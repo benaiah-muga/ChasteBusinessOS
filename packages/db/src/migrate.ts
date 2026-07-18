@@ -333,6 +333,10 @@ ALTER TABLE org_memories ADD COLUMN IF NOT EXISTS user_id uuid;
 ALTER TABLE org_memories ADD COLUMN IF NOT EXISTS session_id uuid;
 ALTER TABLE org_memories ADD COLUMN IF NOT EXISTS expires_at timestamptz;
 
+-- Users: add auth_token for simple token-based auth
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_token text;
+CREATE UNIQUE INDEX IF NOT EXISTS users_auth_token_uidx ON users (auth_token) WHERE auth_token IS NOT NULL;
+
 -- Unique constraint: one memory per org+kind+key
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_memories_org_kind_key
   ON org_memories (organization_id, kind, key)
@@ -354,22 +358,25 @@ CREATE INDEX IF NOT EXISTS idx_org_memories_expires
   WHERE expires_at IS NOT NULL;
 `;
 
-async function main() {
-  const url = process.env.DATABASE_URL;
+export async function runMigrations(databaseUrl?: string): Promise<void> {
+  const url = databaseUrl ?? process.env.DATABASE_URL;
   if (!url) {
-    console.error("DATABASE_URL is required");
-    process.exit(1);
+    throw new Error("DATABASE_URL is required");
   }
   const client = postgres(url, { max: 1 });
   try {
     await client.unsafe(sql);
-    console.log("Migrations applied successfully.");
   } finally {
     await client.end({ timeout: 5 });
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// CLI entry point
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runMigrations().then(() => {
+    console.log("Migrations applied successfully.");
+  }).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

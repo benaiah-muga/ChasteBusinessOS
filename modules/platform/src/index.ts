@@ -9,7 +9,7 @@ import {
   type ModuleRegistry,
   ValidationError,
 } from "@chaste/kernel";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 export function createPlatformModule(
@@ -211,6 +211,87 @@ export function createPlatformModule(
               .insert(schema.userRoles)
               .values({ userId: input.userId, roleId: input.roleId })
               .onConflictDoNothing();
+            return { ok: true as const };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.user.create",
+          permissions: ["core.rbac.manage"],
+          tags: ["core"],
+          input: z.object({
+            email: z.string().email(),
+            displayName: z.string().min(1),
+            roleId: z.string().uuid().optional(),
+          }),
+          output: z.object({
+            id: z.string(),
+            email: z.string(),
+            displayName: z.string(),
+            authToken: z.string(),
+          }),
+          handler: async (input, ctx) => {
+            const authToken = crypto.randomUUID();
+            const [user] = await db
+              .insert(schema.users)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                email: input.email,
+                displayName: input.displayName,
+                authToken,
+              })
+              .returning();
+            if (input.roleId) {
+              await db
+                .insert(schema.userRoles)
+                .values({ userId: user!.id, roleId: input.roleId })
+                .onConflictDoNothing();
+            }
+            return {
+              id: user!.id,
+              email: user!.email,
+              displayName: user!.displayName,
+              authToken,
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.user.deactivate",
+          permissions: ["core.rbac.manage"],
+          tags: ["core"],
+          input: z.object({ userId: z.string().uuid() }),
+          output: z.object({ ok: z.literal(true) }),
+          handler: async (input, ctx) => {
+            await db
+              .update(schema.users)
+              .set({ isActive: false })
+              .where(eq(schema.users.id, input.userId));
+            return { ok: true as const };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.user.removeRole",
+          permissions: ["core.rbac.manage"],
+          tags: ["core"],
+          input: z.object({ userId: z.string().uuid(), roleId: z.string().uuid() }),
+          output: z.object({ ok: z.literal(true) }),
+          handler: async (input) => {
+            await db
+              .delete(schema.userRoles)
+              .where(
+                and(
+                  eq(schema.userRoles.userId, input.userId),
+                  eq(schema.userRoles.roleId, input.roleId),
+                ),
+              );
             return { ok: true as const };
           },
         }),

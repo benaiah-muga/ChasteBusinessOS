@@ -32,10 +32,14 @@ export const users = pgTable(
       .references(() => organizations.id),
     email: text("email").notNull(),
     displayName: text("display_name").notNull(),
+    authToken: text("auth_token"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("users_org_email_uidx").on(t.organizationId, t.email)],
+  (t) => [
+    uniqueIndex("users_org_email_uidx").on(t.organizationId, t.email),
+    uniqueIndex("users_auth_token_uidx").on(t.authToken),
+  ],
 );
 
 export const roles = pgTable(
