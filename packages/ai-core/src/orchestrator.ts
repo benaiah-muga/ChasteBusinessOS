@@ -8,10 +8,15 @@ import {
   executeCommand,
   type CommandHelpers,
   stricterAutonomy,
+  FULL_AUTONOMOUS_WARNING,
 } from "@chaste/kernel";
 import type { ChatMessage, UiPart } from "@chaste/ui-schema";
 import type { AiExplanation } from "./explanation.js";
 import { toExplanationPart } from "./explanation.js";
+import type { AiProvider } from "./providers.js";
+import type { Agent } from "@mastra/core/agent";
+import { createConversationalAgent } from "./agents/conversational-agent.js";
+import { createSupervisorAgent } from "./agents/supervisor.js";
 
 export interface PendingConfirmation {
   id: string;
@@ -30,8 +35,11 @@ export interface OrchestratorDeps {
   commands: CommandRegistry;
   queries: QueryRegistry;
   helpers: CommandHelpers;
-  /** Org default autonomy */
   autonomy: AutonomyLevel;
+  provider?: AiProvider;
+  allowFullAutonomous?: boolean;
+  /** Mastra agent for complex intent resolution — fallback when rules/LLM miss */
+  mastraAgent?: Agent;
 }
 
 export interface ChatTurnInput {
@@ -56,32 +64,86 @@ function msg(role: ChatMessage["role"], parts: UiPart[]): ChatMessage {
   };
 }
 
-/**
- * Deterministic demo intent parser (no LLM required).
- * Later: LLM planner with the same output contract.
- */
-export function parseCustomerCreateIntent(text: string): { name: string; city?: string } | null {
-  const trimmed = text.trim();
-  // "Create customer Acme Ltd in Nairobi"
-  const m = trimmed.match(
-    /create\s+customer\s+(.+?)(?:\s+in\s+([A-Za-z][A-Za-z\s-]+))?\.?$/i,
-  );
-  if (!m?.[1]) return null;
-  const name = m[1].trim();
-  const city = m[2]?.trim();
-  if (!name) return null;
-  return city ? { name, city } : { name };
+export interface PlannedAction {
+  command: string;
+  input: Record<string, unknown>;
+  summary: string;
+  specialist?: string;
 }
 
-export function selectSpecialistTag(
-  text: string,
-  availableTags: string[],
-): string | undefined {
-  const lower = text.toLowerCase();
-  if (lower.includes("customer") || lower.includes("crm")) {
-    return availableTags.includes("crm") ? "crm" : undefined;
+/** Deterministic multi-domain intent parser (always available; LLM is optional assist). */
+export function planFromText(text: string): PlannedAction | null {
+  const trimmed = text.trim();
+
+  let m = trimmed.match(
+    /create\s+customer\s+(.+?)(?:\s+in\s+([A-Za-z][A-Za-z\s-]+))?\.?$/i,
+  );
+  if (m?.[1]) {
+    return {
+      command: "crm.customer.create",
+      input: { name: m[1].trim(), city: m[2]?.trim() },
+      summary: `Create customer ${m[1].trim()}`,
+      specialist: "crm",
+    };
   }
-  return undefined;
+
+  m = trimmed.match(/prepare\s+payroll\s+for\s+(.+)$/i);
+  if (m?.[1]) {
+    return {
+      command: "hr.payroll.prepare",
+      input: { periodLabel: m[1].trim() },
+      summary: `Prepare payroll for ${m[1].trim()}`,
+      specialist: "hr",
+    };
+  }
+
+  m = trimmed.match(
+    /create\s+(?:invoice|bill)\s+(\S+)(?:\s+for\s+([\d.]+))?(?:\s+([A-Z]{3}))?$/i,
+  );
+  if (m?.[1]) {
+    return {
+      command: "acc.invoice.create",
+      input: {
+        number: m[1],
+        total: m[2] ? Number(m[2]) : 0,
+        currency: m[3] ?? "USD",
+      },
+      summary: `Create invoice ${m[1]}`,
+      specialist: "accounting",
+    };
+  }
+
+  m = trimmed.match(/create\s+vendor\s+(.+)$/i);
+  if (m?.[1]) {
+    return {
+      command: "pur.vendor.create",
+      input: { name: m[1].trim() },
+      summary: `Create vendor ${m[1].trim()}`,
+      specialist: "purchasing",
+    };
+  }
+
+  m = trimmed.match(/create\s+product\s+(\S+)\s+(.+)$/i);
+  if (m?.[1] && m[2]) {
+    return {
+      command: "inv.product.create",
+      input: { sku: m[1], name: m[2].trim() },
+      summary: `Create product ${m[1]}`,
+      specialist: "inventory",
+    };
+  }
+
+  m = trimmed.match(/create\s+employee\s+(\S+)\s+(.+)$/i);
+  if (m?.[1] && m[2]) {
+    return {
+      command: "hr.employee.create",
+      input: { employeeNumber: m[1], fullName: m[2].trim() },
+      summary: `Create employee ${m[2].trim()}`,
+      specialist: "hr",
+    };
+  }
+
+  return null;
 }
 
 export async function handleChatTurn(
@@ -93,7 +155,6 @@ export async function handleChatTurn(
     messages: [...input.session.messages],
   };
 
-  // Cancel pending
   if (input.cancelId && session.pending?.id === input.cancelId) {
     session.pending = undefined;
     session.messages.push(
@@ -102,7 +163,6 @@ export async function handleChatTurn(
     return { session };
   }
 
-  // Confirm pending — same command bus as manual UI
   if (input.confirmId && session.pending?.id === input.confirmId) {
     const pending = session.pending;
     const aiCtx: RequestContext = {
@@ -133,7 +193,7 @@ export async function handleChatTurn(
     };
     session.messages.push(
       msg("assistant", [
-        { type: "text", text: `Done. Created via \`${pending.command}\`.` },
+        { type: "text", text: `Done. Executed \`${pending.command}\`.` },
         toExplanationPart(explanation),
         {
           type: "table",
@@ -161,42 +221,101 @@ export async function handleChatTurn(
   session.messages.push(msg("user", [{ type: "text", text: input.userText }]));
 
   const catalog = deps.commands.list();
-  const intent = parseCustomerCreateIntent(input.userText);
-  const tags = [...new Set(catalog.flatMap((c) => c.tags ?? []))];
-  const specialist = selectSpecialistTag(input.userText, tags);
+  let planned = planFromText(input.userText);
 
-  if (!intent) {
-    const available = catalog
-      .filter((c) => !specialist || c.tags?.includes(specialist))
-      .map((c) => c.name);
+  // Optional LLM assist when rules miss (provider may be none)
+  if (!planned && deps.provider && deps.provider.id !== "none") {
+    try {
+      const toolList = catalog.map((c) => c.name).join(", ");
+      const completion = await deps.provider.complete({
+        system: `You map user requests to a single JSON action: {"command":"...","input":{...}} using only: ${toolList}. Reply JSON only.`,
+        user: input.userText,
+      });
+      const jsonMatch = completion.text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as { command?: string; input?: Record<string, unknown> };
+        if (parsed.command && catalog.some((c) => c.name === parsed.command)) {
+          planned = {
+            command: parsed.command,
+            input: parsed.input ?? {},
+            summary: `LLM-planned ${parsed.command}`,
+            specialist: catalog.find((c) => c.name === parsed.command)?.tags?.[0],
+          };
+        }
+      }
+    } catch {
+      // fall through to Mastra agent or help text
+    }
+  }
+
+  // Mastra agent fallback — for complex or multi-step intents
+  if (!planned && deps.mastraAgent) {
+    try {
+      const toolList = catalog.map((c) => `${c.name} — ${c.description ?? c.name}`).join("\n");
+      const completion = await deps.mastraAgent.generate(
+        `The user said: "${input.userText}"\n\n` +
+        `Available commands:\n${toolList}\n\n` +
+        `Respond with a JSON object: {"command":"<command.name>","input":{...}} or {"clarify":"<question>"}`,
+      );
+      const responseText = typeof completion === "string" ? completion : completion?.text ?? "";
+
+      // Check if agent wants to clarify
+      const clarifyMatch = responseText.match(/\{"clarify"\s*:\s*"([^"]+)"\}/);
+      if (clarifyMatch?.[1]) {
+        session.messages.push(msg("assistant", [{ type: "text", text: clarifyMatch[1] }]));
+        return { session };
+      }
+
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as { command?: string; input?: Record<string, unknown> };
+        if (parsed.command && catalog.some((c) => c.name === parsed.command)) {
+          planned = {
+            command: parsed.command,
+            input: parsed.input ?? {},
+            summary: `Mastra-planned ${parsed.command}`,
+            specialist: catalog.find((c) => c.name === parsed.command)?.tags?.[0],
+          };
+        }
+      }
+    } catch {
+      // fall through to help text
+    }
+  }
+
+  if (!planned) {
     session.messages.push(
       msg("assistant", [
         {
           type: "text",
           text:
-            "I can help with installed module tools. Try: “Create customer Acme Ltd in Nairobi”. " +
-            (available.length ? `Known commands: ${available.join(", ")}.` : ""),
+            "I can prepare validated business actions. Examples:\n" +
+            "• Create customer Acme Ltd in Nairobi\n" +
+            "• Create invoice INV-1001 for 250.00 USD\n" +
+            "• Create vendor Contoso Supplies\n" +
+            "• Create product SKU-1 Widget\n" +
+            "• Create employee E-100 Jane Doe\n" +
+            "• Prepare payroll for March 2026",
         },
         {
           type: "explanation",
           summary: "No structured intent matched.",
-          reasons: ["Deterministic parser did not recognize a supported action"],
-          rulesApplied: ["intent_validation", specialist ? `specialist:${specialist}` : "general"],
-          dataUsed: ["user message", "command catalog"],
+          reasons: ["Rule parser and optional LLM did not produce a valid command"],
+          rulesApplied: ["intent_validation"],
+          dataUsed: ["user message", "command catalog", `provider:${deps.provider?.id ?? "none"}`],
         },
       ]),
     );
     return { session };
   }
 
-  const commandName = "crm.customer.create";
-  const meta = catalog.find((c) => c.name === commandName) as CommandMeta | undefined;
+  const meta = catalog.find((c) => c.name === planned!.command) as CommandMeta | undefined;
   if (!meta) {
     session.messages.push(
       msg("assistant", [
         {
           type: "error",
-          message: "CRM customer create is not available. Is demo-crm installed?",
+          message: `Command ${planned.command} is not available (module not loaded).`,
           code: "MODULE_MISSING",
         },
       ]),
@@ -204,23 +323,15 @@ export async function handleChatTurn(
     return { session };
   }
 
-  const commandAutonomy = meta.minAutonomyForAuto
-    ? stricterAutonomy(deps.autonomy, "confirm")
-    : deps.autonomy;
-  // Creating customers defaults to confirm unless guarded/full auto
-  const effective = stricterAutonomy(commandAutonomy, deps.autonomy);
+  const effective = stricterAutonomy(deps.autonomy, deps.autonomy);
   const runId = crypto.randomUUID();
-  const plannedInput = {
-    name: intent.name,
-    city: intent.city,
-  };
 
   const explanation: AiExplanation = {
     runId,
-    summary: `Plan: create customer “${intent.name}” via ${commandName}.`,
+    summary: planned.summary,
     reasons: [
-      "Matched natural-language create-customer pattern",
-      specialist ? `Routed under specialist tag “${specialist}”` : "General routing",
+      "Matched business intent",
+      planned.specialist ? `Specialist tag: ${planned.specialist}` : "General routing",
       "Tool is module command — not a privileged AI API",
     ],
     rulesApplied: [
@@ -231,9 +342,26 @@ export async function handleChatTurn(
     ],
     dataUsed: ["user message", "command catalog", "org autonomy policy"],
     autonomy: effective,
-    plannedCommand: commandName,
-    plannedInput,
+    plannedCommand: planned.command,
+    plannedInput: planned.input,
   };
+
+  if (effective === "full_autonomous" && deps.allowFullAutonomous === false) {
+    session.messages.push(
+      msg("assistant", [
+        {
+          type: "error",
+          message: "Full autonomous mode is not enabled on this platform.",
+          code: "AUTONOMY_DISABLED",
+        },
+        {
+          type: "text",
+          text: FULL_AUTONOMOUS_WARNING,
+        },
+      ]),
+    );
+    return { session };
+  }
 
   if (canAutoExecute(effective)) {
     const aiCtx: RequestContext = {
@@ -242,37 +370,38 @@ export async function handleChatTurn(
     };
     const result = await executeCommand(
       deps.commands,
-      commandName,
-      plannedInput,
+      planned.command,
+      planned.input,
       aiCtx,
       deps.helpers,
     );
-    session.messages.push(
-      msg("assistant", [
-        { type: "text", text: `Executed automatically (${effective}).` },
-        toExplanationPart(explanation),
-        {
-          type: "table",
-          columns: [
-            { key: "field", label: "Field" },
-            { key: "value", label: "Value" },
-          ],
-          rows: Object.entries(result.data as Record<string, unknown>).map(([field, value]) => ({
-            field,
-            value: String(value ?? ""),
-          })),
-        },
-      ]),
-    );
+    const parts: UiPart[] = [
+      { type: "text", text: `Executed automatically (autonomy=${effective}).` },
+      toExplanationPart(explanation),
+    ];
+    if (effective === "full_autonomous") {
+      parts.push({ type: "text", text: FULL_AUTONOMOUS_WARNING });
+    }
+    parts.push({
+      type: "table",
+      columns: [
+        { key: "field", label: "Field" },
+        { key: "value", label: "Value" },
+      ],
+      rows: Object.entries(result.data as Record<string, unknown>).map(([field, value]) => ({
+        field,
+        value: String(value ?? ""),
+      })),
+    });
+    session.messages.push(msg("assistant", parts));
     return { session, explanation };
   }
 
-  // recommend or confirm → prepare UI card
   const confirmId = crypto.randomUUID();
   session.pending = {
     id: confirmId,
-    command: commandName,
-    input: plannedInput,
+    command: planned.command,
+    input: planned.input,
     createdAt: new Date().toISOString(),
   };
 
@@ -282,18 +411,18 @@ export async function handleChatTurn(
       {
         type: "text",
         text: recommendOnly
-          ? "Recommendation only (autonomy=recommend). Confirm is disabled until autonomy is raised."
-          : "I prepared a validated action. Confirm to run it through the same business command as the manual UI.",
+          ? "Recommendation only (autonomy=recommend). Raise autonomy to confirm or auto-execute."
+          : "Prepared a validated action. Confirm to run it through the same business command as the manual UI.",
       },
       toExplanationPart(explanation),
       {
         type: "confirm_action",
         id: confirmId,
-        title: "Create customer",
-        description: `${intent.name}${intent.city ? ` · ${intent.city}` : ""}`,
-        command: commandName,
-        input: plannedInput,
-        confirmLabel: recommendOnly ? "Disabled" : "Confirm create",
+        title: planned.summary,
+        description: `${planned.command}`,
+        command: planned.command,
+        input: planned.input,
+        confirmLabel: recommendOnly ? "Disabled" : "Confirm",
         cancelLabel: "Cancel",
       },
     ]),

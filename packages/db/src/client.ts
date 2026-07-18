@@ -4,7 +4,10 @@ import * as schema from "./schema.js";
 
 export type Db = ReturnType<typeof createDb>;
 
-export function createDb(connectionString: string) {
-  const client = postgres(connectionString, { max: 10 });
+export function createDb(connectionStringOrConfig: string | postgres.Options<Record<string, postgres.PostgresType>>) {
+  const client =
+    typeof connectionStringOrConfig === "string"
+      ? postgres(connectionStringOrConfig, { max: 10 })
+      : postgres({ max: 10, ...connectionStringOrConfig });
   return drizzle(client, { schema });
 }

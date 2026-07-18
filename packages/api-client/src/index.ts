@@ -28,8 +28,10 @@ export const customerSchema = z.object({
   id: z.string(),
   organizationId: z.string(),
   name: z.string(),
-  email: z.string().email().nullable().optional(),
+  email: z.string().nullable().optional(),
   city: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  status: z.string().optional(),
   createdAt: z.string(),
 });
 
@@ -46,6 +48,11 @@ export const sessionSchema = z.object({
   displayName: z.string(),
   permissions: z.array(z.string()),
   autonomy: z.enum(["recommend", "confirm", "guarded_auto", "full_autonomous"]),
+  orgName: z.string().optional(),
+  region: z.string().optional(),
+  fullAutonomousWarning: z.string().optional(),
+  allowFullAutonomous: z.boolean().optional(),
+  aiProvider: z.string().optional(),
 });
 
 export type Session = z.infer<typeof sessionSchema>;
@@ -57,21 +64,6 @@ export const chatResponseSchema = z.object({
 });
 
 export type ChatResponse = z.infer<typeof chatResponseSchema>;
-
-export const moduleInfoSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  version: z.string(),
-  capabilities: z.array(z.string()),
-  specialist: z
-    .object({
-      id: z.string(),
-      displayName: z.string(),
-      description: z.string(),
-      toolTags: z.array(z.string()),
-    })
-    .optional(),
-});
 
 export class ApiError extends Error {
   readonly status: number;
@@ -89,7 +81,6 @@ export class ApiError extends Error {
 
 export interface ChasteApiClientOptions {
   baseUrl: string;
-  /** Demo auth header — replace with real sessions later */
   getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   fetchImpl?: typeof fetch;
 }
@@ -128,9 +119,10 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
       return request("/api/v1/session", { method: "GET" }, (d) => sessionSchema.parse(d));
     },
     listModules() {
-      return request("/api/v1/modules", { method: "GET" }, (d) =>
-        z.object({ items: z.array(moduleInfoSchema) }).parse(d),
-      );
+      return request("/api/v1/modules", { method: "GET" }, (d) => d as {
+        registered: { id: string; name: string; version: string }[];
+        installed: { moduleId: string; version: string; enabled: boolean }[];
+      });
     },
     executeCommand(name: string, input: unknown) {
       return request(
@@ -151,7 +143,7 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         customerListSchema.parse(d),
       );
     },
-    createCustomer(input: { name: string; email?: string; city?: string }) {
+    createCustomer(input: { name: string; email?: string; city?: string; country?: string }) {
       return request(
         "/api/v1/crm/customers",
         { method: "POST", body: JSON.stringify(input) },
@@ -169,6 +161,18 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         { method: "POST", body: JSON.stringify(body) },
         (d) => chatResponseSchema.parse(d),
       );
+    },
+    getRbac() {
+      return request("/api/v1/rbac", { method: "GET" }, (d) => d);
+    },
+    getMarketplace() {
+      return request("/api/v1/marketplace", { method: "GET" }, (d) => d);
+    },
+    setAutonomy(body: {
+      autonomy: "recommend" | "confirm" | "guarded_auto" | "full_autonomous";
+      acknowledgeFullAutonomous?: boolean;
+    }) {
+      return request("/api/v1/autonomy", { method: "POST", body: JSON.stringify(body) }, (d) => d);
     },
   };
 }

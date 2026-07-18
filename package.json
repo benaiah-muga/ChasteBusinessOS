@@ -15,13 +15,15 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "db:generate": "pnpm --filter @chaste/db generate",
-    "db:migrate": "pnpm --filter @chaste/db migrate",
+    "db:migrate": "tsx --env-file=.env packages/db/src/migrate.ts",
+    "e2e": "pnpm --filter @chaste/api e2e",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,md,json,yml}\""
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

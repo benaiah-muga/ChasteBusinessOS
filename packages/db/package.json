@@ -21,6 +21,8 @@
     "dev": "tsc -p tsconfig.json --watch"
   },
   "dependencies": {
+    "@chaste/config": "workspace:*",
+    "@chaste/kernel": "workspace:*",
     "drizzle-orm": "^0.38.3",
     "postgres": "^3.4.5"
   },

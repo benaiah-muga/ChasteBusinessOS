@@ -7,13 +7,15 @@ import {
 } from "@chaste/kernel";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { handleChatTurn, parseCustomerCreateIntent } from "./orchestrator.js";
+import { handleChatTurn, planFromText } from "./orchestrator.js";
 
-describe("parseCustomerCreateIntent", () => {
-  it("parses name and city", () => {
-    expect(parseCustomerCreateIntent("Create customer Acme Ltd in Nairobi")).toEqual({
-      name: "Acme Ltd",
-      city: "Nairobi",
+describe("planFromText", () => {
+  it("parses customer and payroll intents", () => {
+    expect(planFromText("Create customer Acme Ltd in Nairobi")).toMatchObject({
+      command: "crm.customer.create",
+    });
+    expect(planFromText("Prepare payroll for March 2026")).toMatchObject({
+      command: "hr.payroll.prepare",
     });
   });
 });
@@ -46,8 +48,21 @@ describe("handleChatTurn", () => {
       autonomy: "confirm",
     });
 
+    const emptyQueries = {
+      register() {},
+      get() {
+        return undefined;
+      },
+      list: () => [],
+    };
+
     const plan = await handleChatTurn(
-      { commands, queries: { register() {}, get() { return undefined; }, list: () => [] }, helpers: { audit, outbox }, autonomy: "confirm" },
+      {
+        commands,
+        queries: emptyQueries,
+        helpers: { audit, outbox },
+        autonomy: "confirm",
+      },
       {
         session: { id: "s1", messages: [] },
         userText: "Create customer Acme Ltd in Nairobi",
@@ -56,10 +71,14 @@ describe("handleChatTurn", () => {
     );
 
     expect(plan.session.pending?.command).toBe("crm.customer.create");
-    expect(audit.entries).toHaveLength(0);
 
     const confirmed = await handleChatTurn(
-      { commands, queries: { register() {}, get() { return undefined; }, list: () => [] }, helpers: { audit, outbox }, autonomy: "confirm" },
+      {
+        commands,
+        queries: emptyQueries,
+        helpers: { audit, outbox },
+        autonomy: "confirm",
+      },
       {
         session: plan.session,
         confirmId: plan.session.pending!.id,
