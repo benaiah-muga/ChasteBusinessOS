@@ -178,8 +178,12 @@ export const orgMemories = pgTable("org_memories", {
   id: uuid("id").primaryKey().defaultRandom(),
   organizationId: uuid("organization_id").notNull(),
   kind: text("kind").notNull(),
+  key: text("key"),
   content: text("content").notNull(),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  userId: uuid("user_id"),
+  sessionId: uuid("session_id"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

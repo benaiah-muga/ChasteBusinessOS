@@ -1,5 +1,6 @@
 export * from "./explanation.js";
 export * from "./memory.js";
+export * from "./observability.js";
 export * from "./orchestrator.js";
 export * from "./providers.js";
 export * from "./providers/nvidia.js";

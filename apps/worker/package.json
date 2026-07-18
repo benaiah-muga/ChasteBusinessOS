@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@chaste/config": "workspace:*",
-    "@chaste/db": "workspace:*"
+    "@chaste/db": "workspace:*",
+    "@chaste/kernel": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

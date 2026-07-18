@@ -18,6 +18,11 @@ export interface CompletionResult {
   text: string;
   provider: string;
   model: string;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
 }
 
 export interface AiProvider {
@@ -68,11 +73,19 @@ export class OpenAiCompatibleProvider implements AiProvider {
     }
     const json = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     };
     return {
       text: json.choices?.[0]?.message?.content ?? "",
       provider: this.id,
       model: this.model,
+      usage: json.usage
+        ? {
+            promptTokens: json.usage.prompt_tokens,
+            completionTokens: json.usage.completion_tokens,
+            totalTokens: json.usage.total_tokens,
+          }
+        : undefined,
     };
   }
 }

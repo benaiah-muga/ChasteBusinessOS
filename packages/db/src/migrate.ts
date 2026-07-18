@@ -326,6 +326,32 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   parts jsonb NOT NULL DEFAULT '[]'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Memory store: add key, user_id, session_id, expires_at for tiered storage
+ALTER TABLE org_memories ADD COLUMN IF NOT EXISTS key text;
+ALTER TABLE org_memories ADD COLUMN IF NOT EXISTS user_id uuid;
+ALTER TABLE org_memories ADD COLUMN IF NOT EXISTS session_id uuid;
+ALTER TABLE org_memories ADD COLUMN IF NOT EXISTS expires_at timestamptz;
+
+-- Unique constraint: one memory per org+kind+key
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_memories_org_kind_key
+  ON org_memories (organization_id, kind, key)
+  WHERE key IS NOT NULL;
+
+-- Index for user-scoped queries
+CREATE INDEX IF NOT EXISTS idx_org_memories_user
+  ON org_memories (organization_id, user_id)
+  WHERE user_id IS NOT NULL;
+
+-- Index for session-scoped queries
+CREATE INDEX IF NOT EXISTS idx_org_memories_session
+  ON org_memories (session_id)
+  WHERE session_id IS NOT NULL;
+
+-- Index for TTL cleanup
+CREATE INDEX IF NOT EXISTS idx_org_memories_expires
+  ON org_memories (expires_at)
+  WHERE expires_at IS NOT NULL;
 `;
 
 async function main() {

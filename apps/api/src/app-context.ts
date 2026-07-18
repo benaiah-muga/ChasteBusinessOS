@@ -14,6 +14,9 @@ import {
   type WorkflowDefinition,
   type NvidiaProvider,
   type WorkflowExecutionContext,
+  createTracer,
+  type AiTracer,
+  TracedProvider,
 } from "@chaste/ai-core";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
 import {
@@ -24,6 +27,7 @@ import {
   PostgresOutboxWriter,
   resolveUserPermissions,
   DbSessionStore,
+  DbMemoryStore,
   type Db,
   type SessionStore,
 } from "@chaste/db";
@@ -69,9 +73,11 @@ export interface AppContext {
   audit: PostgresAuditWriter;
   outbox: PostgresOutboxWriter;
   sessionStore: SessionStore;
+  memoryStore: DbMemoryStore;
   explanations: AiExplanation[];
   sessionUser: SessionUser;
   provider: AiProvider;
+  tracer: AiTracer;
   mastra: ChasteMastra;
   nvidiaProvider: NvidiaProvider | null;
   workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
@@ -130,6 +136,22 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
   const outbox = new PostgresOutboxWriter(db);
   const provider = createAiProvider(config.ai);
 
+  // Observability — Langfuse traces all LLM calls when configured
+  const tracer = createTracer({
+    langfusePublicKey: config.mastra.langfusePublicKey,
+    langfuseSecretKey: config.mastra.langfuseSecretKey,
+    langfuseBaseUrl: config.mastra.langfuseBaseUrl,
+    observabilityEnabled: config.mastra.observabilityEnabled,
+  });
+
+  // Wrap provider with tracing if Langfuse is enabled
+  const tracedProvider = config.mastra.observabilityEnabled
+    ? new TracedProvider(provider, tracer)
+    : provider;
+
+  // Memory store — persistent tiered storage for AI context
+  const memoryStore = new DbMemoryStore(db);
+
   // Domain modules first (dependency order)
   await modules.register(createCrmModule(db));
   await modules.register(createAccountingModule(db));
@@ -180,9 +202,11 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     audit,
     outbox,
     sessionStore: new DbSessionStore(db),
+    memoryStore,
     explanations: [],
     sessionUser,
-    provider,
+    provider: tracedProvider,
+    tracer,
     mastra,
     nvidiaProvider,
     workflowBuilder,
