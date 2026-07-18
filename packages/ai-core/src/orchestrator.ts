@@ -17,6 +17,7 @@ import type { AiProvider } from "./providers.js";
 import type { Agent } from "@mastra/core/agent";
 import { createConversationalAgent } from "./agents/conversational-agent.js";
 import { createSupervisorAgent } from "./agents/supervisor.js";
+import { generateSuggestions } from "./suggestions.js";
 
 export interface PendingConfirmation {
   id: string;
@@ -208,6 +209,23 @@ export async function handleChatTurn(
         },
       ]),
     );
+
+    // Generate proactive follow-up suggestions
+    try {
+      const { suggestions } = await generateSuggestions(
+        pending.command,
+        result.data,
+        deps.provider,
+      );
+      if (suggestions.length > 0) {
+        session.messages.push(
+          msg("assistant", [{ type: "suggestions", suggestions }]),
+        );
+      }
+    } catch {
+      // suggestions are optional — don't fail on errors
+    }
+
     return { session, explanation };
   }
 
@@ -228,12 +246,53 @@ export async function handleChatTurn(
     try {
       const toolList = catalog.map((c) => c.name).join(", ");
       const completion = await deps.provider.complete({
-        system: `You map user requests to a single JSON action: {"command":"...","input":{...}} using only: ${toolList}. Reply JSON only.`,
-        user: input.userText,
+        system:
+          `You map user requests to JSON actions using only: ${toolList}.\n` +
+          `For a single action: {"command":"...","input":{...}}\n` +
+          `For multiple sequential actions: {"plan":[{"command":"...","input":{...}},{"command":"...","input":{...}}]}\n` +
+          `If ambiguous or missing required info: {"clarify":["question1","question2"]}\n` +
+          `Reply JSON only. Never invent field values — use null for unknown required fields.`,
+        messages: session.messages,
       });
       const jsonMatch = completion.text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]) as { command?: string; input?: Record<string, unknown> };
+        const parsed = JSON.parse(jsonMatch[0]) as {
+          command?: string;
+          input?: Record<string, unknown>;
+          clarify?: string[];
+          plan?: { command: string; input?: Record<string, unknown>; description?: string }[];
+        };
+        if (parsed.clarify && parsed.clarify.length > 0) {
+          session.messages.push({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            parts: [{ type: "text" as const, text: "I need a bit more information to proceed." }, { type: "clarify" as const, questions: parsed.clarify }],
+            createdAt: new Date().toISOString(),
+          });
+          return { session, explanation: undefined };
+        }
+        if (parsed.plan && parsed.plan.length > 0) {
+          // Multi-step plan — emit plan part
+          const steps = parsed.plan
+            .filter((s) => s.command && catalog.some((c) => c.name === s.command))
+            .map((s) => ({
+              command: s.command,
+              description: s.description ?? `Execute ${s.command}`,
+              input: s.input,
+            }));
+          if (steps.length > 0) {
+            session.messages.push({
+              id: crypto.randomUUID(),
+              role: "assistant",
+              parts: [
+                { type: "text" as const, text: `I've created a ${steps.length}-step plan to accomplish your request. Confirm to execute each step sequentially.` },
+                { type: "plan" as const, id: crypto.randomUUID(), title: "Multi-step plan", steps },
+              ],
+              createdAt: new Date().toISOString(),
+            });
+            return { session, explanation: undefined };
+          }
+        }
         if (parsed.command && catalog.some((c) => c.name === parsed.command)) {
           planned = {
             command: parsed.command,
@@ -255,14 +314,24 @@ export async function handleChatTurn(
       const completion = await deps.mastraAgent.generate(
         `The user said: "${input.userText}"\n\n` +
         `Available commands:\n${toolList}\n\n` +
-        `Respond with a JSON object: {"command":"<command.name>","input":{...}} or {"clarify":"<question>"}`,
+        `Respond with a JSON object: {"command":"<command.name>","input":{...}} or {"clarify":["question1"]}` +
+        `If ambiguous, ask clarifying questions via {"clarify":[...]}. Never invent required field values.`,
       );
       const responseText = typeof completion === "string" ? completion : completion?.text ?? "";
 
-      // Check if agent wants to clarify
-      const clarifyMatch = responseText.match(/\{"clarify"\s*:\s*"([^"]+)"\}/);
-      if (clarifyMatch?.[1]) {
-        session.messages.push(msg("assistant", [{ type: "text", text: clarifyMatch[1] }]));
+      // Check if agent wants to clarify (supports both string and array formats)
+      const clarifyArrayMatch = responseText.match(/\{"clarify"\s*:\s*\[([^\]]*)\]\}/);
+      const clarifyStrMatch = responseText.match(/\{"clarify"\s*:\s*"([^"]+)"\}/);
+      const clarifyQuestions = clarifyArrayMatch
+        ? JSON.parse(`[${clarifyArrayMatch[1]}]`) as string[]
+        : clarifyStrMatch?.[1]
+          ? [clarifyStrMatch[1]]
+          : null;
+      if (clarifyQuestions && clarifyQuestions.length > 0) {
+        session.messages.push(msg("assistant", [
+          { type: "text", text: "I need a bit more information to proceed." },
+          { type: "clarify", questions: clarifyQuestions },
+        ]));
         return { session };
       }
 

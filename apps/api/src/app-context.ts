@@ -23,7 +23,9 @@ import {
   PostgresAuditWriter,
   PostgresOutboxWriter,
   resolveUserPermissions,
+  DbSessionStore,
   type Db,
+  type SessionStore,
 } from "@chaste/db";
 import {
   type AutonomyLevel,
@@ -66,7 +68,7 @@ export interface AppContext {
   modules: ModuleRegistry;
   audit: PostgresAuditWriter;
   outbox: PostgresOutboxWriter;
-  sessions: Map<string, ChatSessionState>;
+  sessionStore: SessionStore;
   explanations: AiExplanation[];
   sessionUser: SessionUser;
   provider: AiProvider;
@@ -177,7 +179,7 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     modules,
     audit,
     outbox,
-    sessions: new Map(),
+    sessionStore: new DbSessionStore(db),
     explanations: [],
     sessionUser,
     provider,
@@ -261,11 +263,34 @@ export async function runChat(
   body: { sessionId?: string; message?: string; confirmId?: string; cancelId?: string },
 ) {
   await refreshSessionUser(app);
-  const sessionId = body.sessionId ?? crypto.randomUUID();
-  let session = app.sessions.get(sessionId);
-  if (!session) {
-    session = { id: sessionId, messages: [] };
-    app.sessions.set(sessionId, session);
+  let sessionId = body.sessionId ?? crypto.randomUUID();
+
+  // Load session from DB or create new
+  let dbSession = await app.sessionStore.load(sessionId);
+  let session: ChatSessionState;
+  if (dbSession) {
+    session = {
+      id: dbSession.id,
+      messages: dbSession.messages as ChatSessionState["messages"],
+      pending: dbSession.pending,
+    };
+  } else {
+    // Try loading by org+user for existing sessions
+    const existing = await app.sessionStore.loadByOrgUser(
+      app.sessionUser.organizationId,
+      app.sessionUser.id,
+    );
+    if (existing && existing.id !== sessionId) {
+      sessionId = existing.id;
+      session = {
+        id: existing.id,
+        messages: existing.messages as ChatSessionState["messages"],
+        pending: existing.pending,
+      };
+    } else {
+      await app.sessionStore.create(sessionId, app.sessionUser.organizationId, app.sessionUser.id);
+      session = { id: sessionId, messages: [] };
+    }
   }
 
   const mastraAgent = await getMastraAgent(app);
@@ -289,7 +314,17 @@ export async function runChat(
     },
   );
 
-  app.sessions.set(sessionId, result.session);
+  // Persist to DB
+  await app.sessionStore.save(
+    sessionId,
+    result.session.messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      parts: m.parts,
+      createdAt: m.createdAt,
+    })),
+    result.session.pending,
+  );
   if (result.explanation) {
     app.explanations.push(result.explanation);
   }

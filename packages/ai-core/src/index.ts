@@ -13,3 +13,4 @@ export * from "./guardrails/index.js";
 export * from "./workflows/index.js";
 export * from "./mcp/server.js";
 export * from "./evals/index.js";
+export * from "./suggestions.js";

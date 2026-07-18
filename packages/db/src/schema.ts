@@ -138,20 +138,28 @@ export const marketplaceListings = pgTable("marketplace_listings", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const chatSessions = pgTable("chat_sessions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  organizationId: uuid("organization_id").notNull(),
-  userId: uuid("user_id").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const chatSessions = pgTable(
+  "chat_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    pending: jsonb("pending").$type<{ id: string; command: string; input: unknown; createdAt: string }>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("chat_sess_org_idx").on(t.organizationId),
+    index("chat_sess_user_idx").on(t.userId),
+  ],
+);
 
 export const chatMessages = pgTable("chat_messages", {
   id: uuid("id").primaryKey().defaultRandom(),
   sessionId: uuid("session_id")
     .notNull()
-    .references(() => chatSessions.id),
+    .references(() => chatSessions.id, { onDelete: "cascade" }),
   role: text("role").notNull(),
-  parts: jsonb("parts").notNull(),
+  parts: jsonb("parts").$type<unknown[]>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

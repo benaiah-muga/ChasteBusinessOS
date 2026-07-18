@@ -308,6 +308,24 @@ CREATE TABLE IF NOT EXISTS mfg_work_orders (
   status text NOT NULL DEFAULT 'planned',
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS pending jsonb;
+CREATE INDEX IF NOT EXISTS chat_sess_org_idx ON chat_sessions(organization_id);
+CREATE INDEX IF NOT EXISTS chat_sess_user_idx ON chat_sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+  role text NOT NULL,
+  parts jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 async function main() {

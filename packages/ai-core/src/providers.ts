@@ -1,4 +1,5 @@
 import type { AppConfig } from "@chaste/config";
+import type { ChatMessage } from "@chaste/ui-schema";
 
 /**
  * LLM provider abstraction.
@@ -6,7 +7,10 @@ import type { AppConfig } from "@chaste/config";
  */
 export interface CompletionRequest {
   system: string;
-  user: string;
+  /** Single-turn shortcut — used when no conversation history exists. */
+  user?: string;
+  /** Multi-turn conversation history. When provided, takes precedence over `user`. */
+  messages?: ChatMessage[];
   temperature?: number;
 }
 
@@ -45,6 +49,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
+    const apiMessages = buildApiMessages(req);
     const res = await fetch(`${this.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
@@ -54,10 +59,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
       body: JSON.stringify({
         model: this.model,
         temperature: req.temperature ?? 0,
-        messages: [
-          { role: "system", content: req.system },
-          { role: "user", content: req.user },
-        ],
+        messages: apiMessages,
       }),
     });
     if (!res.ok) {
@@ -84,16 +86,14 @@ export class OllamaProvider implements AiProvider {
   ) {}
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
+    const apiMessages = buildApiMessages(req);
     const res = await fetch(`${this.baseUrl.replace(/\/$/, "")}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         model: this.model,
         stream: false,
-        messages: [
-          { role: "system", content: req.system },
-          { role: "user", content: req.user },
-        ],
+        messages: apiMessages,
       }),
     });
     if (!res.ok) {
@@ -107,6 +107,39 @@ export class OllamaProvider implements AiProvider {
       model: this.model,
     };
   }
+}
+
+/**
+ * Converts CompletionRequest into OpenAI-format messages array.
+ * When `messages` (history) is provided, converts them and prepends system.
+ * Falls back to single-turn system + user.
+ */
+function buildApiMessages(req: CompletionRequest): { role: string; content: string }[] {
+  const msgs: { role: string; content: string }[] = [];
+
+  // System prompt always first
+  msgs.push({ role: "system", content: req.system });
+
+  if (req.messages && req.messages.length > 0) {
+    // Multi-turn: convert ChatMessage[] to OpenAI format
+    for (const msg of req.messages) {
+      const textParts = msg.parts
+        .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
+        .map((p) => p.text)
+        .join("\n");
+      if (textParts) {
+        msgs.push({
+          role: msg.role === "assistant" ? "assistant" : "user",
+          content: textParts,
+        });
+      }
+    }
+  } else if (req.user) {
+    // Single-turn shortcut
+    msgs.push({ role: "user", content: req.user });
+  }
+
+  return msgs;
 }
 
 export function createAiProvider(cfg: AppConfig["ai"]): AiProvider {
