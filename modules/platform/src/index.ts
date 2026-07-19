@@ -1,6 +1,12 @@
 import type { Db } from "@chaste/db";
 import { PERMISSION_CATALOG, schema } from "@chaste/db";
 import {
+  orgSettingsSchema,
+  orgSettingsUpdateSchema,
+  userPreferencesSchema,
+  userPreferencesUpdateSchema,
+} from "@chaste/db";
+import {
   FULL_AUTONOMOUS_WARNING,
   autonomyLevelSchema,
   defineCommand,
@@ -31,6 +37,8 @@ export function createPlatformModule(
         "core.rbac.manage",
         "core.autonomy.manage",
         "core.marketplace.read",
+        "core.settings.read",
+        "core.settings.manage",
       ],
       capabilities: ["core.rbac", "core.marketplace", "core.autonomy"],
       specialist: {
@@ -403,6 +411,130 @@ export function createPlatformModule(
               })
               .onConflictDoNothing();
             return { moduleId: input.moduleId, enabled: true };
+          },
+        }),
+      );
+
+      // ─── Settings & Preferences ────────────────────────────────────────
+
+      const orgSettingsOutputSchema = z.object({
+        settings: z.object({
+          timezone: z.string(),
+          locale: z.string(),
+          currency: z.string(),
+          aiModel: z.string().optional(),
+          aiTemperature: z.number().optional(),
+          aiMaxTokens: z.number().optional(),
+          emailNotifications: z.boolean(),
+          notificationDigest: z.enum(["daily", "weekly", "never"]),
+          webhookUrl: z.string().optional(),
+          auditRetentionDays: z.number(),
+          chatHistoryRetentionDays: z.number(),
+          modules: z.record(z.string(), z.record(z.string(), z.unknown())),
+        }),
+      });
+
+      const userPreferencesOutputSchema = z.object({
+        preferences: z.object({
+          theme: z.enum(["light", "dark", "system"]),
+          timezone: z.string().optional(),
+          locale: z.string().optional(),
+          notifications: z.object({
+            emailDigest: z.enum(["daily", "weekly", "never"]).optional(),
+            pushEnabled: z.boolean().optional(),
+          }),
+        }),
+      });
+
+      queries.register(
+        defineQuery({
+          name: "core.settings.get",
+          permissions: ["core.settings.read"],
+          tags: ["core"],
+          input: z.object({}).default({}),
+          output: orgSettingsOutputSchema,
+          handler: async (_i, ctx) => {
+            const [org] = await db
+              .select({ settings: schema.organizations.settings })
+              .from(schema.organizations)
+              .where(eq(schema.organizations.id, ctx.actor.organizationId));
+            const settings = orgSettingsSchema.parse(org?.settings ?? {});
+            return { settings };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.settings.update",
+          permissions: ["core.settings.manage"],
+          tags: ["core"],
+          input: z.object({ settings: z.record(z.string(), z.unknown()) }),
+          output: orgSettingsOutputSchema,
+          handler: async (input, ctx) => {
+            const [org] = await db
+              .select({ settings: schema.organizations.settings })
+              .from(schema.organizations)
+              .where(eq(schema.organizations.id, ctx.actor.organizationId));
+            const existing = orgSettingsSchema.parse(org?.settings ?? {});
+            const partial = orgSettingsUpdateSchema.parse(input.settings);
+            const merged = { ...existing, ...partial };
+            const settings = orgSettingsSchema.parse(merged);
+            await db
+              .update(schema.organizations)
+              .set({ settings: settings as Record<string, unknown> })
+              .where(eq(schema.organizations.id, ctx.actor.organizationId));
+            return { settings };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.preferences.get",
+          permissions: [],
+          tags: ["core"],
+          input: z.object({}).default({}),
+          output: userPreferencesOutputSchema,
+          handler: async (_i, ctx) => {
+            const [user] = await db
+              .select({ settings: schema.users.settings })
+              .from(schema.users)
+              .where(eq(schema.users.id, ctx.actor.userId));
+            const preferences = userPreferencesSchema.parse(user?.settings ?? {});
+            return { preferences };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.preferences.update",
+          permissions: [],
+          tags: ["core"],
+          input: z.object({ preferences: z.record(z.string(), z.unknown()) }),
+          output: userPreferencesOutputSchema,
+          handler: async (input, ctx) => {
+            const [user] = await db
+              .select({ settings: schema.users.settings })
+              .from(schema.users)
+              .where(eq(schema.users.id, ctx.actor.userId));
+            const existing = userPreferencesSchema.parse(user?.settings ?? {});
+            const partial = userPreferencesUpdateSchema.parse(input.preferences);
+            const merged = {
+              ...existing,
+              ...partial,
+              notifications: {
+                ...existing.notifications,
+                ...(partial.notifications ?? {}),
+              },
+            };
+            const preferences = userPreferencesSchema.parse(merged);
+            await db
+              .update(schema.users)
+              .set({ settings: preferences as Record<string, unknown> })
+              .where(eq(schema.users.id, ctx.actor.userId));
+            return { preferences };
           },
         }),
       );

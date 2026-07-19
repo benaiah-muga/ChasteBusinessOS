@@ -33,6 +33,7 @@ export const users = pgTable(
     email: text("email").notNull(),
     displayName: text("display_name").notNull(),
     authToken: text("auth_token"),
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

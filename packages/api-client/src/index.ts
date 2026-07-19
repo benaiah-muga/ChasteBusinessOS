@@ -174,6 +174,26 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
     }) {
       return request("/api/v1/autonomy", { method: "POST", body: JSON.stringify(body) }, (d) => d);
     },
+    getSettings() {
+      return request("/api/v1/settings", { method: "GET" }, (d) => d as Record<string, unknown>);
+    },
+    updateSettings(settings: Record<string, unknown>) {
+      return request(
+        "/api/v1/settings",
+        { method: "PUT", body: JSON.stringify({ settings }) },
+        (d) => d as Record<string, unknown>,
+      );
+    },
+    getPreferences() {
+      return request("/api/v1/preferences", { method: "GET" }, (d) => d as Record<string, unknown>);
+    },
+    updatePreferences(preferences: Record<string, unknown>) {
+      return request(
+        "/api/v1/preferences",
+        { method: "PUT", body: JSON.stringify({ preferences }) },
+        (d) => d as Record<string, unknown>,
+      );
+    },
   };
 }
 

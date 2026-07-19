@@ -356,6 +356,9 @@ CREATE INDEX IF NOT EXISTS idx_org_memories_session
 CREATE INDEX IF NOT EXISTS idx_org_memories_expires
   ON org_memories (expires_at)
   WHERE expires_at IS NOT NULL;
+
+-- User preferences: add settings jsonb column
+ALTER TABLE users ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'::jsonb;
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {

@@ -11,6 +11,8 @@ export const PERMISSION_CATALOG: { permission: string; module: string; descripti
   { permission: "core.rbac.manage", module: "core", description: "Manage roles and assignments" },
   { permission: "core.autonomy.manage", module: "core", description: "Change AI autonomy" },
   { permission: "core.marketplace.read", module: "core", description: "Browse marketplace" },
+  { permission: "core.settings.read", module: "core", description: "Read org settings" },
+  { permission: "core.settings.manage", module: "core", description: "Manage org settings" },
   { permission: "crm.customer.create", module: "crm", description: "Create customers" },
   { permission: "crm.customer.read", module: "crm", description: "Read customers" },
   { permission: "acc.account.manage", module: "accounting", description: "Manage chart of accounts" },

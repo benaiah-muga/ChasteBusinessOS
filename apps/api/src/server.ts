@@ -179,6 +179,30 @@ export async function buildServer(appCtx?: AppContext) {
     return result.data;
   });
 
+  // ─── Settings & Preferences ──────────────────────────────────────────
+
+  server.get("/api/v1/settings", async (req) => {
+    const result = await runQuery(app, "core.settings.get", {}, req.id);
+    return result.data;
+  });
+
+  server.put("/api/v1/settings", async (req) => {
+    const input = z.object({ settings: z.record(z.unknown()) }).parse(req.body);
+    const result = await runCommand(app, "core.settings.update", input, req.id);
+    return result.data;
+  });
+
+  server.get("/api/v1/preferences", async (req) => {
+    const result = await runQuery(app, "core.preferences.get", {}, req.id);
+    return result.data;
+  });
+
+  server.put("/api/v1/preferences", async (req) => {
+    const input = z.object({ preferences: z.record(z.unknown()) }).parse(req.body);
+    const result = await runCommand(app, "core.preferences.update", input, req.id);
+    return result.data;
+  });
+
   server.post("/api/v1/ai/chat", async (req) => {
     const body = z
       .object({
