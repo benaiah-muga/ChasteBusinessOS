@@ -98,8 +98,10 @@ async function qry(user: TestUser, orgId: string, name: string, input: unknown =
 }
 
 const ALL_PERMISSIONS = [
-  "core.modules.read", "core.modules.manage", "core.rbac.read", "core.rbac.manage",
+  "core.modules.read", "core.modules.manage", "core.rbac.read",
+  "core.user.manage", "core.user.read", "core.role.manage", "core.role.assign",
   "core.autonomy.manage", "core.marketplace.read",
+  "core.settings.read", "core.settings.manage",
   "crm.customer.create", "crm.customer.read",
   "acc.account.manage", "acc.account.read", "acc.journal.post", "acc.invoice.manage", "acc.invoice.read",
   "inv.warehouse.manage", "inv.product.manage", "inv.stock.move", "inv.stock.read",
@@ -326,7 +328,8 @@ describe.skipIf(!hasDb)("Real-world lifecycle E2E", () => {
       const marcus = await addUser(novatech, "marcus@novatech.io", "Marcus Johnson", "operator");
       expect(marcus.permissions).toContain("inv.stock.move");
       expect(marcus.permissions).toContain("pur.po.read");
-      expect(marcus.permissions).not.toContain("core.rbac.manage");
+      expect(marcus.permissions).not.toContain("core.user.manage");
+      expect(marcus.permissions).not.toContain("core.role.manage");
       expect(marcus.permissions).not.toContain("acc.journal.post");
 
       const emily = await addUser(novatech, "emily@novatech.io", "Emily Rodriguez", "finance", FINANCE_PERMISSIONS);

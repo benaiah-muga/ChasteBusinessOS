@@ -47,7 +47,8 @@ interface TestCompany {
 let company: TestCompany;
 
 const ADMIN_PERMISSIONS = [
-  "core.modules.read", "core.modules.manage", "core.rbac.read", "core.rbac.manage",
+  "core.modules.read", "core.modules.manage", "core.rbac.read",
+  "core.user.manage", "core.user.read", "core.role.manage", "core.role.assign",
   "core.autonomy.manage", "core.marketplace.read",
   "core.settings.read", "core.settings.manage",
   "crm.customer.create", "crm.customer.read",
@@ -190,7 +191,7 @@ describe.skipIf(!hasDb)("settings & preferences E2E", () => {
   });
 
   afterAll(async () => {
-    if (db) {
+    if (db && company) {
       await cleanupTestData(db, [company.orgId]);
       await db.$client.end({ timeout: 5 });
     }

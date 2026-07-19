@@ -359,6 +359,23 @@ CREATE INDEX IF NOT EXISTS idx_org_memories_expires
 
 -- User preferences: add settings jsonb column
 ALTER TABLE users ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+-- Split core.rbac.manage into fine-grained permissions
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM role_permissions WHERE permission = 'core.rbac.manage') THEN
+    INSERT INTO role_permissions (role_id, permission)
+      SELECT role_id, 'core.user.manage' FROM role_permissions WHERE permission = 'core.rbac.manage'
+      ON CONFLICT DO NOTHING;
+    INSERT INTO role_permissions (role_id, permission)
+      SELECT role_id, 'core.role.manage' FROM role_permissions WHERE permission = 'core.rbac.manage'
+      ON CONFLICT DO NOTHING;
+    INSERT INTO role_permissions (role_id, permission)
+      SELECT role_id, 'core.role.assign' FROM role_permissions WHERE permission = 'core.rbac.manage'
+      ON CONFLICT DO NOTHING;
+    DELETE FROM role_permissions WHERE permission = 'core.rbac.manage';
+  END IF;
+END $$;
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {

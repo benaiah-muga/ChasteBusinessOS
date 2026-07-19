@@ -15,7 +15,7 @@ import {
   type ModuleRegistry,
   ValidationError,
 } from "@chaste/kernel";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
 
 export function createPlatformModule(
@@ -34,7 +34,10 @@ export function createPlatformModule(
         "core.modules.read",
         "core.modules.manage",
         "core.rbac.read",
-        "core.rbac.manage",
+        "core.user.manage",
+        "core.user.read",
+        "core.role.manage",
+        "core.role.assign",
         "core.autonomy.manage",
         "core.marketplace.read",
         "core.settings.read",
@@ -179,7 +182,7 @@ export function createPlatformModule(
       commands.register(
         defineCommand({
           name: "core.role.create",
-          permissions: ["core.rbac.manage"],
+          permissions: ["core.role.manage"],
           tags: ["core"],
           input: z.object({
             key: z.string().min(1).max(64),
@@ -210,7 +213,7 @@ export function createPlatformModule(
       commands.register(
         defineCommand({
           name: "core.user.assignRole",
-          permissions: ["core.rbac.manage"],
+          permissions: ["core.role.assign"],
           tags: ["core"],
           input: z.object({ userId: z.string().uuid(), roleId: z.string().uuid() }),
           output: z.object({ ok: z.literal(true) }),
@@ -227,7 +230,7 @@ export function createPlatformModule(
       commands.register(
         defineCommand({
           name: "core.user.create",
-          permissions: ["core.rbac.manage"],
+          permissions: ["core.user.manage"],
           tags: ["core"],
           input: z.object({
             email: z.string().email(),
@@ -270,11 +273,31 @@ export function createPlatformModule(
       commands.register(
         defineCommand({
           name: "core.user.deactivate",
-          permissions: ["core.rbac.manage"],
+          permissions: ["core.user.manage"],
           tags: ["core"],
           input: z.object({ userId: z.string().uuid() }),
           output: z.object({ ok: z.literal(true) }),
           handler: async (input, ctx) => {
+            if (input.userId === ctx.actor.userId) {
+              throw new ValidationError("Cannot deactivate your own account");
+            }
+
+            // Check if target is the last admin
+            const adminPerms = await db
+              .select({ userId: schema.userRoles.userId })
+              .from(schema.userRoles)
+              .innerJoin(schema.rolePermissions, eq(schema.userRoles.roleId, schema.rolePermissions.roleId))
+              .where(
+                or(
+                  eq(schema.rolePermissions.permission, "core.user.manage"),
+                  eq(schema.rolePermissions.permission, "core.role.manage"),
+                ),
+              );
+            const uniqueAdminIds = [...new Set(adminPerms.map((r) => r.userId))];
+            if (uniqueAdminIds.length === 1 && uniqueAdminIds[0] === input.userId) {
+              throw new ValidationError("Cannot deactivate the last administrator");
+            }
+
             await db
               .update(schema.users)
               .set({ isActive: false })
@@ -287,11 +310,56 @@ export function createPlatformModule(
       commands.register(
         defineCommand({
           name: "core.user.removeRole",
-          permissions: ["core.rbac.manage"],
+          permissions: ["core.role.assign"],
           tags: ["core"],
           input: z.object({ userId: z.string().uuid(), roleId: z.string().uuid() }),
           output: z.object({ ok: z.literal(true) }),
-          handler: async (input) => {
+          handler: async (input, ctx) => {
+            // Guard: cannot remove own admin-level role
+            if (input.userId === ctx.actor.userId) {
+              const rolePerms = await db
+                .select({ permission: schema.rolePermissions.permission })
+                .from(schema.rolePermissions)
+                .where(eq(schema.rolePermissions.roleId, input.roleId));
+              const hasAdminPerms = rolePerms.some(
+                (p) =>
+                  p.permission === "core.role.manage" ||
+                  p.permission === "core.user.manage",
+              );
+              if (hasAdminPerms) {
+                throw new ValidationError("Cannot remove admin role from yourself");
+              }
+            }
+
+            // Guard: cannot remove last admin's role
+            const targetUserRoles = await db
+              .select({ roleId: schema.userRoles.roleId })
+              .from(schema.userRoles)
+              .where(eq(schema.userRoles.userId, input.userId));
+            const isTargetAdmin = targetUserRoles.some((r) => r.roleId === input.roleId);
+            if (isTargetAdmin) {
+              // Check if removing this role would leave the user with no admin permissions
+              const otherAdminRoles = await db
+                .select({ roleId: schema.rolePermissions.roleId })
+                .from(schema.rolePermissions)
+                .innerJoin(schema.userRoles, eq(schema.rolePermissions.roleId, schema.userRoles.roleId))
+                .where(
+                  and(
+                    eq(schema.userRoles.userId, input.userId),
+                    or(
+                      eq(schema.rolePermissions.permission, "core.user.manage"),
+                      eq(schema.rolePermissions.permission, "core.role.manage"),
+                    ),
+                  ),
+                );
+              const otherRoleIds = [...new Set(otherAdminRoles.map((r) => r.roleId))].filter(
+                (id) => id !== input.roleId,
+              );
+              if (otherRoleIds.length === 0) {
+                throw new ValidationError("Cannot remove the last admin role from a user");
+              }
+            }
+
             await db
               .delete(schema.userRoles)
               .where(
@@ -301,6 +369,208 @@ export function createPlatformModule(
                 ),
               );
             return { ok: true as const };
+          },
+        }),
+      );
+
+      // ─── Role CRUD ─────────────────────────────────────────────────────
+
+      commands.register(
+        defineCommand({
+          name: "core.role.update",
+          permissions: ["core.role.manage"],
+          tags: ["core"],
+          input: z.object({
+            roleId: z.string().uuid(),
+            name: z.string().min(1).optional(),
+            description: z.string().optional(),
+            permissions: z.array(z.string()).optional(),
+          }),
+          output: z.object({ id: z.string(), key: z.string(), name: z.string() }),
+          handler: async (input, ctx) => {
+            const [role] = await db
+              .select()
+              .from(schema.roles)
+              .where(eq(schema.roles.id, input.roleId));
+            if (!role) {
+              throw new ValidationError("Role not found");
+            }
+            if (role.organizationId !== ctx.actor.organizationId) {
+              throw new ValidationError("Role not found");
+            }
+            if (role.isSystem) {
+              throw new ValidationError("Cannot modify system roles");
+            }
+
+            const updates: Record<string, unknown> = {};
+            if (input.name !== undefined) updates.name = input.name;
+            if (input.description !== undefined) updates.description = input.description;
+
+            if (Object.keys(updates).length > 0) {
+              await db
+                .update(schema.roles)
+                .set(updates)
+                .where(eq(schema.roles.id, input.roleId));
+            }
+
+            if (input.permissions !== undefined) {
+              // Replace all permissions
+              await db
+                .delete(schema.rolePermissions)
+                .where(eq(schema.rolePermissions.roleId, input.roleId));
+              for (const permission of input.permissions) {
+                await db
+                  .insert(schema.rolePermissions)
+                  .values({ roleId: input.roleId, permission });
+              }
+            }
+
+            const [updated] = await db
+              .select()
+              .from(schema.roles)
+              .where(eq(schema.roles.id, input.roleId));
+            return { id: updated!.id, key: updated!.key, name: updated!.name };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.role.delete",
+          permissions: ["core.role.manage"],
+          tags: ["core"],
+          input: z.object({ roleId: z.string().uuid() }),
+          output: z.object({ ok: z.literal(true) }),
+          handler: async (input, ctx) => {
+            const [role] = await db
+              .select()
+              .from(schema.roles)
+              .where(eq(schema.roles.id, input.roleId));
+            if (!role) {
+              throw new ValidationError("Role not found");
+            }
+            if (role.organizationId !== ctx.actor.organizationId) {
+              throw new ValidationError("Role not found");
+            }
+            if (role.isSystem) {
+              throw new ValidationError("Cannot delete system roles");
+            }
+
+            // Check if any user has this as their only admin role
+            const usersWithRole = await db
+              .select({ userId: schema.userRoles.userId })
+              .from(schema.userRoles)
+              .where(eq(schema.userRoles.roleId, input.roleId));
+
+            for (const { userId } of usersWithRole) {
+              const otherAdminRoles = await db
+                .select({ roleId: schema.rolePermissions.roleId })
+                .from(schema.rolePermissions)
+                .innerJoin(schema.userRoles, eq(schema.rolePermissions.roleId, schema.userRoles.roleId))
+                .where(
+                  and(
+                    eq(schema.userRoles.userId, userId),
+                    or(
+                      eq(schema.rolePermissions.permission, "core.user.manage"),
+                      eq(schema.rolePermissions.permission, "core.role.manage"),
+                    ),
+                  ),
+                );
+              const otherRoleIds = [
+                ...new Set(otherAdminRoles.map((r) => r.roleId)),
+              ].filter((id) => id !== input.roleId);
+              if (otherRoleIds.length === 0) {
+                throw new ValidationError(
+                  `Cannot delete role: user ${userId} would have no admin permissions`,
+                );
+              }
+            }
+
+            // Cascade delete handles role_permissions and user_roles
+            await db.delete(schema.roles).where(eq(schema.roles.id, input.roleId));
+            return { ok: true as const };
+          },
+        }),
+      );
+
+      // ─── User management ───────────────────────────────────────────────
+
+      commands.register(
+        defineCommand({
+          name: "core.user.activate",
+          permissions: ["core.user.manage"],
+          tags: ["core"],
+          input: z.object({ userId: z.string().uuid() }),
+          output: z.object({ ok: z.literal(true) }),
+          handler: async (input, ctx) => {
+            const [user] = await db
+              .select()
+              .from(schema.users)
+              .where(eq(schema.users.id, input.userId));
+            if (!user) {
+              throw new ValidationError("User not found");
+            }
+            if (user.organizationId !== ctx.actor.organizationId) {
+              throw new ValidationError("User not found");
+            }
+            await db
+              .update(schema.users)
+              .set({ isActive: true })
+              .where(eq(schema.users.id, input.userId));
+            return { ok: true as const };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.user.list",
+          permissions: ["core.user.read"],
+          tags: ["core"],
+          input: z.object({}).default({}),
+          output: z.object({
+            users: z.array(
+              z.object({
+                id: z.string(),
+                email: z.string(),
+                displayName: z.string(),
+                isActive: z.boolean(),
+                roles: z.array(
+                  z.object({ id: z.string(), key: z.string(), name: z.string() }),
+                ),
+                createdAt: z.string(),
+              }),
+            ),
+          }),
+          handler: async (_i, ctx) => {
+            const users = await db
+              .select()
+              .from(schema.users)
+              .where(eq(schema.users.organizationId, ctx.actor.organizationId));
+
+            const result = [];
+            for (const user of users) {
+              const userRoles = await db
+                .select({
+                  id: schema.roles.id,
+                  key: schema.roles.key,
+                  name: schema.roles.name,
+                })
+                .from(schema.userRoles)
+                .innerJoin(schema.roles, eq(schema.userRoles.roleId, schema.roles.id))
+                .where(eq(schema.userRoles.userId, user.id));
+
+              result.push({
+                id: user.id,
+                email: user.email,
+                displayName: user.displayName,
+                isActive: user.isActive,
+                roles: userRoles,
+                createdAt: user.createdAt.toISOString(),
+              });
+            }
+
+            return { users: result };
           },
         }),
       );

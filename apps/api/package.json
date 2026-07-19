@@ -9,7 +9,7 @@
     "start": "node --env-file=../../.env dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --env-file=../../.env ./node_modules/vitest/vitest.mjs run",
+    "test": "tsx --env-file=../../.env ./node_modules/vitest/vitest.mjs run --no-file-parallelism",
     "e2e": "tsx --env-file=../../.env src/e2e.ts"
   },
   "dependencies": {
