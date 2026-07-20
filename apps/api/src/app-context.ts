@@ -40,6 +40,7 @@ import {
   createRequestContext,
   executeCommand,
   executeQuery,
+  NotFoundError,
   type Actor,
   type CommandRegistry,
   type ModuleRegistry,
@@ -390,7 +391,7 @@ export async function executeWorkflowRun(
 ) {
   const wf = app.workflows.get(workflowId);
   if (!wf) {
-    return { success: false, error: "Workflow not found" };
+    throw new NotFoundError("Workflow");
   }
 
   const ctx: WorkflowExecutionContext = {

@@ -7,22 +7,33 @@ export function CreateInvoiceForm() {
   const [number, setNumber] = useState(`INV-${Date.now().toString().slice(-6)}`);
   const [total, setTotal] = useState("100");
   const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
-    const res = await fetch(`${getApiBaseUrl()}/api/v1/accounting/invoices`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ number, total: Number(total), currency: "USD" }),
-    });
-    const body = await res.json();
-    if (!res.ok) {
-      setMsg(body.message ?? "Failed");
-      return;
+    setBusy(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/v1/accounting/invoices`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ number, total: Number(total), currency: "USD" }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        number?: string;
+      };
+      if (!res.ok) {
+        setMsg(body.message ?? "Failed to create invoice");
+        return;
+      }
+      setMsg(`Created ${body.number ?? number}`);
+      window.location.reload();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setBusy(false);
     }
-    setMsg(`Created ${body.number}`);
-    window.location.reload();
   }
 
   return (
@@ -34,13 +45,20 @@ export function CreateInvoiceForm() {
         </label>
         <label style={{ flex: 1 }}>
           Total
-          <input value={total} onChange={(e) => setTotal(e.target.value)} required />
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={total}
+            onChange={(e) => setTotal(e.target.value)}
+            required
+          />
         </label>
       </div>
-      <button className="btn" type="submit">
-        Create invoice
+      <button className="btn" type="submit" disabled={busy}>
+        {busy ? "Creating…" : "Create invoice"}
       </button>
-      {msg ? <p className="muted">{msg}</p> : null}
+      {msg ? <p className={msg.startsWith("Created") ? "muted" : "error"}>{msg}</p> : null}
     </form>
   );
 }

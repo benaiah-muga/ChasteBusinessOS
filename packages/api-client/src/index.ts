@@ -8,6 +8,7 @@ export const healthResponseSchema = z.object({
   ok: z.literal(true),
   service: z.string(),
   version: z.string(),
+  config: z.unknown().optional(),
 });
 
 export const commandResultSchema = z.object({
@@ -193,6 +194,30 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         { method: "PUT", body: JSON.stringify({ preferences }) },
         (d) => d as Record<string, unknown>,
       );
+    },
+    listAudit() {
+      return request("/api/v1/audit", { method: "GET" }, (d) => d as {
+        items: {
+          id: string;
+          at: string;
+          action: string;
+          success: boolean;
+          actorKind: string;
+          errorCode?: string;
+        }[];
+      });
+    },
+    listWorkflows() {
+      return request("/api/v1/workflows", { method: "GET" }, (d) => d as {
+        items: {
+          id: string;
+          name: string;
+          description: string;
+          trigger: unknown;
+          createdBy: string;
+          stepCount: number;
+        }[];
+      });
     },
   };
 }

@@ -1,4 +1,4 @@
-import { FULL_AUTONOMOUS_WARNING, ChasteError } from "@chaste/kernel";
+import { FULL_AUTONOMOUS_WARNING, ChasteError, NotFoundError } from "@chaste/kernel";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { z } from "zod";
@@ -14,6 +14,24 @@ import {
   type AppContext,
 } from "./app-context.js";
 import { workflowDefinitionSchema } from "@chaste/ai-core";
+
+/** Form posts often send "" for optional fields — treat as omitted, not invalid. */
+const optionalEmailSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().email().optional(),
+);
+
+const optionalStringSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().optional(),
+);
+
+/** HTML number inputs / JSON may arrive as strings; coerce at the HTTP boundary. */
+const nonNegativeNumberSchema = z.coerce.number().finite().nonnegative();
+const optionalNonNegativeNumberSchema = z.preprocess(
+  (value) => (value === "" || value === null ? undefined : value),
+  z.coerce.number().finite().nonnegative().optional(),
+);
 
 export async function buildServer(appCtx?: AppContext) {
   const app = appCtx ?? (await createAppContext());
@@ -89,9 +107,9 @@ export async function buildServer(appCtx?: AppContext) {
     const input = z
       .object({
         name: z.string().min(1),
-        email: z.string().email().optional(),
-        city: z.string().optional(),
-        country: z.string().optional(),
+        email: optionalEmailSchema,
+        city: optionalStringSchema,
+        country: optionalStringSchema,
       })
       .parse(req.body);
     const result = await runCommand(app, "crm.customer.create", input, req.id);
@@ -109,7 +127,7 @@ export async function buildServer(appCtx?: AppContext) {
     const input = z
       .object({
         number: z.string(),
-        total: z.number(),
+        total: nonNegativeNumberSchema,
         currency: z.string().optional(),
         customerId: z.string().uuid().optional(),
       })
@@ -122,7 +140,12 @@ export async function buildServer(appCtx?: AppContext) {
   });
   server.post("/api/v1/inventory/products", async (req) => {
     const input = z
-      .object({ sku: z.string(), name: z.string(), reorderLevel: z.number().optional() })
+      .object({
+        sku: z.string(),
+        name: z.string(),
+        uom: optionalStringSchema,
+        reorderLevel: optionalNonNegativeNumberSchema,
+      })
       .parse(req.body);
     return (await runCommand(app, "inv.product.create", input, req.id)).data;
   });
@@ -131,7 +154,7 @@ export async function buildServer(appCtx?: AppContext) {
     return (await runQuery(app, "pur.po.list", {}, req.id)).data;
   });
   server.post("/api/v1/purchasing/vendors", async (req) => {
-    const input = z.object({ name: z.string(), email: z.string().email().optional() }).parse(req.body);
+    const input = z.object({ name: z.string(), email: optionalEmailSchema }).parse(req.body);
     return (await runCommand(app, "pur.vendor.create", input, req.id)).data;
   });
 
@@ -143,8 +166,10 @@ export async function buildServer(appCtx?: AppContext) {
       .object({
         employeeNumber: z.string(),
         fullName: z.string(),
-        baseSalary: z.number().optional(),
-        department: z.string().optional(),
+        email: optionalEmailSchema,
+        baseSalary: optionalNonNegativeNumberSchema,
+        department: optionalStringSchema,
+        jobTitle: optionalStringSchema,
       })
       .parse(req.body);
     return (await runCommand(app, "hr.employee.create", input, req.id)).data;
@@ -245,7 +270,7 @@ export async function buildServer(appCtx?: AppContext) {
     const { id } = req.params as { id: string };
     const wf = app.workflows.get(id);
     if (!wf) {
-      return { error: "Workflow not found", code: "NOT_FOUND" };
+      throw new NotFoundError("Workflow");
     }
     return wf;
   });
@@ -253,11 +278,11 @@ export async function buildServer(appCtx?: AppContext) {
   server.post("/api/v1/workflows/:id/execute", async (req) => {
     const { id } = req.params as { id: string };
     const body = req.body ?? {};
-    const input = (typeof body === "object" && body !== null && "input" in body)
-      ? (body as any).input ?? {}
-      : body;
-    const result = await executeWorkflowRun(app, id, input);
-    return result;
+    const input =
+      typeof body === "object" && body !== null && "input" in body
+        ? ((body as { input?: Record<string, unknown> }).input ?? {})
+        : (body as Record<string, unknown>);
+    return executeWorkflowRun(app, id, input);
   });
 
   server.get("/api/v1/audit", async () => {

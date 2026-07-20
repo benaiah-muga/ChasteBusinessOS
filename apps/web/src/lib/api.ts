@@ -26,9 +26,14 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
     },
     cache: "no-store",
   });
-  const body = await res.json().catch(() => ({}));
+  const body = (await res.json().catch(() => ({}))) as {
+    message?: string;
+    code?: string;
+  };
   if (!res.ok) {
-    throw new Error((body as { message?: string }).message ?? res.statusText);
+    const detail = body.message ?? res.statusText;
+    const code = body.code ? ` (${body.code})` : "";
+    throw new Error(`${detail}${code}`);
   }
   return body as T;
 }

@@ -54,7 +54,7 @@ export const appConfigSchema = z.object({
       .default("true")
       .transform((v) => v === "true"),
     orgName: z.string().default("Primary Organization"),
-    adminEmail: z.string().email().default("admin@localhost"),
+    adminEmail: z.string().email().default("admin@chaste.local"),
     adminName: z.string().default("System Admin"),
   }),
 

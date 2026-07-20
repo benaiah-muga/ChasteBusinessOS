@@ -1,18 +1,34 @@
 "use client";
 
 import type { ChatMessage, UiPart } from "@chaste/api-client";
-import { useMemo, useState } from "react";
+import {
+  Bot,
+  Check,
+  ChevronRight,
+  ClipboardCheck,
+  Clock3,
+  Info,
+  Maximize2,
+  MessageSquareText,
+  Minimize2,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { getApiClient } from "@/lib/api";
 
 function PartView({
   part,
   onConfirm,
   onCancel,
+  onSuggestion,
   busy,
 }: {
   part: UiPart;
   onConfirm: (id: string) => void;
   onCancel: (id: string) => void;
+  onSuggestion: (message: string) => void;
   busy: boolean;
 }) {
   switch (part.type) {
@@ -20,102 +36,151 @@ function PartView({
       return <p className="part-text">{part.text}</p>;
     case "explanation":
       return (
-        <div className="part-explain">
-          <strong>Why</strong>
-          <div>{part.summary}</div>
+        <details className="part-explain" open>
+          <summary>
+            <Info size={15} />
+            Why this is allowed
+          </summary>
+          <p>{part.summary}</p>
           {part.reasons.length ? (
             <ul>
-              {part.reasons.map((r) => (
-                <li key={r}>{r}</li>
+              {part.reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
               ))}
             </ul>
           ) : null}
           {part.rulesApplied.length ? (
-            <div className="mono" style={{ marginTop: "0.4rem" }}>
-              rules: {part.rulesApplied.join(", ")}
-            </div>
+            <div className="mono">rules: {part.rulesApplied.join(", ")}</div>
           ) : null}
-        </div>
+        </details>
       );
     case "confirm_action":
       return (
         <div className="part-confirm">
-          <strong>{part.title}</strong>
-          {part.description ? <div className="muted">{part.description}</div> : null}
-          <div className="mono" style={{ margin: "0.4rem 0" }}>
-            {part.command}
+          <div className="confirm-icon">
+            <ClipboardCheck size={18} />
           </div>
-          <div className="row">
-            <button
-              className="btn"
-              type="button"
-              disabled={busy || part.confirmLabel === "Disabled"}
-              onClick={() => onConfirm(part.id)}
-            >
-              {part.confirmLabel}
-            </button>
-            <button
-              className="btn secondary"
-              type="button"
-              disabled={busy}
-              onClick={() => onCancel(part.id)}
-            >
-              {part.cancelLabel}
-            </button>
+          <div>
+            <strong>{part.title}</strong>
+            {part.description ? <p className="muted">{part.description}</p> : null}
+            <div className="mono command-name">{part.command}</div>
+            <div className="row">
+              <button
+                className="btn"
+                type="button"
+                disabled={busy || part.confirmLabel === "Disabled"}
+                onClick={() => onConfirm(part.id)}
+              >
+                <Check size={16} />
+                {part.confirmLabel}
+              </button>
+              <button className="btn secondary" type="button" disabled={busy} onClick={() => onCancel(part.id)}>
+                <X size={16} />
+                {part.cancelLabel}
+              </button>
+            </div>
           </div>
         </div>
       );
     case "table":
       return (
-        <table className="table" style={{ marginTop: "0.5rem" }}>
-          <thead>
-            <tr>
-              {part.columns.map((c) => (
-                <th key={c.key}>{c.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {part.rows.map((row, i) => (
-              <tr key={i}>
-                {part.columns.map((c) => (
-                  <td key={c.key}>{String(row[c.key] ?? "")}</td>
+        <div className="table-wrap compact">
+          <table className="table">
+            <thead>
+              <tr>
+                {part.columns.map((column) => (
+                  <th key={column.key}>{column.label}</th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {part.rows.map((row, index) => (
+                <tr key={index}>
+                  {part.columns.map((column) => (
+                    <td key={column.key}>{String(row[column.key] ?? "")}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    case "metric":
+      return (
+        <div className="metric-part">
+          <span>{part.label}</span>
+          <strong>{part.value}</strong>
+          {part.hint ? <small>{part.hint}</small> : null}
+        </div>
+      );
+    case "clarify":
+      return (
+        <div className="part-callout">
+          {part.questions.map((question) => (
+            <p key={question}>{question}</p>
+          ))}
+        </div>
+      );
+    case "plan":
+      return (
+        <div className="part-plan">
+          <strong>{part.title}</strong>
+          {part.steps.map((step, index) => (
+            <div key={`${step.command}-${index}`} className="plan-step">
+              <span>{index + 1}</span>
+              <div>
+                <p>{step.description}</p>
+                <small className="mono">{step.command}</small>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    case "suggestions":
+      return (
+        <div className="suggestion-row">
+          {part.suggestions.map((suggestion) => (
+            <button key={suggestion} className="chip" type="button" onClick={() => onSuggestion(suggestion)}>
+              {suggestion}
+              <ChevronRight size={14} />
+            </button>
+          ))}
+        </div>
       );
     case "error":
-      return <p className="error">{part.message}</p>;
+      return (
+        <div className="part-error">
+          <strong>{part.code ?? "Error"}</strong>
+          <p>{part.message}</p>
+        </div>
+      );
     default:
       return (
-        <pre className="mono" style={{ whiteSpace: "pre-wrap" }}>
+        <pre className="mono part-raw">
           {JSON.stringify(part, null, 2)}
         </pre>
       );
   }
 }
 
-export function ChatWidget() {
+export function ChatWidget({ floating = false }: { floating?: boolean }) {
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [text, setText] = useState("Create customer Acme Ltd in Nairobi");
+  const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(!floating);
+  const [capsuleOpen, setCapsuleOpen] = useState(!floating);
   const [error, setError] = useState<string | null>(null);
 
-  const hint = useMemo(
-    () => "AI prepares actions; confirm runs the same command as the manual form.",
-    [],
-  );
+  const statusLines = useMemo(() => {
+    if (!busy) return ["Ready for a command"];
+    return ["Thinking", "Analyzing intent", "Checking autonomy", "Routing through command bus"];
+  }, [busy]);
 
-  async function send(payload: {
-    message?: string;
-    confirmId?: string;
-    cancelId?: string;
-  }) {
+  async function send(payload: { message?: string; confirmId?: string; cancelId?: string }) {
     setBusy(true);
     setError(null);
+    setPanelOpen(true);
     try {
       const api = getApiClient();
       const res = await api.chat({ sessionId, ...payload });
@@ -128,56 +193,124 @@ export function ChatWidget() {
     }
   }
 
+  function submitMessage(message = text) {
+    const next = message.trim();
+    if (!next) return;
+    setText("");
+    void send({ message: next });
+  }
+
+  useEffect(() => {
+    function onPrompt(event: Event) {
+      const detail = (event as CustomEvent<{ prompt?: string }>).detail;
+      if (detail?.prompt) {
+        setCapsuleOpen(true);
+        void send({ message: detail.prompt });
+      }
+    }
+    window.addEventListener("chaste-agent-message", onPrompt);
+    return () => window.removeEventListener("chaste-agent-message", onPrompt);
+  }, [sessionId]);
+
+  const composer = (
+    <form
+      className="agent-composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+        submitMessage();
+      }}
+    >
+      <MessageSquareText size={18} />
+      <input
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onFocus={() => setCapsuleOpen(true)}
+        placeholder="Ask the agent to create, prepare, list, or explain..."
+      />
+      <button className="icon-btn send-btn" type="submit" disabled={busy || !text.trim()} title="Send">
+        <Send size={17} />
+      </button>
+    </form>
+  );
+
   return (
-    <section className="card chat">
-      <div>
-        <h2>Operations chat</h2>
-        <p className="muted" style={{ margin: 0 }}>
-          {hint} Endpoint: <span className="mono">POST /api/v1/ai/chat</span>
-        </p>
-      </div>
-
-      <div className="chat-log">
-        {messages.length === 0 ? (
-          <div className="muted">No messages yet. Try the suggested prompt.</div>
-        ) : (
-          messages.map((m) => (
-            <div key={m.id} className={`bubble ${m.role}`}>
-              {m.parts.map((part, idx) => (
-                <PartView
-                  key={`${m.id}-${idx}`}
-                  part={part}
-                  busy={busy}
-                  onConfirm={(id) => send({ confirmId: id })}
-                  onCancel={(id) => send({ cancelId: id })}
-                />
-              ))}
+    <>
+      <aside className={panelOpen ? "agent-panel open" : "agent-panel"} aria-label="AI agent conversation">
+        <header className="agent-panel-head">
+          <div>
+            <div className="eyebrow">
+              <Sparkles size={14} />
+              AI command surface
             </div>
-          ))
-        )}
-      </div>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const message = text.trim();
-          if (!message) return;
-          void send({ message });
-        }}
-      >
-        <input
-          style={{ flex: 1 }}
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Describe what you want…"
-        />
-        <button className="btn" type="submit" disabled={busy}>
-          {busy ? "…" : "Send"}
-        </button>
-      </form>
-      {error ? <p className="error">{error}</p> : null}
-    </section>
+            <h2>Operations agent</h2>
+          </div>
+          <button className="icon-btn" type="button" onClick={() => setPanelOpen(false)} title="Close agent panel">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="agent-status">
+          {statusLines.map((line, index) => (
+            <div key={line} className={index === statusLines.length - 1 ? "current" : ""}>
+              {busy && index === statusLines.length - 1 ? <Clock3 size={14} /> : <Check size={14} />}
+              <span>{line}</span>
+            </div>
+          ))}
+        </div>
+        <div className="chat-log">
+          {messages.length === 0 ? (
+            <div className="agent-empty">
+              <Bot size={34} />
+              <strong>Tell the agent what business action you want.</strong>
+              <p>It will validate intent, explain rules, and execute only through the backend command path.</p>
+              <div className="suggestion-row">
+                {["Create customer Acme Ltd in Nairobi", "List invoices", "Prepare payroll for July 2026"].map(
+                  (suggestion) => (
+                    <button key={suggestion} className="chip" type="button" onClick={() => submitMessage(suggestion)}>
+                      {suggestion}
+                    </button>
+                  ),
+                )}
+              </div>
+            </div>
+          ) : (
+            messages.map((message) => (
+              <div key={message.id} className={`bubble ${message.role}`}>
+                {message.parts.map((part, index) => (
+                  <PartView
+                    key={`${message.id}-${index}`}
+                    part={part}
+                    busy={busy}
+                    onConfirm={(id) => send({ confirmId: id })}
+                    onCancel={(id) => send({ cancelId: id })}
+                    onSuggestion={submitMessage}
+                  />
+                ))}
+              </div>
+            ))
+          )}
+          {error ? <div className="part-error">{error}</div> : null}
+        </div>
+        {composer}
+      </aside>
+      {floating && !panelOpen ? (
+        <div className={capsuleOpen ? "agent-capsule expanded" : "agent-capsule"}>
+          {capsuleOpen ? (
+            <>
+              {composer}
+              <button className="icon-btn" type="button" onClick={() => setPanelOpen(true)} title="Open full agent">
+                <Maximize2 size={17} />
+              </button>
+              <button className="icon-btn" type="button" onClick={() => setCapsuleOpen(false)} title="Minimize agent">
+                <Minimize2 size={17} />
+              </button>
+            </>
+          ) : (
+            <button className="agent-orb" type="button" onClick={() => setCapsuleOpen(true)} title="AI Agent">
+              <Bot size={24} />
+            </button>
+          )}
+        </div>
+      ) : null}
+    </>
   );
 }
