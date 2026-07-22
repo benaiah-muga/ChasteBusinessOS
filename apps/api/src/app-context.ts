@@ -1,9 +1,36 @@
 import {
   type ChatSessionState,
+  createAiProvider,
   handleChatTurn,
-  InMemoryMemoryStore,
   type AiExplanation,
+  type AiProvider,
+  createMastraInstance,
+  type ChasteMastra,
+  createConversationalAgent,
+  createNvidiaProvider,
+  createWorkflowBuilderAgent,
+  generateWorkflowFromNL,
+  executeDynamicWorkflow,
+  type WorkflowDefinition,
+  type NvidiaProvider,
+  type WorkflowExecutionContext,
+  createTracer,
+  type AiTracer,
+  TracedProvider,
 } from "@chaste/ai-core";
+import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
+import {
+  bootstrapPlatform,
+  createDb,
+  getUserWithOrg,
+  PostgresAuditWriter,
+  PostgresOutboxWriter,
+  resolveUserPermissions,
+  DbSessionStore,
+  DbMemoryStore,
+  type Db,
+  type SessionStore,
+} from "@chaste/db";
 import {
   type AutonomyLevel,
   autonomyLevelSchema,
@@ -13,98 +40,222 @@ import {
   createRequestContext,
   executeCommand,
   executeQuery,
-  InMemoryAuditWriter,
-  InMemoryOutboxWriter,
+  NotFoundError,
   type Actor,
+  type CommandRegistry,
+  type ModuleRegistry,
+  type QueryRegistry,
 } from "@chaste/kernel";
-import { createCoreSystemModule } from "@chaste/module-core-system";
-import { createDemoCrmModule, InMemoryCustomerStore } from "@chaste/module-demo-crm";
+import { createAccountingModule } from "@chaste/module-accounting";
+import { createCrmModule } from "@chaste/module-crm";
+import { createHrModule } from "@chaste/module-hr";
+import { createInventoryModule } from "@chaste/module-inventory";
+import { createManufacturingModule } from "@chaste/module-manufacturing";
+import { createPlatformModule } from "@chaste/module-platform";
+import { createPurchasingModule } from "@chaste/module-purchasing";
 
-export interface DemoUser {
+export interface SessionUser {
   id: string;
   organizationId: string;
   email: string;
   displayName: string;
   permissions: string[];
+  autonomy: AutonomyLevel;
+  orgName: string;
+  region: string;
 }
 
 export interface AppContext {
-  commands: ReturnType<typeof createCommandRegistry>;
-  queries: ReturnType<typeof createQueryRegistry>;
-  modules: ReturnType<typeof createModuleRegistry>;
-  audit: InMemoryAuditWriter;
-  outbox: InMemoryOutboxWriter;
-  memory: InMemoryMemoryStore;
-  customers: InMemoryCustomerStore;
-  sessions: Map<string, ChatSessionState>;
+  config: AppConfig;
+  db: Db;
+  commands: CommandRegistry;
+  queries: QueryRegistry;
+  modules: ModuleRegistry;
+  audit: PostgresAuditWriter;
+  outbox: PostgresOutboxWriter;
+  sessionStore: SessionStore;
+  memoryStore: DbMemoryStore;
   explanations: AiExplanation[];
-  demoUser: DemoUser;
-  autonomy: AutonomyLevel;
+  sessionUser: SessionUser;
+  provider: AiProvider;
+  tracer: AiTracer;
+  mastra: ChasteMastra;
+  nvidiaProvider: NvidiaProvider | null;
+  workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
+  workflows: Map<string, WorkflowDefinition>;
 }
 
-export async function createAppContext(): Promise<AppContext> {
+export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Promise<AppContext> {
+  const config = loadConfig(env);
+
+  // Handle Unix socket URLs that postgres.js v3 can't parse
+  let dbConfig: string | { host: string; database: string; username: string } = config.databaseUrl;
+  const urlMatch = config.databaseUrl.match(/^postgres:\/\/([^@]*)@\/([^?]+)\?host=(.+)$/);
+  if (urlMatch) {
+    dbConfig = {
+      host: urlMatch[3]!,
+      database: urlMatch[2]!,
+      username: urlMatch[1]!,
+    };
+  }
+  // Also handle unix:// scheme
+  const unixMatch = config.databaseUrl.match(/^unix:\/\/(.+)\?db=([^&]+)&user=([^&]+)$/);
+  if (unixMatch) {
+    dbConfig = {
+      host: unixMatch[1]!,
+      database: unixMatch[2]!,
+      username: unixMatch[3]!,
+    };
+  }
+
+  const db = createDb(dbConfig);
+  const bootstrap = await bootstrapPlatform(db, config);
+
+  const permissions = await resolveUserPermissions(db, bootstrap.adminUserId);
+  const userRow = await getUserWithOrg(db, bootstrap.adminUserId);
+  if (!userRow) {
+    throw new Error("Bootstrap admin user not found after seed");
+  }
+
+  const autonomy = autonomyLevelSchema.catch(config.defaultAutonomy).parse(userRow.autonomy);
+
+  const sessionUser: SessionUser = {
+    id: userRow.userId,
+    organizationId: userRow.organizationId,
+    email: userRow.email,
+    displayName: userRow.displayName,
+    permissions,
+    autonomy,
+    orgName: userRow.orgName,
+    region: userRow.region,
+  };
+
   const commands = createCommandRegistry();
   const queries = createQueryRegistry();
   const modules = createModuleRegistry(commands, queries);
-  const audit = new InMemoryAuditWriter();
-  const outbox = new InMemoryOutboxWriter();
-  const memory = new InMemoryMemoryStore();
-  const customers = new InMemoryCustomerStore();
+  const audit = new PostgresAuditWriter(db);
+  const outbox = new PostgresOutboxWriter(db);
+  const provider = createAiProvider(config.ai);
 
-  const autonomy = autonomyLevelSchema.catch("confirm").parse(
-    process.env.CHASTE_DEFAULT_AUTONOMY ?? "confirm",
+  // Observability — Langfuse traces all LLM calls when configured
+  const tracer = createTracer({
+    langfusePublicKey: config.mastra.langfusePublicKey,
+    langfuseSecretKey: config.mastra.langfuseSecretKey,
+    langfuseBaseUrl: config.mastra.langfuseBaseUrl,
+    observabilityEnabled: config.mastra.observabilityEnabled,
+  });
+
+  // Wrap provider with tracing if Langfuse is enabled
+  const tracedProvider = config.mastra.observabilityEnabled
+    ? new TracedProvider(provider, tracer)
+    : provider;
+
+  // Memory store — persistent tiered storage for AI context
+  const memoryStore = new DbMemoryStore(db);
+
+  // Domain modules first (dependency order)
+  await modules.register(createCrmModule(db));
+  await modules.register(createAccountingModule(db));
+  await modules.register(createInventoryModule(db));
+  await modules.register(createPurchasingModule(db));
+  await modules.register(createHrModule(db));
+  await modules.register(createManufacturingModule(db));
+  await modules.register(
+    createPlatformModule(db, modules, {
+      allowFullAutonomous: config.allowFullAutonomous,
+      regions: config.regions,
+    }),
   );
 
-  const demoUser: DemoUser = {
-    id: "00000000-0000-4000-8000-000000000001",
-    organizationId: "00000000-0000-4000-8000-000000000010",
-    email: process.env.CHASTE_DEMO_USER_EMAIL ?? "owner@demo.local",
-    displayName: process.env.CHASTE_DEMO_USER_NAME ?? "Demo Owner",
-    permissions: [
-      "*", // foundation demo — replace with real RBAC
-    ],
-  };
+  // Mastra instance (PG storage is optional — degrades gracefully)
+  const mastra = createMastraInstance({
+    databaseUrl: config.databaseUrl,
+    schemaName: config.mastra.storageSchema,
+  });
 
-  // Register business modules (order: deps first)
-  await modules.register(createDemoCrmModule(customers));
-  // core-system lists modules — register after others so list is complete on query
-  await modules.register(createCoreSystemModule(modules));
+  // Nvidia NIM provider (for Mastra agents)
+  let nvidiaProvider: NvidiaProvider | null = null;
+  let workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null = null;
+
+  const nvidiaKey = config.ai.nvidiaApiKey;
+  if (nvidiaKey) {
+    nvidiaProvider = createNvidiaProvider({
+      apiKey: nvidiaKey,
+      baseUrl: config.ai.nvidiaBaseUrl,
+      model: config.ai.model,
+    });
+  }
+
+  // Workflow builder uses the simpler AiProvider.complete() for reliability
+  if (provider.id !== "none") {
+    workflowBuilder = createWorkflowBuilderAgent({
+      commandRegistry: commands,
+      aiProvider: provider,
+    });
+  }
 
   return {
+    config,
+    db,
     commands,
     queries,
     modules,
     audit,
     outbox,
-    memory,
-    customers,
-    sessions: new Map(),
+    sessionStore: new DbSessionStore(db),
+    memoryStore,
     explanations: [],
-    demoUser,
-    autonomy,
+    sessionUser,
+    provider: tracedProvider,
+    tracer,
+    mastra,
+    nvidiaProvider,
+    workflowBuilder,
+    workflows: new Map(),
   };
 }
 
-export function actorFromDemo(app: AppContext, aiRunId?: string): Actor {
+export function actorFromSession(app: AppContext, aiRunId?: string): Actor {
   return {
     kind: aiRunId ? "ai_assisted" : "user",
-    userId: app.demoUser.id,
-    organizationId: app.demoUser.organizationId,
-    displayName: app.demoUser.displayName,
-    permissions: new Set(app.demoUser.permissions),
+    userId: app.sessionUser.id,
+    organizationId: app.sessionUser.organizationId,
+    displayName: app.sessionUser.displayName,
+    permissions: new Set(app.sessionUser.permissions),
     aiRunId,
   };
 }
 
 export function requestCtx(app: AppContext, requestId?: string) {
   return createRequestContext({
-    actor: actorFromDemo(app),
+    actor: actorFromSession(app),
     requestId,
-    autonomy: app.autonomy,
+    autonomy: app.sessionUser.autonomy,
   });
 }
 
-export async function runCommand(app: AppContext, name: string, input: unknown, requestId?: string) {
+export async function refreshSessionUser(app: AppContext): Promise<void> {
+  const userRow = await getUserWithOrg(app.db, app.sessionUser.id);
+  if (!userRow) return;
+  const permissions = await resolveUserPermissions(app.db, app.sessionUser.id);
+  app.sessionUser = {
+    id: userRow.userId,
+    organizationId: userRow.organizationId,
+    email: userRow.email,
+    displayName: userRow.displayName,
+    permissions,
+    autonomy: autonomyLevelSchema.catch(app.config.defaultAutonomy).parse(userRow.autonomy),
+    orgName: userRow.orgName,
+    region: userRow.region,
+  };
+}
+
+export async function runCommand(
+  app: AppContext,
+  name: string,
+  input: unknown,
+  requestId?: string,
+) {
   return executeCommand(app.commands, name, input, requestCtx(app, requestId), {
     audit: app.audit,
     outbox: app.outbox,
@@ -115,23 +266,69 @@ export async function runQuery(app: AppContext, name: string, input: unknown, re
   return executeQuery(app.queries, name, input, requestCtx(app, requestId));
 }
 
+export async function getMastraAgent(app: AppContext) {
+  const modelId = app.config.ai.model ?? "nvidia/llama-3.3-nemotron-super-49b-v1.5";
+  const model = app.nvidiaProvider
+    ? app.nvidiaProvider.model(modelId)
+    : modelId;
+
+  const { agent } = await createConversationalAgent({
+    model,
+    commandRegistry: app.commands,
+    queryRegistry: app.queries,
+    requestCtx: requestCtx(app),
+    helpers: { audit: app.audit, outbox: app.outbox },
+    autonomy: app.sessionUser.autonomy,
+  });
+  return agent;
+}
+
 export async function runChat(
   app: AppContext,
   body: { sessionId?: string; message?: string; confirmId?: string; cancelId?: string },
 ) {
-  const sessionId = body.sessionId ?? crypto.randomUUID();
-  let session = app.sessions.get(sessionId);
-  if (!session) {
-    session = { id: sessionId, messages: [] };
-    app.sessions.set(sessionId, session);
+  await refreshSessionUser(app);
+  let sessionId = body.sessionId ?? crypto.randomUUID();
+
+  // Load session from DB or create new
+  let dbSession = await app.sessionStore.load(sessionId);
+  let session: ChatSessionState;
+  if (dbSession) {
+    session = {
+      id: dbSession.id,
+      messages: dbSession.messages as ChatSessionState["messages"],
+      pending: dbSession.pending,
+    };
+  } else {
+    // Try loading by org+user for existing sessions
+    const existing = await app.sessionStore.loadByOrgUser(
+      app.sessionUser.organizationId,
+      app.sessionUser.id,
+    );
+    if (existing && existing.id !== sessionId) {
+      sessionId = existing.id;
+      session = {
+        id: existing.id,
+        messages: existing.messages as ChatSessionState["messages"],
+        pending: existing.pending,
+      };
+    } else {
+      await app.sessionStore.create(sessionId, app.sessionUser.organizationId, app.sessionUser.id);
+      session = { id: sessionId, messages: [] };
+    }
   }
+
+  const mastraAgent = await getMastraAgent(app);
 
   const result = await handleChatTurn(
     {
       commands: app.commands,
       queries: app.queries,
       helpers: { audit: app.audit, outbox: app.outbox },
-      autonomy: app.autonomy,
+      autonomy: app.sessionUser.autonomy,
+      provider: app.provider,
+      allowFullAutonomous: app.config.allowFullAutonomous,
+      mastraAgent,
     },
     {
       session,
@@ -142,20 +339,75 @@ export async function runChat(
     },
   );
 
-  app.sessions.set(sessionId, result.session);
+  // Persist to DB
+  await app.sessionStore.save(
+    sessionId,
+    result.session.messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      parts: m.parts,
+      createdAt: m.createdAt,
+    })),
+    result.session.pending,
+  );
   if (result.explanation) {
     app.explanations.push(result.explanation);
-    await app.memory.write({
-      organizationId: app.demoUser.organizationId,
-      kind: "short_term_chat",
-      content: result.explanation.summary,
-      metadata: { runId: result.explanation.runId },
-    });
   }
 
   return {
     sessionId,
     messages: result.session.messages,
     pendingConfirmationId: result.session.pending?.id,
+  };
+}
+
+export async function buildWorkflow(
+  app: AppContext,
+  request: string,
+): Promise<{ workflow: WorkflowDefinition | null; error?: string }> {
+  if (!app.workflowBuilder) {
+    return { workflow: null, error: "Nvidia NIM not configured. Set NVIDIA_API_KEY to enable workflow builder." };
+  }
+
+  try {
+    const workflow = await generateWorkflowFromNL(app.workflowBuilder, request);
+    if (!workflow) {
+      return { workflow: null, error: "Failed to generate workflow from request. Try a more specific description." };
+    }
+    app.workflows.set(workflow.id, workflow);
+    return { workflow };
+  } catch (err) {
+    return {
+      workflow: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export async function executeWorkflowRun(
+  app: AppContext,
+  workflowId: string,
+  input: Record<string, unknown> = {},
+) {
+  const wf = app.workflows.get(workflowId);
+  if (!wf) {
+    throw new NotFoundError("Workflow");
+  }
+
+  const ctx: WorkflowExecutionContext = {
+    registry: app.commands,
+    requestCtx: requestCtx(app),
+    helpers: { audit: app.audit, outbox: app.outbox },
+  };
+
+  return executeDynamicWorkflow(wf, input, ctx);
+}
+
+export function healthPayload(app: AppContext) {
+  return {
+    ok: true as const,
+    service: "chaste-api",
+    version: "0.4.0",
+    config: publicConfigView(app.config),
   };
 }

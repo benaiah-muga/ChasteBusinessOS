@@ -1,6 +1,8 @@
 # Module Development Guide
 
-Modules are the unit of business capability in ChasteBusinessOS.
+Modules are the unit of business capability in ChasteBusinessOS, similar to
+Odoo apps: backend capability + optional frontend surface, installed per
+organization through the marketplace.
 
 ## Rules (for humans and agents)
 
@@ -9,35 +11,169 @@ Modules are the unit of business capability in ChasteBusinessOS.
 3. **All writes via commands** — with Zod input/output and permission strings.
 4. **Outbox for events** — publish after successful commit through kernel helpers.
 5. **No web imports** — modules must not depend on `apps/web` or React.
-6. **Optional UI** — expose APIs; web discovers capabilities. Module-specific React packages are a future concern and still talk HTTP.
+6. **Optional UI** — expose APIs; web discovers capabilities. Module React lives in `apps/web` and talks HTTP only.
 7. **AI tools = commands/queries** — declare capability tags for specialist routing; do not invent a parallel tool API.
 8. **Tests** — contract tests for every command and query.
 
-## Manifest shape
+## End-to-end module lifecycle (Odoo-like)
 
-```ts
-export const manifest = {
-  id: "demo-crm",
-  name: "Demo CRM",
-  version: "0.1.0",
-  dependencies: [],
-  permissions: ["crm.customer.create", "crm.customer.read"],
-  capabilities: ["crm.customers"],
-  specialist: {
-    id: "crm",
-    displayName: "CRM Agent",
-    description: "Customers and relationship data",
-    toolTags: ["crm"],
-  },
-} as const;
+```
+modules/<id>/          Backend package (manifest, commands, queries, schema)
+       │
+       ▼
+API module loader      Registers on process boot (apps/api app-context)
+       │
+       ▼
+Marketplace listing    packages/db seed + marketplace_listings row
+       │
+       ▼
+Install / uninstall    core.module.install | core.module.uninstall
+       │
+       ▼
+module_installs        Per-org enabled flag
+       │
+       ▼
+apps/web registry      lib/module-registry.ts maps moduleId → route/nav
+       │
+       ▼
+Module workspace UI    apps/web/src/components/<module>/ + app/<module>/page.tsx
 ```
 
-## Checklist
+### 1. Backend module package
 
-- [ ] `module.manifest.ts`
-- [ ] Commands + queries registered on load
-- [ ] Schema/migrations if needed
-- [ ] Permissions documented
+Create `modules/<id>/` with:
+
+| File | Purpose |
+|------|---------|
+| `package.json` | Workspace package `@chaste/module-<id>` |
+| `tsconfig.json` | Extends monorepo base |
+| `src/index.ts` | `createXModule(db): BusinessModule` |
+
+Manifest shape:
+
+```ts
+export function createExampleModule(db: Db): BusinessModule {
+  return {
+    manifest: {
+      id: "example",
+      name: "Example",
+      version: "0.1.0",
+      description: "What this module does for operators",
+      dependencies: [],
+      permissions: ["example.item.read", "example.item.manage"],
+      capabilities: ["example.items"],
+      specialist: {
+        id: "example",
+        displayName: "Example Agent",
+        description: "Handles example domain work",
+        toolTags: ["example"],
+      },
+    },
+    register({ commands, queries }) {
+      // defineCommand / defineQuery with Zod + permissions
+    },
+  };
+}
+```
+
+### 2. Wire into the API loader
+
+In `apps/api/src/app-context.ts` (or the active module bootstrap):
+
+1. Import `createExampleModule`
+2. Register it with the kernel `ModuleRegistry`
+3. Ensure permissions appear in `packages/db` `PERMISSION_CATALOG` / seed
+
+Commands become available at:
+
+- `POST /api/v1/commands/:name`
+- `POST /api/v1/queries/:name`
+
+Prefer dedicated REST routes only when the product intentionally exposes them
+(for example list endpoints used by the web).
+
+### 3. Marketplace listing
+
+Add a row to the marketplace catalog in `packages/db/src/seed.ts`:
+
+```ts
+{
+  moduleId: "example",
+  name: "Example",
+  version: "0.1.0",
+  summary: "Operator-facing summary",
+  category: "operations",
+  kind: "builtin", // or "custom"
+}
+```
+
+- **Built-in** modules ship with the product (`publisher: chaste`, `kind: builtin`).
+- **Custom** modules are third-party / community style listings.
+- **Archived** listings use `metadata.archived: true` and are hidden from the UI.
+- **Uninstalled** modules are removed from `module_installs` and disappear from nav.
+
+Install / uninstall / archive commands:
+
+| Command | Effect |
+|---------|--------|
+| `core.module.install` | Upsert install row, `enabled: true` |
+| `core.module.uninstall` | Delete install row for the org |
+| `core.module.set_enabled` | Toggle enabled without removing install |
+| `core.marketplace.archive` | Hide listing from catalog |
+
+### 4. Frontend surface
+
+The web app is an HTTP client only. For each installed module:
+
+1. **Route** — `apps/web/src/app/<id>/page.tsx` (server component loads data)
+2. **Workspace** — `apps/web/src/components/<id>/<Name>Workspace.tsx` (client UI with tabs, KPIs, charts)
+3. **Nav registry** — add entry in `apps/web/src/lib/module-registry.ts`:
+
+```ts
+{ moduleId: "example", href: "/example", label: "Example", group: "business" }
+```
+
+4. **API client** — add typed methods on `@chaste/api-client` when the surface is stable
+5. **Icons** — map `href → Lucide icon` in `AppShell`
+
+`AppShell` loads `GET /api/v1/modules` and only shows business nav items whose
+`moduleId` is installed and enabled. System pages (`marketplace`, `settings`, …)
+use `always: true`.
+
+### 5. UI conventions for modules
+
+Every module landing screen should follow this pattern:
+
+1. **Overview tab** — KPIs + charts (Recharts via `components/ui/Chart`)
+2. **Primary list tabs** — tables for core entities
+3. **Create / action tabs** — forms that call the same APIs as the agent
+4. Human copy only (no raw command names or HTTP paths in the operator UI)
+
+Shared primitives:
+
+- `Tabs` / `Tab` / `TabPanel`
+- `Kpi`
+- `ChartCard`, `AreaSeries`, `BarSeries`, `DonutChart`
+- `Select` for styled dropdowns
+
+### 6. Checklist
+
+- [ ] `modules/<id>` package builds and typechecks
+- [ ] Manifest + permissions + capabilities
+- [ ] Commands + queries registered with Zod
 - [ ] Contract tests
-- [ ] Events documented (produced/consumed)
-- [ ] No cross-module private joins
+- [ ] Schema/migrations if needed
+- [ ] Permission catalog seed updated
+- [ ] Marketplace listing (builtin or custom)
+- [ ] API loader registration
+- [ ] `@chaste/api-client` methods (if public)
+- [ ] Web route + workspace UI + nav registry entry
+- [ ] Install shows the app; uninstall hides it from nav
+
+## Forbidden patterns
+
+- Importing `@chaste/kernel` or `@chaste/db` from `apps/web`
+- Direct SQL from AI tool handlers
+- Cross-module private table joins
+- Secrets in source or logs
+- Bypassing permission checks for “temporary” UI convenience

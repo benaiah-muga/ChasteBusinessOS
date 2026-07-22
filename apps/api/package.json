@@ -5,19 +5,28 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "start": "node --env-file=../../.env dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "tsx --env-file=../../.env ./node_modules/vitest/vitest.mjs run --no-file-parallelism",
+    "e2e": "tsx --env-file=../../.env src/e2e.ts"
   },
   "dependencies": {
     "@chaste/ai-core": "workspace:*",
+    "@chaste/config": "workspace:*",
+    "@chaste/db": "workspace:*",
     "@chaste/kernel": "workspace:*",
-    "@chaste/module-core-system": "workspace:*",
-    "@chaste/module-demo-crm": "workspace:*",
+    "@chaste/module-accounting": "workspace:*",
+    "@chaste/module-crm": "workspace:*",
+    "@chaste/module-hr": "workspace:*",
+    "@chaste/module-inventory": "workspace:*",
+    "@chaste/module-manufacturing": "workspace:*",
+    "@chaste/module-platform": "workspace:*",
+    "@chaste/module-purchasing": "workspace:*",
     "@chaste/ui-schema": "workspace:*",
     "@fastify/cors": "^10.0.1",
+    "@mastra/fastify": "^1.4.7",
     "fastify": "^5.2.0",
     "zod": "^3.24.1"
   },

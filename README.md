@@ -36,20 +36,18 @@ modules/*         Business modules (e.g. demo-crm)
 
 ## Quick start
 
-**Prerequisites:** Node.js 22+, pnpm 9+. PostgreSQL 16+ is recommended when you enable persistence (`DATABASE_URL`). Redis is optional until the worker/queue path is wired. Docker Compose is available if you prefer containers, but a system PostgreSQL install works fine.
+**Prerequisites:** Node.js 22+, pnpm 9+, **PostgreSQL** (system install is fine). Redis optional for later queue scale-out.
 
 ```bash
 pnpm install
 cp .env.example .env
-# Point DATABASE_URL at your local Postgres, e.g.:
-# DATABASE_URL=postgres://chaste:chaste@localhost:5432/chaste
-# Create the DB/user if needed, then:
-# pnpm db:migrate
-
-# Foundation demo API uses an in-memory store for customers (no DB required to try the UI)
+# Edit DATABASE_URL for your local Postgres, e.g.:
+# DATABASE_URL=postgres://$USER@/chaste?host=/var/run/postgresql
+createdb chaste   # if needed
+pnpm db:migrate
 pnpm --filter @chaste/api dev   # http://localhost:3001
 pnpm --filter @chaste/web dev   # http://localhost:3000
-# Or: pnpm dev  (turbo runs api + web + worker)
+pnpm e2e                        # full API + Postgres verification
 ```
 
 | Service | URL |
@@ -58,7 +56,7 @@ pnpm --filter @chaste/web dev   # http://localhost:3000
 | API | http://localhost:3001 |
 | API health | http://localhost:3001/health |
 
-Optional containers: `docker compose up -d` (Postgres + Redis). Default demo session is configured via `.env.example`.
+Configuration & secrets: [docs/configuration.md](./docs/configuration.md).
 
 ## Design constraints
 

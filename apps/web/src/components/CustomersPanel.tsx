@@ -4,7 +4,13 @@ import type { Customer } from "@chaste/api-client";
 import { useState } from "react";
 import { getApiClient } from "@/lib/api";
 
-export function CustomersPanel({ initialCustomers }: { initialCustomers: Customer[] }) {
+export function CustomersPanel({
+  initialCustomers,
+  compact = false,
+}: {
+  initialCustomers: Customer[];
+  compact?: boolean;
+}) {
   const [customers, setCustomers] = useState(initialCustomers);
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
@@ -43,10 +49,9 @@ export function CustomersPanel({ initialCustomers }: { initialCustomers: Custome
   return (
     <section className="card stack">
       <div>
-        <h2>Customers</h2>
+        <h2>{compact ? "Customer intake" : "Customers"}</h2>
         <p className="muted" style={{ margin: 0 }}>
-          Manual UI → <span className="mono">POST /api/v1/crm/customers</span> →{" "}
-          <span className="mono">crm.customer.create</span>
+          Add a new customer below to start tracking activity, quotes, and orders.
         </p>
       </div>
 
@@ -92,32 +97,36 @@ export function CustomersPanel({ initialCustomers }: { initialCustomers: Custome
         {error ? <p className="error">{error}</p> : null}
       </form>
 
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>City</th>
-            <th>Email</th>
-          </tr>
-        </thead>
-        <tbody>
-          {customers.length === 0 ? (
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
             <tr>
-              <td colSpan={3} className="muted">
-                No customers yet
-              </td>
+              <th>Name</th>
+              <th>City</th>
+              <th>Email</th>
+              {!compact ? <th>Status</th> : null}
             </tr>
-          ) : (
-            customers.map((c) => (
-              <tr key={c.id}>
-                <td>{c.name}</td>
-                <td>{c.city ?? "—"}</td>
-                <td>{c.email ?? "—"}</td>
+          </thead>
+          <tbody>
+            {customers.length === 0 ? (
+              <tr>
+                <td colSpan={compact ? 3 : 4} className="muted">
+                  No customers yet
+                </td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+            ) : (
+                  customers.slice(0, compact ? 5 : customers.length).map((c) => (
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td>{c.city ?? <span className="placeholder">not set</span>}</td>
+                  <td>{c.email ?? <span className="placeholder">not set</span>}</td>
+                  {!compact ? <td>{c.status ?? "active"}</td> : null}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

@@ -1,4 +1,4 @@
-# Architecture — ChasteBusinessOS
+# ChasteBusinessOS Architecture
 
 ## Goals
 

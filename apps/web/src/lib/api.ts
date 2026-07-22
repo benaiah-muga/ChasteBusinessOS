@@ -16,3 +16,24 @@ export function getApiClient() {
     baseUrl: getApiBaseUrl(),
   });
 }
+
+export async function apiFetch<T = unknown>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(new URL(path, getApiBaseUrl()).toString(), {
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    message?: string;
+    code?: string;
+  };
+  if (!res.ok) {
+    const detail = body.message ?? res.statusText;
+    const code = body.code ? ` (${body.code})` : "";
+    throw new Error(`${detail}${code}`);
+  }
+  return body as T;
+}

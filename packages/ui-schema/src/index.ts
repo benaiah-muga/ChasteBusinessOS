@@ -74,6 +74,29 @@ export const errorPartSchema = z.object({
   code: z.string().optional(),
 });
 
+export const clarifyPartSchema = z.object({
+  type: z.literal("clarify"),
+  questions: z.array(z.string()),
+});
+
+export const planPartSchema = z.object({
+  type: z.literal("plan"),
+  id: z.string(),
+  title: z.string(),
+  steps: z.array(
+    z.object({
+      command: z.string(),
+      description: z.string(),
+      input: z.record(z.unknown()).optional(),
+    }),
+  ),
+});
+
+export const suggestionsPartSchema = z.object({
+  type: z.literal("suggestions"),
+  suggestions: z.array(z.string()),
+});
+
 export const uiPartSchema = z.discriminatedUnion("type", [
   textPartSchema,
   explanationPartSchema,
@@ -83,11 +106,17 @@ export const uiPartSchema = z.discriminatedUnion("type", [
   tablePartSchema,
   metricPartSchema,
   errorPartSchema,
+  clarifyPartSchema,
+  planPartSchema,
+  suggestionsPartSchema,
 ]);
 
 export type UiPart = z.infer<typeof uiPartSchema>;
 export type ConfirmActionPart = z.infer<typeof confirmActionPartSchema>;
 export type ExplanationPart = z.infer<typeof explanationPartSchema>;
+export type ClarifyPart = z.infer<typeof clarifyPartSchema>;
+export type PlanPart = z.infer<typeof planPartSchema>;
+export type SuggestionsPart = z.infer<typeof suggestionsPartSchema>;
 
 export const chatMessageSchema = z.object({
   id: z.string(),
