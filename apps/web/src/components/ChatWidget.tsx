@@ -50,7 +50,9 @@ function PartView({
             </ul>
           ) : null}
           {part.rulesApplied.length ? (
-            <div className="mono">rules: {part.rulesApplied.join(", ")}</div>
+            <div className="muted" style={{ fontSize: "0.78rem" }}>
+              Policy used: {part.rulesApplied.join(", ")}
+            </div>
           ) : null}
         </details>
       );
@@ -63,7 +65,7 @@ function PartView({
           <div>
             <strong>{part.title}</strong>
             {part.description ? <p className="muted">{part.description}</p> : null}
-            <div className="mono command-name">{part.command}</div>
+            <div className="muted" style={{ fontSize: "0.78rem" }}>{part.command.replace(/\./g, " · ")}</div>
             <div className="row">
               <button
                 className="btn"
@@ -130,7 +132,7 @@ function PartView({
               <span>{index + 1}</span>
               <div>
                 <p>{step.description}</p>
-                <small className="mono">{step.command}</small>
+                <small className="muted">{step.command.replace(/\./g, " · ")}</small>
               </div>
             </div>
           ))}
@@ -173,8 +175,8 @@ export function ChatWidget({ floating = false }: { floating?: boolean }) {
   const [error, setError] = useState<string | null>(null);
 
   const statusLines = useMemo(() => {
-    if (!busy) return ["Ready for a command"];
-    return ["Thinking", "Analyzing intent", "Checking autonomy", "Routing through command bus"];
+    if (!busy) return ["Ready"];
+    return ["Thinking", "Analyzing request", "Checking permissions", "Running"];
   }, [busy]);
 
   async function send(payload: { message?: string; confirmId?: string; cancelId?: string }) {
@@ -225,7 +227,7 @@ export function ChatWidget({ floating = false }: { floating?: boolean }) {
         value={text}
         onChange={(event) => setText(event.target.value)}
         onFocus={() => setCapsuleOpen(true)}
-        placeholder="Ask the agent to create, prepare, list, or explain..."
+        placeholder="Ask the assistant to create, prepare, list, or explain..."
       />
       <button className="icon-btn send-btn" type="submit" disabled={busy || !text.trim()} title="Send">
         <Send size={17} />
@@ -235,14 +237,14 @@ export function ChatWidget({ floating = false }: { floating?: boolean }) {
 
   return (
     <>
-      <aside className={panelOpen ? "agent-panel open" : "agent-panel"} aria-label="AI agent conversation">
+      <aside className={panelOpen ? "agent-panel open" : "agent-panel"} aria-label="Operations assistant conversation">
         <header className="agent-panel-head">
           <div>
             <div className="eyebrow">
               <Sparkles size={14} />
-              AI command surface
+              Operations assistant
             </div>
-            <h2>Operations agent</h2>
+            <h2>Assistant</h2>
           </div>
           <button className="icon-btn" type="button" onClick={() => setPanelOpen(false)} title="Close agent panel">
             <X size={18} />
@@ -260,8 +262,8 @@ export function ChatWidget({ floating = false }: { floating?: boolean }) {
           {messages.length === 0 ? (
             <div className="agent-empty">
               <Bot size={34} />
-              <strong>Tell the agent what business action you want.</strong>
-              <p>It will validate intent, explain rules, and execute only through the backend command path.</p>
+              <strong>Tell the assistant what you want to do.</strong>
+              <p>It checks permissions, explains its reasoning, and performs actions safely.</p>
               <div className="suggestion-row">
                 {["Create customer Acme Ltd in Nairobi", "List invoices", "Prepare payroll for July 2026"].map(
                   (suggestion) => (
@@ -297,15 +299,15 @@ export function ChatWidget({ floating = false }: { floating?: boolean }) {
           {capsuleOpen ? (
             <>
               {composer}
-              <button className="icon-btn" type="button" onClick={() => setPanelOpen(true)} title="Open full agent">
+              <button className="icon-btn" type="button" onClick={() => setPanelOpen(true)} title="Open full assistant">
                 <Maximize2 size={17} />
               </button>
-              <button className="icon-btn" type="button" onClick={() => setCapsuleOpen(false)} title="Minimize agent">
+              <button className="icon-btn" type="button" onClick={() => setCapsuleOpen(false)} title="Minimize assistant">
                 <Minimize2 size={17} />
               </button>
             </>
           ) : (
-            <button className="agent-orb" type="button" onClick={() => setCapsuleOpen(true)} title="AI Agent">
+            <button className="agent-orb" type="button" onClick={() => setCapsuleOpen(true)} title="Assistant">
               <Bot size={24} />
             </button>
           )}

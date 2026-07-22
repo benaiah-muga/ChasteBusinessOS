@@ -97,6 +97,7 @@ describe("userPreferencesSchema", () => {
   it("applies defaults for empty object", () => {
     const result = userPreferencesSchema.parse({});
     expect(result.theme).toBe("system");
+    expect(result.accent).toBe("maroon");
     expect(result.timezone).toBeUndefined();
     expect(result.locale).toBeUndefined();
     expect(result.notifications).toEqual({});
@@ -105,6 +106,7 @@ describe("userPreferencesSchema", () => {
   it("accepts valid full preferences", () => {
     const prefs: UserPreferences = {
       theme: "dark",
+      accent: "teal",
       timezone: "Asia/Tokyo",
       locale: "ja",
       notifications: {
@@ -114,6 +116,7 @@ describe("userPreferencesSchema", () => {
     };
     const result = userPreferencesSchema.parse(prefs);
     expect(result.theme).toBe("dark");
+    expect(result.accent).toBe("teal");
     expect(result.timezone).toBe("Asia/Tokyo");
   });
 

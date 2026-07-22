@@ -4,6 +4,18 @@ import { useState } from "react";
 import { getApiClient } from "@/lib/api";
 
 const levels = ["recommend", "confirm", "guarded_auto", "full_autonomous"] as const;
+const levelLabel: Record<(typeof levels)[number], string> = {
+  recommend: "Assist (recommend only)",
+  confirm: "Confirm each action",
+  guarded_auto: "Supervised auto",
+  full_autonomous: "Full auto",
+};
+const levelDescription: Record<(typeof levels)[number], string> = {
+  recommend: "The assistant suggests actions. You perform every step manually.",
+  confirm: "The assistant performs actions only after you approve each one.",
+  guarded_auto: "The assistant performs routine actions automatically and asks before risky ones.",
+  full_autonomous: "The assistant runs autonomously. Use with caution.",
+};
 
 export function AutonomySettings({
   current,
@@ -28,13 +40,10 @@ export function AutonomySettings({
         autonomy: autonomy as (typeof levels)[number],
         acknowledgeFullAutonomous: ack,
       })) as { autonomy?: string; warning?: string; message?: string };
-      setMessage(
-        res.warning
-          ? `Saved: ${res.autonomy}. WARNING: ${res.warning}`
-          : `Saved autonomy: ${res.autonomy ?? autonomy}`,
-      );
+      const label = levelLabel[autonomy as (typeof levels)[number]] ?? autonomy;
+      setMessage(res.warning ? `Saved: ${label}. Note: ${res.warning}` : `Saved: ${label}`);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Failed");
+      setMessage(e instanceof Error ? e.message : "Failed to save");
     } finally {
       setBusy(false);
     }
@@ -42,20 +51,29 @@ export function AutonomySettings({
 
   return (
     <div className="stack">
-      <label>
-        Level
-        <select
-          value={autonomy}
-          onChange={(e) => setAutonomy(e.target.value)}
-          style={{ padding: "0.5rem", borderRadius: 8 }}
-        >
-          {levels.map((l) => (
-            <option key={l} value={l} disabled={l === "full_autonomous" && !allowFull}>
-              {l}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="stack" style={{ gap: 8 }}>
+        {levels.map((l) => {
+          const disabled = l === "full_autonomous" && !allowFull;
+          const selected = autonomy === l;
+          return (
+            <button
+              key={l}
+              type="button"
+              className={`accent-menu-item${selected ? " selected" : ""}`}
+              disabled={disabled}
+              onClick={() => setAutonomy(l)}
+              style={{ gridTemplateColumns: "22px 1fr", textAlign: "left", cursor: disabled ? "not-allowed" : "pointer" }}
+              title={disabled ? "Full auto is not enabled for this workspace" : undefined}
+            >
+              <span className="accent-menu-swatch" style={{ "--swatch-color": "var(--accent)" } as React.CSSProperties} />
+              <span>
+                <div style={{ fontWeight: 700, color: "var(--ink)" }}>{levelLabel[l]}</div>
+                <div className="muted" style={{ fontSize: "0.8rem" }}>{levelDescription[l]}</div>
+              </span>
+            </button>
+          );
+        })}
+      </div>
       {autonomy === "full_autonomous" ? (
         <>
           <p className="error" style={{ whiteSpace: "pre-wrap" }}>
@@ -63,12 +81,12 @@ export function AutonomySettings({
           </p>
           <label style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem" }}>
             <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />I
-            acknowledge organizational responsibility for full autonomous mode
+            acknowledge responsibility for running in full auto mode
           </label>
         </>
       ) : null}
       <button className="btn" type="button" disabled={busy} onClick={save}>
-        Save autonomy
+        Save preference
       </button>
       {message ? <p className="muted">{message}</p> : null}
     </div>

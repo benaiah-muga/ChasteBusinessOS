@@ -151,6 +151,302 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         (d) => customerSchema.parse(d),
       );
     },
+    listAccounts() {
+      return request("/api/v1/accounting/accounts", { method: "GET" }, (d) => d as {
+        items: { id: string; code: string; name: string; type: string; isActive: boolean }[];
+      });
+    },
+    listInvoices() {
+      return request("/api/v1/accounting/invoices", { method: "GET" }, (d) => d as {
+        items: {
+          id: string;
+          number: string;
+          status: string;
+          currency: string;
+          total: string;
+          customerId?: string;
+          createdAt: string;
+        }[];
+      });
+    },
+    createInvoice(input: { number: string; total: number; currency?: string; customerId?: string }) {
+      return request(
+        "/api/v1/accounting/invoices",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => d as { id: string; number: string; status: string; currency: string; total: string },
+      );
+    },
+    postJournal(input: {
+      reference: string;
+      memo?: string;
+      lines: { accountId: string; debit: number; credit: number }[];
+    }) {
+      return request(
+        "/api/v1/commands/acc.journal.post",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    listInventory() {
+      return request("/api/v1/inventory/stock", { method: "GET" }, (d) => d as {
+        warehouses: { id: string; code: string; name: string; city?: string }[];
+        products: { id: string; sku: string; name: string; uom: string; reorderLevel: number }[];
+        levels: { warehouseId: string; productId: string; quantity: number }[];
+      });
+    },
+    createProduct(input: { sku: string; name: string; uom?: string; reorderLevel?: number }) {
+      return request(
+        "/api/v1/inventory/products",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => d as { id: string; sku: string; name: string },
+      );
+    },
+    createWarehouse(input: { code: string; name: string; city?: string }) {
+      return request(
+        "/api/v1/commands/inv.warehouse.create",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    adjustStock(input: {
+      warehouseId: string;
+      productId: string;
+      quantityDelta: number;
+      reason: string;
+      reference?: string;
+    }) {
+      return request(
+        "/api/v1/commands/inv.stock.adjust",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    listPurchasing() {
+      return request("/api/v1/purchasing", { method: "GET" }, (d) => d as {
+        vendors: { id: string; name: string; email?: string }[];
+        orders: {
+          id: string;
+          vendorId?: string;
+          number: string;
+          status: string;
+          total: string;
+          currency?: string;
+        }[];
+      });
+    },
+    createVendor(input: { name: string; email?: string }) {
+      return request(
+        "/api/v1/purchasing/vendors",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => d as { id: string; name: string },
+      );
+    },
+    createPurchaseOrder(input: { vendorId: string; number: string; total?: number }) {
+      return request(
+        "/api/v1/commands/pur.po.create",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    listHr() {
+      return request("/api/v1/hr", { method: "GET" }, (d) => d as {
+        employees: {
+          id?: string;
+          employeeNumber: string;
+          fullName: string;
+          email?: string;
+          department?: string;
+          jobTitle?: string;
+          baseSalary: string;
+          isActive?: boolean;
+        }[];
+        payrollRuns: {
+          id: string;
+          periodLabel: string;
+          status: string;
+          totalGross: string;
+          employeeCount: number;
+        }[];
+      });
+    },
+    createEmployee(input: {
+      employeeNumber: string;
+      fullName: string;
+      email?: string;
+      department?: string;
+      jobTitle?: string;
+      baseSalary: number;
+    }) {
+      return request(
+        "/api/v1/hr/employees",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => d as { id: string; employeeNumber: string; fullName: string; baseSalary: string },
+      );
+    },
+    preparePayroll(input: { periodLabel: string }) {
+      return request(
+        "/api/v1/hr/payroll",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => d as { id: string; periodLabel: string; status: string; totalGross: string; employeeCount: number },
+      );
+    },
+    listManufacturing() {
+      return request("/api/v1/manufacturing", { method: "GET" }, (d) => d as {
+        boms: {
+          id: string;
+          productId?: string;
+          name: string;
+          quantity?: number;
+        }[];
+        workOrders: { id: string; number: string; status: string; quantity: number }[];
+      });
+    },
+    createBom(input: {
+      productId: string;
+      name: string;
+      quantity?: number;
+      components: { componentProductId: string; quantity: number }[];
+    }) {
+      return request(
+        "/api/v1/commands/mfg.bom.create",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    createWorkOrder(input: { bomId: string; number: string; quantity?: number }) {
+      return request(
+        "/api/v1/commands/mfg.wo.create",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    getRbacOverview() {
+      return request("/api/v1/rbac", { method: "GET" }, (d) => d as {
+        roles: {
+          id?: string;
+          key: string;
+          name: string;
+          description?: string;
+          permissions: string[];
+          isSystem?: boolean;
+        }[];
+        users: {
+          id?: string;
+          email: string;
+          displayName: string;
+          isActive: boolean;
+          roleKeys: string[];
+          createdAt?: string;
+        }[];
+        permissionCatalog: { permission: string; module: string; description: string }[];
+      });
+    },
+    getMarketplace() {
+      return request("/api/v1/marketplace", { method: "GET" }, (d) =>
+        d as {
+          items: {
+            moduleId: string;
+            name: string;
+            version: string;
+            summary: string;
+            category: string;
+            publisher: string;
+            regions: string[];
+            kind: "builtin" | "custom";
+            archived: boolean;
+            installed: boolean;
+            enabled: boolean;
+          }[];
+          platformRegions: string[];
+        },
+      );
+    },
+    installModule(input: { moduleId: string; version?: string }) {
+      return request(
+        "/api/v1/commands/core.module.install",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    uninstallModule(input: { moduleId: string }) {
+      return request(
+        "/api/v1/commands/core.module.uninstall",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    setModuleEnabled(input: { moduleId: string; enabled: boolean }) {
+      return request(
+        "/api/v1/commands/core.module.set_enabled",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    archiveMarketplaceListing(input: { moduleId: string; archived: boolean }) {
+      return request(
+        "/api/v1/commands/core.marketplace.archive",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    listWorkflowsFull() {
+      return request("/api/v1/workflows", { method: "GET" }, (d) => d as {
+        items: {
+          id: string;
+          name: string;
+          description: string;
+          trigger: unknown;
+          createdBy: string;
+          stepCount: number;
+        }[];
+      });
+    },
+    getWorkflow(id: string) {
+      return request(`/api/v1/workflows/${encodeURIComponent(id)}`, { method: "GET" }, (d) => d as {
+        id: string;
+        name: string;
+        description: string;
+        trigger: string;
+        steps: unknown[];
+      });
+    },
+    buildWorkflowFromText(textRequest: string) {
+      return request(
+        "/api/v1/workflows/build",
+        { method: "POST", body: JSON.stringify({ request: textRequest }) },
+        (d) =>
+          d as {
+            workflow?: { id: string; name: string; description: string; steps: unknown[] };
+            error?: string;
+            id?: string;
+            name?: string;
+            description?: string;
+            steps?: unknown[];
+          },
+      );
+    },
+    saveWorkflow(def: Record<string, unknown>) {
+      return request(
+        "/api/v1/workflows",
+        { method: "POST", body: JSON.stringify(def) },
+        (d) => d as { id: string },
+      );
+    },
+    runWorkflow(id: string, input: Record<string, unknown>) {
+      return request(
+        `/api/v1/workflows/${encodeURIComponent(id)}/execute`,
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as {
+          runId?: string;
+          status: string;
+          steps?: unknown[];
+          pendingApproval?: { stepId: string; command?: string; input?: unknown };
+          results?: unknown[];
+          startedAt?: string;
+          finishedAt?: string;
+        },
+      );
+    },
     chat(body: {
       sessionId?: string;
       message?: string;
@@ -162,12 +458,6 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         { method: "POST", body: JSON.stringify(body) },
         (d) => chatResponseSchema.parse(d),
       );
-    },
-    getRbac() {
-      return request("/api/v1/rbac", { method: "GET" }, (d) => d);
-    },
-    getMarketplace() {
-      return request("/api/v1/marketplace", { method: "GET" }, (d) => d);
     },
     setAutonomy(body: {
       autonomy: "recommend" | "confirm" | "guarded_auto" | "full_autonomous";

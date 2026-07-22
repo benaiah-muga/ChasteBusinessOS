@@ -4,6 +4,16 @@ import { getApiClient } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
+function humanizeAction(action: string): string {
+  const parts = action.split(".");
+  if (parts.length < 2) return action;
+  const modulePart = parts[0];
+  const verb = parts[parts.length - 1];
+  const middle = parts.slice(1, -1).join(" ");
+  const nice = `${verb[0]?.toUpperCase()}${verb.slice(1)} ${middle} (${modulePart})`;
+  return nice.replace(/\s+/g, " ").trim();
+}
+
 export default async function AuditPage() {
   const api = getApiClient();
   let items: Awaited<ReturnType<typeof api.listAudit>>["items"] = [];
@@ -15,7 +25,7 @@ export default async function AuditPage() {
   }
 
   return (
-    <AppShell subtitle="Audit trail for command and query execution.">
+    <AppShell subtitle="Activity log for every operation across this workspace.">
       {error ? (
         <div className="card part-error">
           Cannot load audit log. {error}
@@ -24,8 +34,8 @@ export default async function AuditPage() {
       <section className="card stack">
         <div className="section-head">
           <div>
-            <h2>Audit log</h2>
-            <p className="muted">The latest 100 backend audit entries for this organization.</p>
+            <h2>Activity log</h2>
+            <p className="muted">The latest 100 actions recorded for this workspace.</p>
           </div>
           <span className="badge accent">{items.length} entries</span>
         </div>
@@ -56,9 +66,9 @@ export default async function AuditPage() {
                         {item.success ? "Success" : "Failed"}
                       </span>
                     </td>
-                    <td className="mono">{item.action}</td>
+                    <td title={item.action}>{humanizeAction(item.action)}</td>
                     <td>{item.actorKind}</td>
-                    <td>{item.errorCode ?? "—"}</td>
+                    <td>{item.errorCode ? <span className="error">{item.errorCode}</span> : <span className="placeholder">none</span>}</td>
                     <td>{new Date(item.at).toLocaleString()}</td>
                   </tr>
                 ))

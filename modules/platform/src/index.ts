@@ -625,7 +625,12 @@ export function createPlatformModule(
           name: "core.marketplace.list",
           permissions: ["core.marketplace.read"],
           tags: ["core"],
-          input: z.object({ region: z.string().optional() }).default({}),
+          input: z
+            .object({
+              region: z.string().optional(),
+              includeArchived: z.boolean().optional(),
+            })
+            .default({}),
           output: z.object({
             items: z.array(
               z.object({
@@ -636,28 +641,49 @@ export function createPlatformModule(
                 category: z.string(),
                 publisher: z.string(),
                 regions: z.array(z.string()),
+                kind: z.enum(["builtin", "custom"]),
+                archived: z.boolean(),
+                installed: z.boolean(),
+                enabled: z.boolean(),
               }),
             ),
             platformRegions: z.array(z.string()),
           }),
-          handler: async (input) => {
+          handler: async (input, ctx) => {
             const rows = await db.select().from(schema.marketplaceListings);
+            const installs = await db
+              .select()
+              .from(schema.moduleInstalls)
+              .where(eq(schema.moduleInstalls.organizationId, ctx.actor.organizationId));
+            const installById = new Map(installs.map((i) => [i.moduleId, i]));
             const region = input.region;
             const items = rows
               .filter((r) => {
+                const meta = (r.metadata ?? {}) as { archived?: boolean; kind?: string };
+                if (!input.includeArchived && meta.archived === true) return false;
                 if (!region) return true;
                 const regs = r.regions ?? ["*"];
                 return regs.includes("*") || regs.includes(region);
               })
-              .map((r) => ({
-                moduleId: r.moduleId,
-                name: r.name,
-                version: r.version,
-                summary: r.summary,
-                category: r.category,
-                publisher: r.publisher,
-                regions: r.regions ?? ["*"],
-              }));
+              .map((r) => {
+                const meta = (r.metadata ?? {}) as { archived?: boolean; kind?: string };
+                const install = installById.get(r.moduleId);
+                const kind: "builtin" | "custom" =
+                  meta.kind === "custom" || r.publisher !== "chaste" ? "custom" : "builtin";
+                return {
+                  moduleId: r.moduleId,
+                  name: r.name,
+                  version: r.version,
+                  summary: r.summary,
+                  category: r.category,
+                  publisher: r.publisher,
+                  regions: r.regions ?? ["*"],
+                  kind,
+                  archived: meta.archived === true,
+                  installed: Boolean(install),
+                  enabled: install?.enabled ?? false,
+                };
+              });
             return { items, platformRegions: opts.regions };
           },
         }),
@@ -679,8 +705,86 @@ export function createPlatformModule(
                 version: input.version,
                 enabled: true,
               })
-              .onConflictDoNothing();
+              .onConflictDoUpdate({
+                target: [schema.moduleInstalls.organizationId, schema.moduleInstalls.moduleId],
+                set: { enabled: true, version: input.version },
+              });
             return { moduleId: input.moduleId, enabled: true };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.module.uninstall",
+          permissions: ["core.modules.manage"],
+          tags: ["core"],
+          input: z.object({ moduleId: z.string().min(1) }),
+          output: z.object({ moduleId: z.string(), uninstalled: z.boolean() }),
+          handler: async (input, ctx) => {
+            await db
+              .delete(schema.moduleInstalls)
+              .where(
+                and(
+                  eq(schema.moduleInstalls.organizationId, ctx.actor.organizationId),
+                  eq(schema.moduleInstalls.moduleId, input.moduleId),
+                ),
+              );
+            return { moduleId: input.moduleId, uninstalled: true };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.module.set_enabled",
+          permissions: ["core.modules.manage"],
+          tags: ["core"],
+          input: z.object({ moduleId: z.string().min(1), enabled: z.boolean() }),
+          output: z.object({ moduleId: z.string(), enabled: z.boolean() }),
+          handler: async (input, ctx) => {
+            const updated = await db
+              .update(schema.moduleInstalls)
+              .set({ enabled: input.enabled })
+              .where(
+                and(
+                  eq(schema.moduleInstalls.organizationId, ctx.actor.organizationId),
+                  eq(schema.moduleInstalls.moduleId, input.moduleId),
+                ),
+              )
+              .returning();
+            if (updated.length === 0) {
+              throw new ValidationError("Module is not installed", { moduleId: input.moduleId });
+            }
+            return { moduleId: input.moduleId, enabled: input.enabled };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.marketplace.archive",
+          permissions: ["core.modules.manage"],
+          tags: ["core"],
+          input: z.object({ moduleId: z.string().min(1), archived: z.boolean() }),
+          output: z.object({ moduleId: z.string(), archived: z.boolean() }),
+          handler: async (input) => {
+            const [row] = await db
+              .select()
+              .from(schema.marketplaceListings)
+              .where(eq(schema.marketplaceListings.moduleId, input.moduleId))
+              .limit(1);
+            if (!row) {
+              throw new ValidationError("Marketplace listing not found", {
+                moduleId: input.moduleId,
+              });
+            }
+            const meta = { ...(row.metadata ?? {}), archived: input.archived };
+            await db
+              .update(schema.marketplaceListings)
+              .set({ metadata: meta })
+              .where(eq(schema.marketplaceListings.moduleId, input.moduleId));
+            return { moduleId: input.moduleId, archived: input.archived };
           },
         }),
       );
@@ -707,6 +811,16 @@ export function createPlatformModule(
       const userPreferencesOutputSchema = z.object({
         preferences: z.object({
           theme: z.enum(["light", "dark", "system"]),
+          accent: z.enum([
+            "maroon",
+            "teal",
+            "blue",
+            "violet",
+            "rose",
+            "amber",
+            "forest",
+            "slate",
+          ]),
           timezone: z.string().optional(),
           locale: z.string().optional(),
           notifications: z.object({

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   Boxes,
   BriefcaseBusiness,
   Building2,
+  Check,
   ChevronDown,
   CircleDollarSign,
   ClipboardList,
@@ -18,93 +19,146 @@ import {
   Menu,
   Moon,
   Package,
-  Palette,
   Settings,
   ShieldCheck,
   ShoppingCart,
-  Sparkles,
   Sun,
+  SunMoon,
   Users,
   Workflow,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { ChatWidget } from "@/components/ChatWidget";
 import { getApiClient } from "@/lib/api";
+import { filterNavByInstalled, type ModuleNavItem } from "@/lib/module-registry";
 
-type Theme = "light" | "dark";
-type Accent = "teal" | "blue" | "violet" | "rose" | "amber";
+type StoredTheme = "light" | "dark" | "system";
+type AppliedTheme = "light" | "dark";
+type Accent = "maroon" | "teal" | "blue" | "violet" | "rose" | "amber" | "forest" | "slate";
 
-const navGroups = [
-  {
-    label: "Workspace",
-    items: [
-      { href: "/", label: "Dashboard", icon: Home },
-      { href: "/workflows", label: "Workflows", icon: Workflow },
-    ],
-  },
-  {
-    label: "Business",
-    items: [
-      { href: "/crm", label: "CRM", icon: Users },
-      { href: "/accounting", label: "Accounting", icon: CircleDollarSign },
-      { href: "/inventory", label: "Inventory", icon: Package },
-      { href: "/purchasing", label: "Purchasing", icon: ShoppingCart },
-      { href: "/hr", label: "HR", icon: BriefcaseBusiness },
-      { href: "/manufacturing", label: "Manufacturing", icon: Factory },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { href: "/rbac", label: "RBAC", icon: KeyRound },
-      { href: "/marketplace", label: "Marketplace", icon: Boxes },
-      { href: "/audit", label: "Audit log", icon: ClipboardList },
-      { href: "/settings", label: "Settings", icon: Settings },
-    ],
-  },
+const ACCENTS: { value: Accent; label: string; swatch: string }[] = [
+  { value: "maroon", label: "Deep Maroon", swatch: "#7a1f2b" },
+  { value: "teal", label: "Teal", swatch: "#0f8c86" },
+  { value: "blue", label: "Blue", swatch: "#2563eb" },
+  { value: "violet", label: "Violet", swatch: "#7c3aed" },
+  { value: "rose", label: "Rose", swatch: "#e11d48" },
+  { value: "amber", label: "Amber", swatch: "#c27803" },
+  { value: "forest", label: "Forest", swatch: "#2f6b4a" },
+  { value: "slate", label: "Slate", swatch: "#475569" },
 ];
 
-const accents: { value: Accent; label: string }[] = [
-  { value: "teal", label: "Teal" },
-  { value: "blue", label: "Blue" },
-  { value: "violet", label: "Violet" },
-  { value: "rose", label: "Rose" },
-  { value: "amber", label: "Amber" },
-];
+const NAV_ICONS: Record<string, LucideIcon> = {
+  "/": Home,
+  "/workflows": Workflow,
+  "/crm": Users,
+  "/accounting": CircleDollarSign,
+  "/inventory": Package,
+  "/purchasing": ShoppingCart,
+  "/hr": BriefcaseBusiness,
+  "/manufacturing": Factory,
+  "/rbac": KeyRound,
+  "/marketplace": Boxes,
+  "/audit": ClipboardList,
+  "/settings": Settings,
+};
 
-export function AppShell({
-  children,
-  subtitle,
-}: {
-  children: React.ReactNode;
-  subtitle?: string;
-}) {
+const GROUP_LABELS: Record<ModuleNavItem["group"], string> = {
+  workspace: "Workspace",
+  business: "Business",
+  system: "System",
+};
+
+const AUTONOMY_LABELS: Record<string, string> = {
+  recommend: "Assist",
+  confirm: "Confirm",
+  guarded_auto: "Supervised",
+  full_autonomous: "Full auto",
+};
+
+function appliedThemeFromStored(stored: StoredTheme | null): AppliedTheme {
+  if (stored === "dark") return "dark";
+  if (stored === "light") return "light";
+  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
+export function AppShell({ children, subtitle }: { children: React.ReactNode; subtitle?: string }) {
   const pathname = usePathname();
-  const [theme, setTheme] = useState<Theme>("light");
-  const [accent, setAccent] = useState<Accent>("teal");
+  const [storedTheme, setStoredTheme] = useState<StoredTheme>("system");
+  const [accent, setAccent] = useState<Accent>("maroon");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [booting, setBooting] = useState(true);
+  const [accentOpen, setAccentOpen] = useState(false);
   const [health, setHealth] = useState<"checking" | "online" | "offline">("checking");
+  const [enabledModules, setEnabledModules] = useState<{ moduleId: string; enabled: boolean }[] | null>(
+    null,
+  );
   const [session, setSession] = useState<{
     displayName: string;
     orgName?: string;
     email: string;
     autonomy: string;
+    region?: string;
   } | null>(null);
 
+  const appliedTheme: AppliedTheme = appliedThemeFromStored(storedTheme);
+  const accentRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const savedTheme = window.localStorage.getItem("chaste-theme") as Theme | null;
-    const savedAccent = window.localStorage.getItem("chaste-accent") as Accent | null;
-    if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
-    if (savedAccent && accents.some((item) => item.value === savedAccent)) setAccent(savedAccent);
+    const savedTheme = localStorage.getItem("chaste-theme-saved") as StoredTheme | null;
+    const savedAccent = localStorage.getItem("chaste-accent") as Accent | null;
+    if (savedTheme === "light" || savedTheme === "dark" || savedTheme === "system") {
+      setStoredTheme(savedTheme);
+    } else {
+      setStoredTheme("system");
+    }
+    if (savedAccent && ACCENTS.some((a) => a.value === savedAccent)) {
+      setAccent(savedAccent);
+    } else {
+      setAccent("maroon");
+      localStorage.setItem("chaste-accent", "maroon");
+    }
+    getApiClient()
+      .getPreferences()
+      .then((prefs) => {
+        const p = prefs as { preferences?: { theme?: string; accent?: string } };
+        if (p?.preferences?.theme) {
+          const t = p.preferences.theme as StoredTheme;
+          if (t === "light" || t === "dark" || t === "system") setStoredTheme(t);
+        }
+        if (p?.preferences?.accent) {
+          const a = p.preferences.accent as Accent;
+          if (ACCENTS.some((x) => x.value === a)) setAccent(a);
+        }
+      })
+      .catch(() => null);
   }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    if (appliedTheme === "dark") {
+      document.documentElement.dataset.theme = "dark";
+    } else {
+      document.documentElement.dataset.theme = "light";
+    }
     document.documentElement.dataset.accent = accent;
-    window.localStorage.setItem("chaste-theme", theme);
-    window.localStorage.setItem("chaste-accent", accent);
-  }, [theme, accent]);
+    localStorage.setItem("chaste-theme-saved", storedTheme);
+    localStorage.setItem("chaste-accent", accent);
+    getApiClient()
+      .updatePreferences({ theme: storedTheme, accent })
+      .catch(() => null);
+  }, [storedTheme, accent, appliedTheme]);
+
+  useEffect(() => {
+    if (storedTheme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = () => {
+      document.documentElement.dataset.theme = mq.matches ? "dark" : "light";
+    };
+    handler();
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [storedTheme]);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,12 +169,19 @@ export function AppShell({
         if (cancelled) return;
         setHealth("online");
         api.session().then(setSession).catch(() => null);
+        api
+          .listModules()
+          .then((mods) => {
+            if (!cancelled) setEnabledModules(mods.installed);
+          })
+          .catch(() => {
+            if (!cancelled) setEnabledModules([]);
+          });
       } catch {
-        if (!cancelled) setHealth("offline");
-      } finally {
-        window.setTimeout(() => {
-          if (!cancelled) setBooting(false);
-        }, 650);
+        if (!cancelled) {
+          setHealth("offline");
+          setEnabledModules([]);
+        }
       }
     }
     void boot();
@@ -129,13 +190,60 @@ export function AppShell({
     };
   }, []);
 
+  useEffect(() => {
+    if (!accentOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (accentRef.current && !accentRef.current.contains(e.target as Node)) {
+        setAccentOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [accentOpen]);
+
+  const navItems = useMemo(() => {
+    // Until modules load, show full business nav to avoid flicker; then filter
+    if (enabledModules === null) {
+      return filterNavByInstalled(
+        ["crm", "accounting", "inventory", "purchasing", "hr", "manufacturing"].map((moduleId) => ({
+          moduleId,
+          enabled: true,
+        })),
+      );
+    }
+    return filterNavByInstalled(enabledModules);
+  }, [enabledModules]);
+
+  const navGroups = useMemo(() => {
+    const groups: { label: string; items: { href: string; label: string; icon: LucideIcon }[] }[] = [];
+    for (const group of ["workspace", "business", "system"] as const) {
+      const items = navItems
+        .filter((n) => n.group === group)
+        .map((n) => ({
+          href: n.href,
+          label: n.label,
+          icon: NAV_ICONS[n.href] ?? Boxes,
+        }));
+      if (items.length) groups.push({ label: GROUP_LABELS[group], items });
+    }
+    return groups;
+  }, [navItems]);
+
   const currentPage = useMemo(() => {
     for (const group of navGroups) {
       const found = group.items.find((item) => item.href === pathname);
       if (found) return found.label;
     }
     return "Dashboard";
-  }, [pathname]);
+  }, [pathname, navGroups]);
+
+  const cycleTheme = useCallback(() => {
+    setStoredTheme((cur) => (cur === "system" ? "light" : cur === "light" ? "dark" : "system"));
+  }, []);
+
+  const themeTitle =
+    storedTheme === "system" ? "System theme" : storedTheme === "dark" ? "Dark theme" : "Light theme";
+  const ThemeIcon = storedTheme === "system" ? SunMoon : storedTheme === "dark" ? Moon : Sun;
 
   function SidebarContent() {
     return (
@@ -146,7 +254,7 @@ export function AppShell({
           </div>
           <div>
             <div className="brand-word">ChasteBusinessOS</div>
-            <div className="brand-sub">Command-governed operations</div>
+            <div className="brand-sub">Governed business operations</div>
           </div>
         </div>
         <nav className="side-nav" aria-label="Primary navigation">
@@ -175,9 +283,14 @@ export function AppShell({
     );
   }
 
+  const statusLabel =
+    health === "online" ? "System online" : health === "offline" ? "Service offline" : "Connecting";
+  const autonomyLabel = session?.autonomy
+    ? (AUTONOMY_LABELS[session.autonomy] ?? session.autonomy)
+    : "Standard";
+
   return (
     <>
-      {booting ? <BootScreen health={health} /> : null}
       <div className="app-frame">
         <aside className="sidebar">
           <SidebarContent />
@@ -199,7 +312,7 @@ export function AppShell({
             <div className="page-title-block">
               <div className="eyebrow">
                 <HeartPulse size={14} />
-                <span>{health === "online" ? "System online" : health === "offline" ? "API offline" : "Checking API"}</span>
+                <span>{statusLabel}</span>
               </div>
               <h1 className="page-title">{currentPage}</h1>
               {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}
@@ -207,41 +320,68 @@ export function AppShell({
             <div className="topbar-actions">
               <div className="status-pill">
                 <Building2 size={15} />
-                <span>{session?.orgName ?? session?.email ?? "Local org"}</span>
+                <span>{session?.orgName ?? session?.email ?? "Local workspace"}</span>
               </div>
               <div className="status-pill autonomy">
                 <Bot size={15} />
-                <span>{session?.autonomy ?? "unknown"}</span>
+                <span>{autonomyLabel}</span>
               </div>
-              <div className="segmented" aria-label="Theme">
+              <button
+                className="icon-btn tip"
+                type="button"
+                data-tip={themeTitle}
+                onClick={cycleTheme}
+                aria-label="Cycle theme"
+                title={themeTitle}
+              >
+                <ThemeIcon size={15} />
+              </button>
+              <div className="accent-select-wrap" ref={accentRef}>
                 <button
-                  className={theme === "light" ? "selected" : ""}
                   type="button"
-                  onClick={() => setTheme("light")}
-                  title="Light theme"
+                  className="accent-select"
+                  data-open={accentOpen ? "true" : "false"}
+                  onClick={() => setAccentOpen((v) => !v)}
+                  aria-haspopup="listbox"
+                  aria-expanded={accentOpen}
+                  title="Accent color"
                 >
-                  <Sun size={15} />
+                  <span
+                    className="swatch"
+                    style={{ background: ACCENTS.find((a) => a.value === accent)?.swatch }}
+                  />
+                  <span className="label">{ACCENTS.find((a) => a.value === accent)?.label ?? "Accent"}</span>
+                  <span className="chev">
+                    <ChevronDown size={14} />
+                  </span>
                 </button>
-                <button
-                  className={theme === "dark" ? "selected" : ""}
-                  type="button"
-                  onClick={() => setTheme("dark")}
-                  title="Dark theme"
-                >
-                  <Moon size={15} />
-                </button>
+                {accentOpen ? (
+                  <div className="accent-menu" role="listbox">
+                    {ACCENTS.map((a) => (
+                      <button
+                        key={a.value}
+                        type="button"
+                        className={`accent-menu-item${a.value === accent ? " selected" : ""}`}
+                        onClick={() => {
+                          setAccent(a.value);
+                          setAccentOpen(false);
+                        }}
+                        role="option"
+                        aria-selected={a.value === accent}
+                      >
+                        <span
+                          className="accent-menu-swatch"
+                          style={{ "--swatch-color": a.swatch } as React.CSSProperties}
+                        />
+                        <span>{a.label}</span>
+                        <span className="check">
+                          <Check size={14} />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-              <label className="accent-select" title="Accent color">
-                <Palette size={15} />
-                <select value={accent} onChange={(event) => setAccent(event.target.value as Accent)}>
-                  {accents.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={14} />
-              </label>
             </div>
           </header>
           <div className="content-plane">{children}</div>
@@ -265,33 +405,5 @@ export function AppShell({
       </nav>
       <ChatWidget floating />
     </>
-  );
-}
-
-function BootScreen({ health }: { health: "checking" | "online" | "offline" }) {
-  return (
-    <div className="boot-screen">
-      <div className="boot-core">
-        <div className="boot-glyph">
-          <Sparkles size={31} />
-        </div>
-        <div>
-          <h2>ChasteBusinessOS</h2>
-          <p>
-            {health === "offline"
-              ? "API is not responding"
-              : health === "online"
-                ? "System ready"
-                : "Initializing system"}
-          </p>
-        </div>
-        <div className="boot-rail">
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
-    </div>
   );
 }

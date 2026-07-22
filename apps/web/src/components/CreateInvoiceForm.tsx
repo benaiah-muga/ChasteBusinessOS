@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { getApiBaseUrl } from "@/lib/api";
+import { getApiClient } from "@/lib/api";
 
-export function CreateInvoiceForm() {
+export function CreateInvoiceForm({ onCreated }: { onCreated?: () => void }) {
   const [number, setNumber] = useState(`INV-${Date.now().toString().slice(-6)}`);
   const [total, setTotal] = useState("100");
+  const [currency, setCurrency] = useState("USD");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -14,23 +15,14 @@ export function CreateInvoiceForm() {
     setMsg(null);
     setBusy(true);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/v1/accounting/invoices`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ number, total: Number(total), currency: "USD" }),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        message?: string;
-        number?: string;
-      };
-      if (!res.ok) {
-        setMsg(body.message ?? "Failed to create invoice");
-        return;
-      }
-      setMsg(`Created ${body.number ?? number}`);
-      window.location.reload();
+      const api = getApiClient();
+      const res = await api.createInvoice({ number, total: Number(total), currency });
+      setMsg(`Created ${res.number ?? number}`);
+      setNumber(`INV-${Date.now().toString().slice(-6)}`);
+      setTotal("100");
+      onCreated?.();
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Network error");
+      setMsg(err instanceof Error ? err.message : "Failed to create invoice");
     } finally {
       setBusy(false);
     }
@@ -39,7 +31,7 @@ export function CreateInvoiceForm() {
   return (
     <form className="stack" onSubmit={submit}>
       <div className="row">
-        <label style={{ flex: 1 }}>
+        <label style={{ flex: 2 }}>
           Number
           <input value={number} onChange={(e) => setNumber(e.target.value)} required />
         </label>
@@ -54,11 +46,19 @@ export function CreateInvoiceForm() {
             required
           />
         </label>
+        <label style={{ flex: 1 }}>
+          Currency
+          <input value={currency} onChange={(e) => setCurrency(e.target.value)} maxLength={4} required />
+        </label>
       </div>
-      <button className="btn" type="submit" disabled={busy}>
-        {busy ? "Creating…" : "Create invoice"}
-      </button>
-      {msg ? <p className={msg.startsWith("Created") ? "muted" : "error"}>{msg}</p> : null}
+      <div className="row">
+        <button className="btn" type="submit" disabled={busy}>
+          {busy ? "Creating…" : "Create invoice"}
+        </button>
+        {msg ? (
+          <span className={msg.startsWith("Created") ? "badge accent" : "error"}>{msg}</span>
+        ) : null}
+      </div>
     </form>
   );
 }

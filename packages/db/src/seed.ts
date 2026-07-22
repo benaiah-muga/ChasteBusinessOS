@@ -46,22 +46,25 @@ const MARKETPLACE = [
     moduleId: "crm",
     name: "CRM",
     version: "0.1.0",
-    summary: "Customers and relationship records",
+    summary: "Customers, pipeline, and relationship records",
     category: "sales",
+    kind: "builtin" as const,
   },
   {
     moduleId: "accounting",
     name: "Accounting",
     version: "0.1.0",
-    summary: "Chart of accounts, journals, invoices",
+    summary: "Chart of accounts, journals, and invoices",
     category: "finance",
+    kind: "builtin" as const,
   },
   {
     moduleId: "inventory",
     name: "Inventory",
     version: "0.1.0",
-    summary: "Warehouses, products, stock moves",
+    summary: "Warehouses, products, and stock moves",
     category: "operations",
+    kind: "builtin" as const,
   },
   {
     moduleId: "purchasing",
@@ -69,6 +72,7 @@ const MARKETPLACE = [
     version: "0.1.0",
     summary: "Vendors and purchase orders",
     category: "operations",
+    kind: "builtin" as const,
   },
   {
     moduleId: "hr",
@@ -76,6 +80,7 @@ const MARKETPLACE = [
     version: "0.1.0",
     summary: "Employees and payroll preparation",
     category: "people",
+    kind: "builtin" as const,
   },
   {
     moduleId: "manufacturing",
@@ -83,6 +88,16 @@ const MARKETPLACE = [
     version: "0.1.0",
     summary: "Bills of materials and work orders",
     category: "operations",
+    kind: "builtin" as const,
+  },
+  {
+    moduleId: "demo-crm",
+    name: "Demo CRM Extension",
+    version: "0.1.0",
+    summary: "Sample custom module showing third-party style packaging",
+    category: "sales",
+    publisher: "community",
+    kind: "custom" as const,
   },
 ];
 
@@ -103,7 +118,9 @@ export async function bootstrapPlatform(db: Db, cfg: AppConfig): Promise<Bootstr
         version: listing.version,
         summary: listing.summary,
         category: listing.category,
+        publisher: "publisher" in listing && listing.publisher ? listing.publisher : "chaste",
         regions: cfg.regions.includes("*") ? ["*"] : cfg.regions,
+        metadata: { kind: listing.kind, archived: false },
       })
       .onConflictDoNothing({ target: schema.marketplaceListings.moduleId });
   }
@@ -226,8 +243,8 @@ export async function bootstrapPlatform(db: Db, cfg: AppConfig): Promise<Bootstr
       target: [schema.userRoles.userId, schema.userRoles.roleId],
     });
 
-  // Install all core modules for org
-  for (const listing of MARKETPLACE) {
+  // Install all builtin modules for org (custom modules stay available in marketplace)
+  for (const listing of MARKETPLACE.filter((l) => l.kind === "builtin")) {
     await db
       .insert(schema.moduleInstalls)
       .values({

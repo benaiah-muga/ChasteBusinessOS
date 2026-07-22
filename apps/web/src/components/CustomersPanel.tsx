@@ -51,7 +51,7 @@ export function CustomersPanel({
       <div>
         <h2>{compact ? "Customer intake" : "Customers"}</h2>
         <p className="muted" style={{ margin: 0 }}>
-          Manual UI uses <span className="mono">POST /api/v1/crm/customers</span> through the API client.
+          Add a new customer below to start tracking activity, quotes, and orders.
         </p>
       </div>
 
@@ -115,11 +115,11 @@ export function CustomersPanel({
                 </td>
               </tr>
             ) : (
-              customers.slice(0, compact ? 5 : customers.length).map((c) => (
+                  customers.slice(0, compact ? 5 : customers.length).map((c) => (
                 <tr key={c.id}>
                   <td>{c.name}</td>
-                  <td>{c.city ?? "—"}</td>
-                  <td>{c.email ?? "—"}</td>
+                  <td>{c.city ?? <span className="placeholder">not set</span>}</td>
+                  <td>{c.email ?? <span className="placeholder">not set</span>}</td>
                   {!compact ? <td>{c.status ?? "active"}</td> : null}
                 </tr>
               ))

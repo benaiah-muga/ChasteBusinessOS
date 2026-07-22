@@ -36,6 +36,9 @@ export type OrgSettings = z.infer<typeof orgSettingsSchema>;
  */
 export const userPreferencesSchema = z.object({
   theme: z.enum(["light", "dark", "system"]).default("system"),
+  accent: z
+    .enum(["maroon", "teal", "blue", "violet", "rose", "amber", "forest", "slate"])
+    .default("maroon"),
   timezone: z.string().optional(),
   locale: z.string().optional(),
   notifications: z
@@ -73,6 +76,9 @@ export const orgSettingsUpdateSchema = z.object({
  */
 export const userPreferencesUpdateSchema = z.object({
   theme: z.enum(["light", "dark", "system"]).optional(),
+  accent: z
+    .enum(["maroon", "teal", "blue", "violet", "rose", "amber", "forest", "slate"])
+    .optional(),
   timezone: z.string().optional(),
   locale: z.string().optional(),
   notifications: z

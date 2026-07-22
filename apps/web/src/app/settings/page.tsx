@@ -14,32 +14,35 @@ export default async function SettingsPage() {
   }
 
   return (
-    <AppShell subtitle="Organization settings — AI autonomy, region, providers">
+    <AppShell subtitle="Workspace settings, AI behavior, and appearance preferences.">
       <div className="grid">
         <section className="card stack">
-          <h2>Session</h2>
+          <h2>Workspace</h2>
           {session ? (
             <ul>
               <li>
-                Org: <strong>{session.orgName}</strong>
+                Name: <strong>{session.orgName}</strong>
               </li>
               <li>
-                Region: <span className="mono">{session.region}</span>
+                Region: <strong>{session.region ?? "local"}</strong>
               </li>
               <li>
-                AI provider: <span className="mono">{session.aiProvider}</span>
+                AI provider: <strong>{session.aiProvider ?? "not configured"}</strong>
               </li>
               <li>
                 Autonomy: <strong>{session.autonomy}</strong>
               </li>
               <li>
-                Full auto allowed:{" "}
-                {session.allowFullAutonomous ? "yes (platform)" : "no (platform flag)"}
+                Full auto allowed: {session.allowFullAutonomous ? "yes" : "no"}
               </li>
             </ul>
           ) : (
-            <p className="error">API offline</p>
+            <p className="error">Service offline</p>
           )}
+          <p className="muted">
+            Theme and accent are controlled from the top bar and follow you across every page. Defaults are
+            system theme and deep maroon.
+          </p>
         </section>
         <section className="card stack">
           <h2>AI autonomy</h2>
