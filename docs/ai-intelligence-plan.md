@@ -1,7 +1,7 @@
 # Implementation Plan: AI-Native Intelligence Layer
 
 ## Goal
-Make ChasteBusinessOS truly intelligent — natural language in, business actions out, with memory, clarification, multi-step planning, and proactive suggestions.
+Make ChasteBusinessOS truly intelligent -- natural language in, business actions out, with memory, clarification, multi-step planning, and proactive suggestions.
 
 ## Architecture Decision
 Custom implementation using our existing `AiProvider.complete()` + session DB persistence.
@@ -83,11 +83,11 @@ CREATE TABLE chat_sessions (
 - Keep in-memory Map as write-through cache for performance
 
 ### File changes
-- `packages/ai-core/src/providers.ts` — extend CompletionRequest, update complete()
-- `packages/ai-core/src/orchestrator.ts` — pass messages in Tier 2 + 3
-- `packages/db/src/schema.ts` — add chat_sessions table
-- `packages/db/src/migrate.ts` — add migration
-- `apps/api/src/app-context.ts` — DB-backed sessions
+- `packages/ai-core/src/providers.ts` -- extend CompletionRequest, update complete()
+- `packages/ai-core/src/orchestrator.ts` -- pass messages in Tier 2 + 3
+- `packages/db/src/schema.ts` -- add chat_sessions table
+- `packages/db/src/migrate.ts` -- add migration
+- `apps/api/src/app-context.ts` -- DB-backed sessions
 
 ---
 
@@ -154,8 +154,8 @@ When the user responds to a clarification (check `session.pending?.type === "cla
 - This creates a natural back-and-forth
 
 ### File changes
-- `packages/ui-schema/src/index.ts` — add clarify part
-- `packages/ai-core/src/orchestrator.ts` — ClarifyAction type, Tier 2 prompt update, clarification handling
+- `packages/ui-schema/src/index.ts` -- add clarify part
+- `packages/ai-core/src/orchestrator.ts` -- ClarifyAction type, Tier 2 prompt update, clarification handling
 
 ---
 
@@ -233,9 +233,9 @@ if (session.pending?.type === "plan" && confirmId) {
 ```
 
 ### File changes
-- `packages/ui-schema/src/index.ts` — add plan part
-- `packages/ai-core/src/orchestrator.ts` — MultiStepPlan type, plan handling
-- `apps/api/src/server.ts` — handle plan confirmation
+- `packages/ui-schema/src/index.ts` -- add plan part
+- `packages/ai-core/src/orchestrator.ts` -- MultiStepPlan type, plan handling
+- `apps/api/src/server.ts` -- handle plan confirmation
 
 ---
 
@@ -263,7 +263,7 @@ After successful execution, generate contextual suggestions based on what was do
 }
 ```
 
-**4b. Suggestion generator** (`packages/ai-core/src/suggestions.ts` — new file)
+**4b. Suggestion generator** (`packages/ai-core/src/suggestions.ts` -- new file)
 ```ts
 interface SuggestionRule {
   /** Command that was just executed */
@@ -316,19 +316,19 @@ if (result.ok) {
 ```
 
 ### File changes
-- `packages/ai-core/src/suggestions.ts` — new file, rule-based + LLM suggestions
-- `packages/ui-schema/src/index.ts` — add suggestions part
-- `packages/ai-core/src/orchestrator.ts` — wire suggestions after execution
-- `packages/ai-core/src/index.ts` — export suggestions
+- `packages/ai-core/src/suggestions.ts` -- new file, rule-based + LLM suggestions
+- `packages/ui-schema/src/index.ts` -- add suggestions part
+- `packages/ai-core/src/orchestrator.ts` -- wire suggestions after execution
+- `packages/ai-core/src/index.ts` -- export suggestions
 
 ---
 
 ## Implementation Order
 
-1. **Multi-turn memory** (Feature 1) — Foundation for everything else
-2. **Clarifying questions** (Feature 2) — Needs conversation history to work well
-3. **Multi-step planning** (Feature 3) — Builds on clarification flow
-4. **Proactive suggestions** (Feature 4) — Independent, can be last
+1. **Multi-turn memory** (Feature 1) -- Foundation for everything else
+2. **Clarifying questions** (Feature 2) -- Needs conversation history to work well
+3. **Multi-step planning** (Feature 3) -- Builds on clarification flow
+4. **Proactive suggestions** (Feature 4) -- Independent, can be last
 
 ## Estimated scope
 - ~400-500 lines of new/modified code

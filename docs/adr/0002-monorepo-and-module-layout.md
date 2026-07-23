@@ -13,9 +13,9 @@ deployable processes (api, web, worker) without tight UI–domain coupling.
 
 Use a **pnpm + Turborepo monorepo**:
 
-- `apps/*` — deployables
-- `packages/*` — shared libraries
-- `modules/*` — installable business modules
+- `apps/*` -- deployables
+- `packages/*` -- shared libraries
+- `modules/*` -- installable business modules
 
 `apps/web` depends only on `@chaste/api-client` and `@chaste/ui-schema`.
 

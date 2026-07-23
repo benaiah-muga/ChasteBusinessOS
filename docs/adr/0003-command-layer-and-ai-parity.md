@@ -17,5 +17,5 @@ AI must operate the business without special privileges or parallel write paths.
 ## Consequences
 
 - Consistency and security by construction
-- Slightly more ceremony for simple CRUD — accepted for integrity
+- Slightly more ceremony for simple CRUD -- accepted for integrity
 - Easier explainability and testing

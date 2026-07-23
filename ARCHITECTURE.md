@@ -69,10 +69,10 @@ Queries are analogous: `GET/POST /api/v1/queries/:name`.
 
 Each module provides:
 
-- `module.manifest.ts` — id, version, deps, permissions, capabilities
+- `module.manifest.ts` -- id, version, deps, permissions, capabilities
 - Commands & queries
 - Optional schema/migrations (namespaced tables)
-- Optional specialist **profile metadata** (tool tags, prompts) — not a private runtime
+- Optional specialist **profile metadata** (tool tags, prompts) -- not a private runtime
 
 Modules must not couple to the web app. If a module needs UI, it exposes API contracts;
 the web discovers capabilities via API and renders generic or registered views.
