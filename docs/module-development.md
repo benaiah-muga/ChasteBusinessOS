@@ -6,14 +6,14 @@ organization through the marketplace.
 
 ## Rules (for humans and agents)
 
-1. **Public contracts only** — other modules consume your commands, queries, and events — not your tables.
-2. **Namespaced data** — tables use a clear prefix (`crm_customers`, not `customers` alone when ambiguous).
-3. **All writes via commands** — with Zod input/output and permission strings.
-4. **Outbox for events** — publish after successful commit through kernel helpers.
-5. **No web imports** — modules must not depend on `apps/web` or React.
-6. **Optional UI** — expose APIs; web discovers capabilities. Module React lives in `apps/web` and talks HTTP only.
-7. **AI tools = commands/queries** — declare capability tags for specialist routing; do not invent a parallel tool API.
-8. **Tests** — contract tests for every command and query.
+1. **Public contracts only** -- other modules consume your commands, queries, and events -- not your tables.
+2. **Namespaced data** -- tables use a clear prefix (`crm_customers`, not `customers` alone when ambiguous).
+3. **All writes via commands** -- with Zod input/output and permission strings.
+4. **Outbox for events** -- publish after successful commit through kernel helpers.
+5. **No web imports** -- modules must not depend on `apps/web` or React.
+6. **Optional UI** -- expose APIs; web discovers capabilities. Module React lives in `apps/web` and talks HTTP only.
+7. **AI tools = commands/queries** -- declare capability tags for specialist routing; do not invent a parallel tool API.
+8. **Tests** -- contract tests for every command and query.
 
 ## End-to-end module lifecycle (Odoo-like)
 
@@ -125,16 +125,16 @@ Install / uninstall / archive commands:
 
 The web app is an HTTP client only. For each installed module:
 
-1. **Route** — `apps/web/src/app/<id>/page.tsx` (server component loads data)
-2. **Workspace** — `apps/web/src/components/<id>/<Name>Workspace.tsx` (client UI with tabs, KPIs, charts)
-3. **Nav registry** — add entry in `apps/web/src/lib/module-registry.ts`:
+1. **Route** -- `apps/web/src/app/<id>/page.tsx` (server component loads data)
+2. **Workspace** -- `apps/web/src/components/<id>/<Name>Workspace.tsx` (client UI with tabs, KPIs, charts)
+3. **Nav registry** -- add entry in `apps/web/src/lib/module-registry.ts`:
 
 ```ts
 { moduleId: "example", href: "/example", label: "Example", group: "business" }
 ```
 
-4. **API client** — add typed methods on `@chaste/api-client` when the surface is stable
-5. **Icons** — map `href → Lucide icon` in `AppShell`
+4. **API client** -- add typed methods on `@chaste/api-client` when the surface is stable
+5. **Icons** -- map `href → Lucide icon` in `AppShell`
 
 `AppShell` loads `GET /api/v1/modules` and only shows business nav items whose
 `moduleId` is installed and enabled. System pages (`marketplace`, `settings`, …)
@@ -144,9 +144,9 @@ use `always: true`.
 
 Every module landing screen should follow this pattern:
 
-1. **Overview tab** — KPIs + charts (Recharts via `components/ui/Chart`)
-2. **Primary list tabs** — tables for core entities
-3. **Create / action tabs** — forms that call the same APIs as the agent
+1. **Overview tab** -- KPIs + charts (Recharts via `components/ui/Chart`)
+2. **Primary list tabs** -- tables for core entities
+3. **Create / action tabs** -- forms that call the same APIs as the agent
 4. Human copy only (no raw command names or HTTP paths in the operator UI)
 
 Shared primitives:

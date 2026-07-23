@@ -37,7 +37,7 @@ to `opencode.jsonc` for richer documentation access:
 
 Pin exact versions to avoid supply chain risks. Verify safe versions before
 installing (the June 2026 `@mastra` scope compromise affected versions
-`@mastra/core@1.42.1`, `mastra@1.13.1`, etc. — all later versions are clean):
+`@mastra/core@1.42.1`, `mastra@1.13.1`, etc. -- all later versions are clean):
 
 | Package | Version Range | Purpose |
 |---|---|---|
@@ -62,7 +62,7 @@ LANGFUSE_SECRET_KEY=                # optional, for Langfuse dashboard later
 
 ---
 
-## Phase 1: Foundation — Mastra Core + Storage
+## Phase 1: Foundation -- Mastra Core + Storage
 
 **Goal:** Install Mastra, wire PostgreSQL storage, adapt the Fastify server,
 and ensure the existing command bus works through Mastra's tool system.
@@ -149,7 +149,7 @@ Modify `apps/api/src/app-context.ts`:
 
 - Create the Mastra instance during app bootstrap
 - Pass it through to the API server and ai-core
-- Keep the existing `CommandRegistry` and `QueryRegistry` — Mastra wraps them,
+- Keep the existing `CommandRegistry` and `QueryRegistry` -- Mastra wraps them,
   does not replace them
 
 ### 1.5 Fastify Adapter Integration
@@ -197,7 +197,7 @@ import { z } from "zod";
 export function commandToTool(cmd: CommandMeta, registry: CommandRegistry, ctx: RequestContext) {
   return createTool({
     id: cmd.name,
-    description: `${cmd.name} — ${cmd.tags?.join(", ") ?? "general"}`,
+    description: `${cmd.name} -- ${cmd.tags?.join(", ") ?? "general"}`,
     inputSchema: cmd.input,    // already a Zod schema
     outputSchema: cmd.output,  // already a Zod schema
     execute: async ({ context }) => {
@@ -295,7 +295,7 @@ Modify `packages/ai-core/src/orchestrator.ts`:
   the current `provider.complete()` fallback
 - The Mastra agent has access to all tools and can handle complex, multi-step,
   or ambiguous requests
-- Preserve the autonomy gate logic — the agent's tool calls go through
+- Preserve the autonomy gate logic -- the agent's tool calls go through
   `executeCommand` which checks permissions and autonomy levels
 
 **Flow becomes:**
@@ -430,10 +430,10 @@ Guardrails should tighten as autonomy increases:
 
 | Autonomy | Guardrail Intensity |
 |---|---|
-| `recommend` | Light — Unicode normalization only (user reviews everything) |
-| `confirm` | Medium — + prompt injection detection (user approves before execute) |
-| `guarded_auto` | Full — + PII detection + moderation + output validation |
-| `full_autonomous` | Maximum — all processors + stricter thresholds + audit logging |
+| `recommend` | Light -- Unicode normalization only (user reviews everything) |
+| `confirm` | Medium -- + prompt injection detection (user approves before execute) |
+| `guarded_auto` | Full -- + PII detection + moderation + output validation |
+| `full_autonomous` | Maximum -- all processors + stricter thresholds + audit logging |
 
 ### 3.4 Organize as a Guardrails Registry
 
@@ -677,7 +677,7 @@ export const accountingAgent = new Agent({
   id: "accounting-agent",
   instructions: `You are the Accounting specialist.
 You handle ledger operations, journal entries, invoicing, and financial reporting.
-Double-entry bookkeeping rules are enforced by the system — never bypass them.`,
+Double-entry bookkeeping rules are enforced by the system -- never bypass them.`,
   model: "openai/gpt-4o",
   tools: accountingToolsOnly,
   memory: sharedMemory,
@@ -894,15 +894,15 @@ Start with 3-4 high-value workflows for SMBs:
 New endpoints in `apps/api/src/server.ts`:
 
 ```
-POST   /api/v1/workflows              — Create workflow definition
-GET    /api/v1/workflows              — List workflows
-GET    /api/v1/workflows/:id          — Get workflow definition
-PUT    /api/v1/workflows/:id          — Update workflow definition
-DELETE /api/v1/workflows/:id          — Delete workflow definition
-POST   /api/v1/workflows/:id/run      — Start a workflow run
-POST   /api/v1/workflows/:id/resume   — Resume a suspended workflow
-GET    /api/v1/workflows/:id/runs     — List workflow run history
-GET    /api/v1/workflows/:id/runs/:rid — Get run status and state
+POST   /api/v1/workflows              -- Create workflow definition
+GET    /api/v1/workflows              -- List workflows
+GET    /api/v1/workflows/:id          -- Get workflow definition
+PUT    /api/v1/workflows/:id          -- Update workflow definition
+DELETE /api/v1/workflows/:id          -- Delete workflow definition
+POST   /api/v1/workflows/:id/run      -- Start a workflow run
+POST   /api/v1/workflows/:id/resume   -- Resume a suspended workflow
+GET    /api/v1/workflows/:id/runs     -- List workflow run history
+GET    /api/v1/workflows/:id/runs/:rid -- Get run status and state
 ```
 
 ### 6.6 DB Schema Additions
@@ -1012,7 +1012,7 @@ const mastra = new Mastra({
 
 ### 7.4 Migration Strategy
 
-The existing orchestrator code is not thrown away — it's evolved:
+The existing orchestrator code is not thrown away -- it's evolved:
 
 | Before | After |
 |---|---|
@@ -1058,7 +1058,7 @@ export const workflowBuilderAgent = new Agent({
   instructions: `You are a workflow architect for ChasteBusinessOS.
 Given a business requirement in natural language, design a workflow definition.
 
-You have access to the command catalog — use only commands that exist.
+You have access to the command catalog -- use only commands that exist.
 Every workflow step must map to an existing command.
 
 RULES:
@@ -1105,9 +1105,9 @@ User: "When a sales order is confirmed, check stock. If we have it, ship it.
 New endpoints:
 
 ```
-POST /api/v1/workflows/generate         — Generate workflow from natural language
-POST /api/v1/workflows/:id/validate     — Validate a workflow definition
-POST /api/v1/workflows/:id/activate     — Activate a validated workflow
+POST /api/v1/workflows/generate         -- Generate workflow from natural language
+POST /api/v1/workflows/:id/validate     -- Validate a workflow definition
+POST /api/v1/workflows/:id/activate     -- Activate a validated workflow
 ```
 
 ### 8.4 Workflow Builder UI (Frontend)
@@ -1126,7 +1126,7 @@ The meta-agent operates under strict constraints:
 - Financial actions always require approval steps
 - Workflow definitions are validated against the Zod schema before activation
 - Workflow executions go through the command bus (same as UI/AI)
-- The meta-agent cannot execute workflows — only generate definitions
+- The meta-agent cannot execute workflows -- only generate definitions
 - Human must explicitly activate before a workflow goes live
 
 ### 8.6 Verify
@@ -1208,15 +1208,15 @@ The meta-agent operates under strict constraints:
 
 ## Non-Goals (What We're NOT Building)
 
-- **No LangGraph** — Mastra handles both agents and workflows. LangGraph.js is
+- **No LangGraph** -- Mastra handles both agents and workflows. LangGraph.js is
   an escape hatch only if Mastra's workflow engine hits hard limits.
-- **No LangChain Deep Agents** — Python-only, too opinionated, too coupled.
-- **No CrewAI** — Python-only, no TypeScript support.
-- **No Google ADK** — GCP vendor lock-in risk.
-- **No Inngest/BullMQ yet** — Mastra's built-in engine is sufficient. Add
+- **No LangChain Deep Agents** -- Python-only, too opinionated, too coupled.
+- **No CrewAI** -- Python-only, no TypeScript support.
+- **No Google ADK** -- GCP vendor lock-in risk.
+- **No Inngest/BullMQ yet** -- Mastra's built-in engine is sufficient. Add
   durable execution later if workflow volume demands it.
-- **No voice/multimodal** — Out of scope for SMB business OS v1.
-- **No Mastra Studio in production** — Development tool only.
+- **No voice/multimodal** -- Out of scope for SMB business OS v1.
+- **No Mastra Studio in production** -- Development tool only.
 
 ---
 

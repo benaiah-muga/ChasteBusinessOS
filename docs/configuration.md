@@ -2,11 +2,11 @@
 
 ## Principles
 
-1. **Secrets never live in git** — only `.env.example` placeholders.
-2. **Runtime config is typed** — `loadConfig()` in `@chaste/config` (Zod).
-3. **Providers are config-driven** — select via `CHASTE_AI_PROVIDER`; credentials from env.
-4. **Org business policy is in PostgreSQL** — autonomy level, module installs, RBAC.
-5. **Web receives no secrets** — only `NEXT_PUBLIC_API_URL`.
+1. **Secrets never live in git** -- only `.env.example` placeholders.
+2. **Runtime config is typed** -- `loadConfig()` in `@chaste/config` (Zod).
+3. **Providers are config-driven** -- select via `CHASTE_AI_PROVIDER`; credentials from env.
+4. **Org business policy is in PostgreSQL** -- autonomy level, module installs, RBAC.
+5. **Web receives no secrets** -- only `NEXT_PUBLIC_API_URL`.
 
 ## Secret sources
 
@@ -23,15 +23,15 @@ The application **only reads environment variables**. It does not call cloud sec
 
 | `CHASTE_AI_PROVIDER` | Credentials | Notes |
 |---|---|---|
-| `none` | — | Deterministic rule planner only |
+| `none` | -- | Deterministic rule planner only |
 | `openai` | `OPENAI_API_KEY` | Official API |
 | `openai_compatible` | key + `CHASTE_AI_BASE_URL` | Local gateways, proxies |
 | `ollama` | optional | Local LLM packaging via Ollama HTTP API |
 
 ## Multi-region
 
-- `CHASTE_REGION` — this deployment’s region label
-- `CHASTE_REGIONS` — known regions (marketplace geo filter)
+- `CHASTE_REGION` -- this deployment’s region label
+- `CHASTE_REGIONS` -- known regions (marketplace geo filter)
 - Org row stores `region` for affinity
 
 ## Full autonomous mode

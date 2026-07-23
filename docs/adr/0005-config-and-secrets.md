@@ -10,11 +10,11 @@ The platform needs secrets (DB, AI keys), infrastructure config, and org policy 
 
 ## Decision
 
-1. **Secrets and infrastructure** — environment variables only, validated by `@chaste/config` (Zod).
-2. **Providers** — selected by config (`CHASTE_AI_PROVIDER`); implementations behind interfaces.
-3. **Org policy** — PostgreSQL (autonomy, RBAC, module installs).
-4. **Local LLM** — Ollama HTTP provider for self-hosted models.
-5. **Web** — no secrets; HTTP API client only.
+1. **Secrets and infrastructure** -- environment variables only, validated by `@chaste/config` (Zod).
+2. **Providers** -- selected by config (`CHASTE_AI_PROVIDER`); implementations behind interfaces.
+3. **Org policy** -- PostgreSQL (autonomy, RBAC, module installs).
+4. **Local LLM** -- Ollama HTTP provider for self-hosted models.
+5. **Web** -- no secrets; HTTP API client only.
 
 ## Consequences
 

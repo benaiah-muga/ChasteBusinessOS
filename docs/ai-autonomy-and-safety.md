@@ -20,7 +20,7 @@ must show a clear warning at enablement time and keep a complete audit trail.
 - Autonomy never elevates permissions above the acting principal.
 - Dangerous commands can force a higher gate than the org default.
 - Every AI run stores an explanation: intent, tools considered, policy applied, result.
-- Analytics answers must be tied to verifiable queries — no fabricated figures.
+- Analytics answers must be tied to verifiable queries -- no fabricated figures.
 
 ## Specialist agents
 

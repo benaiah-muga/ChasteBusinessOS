@@ -1,17 +1,17 @@
-# AGENTS.md — Rules for AI coding agents
+# AGENTS.md -- Rules for AI coding agents
 
 You are contributing to **ChasteBusinessOS**, an AI-native Business Operating
-System. Optimize for **reliability, loose coupling, and auditability** — not
+System. Optimize for **reliability, loose coupling, and auditability** -- not
 clever shortcuts.
 
 ## Non-negotiable product invariants
 
-1. **AI/manual parity** — AI executes only through the same command/query bus as humans.
-2. **No elevated AI privileges** — never bypass permissions, validation, or audit.
-3. **Frontend is an API client** — `apps/web` must not import kernel, db, or modules.
+1. **AI/manual parity** -- AI executes only through the same command/query bus as humans.
+2. **No elevated AI privileges** -- never bypass permissions, validation, or audit.
+3. **Frontend is an API client** -- `apps/web` must not import kernel, db, or modules.
 4. **Zod validates intent and payloads** at boundaries (HTTP, commands, chat UI parts).
-5. **Events after commit** — use transactional outbox; do not dual-write carelessly.
-6. **Explainability** — AI-assisted paths record why/what/rules when you touch that layer.
+5. **Events after commit** -- use transactional outbox; do not dual-write carelessly.
+6. **Explainability** -- AI-assisted paths record why/what/rules when you touch that layer.
 
 ## Where to put code
 
@@ -55,9 +55,9 @@ If you add a module or command:
 
 Use repo skills under `skills/` when relevant:
 
-- `skills/module-author` — new modules
-- `skills/command-safety` — commands & permissions
-- `skills/pr-hygiene` — PR completeness
+- `skills/module-author` -- new modules
+- `skills/command-safety` -- commands & permissions
+- `skills/pr-hygiene` -- PR completeness
 
 ## Style
 

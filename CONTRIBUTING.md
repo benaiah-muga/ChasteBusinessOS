@@ -33,7 +33,7 @@ pnpm dev
 | Path | Role |
 |---|---|
 | `apps/api` | HTTP API gateway (only process that loads kernel + modules for requests) |
-| `apps/web` | Next.js UI — **consumes REST APIs only** (no kernel/db imports) |
+| `apps/web` | Next.js UI -- **consumes REST APIs only** (no kernel/db imports) |
 | `apps/worker` | Outbox, jobs, async AI workflows |
 | `packages/*` | Shared libraries (kernel, db, ai-core, schemas, api-client) |
 | `modules/*` | Installable business modules |
@@ -44,7 +44,7 @@ pnpm dev
 
 - **`apps/web` must not import** `@chaste/kernel`, `@chaste/db`, `@chaste/ai-core`, or module packages.
 - Web may import **`@chaste/api-client`** and **`@chaste/ui-schema`** (HTTP types + generative UI schemas only).
-- Business mutations live in **commands**; AI tools wrap commands — never raw SQL.
+- Business mutations live in **commands**; AI tools wrap commands -- never raw SQL.
 - Modules do not reach into other modules’ private tables.
 
 ## Pull requests
