@@ -4,15 +4,10 @@ import {
   handleChatTurn,
   type AiExplanation,
   type AiProvider,
-  createMastraInstance,
-  type ChasteMastra,
-  createConversationalAgent,
-  createNvidiaProvider,
   createWorkflowBuilderAgent,
   generateWorkflowFromNL,
   executeDynamicWorkflow,
   type WorkflowDefinition,
-  type NvidiaProvider,
   type WorkflowExecutionContext,
   createTracer,
   type AiTracer,
@@ -79,8 +74,6 @@ export interface AppContext {
   sessionUser: SessionUser;
   provider: AiProvider;
   tracer: AiTracer;
-  mastra: ChasteMastra;
-  nvidiaProvider: NvidiaProvider | null;
   workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
   workflows: Map<string, WorkflowDefinition>;
 }
@@ -139,14 +132,14 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
 
   // Observability — Langfuse traces all LLM calls when configured
   const tracer = createTracer({
-    langfusePublicKey: config.mastra.langfusePublicKey,
-    langfuseSecretKey: config.mastra.langfuseSecretKey,
-    langfuseBaseUrl: config.mastra.langfuseBaseUrl,
-    observabilityEnabled: config.mastra.observabilityEnabled,
+    langfusePublicKey: config.observability.langfusePublicKey,
+    langfuseSecretKey: config.observability.langfuseSecretKey,
+    langfuseBaseUrl: config.observability.langfuseBaseUrl,
+    observabilityEnabled: config.observability.enabled,
   });
 
   // Wrap provider with tracing if Langfuse is enabled
-  const tracedProvider = config.mastra.observabilityEnabled
+  const tracedProvider = config.observability.enabled
     ? new TracedProvider(provider, tracer)
     : provider;
 
@@ -167,26 +160,8 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     }),
   );
 
-  // Mastra instance (PG storage is optional — degrades gracefully)
-  const mastra = createMastraInstance({
-    databaseUrl: config.databaseUrl,
-    schemaName: config.mastra.storageSchema,
-  });
-
-  // Nvidia NIM provider (for Mastra agents)
-  let nvidiaProvider: NvidiaProvider | null = null;
+  // Workflow builder uses AiProvider.complete() (rules + structured LLM)
   let workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null = null;
-
-  const nvidiaKey = config.ai.nvidiaApiKey;
-  if (nvidiaKey) {
-    nvidiaProvider = createNvidiaProvider({
-      apiKey: nvidiaKey,
-      baseUrl: config.ai.nvidiaBaseUrl,
-      model: config.ai.model,
-    });
-  }
-
-  // Workflow builder uses the simpler AiProvider.complete() for reliability
   if (provider.id !== "none") {
     workflowBuilder = createWorkflowBuilderAgent({
       commandRegistry: commands,
@@ -208,8 +183,6 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     sessionUser,
     provider: tracedProvider,
     tracer,
-    mastra,
-    nvidiaProvider,
     workflowBuilder,
     workflows: new Map(),
   };
@@ -266,23 +239,6 @@ export async function runQuery(app: AppContext, name: string, input: unknown, re
   return executeQuery(app.queries, name, input, requestCtx(app, requestId));
 }
 
-export async function getMastraAgent(app: AppContext) {
-  const modelId = app.config.ai.model ?? "nvidia/llama-3.3-nemotron-super-49b-v1.5";
-  const model = app.nvidiaProvider
-    ? app.nvidiaProvider.model(modelId)
-    : modelId;
-
-  const { agent } = await createConversationalAgent({
-    model,
-    commandRegistry: app.commands,
-    queryRegistry: app.queries,
-    requestCtx: requestCtx(app),
-    helpers: { audit: app.audit, outbox: app.outbox },
-    autonomy: app.sessionUser.autonomy,
-  });
-  return agent;
-}
-
 export async function runChat(
   app: AppContext,
   body: { sessionId?: string; message?: string; confirmId?: string; cancelId?: string },
@@ -290,7 +246,9 @@ export async function runChat(
   await refreshSessionUser(app);
   let sessionId = body.sessionId ?? crypto.randomUUID();
 
-  // Load session from DB or create new
+  // Load session from DB or create new.
+  // Only reuse org+user sticky session when the client omits sessionId.
+  // An explicit unknown sessionId always starts a fresh conversation (isolation).
   let dbSession = await app.sessionStore.load(sessionId);
   let session: ChatSessionState;
   if (dbSession) {
@@ -299,13 +257,12 @@ export async function runChat(
       messages: dbSession.messages as ChatSessionState["messages"],
       pending: dbSession.pending,
     };
-  } else {
-    // Try loading by org+user for existing sessions
+  } else if (!body.sessionId) {
     const existing = await app.sessionStore.loadByOrgUser(
       app.sessionUser.organizationId,
       app.sessionUser.id,
     );
-    if (existing && existing.id !== sessionId) {
+    if (existing) {
       sessionId = existing.id;
       session = {
         id: existing.id,
@@ -316,9 +273,10 @@ export async function runChat(
       await app.sessionStore.create(sessionId, app.sessionUser.organizationId, app.sessionUser.id);
       session = { id: sessionId, messages: [] };
     }
+  } else {
+    await app.sessionStore.create(sessionId, app.sessionUser.organizationId, app.sessionUser.id);
+    session = { id: sessionId, messages: [] };
   }
-
-  const mastraAgent = await getMastraAgent(app);
 
   const result = await handleChatTurn(
     {
@@ -328,7 +286,6 @@ export async function runChat(
       autonomy: app.sessionUser.autonomy,
       provider: app.provider,
       allowFullAutonomous: app.config.allowFullAutonomous,
-      mastraAgent,
     },
     {
       session,
@@ -366,7 +323,11 @@ export async function buildWorkflow(
   request: string,
 ): Promise<{ workflow: WorkflowDefinition | null; error?: string }> {
   if (!app.workflowBuilder) {
-    return { workflow: null, error: "Nvidia NIM not configured. Set NVIDIA_API_KEY to enable workflow builder." };
+    return {
+      workflow: null,
+      error:
+        "AI provider not configured. Set CHASTE_AI_PROVIDER (e.g. nvidia_nim) and the matching API key to enable workflow builder.",
+    };
   }
 
   try {
@@ -388,6 +349,7 @@ export async function executeWorkflowRun(
   app: AppContext,
   workflowId: string,
   input: Record<string, unknown> = {},
+  options: { approvedStepIds?: string[] } = {},
 ) {
   const wf = app.workflows.get(workflowId);
   if (!wf) {
@@ -400,7 +362,9 @@ export async function executeWorkflowRun(
     helpers: { audit: app.audit, outbox: app.outbox },
   };
 
-  return executeDynamicWorkflow(wf, input, ctx);
+  return executeDynamicWorkflow(wf, input, ctx, {
+    approvedStepIds: options.approvedStepIds,
+  });
 }
 
 export function healthPayload(app: AppContext) {

@@ -60,7 +60,7 @@ export const appConfigSchema = z.object({
 
   ai: z.object({
     provider: aiProviderSchema.default("none"),
-    model: z.string().default("nvidia/llama-3.3-nemotron-super-49b-v1.5"),
+    model: z.string().default("meta/llama-3.1-8b-instruct"),
     /** Secret — never log. */
     apiKey: z.string().optional(),
     /** OpenAI-compatible or Ollama base URL. */
@@ -71,9 +71,9 @@ export const appConfigSchema = z.object({
     nvidiaBaseUrl: z.string().url().optional(),
   }),
 
-  mastra: z.object({
-    storageSchema: z.string().min(1).default("mastra"),
-    observabilityEnabled: z
+  /** Optional LLM tracing (Langfuse). Independent of any agent framework. */
+  observability: z.object({
+    enabled: z
       .enum(["true", "false"])
       .default("false")
       .transform((v) => v === "true"),
@@ -125,9 +125,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       nvidiaApiKey: env.NVIDIA_API_KEY,
       nvidiaBaseUrl: env.NVIDIA_BASE_URL,
     },
-    mastra: {
-      storageSchema: env.MASTRA_STORAGE_SCHEMA,
-      observabilityEnabled: env.MASTRA_OBSERVABILITY_ENABLED,
+    observability: {
+      // Prefer CHASTE_OBSERVABILITY_ENABLED; keep MASTRA_* as temporary aliases.
+      enabled: env.CHASTE_OBSERVABILITY_ENABLED ?? env.MASTRA_OBSERVABILITY_ENABLED,
       langfusePublicKey: env.LANGFUSE_PUBLIC_KEY,
       langfuseSecretKey: env.LANGFUSE_SECRET_KEY,
       langfuseBaseUrl: env.LANGFUSE_BASE_URL,
@@ -167,7 +167,7 @@ export function publicConfigView(cfg: AppConfig) {
     aiModel: cfg.ai.model,
     aiConfigured: Boolean(cfg.ai.apiKey) || cfg.ai.provider === "ollama" || Boolean(cfg.ai.nvidiaApiKey),
     bootstrapEnabled: cfg.bootstrap.enabled,
-    mastraObservability: cfg.mastra.observabilityEnabled,
+    observabilityEnabled: cfg.observability.enabled,
     nvidiaConfigured: Boolean(cfg.ai.nvidiaApiKey),
   };
 }

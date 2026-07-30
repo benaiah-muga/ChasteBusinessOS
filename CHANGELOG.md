@@ -11,11 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **AI stack**: remove Mastra; custom orchestrator + `AiProvider` + workflow engine only (see ADR 0006)
+- Config: `mastra.*` observability renamed to `observability.*` (`CHASTE_OBSERVABILITY_ENABLED`; old env alias still accepted)
 - Refresh README with current platform scope, modules, AI stack, and development workflow
 - Replace em dash punctuation in README for clearer, more consistent formatting
 
+### Removed
+
+- `@mastra/*` dependencies and Mastra agents/tools/storage wrappers
+- Mastra agent fallback path in chat orchestrator
+
 ### Added
 
+- ADR 0006: custom AI orchestration
+- ADR 0007: harness memory graph and self-development pipeline (spec decision)
+- Product specs: agent harness, semantic memory, self-development, scheduling/comms, platform module
+- Expanded VISION / ARCHITECTURE / product-architecture-next for harness, gaps, self-dev, multi-branch, proactive agents
+- Lightweight prompt-injection guardrails in orchestrator
 - `CHANGELOG.md` to track release history
 
 ## [0.1.0] - 2026-07-22
@@ -26,7 +38,7 @@ Early alpha release. Not recommended for production use.
 
 - **Foundation**: monorepo scaffold with Turborepo, TypeScript strict mode, Fastify API, Next.js web app, PostgreSQL + Drizzle, and kernel command/query bus
 - **Business modules**: CRM, Accounting, Inventory, Purchasing, Manufacturing, HR, and Platform (RBAC, settings, marketplace, autonomy)
-- **AI layer**: Mastra agents, Nvidia NIM provider support, workflow engine, domain specialists, and command/query tool wrappers
+- **AI layer**: custom orchestrator + workflow engine, Nvidia NIM via AiProvider, module specialist metadata
 - **Conversation intelligence**: multi-turn memory, clarifying questions, multi-step planning, and proactive suggestions after successful actions
 - **Infrastructure**: transactional outbox processor (`apps/worker`), persistent memory store, optional Langfuse observability
 - **Platform services**: user management commands, auth resolver, org settings, user preferences, split RBAC permissions with safety guards

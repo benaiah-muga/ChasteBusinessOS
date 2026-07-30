@@ -1,4 +1,7 @@
-import type { InputProcessor, OutputProcessor } from "@mastra/core/processors";
+/**
+ * Lightweight prompt guardrails — no agent framework dependency.
+ * Used by the orchestrator chat path to reject obvious injection attempts.
+ */
 import type { AutonomyLevel } from "@chaste/kernel";
 
 const INJECTION_PATTERNS = [
@@ -11,65 +14,15 @@ const INJECTION_PATTERNS = [
   /act\s+as\s+if\s+you\s+have\s+no\s+(?:rules|restrictions)/i,
 ];
 
-function createInjectionDetector(): InputProcessor {
-  return {
-    id: "prompt-injection-detector",
-    processInputStep: async (args) => {
-      const { messages } = args;
-      for (const msg of messages ?? []) {
-        const text = typeof msg.content === "string" ? msg.content : "";
-        for (const pattern of INJECTION_PATTERNS) {
-          if (pattern.test(text)) {
-            throw new Error(
-              `Guardrail blocked potential prompt injection in message: ${msg.id ?? "unknown"}`,
-            );
-          }
-        }
-      }
-    },
-  };
+/** Returns true if the user text looks like a prompt-injection attempt. */
+export function looksLikePromptInjection(text: string): boolean {
+  return INJECTION_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-function createModerationGuard(): InputProcessor {
-  return {
-    id: "moderation-guard",
-    processInputStep: async () => {
-      // Pass-through: moderation is checked at the API/agent level.
-      // This processor exists as a hook point for future content policies.
-    },
-  };
-}
-
-function createOutputScrubber(): OutputProcessor {
-  return {
-    id: "system-prompt-scrubber",
-    processOutputStream: async (args) => {
-      // Pass-through: this processor is a hook point for future content policies.
-      return args.part;
-    },
-  };
-}
-
-export async function getInputProcessors(autonomy: AutonomyLevel): Promise<InputProcessor[]> {
-  const processors: InputProcessor[] = [];
-
-  if (autonomy === "confirm" || autonomy === "guarded_auto" || autonomy === "full_autonomous") {
-    processors.push(createInjectionDetector());
-  }
-
-  if (autonomy === "guarded_auto" || autonomy === "full_autonomous") {
-    processors.push(createModerationGuard());
-  }
-
-  return processors;
-}
-
-export async function getOutputProcessors(autonomy: AutonomyLevel): Promise<OutputProcessor[]> {
-  const processors: OutputProcessor[] = [];
-
-  if (autonomy === "guarded_auto" || autonomy === "full_autonomous") {
-    processors.push(createOutputScrubber());
-  }
-
-  return processors;
+/**
+ * Whether input-side injection checks should run for this autonomy level.
+ * Higher autonomy = more automation = stricter input checks.
+ */
+export function shouldCheckInjection(autonomy: AutonomyLevel): boolean {
+  return autonomy === "confirm" || autonomy === "guarded_auto" || autonomy === "full_autonomous";
 }

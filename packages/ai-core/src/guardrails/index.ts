@@ -1,1 +1,1 @@
-export { getInputProcessors, getOutputProcessors } from "./processors.js";
+export { looksLikePromptInjection, shouldCheckInjection } from "./processors.js";

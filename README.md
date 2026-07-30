@@ -7,11 +7,11 @@
 
 *Every action -- AI or human -- flows through the same validated command bus, permission checks, and audit trail.*
 
-[Vision](./VISION.md) · [Architecture](./ARCHITECTURE.md) · [Contributing](./CONTRIBUTING.md) · [Agents](./AGENTS.md) · [Changelog](./CHANGELOG.md)
+[Vision](./VISION.md) · [Architecture](./ARCHITECTURE.md) · [Product roadmap](./docs/product-architecture-next.md) · [Contributing](./CONTRIBUTING.md) · [Agents](./AGENTS.md) · [Changelog](./CHANGELOG.md)
 
 ## Status
 
-**Early alpha, active development.** The platform ships a production-shaped foundation: kernel command/query bus, full web UI, seven business modules, RBAC and settings, audit trails, transactional outbox, and a conversation intelligence layer powered by Mastra agents. Not yet recommended for production workloads.
+**Early alpha, active development.** The platform ships a production-shaped foundation: kernel command/query bus, full web UI, seven business modules, RBAC and settings, audit trails, transactional outbox, and a custom conversation intelligence layer (plan → confirm → command bus). Not yet recommended for production workloads.
 
 ## What it is
 
@@ -21,15 +21,20 @@ The goal is **trustworthy automation**: AI that plans, clarifies, and suggests, 
 
 ## Highlights
 
+- **Agent harness**: models operate the business through the same tools as humans (no elevated privileges)
 - **Single command bus**: humans and AI execute the same commands with identical authz and audit coverage
 - **Installable modules**: Odoo-inspired modularity; enable only what your organization needs
 - **Conversation intelligence**: multi-turn memory, clarifying questions, multi-step plans, and proactive suggestions
 - **Domain specialists**: scoped AI agents (CRM, Accounting, Inventory, …) over module tool registries, not private backends
+- **Capability gaps → self-dev path** (roadmap): honest tickets, optional coding-agent handoff, marketplace/extensions instead of core bloat
+- **Semantic memory** (roadmap): jcode-inspired embeddings, passive recall, extraction, consolidation
 - **Configurable autonomy**: recommend → confirm → guarded auto → full autonomous (with explicit warnings)
 - **HTTP-first clients**: the web app consumes REST APIs only; no kernel or DB imports in the browser
 - **Explainable AI actions**: every assisted path can record what happened, why, and which rules applied
 - **Zod-validated boundaries**: intents, commands, settings, and generative chat UI parts
 - **Observable stack**: optional Langfuse tracing for LLM calls; transactional outbox for domain events
+
+Roadmap detail: [docs/product-architecture-next.md](./docs/product-architecture-next.md) · specs under [docs/specs/](./docs/specs/).
 
 ## Business modules
 
@@ -62,7 +67,7 @@ The Next.js UI provides operational screens alongside the AI chat surface:
 | Layer | Technology | Role |
 |---|---|---|
 | Orchestrator | `@chaste/ai-core` | Intent resolution, autonomy gates, confirm/cancel flows |
-| Agents | [Mastra](https://mastra.ai) | Conversational agent, supervisor routing, domain specialists |
+| AI layer | Custom `@chaste/ai-core` | Orchestrator, workflow engine, AiProvider, autonomy + explainability |
 | Tools | Command/query wrappers | AI never calls SQL directly; only registered bus operations |
 | Workflows | Workflow engine | Multi-step business automation with step validation |
 | Memory | PostgreSQL + pgvector | Persistent chat sessions and long-term org memory |
@@ -82,7 +87,7 @@ apps/
 packages/
   kernel/         Command/query bus, authz, audit, module registry
   db/             Drizzle schema, migrations, settings schemas
-  ai-core/        Orchestrator, Mastra agents, workflows, memory, guardrails
+  ai-core/        Orchestrator, workflows, providers, memory, guardrails
   api-client/     Typed HTTP client and DTOs for frontends
   ui-schema/      Generative chat UI part schemas (Zod)
   config/         Typed environment configuration

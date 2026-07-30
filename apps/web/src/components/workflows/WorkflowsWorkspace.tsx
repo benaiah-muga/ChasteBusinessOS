@@ -48,6 +48,8 @@ export function WorkflowsWorkspace({ initialWorkflows }: { initialWorkflows: Wor
   );
   const [runInput, setRunInput] = useState("{}");
   const [lastRun, setLastRun] = useState<RunResult | null>(null);
+  /** Accumulated approval gates so resume continues past all approved steps. */
+  const [approvedStepIds, setApprovedStepIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -101,8 +103,9 @@ export function WorkflowsWorkspace({ initialWorkflows }: { initialWorkflows: Wor
     }
   }
 
-  async function runSelected() {
-    if (!selectedId) return;
+  async function runSelected(workflowId?: string, extraApproved: string[] = []) {
+    const id = workflowId ?? selectedId;
+    if (!id) return;
     setBusy(true);
     setMsg(null);
     setLastRun(null);
@@ -114,16 +117,32 @@ export function WorkflowsWorkspace({ initialWorkflows }: { initialWorkflows: Wor
       setBusy(false);
       return;
     }
+    const approved = [...new Set([...approvedStepIds, ...extraApproved])];
     try {
-      const res = await getApiClient().runWorkflow(selectedId, input);
-      setLastRun(res as RunResult);
-      setMsg(res.status === "completed" || (res as RunResult).success ? "Run completed" : "Run finished with status");
+      const res = await getApiClient().runWorkflow(id, input, { approvedStepIds: approved });
+      const run = res as RunResult;
+      setLastRun(run);
+      if (run.pendingApproval?.stepId) {
+        setApprovedStepIds(approved);
+        setMsg(`Paused for approval on step ${run.pendingApproval.stepId}`);
+      } else if (run.success === false) {
+        setMsg(run.error ?? "Run finished with issues");
+      } else {
+        setApprovedStepIds([]);
+        setMsg("Run completed");
+      }
       setTab("runs");
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Failed to execute workflow");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function approveAndContinue() {
+    const stepId = lastRun?.pendingApproval?.stepId;
+    if (!stepId || !selectedId) return;
+    await runSelected(selectedId, [stepId]);
   }
 
   // seed a deterministic sample workflow without AI when empty
@@ -289,9 +308,8 @@ export function WorkflowsWorkspace({ initialWorkflows }: { initialWorkflows: Wor
                       type="button"
                       disabled={busy}
                       onClick={async () => {
-                        setSelectedId(workflow.id);
                         await loadDetail(workflow.id);
-                        await runSelected();
+                        await runSelected(workflow.id);
                       }}
                     >
                       <Play size={15} />
@@ -379,7 +397,7 @@ export function WorkflowsWorkspace({ initialWorkflows }: { initialWorkflows: Wor
                 style={{ minHeight: 120, padding: 12, fontFamily: "var(--mono)", fontSize: "0.85rem" }}
               />
             </label>
-            <button className="btn" type="button" disabled={busy} onClick={runSelected}>
+            <button className="btn" type="button" disabled={busy} onClick={() => void runSelected()}>
               {busy ? <Loader2 size={15} /> : <Play size={15} />}
               Execute workflow
             </button>
@@ -408,11 +426,20 @@ export function WorkflowsWorkspace({ initialWorkflows }: { initialWorkflows: Wor
                 </span>
                 {lastRun.runId ? <span className="muted">Run {lastRun.runId}</span> : null}
               </div>
-              {lastRun.error ? <p className="error">{lastRun.error}</p> : null}
+              {lastRun.error && !lastRun.pendingApproval ? <p className="error">{lastRun.error}</p> : null}
               {lastRun.pendingApproval ? (
-                <p className="muted">
-                  Pending approval on step {lastRun.pendingApproval.stepId}: {lastRun.pendingApproval.description}
-                </p>
+                <div className="stack" style={{ gap: 8 }}>
+                  <p className="muted">
+                    Pending approval on step <strong>{lastRun.pendingApproval.stepId}</strong>
+                    {lastRun.pendingApproval.description
+                      ? `: ${lastRun.pendingApproval.description}`
+                      : ""}
+                  </p>
+                  <button className="btn" type="button" disabled={busy} onClick={() => void approveAndContinue()}>
+                    {busy ? <Loader2 size={15} className="spin" /> : <CheckCircle2 size={15} />}
+                    Approve &amp; continue
+                  </button>
+                </div>
               ) : null}
               <div className="table-wrap">
                 <table className="table">

@@ -1,5 +1,15 @@
 # Implementation Plan: AI-Native Intelligence Layer
 
+> **Superseding product direction (2026-07-30):** broader harness, jcode-inspired
+> semantic memory graph, capability-gap self-dev, and scheduling/comms are specified in
+> [product-architecture-next.md](./product-architecture-next.md),
+> [specs/agent-harness.md](./specs/agent-harness.md),
+> [specs/memory-system.md](./specs/memory-system.md),
+> and [ADR 0007](./adr/0007-harness-memory-and-self-dev.md).
+> This file remains a useful implementation checklist for the **conversation
+> intelligence foundation** (multi-turn session memory, clarify, plan, suggestions)
+> already largely landed in `@chaste/ai-core`.
+
 ## Goal
 Make ChasteBusinessOS truly intelligent -- natural language in, business actions out, with memory, clarification, multi-step planning, and proactive suggestions.
 

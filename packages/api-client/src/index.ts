@@ -432,19 +432,32 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         (d) => d as { id: string },
       );
     },
-    runWorkflow(id: string, input: Record<string, unknown>) {
+    runWorkflow(
+      id: string,
+      input: Record<string, unknown> = {},
+      options: { approvedStepIds?: string[]; approveStepId?: string } = {},
+    ) {
       return request(
         `/api/v1/workflows/${encodeURIComponent(id)}/execute`,
-        { method: "POST", body: JSON.stringify({ input }) },
-        (d) => d as {
-          runId?: string;
-          status: string;
-          steps?: unknown[];
-          pendingApproval?: { stepId: string; command?: string; input?: unknown };
-          results?: unknown[];
-          startedAt?: string;
-          finishedAt?: string;
+        {
+          method: "POST",
+          body: JSON.stringify({
+            input,
+            approvedStepIds: options.approvedStepIds,
+            approveStepId: options.approveStepId,
+          }),
         },
+        (d) =>
+          d as {
+            success?: boolean;
+            runId?: string;
+            status?: string;
+            stepResults?: { stepId: string; status: string; error?: string; output?: unknown }[];
+            steps?: unknown[];
+            error?: string;
+            pendingApproval?: { stepId: string; description?: string; approveBy?: string };
+            output?: Record<string, unknown>;
+          },
       );
     },
     chat(body: {

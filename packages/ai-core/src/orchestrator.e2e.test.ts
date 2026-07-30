@@ -25,7 +25,15 @@ import {
 } from "@chaste/kernel";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { handleChatTurn, planFromText, type ChatSessionState, type OrchestratorDeps } from "./orchestrator.js";
+import {
+  handleChatTurn,
+  planFromText,
+  planManyFromText,
+  resolvePlanStepInput,
+  wireSequentialPlanInputs,
+  type ChatSessionState,
+  type OrchestratorDeps,
+} from "./orchestrator.js";
 import { generateSuggestions } from "./suggestions.js";
 import { InMemoryMemoryStore } from "./memory.js";
 import type { AiProvider, CompletionResult } from "./providers.js";
@@ -106,9 +114,20 @@ function registerTestCommands(commands: CommandRegistry) {
         number: z.string().min(1),
         total: z.number().default(0),
         currency: z.string().default("USD"),
+        customerId: z.string().optional(),
       }),
-      output: z.object({ id: z.string(), number: z.string(), total: z.number() }),
-      handler: async (input) => ({ id: "inv-1", number: input.number, total: input.total }),
+      output: z.object({
+        id: z.string(),
+        number: z.string(),
+        total: z.number(),
+        customerId: z.string().optional(),
+      }),
+      handler: async (input) => ({
+        id: "inv-1",
+        number: input.number,
+        total: input.total,
+        customerId: input.customerId,
+      }),
     }),
   );
   commands.register(
@@ -270,6 +289,61 @@ describe("planFromText", () => {
       command: "crm.customer.create",
       input: { name: "Test Corp", city: "Lagos" },
     });
+  });
+});
+
+describe("planManyFromText", () => {
+  it("parses compound create customer and invoice", () => {
+    const plans = planManyFromText(
+      "Create customer Acme Ltd in Nairobi and create invoice INV-200 for 100.00 USD",
+    );
+    expect(plans).toHaveLength(2);
+    expect(plans[0]).toMatchObject({
+      command: "crm.customer.create",
+      input: { name: "Acme Ltd", city: "Nairobi" },
+    });
+    expect(plans[1]).toMatchObject({
+      command: "acc.invoice.create",
+      input: { number: "INV-200", total: 100, currency: "USD" },
+    });
+    // Cross-step wiring for customerId
+    expect(plans[1]!.input.customerId).toBe("${step1.id}");
+  });
+
+  it("returns single plan for simple requests", () => {
+    expect(planManyFromText("Create customer Solo Co")).toHaveLength(1);
+  });
+});
+
+describe("resolvePlanStepInput", () => {
+  it("resolves step templates and auto-wires customerId", () => {
+    const resolved = resolvePlanStepInput(
+      "acc.invoice.create",
+      { number: "INV-1", total: 50, customerId: "${step1.id}" },
+      [{ command: "crm.customer.create", data: { id: "cust-99", name: "Acme" } }],
+      1,
+    );
+    expect(resolved).toMatchObject({ number: "INV-1", total: 50, customerId: "cust-99" });
+  });
+
+  it("auto-wires customerId when template missing", () => {
+    const resolved = resolvePlanStepInput(
+      "acc.invoice.create",
+      { number: "INV-2", total: 10 },
+      [{ command: "crm.customer.create", data: { id: "cust-auto" } }],
+      1,
+    );
+    expect(resolved.customerId).toBe("cust-auto");
+  });
+});
+
+describe("wireSequentialPlanInputs", () => {
+  it("injects customerId template after customer create", () => {
+    const wired = wireSequentialPlanInputs([
+      { command: "crm.customer.create", input: { name: "A" }, summary: "c" },
+      { command: "acc.invoice.create", input: { number: "I", total: 1 }, summary: "i" },
+    ]);
+    expect(wired[1]!.input.customerId).toBe("${step1.id}");
   });
 });
 
@@ -701,7 +775,19 @@ describe("handleChatTurn — LLM integration", () => {
     expect(result.session.pending!.input).toMatchObject({ name: "LLM Corp" });
   });
 
-  it("LLM plan response emits multi-step plan", async () => {
+  it("rule-based multi-step request creates pending multi plan", async () => {
+    const deps = makeDeps({ autonomy: "confirm" });
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer MultiCo in Kisumu and create invoice INV-M1 for 200.00 USD",
+      ctx: makeCtx(),
+    });
+    expect(result.session.pending?.plan).toHaveLength(2);
+    expect(result.session.pending!.plan![0]!.command).toBe("crm.customer.create");
+    expect(result.session.pending!.plan![1]!.command).toBe("acc.invoice.create");
+  });
+
+  it("LLM plan response emits multi-step plan with confirm-all", async () => {
     const deps = makeDeps();
     const provider = new MockProvider(
       JSON.stringify({
@@ -721,11 +807,50 @@ describe("handleChatTurn — LLM integration", () => {
       },
     );
 
-    expect(result.session.pending).toBeUndefined();
+    // Under autonomy=confirm, multi-step plans wait for a single confirm-all
+    expect(result.session.pending).toBeDefined();
+    expect(result.session.pending!.plan).toHaveLength(2);
+    expect(result.session.pending!.plan![1]!.input).toMatchObject({
+      customerId: "${step1.id}",
+    });
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
     const planPart = lastMsg.parts.find((p) => p.type === "plan") as { type: "plan"; steps: unknown[] } | undefined;
     expect(planPart).toBeDefined();
     expect(planPart!.steps).toHaveLength(2);
+    const confirmPart = lastMsg.parts.find((p) => p.type === "confirm_action") as
+      | { type: "confirm_action"; confirmLabel: string }
+      | undefined;
+    expect(confirmPart?.confirmLabel).toBe("Confirm all");
+  });
+
+  it("confirm-all executes multi-step plan with cross-step wiring", async () => {
+    const deps = makeDeps({ autonomy: "confirm" });
+    const planned = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer WireCo and create invoice INV-WIRE for 75.00 USD",
+      ctx: makeCtx(),
+    });
+
+    expect(planned.session.pending?.plan).toHaveLength(2);
+    const confirmed = await handleChatTurn(deps, {
+      session: planned.session,
+      confirmId: planned.session.pending!.id,
+      ctx: makeCtx(),
+    });
+
+    expect(confirmed.session.pending).toBeUndefined();
+    const done = confirmed.session.messages[confirmed.session.messages.length - 1]!;
+    // last message may be suggestions; find the Done message
+    const doneMsg = [...confirmed.session.messages].reverse().find((m) =>
+      m.parts.some((p) => p.type === "text" && "text" in p && String(p.text).includes("Executed 2 steps")),
+    );
+    expect(doneMsg).toBeDefined();
+    const table = doneMsg!.parts.find((p) => p.type === "table") as
+      | { type: "table"; rows: { command: string; result: string }[] }
+      | undefined;
+    expect(table?.rows).toHaveLength(2);
+    expect(table!.rows[1]!.result).toContain("cust-1");
+    void done;
   });
 
   it("LLM error falls through to help text", async () => {

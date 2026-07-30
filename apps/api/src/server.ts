@@ -277,12 +277,22 @@ export async function buildServer(appCtx?: AppContext) {
 
   server.post("/api/v1/workflows/:id/execute", async (req) => {
     const { id } = req.params as { id: string };
-    const body = req.body ?? {};
-    const input =
-      typeof body === "object" && body !== null && "input" in body
-        ? ((body as { input?: Record<string, unknown> }).input ?? {})
-        : (body as Record<string, unknown>);
-    return executeWorkflowRun(app, id, input);
+    const body = z
+      .object({
+        input: z.record(z.unknown()).optional(),
+        approvedStepIds: z.array(z.string()).optional(),
+        /** Convenience: approve a single pending gate then continue. */
+        approveStepId: z.string().optional(),
+      })
+      .passthrough()
+      .parse(req.body ?? {});
+
+    const input = body.input ?? {};
+    const approvedStepIds = [
+      ...(body.approvedStepIds ?? []),
+      ...(body.approveStepId ? [body.approveStepId] : []),
+    ];
+    return executeWorkflowRun(app, id, input, { approvedStepIds });
   });
 
   server.get("/api/v1/audit", async () => {

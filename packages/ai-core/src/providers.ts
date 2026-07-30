@@ -30,6 +30,12 @@ export interface AiProvider {
   complete(req: CompletionRequest): Promise<CompletionResult>;
 }
 
+/**
+ * Hard wall on single-turn completions (chat clarification, workflow builder).
+ * Remote NIM models can stall; without this the workspace hangs indefinitely.
+ */
+const AI_TIMEOUT_MS = 30_000;
+
 export class NoneProvider implements AiProvider {
   readonly id = "none";
   async complete(): Promise<CompletionResult> {
@@ -55,18 +61,32 @@ export class OpenAiCompatibleProvider implements AiProvider {
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
     const apiMessages = buildApiMessages(req);
-    const res = await fetch(`${this.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        temperature: req.temperature ?? 0,
-        messages: apiMessages,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.model,
+          temperature: req.temperature ?? 0,
+          messages: apiMessages,
+          max_tokens: 1024,
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new Error(`AI provider timed out after ${AI_TIMEOUT_MS}ms`);
+      }
+      throw err;
+    }
+    clearTimeout(timeout);
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`AI provider error ${res.status}: ${body.slice(0, 200)}`);
@@ -100,15 +120,29 @@ export class OllamaProvider implements AiProvider {
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
     const apiMessages = buildApiMessages(req);
-    const res = await fetch(`${this.baseUrl.replace(/\/$/, "")}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: this.model,
-        stream: false,
-        messages: apiMessages,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl.replace(/\/$/, "")}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: this.model,
+          stream: false,
+          messages: apiMessages,
+          options: { num_predict: 1024 },
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new Error(`Ollama timed out after ${AI_TIMEOUT_MS}ms`);
+      }
+      throw err;
+    }
+    clearTimeout(timeout);
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`Ollama error ${res.status}: ${body.slice(0, 200)}`);
