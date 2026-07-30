@@ -1,8 +1,13 @@
 import { buildServer } from "./server.js";
 
-const port = Number(process.env.PORT ?? 3001);
-const host = process.env.HOST ?? "0.0.0.0";
-
-const { server } = await buildServer();
-await server.listen({ port, host });
-server.log.info(`ChasteBusinessOS API listening on http://${host}:${port}`);
+const { server, app } = await buildServer();
+await server.listen({ port: app.config.port, host: app.config.host });
+server.log.info(
+  {
+    port: app.config.port,
+    region: app.config.region,
+    aiProvider: app.provider.id,
+    org: app.sessionUser.orgName,
+  },
+  "ChasteBusinessOS API ready",
+);

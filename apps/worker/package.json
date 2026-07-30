@@ -11,7 +11,10 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@chaste/config": "workspace:*",
+    "@chaste/db": "workspace:*"
+  },
   "devDependencies": {
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

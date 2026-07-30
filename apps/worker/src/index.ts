@@ -1,23 +1,54 @@
 /**
- * Outbox / job worker stub.
- * Foundation: logs heartbeat. Later: drain outbox_events, BullMQ, LangGraph runners.
+ * Outbox worker — drains unprocessed domain events.
+ * Secrets via env (DATABASE_URL); no elevated business privileges.
  */
-const intervalMs = Number(process.env.WORKER_HEARTBEAT_MS ?? 30_000);
+import { loadConfig } from "@chaste/config";
+import { createDb, PostgresOutboxWriter } from "@chaste/db";
 
-console.log(
-  JSON.stringify({
-    service: "chaste-worker",
-    status: "starting",
-    note: "Outbox consumer not yet wired — API uses in-process outbox for demo",
-  }),
-);
+async function main() {
+  const cfg = loadConfig();
+  const db = createDb(cfg.databaseUrl);
+  const outbox = new PostgresOutboxWriter(db);
+  const intervalMs = Number(process.env.WORKER_POLL_MS ?? 5_000);
 
-setInterval(() => {
   console.log(
     JSON.stringify({
       service: "chaste-worker",
-      status: "heartbeat",
-      at: new Date().toISOString(),
+      status: "starting",
+      region: cfg.region,
+      pollMs: intervalMs,
     }),
   );
-}, intervalMs);
+
+  async function tick() {
+    const batch = await outbox.listUnprocessed(50);
+    for (const event of batch) {
+      // Future: route by event.type to module handlers / webhooks
+      console.log(
+        JSON.stringify({
+          service: "chaste-worker",
+          action: "process_outbox",
+          type: event.type,
+          id: event.id,
+          organizationId: event.organizationId,
+        }),
+      );
+      await outbox.markProcessed(event.id);
+    }
+  }
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      await tick();
+    } catch (err) {
+      console.error(JSON.stringify({ service: "chaste-worker", error: String(err) }));
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

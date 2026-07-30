@@ -1,6 +1,5 @@
 /**
- * Lightweight SQL bootstrap for foundation.
- * Expand to drizzle-kit migrations as modules grow.
+ * Idempotent SQL migrations for the platform SoR.
  */
 import postgres from "postgres";
 
@@ -11,17 +10,50 @@ CREATE TABLE IF NOT EXISTS organizations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   autonomy text NOT NULL DEFAULT 'confirm',
+  full_autonomous_ack_at timestamptz,
+  region text NOT NULL DEFAULT 'local',
+  settings jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS full_autonomous_ack_at timestamptz;
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS region text NOT NULL DEFAULT 'local';
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL REFERENCES organizations(id),
   email text NOT NULL,
   display_name text NOT NULL,
-  permissions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+CREATE UNIQUE INDEX IF NOT EXISTS users_org_email_uidx ON users(organization_id, email);
+
+CREATE TABLE IF NOT EXISTS roles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL REFERENCES organizations(id),
+  key text NOT NULL,
+  name text NOT NULL,
+  description text,
+  is_system boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS roles_org_key_uidx ON roles(organization_id, key);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  role_id uuid NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  permission text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS role_perm_uidx ON role_permissions(role_id, permission);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id uuid NOT NULL REFERENCES roles(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS user_roles_uidx ON user_roles(user_id, role_id);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -57,7 +89,23 @@ CREATE TABLE IF NOT EXISTS module_installs (
   organization_id uuid NOT NULL,
   module_id text NOT NULL,
   version text NOT NULL,
+  enabled boolean NOT NULL DEFAULT true,
   installed_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE module_installs ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
+CREATE UNIQUE INDEX IF NOT EXISTS module_installs_uidx ON module_installs(organization_id, module_id);
+
+CREATE TABLE IF NOT EXISTS marketplace_listings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  module_id text NOT NULL UNIQUE,
+  name text NOT NULL,
+  version text NOT NULL,
+  summary text NOT NULL,
+  category text NOT NULL,
+  publisher text NOT NULL DEFAULT 'chaste',
+  regions jsonb NOT NULL DEFAULT '["*"]'::jsonb,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -101,9 +149,165 @@ CREATE TABLE IF NOT EXISTS crm_customers (
   name text NOT NULL,
   email text,
   city text,
+  country text,
+  status text NOT NULL DEFAULT 'active',
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS crm_customers_org_idx ON crm_customers(organization_id);
+
+CREATE TABLE IF NOT EXISTS acc_accounts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  code text NOT NULL,
+  name text NOT NULL,
+  type text NOT NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS acc_accounts_code_uidx ON acc_accounts(organization_id, code);
+
+CREATE TABLE IF NOT EXISTS acc_journal_entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  reference text NOT NULL,
+  memo text,
+  status text NOT NULL DEFAULT 'posted',
+  entry_date timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS acc_journal_lines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  entry_id uuid NOT NULL REFERENCES acc_journal_entries(id) ON DELETE CASCADE,
+  account_id uuid NOT NULL REFERENCES acc_accounts(id),
+  debit numeric(18,2) NOT NULL DEFAULT 0,
+  credit numeric(18,2) NOT NULL DEFAULT 0,
+  memo text
+);
+
+CREATE TABLE IF NOT EXISTS acc_invoices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  customer_id uuid,
+  number text NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  currency text NOT NULL DEFAULT 'USD',
+  total numeric(18,2) NOT NULL DEFAULT 0,
+  issued_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS inv_warehouses (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  code text NOT NULL,
+  name text NOT NULL,
+  city text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS inv_wh_code_uidx ON inv_warehouses(organization_id, code);
+
+CREATE TABLE IF NOT EXISTS inv_products (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  sku text NOT NULL,
+  name text NOT NULL,
+  uom text NOT NULL DEFAULT 'ea',
+  reorder_level integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS inv_products_sku_uidx ON inv_products(organization_id, sku);
+
+CREATE TABLE IF NOT EXISTS inv_stock_levels (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  warehouse_id uuid NOT NULL REFERENCES inv_warehouses(id),
+  product_id uuid NOT NULL REFERENCES inv_products(id),
+  quantity integer NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS inv_stock_uidx ON inv_stock_levels(warehouse_id, product_id);
+
+CREATE TABLE IF NOT EXISTS inv_stock_moves (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  warehouse_id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  quantity integer NOT NULL,
+  reason text NOT NULL,
+  reference text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS pur_vendors (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  name text NOT NULL,
+  email text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pur_vendors_org_idx ON pur_vendors(organization_id);
+
+CREATE TABLE IF NOT EXISTS pur_purchase_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  vendor_id uuid NOT NULL REFERENCES pur_vendors(id),
+  number text NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  total numeric(18,2) NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS hr_employees (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  employee_number text NOT NULL,
+  full_name text NOT NULL,
+  email text,
+  department text,
+  job_title text,
+  status text NOT NULL DEFAULT 'active',
+  base_salary numeric(18,2) NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS hr_emp_num_uidx ON hr_employees(organization_id, employee_number);
+
+CREATE TABLE IF NOT EXISTS hr_payroll_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  period_label text NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  total_gross numeric(18,2) NOT NULL DEFAULT 0,
+  employee_count integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS mfg_boms (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  product_id uuid NOT NULL,
+  name text NOT NULL,
+  quantity integer NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS mfg_boms_org_idx ON mfg_boms(organization_id);
+
+CREATE TABLE IF NOT EXISTS mfg_bom_lines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bom_id uuid NOT NULL REFERENCES mfg_boms(id) ON DELETE CASCADE,
+  component_product_id uuid NOT NULL,
+  quantity integer NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS mfg_work_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  bom_id uuid NOT NULL,
+  number text NOT NULL,
+  quantity integer NOT NULL DEFAULT 1,
+  status text NOT NULL DEFAULT 'planned',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 async function main() {
@@ -115,7 +319,7 @@ async function main() {
   const client = postgres(url, { max: 1 });
   try {
     await client.unsafe(sql);
-    console.log("Migrations applied.");
+    console.log("Migrations applied successfully.");
   } finally {
     await client.end({ timeout: 5 });
   }
