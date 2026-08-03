@@ -42,7 +42,15 @@ export const customerListSchema = z.object({
   items: z.array(customerSchema),
 });
 
-export const sessionSchema = z.object({
+export type CatalogItem = {
+  id: string;
+  moduleId: string;
+  capabilityId: string;
+  name: string;
+  description: string;
+  keywords: string[];
+  implemented: boolean;
+};export const sessionSchema = z.object({
   userId: z.string(),
   organizationId: z.string(),
   email: z.string(),
@@ -521,6 +529,192 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
           stepCount: number;
         }[];
       });
+    },
+    listBranches() {
+      return request("/api/v1/branches", { method: "GET" }, (d) => d as {
+        branches: {
+          id: string;
+          name: string;
+          code: string;
+          timezone: string | null;
+          active: boolean;
+          isActiveBranch: boolean;
+          grantType: "all" | "explicit";
+        }[];
+      });
+    },
+    createBranch(input: { name: string; code: string; timezone?: string; parentBranchId?: string }) {
+      return request(
+        "/api/v1/branches",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => d as { id: string; name: string; code: string },
+      );
+    },
+    setActiveBranch(input: { branchId: string }) {
+      return request(
+        "/api/v1/branches/switch",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => d as { activeBranchId: string },
+      );
+    },
+    listNotifications(unreadOnly = false) {
+      return request(
+        `/api/v1/notifications${unreadOnly ? "?unreadOnly=true" : ""}`,
+        { method: "GET" },
+        (d) => d as {
+          notifications: {
+            id: string;
+            kind: string;
+            title: string;
+            body: string | null;
+            href: string | null;
+            resourceType: string | null;
+            resourceId: string | null;
+            read: boolean;
+            createdAt: string;
+          }[];
+        },
+      );
+    },
+    markNotificationRead(notificationId: string) {
+      return request(
+        `/api/v1/notifications/${encodeURIComponent(notificationId)}/read`,
+        { method: "POST" },
+        (d) => d as { ok: boolean },
+      );
+    },
+    markAllNotificationsRead() {
+      return request(
+        "/api/v1/notifications/read-all",
+        { method: "POST" },
+        (d) => d as { ok: boolean },
+      );
+    },
+    listReminders(status?: string) {
+      return request(
+        `/api/v1/reminders${status ? `?status=${status}` : ""}`,
+        { method: "GET" },
+        (d) => d as any,
+      );
+    },
+    createReminder(input: {
+      title: string;
+      body?: string;
+      fireAt: string;
+      channel?: "in_app" | "email" | "both";
+      branchId?: string;
+    }) {
+      return request("/api/v1/reminders", { method: "POST", body: JSON.stringify(input) }, (d) => d as any);
+    },
+    cancelReminder(reminderId: string) {
+      return request(
+        `/api/v1/reminders/${encodeURIComponent(reminderId)}/cancel`,
+        { method: "POST" },
+        (d) => d as { cancelled: boolean },
+      );
+    },
+    listCalendarEvents(input: { from?: string; to?: string; branchId?: string } = {}) {
+      const qs = new URLSearchParams(
+        Object.entries(input).filter(([, v]) => v !== undefined) as [string, string][],
+      ).toString();
+      return request(
+        `/api/v1/calendar${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+        (d) => d as any,
+      );
+    },
+    createCalendarEvent(input: {
+      title: string;
+      startsAt: string;
+      endsAt: string;
+      timezone?: string;
+      description?: string;
+      branchId?: string;
+      attendees?: string[];
+    }) {
+      return request("/api/v1/calendar/events", { method: "POST", body: JSON.stringify(input) }, (d) => d as any);
+    },
+    cancelCalendarEvent(eventId: string) {
+      return request(
+        `/api/v1/calendar/events/${encodeURIComponent(eventId)}/cancel`,
+        { method: "POST" },
+        (d) => d as { cancelled: boolean },
+      );
+    },
+    listCapabilityGaps(status?: string) {
+      return request(
+        "/api/v1/queries/core.capability.gap.list",
+        { method: "POST", body: JSON.stringify({ input: status ? { status } : {} }) },
+        (d) => d as {
+          tickets: {
+            id: string;
+            organizationId: string;
+            status: string;
+            proposedCapabilityId: string;
+            title: string;
+            abstractRequirement: string;
+            suggestedModuleId: string | null;
+            deploymentTarget: string;
+            codingAgent: string | null;
+            artifactRef: string | null;
+            createdAt: string;
+          }[];
+        },
+      );
+    },
+    createCapabilityGap(input: {
+      proposedCapabilityId: string;
+      title: string;
+      abstractRequirement: string;
+      acceptanceCriteria?: string[];
+      exampleScenarios?: string[];
+      nonGoals?: string[];
+      deploymentTarget?: string;
+    }) {
+      return request(
+        "/api/v1/commands/core.capability.gap.create",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    confirmCapabilityGap(input: { ticketId: string; suggestedModuleId?: string; deploymentTarget?: string }) {
+      return request(
+        "/api/v1/commands/core.capability.gap.confirm",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    listCapabilityCatalog(moduleId?: string) {
+      return request(
+        "/api/v1/queries/core.capability.catalog.list",
+        { method: "POST", body: JSON.stringify({ input: moduleId ? { moduleId } : {} }) },
+        (d) => d as { items: CatalogItem[] },
+      );
+    },
+    searchCapabilityCatalog(input: { query: string; moduleId?: string }) {
+      return request(
+        "/api/v1/queries/core.capability.catalog.search",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { items: CatalogItem[] },
+      );
+    },
+    recommendCapability(input: {
+      abstractRequirement: string;
+      acceptanceCriteria?: string[];
+      exampleScenarios?: string[];
+      suggestedModuleId?: string;
+    }) {
+      return request(
+        "/api/v1/queries/core.capability.gap.recommend",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) =>
+          d as {
+            deploymentTarget: string;
+            suggestedModuleId: string | null;
+            rationale: string[];
+            signals: string[];
+          },
+      );
     },
   };
 }

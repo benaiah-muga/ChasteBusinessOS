@@ -4,18 +4,23 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Bell,
   Bot,
   Boxes,
   BriefcaseBusiness,
   Building2,
+  CalendarDays,
   Check,
   ChevronDown,
   CircleDollarSign,
   ClipboardList,
   Factory,
+  GitBranch,
   HeartPulse,
   Home,
+  Inbox,
   KeyRound,
+  Lightbulb,
   Menu,
   Moon,
   Package,
@@ -31,6 +36,7 @@ import {
 } from "lucide-react";
 import { ChatWidget } from "@/components/ChatWidget";
 import { getApiClient } from "@/lib/api";
+import { BranchSwitcher } from "@/components/BranchSwitcher";
 import { filterNavByInstalled, type ModuleNavItem } from "@/lib/module-registry";
 
 type StoredTheme = "light" | "dark" | "system";
@@ -51,6 +57,11 @@ const ACCENTS: { value: Accent; label: string; swatch: string }[] = [
 const NAV_ICONS: Record<string, LucideIcon> = {
   "/": Home,
   "/workflows": Workflow,
+  "/calendar": CalendarDays,
+  "/reminders": Bell,
+  "/notifications": Inbox,
+  "/gaps": Lightbulb,
+  "/branches": GitBranch,
   "/crm": Users,
   "/accounting": CircleDollarSign,
   "/inventory": Package,
@@ -100,6 +111,7 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
     email: string;
     autonomy: string;
     region?: string;
+    permissions?: string[];
   } | null>(null);
 
   const appliedTheme: AppliedTheme = appliedThemeFromStored(storedTheme);
@@ -318,10 +330,11 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
               {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}
             </div>
             <div className="topbar-actions">
-              <div className="status-pill">
-                <Building2 size={15} />
-                <span>{session?.orgName ?? session?.email ?? "Local workspace"}</span>
-              </div>
+              <BranchSwitcher
+                canRead={session?.permissions?.includes("core.branch.read") ?? false}
+                orgName={session?.orgName}
+                autonomy={autonomyLabel}
+              />
               <div className="status-pill autonomy">
                 <Bot size={15} />
                 <span>{autonomyLabel}</span>
