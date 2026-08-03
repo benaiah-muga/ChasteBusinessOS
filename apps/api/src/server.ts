@@ -268,6 +268,48 @@ export async function buildServer(appCtx?: AppContext) {
     return (await runCommand(app, "core.followup.cancel", { followUpId: id }, req.id)).data;
   });
 
+  // Calendar (spec: scheduling-and-comms §2.1)
+  server.get("/api/v1/calendar", async (req) => {
+    const { from, to, branchId } = req.query as { from?: string; to?: string; branchId?: string };
+    return (await runQuery(app, "core.calendar.list", { from, to, branchId }, req.id)).data;
+  });
+  server.post("/api/v1/calendar/events", async (req) => {
+    const input = z
+      .object({
+        title: z.string().min(1),
+        startsAt: z.string(),
+        endsAt: z.string(),
+        timezone: z.string().default("UTC"),
+        description: z.string().optional(),
+        calendarId: z.string().uuid().optional(),
+        branchId: z.string().uuid().optional(),
+        attendees: z.array(z.string()).optional(),
+        linkedResources: z.array(z.object({ type: z.string(), id: z.string() })).optional(),
+      })
+      .parse(req.body);
+    return (await runCommand(app, "core.calendar.event.create", input, req.id)).data;
+  });
+  server.patch("/api/v1/calendar/events/:id", async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        title: z.string().min(1).optional(),
+        description: z.string().nullable().optional(),
+        startsAt: z.string().optional(),
+        endsAt: z.string().optional(),
+        timezone: z.string().optional(),
+        branchId: z.string().uuid().nullable().optional(),
+        attendees: z.array(z.string()).optional(),
+        linkedResources: z.array(z.object({ type: z.string(), id: z.string() })).optional(),
+      })
+      .parse(req.body);
+    return (await runCommand(app, "core.calendar.event.update", { eventId: id, ...body }, req.id)).data;
+  });
+  server.post("/api/v1/calendar/events/:id/cancel", async (req) => {
+    const { id } = req.params as { id: string };
+    return (await runCommand(app, "core.calendar.event.cancel", { eventId: id }, req.id)).data;
+  });
+
   server.post("/api/v1/autonomy", async (req) => {
     const input = z
       .object({

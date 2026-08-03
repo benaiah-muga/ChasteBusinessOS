@@ -575,6 +575,41 @@ CREATE INDEX IF NOT EXISTS follow_ups_due_idx ON follow_ups(status, fire_at);
 CREATE INDEX IF NOT EXISTS follow_ups_user_idx ON follow_ups(user_id);
 CREATE INDEX IF NOT EXISTS follow_ups_org_idx ON follow_ups(organization_id);
 
+-- C3 -- calendars and shared calendar events (scheduling-and-comms.md §2.1)
+CREATE TABLE IF NOT EXISTS calendars (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  scope text NOT NULL DEFAULT 'org',
+  name text NOT NULL,
+  owner_user_id uuid,
+  branch_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS calendars_org_idx ON calendars(organization_id);
+CREATE INDEX IF NOT EXISTS calendars_owner_idx ON calendars(owner_user_id);
+
+CREATE TABLE IF NOT EXISTS calendar_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  calendar_id uuid NOT NULL,
+  title text NOT NULL,
+  description text,
+  starts_at timestamptz NOT NULL,
+  ends_at timestamptz NOT NULL,
+  timezone text NOT NULL DEFAULT 'UTC',
+  branch_id uuid,
+  attendees jsonb NOT NULL DEFAULT '[]'::jsonb,
+  linked_resources jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'scheduled',
+  created_by uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS calendar_events_org_idx ON calendar_events(organization_id);
+CREATE INDEX IF NOT EXISTS calendar_events_calendar_idx ON calendar_events(calendar_id);
+CREATE INDEX IF NOT EXISTS calendar_events_range_idx
+  ON calendar_events(organization_id, starts_at, ends_at);
+
 -- S0 -- machine-readable capability catalog (self-development.md §6)
 CREATE TABLE IF NOT EXISTS capability_catalog_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -623,6 +658,9 @@ INSERT INTO capability_catalog_items (module_id, capability_id, name, descriptio
   ('platform', 'core.followups', 'Agent follow-ups',
    'Ask the agent to follow up on a goal later; it re-enters and executes under org policy.',
    '["followup","follow up","agent","later","recurring"]'),
+  ('platform', 'core.calendar', 'Calendar & scheduling',
+   'Create, update, and list shared calendar events for the organization or a branch.',
+   '["calendar","event","meeting","schedule","block","appointment"]'),
   ('crm', 'crm.customers', 'Customer relationships',
    'Manage customers, contacts, and sales follow-up.',
    '["customer","sales","account","lead","contact","crm"]'),

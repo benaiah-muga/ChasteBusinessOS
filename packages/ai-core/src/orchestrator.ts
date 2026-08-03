@@ -487,6 +487,75 @@ export function parseScheduleFireAt(text: string): { fireAt: string | null; clea
   return { fireAt: null, cleaned: text.trim() };
 }
 
+/**
+ * Deterministic time-range extraction for calendar scheduling
+ * ("block tuesday 10-11", "schedule a meeting tomorrow 2pm until 3pm").
+ * Falls back to null so the LLM assist path can clarify multi-constraint times.
+ */
+export function parseScheduleRange(text: string): {
+  startsAt: string;
+  endsAt: string;
+  cleaned: string;
+} | null {
+  const now = new Date();
+
+  const dayOfWeek = text.match(/\bon\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
+  const dayAnchor = text.match(/\b(today|tomorrow)\b/i);
+
+  let base = new Date(now);
+  if (dayAnchor?.[1]?.toLowerCase() === "tomorrow") {
+    base.setDate(base.getDate() + 1);
+  }
+  if (dayOfWeek?.[1]) {
+    const target = DAY_NAMES.findIndex((d) => d.startsWith(dayOfWeek[1]!.slice(0, 3).toLowerCase()));
+    let delta = (target - base.getDay() + 7) % 7;
+    if (delta === 0 && !dayAnchor) delta = 7; // next occurrence when no explicit "today"
+    base.setDate(base.getDate() + delta);
+  }
+
+  const range = text.match(
+    /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b\s*(?:-|–|to|until)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i,
+  );
+  if (!range?.[1] || !range?.[4]) return null;
+
+  const startHour = Number(range[1]);
+  const startMinute = Number(range[2] ?? 0);
+  const startMeridian = range[3]?.toLowerCase();
+  const endHourRaw = Number(range[4]);
+  const endMinute = Number(range[5] ?? 0);
+  const endMeridian = range[6]?.toLowerCase();
+
+  let startHourFinal = startHour;
+  if (startMeridian === "pm" && startHourFinal < 12) startHourFinal += 12;
+  if (startMeridian === "am" && startHourFinal === 12) startHourFinal = 0;
+  let endHourFinal = endHourRaw;
+  if (endMeridian === "pm" && endHourFinal < 12) endHourFinal += 12;
+  if (endMeridian === "am" && endHourFinal === 12) endHourFinal = 0;
+  if (!endMeridian && !startMeridian && endHourRaw < startHour) {
+    endHourFinal += 12; // "10-11" is 10am-11am, but "22-23" style stays 24h
+  }
+
+  const startsAt = new Date(base);
+  startsAt.setHours(startHourFinal, startMinute, 0, 0);
+  const endsAt = new Date(base);
+  endsAt.setHours(endHourFinal, endMinute, 0, 0);
+  if (endsAt <= startsAt) endsAt.setDate(endsAt.getDate() + 1);
+
+  if (!dayAnchor && !dayOfWeek && startsAt <= now) {
+    startsAt.setDate(startsAt.getDate() + 1);
+    endsAt.setDate(endsAt.getDate() + 1);
+  }
+
+  const cleaned = text
+    .replace(range[0], "")
+    .replace(dayAnchor?.[0] ?? "", "")
+    .replace(dayOfWeek?.[0] ?? "", "")
+    .replace(/\b(block|schedule|book)\b/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), cleaned };
+}
+
 /** Parse a single intent segment (no compound splitting). */
 function planSingleSegment(text: string): PlannedAction | null {
   const trimmed = text.trim().replace(/[.!]+$/, "");
@@ -515,6 +584,19 @@ function planSingleSegment(text: string): PlannedAction | null {
         command: "core.followup.create",
         input: { goal: cleaned, fireAt },
         summary: `Follow up: ${cleaned}`,
+        specialist: "core",
+      };
+    }
+  }
+
+  m = trimmed.match(/^(?:block|schedule|book)\s+(.+)$/i);
+  if (m?.[1]) {
+    const range = parseScheduleRange(m[1]);
+    if (range) {
+      return {
+        command: "core.calendar.event.create",
+        input: { title: range.cleaned, startsAt: range.startsAt, endsAt: range.endsAt },
+        summary: `Schedule: ${range.cleaned}`,
         specialist: "core",
       };
     }

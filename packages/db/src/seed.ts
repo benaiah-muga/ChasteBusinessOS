@@ -25,6 +25,8 @@ export const PERMISSION_CATALOG: { permission: string; module: string; descripti
   { permission: "core.notification.read", module: "core", description: "Read own notifications" },
   { permission: "core.reminder.write", module: "core", description: "Set and manage reminders" },
   { permission: "core.followup.write", module: "core", description: "Schedule agent follow-ups" },
+  { permission: "core.calendar.read", module: "core", description: "See calendars and events in scope" },
+  { permission: "core.calendar.write", module: "core", description: "Create and update calendar events" },
   { permission: "crm.customer.create", module: "crm", description: "Create customers" },
   { permission: "crm.customer.read", module: "crm", description: "Read customers" },
   { permission: "acc.account.manage", module: "accounting", description: "Manage chart of accounts" },

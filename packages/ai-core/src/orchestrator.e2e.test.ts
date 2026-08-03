@@ -277,6 +277,30 @@ describe("planFromText", () => {
     expect((plan?.input as any).goal).toContain("if no payment");
   });
 
+  it("parses 'block tuesday 10-11 for stock count' into a calendar event", () => {
+    const plan = planFromText("block tuesday 10-11 for stock count");
+    expect(plan?.command).toBe("core.calendar.event.create");
+    const input = plan?.input as any;
+    expect(input.title).toContain("stock count");
+    expect(new Date(input.startsAt).getTime()).toBeLessThan(new Date(input.endsAt).getTime());
+  });
+
+  it("parses a book + duration-style range with meridian times", () => {
+    const plan = planFromText("book a meeting tomorrow 2pm to 3pm");
+    expect(plan?.command).toBe("core.calendar.event.create");
+    const input = plan?.input as any;
+    expect(input.title).toContain("meeting");
+    const start = new Date(input.startsAt);
+    const end = new Date(input.endsAt);
+    expect(start.getHours()).toBe(14);
+    expect(end.getHours()).toBe(15);
+  });
+
+  it("leaves ambiguous calendar requests to the LLM", () => {
+    const plan = planFromText("schedule a board meeting soon");
+    expect(plan).toBeNull();
+  });
+
   it("leaves ambiguous reminders to the LLM (no fireAt)", () => {
     const plan = planFromText("remind me to stretch");
     expect(plan).toBeNull();

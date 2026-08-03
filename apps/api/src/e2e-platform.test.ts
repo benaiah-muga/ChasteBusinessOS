@@ -58,6 +58,7 @@ const ADMIN_PERMISSIONS = [
   "core.capability.catalog.read",
   "core.notification.read",
   "core.reminder.write", "core.followup.write",
+  "core.calendar.read", "core.calendar.write",
 ];
 
 const OPERATOR_PERMISSIONS = [
@@ -66,6 +67,7 @@ const OPERATOR_PERMISSIONS = [
   "core.notification.read",
   "core.capability.catalog.read",
   "core.reminder.write", "core.followup.write",
+  "core.calendar.read", "core.calendar.write",
 ];
 
 let orgA: TestCompany;
@@ -717,6 +719,100 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
         followUpId,
       });
       expect(result.cancelled).toBe(true);
+    });
+  });
+
+  describe("core.calendar (C3)", () => {
+    let eventId: string;
+
+    it("creates an event on the default org calendar", async () => {
+      const created = await cmd(orgA.operatorUser, orgA.orgId, "core.calendar.event.create", {
+        title: "Stock count",
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        endsAt: new Date(Date.now() + 120_000).toISOString(),
+        timezone: "Africa/Nairobi",
+        attendees: [orgA.operatorUser.email],
+      });
+      expect(created.status).toBe("scheduled");
+      expect(created.title).toBe("Stock count");
+      expect(created.timezone).toBe("Africa/Nairobi");
+      expect(created.attendees).toContain(orgA.operatorUser.email);
+      eventId = created.id;
+
+      const notes = await qry(orgA.operatorUser, orgA.orgId, "core.notification.list", {
+        unreadOnly: true,
+      });
+      expect(notes.notifications.some((n: any) => n.title === "Event scheduled")).toBe(true);
+    });
+
+    it("creates a branch-scoped event", async () => {
+      const created = await cmd(orgA.operatorUser, orgA.orgId, "core.calendar.event.create", {
+        title: "Branch standup",
+        startsAt: new Date(Date.now() + 180_000).toISOString(),
+        endsAt: new Date(Date.now() + 240_000).toISOString(),
+        branchId: hqBranchA,
+      });
+      expect(created.branchId).toBe(hqBranchA);
+    });
+
+    it("rejects an event whose end precedes its start", async () => {
+      const e = await cmdFails(orgA.operatorUser, orgA.orgId, "core.calendar.event.create", {
+        title: "Bad event",
+        startsAt: new Date(Date.now() + 60_000).toISOString(),
+        endsAt: new Date(Date.now() + 30_000).toISOString(),
+      });
+      expect(e.message).toContain("after startsAt");
+    });
+
+    it("lists events within a date range", async () => {
+      const list = await qry(orgA.operatorUser, orgA.orgId, "core.calendar.list", {
+        from: new Date(Date.now() - 60_000).toISOString(),
+        to: new Date(Date.now() + 300_000).toISOString(),
+      });
+      expect(list.events.some((ev: any) => ev.id === eventId)).toBe(true);
+      expect(list.events.every((ev: any) => ev.status === "scheduled")).toBe(true);
+    });
+
+    it("filters the list by branch", async () => {
+      const list = await qry(orgA.operatorUser, orgA.orgId, "core.calendar.list", {
+        branchId: hqBranchA,
+      });
+      expect(list.events.every((ev: any) => ev.branchId === hqBranchA)).toBe(true);
+    });
+
+    it("updates an event title and attendees", async () => {
+      const updated = await cmd(orgA.operatorUser, orgA.orgId, "core.calendar.event.update", {
+        eventId,
+        title: "Stock count (rescheduled)",
+        attendees: [],
+      });
+      expect(updated.title).toBe("Stock count (rescheduled)");
+      expect(updated.attendees).toHaveLength(0);
+    });
+
+    it("cancels an event and hides it from the default list", async () => {
+      const result = await cmd(orgA.operatorUser, orgA.orgId, "core.calendar.event.cancel", {
+        eventId,
+      });
+      expect(result.cancelled).toBe(true);
+
+      const list = await qry(orgA.operatorUser, orgA.orgId, "core.calendar.list", {
+        from: new Date(Date.now() - 60_000).toISOString(),
+        to: new Date(Date.now() + 300_000).toISOString(),
+      });
+      expect(list.events.some((ev: any) => ev.id === eventId)).toBe(false);
+
+      const withCancelled = await qry(orgA.operatorUser, orgA.orgId, "core.calendar.list", {
+        includeCancelled: true,
+        from: new Date(Date.now() - 60_000).toISOString(),
+        to: new Date(Date.now() + 300_000).toISOString(),
+      });
+      expect(withCancelled.events.some((ev: any) => ev.id === eventId)).toBe(true);
+    });
+
+    it("denies calendar read without permission", async () => {
+      const e = await qryFails(orgA.noPermUser, orgA.orgId, "core.calendar.list", {});
+      expect(e.code).toBe("PERMISSION_DENIED");
     });
   });
 

@@ -333,6 +333,54 @@ export const followUps = pgTable(
   ],
 );
 
+/** C3 — calendars (org | user | branch-scoped). */
+export const calendars = pgTable(
+  "calendars",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    scope: text("scope").notNull().default("org"),
+    name: text("name").notNull(),
+    ownerUserId: uuid("owner_user_id"),
+    branchId: uuid("branch_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("calendars_org_idx").on(t.organizationId),
+    index("calendars_owner_idx").on(t.ownerUserId),
+  ],
+);
+
+/** C3 — calendar events shared by humans and agents. Stored UTC + zone. */
+export const calendarEvents = pgTable(
+  "calendar_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    calendarId: uuid("calendar_id").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    timezone: text("timezone").notNull().default("UTC"),
+    branchId: uuid("branch_id"),
+    attendees: jsonb("attendees").$type<string[]>().notNull().default([]),
+    linkedResources: jsonb("linked_resources")
+      .$type<Array<{ type: string; id: string }>>()
+      .notNull()
+      .default([]),
+    status: text("status").notNull().default("scheduled"),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("calendar_events_org_idx").on(t.organizationId),
+    index("calendar_events_calendar_idx").on(t.calendarId),
+    index("calendar_events_range_idx").on(t.organizationId, t.startsAt, t.endsAt),
+  ],
+);
+
 export const notifications = pgTable(
   "notifications",
   {

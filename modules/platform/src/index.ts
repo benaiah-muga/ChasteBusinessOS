@@ -16,7 +16,7 @@ import {
   type ModuleRegistry,
   ValidationError,
 } from "@chaste/kernel";
-import { and, eq, ilike, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gte, ilike, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 
 /** Capability gap ticket lifecycle (spec: self-development.md §4). */
@@ -2191,6 +2191,296 @@ export function createPlatformModule(
                 status: f.status,
               })),
             };
+          },
+        }),
+      );
+
+      // ─── Calendar (C3) ────────────────────────────────────────────────
+
+      const tsSchema = z.string().refine((v) => Number.isFinite(Date.parse(v)), "must be an ISO timestamp");
+      const calendarEventOutputSchema = z.object({
+        id: z.string(),
+        organizationId: z.string(),
+        calendarId: z.string(),
+        title: z.string(),
+        description: z.string().nullable(),
+        startsAt: z.string(),
+        endsAt: z.string(),
+        timezone: z.string(),
+        branchId: z.string().nullable(),
+        attendees: z.array(z.string()),
+        linkedResources: z.array(z.object({ type: z.string(), id: z.string() })),
+        status: z.string(),
+        createdBy: z.string(),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+      });
+
+      function toCalendarEvent(row: typeof schema.calendarEvents.$inferSelect) {
+        return {
+          id: row.id,
+          organizationId: row.organizationId,
+          calendarId: row.calendarId,
+          title: row.title,
+          description: row.description,
+          startsAt: row.startsAt.toISOString(),
+          endsAt: row.endsAt.toISOString(),
+          timezone: row.timezone,
+          branchId: row.branchId,
+          attendees: row.attendees,
+          linkedResources: row.linkedResources,
+          status: row.status,
+          createdBy: row.createdBy,
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        };
+      }
+
+      async function defaultOrgCalendar(orgId: string) {
+        const [existing] = await db
+          .select()
+          .from(schema.calendars)
+          .where(and(eq(schema.calendars.organizationId, orgId), isNull(schema.calendars.ownerUserId)))
+          .limit(1);
+        if (existing) return existing;
+        const [created] = await db
+          .insert(schema.calendars)
+          .values({ organizationId: orgId, scope: "org", name: "Organization calendar" })
+          .returning();
+        return created!;
+      }
+
+      queries.register(
+        defineQuery({
+          name: "core.calendar.list",
+          permissions: ["core.calendar.read"],
+          tags: ["core"],
+          input: z
+            .object({
+              from: tsSchema.optional(),
+              to: tsSchema.optional(),
+              branchId: z.string().uuid().optional(),
+              includeCancelled: z.boolean().optional(),
+              limit: z.number().int().min(1).max(500).optional(),
+            })
+            .default({}),
+          output: z.object({ events: z.array(calendarEventOutputSchema) }),
+          handler: async (input, ctx) => {
+            const where = and(
+              eq(schema.calendarEvents.organizationId, ctx.actor.organizationId),
+              input.from ? gte(schema.calendarEvents.startsAt, new Date(input.from)) : undefined,
+              input.to ? lte(schema.calendarEvents.startsAt, new Date(input.to)) : undefined,
+              input.branchId ? eq(schema.calendarEvents.branchId, input.branchId) : undefined,
+              input.includeCancelled ? undefined : eq(schema.calendarEvents.status, "scheduled"),
+            );
+            const rows = await db
+              .select()
+              .from(schema.calendarEvents)
+              .where(where)
+              .orderBy(schema.calendarEvents.startsAt)
+              .limit(input.limit ?? 200);
+            return { events: rows.map(toCalendarEvent) };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.calendar.event.create",
+          permissions: ["core.calendar.write"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            title: z.string().min(1),
+            startsAt: tsSchema,
+            endsAt: tsSchema,
+            timezone: z.string().default("UTC"),
+            description: z.string().optional(),
+            calendarId: z.string().uuid().optional(),
+            branchId: z.string().uuid().optional(),
+            attendees: z.array(z.string()).optional(),
+            linkedResources: z.array(z.object({ type: z.string(), id: z.string() })).optional(),
+          }),
+          output: calendarEventOutputSchema,
+          handler: async (input, ctx) => {
+            const startsAt = new Date(input.startsAt);
+            const endsAt = new Date(input.endsAt);
+            if (endsAt <= startsAt) {
+              throw new ValidationError("endsAt must be after startsAt", {
+                startsAt: input.startsAt,
+                endsAt: input.endsAt,
+              });
+            }
+            if (input.branchId) {
+              const [branch] = await db
+                .select()
+                .from(schema.branches)
+                .where(
+                  and(
+                    eq(schema.branches.id, input.branchId),
+                    eq(schema.branches.organizationId, ctx.actor.organizationId),
+                  ),
+                );
+              if (!branch) {
+                throw new ValidationError("Branch not found", { branchId: input.branchId });
+              }
+            }
+            let calendarId = input.calendarId;
+            if (calendarId) {
+              const [calendar] = await db
+                .select()
+                .from(schema.calendars)
+                .where(
+                  and(
+                    eq(schema.calendars.id, calendarId),
+                    eq(schema.calendars.organizationId, ctx.actor.organizationId),
+                  ),
+                );
+              if (!calendar) {
+                throw new ValidationError("Calendar not found", { calendarId });
+              }
+            } else {
+              calendarId = (await defaultOrgCalendar(ctx.actor.organizationId)).id;
+            }
+
+            const [row] = await db
+              .insert(schema.calendarEvents)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                calendarId,
+                title: input.title,
+                description: input.description ?? null,
+                startsAt,
+                endsAt,
+                timezone: input.timezone,
+                branchId: input.branchId ?? null,
+                attendees: input.attendees ?? [],
+                linkedResources: input.linkedResources ?? [],
+                createdBy: ctx.actor.userId,
+              })
+              .returning();
+
+            await notifyUser(db, {
+              organizationId: ctx.actor.organizationId,
+              userId: ctx.actor.userId,
+              kind: "system",
+              title: "Event scheduled",
+              body: `${input.title} — ${startsAt.toISOString()} to ${endsAt.toISOString()}.`,
+              resourceType: "calendar_event",
+              resourceId: row!.id,
+            });
+
+            return toCalendarEvent(row!);
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.calendar.event.update",
+          permissions: ["core.calendar.write"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            eventId: z.string().uuid(),
+            title: z.string().min(1).optional(),
+            description: z.string().nullable().optional(),
+            startsAt: tsSchema.optional(),
+            endsAt: tsSchema.optional(),
+            timezone: z.string().optional(),
+            branchId: z.string().uuid().nullable().optional(),
+            attendees: z.array(z.string()).optional(),
+            linkedResources: z.array(z.object({ type: z.string(), id: z.string() })).optional(),
+          }),
+          output: calendarEventOutputSchema,
+          handler: async (input, ctx) => {
+            const [event] = await db
+              .select()
+              .from(schema.calendarEvents)
+              .where(
+                and(
+                  eq(schema.calendarEvents.id, input.eventId),
+                  eq(schema.calendarEvents.organizationId, ctx.actor.organizationId),
+                ),
+              );
+            if (!event) {
+              throw new ValidationError("Calendar event not found", { eventId: input.eventId });
+            }
+            if (input.branchId !== undefined) {
+              if (input.branchId === null) {
+                // allow clearing branch scope
+              } else {
+                const [branch] = await db
+                  .select()
+                  .from(schema.branches)
+                  .where(
+                    and(
+                      eq(schema.branches.id, input.branchId),
+                      eq(schema.branches.organizationId, ctx.actor.organizationId),
+                    ),
+                  );
+                if (!branch) {
+                  throw new ValidationError("Branch not found", { branchId: input.branchId });
+                }
+              }
+            }
+
+            const startsAt = input.startsAt !== undefined ? new Date(input.startsAt) : event.startsAt;
+            const endsAt = input.endsAt !== undefined ? new Date(input.endsAt) : event.endsAt;
+            if (endsAt <= startsAt) {
+              throw new ValidationError("endsAt must be after startsAt");
+            }
+
+            const updates: Record<string, unknown> = { updatedAt: new Date() };
+            if (input.title !== undefined) updates.title = input.title;
+            if (input.description !== undefined) updates.description = input.description;
+            if (input.startsAt !== undefined) updates.startsAt = startsAt;
+            if (input.endsAt !== undefined) updates.endsAt = endsAt;
+            if (input.timezone !== undefined) updates.timezone = input.timezone;
+            if (input.branchId !== undefined) updates.branchId = input.branchId;
+            if (input.attendees !== undefined) updates.attendees = input.attendees;
+            if (input.linkedResources !== undefined) updates.linkedResources = input.linkedResources;
+
+            await db
+              .update(schema.calendarEvents)
+              .set(updates)
+              .where(eq(schema.calendarEvents.id, input.eventId));
+
+            const [updated] = await db
+              .select()
+              .from(schema.calendarEvents)
+              .where(eq(schema.calendarEvents.id, input.eventId));
+            return toCalendarEvent(updated!);
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.calendar.event.cancel",
+          permissions: ["core.calendar.write"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ eventId: z.string().uuid() }),
+          output: z.object({ cancelled: z.boolean() }),
+          handler: async (input, ctx) => {
+            const rows = await db
+              .update(schema.calendarEvents)
+              .set({ status: "cancelled", updatedAt: new Date() })
+              .where(
+                and(
+                  eq(schema.calendarEvents.id, input.eventId),
+                  eq(schema.calendarEvents.organizationId, ctx.actor.organizationId),
+                  eq(schema.calendarEvents.status, "scheduled"),
+                ),
+              )
+              .returning();
+            if (rows.length === 0) {
+              throw new ValidationError("Calendar event not found or already cancelled", {
+                eventId: input.eventId,
+              });
+            }
+            return { cancelled: true };
           },
         }),
       );
