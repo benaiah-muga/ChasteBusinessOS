@@ -97,6 +97,44 @@ export const suggestionsPartSchema = z.object({
   suggestions: z.array(z.string()),
 });
 
+/**
+ * Live narration status line — ported from OpenWorker's `_NARRATION_GUIDANCE`.
+ * Rendered by the chat widget as a transient muted line *before* each batch of
+ * non-trivial tool calls; collapses once the step result lands so it never
+ * fights with the final answer for visual real estate. The biggest "feels
+ * alive" upgrade for the lowest cost.
+ *
+ * The orchestrator emits one progress part for every multi-step plan or
+ * consequential command batch with text like:
+ *   "Checking what shipped since yesterday's standup."
+ */
+export const progressPartSchema = z.object({
+  type: z.literal("progress"),
+  text: z.string(),
+  /** Optional batch id so the UI can replace an earlier transient line. */
+  batchId: z.string().optional(),
+});
+
+/**
+ * Inbox prompt — rendered from `InboxStore.addApproval/addQuestion/addPlan` so
+ * the user can resolve them from the chat surface itself. Every `progress` /
+ * `confirm_action` polishes the existing chat approval flow; `inbox_prompt`
+ * surfaces items that arrived *unattended* (the R3 path) when the user
+ * reconnects.
+ */
+export const inboxPromptPartSchema = z.object({
+  type: z.literal("inbox_prompt"),
+  itemId: z.string(),
+  kind: z.enum(["approval", "question", "plan", "notification"]),
+  title: z.string(),
+  body: z.string().optional(),
+  options: z.array(z.string()).optional(),
+  /** Allow a free-text "Other" answer even when options exist. */
+  allowText: z.boolean().default(true),
+  multi: z.boolean().default(false),
+  data: z.record(z.unknown()).optional(),
+});
+
 export const uiPartSchema = z.discriminatedUnion("type", [
   textPartSchema,
   explanationPartSchema,
@@ -109,6 +147,8 @@ export const uiPartSchema = z.discriminatedUnion("type", [
   clarifyPartSchema,
   planPartSchema,
   suggestionsPartSchema,
+  progressPartSchema,
+  inboxPromptPartSchema,
 ]);
 
 export type UiPart = z.infer<typeof uiPartSchema>;
@@ -117,6 +157,8 @@ export type ExplanationPart = z.infer<typeof explanationPartSchema>;
 export type ClarifyPart = z.infer<typeof clarifyPartSchema>;
 export type PlanPart = z.infer<typeof planPartSchema>;
 export type SuggestionsPart = z.infer<typeof suggestionsPartSchema>;
+export type ProgressPart = z.infer<typeof progressPartSchema>;
+export type InboxPromptPart = z.infer<typeof inboxPromptPartSchema>;
 
 export const chatMessageSchema = z.object({
   id: z.string(),

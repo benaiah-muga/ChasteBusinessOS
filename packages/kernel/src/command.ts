@@ -4,6 +4,7 @@ import type { RequestContext } from "./context.js";
 import { actorHasPermission } from "./context.js";
 import { NotFoundError, PermissionError, ValidationError } from "./errors.js";
 import type { OutboxWriter } from "./events.js";
+import type { RiskClass } from "./risk.js";
 
 export interface CommandMeta {
   name: string;
@@ -13,6 +14,21 @@ export interface CommandMeta {
   tags?: string[];
   /** Minimum autonomy required to auto-run without confirm UI */
   minAutonomyForAuto?: "guarded_auto" | "full_autonomous";
+  /**
+   * Declared side-effect class of this command. Used by the autonomy gate
+   * (orchestrator) and the Inbox store. When omitted, defaults are inferred:
+   * commands → `write_local`, queries → `read`. Modules should declare
+   * `external` for any command whose side effects leave the platform entirely
+   * (email, Slack, payment gateway, …).
+   */
+  riskClass?: RiskClass;
+  /**
+   * When `riskClass: "external"`, the human-oriented name of the input field
+   * that carries the off-platform recipient/target (e.g. `"channel"` for a
+   * Slack send). The orchestrator's standing-rule resolver reads this so
+   * "allow always" binds to the *target*, not the whole command.
+   */
+  externalTargetField?: string;
 }
 
 export interface CommandDefinition<TIn extends z.ZodType, TOut extends z.ZodType>
@@ -53,13 +69,17 @@ export function createCommandRegistry(): CommandRegistry {
       return map.get(name);
     },
     list() {
-      return [...map.values()].map(({ name, description, permissions, tags, minAutonomyForAuto }) => ({
-        name,
-        description,
-        permissions,
-        tags,
-        minAutonomyForAuto,
-      }));
+      return [...map.values()].map(
+        ({ name, description, permissions, tags, minAutonomyForAuto, riskClass, externalTargetField }) => ({
+          name,
+          description,
+          permissions,
+          tags,
+          minAutonomyForAuto,
+          riskClass,
+          externalTargetField,
+        }),
+      );
     },
   };
 }

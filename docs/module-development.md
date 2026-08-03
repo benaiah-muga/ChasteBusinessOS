@@ -14,6 +14,19 @@ organization through the marketplace.
 6. **Optional UI** -- expose APIs; web discovers capabilities. Module React lives in `apps/web` and talks HTTP only.
 7. **AI tools = commands/queries** -- declare capability tags for specialist routing; do not invent a parallel tool API.
 8. **Tests** -- contract tests for every command and query.
+9. **Portable by default** -- a module must be packable and shareable with another org/instance without private monorepo coupling. See [specs/portable-modules.md](./specs/portable-modules.md).
+
+### Portability checklist
+
+| Requirement | Detail |
+|---|---|
+| Declarative manifest | `id`, `version`, permissions, capabilities, dependencies |
+| No cross-module private joins | Only public commands/queries/events |
+| Namespaced tables & permissions | Collision-free side-load |
+| Optional `ui-manifest.json` | Nav/homeHref via HTTP, not React import from module package |
+| Share paths | Marketplace publish, `.chaste-module.tgz` pack, or monorepo path for dev |
+
+**Standard platform features** (branches, RBAC, settings, notifications) are customized without code. Self-dev / coding agents only for out-of-scope capabilities ([specs/self-development.md](./specs/self-development.md)).
 
 ## End-to-end module lifecycle (Odoo-like)
 

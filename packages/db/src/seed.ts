@@ -16,6 +16,12 @@ export const PERMISSION_CATALOG: { permission: string; module: string; descripti
   { permission: "core.marketplace.read", module: "core", description: "Browse marketplace" },
   { permission: "core.settings.read", module: "core", description: "Read org settings" },
   { permission: "core.settings.manage", module: "core", description: "Manage org settings" },
+  { permission: "core.branch.read", module: "core", description: "List and view branches" },
+  { permission: "core.branch.manage", module: "core", description: "Create and update branches" },
+  { permission: "core.branch.all", module: "core", description: "Access all branches without explicit grant" },
+  { permission: "core.capability.gap.read", module: "core", description: "View capability gap tickets" },
+  { permission: "core.capability.gap.manage", module: "core", description: "Create and update capability gap tickets" },
+  { permission: "core.notification.read", module: "core", description: "Read own notifications" },
   { permission: "crm.customer.create", module: "crm", description: "Create customers" },
   { permission: "crm.customer.read", module: "crm", description: "Read customers" },
   { permission: "acc.account.manage", module: "accounting", description: "Manage chart of accounts" },
@@ -208,6 +214,38 @@ export async function bootstrapPlatform(db: Db, cfg: AppConfig): Promise<Bootstr
       .onConflictDoNothing({
         target: [schema.rolePermissions.roleId, schema.rolePermissions.permission],
       });
+  }
+
+  // Default HQ branch + grant admin access
+  let [hqBranch] = await db
+    .select()
+    .from(schema.branches)
+    .where(eq(schema.branches.organizationId, org.id))
+    .limit(1);
+  if (!hqBranch) {
+    const [created] = await db
+      .insert(schema.branches)
+      .values({
+        organizationId: org.id,
+        name: "Headquarters",
+        code: "HQ",
+        timezone: "UTC",
+        active: true,
+      })
+      .returning();
+    hqBranch = created!;
+  }
+  await db
+    .insert(schema.userBranchAccess)
+    .values({ userId: admin.id, branchId: hqBranch.id })
+    .onConflictDoNothing({
+      target: [schema.userBranchAccess.userId, schema.userBranchAccess.branchId],
+    });
+  if (!admin.activeBranchId) {
+    await db
+      .update(schema.users)
+      .set({ activeBranchId: hqBranch.id })
+      .where(eq(schema.users.id, admin.id));
   }
 
   // Operator role (read-heavy)

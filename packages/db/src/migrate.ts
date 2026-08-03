@@ -359,6 +359,7 @@ CREATE INDEX IF NOT EXISTS idx_org_memories_expires
 
 -- User preferences: add settings jsonb column
 ALTER TABLE users ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS active_branch_id uuid;
 
 -- Split core.rbac.manage into fine-grained permissions
 DO $$
@@ -376,6 +377,165 @@ BEGIN
     DELETE FROM role_permissions WHERE permission = 'core.rbac.manage';
   END IF;
 END $$;
+
+-- Branches
+CREATE TABLE IF NOT EXISTS branches (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL REFERENCES organizations(id),
+  name text NOT NULL,
+  code text NOT NULL,
+  timezone text,
+  parent_branch_id uuid,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS branches_org_code_uidx ON branches(organization_id, code);
+CREATE INDEX IF NOT EXISTS branches_org_idx ON branches(organization_id);
+
+CREATE TABLE IF NOT EXISTS user_branch_access (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  branch_id uuid NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS user_branch_access_uidx ON user_branch_access(user_id, branch_id);
+
+-- Chat session metadata
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS title text;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS active_branch_id uuid;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+CREATE INDEX IF NOT EXISTS chat_sess_updated_idx ON chat_sessions(updated_at);
+
+CREATE TABLE IF NOT EXISTS chat_feedback (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  session_id uuid NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+  message_id text NOT NULL,
+  rating text NOT NULL,
+  comment text,
+  run_id text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS chat_feedback_sess_idx ON chat_feedback(session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS chat_feedback_msg_user_uidx ON chat_feedback(session_id, message_id, user_id);
+
+CREATE TABLE IF NOT EXISTS capability_gap_tickets (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'draft',
+  proposed_capability_id text NOT NULL,
+  title text NOT NULL,
+  abstract_requirement text NOT NULL,
+  acceptance_criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
+  example_scenarios jsonb NOT NULL DEFAULT '[]'::jsonb,
+  suggested_module_id text,
+  non_goals jsonb NOT NULL DEFAULT '[]'::jsonb,
+  deployment_target text NOT NULL DEFAULT 'undecided',
+  coding_agent text,
+  artifact_ref text,
+  created_by uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS gap_tickets_org_idx ON capability_gap_tickets(organization_id);
+CREATE INDEX IF NOT EXISTS gap_tickets_status_idx ON capability_gap_tickets(status);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  kind text NOT NULL DEFAULT 'info',
+  title text NOT NULL,
+  body text,
+  href text,
+  resource_type text,
+  resource_id text,
+  read_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS notifications_org_idx ON notifications(organization_id);
+
+-- Chat session agent-runtime columns
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS unattended boolean NOT NULL DEFAULT false;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS compaction_state jsonb;
+
+-- R2 -- pending approvals (the canonical human-attention queue)
+CREATE TABLE IF NOT EXISTS pending_approvals (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL,
+  organization_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  kind text NOT NULL,
+  title text NOT NULL,
+  body text,
+  state text NOT NULL DEFAULT 'pending',
+  resolution text,
+  inbox text NOT NULL DEFAULT 'default',
+  visibility text NOT NULL DEFAULT 'inline',
+  tool_call_id text,
+  options jsonb DEFAULT '[]'::jsonb,
+  allow_text boolean NOT NULL DEFAULT true,
+  multi boolean NOT NULL DEFAULT false,
+  data jsonb DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS pending_approvals_session_idx ON pending_approvals(session_id);
+CREATE INDEX IF NOT EXISTS pending_approvals_org_state_idx ON pending_approvals(organization_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS pending_approvals_toolcall_uidx ON pending_approvals(session_id, tool_call_id);
+
+-- R5 -- durable self-wake records
+CREATE TABLE IF NOT EXISTS ai_wakes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL,
+  task_id uuid,
+  proactive_text text,
+  kind text NOT NULL,
+  state text NOT NULL DEFAULT 'pending',
+  fire_at timestamptz,
+  job_id text,
+  event_key text,
+  note text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ai_wakes_due_idx ON ai_wakes(state, fire_at);
+CREATE INDEX IF NOT EXISTS ai_wakes_session_idx ON ai_wakes(session_id);
+CREATE INDEX IF NOT EXISTS ai_wakes_job_idx ON ai_wakes(job_id);
+CREATE INDEX IF NOT EXISTS ai_wakes_event_idx ON ai_wakes(event_key);
+
+-- R7 -- org/platform AI skill catalog
+CREATE TABLE IF NOT EXISTS ai_skills (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  scope text NOT NULL DEFAULT 'organization',
+  organization_id uuid,
+  branch_id uuid,
+  name text NOT NULL,
+  title text NOT NULL,
+  summary text NOT NULL,
+  instructions text NOT NULL,
+  files jsonb DEFAULT '[]'::jsonb,
+  enabled boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ai_skills_name_scope_uidx ON ai_skills(name, organization_id, branch_id);
+CREATE INDEX IF NOT EXISTS ai_skills_org_idx ON ai_skills(organization_id);
+
+-- R10 -- inbound channel to session ownership
+CREATE TABLE IF NOT EXISTS channel_session_bindings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  thread_target text NOT NULL,
+  session_id uuid NOT NULL,
+  organization_id uuid NOT NULL,
+  branch_id uuid,
+  channel text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS channel_bindings_target_uidx ON channel_session_bindings(thread_target);
+CREATE INDEX IF NOT EXISTS channel_bindings_session_idx ON channel_session_bindings(session_id);
+CREATE INDEX IF NOT EXISTS channel_bindings_org_idx ON channel_session_bindings(organization_id);
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {

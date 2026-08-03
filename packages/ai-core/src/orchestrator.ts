@@ -4,11 +4,24 @@ import {
   type CommandRegistry,
   type QueryRegistry,
   type RequestContext,
-  canAutoExecute,
   executeCommand,
   type CommandHelpers,
-  stricterAutonomy,
   FULL_AUTONOMOUS_WARNING,
+  type ConversationMode,
+  type InboxItem,
+  type InboxStore,
+  isReadOnly,
+  classify,
+  externalTargetOf,
+  type RiskClass,
+  type RiskClassifiable,
+  classifiableFromMeta,
+  effectiveAutonomyForCommand,
+  commandMayAutoExecute,
+  effectiveAutonomyForPlan,
+  planMayAutoExecute,
+  MODE_CONTEXT,
+  type AutoExecMeta,
 } from "@chaste/kernel";
 import type { ChatMessage, UiPart } from "@chaste/ui-schema";
 import type { AiExplanation } from "./explanation.js";
@@ -17,6 +30,33 @@ import type { AiProvider } from "./providers.js";
 import { generateSuggestions } from "./suggestions.js";
 import { normalizeFieldNames, resolveInput } from "./workflows/engine.js";
 import { looksLikePromptInjection, shouldCheckInjection } from "./guardrails/index.js";
+import {
+  applyToOutbound,
+  buildState,
+  shouldCompact,
+  trimState,
+  triggerTokens,
+  estimateTokens,
+  KEEP_RECENT_FRACTION,
+  type CompactionState,
+  type CompactionSummarizer,
+  isContextOverflow,
+  type ToolCallRecord,
+} from "./compaction.js";
+import {
+  skillCatalogText,
+  disableCountermand,
+  skillTools,
+  type SkillStore,
+  type SkillTools,
+  type SkillFile,
+} from "./skills.js";
+import {
+  selfWakeTools,
+  type WakeStore,
+  type SelfWakeTools,
+} from "./selfwake.js";
+import type { StandingRuleDecision } from "@chaste/kernel";
 
 export interface PendingPlanStep {
   command: string;
@@ -33,10 +73,24 @@ export interface PendingConfirmation {
   plan?: PendingPlanStep[];
 }
 
+/**
+ * The orchestrator's in-process session shape. When the kernel `InboxStore` is
+ * wired, `pending` becomes the in-chat projection of the canonical Inbox item
+ * (kept here for back-compat with callers that read it synchronously); the
+ * Inbox remains the store of record and is the durable surface for retries.
+ */
 export interface ChatSessionState {
   id: string;
   messages: ChatMessage[];
   pending?: PendingConfirmation;
+  /** R3: when true, the orchestrator parks approvals in the Inbox, not inline. */
+  unattended?: boolean;
+  /** R6: persisted compaction state (boundary + summary + working state). */
+  compactionState?: CompactionState | null;
+  /** R7: skill names whose instructions are already in history (countermand source). */
+  loadedSkillNames?: string[];
+  /** Branch scope used for skill filtering and branch-scoped commands. */
+  activeBranchId?: string;
 }
 
 export interface OrchestratorDeps {
@@ -46,6 +100,43 @@ export interface OrchestratorDeps {
   autonomy: AutonomyLevel;
   provider?: AiProvider;
   allowFullAutonomous?: boolean;
+  /**
+   * R2 — the canonical human-attention queue. When provided, the orchestrator
+   * mirrors every `pending` confirmation to the Inbox for durable resume and
+   * (when `session.unattended`) cross-session/mobile approvals.
+   */
+  inbox?: InboxStore;
+  /** R3 — default visibility for new inbox items. Defaults to `inline` (attended). */
+  defaultInboxVisibility?: "inline" | "inbox";
+  /**
+   * R9 — conversation mode (discuss/plan/interactive). When `discuss` or
+   * `plan`, the orchestrator refuses writes/exec and instead emits an
+   * explanation describing the proposed change.
+   */
+  mode?: ConversationMode;
+  /** R6 — context-window-aware compaction when the outbound history is large. */
+  compaction?: {
+    summarizer: CompactionSummarizer;
+    contextWindow?: number;
+  };
+  /** R1 — user-local risk overrides (per-org policy later). */
+  riskOverrides?: (commandName: string) => RiskClass | null;
+  /**
+   * R5 — durable self-wake store. When provided, the orchestrator surfaces the
+   * agent-callable `sleepFor`/`sleepUntil`/`wakeOnJob`/`wakeOnEvent` tools to
+   * the LLM so a session can suspend itself and be re-invoked later.
+   */
+  wake?: WakeStore;
+  /**
+   * R7 — org/platform skill catalog exposed to the AI. When provided, the
+   * per-turn catalog is injected and `loadSkill`/`saveSkill` become callable.
+   */
+  skills?: SkillStore;
+  /**
+   * Background audit span for mechanical state extraction on compaction. When
+   * unset, compaction's `workingState` is empty (preserved cap, fewer features).
+   */
+  auditSpanProvider?: () => ToolCallRecord[];
 }
 
 export interface ChatTurnInput {
@@ -53,12 +144,16 @@ export interface ChatTurnInput {
   userText?: string;
   confirmId?: string;
   cancelId?: string;
+  /** Resolution string when answering a via-inbox approval ("allow"/"always"/"deny"). */
+  inboxResolution?: string;
   ctx: RequestContext;
 }
 
 export interface ChatTurnResult {
   session: ChatSessionState;
   explanation?: AiExplanation;
+  /** When set, the call needs human attention; surfaced to the UI/push channels. */
+  inboxItemId?: string;
 }
 
 function msg(role: ChatMessage["role"], parts: UiPart[]): ChatMessage {
@@ -68,6 +163,197 @@ function msg(role: ChatMessage["role"], parts: UiPart[]): ChatMessage {
     parts,
     createdAt: new Date().toISOString(),
   };
+}
+
+/**
+ * R2/R3/R4 — mirror a freshly-created `session.pending` confirmation to the
+ * canonical Inbox store. The Inbox becomes the durable store of record; the
+ * in-chat `pending` blob remains for synchronous callers (API clients reading
+ * the HTTP response, tests) but is now a projection of the Inbox, not the
+ * source of truth.
+ *
+ * R4 — when the planned command is `external`-risk and the call names a
+ * target, the Inbox carries the standing-rule metadata (taskId/commandId/
+ * standingTarget) so resolving with "always" later caches a scoped rule.
+ *
+ * Visibility: `session.unattended` flips the visibility to `inbox` so the
+ * approval surfaces in the cross-session queue (mobile, Slack dm). Default is
+ * `inline` — attended sessions answer in the composer.
+ */
+function mirrorToInbox(
+  deps: OrchestratorDeps,
+  session: ChatSessionState,
+  ctx: { organizationId: string; userId: string },
+  pending: PendingConfirmation,
+  opts: { summary: string; commandMeta?: CommandMeta; input?: Record<string, unknown> } = {
+    summary: pending.command,
+  },
+): InboxItem | undefined {
+  if (!deps.inbox) return undefined;
+  const visibility = session.unattended ? "inbox" : (deps.defaultInboxVisibility ?? "inline");
+  const pendingInput = (opts.input ?? (pending.input as Record<string, unknown>)) ?? {};
+  void pendingInput; // we only need the input-derived standingTarget below
+  let standingTarget: string | undefined;
+  if (opts.commandMeta && pending.command) {
+    const cls = classify(pending.command, {
+      classifiable: {
+        riskClass: opts.commandMeta.riskClass,
+        externalTargetField: opts.commandMeta.externalTargetField,
+      },
+      overrides: deps.riskOverrides,
+    });
+    if (cls === "external") {
+      const target = externalTargetOf(
+        pending.command,
+        pending.input as Record<string, unknown>,
+        {
+          riskClass: cls,
+          externalTargetField: opts.commandMeta.externalTargetField,
+        },
+      );
+      standingTarget = target ?? undefined;
+    }
+  }
+  return deps.inbox.addApproval({
+    sessionId: session.id,
+    organizationId: ctx.organizationId,
+    userId: ctx.userId,
+    title: opts.summary,
+    body: pending.command,
+    visibility,
+    toolCallId: pending.id,
+    data: {
+      commandId: pending.command,
+      standingTarget,
+      // taskId left unset by ad-hoc approvals; automation runs supply it.
+    },
+  });
+}
+
+/** Look up a command's metadata in the registry (undefined when module not loaded). */
+function commandMetaOf(deps: OrchestratorDeps, command: string): CommandMeta | undefined {
+  return deps.commands.list().find((c) => c.name === command) as CommandMeta | undefined;
+}
+
+/** Effective risk of a planned command, honoring user-local overrides. */
+function riskOf(
+  deps: OrchestratorDeps,
+  command: string,
+  meta?: CommandMeta,
+): RiskClass {
+  return classify(command, {
+    classifiable: classifiableFromMeta(meta),
+    overrides: deps.riskOverrides,
+  });
+}
+
+/**
+ * R4 — does a standing approval rule already cover this command+target? Returns
+ * the triggering rule string when yes. Only `external`-risk commands that name
+ * a concrete off-platform target are eligible (the safety floor that makes
+ * "allow always" scoped, never blanket).
+ */
+function standingDecision(
+  deps: OrchestratorDeps,
+  session: ChatSessionState,
+  command: string,
+  input: unknown,
+  meta?: CommandMeta,
+): StandingRuleDecision | null {
+  if (!deps.inbox) return null;
+  const classifiable = classifiableFromMeta(meta);
+  if (classify(command, { classifiable, overrides: deps.riskOverrides }) !== "external") {
+    return null;
+  }
+  const target = externalTargetOf(command, (input ?? {}) as Record<string, unknown>, classifiable);
+  if (!target) return null;
+  return deps.inbox.standingRuleFor({
+    sessionId: session.id,
+    commandId: command,
+    target,
+  });
+}
+
+/**
+ * R6 — compaction trigger/build wiring. When the outbound history would exceed
+ * the context budget, build a CompactionState (LLM summary + mechanical working
+ * state) and park it on the session; the persisted transcript is untouched and
+ * only what we *send* to the model is transformed. Falls back to the no-LLM
+ * `trimState` when the summarizer is unavailable.
+ */
+async function ensureCompactionState(
+  deps: OrchestratorDeps,
+  session: ChatSessionState,
+): Promise<ChatSessionState> {
+  if (!deps.compaction) return session;
+  const { summarizer, contextWindow } = deps.compaction;
+  if (!shouldCompact(estimateTokens(session.messages), contextWindow)) return session;
+
+  const auditSpan = deps.auditSpanProvider?.() ?? [];
+  const trigger = triggerTokens(contextWindow, {});
+  const keepTokens = Math.max(1, Math.trunc(trigger * KEEP_RECENT_FRACTION));
+  const prior = session.compactionState ?? undefined;
+
+  try {
+    const state = await buildState(session.messages, auditSpan, summarizer, {
+      keepTokens,
+      prior,
+    });
+    if (state) return { ...session, compactionState: state };
+  } catch {
+    // summarizer down — honest no-LLM fallback, never silent drop
+  }
+  const trimmed = trimState(session.messages, auditSpan, { prior });
+  if (trimmed) return { ...session, compactionState: trimmed };
+  return session;
+}
+
+/**
+ * R9 — per-turn mode context (OpenWorker's per-turn context pattern). Mode can
+ * flip mid-session, so the instruction is appended to the *outbound* view each
+ * turn instead of being baked into the static system prompt. Never mutates the
+ * persisted transcript.
+ */
+function withModeContext(
+  messages: ChatMessage[],
+  mode: ConversationMode | undefined,
+): ChatMessage[] {
+  if (!mode || !isReadOnly(mode)) return messages;
+  const note = MODE_CONTEXT[mode];
+  if (!note || messages.length === 0) return messages;
+  const copy = messages.slice();
+  const last = copy[copy.length - 1]!;
+  if (last.role !== "user") return copy;
+  copy[copy.length - 1] = {
+    ...last,
+    parts: [...last.parts, { type: "text", text: `\n[${note}]` }],
+  };
+  return copy;
+}
+
+/** R7 — per-turn skill catalog + loaded-skill disable countermand, appended to outbound. */
+function withSkillContext(
+  messages: ChatMessage[],
+  deps: OrchestratorDeps,
+  session: ChatSessionState,
+  organizationId: string,
+): ChatMessage[] {
+  if (!deps.skills) return messages;
+  const filter = {
+    organizationId,
+    branchId: session.activeBranchId,
+  };
+  const catalog = skillCatalogText(deps.skills, filter);
+  const countermand = disableCountermand(deps.skills, filter, session.loadedSkillNames ?? []);
+  if (!catalog && !countermand) return messages;
+  const copy = messages.slice();
+  const last = copy[copy.length - 1]!;
+  if (last.role !== "user") return copy;
+  const extras: UiPart[] = [];
+  if (catalog) extras.push({ type: "text", text: catalog });
+  if (countermand) extras.push({ type: "text", text: countermand });
+  copy[copy.length - 1] = { ...last, parts: [...last.parts, ...extras] };
+  return copy;
 }
 
 export interface PlannedAction {
@@ -298,17 +584,222 @@ async function executePlanSteps(
   return stepOutputs;
 }
 
+// ---------------------------------------------------------------------------
+// Agent tool layer (R5 self-wake tools + R7 skill catalog tools)
+//
+// The provider interface is text-only, so agent tools are surfaced the
+// OpenWorker way: a live per-turn catalog in the prompt, and the model may
+// return `{"toolCall":{"name":"loadSkill","args":{...}}}` as part of its JSON.
+// The orchestrator executes the tool, appends the result into the outbound
+// view, and re-invokes the model — a bounded loop. Tool execution is safe by
+// construction: skills only READ instructions into context; saveSkill parks a
+// disabled draft behind an Inbox approval; self-wake only creates durable wake
+// records (no immediate side effect on real state).
+// ---------------------------------------------------------------------------
+
+interface AgentToolCall {
+  name: string;
+  args?: Record<string, unknown>;
+}
+
+interface AgentToolResult {
+  message: string;
+  inboxItemId?: string;
+}
+
+const AGENT_TOOL_MAX_ITERATIONS = 3;
+
+function agentToolList(deps: OrchestratorDeps): string {
+  const tools: string[] = [];
+  if (deps.skills) {
+    tools.push("loadSkill(name)", "saveSkill({name,title,summary,instructions,files?})");
+  }
+  if (deps.wake) {
+    tools.push(
+      "sleepFor(seconds,note?)",
+      "sleepUntil(isoTimestamp,note?)",
+      "wakeOnJob(jobId,note?)",
+      "wakeOnEvent(eventKey,note?)",
+    );
+  }
+  return tools.join(", ");
+}
+
+async function executeAgentTool(
+  deps: OrchestratorDeps,
+  session: ChatSessionState,
+  ctx: { organizationId: string; userId: string; branchId?: string },
+  call: AgentToolCall,
+): Promise<AgentToolResult> {
+  const name = call.name;
+  const args = call.args ?? {};
+
+  switch (name) {
+    case "loadSkill": {
+      if (!deps.skills) return { message: "Skill catalog not available on this instance." };
+      const filter = { organizationId: ctx.organizationId, branchId: ctx.branchId };
+      const skill = deps.skills.get(String(args.name ?? ""), filter);
+      if (!skill || !skill.enabled) {
+        return { message: `Skill "${args.name}" is not available (unknown or disabled).` };
+      }
+      session.loadedSkillNames = [...new Set([...(session.loadedSkillNames ?? []), skill.name])];
+      const files = (skill.files ?? [])
+        .map((f) => `\n  [file] ${f.path}\n${f.excerpt}`)
+        .join("");
+      return { message: `Loaded skill "${skill.name}" (${skill.title}):\n${skill.instructions}${files}` };
+    }
+
+    case "saveSkill": {
+      if (!deps.skills) return { message: "Skill store not available on this instance." };
+      const tools = skillTools(deps.skills, {
+        organizationId: ctx.organizationId,
+        branchId: ctx.branchId,
+      });
+      const res = tools.saveSkill({
+        name: String(args.name ?? ""),
+        title: String(args.title ?? args.name ?? ""),
+        summary: String(args.summary ?? ""),
+        instructions: String(args.instructions ?? ""),
+        files: Array.isArray(args.files) ? (args.files as SkillFile[]) : undefined,
+      });
+      // Review-before-save rule: the draft is disabled until a human approves
+      // through the Inbox card (no self-grant path).
+      let inboxItemId: string | undefined;
+      if (deps.inbox) {
+        const item = deps.inbox.addApproval({
+          sessionId: session.id,
+          organizationId: ctx.organizationId,
+          userId: ctx.userId,
+          title: `Save skill "${res.skill.name}"?`,
+          body: res.skill.summary,
+          data: { skillSave: res.skill.name },
+        });
+        inboxItemId = item.id;
+      }
+      return {
+        message:
+          `Skill "${res.skill.name}" drafted and awaiting human approval` +
+          (inboxItemId ? ` (inbox item ${inboxItemId})` : "") +
+          `. It is NOT active until approved.`,
+        inboxItemId,
+      };
+    }
+
+    case "sleepFor":
+    case "sleepUntil":
+    case "wakeOnJob":
+    case "wakeOnEvent": {
+      if (!deps.wake) return { message: "Self-wake store not available on this instance." };
+      const tools = selfWakeTools(deps.wake, session.id);
+      switch (name) {
+        case "sleepFor": {
+          const r = tools.sleepFor(Number(args.seconds ?? 0), args.note as string | undefined);
+          return { message: `Sleeping ${args.seconds}s; wake ${r.wakeId} fires ${r.fireAt}.` };
+        }
+        case "sleepUntil": {
+          const r = tools.sleepUntil(
+            String(args.isoTimestamp ?? args.when ?? ""),
+            args.note as string | undefined,
+          );
+          return { message: `Wake ${r.wakeId} scheduled for ${r.fireAt}.` };
+        }
+        case "wakeOnJob": {
+          const r = tools.wakeOnJob(String(args.jobId ?? ""), args.note as string | undefined);
+          return { message: `Will resume when job ${r.jobId} completes (wake ${r.wakeId}).` };
+        }
+        default: {
+          const r = tools.wakeOnEvent(
+            String(args.eventKey ?? ""),
+            args.note as string | undefined,
+          );
+          return { message: `Will resume when event "${r.eventKey}" fires (wake ${r.wakeId}).` };
+        }
+      }
+    }
+
+    default:
+      return { message: `Unknown agent tool "${name}".` };
+  }
+}
+
+/**
+ * Bounded model tool loop. Returns the final parsed JSON when the model stops
+ * calling tools, or `null` when it never produced parseable JSON. Mutates the
+ * session's `loadedSkillNames`. Tracked inbox items (skill-save approvals) are
+ * surfaced through the returned `inboxItemId`.
+ */
+async function runAgentToolLoop(
+  deps: OrchestratorDeps,
+  session: ChatSessionState,
+  ctx: { organizationId: string; userId: string; branchId?: string },
+  system: string,
+  messages: ChatMessage[],
+): Promise<{ parsed: ParsedLlmResponse | null; inboxItemId?: string }> {
+  if (!deps.provider || deps.provider.id === "none") return { parsed: null };
+  let current = messages;
+  let inboxItemId: string | undefined;
+
+  for (let iteration = 0; iteration < AGENT_TOOL_MAX_ITERATIONS; iteration++) {
+    const completion = await deps.provider.complete({ system, messages: current });
+    const jsonMatch = completion.text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { parsed: null };
+    let parsed: ParsedLlmResponse;
+    try {
+      parsed = JSON.parse(jsonMatch[0]) as ParsedLlmResponse;
+    } catch {
+      return { parsed: null };
+    }
+
+    const call = parsed.toolCall;
+    if (!call || typeof call.name !== "string") {
+      return { parsed, inboxItemId };
+    }
+
+    const result = await executeAgentTool(deps, session, ctx, call);
+    if (result.inboxItemId) inboxItemId = result.inboxItemId;
+
+    current = [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        parts: [{ type: "text", text: `Invoking agent tool \`${call.name}\`.` }],
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        parts: [{ type: "text", text: `Tool result: ${result.message}` }],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+  return { parsed: null, inboxItemId };
+}
+
+interface ParsedLlmResponse {
+  command?: string;
+  input?: Record<string, unknown>;
+  clarify?: string[];
+  plan?: { command: string; input?: Record<string, unknown>; description?: string }[];
+  toolCall?: AgentToolCall;
+}
+
 export async function handleChatTurn(
   deps: OrchestratorDeps,
   input: ChatTurnInput,
 ): Promise<ChatTurnResult> {
-  const session = {
+  let session = {
     ...input.session,
     messages: [...input.session.messages],
   };
-
   if (input.cancelId && session.pending?.id === input.cancelId) {
+    const cancelled = session.pending;
     session.pending = undefined;
+    if (deps.inbox && cancelled) {
+      const existing = deps.inbox.list({ sessionId: session.id }).find((i) => i.id === cancelled.id);
+      if (existing) deps.inbox.resolve(existing.id, "deny");
+    }
     session.messages.push(
       msg("assistant", [{ type: "text", text: "Cancelled. No changes were made." }]),
     );
@@ -332,6 +823,42 @@ export async function handleChatTurn(
     return { session };
   }
 
+  // R7 — skill-save approvals resolve through the same Inbox card as any other
+  // approval. The draft was created disabled; an allow/always enables it, deny
+  // leaves it disabled. No self-grant path exists.
+  if (input.confirmId && deps.inbox && deps.skills) {
+    const skillItem = deps.inbox
+      .list({ sessionId: session.id, state: "pending" })
+      .find((i) => i.kind === "approval" && i.data?.skillSave != null && i.id === input.confirmId);
+    if (skillItem) {
+      const skillName = String(skillItem.data?.skillSave);
+      const resolution = input.inboxResolution ?? "allow";
+      deps.inbox.resolve(skillItem.id, resolution);
+      if (resolution === "allow" || resolution === "always") {
+        deps.skills.setEnabled(
+          skillName,
+          { organizationId: skillItem.organizationId, branchId: session.activeBranchId },
+          true,
+        );
+        session.messages.push(
+          msg("assistant", [
+            {
+              type: "text",
+              text: `Skill "${skillName}" was reviewed and enabled. It is now loadable by the assistant in this org.`,
+            },
+          ]),
+        );
+      } else {
+        session.messages.push(
+          msg("assistant", [
+            { type: "text", text: `Skill "${skillName}" was rejected; it remains disabled.` },
+          ]),
+        );
+      }
+      return { session };
+    }
+  }
+
   if (input.confirmId && session.pending?.id === input.confirmId) {
     const pending = session.pending;
     const aiCtx: RequestContext = {
@@ -342,6 +869,28 @@ export async function handleChatTurn(
         aiRunId: input.ctx.actor.aiRunId ?? crypto.randomUUID(),
       },
     };
+
+    // R2/R3: when an inbox is wired, resolve the canonical inbox item first so
+    // the once-only state-machine fires even when the client retried an
+    // approval from another surface (mobile, Slack). When `inboxResolution` is
+    // supplied (e.g. the user pressed "allow always"), it minted a standing
+    // rule + is forwarded into `resolve`. Otherwise resolve with "allow".
+    if (deps.inbox) {
+      const item = deps.inbox.list({ sessionId: session.id }).find((i) => i.id === pending.id);
+      if (item) {
+        const resolution = input.inboxResolution ?? "allow";
+        if (!deps.inbox.resolve(item.id, resolution)) {
+          // already resolved by another surface — treat as already-executed
+          session.pending = undefined;
+          session.messages.push(
+            msg("assistant", [
+              { type: "text", text: "This request was already actioned from another surface." },
+            ]),
+          );
+          return { session };
+        }
+      }
+    }
 
     const stepsToRun: PendingPlanStep[] =
       pending.plan && pending.plan.length > 0
@@ -434,68 +983,171 @@ export async function handleChatTurn(
   let planned: PlannedAction | null = rulePlans.length === 1 ? rulePlans[0]! : null;
   let multiPlan: PlannedAction[] | null = rulePlans.length > 1 ? rulePlans : null;
 
-  // Optional LLM assist when rules miss (provider may be none)
+  // R9 — read-only mode gate. In discuss/plan mode the orchestrator can still
+  // plan and propose but cannot execute writes/exec. This check fires BEFORE
+  // the LLM assist: rules that detected a write action emit a "describe in chat"
+  // response instead. Plan mode shows the plan card; discuss mode describes.
+  if (deps.mode && isReadOnly(deps.mode) && (planned || multiPlan)) {
+    const proposing = multiPlan ?? (planned ? [planned] : []);
+    const planSteps = proposing.map((p) => ({
+      command: p.command,
+      description: p.summary,
+      input: p.input,
+    }));
+    session.messages.push(
+      msg("assistant", [
+        {
+          type: "text",
+          text:
+            deps.mode === "discuss"
+              ? "Discuss mode is active, so I can't run this — describe it instead. Switch to plan or interactive mode to act."
+              : "Plan mode is active. Here's the plan I'd execute once you approve it.",
+        },
+        {
+          type: "plan",
+          id: crypto.randomUUID(),
+          title: "Proposed plan",
+          steps: planSteps,
+        },
+      ]),
+    );
+    return { session };
+  }
+
+  // R6 — outbound-history compaction. When the model's context budget is
+  // exceeded, replace the older portion of the OUTBOUND view with a
+  // structured summary + mechanical state. The persisted transcript
+  // (`session.messages`) is never modified; we only pass a transformed copy to
+  // the provider. The state is (re)built here when the trigger fires.
+  session = await ensureCompactionState(deps, session);
+  let outboundMessages = session.messages;
+  if (deps.compaction) {
+    outboundMessages = applyToOutbound(session.messages, session.compactionState ?? null);
+  }
+  // R9 + R7 — per-turn ephemeral context: read-only mode paragraph and the
+  // skill catalog / disable-countermand are appended to the outbound view every
+  // turn (both can change mid-session, so they never live in the static prompt).
+  outboundMessages = withModeContext(outboundMessages, deps.mode);
+  outboundMessages = withSkillContext(outboundMessages, deps, session, input.ctx.actor.organizationId);
+
+  // Optional LLM assist when rules miss (provider may be none). Runs a bounded
+  // agent-tool loop (R5 self-wake / R7 skills) and retries once after a
+  // context-overflow error with a no-LLM trim.
   if (!planned && !multiPlan && deps.provider && deps.provider.id !== "none") {
+    const agentTools = agentToolList(deps);
+    const system =
+      `You map user requests to JSON actions using only: ${catalog.map((c) => c.name).join(", ")}.\n` +
+      `For a single action: {"command":"...","input":{...}}\n` +
+      `For multiple sequential actions: {"plan":[{"command":"...","input":{...},"description":"..."},{"command":"...","input":{...}}]}\n` +
+      `If ambiguous or missing required info: {"clarify":["question1","question2"]}\n` +
+      (agentTools
+        ? `Before planning, you may call an agent tool to pull in context or schedule follow-ups.\nAvailable agent tools: ${agentTools}.\nTo call one, reply {"toolCall":{"name":"loadSkill","args":{"name":"..."}}} — you will receive the result and should then continue planning.\n`
+        : "") +
+      `Reply JSON only. Never invent field values — use null for unknown required fields.`;
+
+    let parsed: ParsedLlmResponse | null = null;
+    let inboxItemId: string | undefined;
     try {
-      const toolList = catalog.map((c) => c.name).join(", ");
-      const completion = await deps.provider.complete({
-        system:
-          `You map user requests to JSON actions using only: ${toolList}.\n` +
-          `For a single action: {"command":"...","input":{...}}\n` +
-          `For multiple sequential actions: {"plan":[{"command":"...","input":{...},"description":"..."},{"command":"...","input":{...}}]}\n` +
-          `If ambiguous or missing required info: {"clarify":["question1","question2"]}\n` +
-          `Reply JSON only. Never invent field values — use null for unknown required fields.`,
-        messages: session.messages,
-      });
-      const jsonMatch = completion.text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]) as {
-          command?: string;
-          input?: Record<string, unknown>;
-          clarify?: string[];
-          plan?: { command: string; input?: Record<string, unknown>; description?: string }[];
-        };
-        if (parsed.clarify && parsed.clarify.length > 0) {
-          session.messages.push({
-            id: crypto.randomUUID(),
-            role: "assistant",
-            parts: [
-              { type: "text" as const, text: "I need a bit more information to proceed." },
-              { type: "clarify" as const, questions: parsed.clarify },
-            ],
-            createdAt: new Date().toISOString(),
-          });
-          return { session, explanation: undefined };
+      ({ parsed, inboxItemId } = await runAgentToolLoop(
+        deps,
+        session,
+        { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },
+        system,
+        outboundMessages,
+      ));
+    } catch (err) {
+      if (isContextOverflow(err)) {
+        // free context with an honest no-LLM trim, then retry exactly once
+        const trimmed = trimState(session.messages, deps.auditSpanProvider?.() ?? [], {
+          prior: session.compactionState ?? undefined,
+        });
+        if (trimmed) session = { ...session, compactionState: trimmed };
+        outboundMessages = applyToOutbound(session.messages, session.compactionState ?? null);
+        try {
+          ({ parsed, inboxItemId } = await runAgentToolLoop(
+            deps,
+            session,
+            { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },
+            system,
+            outboundMessages,
+          ));
+        } catch {
+          parsed = null;
         }
-        if (parsed.plan && parsed.plan.length > 0) {
-          const steps = wireSequentialPlanInputs(
-            parsed.plan
-              .filter((s) => s.command && catalog.some((c) => c.name === s.command))
-              .map((s) => ({
-                command: s.command!,
-                input: normalizeFieldNames(s.input ?? {}),
-                summary: s.description ?? `Execute ${s.command}`,
-                specialist: catalog.find((c) => c.name === s.command)?.tags?.[0],
-              })),
-          );
-          if (steps.length > 1) {
-            multiPlan = steps;
-          } else if (steps.length === 1) {
-            planned = steps[0]!;
-          }
-        }
-        if (!planned && !multiPlan && parsed.command && catalog.some((c) => c.name === parsed.command)) {
-          planned = {
-            command: parsed.command,
-            input: parsed.input ?? {},
-            summary: `LLM-planned ${parsed.command}`,
-            specialist: catalog.find((c) => c.name === parsed.command)?.tags?.[0],
-          };
+      } else {
+        parsed = null;
+      }
+    }
+
+    if (parsed) {
+      if (parsed.clarify && parsed.clarify.length > 0) {
+        session.messages.push({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          parts: [
+            { type: "text" as const, text: "I need a bit more information to proceed." },
+            { type: "clarify" as const, questions: parsed.clarify },
+          ],
+          createdAt: new Date().toISOString(),
+        });
+        return { session, explanation: undefined, inboxItemId };
+      }
+      if (parsed.plan && parsed.plan.length > 0) {
+        const steps = wireSequentialPlanInputs(
+          parsed.plan
+            .filter((s) => s.command && catalog.some((c) => c.name === s.command))
+            .map((s) => ({
+              command: s.command!,
+              input: normalizeFieldNames(s.input ?? {}),
+              summary: s.description ?? `Execute ${s.command}`,
+              specialist: catalog.find((c) => c.name === s.command)?.tags?.[0],
+            })),
+        );
+        if (steps.length > 1) {
+          multiPlan = steps;
+        } else if (steps.length === 1) {
+          planned = steps[0]!;
         }
       }
-    } catch {
-      // fall through to help text
+      if (!planned && !multiPlan && parsed.command && catalog.some((c) => c.name === parsed.command)) {
+        planned = {
+          command: parsed.command,
+          input: parsed.input ?? {},
+          summary: `LLM-planned ${parsed.command}`,
+          specialist: catalog.find((c) => c.name === parsed.command)?.tags?.[0],
+        };
+      }
     }
+  }
+
+  // R9 — re-apply the read-only gate after the LLM assist (the LLM may have
+  // proposed a write even though the rule parser missed). Same response shape
+  // as the pre-LLM gate above.
+  if (deps.mode && isReadOnly(deps.mode) && (planned || multiPlan)) {
+    const proposing = multiPlan ?? (planned ? [planned] : []);
+    const planSteps = proposing.map((p) => ({
+      command: p.command,
+      description: p.summary,
+      input: p.input,
+    }));
+    session.messages.push(
+      msg("assistant", [
+        {
+          type: "text",
+          text:
+            deps.mode === "discuss"
+              ? "Discuss mode is active, so I can't run this — describe it instead. Switch to plan or interactive mode to act."
+              : "Plan mode is active. Here's the plan I'd execute once you approve it.",
+        },
+        {
+          type: "plan",
+          id: crypto.randomUUID(),
+          title: "Proposed plan",
+          steps: planSteps,
+        },
+      ]),
+    );
+    return { session };
   }
 
   // Multi-step plan from rules or LLM
@@ -505,17 +1157,44 @@ export async function handleChatTurn(
       description: p.summary,
       input: p.input,
     }));
-    const effectiveMulti = stricterAutonomy(deps.autonomy, deps.autonomy);
+    // R1 — the plan's gate is the strictest across its steps (respects each
+    // command's `minAutonomyForAuto` + risk class). Previously the plan only
+    // consulted the raw configured level, so `minAutonomyForAuto` was dead
+    // metadata and high-risk commands could auto-run under guarded_auto.
+    const stepMetas: AutoExecMeta[] = multiPlan
+      .map((p) => {
+        const m = commandMetaOf(deps, p.command);
+        if (!m) return undefined;
+        const out: AutoExecMeta = {};
+        if (m.minAutonomyForAuto) out.minAutonomyForAuto = m.minAutonomyForAuto;
+        if (m.riskClass) out.riskClass = m.riskClass;
+        return out;
+      })
+      .filter((m): m is AutoExecMeta => m !== undefined);
+    const effectiveMulti = effectiveAutonomyForPlan(deps.autonomy, stepMetas);
+    const planAuto = planMayAutoExecute(deps.autonomy, stepMetas);
+    // R4 — a plan may skip the confirmation entirely when every step is already
+    // covered by a standing approval rule (scoped to command + external target).
+    const planRules = multiPlan.map((p) =>
+      standingDecision(deps, session, p.command, p.input, commandMetaOf(deps, p.command)),
+    );
+    const coveredByRules = planRules.every((r) => r !== null);
     const runIdMulti = crypto.randomUUID();
     const explanation: AiExplanation = {
       runId: runIdMulti,
       summary: `${multiPlan.length}-step plan prepared`,
-      reasons: multiPlan.map((p) => p.summary),
+      reasons: [
+        ...multiPlan.map((p) => p.summary),
+        ...(coveredByRules
+          ? [`allowed by standing rule(s): ${planRules.map((r) => r!.rule).join(", ")}`]
+          : []),
+      ],
       rulesApplied: [
         "ai_manual_parity",
         "multi_step_plan",
         `autonomy:${effectiveMulti}`,
         "zod_validation_on_execute",
+        ...(coveredByRules ? ["standing_rule"] : []),
       ],
       dataUsed: ["user message", "command catalog"],
       autonomy: effectiveMulti,
@@ -523,11 +1202,24 @@ export async function handleChatTurn(
       plannedInput: { steps: planSteps },
     };
 
-    if (canAutoExecute(effectiveMulti)) {
+    if (coveredByRules || planAuto) {
       const aiCtx: RequestContext = {
         ...input.ctx,
         actor: { ...input.ctx.actor, kind: "ai_assisted", aiRunId: runIdMulti },
       };
+      const parts: UiPart[] = [
+        // R8 — live narration before a non-trivial execution batch.
+        {
+          type: "progress",
+          text: `Executing ${multiPlan.length}-step plan${coveredByRules ? " (standing approval rule)" : ` (autonomy=${effectiveMulti})`}…`,
+        },
+        {
+          type: "text",
+          text: coveredByRules
+            ? `Executed ${multiPlan.length} steps automatically — each step was already covered by a standing approval rule.`
+            : `Executed ${multiPlan.length}-step plan automatically (autonomy=${effectiveMulti}).`,
+        },
+      ];
       const stepOutputs = await executePlanSteps(
         deps,
         multiPlan.map((p) => ({
@@ -537,29 +1229,24 @@ export async function handleChatTurn(
         })),
         aiCtx,
       );
-      session.messages.push(
-        msg("assistant", [
-          {
-            type: "text",
-            text: `Executed ${stepOutputs.length}-step plan automatically (autonomy=${effectiveMulti}).`,
-          },
-          { type: "plan", id: runIdMulti, title: "Multi-step plan", steps: planSteps },
-          toExplanationPart(explanation),
-          {
-            type: "table",
-            columns: [
-              { key: "step", label: "Step" },
-              { key: "command", label: "Command" },
-              { key: "result", label: "Result" },
-            ],
-            rows: stepOutputs.map((s, i) => ({
-              step: String(i + 1),
-              command: s.command,
-              result: JSON.stringify(s.data).slice(0, 120),
-            })),
-          },
-        ]),
+      parts.push(
+        { type: "plan", id: runIdMulti, title: "Multi-step plan", steps: planSteps },
+        toExplanationPart(explanation),
+        {
+          type: "table",
+          columns: [
+            { key: "step", label: "Step" },
+            { key: "command", label: "Command" },
+            { key: "result", label: "Result" },
+          ],
+          rows: stepOutputs.map((s, i) => ({
+            step: String(i + 1),
+            command: s.command,
+            result: JSON.stringify(s.data).slice(0, 120),
+          })),
+        },
       );
+      session.messages.push(msg("assistant", parts));
       return { session, explanation };
     }
 
@@ -575,6 +1262,16 @@ export async function handleChatTurn(
       })),
       createdAt: new Date().toISOString(),
     };
+    {
+      const firstCmdMeta = catalog.find((c) => c.name === multiPlan[0]!.command);
+      void mirrorToInbox(
+        deps,
+        session,
+        { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },
+        session.pending,
+        { summary: `Execute ${multiPlan.length}-step plan`, commandMeta: firstCmdMeta },
+      );
+    }
     session.messages.push(
       msg("assistant", [
         {
@@ -629,7 +1326,7 @@ export async function handleChatTurn(
     return { session };
   }
 
-  const meta = catalog.find((c) => c.name === planned!.command) as CommandMeta | undefined;
+  const meta = commandMetaOf(deps, planned!.command);
   if (!meta) {
     session.messages.push(
       msg("assistant", [
@@ -643,7 +1340,12 @@ export async function handleChatTurn(
     return { session };
   }
 
-  const effective = stricterAutonomy(deps.autonomy, deps.autonomy);
+  // R1 — the effective gate respects the command's declared `minAutonomyForAuto`
+  // and its risk class (exec/external never auto-run without an explicit opt-in).
+  const effective = effectiveAutonomyForCommand(deps.autonomy, meta);
+  // R4 — a standing approval rule (command → external target) lets the call run
+  // without a fresh confirmation; the rule string is recorded for audit.
+  const standing = standingDecision(deps, session, planned!.command, planned!.input, meta);
   const runId = crypto.randomUUID();
 
   const explanation: AiExplanation = {
@@ -653,12 +1355,14 @@ export async function handleChatTurn(
       "Matched business intent",
       planned.specialist ? `Specialist tag: ${planned.specialist}` : "General routing",
       "Tool is module command — not a privileged AI API",
+      ...(standing ? [`allowed by standing rule: ${standing.rule}`] : []),
     ],
     rulesApplied: [
       "ai_manual_parity",
       `autonomy:${effective}`,
       "zod_validation_on_execute",
       "permission_check_on_execute",
+      ...(standing ? ["standing_rule"] : []),
     ],
     dataUsed: ["user message", "command catalog", "org autonomy policy"],
     autonomy: effective,
@@ -666,7 +1370,7 @@ export async function handleChatTurn(
     plannedInput: planned.input,
   };
 
-  if (effective === "full_autonomous" && deps.allowFullAutonomous === false) {
+  if (deps.autonomy === "full_autonomous" && deps.allowFullAutonomous === false) {
     session.messages.push(
       msg("assistant", [
         {
@@ -683,7 +1387,7 @@ export async function handleChatTurn(
     return { session };
   }
 
-  if (canAutoExecute(effective)) {
+  if (standing || commandMayAutoExecute(deps.autonomy, meta)) {
     const aiCtx: RequestContext = {
       ...input.ctx,
       actor: { ...input.ctx.actor, kind: "ai_assisted", aiRunId: runId },
@@ -696,7 +1400,19 @@ export async function handleChatTurn(
       deps.helpers,
     );
     const parts: UiPart[] = [
-      { type: "text", text: `Executed automatically (autonomy=${effective}).` },
+      // R8 — live narration line for a consequential single command.
+      {
+        type: "progress",
+        text: standing
+          ? `Running ${planned.command} (covered by standing rule: ${standing.rule})…`
+          : `Running ${planned.command} (autonomy=${effective})…`,
+      },
+      {
+        type: "text",
+        text: standing
+          ? `Executed \`${planned.command}\` automatically — covered by your standing rule ${standing.rule}.`
+          : `Executed automatically (autonomy=${effective}).`,
+      },
       toExplanationPart(explanation),
     ];
     if (effective === "full_autonomous") {

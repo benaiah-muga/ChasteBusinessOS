@@ -8,3 +8,7 @@ export * from "./mcp/server.js";
 export * from "./evals/index.js";
 export * from "./suggestions.js";
 export * from "./guardrails/index.js";
+export * from "./selfwake.js";
+export * from "./channels.js";
+export * from "./compaction.js";
+export * from "./skills.js";

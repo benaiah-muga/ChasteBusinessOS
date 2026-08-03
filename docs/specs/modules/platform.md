@@ -25,14 +25,14 @@ Platform is the control plane of the Business OS: identity, RBAC, branches, modu
 | Organization | exists |
 | User | exists |
 | Role / Permission / assignment | exists (expand) |
-| Branch | **next** |
-| UserBranchAccess | **next** |
+| Branch | **implemented (Horizon A)** |
+| UserBranchAccess | **implemented (Horizon A)** |
 | ModuleInstall / MarketplaceListing | exists |
-| Capability / CapabilityGapTicket | **next** |
-| Notification | **next** |
+| Capability / CapabilityGapTicket | **implemented (Horizon A)** |
+| Notification | **implemented (foundation)** |
 | CalendarEvent / Reminder / FollowUp | **later** |
 | EmailOutbox | **later** |
-| Chat session / Memory nodes | ai-core + db (cross-cutting) |
+| Chat session / Memory nodes | ai-core + db (cross-cutting); history + feedback **Horizon A** |
 
 ## 4. Multi-branch
 
@@ -118,14 +118,14 @@ Global chrome always shows: **branch switcher**, notification bell, AI chat entr
 
 ## 10. SMB checklist (baseline)
 
-- [ ] Create and switch branches
-- [ ] See all allowed branches
+- [x] Create and switch branches
+- [x] See all allowed branches
 - [ ] Invite user to org (and optionally branch)
-- [ ] Assign roles without raw SQL
-- [ ] Install/uninstall module from marketplace
-- [ ] Configure autonomy level with warnings
-- [ ] File and view capability gap tickets
-- [ ] Receive in-app notification for approvals/reminders
+- [x] Assign roles without raw SQL
+- [x] Install/uninstall module from marketplace
+- [x] Configure autonomy level with warnings
+- [x] File and view capability gap tickets
+- [x] Receive in-app notification foundation (list/mark read)
 - [ ] Set a reminder in natural language (when C4+)
 
 ## 11. Non-goals

@@ -136,11 +136,23 @@ Permissions: `core.capability.gap.*` distinct from install/publish.
 
 Cloud agent **recommends**; user/org policy chooses. Never silently publish shared marketplace from a single tenant without review policy.
 
-## 6. Local coding-agent detection
+## 6. Standard features vs self-development
+
+Platform **standard features** (branches, users/RBAC, marketplace install, autonomy, notifications foundation, chat, gap tickets) are customized through **settings, config, and NL workflows** — no code required.
+
+| Need | Path |
+|---|---|
+| Toggle behavior, fields, autonomy, reports | Standard / config (no code) |
+| New domain package shared with others | Portable module ([portable-modules.md](./portable-modules.md)) |
+| Out of scope of platform + installed modules | Capability gap → self-development |
+
+Self-dev is only for **out-of-scope** work after catalog search and config options are exhausted.
+
+## 7. Local coding-agent detection
 
 On self-hosted instances with `CHASTE_SELF_DEV_ENABLED=true`:
 
-1. Probe for known agents on `PATH` / config (OpenCode, Codex CLI, Claude Code, etc.).
+1. Probe for known agents on `PATH` / config (OpenCode, Codex CLI, Claude Code, **Buzz**, etc.).
 2. Present available agents to customization agent / settings UI.
 3. Handoff payload includes:
    - Confirmed ticket JSON
@@ -153,7 +165,34 @@ On self-hosted instances with `CHASTE_SELF_DEV_ENABLED=true`:
 
 If no coding agent is present: ticket remains for human developers; UI explains how to install a supported agent.
 
-## 7. Secure surfaces (what may be edited)
+### 7.1 CodingAgentProvider contract
+
+Agents are pluggable adapters — never hard-wired into the command bus:
+
+```ts
+type CodingAgentProvider = {
+  id: string;                 // "opencode" | "codex" | "claude-code" | "buzz" | …
+  displayName: string;
+  detect(): Promise<boolean>; // PATH / config / version probe
+  handoff(task: CodingHandoffPayload): Promise<CodingHandoffResult>;
+};
+```
+
+### 7.2 Native Buzz support
+
+**Buzz** is supported as a first-class `CodingAgentProvider` for agent-driven development handoff:
+
+| Concern | Approach |
+|---|---|
+| Detection | `CHASTE_CODING_AGENT_BUZZ_PATH` or `buzz` on `PATH`; optional version check |
+| Handoff | Write task pack (ticket JSON, allowed roots, check commands) + invoke Buzz CLI/API in worktree |
+| Isolation | Same sandbox rules as other agents; no production secret injection |
+| Fallback | If Buzz absent, list other detected agents or human queue |
+| Audit | Ticket records `codingAgent: "buzz"`, artifact ref, exit status |
+
+Buzz does **not** gain elevated platform privileges; generated modules still install through `core.module.install` with normal permissions.
+
+## 8. Secure surfaces (what may be edited)
 
 | Allowed | Forbidden by default |
 |---|---|
@@ -165,7 +204,7 @@ If no coding agent is present: ticket remains for human developers; UI explains 
 
 Cloud workers use stronger isolation (ephemeral VMs/containers, no customer SoR write from codegen).
 
-## 8. Marketplace / registry loop
+## 9. Marketplace / registry loop
 
 1. Package meets module manifest contract.
 2. `core.marketplace.publish` (or contribution PR to public registry).
@@ -174,7 +213,7 @@ Cloud workers use stronger isolation (ephemeral VMs/containers, no customer SoR 
 
 Local-only extensions can stay private (never published).
 
-## 9. Customization agent behavior
+## 10. Customization agent behavior
 
 - Speaks product language, not framework jargon, to the user.
 - Produces acceptance criteria the user can edit.
@@ -182,7 +221,7 @@ Local-only extensions can stay private (never published).
 - After ship: demonstrates the new capability via ops tools; writes memory lesson.
 - Does not claim "done" without green checks + install success.
 
-## 10. Relation to "everything in main"
+## 11. Relation to "everything in main"
 
 **Rejected as default:** merging every customization into mainline.
 
@@ -192,7 +231,7 @@ Local-only extensions can stay private (never published).
 - Long tail stays extensions or marketplace packages.
 - Mapping templates and config remain data, not code.
 
-## 11. Phasing
+## 12. Phasing
 
 | Phase | Deliverable |
 |---|---|
@@ -204,7 +243,7 @@ Local-only extensions can stay private (never published).
 | S5 | Cloud private extension builders |
 | S6 | Auto memory lesson + eval harness for gap honesty |
 
-## 12. Success metrics
+## 13. Success metrics
 
 - % of missing-feature evals that ticket instead of hallucinate
 - Time from confirmed ticket → installable module (local pilot)
@@ -212,7 +251,7 @@ Local-only extensions can stay private (never published).
 - Zero privilege-escalation incidents via self-dev path
 - Reuse rate of customization memories on similar tickets
 
-## 13. Non-goals
+## 14. Non-goals
 
 - Fully unsupervised production deploys on day one
 - Replacing professional services for regulated certifications

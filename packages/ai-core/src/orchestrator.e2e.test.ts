@@ -19,6 +19,7 @@ import {
   defineCommand,
   InMemoryAuditWriter,
   InMemoryOutboxWriter,
+  InboxStore,
   type CommandRegistry,
   type QueryRegistry,
   type AutonomyLevel,
@@ -38,6 +39,8 @@ import { generateSuggestions } from "./suggestions.js";
 import { InMemoryMemoryStore } from "./memory.js";
 import type { AiProvider, CompletionResult } from "./providers.js";
 import { NoneProvider } from "./providers.js";
+import { WakeStore } from "./selfwake.js";
+import { InMemorySkillStore } from "./skills.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -1264,5 +1267,330 @@ describe("handleChatTurn — explanation audit trail", () => {
 
     expect(result.explanation).toBeDefined();
     expect(result.explanation!.plannedInput).toMatchObject({ name: "Acme Ltd" });
+  });
+});
+
+// ===================================================================
+// OpenWorker-benchmark wiring (R1/R4/R5/R7/R8/R9/R6)
+// ===================================================================
+
+function ctxWith(permissions: string[]): RequestContextLike {
+  const base = makeCtx();
+  return {
+    ...base,
+    actor: { ...base.actor, permissions: new Set([...base.actor.permissions, ...permissions]) },
+  };
+}
+
+type RequestContextLike = ReturnType<typeof makeCtx>;
+
+function registerExternalCommands(commands: CommandRegistry) {
+  commands.register(
+    defineCommand({
+      name: "email.send",
+      permissions: ["email.send"],
+      tags: ["comms"],
+      riskClass: "external",
+      externalTargetField: "to",
+      input: z.object({
+        to: z.string().min(1),
+        subject: z.string().min(1),
+        body: z.string().optional(),
+      }),
+      output: z.object({ ok: z.boolean(), to: z.string() }),
+      handler: async (input) => ({ ok: true, to: input.to }),
+    }),
+  );
+  commands.register(
+    defineCommand({
+      name: "payroll.wire",
+      permissions: ["hr.payroll.run"],
+      tags: ["hr"],
+      riskClass: "external",
+      input: z.object({ amount: z.number(), currency: z.string() }),
+      output: z.object({ id: z.string() }),
+      handler: async () => ({ id: "wire-1" }),
+    }),
+  );
+  commands.register(
+    defineCommand({
+      name: "hr.payroll.approve",
+      permissions: ["hr.payroll.run"],
+      minAutonomyForAuto: "full_autonomous",
+      input: z.object({ periodLabel: z.string() }),
+      output: z.object({ id: z.string(), periodLabel: z.string() }),
+      handler: async (input) => ({ id: "pr-9", periodLabel: input.periodLabel }),
+    }),
+  );
+}
+
+describe("handleChatTurn — R4 standing approval rules", () => {
+  it("auto-executes an external command covered by a standing rule, recording the rule", async () => {
+    const commands = createCommandRegistry();
+    registerTestCommands(commands);
+    registerExternalCommands(commands);
+    const inbox = new InboxStore();
+    // Pre-mint: "allow email.send → user@x.com always"
+    const approval = inbox.addApproval({
+      sessionId: "s1",
+      organizationId: "o1",
+      userId: "u1",
+      title: "Seed",
+      toolCallId: "t0",
+      data: { commandId: "email.send", standingTarget: "user@x.com" },
+    });
+    inbox.resolve(approval.id, "always");
+
+    const provider = new MockProvider(
+      JSON.stringify({
+        command: "email.send",
+        input: { to: "user@x.com", subject: "Townhall", body: "Reminder" },
+      }),
+    );
+    const deps = { ...makeDeps({ autonomy: "confirm", provider, commands }), inbox };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Remind the team about the townhall via email",
+      ctx: ctxWith(["email.send"]),
+    });
+
+    // No confirmation was requested — the standing rule allowed the call.
+    expect(result.session.pending).toBeUndefined();
+    const lastMsg = result.session.messages[result.session.messages.length - 1]!;
+    expect(
+      lastMsg.parts.some(
+        (p) => p.type === "text" && "text" in p && String(p.text).includes("standing rule"),
+      ),
+    ).toBe(true);
+    expect(result.explanation?.rulesApplied).toContain("standing_rule");
+    expect(result.explanation?.reasons.join(" ")).toContain("email.send → user@x.com");
+  });
+
+  it("still asks for confirmation when the standing rule targets a different recipient", async () => {
+    const commands = createCommandRegistry();
+    registerTestCommands(commands);
+    registerExternalCommands(commands);
+    const inbox = new InboxStore();
+    const approval = inbox.addApproval({
+      sessionId: "s1",
+      organizationId: "o1",
+      userId: "u1",
+      title: "Seed",
+      toolCallId: "t0",
+      data: { commandId: "email.send", standingTarget: "user@x.com" },
+    });
+    inbox.resolve(approval.id, "always");
+
+    const provider = new MockProvider(
+      JSON.stringify({
+        command: "email.send",
+        input: { to: "other@example.com", subject: "Townhall" },
+      }),
+    );
+    const deps = { ...makeDeps({ autonomy: "confirm", provider, commands }), inbox };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Email the whole office about the townhall",
+      ctx: ctxWith(["email.send"]),
+    });
+
+    // Different target → not covered → normal confirm flow.
+    expect(result.session.pending?.command).toBe("email.send");
+    expect(result.explanation?.rulesApplied).not.toContain("standing_rule");
+  });
+});
+
+describe("handleChatTurn — R1 risk-aware autonomy gate", () => {
+  it("does NOT auto-run an external command under guarded_auto without an explicit opt-in", async () => {
+    const commands = createCommandRegistry();
+    registerTestCommands(commands);
+    registerExternalCommands(commands);
+    const provider = new MockProvider(
+      JSON.stringify({ command: "payroll.wire", input: { amount: 100, currency: "USD" } }),
+    );
+    const deps = makeDeps({ autonomy: "guarded_auto", provider, commands });
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Send the contractor wires for this month",
+      ctx: makeCtx(),
+    });
+
+    // risk=external + no minAutonomyForAuto → falls back to confirm, never auto.
+    expect(result.session.pending?.command).toBe("payroll.wire");
+    expect(result.explanation?.autonomy).toBe("confirm");
+  });
+
+  it("respects minAutonomyForAuto: full_autonomous (previously dead metadata)", async () => {
+    const commands = createCommandRegistry();
+    registerTestCommands(commands);
+    registerExternalCommands(commands);
+    const provider = new MockProvider(
+      JSON.stringify({ command: "hr.payroll.approve", input: { periodLabel: "2026-03" } }),
+    );
+    const deps = makeDeps({ autonomy: "guarded_auto", provider, commands });
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Approve the March payroll run",
+      ctx: makeCtx(),
+    });
+
+    // guarded_auto < full_autonomous requirement → must confirm, not auto-run.
+    expect(result.session.pending?.command).toBe("hr.payroll.approve");
+    expect(result.explanation?.autonomy).toBe("full_autonomous");
+  });
+});
+
+describe("handleChatTurn — R8 progress narration part", () => {
+  it("emits a progress part before an auto-executed consequential command", async () => {
+    const deps = makeDeps({ autonomy: "guarded_auto" });
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer Acme Ltd",
+      ctx: makeCtx(),
+    });
+
+    const lastMsg = result.session.messages[result.session.messages.length - 1]!;
+    const progress = lastMsg.parts.find((p) => p.type === "progress") as
+      | { type: "progress"; text: string }
+      | undefined;
+    expect(progress).toBeDefined();
+    expect(progress!.text).toContain("crm.customer.create");
+  });
+});
+
+describe("handleChatTurn — R9 read-only mode gate (post-LLM)", () => {
+  it("discuss mode blocks an LLM-planned write and describes instead", async () => {
+    const provider = new MockProvider(
+      JSON.stringify({ command: "crm.customer.create", input: { name: "Sneaky" } }),
+    );
+    const deps = { ...makeDeps({ provider }), mode: "discuss" as const };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "We should register the new regional holding as a customer soon",
+      ctx: makeCtx(),
+    });
+
+    expect(result.session.pending).toBeUndefined();
+    const lastMsg = result.session.messages[result.session.messages.length - 1]!;
+    expect(
+      lastMsg.parts.some(
+        (p) => p.type === "text" && "text" in p && String(p.text).includes("Discuss mode is active"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("handleChatTurn — R5+R7 agent tool loop", () => {
+  it("runs loadSkill, records the loaded skill, then plans the command", async () => {
+    const skills = new InMemorySkillStore();
+    skills.upsert({
+      name: "crm.lead-prioritization",
+      scope: "platform",
+      title: "Lead prioritization",
+      summary: "Score leads by RFM",
+      instructions: "Use RFM scoring; update the priority field.",
+      enabled: true,
+    });
+    const provider = new MockProvider(
+      JSON.stringify({ toolCall: { name: "loadSkill", args: { name: "crm.lead-prioritization" } } }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "ToolCo" } }),
+    );
+    const deps = { ...makeDeps({ provider }), skills };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Help us prioritize our leads and add ToolCo as a customer",
+      ctx: makeCtx(),
+    });
+
+    expect(result.session.loadedSkillNames).toContain("crm.lead-prioritization");
+    expect(result.session.pending?.command).toBe("crm.customer.create");
+  });
+
+  it("saveSkill parks a disabled draft behind an inbox approval", async () => {
+    const skills = new InMemorySkillStore();
+    const inbox = new InboxStore();
+    const provider = new MockProvider(
+      JSON.stringify({
+        toolCall: {
+          name: "saveSkill",
+          args: {
+            name: "acc.cycle-close",
+            title: "Cycle close",
+            summary: "Monthly accounting close procedure",
+            instructions: "Run all accruals, then reconcile.",
+          },
+        },
+      }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "SkillCo" } }),
+    );
+    const deps = { ...makeDeps({ provider }), skills, inbox };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Save our month-end close procedure as a skill",
+      ctx: makeCtx(),
+    });
+
+    const draft = skills.get("acc.cycle-close", { organizationId: "o1" });
+    expect(draft).toBeDefined();
+    expect(draft!.enabled).toBe(false); // disabled until a human approves
+    const pending = inbox.pending({ sessionId: "s1" });
+    expect(pending.some((i) => i.data?.skillSave === "acc.cycle-close")).toBe(true);
+  });
+
+  it("sleepUntil creates a durable wake record and the model continues", async () => {
+    const wakes = new WakeStore();
+    const provider = new MockProvider(
+      JSON.stringify({
+        toolCall: { name: "sleepUntil", args: { isoTimestamp: "2026-09-01T08:00:00Z", note: "digest" } },
+      }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "WakeCo" } }),
+    );
+    const deps = { ...makeDeps({ provider }), wake: wakes };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Check back in the morning and create WakeCo as a customer",
+      ctx: makeCtx(),
+    });
+
+    expect(wakes.pending("s1")).toHaveLength(1);
+    expect(wakes.pending("s1")[0]!.kind).toBe("timer");
+    expect(result.session.pending?.command).toBe("crm.customer.create");
+  });
+});
+
+describe("handleChatTurn — R6 compaction wiring", () => {
+  it("builds compaction state when the outbound history exceeds the trigger", async () => {
+    const summarizer = {
+      modelUsed: "sm",
+      summarize: async () => "(summary)",
+    };
+    const deps = { ...makeDeps(), compaction: { summarizer, contextWindow: 1000 } };
+    const session: ChatSessionState = { id: "s1", messages: [] };
+    for (let i = 0; i < 60; i++) {
+      session.messages.push({
+        id: crypto.randomUUID(),
+        role: "user",
+        parts: [{ type: "text", text: `turn ${i}: create something ${i}` }],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      session.messages.push({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        parts: [{ type: "text", text: `reply ${i}: did that` }],
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+    }
+
+    const result = await handleChatTurn(deps, {
+      session,
+      userText: "Create customer Acme Ltd",
+      ctx: makeCtx(),
+    });
+
+    expect(result.session.compactionState).toBeDefined();
+    expect(result.session.compactionState!.boundaryIndex).toBeGreaterThan(0);
+    // the persisted transcript is untouched — only the outbound view compacts
+    // (120 preloaded + the user turn + the confirm-path assistant reply)
+    expect(result.session.messages.length).toBe(122);
   });
 });

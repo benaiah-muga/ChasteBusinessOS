@@ -69,6 +69,8 @@ export const appConfigSchema = z.object({
     nvidiaApiKey: z.string().optional(),
     /** Nvidia NIM base URL override */
     nvidiaBaseUrl: z.string().url().optional(),
+    /** R2 — where new approvals surface by default for attended sessions. */
+    defaultInboxVisibility: z.enum(["inline", "inbox"]).default("inline"),
   }),
 
   /** Optional LLM tracing (Langfuse). Independent of any agent framework. */
@@ -124,6 +126,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       baseUrl: env.CHASTE_AI_BASE_URL,
       nvidiaApiKey: env.NVIDIA_API_KEY,
       nvidiaBaseUrl: env.NVIDIA_BASE_URL,
+      defaultInboxVisibility:
+        env.CHASTE_DEFAULT_INBOX_VISIBILITY === "inbox" ? "inbox" : "inline",
     },
     observability: {
       // Prefer CHASTE_OBSERVABILITY_ENABLED; keep MASTRA_* as temporary aliases.

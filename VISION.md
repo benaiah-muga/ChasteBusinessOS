@@ -46,8 +46,8 @@ The point of the harness is to **remove the need for human intervention of agenc
 
 Instead of only navigating screens, users can say:
 
-- "We're opening a second branch in Nairobi."
-- "Create a quotation for our biggest customer."
+- "We're opening a second branch in Nairobi." Agent will do the needful and afterwards, a button linking to the resource will be emmited in the chat ui and also a push notification with sound.
+- "Create a quotation for our biggest customer." The Agent will emit a UI component(Button) for user to confirm, after confirmation, the agent can emit another UI component(Form) with appropriate fields for the user to enter.
 - "Show me why profits dropped this month."
 - "Order more stock when inventory reaches this level."
 - "Prepare payroll for this month."

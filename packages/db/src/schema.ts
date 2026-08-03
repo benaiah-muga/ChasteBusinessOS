@@ -34,6 +34,7 @@ export const users = pgTable(
     displayName: text("display_name").notNull(),
     authToken: text("auth_token"),
     settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+    activeBranchId: uuid("active_branch_id"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -143,18 +144,63 @@ export const marketplaceListings = pgTable("marketplace_listings", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/* ─── Branches ───────────────────────────────────────────────── */
+
+export const branches = pgTable(
+  "branches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    name: text("name").notNull(),
+    code: text("code").notNull(),
+    timezone: text("timezone"),
+    parentBranchId: uuid("parent_branch_id"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("branches_org_code_uidx").on(t.organizationId, t.code),
+    index("branches_org_idx").on(t.organizationId),
+  ],
+);
+
+export const userBranchAccess = pgTable(
+  "user_branch_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("user_branch_access_uidx").on(t.userId, t.branchId)],
+);
+
 export const chatSessions = pgTable(
   "chat_sessions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     organizationId: uuid("organization_id").notNull(),
     userId: uuid("user_id").notNull(),
+    title: text("title"),
+    activeBranchId: uuid("active_branch_id"),
     pending: jsonb("pending").$type<{ id: string; command: string; input: unknown; createdAt: string }>(),
+    /** R3 — unattended sessions park approvals in the cross-session Inbox queue instead of inline. */
+    unattended: boolean("unattended").notNull().default(false),
+    /** R6 — outbound compaction boundary + summary + mechanical working state (JSONB). */
+    compactionState: jsonb("compaction_state").$type<unknown | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("chat_sess_org_idx").on(t.organizationId),
     index("chat_sess_user_idx").on(t.userId),
+    index("chat_sess_updated_idx").on(t.updatedAt),
   ],
 );
 
@@ -167,6 +213,177 @@ export const chatMessages = pgTable("chat_messages", {
   parts: jsonb("parts").$type<unknown[]>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const chatFeedback = pgTable(
+  "chat_feedback",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id").notNull(),
+    rating: text("rating").notNull(), // "up" | "down"
+    comment: text("comment"),
+    runId: text("run_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("chat_feedback_sess_idx").on(t.sessionId),
+    uniqueIndex("chat_feedback_msg_user_uidx").on(t.sessionId, t.messageId, t.userId),
+  ],
+);
+
+export const capabilityGapTickets = pgTable(
+  "capability_gap_tickets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    status: text("status").notNull().default("draft"),
+    proposedCapabilityId: text("proposed_capability_id").notNull(),
+    title: text("title").notNull(),
+    abstractRequirement: text("abstract_requirement").notNull(),
+    acceptanceCriteria: jsonb("acceptance_criteria").$type<string[]>().notNull().default([]),
+    exampleScenarios: jsonb("example_scenarios").$type<string[]>().notNull().default([]),
+    suggestedModuleId: text("suggested_module_id"),
+    nonGoals: jsonb("non_goals").$type<string[]>().notNull().default([]),
+    deploymentTarget: text("deployment_target").notNull().default("undecided"),
+    codingAgent: text("coding_agent"),
+    artifactRef: text("artifact_ref"),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("gap_tickets_org_idx").on(t.organizationId),
+    index("gap_tickets_status_idx").on(t.status),
+  ],
+);
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    kind: text("kind").notNull().default("info"),
+    title: text("title").notNull(),
+    body: text("body"),
+    href: text("href"),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("notifications_user_idx").on(t.userId),
+    index("notifications_org_idx").on(t.organizationId),
+  ],
+);
+
+/* ─── AI runtime stores (OpenWorker-benchmark primitives, R2/R5/R7/R10) ─── */
+
+/**
+ * R2 — the canonical human-attention queue. Mirrors `InboxItem` from
+ * `@chaste/kernel` so a Postgres-backed InboxStore can be layered on top later;
+ * today the runtime uses the in-memory kernel store and this is the durable
+ * schema that schema-first flows will target.
+ */
+export const pendingApprovals = pgTable(
+  "pending_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id").notNull(),
+    organizationId: uuid("organization_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    kind: text("kind").notNull(), // approval | question | notification | plan
+    title: text("title").notNull(),
+    body: text("body"),
+    state: text("state").notNull().default("pending"),
+    resolution: text("resolution"),
+    inbox: text("inbox").notNull().default("default"),
+    visibility: text("visibility").notNull().default("inline"), // inline | inbox
+    toolCallId: text("tool_call_id"),
+    options: jsonb("options").$type<string[]>().default([]),
+    allowText: boolean("allow_text").notNull().default(true),
+    multi: boolean("multi").notNull().default(false),
+    data: jsonb("data").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("pending_approvals_session_idx").on(t.sessionId),
+    index("pending_approvals_org_state_idx").on(t.organizationId, t.state),
+    index("pending_approvals_toolcall_uidx").on(t.sessionId, t.toolCallId),
+  ],
+);
+
+/** R5 — durable self-wake records consumed by the worker tick to re-enter a session. */
+export const aiWakes = pgTable(
+  "ai_wakes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id").notNull(),
+    taskId: uuid("task_id"),
+    proactiveText: text("proactive_text"),
+    kind: text("kind").notNull(), // timer | completion | event
+    state: text("state").notNull().default("pending"), // pending | due | fired
+    fireAt: timestamp("fire_at", { withTimezone: true }),
+    jobId: text("job_id"),
+    eventKey: text("event_key"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("ai_wakes_due_idx").on(t.state, t.fireAt),
+    index("ai_wakes_session_idx").on(t.sessionId),
+    index("ai_wakes_job_idx").on(t.jobId),
+    index("ai_wakes_event_idx").on(t.eventKey),
+  ],
+);
+
+/** R7 — org/platform skill catalog exposed to the AI (progressive disclosure). */
+export const aiSkills = pgTable(
+  "ai_skills",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scope: text("scope").notNull().default("organization"), // platform | organization
+    organizationId: uuid("organization_id"),
+    branchId: uuid("branch_id"),
+    name: text("name").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    instructions: text("instructions").notNull(),
+    files: jsonb("files").$type<unknown[]>().default([]),
+    enabled: boolean("enabled").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ai_skills_name_scope_uidx").on(t.name, t.organizationId, t.branchId),
+    index("ai_skills_org_idx").on(t.organizationId),
+  ],
+);
+
+/** R10 — inbound channel → session ownership (Slack/Telegram/WhatsApp mentions). */
+export const channelSessionBindings = pgTable(
+  "channel_session_bindings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    threadTarget: text("thread_target").notNull(), // "platform:chatId:threadTs"
+    sessionId: uuid("session_id").notNull(),
+    organizationId: uuid("organization_id").notNull(),
+    branchId: uuid("branch_id"),
+    channel: text("channel").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("channel_bindings_target_uidx").on(t.threadTarget),
+    index("channel_bindings_session_idx").on(t.sessionId),
+    index("channel_bindings_org_idx").on(t.organizationId),
+  ],
+);
 
 export const aiExplanations = pgTable("ai_explanations", {
   id: uuid("id").primaryKey().defaultRandom(),

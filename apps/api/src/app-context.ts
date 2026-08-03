@@ -12,7 +12,14 @@ import {
   createTracer,
   type AiTracer,
   TracedProvider,
+  WakeStore,
+  InMemorySkillStore,
+  SUMMARY_SYSTEM_PROMPT,
+  type SkillStore,
+  type CompactionSummarizer,
+  type CompletionRequest,
 } from "@chaste/ai-core";
+import type { ChatMessage } from "@chaste/ui-schema";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
 import {
   bootstrapPlatform,
@@ -35,6 +42,7 @@ import {
   createRequestContext,
   executeCommand,
   executeQuery,
+  InboxStore,
   NotFoundError,
   type Actor,
   type CommandRegistry,
@@ -70,6 +78,14 @@ export interface AppContext {
   outbox: PostgresOutboxWriter;
   sessionStore: SessionStore;
   memoryStore: DbMemoryStore;
+  /** R2 — the canonical human-attention queue (in-memory kernel store; durable `pending_approvals` table exists for the Postgres-backed swap). */
+  inbox: InboxStore;
+  /** R5 — durable self-wake records for scheduled re-entry. */
+  wakes: WakeStore;
+  /** R7 — org/platform AI skill catalog (progressive disclosure). */
+  skills: SkillStore;
+  /** R6 — compaction summarizer over the configured provider. */
+  compaction?: { summarizer: CompactionSummarizer };
   explanations: AiExplanation[];
   sessionUser: SessionUser;
   provider: AiProvider;
@@ -169,6 +185,49 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     });
   }
 
+  // R2/R5/R7 runtime stores — the durable Postgres-backed counterparts
+  // (`pending_approvals`, `ai_wakes`, `ai_skills`) exist in the schema; the
+  // in-memory kernel stores satisfy the same interfaces so the runtime works
+  // today and can be swapped without touching the orchestrator.
+  const inbox = new InboxStore();
+  const wakes = new WakeStore();
+  const skills = new InMemorySkillStore();
+
+  // R6 — compaction summarizer reuses the configured provider with the
+  // fixed 8-section OpenWorker summary contract.
+  const compaction =
+    provider.id !== "none"
+      ? {
+          summarizer: {
+            modelUsed: provider.id,
+            async summarize(messages: ChatMessage[], priorSummary: string): Promise<string> {
+              const req: CompletionRequest = {
+                system: SUMMARY_SYSTEM_PROMPT,
+                messages,
+              };
+              if (priorSummary) {
+                req.messages = [
+                  ...messages,
+                  {
+                    id: crypto.randomUUID(),
+                    role: "user",
+                    parts: [
+                      {
+                        type: "text",
+                        text: `Previous compaction summary — fold its still-relevant content into the new summary:\n${priorSummary}`,
+                      },
+                    ],
+                    createdAt: new Date().toISOString(),
+                  },
+                ];
+              }
+              const res = await provider.complete(req);
+              return res.text || "(no summary returned by provider)";
+            },
+          },
+        }
+      : undefined;
+
   return {
     config,
     db,
@@ -179,6 +238,10 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     outbox,
     sessionStore: new DbSessionStore(db),
     memoryStore,
+    inbox,
+    wakes,
+    skills,
+    compaction,
     explanations: [],
     sessionUser,
     provider: tracedProvider,
@@ -256,6 +319,8 @@ export async function runChat(
       id: dbSession.id,
       messages: dbSession.messages as ChatSessionState["messages"],
       pending: dbSession.pending,
+      unattended: dbSession.unattended ?? false,
+      compactionState: dbSession.compactionState as ChatSessionState["compactionState"],
     };
   } else if (!body.sessionId) {
     const existing = await app.sessionStore.loadByOrgUser(
@@ -268,6 +333,8 @@ export async function runChat(
         id: existing.id,
         messages: existing.messages as ChatSessionState["messages"],
         pending: existing.pending,
+        unattended: existing.unattended ?? false,
+        compactionState: existing.compactionState as ChatSessionState["compactionState"],
       };
     } else {
       await app.sessionStore.create(sessionId, app.sessionUser.organizationId, app.sessionUser.id);
@@ -286,6 +353,11 @@ export async function runChat(
       autonomy: app.sessionUser.autonomy,
       provider: app.provider,
       allowFullAutonomous: app.config.allowFullAutonomous,
+      inbox: app.inbox,
+      wake: app.wakes,
+      skills: app.skills,
+      compaction: app.compaction,
+      defaultInboxVisibility: app.config.ai.defaultInboxVisibility,
     },
     {
       session,
@@ -306,6 +378,10 @@ export async function runChat(
       createdAt: m.createdAt,
     })),
     result.session.pending,
+    {
+      unattended: result.session.unattended ?? false,
+      compactionState: result.session.compactionState ?? null,
+    },
   );
   if (result.explanation) {
     app.explanations.push(result.explanation);

@@ -26,7 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ADR 0006: custom AI orchestration
 - ADR 0007: harness memory graph and self-development pipeline (spec decision)
 - Product specs: agent harness, semantic memory, self-development, scheduling/comms, platform module
+- Specs: portable modules, chat sessions/feedback, UI correctness, PWA/Tailscale access, model eval suite
 - Expanded VISION / ARCHITECTURE / product-architecture-next for harness, gaps, self-dev, multi-branch, proactive agents
+- **Horizon A platform**: multi-branch (list/create/update/set_active/grant), capability gap tickets, in-app notifications foundation
+- **Chat**: session history API + top-bar continue/new chat, like/dislike feedback, auto titles
+- **Safety**: `resource_link` / `gap_ticket` UiParts with server-side href allowlist verification
+- **PWA**: installable web manifest + service worker registration
+- **Evals**: expanded real-world scenario seed set for model readiness
+- Passive memory inject foundation on chat turns
+- Coding agent provider contract including optional Buzz adapter detection
 - Lightweight prompt-injection guardrails in orchestrator
 - `CHANGELOG.md` to track release history
 
