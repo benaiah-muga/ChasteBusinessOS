@@ -12,10 +12,18 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@chaste/ai-core": "workspace:*",
     "@chaste/config": "workspace:*",
     "@chaste/db": "workspace:*",
     "@chaste/kernel": "workspace:*",
-    "@chaste/module-platform": "workspace:*"
+    "@chaste/module-accounting": "workspace:*",
+    "@chaste/module-crm": "workspace:*",
+    "@chaste/module-hr": "workspace:*",
+    "@chaste/module-inventory": "workspace:*",
+    "@chaste/module-manufacturing": "workspace:*",
+    "@chaste/module-platform": "workspace:*",
+    "@chaste/module-purchasing": "workspace:*",
+    "drizzle-orm": "^0.38.3"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

@@ -261,6 +261,29 @@ export const capabilityGapTickets = pgTable(
   ],
 );
 
+/**
+ * S0 — machine-readable capability catalog (spec: self-development.md §6).
+ * Product-level knowledge of what the platform + registered modules can do,
+ * searched by the operations agent before falling back to gap tickets.
+ */
+export const capabilityCatalogItems = pgTable(
+  "capability_catalog_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    moduleId: text("module_id").notNull(),
+    capabilityId: text("capability_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    keywords: jsonb("keywords").$type<string[]>().notNull().default([]),
+    implemented: boolean("implemented").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("capability_catalog_module_cap_uidx").on(t.moduleId, t.capabilityId),
+    index("capability_catalog_cap_idx").on(t.capabilityId),
+  ],
+);
+
 /** C2 — user reminders. Fired by the schedule processor into in-app notifications. */
 export const reminders = pgTable(
   "reminders",

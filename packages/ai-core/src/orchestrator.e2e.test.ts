@@ -31,6 +31,7 @@ import {
   planFromText,
   planManyFromText,
   resolvePlanStepInput,
+  runFollowUpTurn,
   wireSequentialPlanInputs,
   type ChatSessionState,
   type OrchestratorDeps,
@@ -1690,5 +1691,45 @@ describe("handleChatTurn — active branch context", () => {
     expect(
       lastUser!.parts.some((p) => p.type === "text" && p.text.includes("Active branch")),
     ).toBe(false);
+  });
+});
+
+// ===================================================================
+// runFollowUpTurn — C5 agent follow-up harness re-entry
+// ===================================================================
+
+describe("runFollowUpTurn", () => {
+  it("re-enters the harness with the follow-up goal under guarded_auto", async () => {
+    const deps = makeDeps({ autonomy: "guarded_auto" });
+    const ctx = makeCtx();
+
+    const result = await runFollowUpTurn(deps, {
+      session: freshSession(),
+      ctx,
+      goal: "Create customer Acme Ltd",
+    });
+
+    // The goal runs under the pipeline and executes under guarded_auto.
+    expect(deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create")).toBe(
+      true,
+    );
+    // The assistant turn explains the outcome.
+    const lastMsg = result.session.messages[result.session.messages.length - 1]!;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    expect(textPart?.text).toBeTruthy();
+  });
+
+  it("under confirm autonomy surfaces a pending confirmation instead of executing", async () => {
+    const deps = makeDeps({ autonomy: "confirm" });
+    const ctx = makeCtx();
+
+    const result = await runFollowUpTurn(deps, {
+      session: freshSession(),
+      ctx,
+      goal: "Create customer Acme Ltd",
+    });
+
+    expect(deps.helpers.audit.entries.some((e) => e.action === "crm.customer.create")).toBe(false);
+    expect(result.session.pending).toBeDefined();
   });
 });

@@ -9,6 +9,7 @@ import { loadConfig } from "@chaste/config";
 import { createDb, PostgresOutboxWriter } from "@chaste/db";
 import { createDefaultProcessor } from "@chaste/kernel";
 import { createScheduleProcessor } from "@chaste/module-platform";
+import { createFollowUpHarness, runFollowUp } from "./harness.js";
 
 async function main() {
   const cfg = loadConfig();
@@ -16,6 +17,7 @@ async function main() {
   const outbox = new PostgresOutboxWriter(db);
   const processor = createDefaultProcessor();
   const schedule = createScheduleProcessor(db);
+  const followUps = await createFollowUpHarness(cfg, db);
   const intervalMs = Number(process.env.WORKER_POLL_MS ?? 5_000);
   const maxRetries = Number(process.env.WORKER_MAX_RETRIES ?? 3);
   const retryDelayMs = Number(process.env.WORKER_RETRY_DELAY_MS ?? 1_000);
@@ -40,21 +42,34 @@ async function main() {
       }
       const dueFollowUps = await schedule.claimDueFollowUps();
       for (const f of dueFollowUps) {
-        // C5 — re-enter the agent harness. The goal is surfaced as a system
-        // turn for the user's session; harness wiring is driven by the worker's
-        // caller (today: log + outbox note; orchestrator re-entry lands with the
-        // Postgres-backed session/inbox swap).
-        console.log(
-          JSON.stringify({
-            service: "chaste-worker",
-            action: "followup_due",
-            followUpId: f.id,
-            orgId: f.organizationId,
-            userId: f.userId,
-            goal: f.goal,
-            sessionId: f.sessionId,
-          }),
-        );
+        // C5 — re-enter the agent harness with the follow-up goal under the
+        // owner's org autonomy policy, then transition the durable job.
+        try {
+          const result = await runFollowUp(followUps, f.id, f.id);
+          console.log(
+            JSON.stringify({
+              service: "chaste-worker",
+              action: "followup_fired",
+              followUpId: f.id,
+              orgId: f.organizationId,
+              userId: f.userId,
+              status: result.status,
+              sessionId: result.sessionId,
+              goal: f.goal,
+            }),
+          );
+        } catch (err) {
+          console.error(
+            JSON.stringify({
+              service: "chaste-worker",
+              action: "followup_failed",
+              followUpId: f.id,
+              orgId: f.organizationId,
+              userId: f.userId,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }
       }
     } catch (err) {
       console.error(

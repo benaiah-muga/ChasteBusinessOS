@@ -16,7 +16,7 @@ import {
   type ModuleRegistry,
   ValidationError,
 } from "@chaste/kernel";
-import { and, eq, isNull, lte, or } from "drizzle-orm";
+import { and, eq, ilike, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 
 /** Capability gap ticket lifecycle (spec: self-development.md §4). */
@@ -1668,6 +1668,139 @@ export function createPlatformModule(
             });
 
             return toGapTicket(confirmed!);
+          },
+        }),
+      );
+
+      // ─── Capability catalog (S0) + placement recommender (S1) ────────
+
+      const catalogItemSchema = z.object({
+        id: z.string(),
+        moduleId: z.string(),
+        capabilityId: z.string(),
+        name: z.string(),
+        description: z.string(),
+        keywords: z.array(z.string()),
+        implemented: z.boolean(),
+      });
+
+      queries.register(
+        defineQuery({
+          name: "core.capability.catalog.list",
+          permissions: ["core.capability.catalog.read"],
+          tags: ["core"],
+          input: z.object({ moduleId: z.string().optional() }).default({}),
+          output: z.object({ items: z.array(catalogItemSchema) }),
+          handler: async (input) => {
+            const rows = await db
+              .select()
+              .from(schema.capabilityCatalogItems)
+              .where(input.moduleId ? eq(schema.capabilityCatalogItems.moduleId, input.moduleId) : undefined)
+              .orderBy(schema.capabilityCatalogItems.capabilityId);
+            return {
+              items: rows.map((r) => ({
+                id: r.id,
+                moduleId: r.moduleId,
+                capabilityId: r.capabilityId,
+                name: r.name,
+                description: r.description,
+                keywords: r.keywords,
+                implemented: r.implemented,
+              })),
+            };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.capability.catalog.search",
+          permissions: ["core.capability.catalog.read"],
+          tags: ["core"],
+          input: z.object({ query: z.string().min(1), moduleId: z.string().optional() }),
+          output: z.object({ items: z.array(catalogItemSchema) }),
+          handler: async (input) => {
+            const like = `%${input.query}%`;
+            const rows = await db
+              .select()
+              .from(schema.capabilityCatalogItems)
+              .where(
+                and(
+                  input.moduleId ? eq(schema.capabilityCatalogItems.moduleId, input.moduleId) : undefined,
+                  or(ilike(schema.capabilityCatalogItems.name, like), ilike(schema.capabilityCatalogItems.description, like)),
+                ),
+              )
+              .orderBy(schema.capabilityCatalogItems.capabilityId)
+              .limit(50);
+            return {
+              items: rows.map((r) => ({
+                id: r.id,
+                moduleId: r.moduleId,
+                capabilityId: r.capabilityId,
+                name: r.name,
+                description: r.description,
+                keywords: r.keywords,
+                implemented: r.implemented,
+              })),
+            };
+          },
+        }),
+      );
+
+      // Placement recommendation per self-development.md §5. The agent
+      // recommends; the user/org policy chooses. Never silent publish.
+      const recommendSchema = z.object({
+        abstractRequirement: z.string(),
+        acceptanceCriteria: z.array(z.string()).default([]),
+        exampleScenarios: z.array(z.string()).default([]),
+        suggestedModuleId: z.string().optional(),
+      });
+      const recommendOutputSchema = z.object({
+        deploymentTarget: gapDeploymentTargetSchema,
+        suggestedModuleId: z.string().nullable(),
+        rationale: z.array(z.string()),
+        signals: z.array(z.string()),
+      });
+
+      queries.register(
+        defineQuery({
+          name: "core.capability.gap.recommend",
+          permissions: ["core.capability.gap.read"],
+          tags: ["core"],
+          input: recommendSchema,
+          output: recommendOutputSchema,
+          handler: async (input) => {
+            const text = [
+              input.abstractRequirement,
+              ...input.acceptanceCriteria,
+              ...input.exampleScenarios,
+            ].join(" ");
+            const lower = text.toLowerCase();
+            const signals: string[] = [];
+
+            let target: (typeof GAP_DEPLOYMENT_TARGET)[number] = "undecided";
+            const rationale: string[] = [];
+
+            if (/\b(private cloud|isolated tenant|cloud tenant)\b/.test(lower)) {
+              signals.push("org-specific on cloud tenant");
+              target = "private_cloud";
+              rationale.push("Requirement describes an org-specific package for a cloud tenant.");
+            } else if (/\b(kernel|authz|authorization|payment|billing|security sensitive|permission|rbac|audit)\b/.test(lower)) {
+              signals.push("touches kernel authz/payments/core");
+              target = "platform_roadmap";
+              rationale.push("Touches kernel authz/payments — needs platform maintainers, never a single tenant.");
+            } else if (/\b(org-specific|company-specific|internal|our workflow|our process|self-host|local process|proprietary)\b/.test(lower)) {
+              signals.push("org-specific local process");
+              target = "local_extension";
+              rationale.push("Appears to be an org-specific process that should stay a local extension.");
+            } else {
+              signals.push("common SMB need");
+              target = "marketplace_shared";
+              rationale.push("Looks like a common, non-proprietary need — suitable for a shared marketplace package.");
+            }
+
+            const suggestedModuleId: string | null = input.suggestedModuleId ?? null;
+            return { deploymentTarget: target, suggestedModuleId, rationale, signals };
           },
         }),
       );

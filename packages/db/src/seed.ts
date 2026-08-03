@@ -21,6 +21,7 @@ export const PERMISSION_CATALOG: { permission: string; module: string; descripti
   { permission: "core.branch.all", module: "core", description: "Access all branches without explicit grant" },
   { permission: "core.capability.gap.read", module: "core", description: "View capability gap tickets" },
   { permission: "core.capability.gap.manage", module: "core", description: "Create and update capability gap tickets" },
+  { permission: "core.capability.catalog.read", module: "core", description: "Search the machine capability catalog" },
   { permission: "core.notification.read", module: "core", description: "Read own notifications" },
   { permission: "core.reminder.write", module: "core", description: "Set and manage reminders" },
   { permission: "core.followup.write", module: "core", description: "Schedule agent follow-ups" },

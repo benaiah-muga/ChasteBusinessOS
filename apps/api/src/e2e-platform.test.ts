@@ -55,6 +55,7 @@ const ADMIN_PERMISSIONS = [
   "core.settings.read", "core.settings.manage",
   "core.branch.read", "core.branch.manage", "core.branch.all",
   "core.capability.gap.read", "core.capability.gap.manage",
+  "core.capability.catalog.read",
   "core.notification.read",
   "core.reminder.write", "core.followup.write",
 ];
@@ -63,6 +64,7 @@ const OPERATOR_PERMISSIONS = [
   "core.modules.read", "core.rbac.read", "core.marketplace.read", "core.user.read",
   "core.branch.read",
   "core.notification.read",
+  "core.capability.catalog.read",
   "core.reminder.write", "core.followup.write",
 ];
 
@@ -460,6 +462,59 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
         title: "Late edit",
       });
       expect(e.message).toContain("in_progress");
+    });
+  });
+
+  // ─── Capability catalog (S0) + placement recommender (S1) ───────────────
+
+  describe("capability catalog + placement recommender", () => {
+    it("lists the seeded machine catalog", async () => {
+      const result = await qry(orgA.adminUser, orgA.orgId, "core.capability.catalog.list");
+      expect(result.items.length).toBeGreaterThanOrEqual(16);
+      expect(result.items.some((i: any) => i.capabilityId === "core.branches")).toBe(true);
+      const scoped = await qry(orgA.adminUser, orgA.orgId, "core.capability.catalog.list", {
+        moduleId: "crm",
+      });
+      expect(scoped.items.every((i: any) => i.moduleId === "crm")).toBe(true);
+    });
+
+    it("searches the catalog by name and description", async () => {
+      const hit = await qry(orgA.adminUser, orgA.orgId, "core.capability.catalog.search", {
+        query: "invoice",
+      });
+      expect(hit.items.some((i: any) => i.capabilityId === "acc.accounts")).toBe(true);
+      const miss = await qry(orgA.adminUser, orgA.orgId, "core.capability.catalog.search", {
+        query: "quantum teleportation",
+      });
+      expect(miss.items).toHaveLength(0);
+    });
+
+    it("operator role can read the catalog", async () => {
+      const result = await qry(orgA.operatorUser, orgA.orgId, "core.capability.catalog.list");
+      expect(result.items.length).toBeGreaterThan(0);
+    });
+
+    it("recommends platform_roadmap for kernel-adjacent requirements", async () => {
+      const rec = await qry(orgA.adminUser, orgA.orgId, "core.capability.gap.recommend", {
+        abstractRequirement: "Custom authz rules that override role-based permissions.",
+        acceptanceCriteria: ["Allow per-branch permission overrides"],
+      });
+      expect(rec.deploymentTarget).toBe("platform_roadmap");
+      expect(rec.signals).toContain("touches kernel authz/payments/core");
+    });
+
+    it("recommends local_extension for org-specific processes", async () => {
+      const rec = await qry(orgA.adminUser, orgA.orgId, "core.capability.gap.recommend", {
+        abstractRequirement: "Our internal purchase approval workflow with company-specific steps.",
+      });
+      expect(rec.deploymentTarget).toBe("local_extension");
+    });
+
+    it("recommends marketplace_shared for common SMB needs", async () => {
+      const rec = await qry(orgA.adminUser, orgA.orgId, "core.capability.gap.recommend", {
+        abstractRequirement: "Track customer churn and send renewal notices.",
+      });
+      expect(rec.deploymentTarget).toBe("marketplace_shared");
     });
   });
 

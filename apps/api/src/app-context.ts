@@ -14,6 +14,7 @@ import {
   TracedProvider,
   WakeStore,
   InMemorySkillStore,
+  runFollowUpTurn,
   SUMMARY_SYSTEM_PROMPT,
   type SkillStore,
   type CompactionSummarizer,
@@ -304,6 +305,23 @@ export async function runQuery(app: AppContext, name: string, input: unknown, re
   return executeQuery(app.queries, name, input, requestCtx(app, requestId));
 }
 
+function buildOrchestratorDeps(app: AppContext, activeBranch?: { name: string; code: string }) {
+  return {
+    commands: app.commands,
+    queries: app.queries,
+    helpers: { audit: app.audit, outbox: app.outbox },
+    autonomy: app.sessionUser.autonomy,
+    provider: app.provider,
+    allowFullAutonomous: app.config.allowFullAutonomous,
+    inbox: app.inbox,
+    wake: app.wakes,
+    skills: app.skills,
+    compaction: app.compaction,
+    defaultInboxVisibility: app.config.ai.defaultInboxVisibility,
+    activeBranch,
+  };
+}
+
 export async function runChat(
   app: AppContext,
   body: { sessionId?: string; message?: string; confirmId?: string; cancelId?: string },
@@ -359,20 +377,7 @@ export async function runChat(
   }
 
   const result = await handleChatTurn(
-    {
-      commands: app.commands,
-      queries: app.queries,
-      helpers: { audit: app.audit, outbox: app.outbox },
-      autonomy: app.sessionUser.autonomy,
-      provider: app.provider,
-      allowFullAutonomous: app.config.allowFullAutonomous,
-      inbox: app.inbox,
-      wake: app.wakes,
-      skills: app.skills,
-      compaction: app.compaction,
-      defaultInboxVisibility: app.config.ai.defaultInboxVisibility,
-      activeBranch,
-    },
+    buildOrchestratorDeps(app, activeBranch),
     {
       session,
       userText: body.message,
@@ -406,6 +411,118 @@ export async function runChat(
     messages: result.session.messages,
     pendingConfirmationId: result.session.pending?.id,
   };
+}
+
+/**
+ * C5 — follow-up harness re-entry. Runs a due follow-up through the orchestrator
+ * under the follow-up's owning user/org policy, persists the session, and
+ * transitions the durable job to done/failed. Returns a short status string.
+ */
+export async function runFollowUp(
+  app: AppContext,
+  followUpId: string,
+  requestId?: string,
+): Promise<{ status: string; sessionId?: string }> {
+  const [fu] = await app.db
+    .select()
+    .from(schema.followUps)
+    .where(eq(schema.followUps.id, followUpId))
+    .limit(1);
+  if (!fu || fu.status !== "running") {
+    return { status: fu ? `not_${fu.status}` : "not_found" };
+  }
+
+  const userRow = await getUserWithOrg(app.db, fu.userId);
+  if (!userRow || !userRow.isActive) {
+    await app.db
+      .update(schema.followUps)
+      .set({ status: "failed" })
+      .where(eq(schema.followUps.id, followUpId));
+    return { status: "user_missing" };
+  }
+  const permissions = await resolveUserPermissions(app.db, fu.userId);
+  const autonomy = autonomyLevelSchema.catch(app.config.defaultAutonomy).parse(userRow.autonomy);
+  const actor: Actor = {
+    kind: "ai_assisted",
+    userId: fu.userId,
+    organizationId: fu.organizationId,
+    displayName: userRow.displayName,
+    permissions: new Set(permissions),
+    aiRunId: crypto.randomUUID(),
+  };
+  const ctx = createRequestContext({ actor, requestId, autonomy });
+
+  // Session: prefer the follow-up's pinned session, else the user's sticky one.
+  let sessionId = fu.sessionId ?? crypto.randomUUID();
+  let dbSession = fu.sessionId ? await app.sessionStore.load(sessionId) : undefined;
+  let session: ChatSessionState;
+  if (dbSession) {
+    session = {
+      id: dbSession.id,
+      messages: dbSession.messages as ChatSessionState["messages"],
+      pending: dbSession.pending,
+      unattended: dbSession.unattended ?? false,
+      compactionState: dbSession.compactionState as ChatSessionState["compactionState"],
+    };
+  } else {
+    const sticky = await app.sessionStore.loadByOrgUser(fu.organizationId, fu.userId);
+    if (sticky) {
+      sessionId = sticky.id;
+      session = {
+        id: sticky.id,
+        messages: sticky.messages as ChatSessionState["messages"],
+        pending: sticky.pending,
+        unattended: sticky.unattended ?? false,
+        compactionState: sticky.compactionState as ChatSessionState["compactionState"],
+      };
+    } else {
+      await app.sessionStore.create(sessionId, fu.organizationId, fu.userId);
+      session = { id: sessionId, messages: [] };
+    }
+  }
+
+  let activeBranch: { name: string; code: string } | undefined;
+  const branchId = fu.branchId ?? session.activeBranchId;
+  if (branchId) {
+    const [branch] = await app.db
+      .select({ name: schema.branches.name, code: schema.branches.code })
+      .from(schema.branches)
+      .where(eq(schema.branches.id, branchId))
+      .limit(1);
+    if (branch) activeBranch = branch;
+  }
+
+  try {
+    const result = await runFollowUpTurn(
+      buildOrchestratorDeps(app, activeBranch),
+      { session, ctx, goal: fu.goal },
+    );
+    await app.sessionStore.save(
+      sessionId,
+      result.session.messages.map((m: ChatMessage) => ({
+        id: m.id,
+        role: m.role,
+        parts: m.parts,
+        createdAt: m.createdAt,
+      })),
+      result.session.pending,
+      {
+        unattended: result.session.unattended ?? false,
+        compactionState: result.session.compactionState ?? null,
+      },
+    );
+    await app.db
+      .update(schema.followUps)
+      .set({ status: "done", firedAt: new Date(), sessionId })
+      .where(eq(schema.followUps.id, followUpId));
+    return { status: "done", sessionId };
+  } catch (err) {
+    await app.db
+      .update(schema.followUps)
+      .set({ status: "failed" })
+      .where(eq(schema.followUps.id, followUpId));
+    return { status: "failed", sessionId };
+  }
 }
 
 export async function buildWorkflow(

@@ -1604,3 +1604,29 @@ export async function handleChatTurn(
 
   return { session, explanation };
 }
+
+/**
+ * C5 — agent follow-up harness re-entry.
+ *
+ * A due follow-up is a natural-language goal that re-enters the orchestrator as
+ * a synthesized user turn running under the follow-up's owning user/org policy
+ * (spec: scheduling-and-comms §2.3). The regular plan/confirm pipeline applies,
+ * so under confirm/guarded autonomy the user is notified with a plan instead of
+ * anything executing silently. The goal is passed verbatim so the deterministic
+ * rule parser can match it; the origin (automatic follow-up) is visible in the
+ * audit trail via the run id.
+ */
+export async function runFollowUpTurn(
+  deps: OrchestratorDeps,
+  input: {
+    session: ChatSessionState;
+    ctx: RequestContext;
+    goal: string;
+  },
+): Promise<ChatTurnResult> {
+  return handleChatTurn(deps, {
+    session: input.session,
+    userText: input.goal,
+    ctx: input.ctx,
+  });
+}

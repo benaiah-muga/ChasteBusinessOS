@@ -574,6 +574,74 @@ CREATE TABLE IF NOT EXISTS follow_ups (
 CREATE INDEX IF NOT EXISTS follow_ups_due_idx ON follow_ups(status, fire_at);
 CREATE INDEX IF NOT EXISTS follow_ups_user_idx ON follow_ups(user_id);
 CREATE INDEX IF NOT EXISTS follow_ups_org_idx ON follow_ups(organization_id);
+
+-- S0 -- machine-readable capability catalog (self-development.md §6)
+CREATE TABLE IF NOT EXISTS capability_catalog_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  module_id text NOT NULL,
+  capability_id text NOT NULL,
+  name text NOT NULL,
+  description text NOT NULL,
+  keywords jsonb NOT NULL DEFAULT '[]'::jsonb,
+  implemented boolean NOT NULL DEFAULT TRUE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS capability_catalog_module_cap_uidx
+  ON capability_catalog_items(module_id, capability_id);
+CREATE INDEX IF NOT EXISTS capability_catalog_cap_idx
+  ON capability_catalog_items(capability_id);
+
+-- Seed the curated platform capability catalog (idempotent).
+INSERT INTO capability_catalog_items (module_id, capability_id, name, description, keywords) VALUES
+  ('platform', 'core.branches', 'Branches',
+   'Create and switch organizational branches (HQ, locations) and scope work to a branch.',
+   '["branch","location","site","office"]'),
+  ('platform', 'core.users', 'Users & invites',
+   'Invite users to the organization, optionally scoped to a branch, and manage profiles.',
+   '["user","invite","team","member","people"]'),
+  ('platform', 'core.rbac', 'Roles & permissions',
+   'Define roles and assign granular permissions per organization.',
+   '["rbac","role","permission","access","security"]'),
+  ('platform', 'core.marketplace', 'Marketplace & modules',
+   'Browse, install, and manage business modules from the marketplace.',
+   '["marketplace","module","install","extension","app"]'),
+  ('platform', 'core.autonomy', 'Autonomy policy',
+   'Govern whether the AI can auto-execute commands or requires human confirmation.',
+   '["autonomy","ai","guarded","confirm","policy","automation"]'),
+  ('platform', 'core.notifications', 'Notifications',
+   'Record and list in-app notifications; mark them read.',
+   '["notification","alert","bell","inbox"]'),
+  ('platform', 'core.chat', 'AI chat & agent runtime',
+   'Natural-language chat that plans and executes commands under the organization autonomy policy.',
+   '["chat","ai","agent","assistant","nlu","language"]'),
+  ('platform', 'core.capabilities', 'Capability gaps',
+   'Search what the product can do and file capability gap tickets for what it cannot.',
+   '["gap","capability","customize","request","roadmap"]'),
+  ('platform', 'core.reminders', 'Reminders',
+   'Schedule one-off reminders that surface as in-app notifications at the chosen time.',
+   '["reminder","schedule","todo","nudge","notify"]'),
+  ('platform', 'core.followups', 'Agent follow-ups',
+   'Ask the agent to follow up on a goal later; it re-enters and executes under org policy.',
+   '["followup","follow up","agent","later","recurring"]'),
+  ('crm', 'crm.customers', 'Customer relationships',
+   'Manage customers, contacts, and sales follow-up.',
+   '["customer","sales","account","lead","contact","crm"]'),
+  ('accounting', 'acc.accounts', 'Accounting & finance',
+   'Ledger, journal entries, invoices, and financial accounting.',
+   '["account","ledger","journal","invoice","invoice","bookkeeping","finance"]'),
+  ('inventory', 'inventory.items', 'Inventory management',
+   'Track inventory items, stock levels, and warehouses.',
+   '["inventory","stock","warehouse","item","reorder","sku"]'),
+  ('purchasing', 'purchasing.orders', 'Purchasing & procurement',
+   'Create and manage purchase orders and vendor procurement.',
+   '["purchase","procurement","vendor","supplier","po"]'),
+  ('hr', 'hr.employees', 'HR & people',
+   'Manage employees, hiring, and HR records.',
+   '["hr","employee","people","hiring","onboarding","payslip"]'),
+  ('manufacturing', 'manufacturing.orders', 'Manufacturing',
+   'Create and route manufacturing orders and production.',
+   '["manufacturing","production","batch","routing","work order"]')
+ON CONFLICT (module_id, capability_id) DO NOTHING;
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {
