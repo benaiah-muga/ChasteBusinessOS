@@ -16,7 +16,7 @@ import {
   type ModuleRegistry,
   ValidationError,
 } from "@chaste/kernel";
-import { and, eq, gte, ilike, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gte, ilike, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { createEmailAdapter, emailTemplateSchema, renderEmailTemplate, type EmailAdapter } from "./email.js";
 
@@ -2833,6 +2833,13 @@ export function createPlatformModule(
  */
 export function createScheduleProcessor(db: Db) {
   return {
+    /**
+     * Fire due reminders into in-app notifications. The UPDATE … RETURNING claim
+     * is atomic (concurrent workers can't double-fire), but delivery is isolated
+     * per row: a single notification failure is recorded on THAT reminder
+     * (status → "failed", spec §2.2) and the rest of the batch still delivers —
+     * a failure never silently drops the whole batch's notifications.
+     */
     async processDueReminders(): Promise<number> {
       const now = new Date();
       const rows = await db
@@ -2840,19 +2847,38 @@ export function createScheduleProcessor(db: Db) {
         .set({ status: "fired", firedAt: now })
         .where(and(eq(schema.reminders.status, "scheduled"), lte(schema.reminders.fireAt, now)))
         .returning();
+      let delivered = 0;
       for (const r of rows) {
-        await notifyUser(db, {
-          organizationId: r.organizationId,
-          userId: r.userId,
-          kind: "reminder",
-          title: r.title,
-          body: r.body ?? undefined,
-          href: r.href ?? undefined,
-          resourceType: "reminder",
-          resourceId: r.id,
-        });
+        try {
+          await notifyUser(db, {
+            organizationId: r.organizationId,
+            userId: r.userId,
+            kind: "reminder",
+            title: r.title,
+            body: r.body ?? undefined,
+            href: r.href ?? undefined,
+            resourceType: "reminder",
+            resourceId: r.id,
+          });
+          delivered += 1;
+        } catch (err) {
+          // Record the failure on this reminder instead of aborting the batch.
+          await db
+            .update(schema.reminders)
+            .set({ status: "failed" })
+            .where(eq(schema.reminders.id, r.id));
+          console.error(
+            JSON.stringify({
+              service: "chaste-worker",
+              action: "reminder_failed",
+              reminderId: r.id,
+              userId: r.userId,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }
       }
-      return rows.length;
+      return delivered;
     },
 
     async claimDueFollowUps(): Promise<(typeof schema.followUps.$inferSelect)[]> {
@@ -2873,7 +2899,22 @@ export function createScheduleProcessor(db: Db) {
 export function createEmailProcessor(db: Db, adapter: EmailAdapter = createEmailAdapter()) {
   return {
     adapterId: adapter.id,
-    async flushEmailOutbox(batch = 25): Promise<number> {
+    /**
+     * Flush queued emails through the adapter with crash recovery. Emails left
+     * in `sending` longer than `leaseMs` (e.g. a worker crash mid-batch) are
+     * reclaimed back to `queued` before the next claim, so they are retried
+     * instead of failing silently. No schema column is added: `createdAt` is a
+     * safe lease proxy because claim→send happens within a single tick, and the
+     * default lease (10 min) is far longer than any single flush.
+     */
+    async flushEmailOutbox(batch = 25, leaseMs = 10 * 60_000): Promise<number> {
+      if (leaseMs > 0) {
+        const cutoff = new Date(Date.now() - leaseMs);
+        await db
+          .update(schema.emailOutbox)
+          .set({ status: "queued", provider: null, error: null })
+          .where(and(eq(schema.emailOutbox.status, "sending"), lt(schema.emailOutbox.createdAt, cutoff)));
+      }
       const queued = await db
         .select()
         .from(schema.emailOutbox)

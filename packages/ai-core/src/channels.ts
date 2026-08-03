@@ -46,6 +46,17 @@ export class ChannelSessionStore {
     extras: { organizationId: string; branchId?: string } = { organizationId: "" },
   ): ChannelThreadBinding {
     const existing = this.threads.get(threadTarget);
+    // When a thread target is re-bound to a *different* session, the previous
+    // owner's bySession index must forget it — otherwise deleting the old
+    // session via removeSession() would clobber this fresh binding because the
+    // old session's target set still points at the (now re-pointed) thread.
+    if (existing && existing.sessionId !== sessionId) {
+      const oldOwners = this.bySession.get(existing.sessionId);
+      if (oldOwners) {
+        oldOwners.delete(threadTarget);
+        if (oldOwners.size === 0) this.bySession.delete(existing.sessionId);
+      }
+    }
     const rec: ChannelThreadBinding = {
       threadTarget,
       sessionId,

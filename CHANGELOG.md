@@ -21,7 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@mastra/*` dependencies and Mastra agents/tools/storage wrappers
 - Mastra agent fallback path in chat orchestrator
 
+### Fixed
+
+- **Inbox once-only (R2/R3)**: confirm/cancel now resolve the canonical approval by its `toolCallId` (not the pending `id`), so approving/denying a multi-step or single-command plan updates the durable Inbox item and cross-surface "first-responder-wins" actually engages — no more dangling `pending` approvals
+- **Autonomy audit gate**: `effectiveAutonomyForPlan` no longer lets a later step's `minAutonomyForAuto` mask an earlier `external`/`exec` confirm floor — the reported/audited autonomy for a plan is now the strictest step
+- **Channel session re-homing**: rebinding a thread target to a new session now removes it from the old session's index, so deleting the old session can't clobber the fresh binding
+
 ### Added
+
+- **Reliability — scheduler/email**: reminder delivery is now failure-atomic (a single `notifyUser` failure marks that reminder `failed` instead of dropping the whole batch); email outbox gains crash-recovery lease (rows stuck in `sending` past a lease window are reclaimed to `queued` and retried)
+- **Single-command approvals mirror to the Inbox** — parity with multi-step plans, so a single external/write action is approvable from mobile/Slack and from unattended sessions
+- **Deterministic scheduling parsers**: `parseScheduleFireAt` / `parseScheduleRange` accept an injected clock, enabling stable, timezone-robust unit tests
+- **AI harness test suite**: easy / medium / complex humanlike chat scenarios across CRM, Accounting, Purchasing, Inventory, and HR (plan → confirm → execute, cross-step wiring, multi-turn sessions), plus RBAC permission-denial and prompt-injection guardrail coverage
 
 - ADR 0006: custom AI orchestration
 - ADR 0007: harness memory graph and self-development pipeline (spec decision)

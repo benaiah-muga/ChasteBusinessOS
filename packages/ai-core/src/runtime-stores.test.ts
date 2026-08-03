@@ -123,6 +123,35 @@ describe("ChannelSessionStore (inbound mentions, R10)", () => {
     expect(store.get("slack:C3:ts3")?.sessionId).toBe("s2");
   });
 
+  it("overwriting a thread target re-homes it to the new session without poisoning the old index", () => {
+    // Regression: re-binding a thread target to a NEW session must remove it
+    // from the OLD session's bySession index. Otherwise deleting the old
+    // session would delete the brand-new binding too.
+    const store = new ChannelSessionStore();
+    store.set("slack:C1:ts1", "s1", "slack:C1", { organizationId: "o1" });
+    // Re-home the same thread to session s2 (e.g. a respawn).
+    const rebound = store.set("slack:C1:ts1", "s2", "slack:C1", { organizationId: "o1" });
+    expect(rebound.sessionId).toBe("s2");
+
+    // The old session should no longer claim this thread target.
+    expect(store.targetsFor("s1")).toEqual([]);
+    // Deleting the old session must NOT clobber the new binding.
+    expect(store.removeSession("s1")).toBe(0);
+    expect(store.get("slack:C1:ts1")?.sessionId).toBe("s2");
+  });
+
+  it("removeSession only deletes threads the owning session still actually owns", () => {
+    const store = new ChannelSessionStore();
+    store.set("slack:A:t1", "s1", "slack:A", { organizationId: "o1" });
+    store.set("slack:A:t2", "s1", "slack:A", { organizationId: "o1" });
+    // s1 loses ownership of A:t1 to s3; s1 still owns A:t2 exclusively.
+    store.set("slack:A:t1", "s3", "slack:A", { organizationId: "o1" });
+
+    expect(store.removeSession("s1")).toBe(1); // only A:t2
+    expect(store.get("slack:A:t1")?.sessionId).toBe("s3");
+    expect(store.get("slack:A:t2")).toBeUndefined();
+  });
+
   it("filters by organization and channel", () => {
     const store = new ChannelSessionStore();
     store.set("slack:A:t1", "s1", "slack:A", { organizationId: "o1" });

@@ -106,13 +106,23 @@ export function commandMayAutoExecute(
   return true;
 }
 
-/** The strictest gate across every step of a multi-step plan. */
+/**
+ * The strictest gate across every step of a multi-step plan.
+ *
+ * Each step is scored INDEPENDENTLY against the *original* configured level,
+ * then the strictest (lowest autonomy rank) wins. We must NOT re-feed a running
+ * gate as the next step's "configured" level: `effectiveAutonomyForCommand` only
+ * ever raises toward a step's own requirements, so a later step declaring a high
+ * `minAutonomyForAuto` would wrongly lift the gate back above an earlier step's
+ * risk-confirm floor (e.g. an `external` command that never auto-runs). Scoring
+ * each step from the configured baseline preserves every floor.
+ */
 export function effectiveAutonomyForPlan(
   configured: AutonomyLevel,
   metas: AutoExecMeta[],
 ): AutonomyLevel {
   return metas.reduce(
-    (gate, m) => effectiveAutonomyForCommand(gate, m),
+    (gate, m) => stricterAutonomy(gate, effectiveAutonomyForCommand(configured, m)),
     configured,
   );
 }

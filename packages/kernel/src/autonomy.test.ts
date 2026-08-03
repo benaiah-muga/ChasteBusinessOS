@@ -60,8 +60,19 @@ describe("commandMayAutoExecute", () => {
 
 describe("plan gate helpers", () => {
   it("the plan gate is the strictest across its steps", () => {
+    // configured = full_autonomous (rank 3); step A stays full (3); step B's
+    // risk-confirm floor drops it to confirm (rank 1) — the strictest wins.
+    const metas: AutoExecMeta[] = [{ minAutonomyForAuto: "full_autonomous" }, { riskClass: "external" }];
+    expect(effectiveAutonomyForPlan("full_autonomous", metas)).toBe("confirm");
+  });
+
+  it("a risk-confirm floor is preserved even when a later step declares a higher minAutonomyForAuto", () => {
+    // Regression: the external step (no opt-in) forces a confirm floor. A later
+    // step demanding full_autonomous must NOT lift the reported gate above that
+    // floor — the plan still contains a step that can never auto-run.
     const metas: AutoExecMeta[] = [{ riskClass: "external" }, { minAutonomyForAuto: "full_autonomous" }];
-    expect(effectiveAutonomyForPlan("guarded_auto", metas)).toBe("full_autonomous");
+    expect(effectiveAutonomyForPlan("guarded_auto", metas)).toBe("confirm");
+    expect(effectiveAutonomyForPlan("full_autonomous", metas)).toBe("confirm");
   });
 
   it("a plan only auto-runs when EVERY step allows it", () => {

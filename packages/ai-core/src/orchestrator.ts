@@ -425,9 +425,10 @@ const DAY_NAMES = [
  * "tomorrow at HH:MM[am|pm]", "at HH:MM[am|pm]" (today or next). Ambiguous
  * or missing times return `fireAt: null` so the LLM assist path can clarify.
  */
-export function parseScheduleFireAt(text: string): { fireAt: string | null; cleaned: string } {
-  const now = new Date();
-
+export function parseScheduleFireAt(text: string, now: Date = new Date()): {
+  fireAt: string | null;
+  cleaned: string;
+} {
   const inRe = text.match(/\bin (\d+) (minute|minutes|hour|hours|day|days)\b/i);
   if (inRe?.[1]) {
     const n = Number(inRe[1]);
@@ -492,13 +493,11 @@ export function parseScheduleFireAt(text: string): { fireAt: string | null; clea
  * ("block tuesday 10-11", "schedule a meeting tomorrow 2pm until 3pm").
  * Falls back to null so the LLM assist path can clarify multi-constraint times.
  */
-export function parseScheduleRange(text: string): {
+export function parseScheduleRange(text: string, now: Date = new Date()): {
   startsAt: string;
   endsAt: string;
   cleaned: string;
 } | null {
-  const now = new Date();
-
   const dayOfWeek = text.match(/\bon\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
   const dayAnchor = text.match(/\b(today|tomorrow)\b/i);
 
@@ -1016,7 +1015,13 @@ export async function handleChatTurn(
     const cancelled = session.pending;
     session.pending = undefined;
     if (deps.inbox && cancelled) {
-      const existing = deps.inbox.list({ sessionId: session.id }).find((i) => i.id === cancelled.id);
+      // Match the inbox item by `toolCallId` (what mirrorToInbox mints), not by
+      // `id` — the item's id is a fresh UUID, while `toolCallId` carries the
+      // in-chat pending confirmation id. Searching by `id` never matches and
+      // leaves a dangling "pending" approval on cancel.
+      const existing = deps.inbox
+        .list({ sessionId: session.id })
+        .find((i) => i.toolCallId === cancelled.id);
       if (existing) deps.inbox.resolve(existing.id, "deny");
     }
     session.messages.push(
@@ -1095,7 +1100,13 @@ export async function handleChatTurn(
     // supplied (e.g. the user pressed "allow always"), it minted a standing
     // rule + is forwarded into `resolve`. Otherwise resolve with "allow".
     if (deps.inbox) {
-      const item = deps.inbox.list({ sessionId: session.id }).find((i) => i.id === pending.id);
+      // R2/R3 once-only: match the canonical inbox item by `toolCallId`. The
+      // item's `id` is a fresh UUID minted by addApproval; `toolCallId` carries
+      // the in-chat `pending.id` that mirrorToInbox stored, so a retry/confirm
+      // from any surface finds and resolves the SAME canonical record.
+      const item = deps.inbox
+        .list({ sessionId: session.id })
+        .find((i) => i.toolCallId === pending.id);
       if (item) {
         const resolution = input.inboxResolution ?? "allow";
         if (!deps.inbox.resolve(item.id, resolution)) {
@@ -1660,6 +1671,20 @@ export async function handleChatTurn(
     input: planned.input,
     createdAt: new Date().toISOString(),
   };
+
+  // R2/R3 — mirror single-command approvals to the canonical Inbox, exactly as
+  // multi-step plans are mirrored. This makes a single external/write action
+  // approvable from any surface (mobile, Slack) and from unattended sessions,
+  // not just multi-step plans. The item carries `toolCallId === pending.id` so
+  // the shared confirm/cancel handler (which now looks up by toolCallId) finds
+  // and resolves the same canonical record.
+  mirrorToInbox(
+    deps,
+    session,
+    { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },
+    session.pending,
+    { summary: planned.summary, commandMeta: meta, input: planned.input as Record<string, unknown> },
+  );
 
   const recommendOnly = effective === "recommend";
   session.messages.push(
