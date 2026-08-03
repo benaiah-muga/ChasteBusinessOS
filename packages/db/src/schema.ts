@@ -261,6 +261,55 @@ export const capabilityGapTickets = pgTable(
   ],
 );
 
+/** C2 — user reminders. Fired by the schedule processor into in-app notifications. */
+export const reminders = pgTable(
+  "reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    createdBy: uuid("created_by").notNull(),
+    title: text("title").notNull(),
+    body: text("body"),
+    href: text("href"),
+    fireAt: timestamp("fire_at", { withTimezone: true }).notNull(),
+    channel: text("channel").notNull().default("in_app"),
+    status: text("status").notNull().default("scheduled"),
+    branchId: uuid("branch_id"),
+    firedAt: timestamp("fired_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("reminders_due_idx").on(t.status, t.fireAt),
+    index("reminders_user_idx").on(t.userId),
+    index("reminders_org_idx").on(t.organizationId),
+  ],
+);
+
+/** C5 — durable agent follow-ups that re-enter the harness at fire time. */
+export const followUps = pgTable(
+  "follow_ups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    createdBy: uuid("created_by").notNull(),
+    goal: text("goal").notNull(),
+    fireAt: timestamp("fire_at", { withTimezone: true }).notNull(),
+    sessionId: uuid("session_id"),
+    branchId: uuid("branch_id"),
+    autonomyOverride: text("autonomy_override"),
+    status: text("status").notNull().default("scheduled"),
+    firedAt: timestamp("fired_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("follow_ups_due_idx").on(t.status, t.fireAt),
+    index("follow_ups_user_idx").on(t.userId),
+    index("follow_ups_org_idx").on(t.organizationId),
+  ],
+);
+
 export const notifications = pgTable(
   "notifications",
   {

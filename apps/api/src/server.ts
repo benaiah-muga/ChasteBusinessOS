@@ -225,6 +225,49 @@ export async function buildServer(appCtx?: AppContext) {
     return (await runCommand(app, "core.notification.mark_all_read", {}, req.id)).data;
   });
 
+  // Reminders & follow-ups (spec: scheduling-and-comms §2/§3)
+  server.get("/api/v1/reminders", async (req) => {
+    const { status } = req.query as { status?: string };
+    return (await runQuery(app, "core.reminder.list", { status }, req.id)).data;
+  });
+  server.post("/api/v1/reminders", async (req) => {
+    const input = z
+      .object({
+        title: z.string().min(1),
+        body: z.string().optional(),
+        href: z.string().optional(),
+        fireAt: z.string(),
+        channel: z.enum(["in_app", "email", "both"]).optional(),
+        branchId: z.string().uuid().optional(),
+      })
+      .parse(req.body);
+    return (await runCommand(app, "core.reminder.set", input, req.id)).data;
+  });
+  server.post("/api/v1/reminders/:id/cancel", async (req) => {
+    const { id } = req.params as { id: string };
+    return (await runCommand(app, "core.reminder.cancel", { reminderId: id }, req.id)).data;
+  });
+
+  server.get("/api/v1/followups", async (req) => {
+    const { status } = req.query as { status?: string };
+    return (await runQuery(app, "core.followup.list", { status }, req.id)).data;
+  });
+  server.post("/api/v1/followups", async (req) => {
+    const input = z
+      .object({
+        goal: z.string().min(1),
+        fireAt: z.string(),
+        sessionId: z.string().uuid().optional(),
+        branchId: z.string().uuid().optional(),
+      })
+      .parse(req.body);
+    return (await runCommand(app, "core.followup.create", input, req.id)).data;
+  });
+  server.post("/api/v1/followups/:id/cancel", async (req) => {
+    const { id } = req.params as { id: string };
+    return (await runCommand(app, "core.followup.cancel", { followUpId: id }, req.id)).data;
+  });
+
   server.post("/api/v1/autonomy", async (req) => {
     const input = z
       .object({

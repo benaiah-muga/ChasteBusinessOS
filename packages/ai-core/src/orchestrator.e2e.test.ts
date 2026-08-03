@@ -246,6 +246,46 @@ describe("planFromText", () => {
     });
   });
 
+  it("parses 'remind me … in N minutes' into a reminder", () => {
+    const plan = planFromText("remind me in 30 minutes to call Acme");
+    expect(plan?.command).toBe("core.reminder.set");
+    const fireAt = (plan?.input as any).fireAt as string;
+    const delta = Date.parse(fireAt) - Date.now();
+    expect(delta).toBeGreaterThan(25 * 60_000);
+    expect(delta).toBeLessThan(35 * 60_000);
+    expect((plan?.input as any).title).toContain("call Acme");
+  });
+
+  it("parses 'remind me at 4pm to review AR' into a reminder", () => {
+    const plan = planFromText("remind me at 4pm to review AR");
+    expect(plan?.command).toBe("core.reminder.set");
+    expect(Date.parse((plan?.input as any).fireAt)).toBeGreaterThan(Date.now());
+  });
+
+  it("parses 'set a reminder tomorrow at 9am …' into a reminder", () => {
+    const plan = planFromText("set a reminder tomorrow at 9am to file VAT");
+    expect(plan?.command).toBe("core.reminder.set");
+    const fireAt = new Date(Date.parse((plan?.input as any).fireAt));
+    expect(fireAt.getHours()).toBe(9);
+  });
+
+  it("parses 'follow up with Acme on monday at 10am …'", () => {
+    const plan = planFromText("follow up with Acme on monday at 10am if no payment");
+    expect(plan?.command).toBe("core.followup.create");
+    expect((plan?.input as any).goal).toContain("Acme");
+    expect((plan?.input as any).goal).toContain("if no payment");
+  });
+
+  it("leaves ambiguous reminders to the LLM (no fireAt)", () => {
+    const plan = planFromText("remind me to stretch");
+    expect(plan).toBeNull();
+  });
+
+  it("does not misparse bare numbers as clock times", () => {
+    const plan = planFromText("remind me to review 2 invoices next week");
+    expect(plan).toBeNull();
+  });
+
   it("parses payroll intent", () => {
     const plan = planFromText("Prepare payroll for March 2026");
     expect(plan).toMatchObject({

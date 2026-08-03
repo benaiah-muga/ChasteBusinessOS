@@ -10,7 +10,7 @@ export async function cleanupTestData(db: Db): Promise<void> {
     sql`TRUNCATE TABLE
       audit_log, outbox_events, org_memories,
       chat_feedback, chat_messages, chat_sessions, ai_explanations,
-      notifications, capability_gap_tickets,
+      notifications, capability_gap_tickets, reminders, follow_ups,
       user_branch_access, branches,
       pending_approvals, ai_wakes, ai_skills, channel_session_bindings,
       crm_customers,

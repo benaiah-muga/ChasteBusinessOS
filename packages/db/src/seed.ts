@@ -22,6 +22,8 @@ export const PERMISSION_CATALOG: { permission: string; module: string; descripti
   { permission: "core.capability.gap.read", module: "core", description: "View capability gap tickets" },
   { permission: "core.capability.gap.manage", module: "core", description: "Create and update capability gap tickets" },
   { permission: "core.notification.read", module: "core", description: "Read own notifications" },
+  { permission: "core.reminder.write", module: "core", description: "Set and manage reminders" },
+  { permission: "core.followup.write", module: "core", description: "Schedule agent follow-ups" },
   { permission: "crm.customer.create", module: "crm", description: "Create customers" },
   { permission: "crm.customer.read", module: "crm", description: "Read customers" },
   { permission: "acc.account.manage", module: "accounting", description: "Manage chart of accounts" },
@@ -267,7 +269,12 @@ export async function bootstrapPlatform(db: Db, cfg: AppConfig): Promise<Bootstr
       .returning();
     opsRole = created!;
     const opsPerms = ALL_PERMS.filter(
-      (p) => p.endsWith(".read") || p.includes(".create") || p.includes(".move") || p.includes(".run"),
+      (p) =>
+        p.endsWith(".read") ||
+        p.includes(".create") ||
+        p.includes(".move") ||
+        p.includes(".run") ||
+        p.includes(".write"),
     );
     for (const permission of opsPerms) {
       await db.insert(schema.rolePermissions).values({ roleId: opsRole.id, permission });

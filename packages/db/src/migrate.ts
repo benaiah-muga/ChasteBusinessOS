@@ -536,6 +536,44 @@ CREATE TABLE IF NOT EXISTS channel_session_bindings (
 CREATE UNIQUE INDEX IF NOT EXISTS channel_bindings_target_uidx ON channel_session_bindings(thread_target);
 CREATE INDEX IF NOT EXISTS channel_bindings_session_idx ON channel_session_bindings(session_id);
 CREATE INDEX IF NOT EXISTS channel_bindings_org_idx ON channel_session_bindings(organization_id);
+
+-- C2/C5 -- reminders and agent follow-ups (scheduling-and-comms.md)
+CREATE TABLE IF NOT EXISTS reminders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  created_by uuid NOT NULL,
+  title text NOT NULL,
+  body text,
+  href text,
+  fire_at timestamptz NOT NULL,
+  channel text NOT NULL DEFAULT 'in_app',
+  status text NOT NULL DEFAULT 'scheduled',
+  branch_id uuid,
+  fired_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS reminders_due_idx ON reminders(status, fire_at);
+CREATE INDEX IF NOT EXISTS reminders_user_idx ON reminders(user_id);
+CREATE INDEX IF NOT EXISTS reminders_org_idx ON reminders(organization_id);
+
+CREATE TABLE IF NOT EXISTS follow_ups (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  created_by uuid NOT NULL,
+  goal text NOT NULL,
+  fire_at timestamptz NOT NULL,
+  session_id uuid,
+  branch_id uuid,
+  autonomy_override text,
+  status text NOT NULL DEFAULT 'scheduled',
+  fired_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS follow_ups_due_idx ON follow_ups(status, fire_at);
+CREATE INDEX IF NOT EXISTS follow_ups_user_idx ON follow_ups(user_id);
+CREATE INDEX IF NOT EXISTS follow_ups_org_idx ON follow_ups(organization_id);
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {

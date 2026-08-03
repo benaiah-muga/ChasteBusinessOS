@@ -19,9 +19,9 @@ import {
   type CommandRegistry,
   type QueryRegistry,
 } from "@chaste/kernel";
-import { createDb, runMigrations, schema, type Db, cleanupTestData } from "@chaste/db";
+import { createDb, runMigrations, schema, type Db, cleanupTestData, hashAuthToken, resolveUserByToken } from "@chaste/db";
 import { eq } from "drizzle-orm";
-import { createPlatformModule } from "@chaste/module-platform";
+import { createPlatformModule, createScheduleProcessor } from "@chaste/module-platform";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const DB_URL = process.env.DATABASE_URL!;
@@ -56,12 +56,14 @@ const ADMIN_PERMISSIONS = [
   "core.branch.read", "core.branch.manage", "core.branch.all",
   "core.capability.gap.read", "core.capability.gap.manage",
   "core.notification.read",
+  "core.reminder.write", "core.followup.write",
 ];
 
 const OPERATOR_PERMISSIONS = [
   "core.modules.read", "core.rbac.read", "core.marketplace.read", "core.user.read",
   "core.branch.read",
   "core.notification.read",
+  "core.reminder.write", "core.followup.write",
 ];
 
 let orgA: TestCompany;
@@ -542,6 +544,182 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
       });
       expect(e.message).toContain("Role not found");
     });
+
+    it("stores the invite token hashed at rest and returns it raw once", async () => {
+      const invited = await cmd(orgA.adminUser, orgA.orgId, "core.user.invite", {
+        email: "hashed-token@test.com",
+        displayName: "Hashed Token",
+      });
+      const raw = invited.authToken as string;
+      const [row] = await db
+        .select({ stored: schema.users.authToken })
+        .from(schema.users)
+        .where(eq(schema.users.id, invited.id));
+      // Raw token is returned to the inviter; only the digest is at rest.
+      expect(row!.stored).toBe(hashAuthToken(raw));
+      expect(row!.stored).not.toBe(raw);
+
+      // The raw token still authenticates (hashed lookup path).
+      const authed = await resolveUserByToken(db, raw);
+      expect(authed?.userId).toBe(invited.id);
+    });
+  });
+
+  // ─── Reminders & Follow-ups (scheduling-and-comms §2/§3) ─────────────
+
+  describe("core.reminder.set", () => {
+    const future = () => new Date(Date.now() + 60_000).toISOString();
+
+    it("schedules a reminder and notifies the scheduler", async () => {
+      const created = await cmd(orgA.operatorUser, orgA.orgId, "core.reminder.set", {
+        title: "Call Acme re: payment",
+        fireAt: future(),
+      });
+      expect(created.status).toBe("scheduled");
+      expect(Date.parse(created.fireAt)).toBeGreaterThan(Date.now());
+
+      const notes = await qry(orgA.operatorUser, orgA.orgId, "core.notification.list", {
+        unreadOnly: true,
+      });
+      expect(notes.notifications.some((n: any) => n.title === "Reminder scheduled")).toBe(true);
+    });
+
+    it("rejects a fireAt in the past", async () => {
+      const e = await cmdFails(orgA.operatorUser, orgA.orgId, "core.reminder.set", {
+        title: "Too late",
+        fireAt: new Date(Date.now() - 60_000).toISOString(),
+      });
+      expect(e.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("rejects a branchId from another org", async () => {
+      const branchesB = await qry(orgB.adminUser, orgB.orgId, "core.branch.list");
+      const otherBranch = branchesB.branches[0].id;
+      const e = await cmdFails(orgA.operatorUser, orgA.orgId, "core.reminder.set", {
+        title: "Wrong org branch",
+        fireAt: future(),
+        branchId: otherBranch,
+      });
+      expect(e.message).toContain("Branch not found");
+    });
+  });
+
+  describe("core.reminder.list / cancel", () => {
+    let reminderId: string;
+
+    it("lists only the caller's own reminders", async () => {
+      const mine = await qry(orgA.operatorUser, orgA.orgId, "core.reminder.list");
+      expect(mine.reminders.length).toBeGreaterThan(0);
+      reminderId = mine.reminders[0].id;
+
+      const adminList = await qry(orgA.adminUser, orgA.orgId, "core.reminder.list");
+      expect(adminList.reminders.some((r: any) => r.id === reminderId)).toBe(false);
+    });
+
+    it("cancels a scheduled reminder", async () => {
+      const result = await cmd(orgA.operatorUser, orgA.orgId, "core.reminder.cancel", {
+        reminderId,
+      });
+      expect(result.cancelled).toBe(true);
+      const list = await qry(orgA.operatorUser, orgA.orgId, "core.reminder.list", {
+        status: "cancelled",
+      });
+      expect(list.reminders.some((r: any) => r.id === reminderId)).toBe(true);
+    });
+
+    it("cannot cancel another user's reminder", async () => {
+      const adminReminder = await cmd(orgA.adminUser, orgA.orgId, "core.reminder.set", {
+        title: "Admin only",
+        fireAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+      const e = await cmdFails(orgA.operatorUser, orgA.orgId, "core.reminder.cancel", {
+        reminderId: adminReminder.id,
+      });
+      expect(e.message).toContain("Reminder not found");
+    });
+  });
+
+  describe("core.followup.create / list / cancel", () => {
+    let followUpId: string;
+
+    it("schedules an agent follow-up", async () => {
+      const created = await cmd(orgA.operatorUser, orgA.orgId, "core.followup.create", {
+        goal: "Review overdue invoices",
+        fireAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      expect(created.status).toBe("scheduled");
+      expect(created.goal).toBe("Review overdue invoices");
+      followUpId = created.id;
+    });
+
+    it("lists the follow-up for the owner", async () => {
+      const list = await qry(orgA.operatorUser, orgA.orgId, "core.followup.list");
+      expect(list.followUps.some((f: any) => f.id === followUpId)).toBe(true);
+    });
+
+    it("cancels a scheduled follow-up", async () => {
+      const result = await cmd(orgA.operatorUser, orgA.orgId, "core.followup.cancel", {
+        followUpId,
+      });
+      expect(result.cancelled).toBe(true);
+    });
+  });
+
+  describe("schedule processor (worker cadence)", () => {
+    it("fires due reminders into notifications and marks them fired", async () => {
+      const schedule = createScheduleProcessor(db);
+      const [due] = await db
+        .insert(schema.reminders)
+        .values({
+          organizationId: orgA.orgId,
+          userId: orgA.operatorUser.id,
+          createdBy: orgA.operatorUser.id,
+          title: "Past due nudge",
+          body: "Do the thing",
+          fireAt: new Date(Date.now() - 30_000),
+        })
+        .returning();
+
+      const fired = await schedule.processDueReminders();
+      expect(fired).toBeGreaterThanOrEqual(1);
+
+      const [row] = await db
+        .select()
+        .from(schema.reminders)
+        .where(eq(schema.reminders.id, due!.id));
+      expect(row!.status).toBe("fired");
+      expect(row!.firedAt).not.toBeNull();
+
+      const notes = await qry(orgA.operatorUser, orgA.orgId, "core.notification.list", {
+        unreadOnly: true,
+      });
+      expect(notes.notifications.some((n: any) => n.title === "Past due nudge")).toBe(true);
+    });
+
+    it("claims due follow-ups exactly once", async () => {
+      const schedule = createScheduleProcessor(db);
+      const [due] = await db
+        .insert(schema.followUps)
+        .values({
+          organizationId: orgA.orgId,
+          userId: orgA.operatorUser.id,
+          createdBy: orgA.operatorUser.id,
+          goal: "Recheck the books",
+          fireAt: new Date(Date.now() - 30_000),
+        })
+        .returning();
+
+      const first = await schedule.claimDueFollowUps();
+      expect(first.some((f) => f.id === due!.id)).toBe(true);
+      const second = await schedule.claimDueFollowUps();
+      expect(second.some((f) => f.id === due!.id)).toBe(false); // idempotent claim
+
+      const [row] = await db
+        .select()
+        .from(schema.followUps)
+        .where(eq(schema.followUps.id, due!.id));
+      expect(row!.status).toBe("running");
+    });
   });
 
   // ─── Tenancy / security guards ────────────────────────────────────────
@@ -616,6 +794,10 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
         "core.notification.mark_read",
         "core.notification.mark_all_read",
         "core.user.invite",
+        "core.reminder.set",
+        "core.reminder.cancel",
+        "core.followup.create",
+        "core.followup.cancel",
       ]) {
         expect(commandNames).toContain(expected);
       }
@@ -623,6 +805,8 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
         "core.branch.list",
         "core.capability.gap.list",
         "core.notification.list",
+        "core.reminder.list",
+        "core.followup.list",
       ]) {
         expect(queryNames).toContain(expected);
       }

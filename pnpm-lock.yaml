@@ -139,6 +139,9 @@ importers:
       '@chaste/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@chaste/module-platform':
+        specifier: workspace:*
+        version: link:../../modules/platform
     devDependencies:
       tsx:
         specifier: ^4.19.2

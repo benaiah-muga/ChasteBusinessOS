@@ -407,11 +407,120 @@ function splitCompoundRequest(text: string): string[] {
   return [text.trim()];
 }
 
+const DAY_NAMES = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+] as const;
+
+/**
+ * Deterministic datetime phrase extraction for "remind me …" / "follow up …".
+ *
+ * Understands a small, reliable set of phrases: "in N minutes/hours/days",
+ * "on <weekday> at HH:MM[am|pm]" (next occurrence), "today at HH:MM[am|pm]",
+ * "tomorrow at HH:MM[am|pm]", "at HH:MM[am|pm]" (today or next). Ambiguous
+ * or missing times return `fireAt: null` so the LLM assist path can clarify.
+ */
+export function parseScheduleFireAt(text: string): { fireAt: string | null; cleaned: string } {
+  const now = new Date();
+
+  const inRe = text.match(/\bin (\d+) (minute|minutes|hour|hours|day|days)\b/i);
+  if (inRe?.[1]) {
+    const n = Number(inRe[1]);
+    const unit = inRe[2]!.toLowerCase();
+    const ms =
+      unit.startsWith("minute") ? n * 60_000 :
+      unit.startsWith("hour") ? n * 3_600_000 :
+      n * 86_400_000;
+    const fireAt = new Date(now.getTime() + ms).toISOString();
+    return { fireAt, cleaned: text.replace(inRe[0], "").trim() };
+  }
+
+  const dayRe = text.match(
+    /\bon (sunday|monday|tuesday|wednesday|thursday|friday|saturday)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i,
+  );
+  if (dayRe?.[1]) {
+    const target = DAY_NAMES.findIndex((d) => d.startsWith(dayRe[1]!.slice(0, 3).toLowerCase()));
+    let hour = Number(dayRe[2]);
+    const minute = Number(dayRe[3] ?? 0);
+    const meridian = dayRe[4]?.toLowerCase();
+    if (meridian === "pm" && hour < 12) hour += 12;
+    if (meridian === "am" && hour === 12) hour = 0;
+
+    const date = new Date(now);
+    let delta = (target - date.getDay() + 7) % 7;
+    if (delta === 0) delta = 7; // next occurrence, not today
+    date.setDate(date.getDate() + delta);
+    date.setHours(hour, minute, 0, 0);
+    return { fireAt: date.toISOString(), cleaned: text.replace(dayRe[0], "").trim() };
+  }
+
+  // "today at 4pm" | "tomorrow at 9am" | "at 4pm" | "4:30pm"
+  const clockRe = text.match(
+    /\b((?:today|tomorrow)\s+at|at)?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i,
+  );
+  const clockNoMeridian = text.match(/\b((?:today|tomorrow)\s+at|at)\s+(\d{1,2})(?::(\d{2}))?\b/i);
+  const m = clockRe?.[4] ? clockRe : clockNoMeridian;
+  if (m?.[2] && Number(m[2]) <= 23) {
+    let hour = Number(m[2]);
+    const minute = Number(m[3] ?? 0);
+    const meridian = m[4]?.toLowerCase();
+    if (meridian === "pm" && hour < 12) hour += 12;
+    if (meridian === "am" && hour === 12) hour = 0;
+
+    const when = m[1]?.toLowerCase();
+    const date = new Date(now);
+    if (when?.includes("tomorrow")) {
+      date.setDate(date.getDate() + 1);
+    }
+    date.setHours(hour, minute, 0, 0);
+    if (date.getTime() <= now.getTime()) {
+      date.setDate(date.getDate() + 1);
+    }
+    return { fireAt: date.toISOString(), cleaned: text.replace(m[0], "").trim() };
+  }
+
+  return { fireAt: null, cleaned: text.trim() };
+}
+
 /** Parse a single intent segment (no compound splitting). */
 function planSingleSegment(text: string): PlannedAction | null {
   const trimmed = text.trim().replace(/[.!]+$/, "");
 
-  let m = trimmed.match(
+  // Reminders & follow-ups (spec: scheduling-and-comms §3). Deterministic
+  // datetime phrases map to an ISO fireAt; anything else falls through to the
+  // LLM assist path, which may clarify the time.
+  let m = trimmed.match(/^(?:remind me(?: to)?|set a reminder(?: to)?)\s+(.+)$/i);
+  if (m?.[1]) {
+    const { fireAt, cleaned } = parseScheduleFireAt(m[1]);
+    if (fireAt) {
+      return {
+        command: "core.reminder.set",
+        input: { title: cleaned, fireAt },
+        summary: `Remind me: ${cleaned}`,
+        specialist: "core",
+      };
+    }
+  }
+
+  m = trimmed.match(/^follow up(?:\s+with)?\s+(.+)$/i);
+  if (m?.[1]) {
+    const { fireAt, cleaned } = parseScheduleFireAt(m[1]);
+    if (fireAt) {
+      return {
+        command: "core.followup.create",
+        input: { goal: cleaned, fireAt },
+        summary: `Follow up: ${cleaned}`,
+        specialist: "core",
+      };
+    }
+  }
+
+  m = trimmed.match(
     /^create\s+customer\s+(.+?)(?:\s+in\s+([A-Za-z][A-Za-z\s-]+))?$/i,
   );
   if (m?.[1]) {

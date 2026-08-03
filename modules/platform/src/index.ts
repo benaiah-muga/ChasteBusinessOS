@@ -1,5 +1,5 @@
 import type { Db } from "@chaste/db";
-import { PERMISSION_CATALOG, resolveUserPermissions, schema } from "@chaste/db";
+import { PERMISSION_CATALOG, hashAuthToken, resolveUserPermissions, schema } from "@chaste/db";
 import {
   orgSettingsSchema,
   orgSettingsUpdateSchema,
@@ -16,7 +16,7 @@ import {
   type ModuleRegistry,
   ValidationError,
 } from "@chaste/kernel";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 
 /** Capability gap ticket lifecycle (spec: self-development.md §4). */
@@ -137,6 +137,8 @@ export function createPlatformModule(
         "core.capability.gap.read",
         "core.capability.gap.manage",
         "core.notification.read",
+        "core.reminder.write",
+        "core.followup.write",
       ],
       capabilities: ["core.rbac", "core.marketplace", "core.autonomy"],
       specialist: {
@@ -444,14 +446,16 @@ export function createPlatformModule(
               }
             }
 
-            const authToken = crypto.randomUUID();
+            const rawToken = crypto.randomUUID();
             const [user] = await db
               .insert(schema.users)
               .values({
                 organizationId: orgId,
                 email: input.email,
                 displayName: input.displayName,
-                authToken,
+                // At-rest the column holds only the digest; the raw token is
+                // returned exactly once (see hashAuthToken in @chaste/db).
+                authToken: hashAuthToken(rawToken),
                 activeBranchId: input.branchId ?? null,
               })
               .returning();
@@ -481,7 +485,7 @@ export function createPlatformModule(
               id: user!.id,
               email: user!.email,
               displayName: user!.displayName,
-              authToken,
+              authToken: rawToken,
               roleId: input.roleId ?? null,
               branchId: input.branchId ?? null,
             };
@@ -1774,6 +1778,290 @@ export function createPlatformModule(
         }),
       );
 
+      // ─── Reminders & Follow-ups (spec: scheduling-and-comms §2/§3) ──────
+
+      const reminderOutputSchema = z.object({
+        id: z.string(),
+        title: z.string(),
+        body: z.string().nullable(),
+        href: z.string().nullable(),
+        fireAt: z.string(),
+        channel: z.string(),
+        status: z.string(),
+        branchId: z.string().nullable(),
+      });
+
+      const followUpOutputSchema = z.object({
+        id: z.string(),
+        goal: z.string(),
+        fireAt: z.string(),
+        sessionId: z.string().nullable(),
+        branchId: z.string().nullable(),
+        status: z.string(),
+      });
+
+      const fireAtSchema = z.string().refine((v) => {
+        const t = Date.parse(v);
+        return Number.isFinite(t) && t > Date.now();
+      }, "fireAt must be a future ISO timestamp");
+
+      commands.register(
+        defineCommand({
+          name: "core.reminder.set",
+          permissions: ["core.reminder.write"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            title: z.string().min(1),
+            body: z.string().optional(),
+            href: z.string().optional(),
+            fireAt: fireAtSchema,
+            channel: z.enum(["in_app", "email", "both"]).optional(),
+            branchId: z.string().uuid().optional(),
+          }),
+          output: reminderOutputSchema,
+          handler: async (input, ctx) => {
+            if (input.branchId) {
+              const [branch] = await db
+                .select()
+                .from(schema.branches)
+                .where(
+                  and(
+                    eq(schema.branches.id, input.branchId),
+                    eq(schema.branches.organizationId, ctx.actor.organizationId),
+                  ),
+                );
+              if (!branch) {
+                throw new ValidationError("Branch not found", { branchId: input.branchId });
+              }
+            }
+            const [row] = await db
+              .insert(schema.reminders)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                userId: ctx.actor.userId,
+                createdBy: ctx.actor.userId,
+                title: input.title,
+                body: input.body ?? null,
+                href: input.href ?? null,
+                fireAt: new Date(input.fireAt),
+                channel: input.channel ?? "in_app",
+                branchId: input.branchId ?? null,
+              })
+              .returning();
+            await notifyUser(db, {
+              organizationId: ctx.actor.organizationId,
+              userId: ctx.actor.userId,
+              kind: "system",
+              title: "Reminder scheduled",
+              body: `${input.title} — I'll nudge you at ${new Date(input.fireAt).toISOString()}.`,
+            });
+            return {
+              id: row!.id,
+              title: row!.title,
+              body: row!.body,
+              href: row!.href,
+              fireAt: row!.fireAt.toISOString(),
+              channel: row!.channel,
+              status: row!.status,
+              branchId: row!.branchId,
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.reminder.cancel",
+          permissions: ["core.reminder.write"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ reminderId: z.string().uuid() }),
+          output: z.object({ cancelled: z.boolean() }),
+          handler: async (input, ctx) => {
+            const rows = await db
+              .update(schema.reminders)
+              .set({ status: "cancelled" })
+              .where(
+                and(
+                  eq(schema.reminders.id, input.reminderId),
+                  eq(schema.reminders.userId, ctx.actor.userId),
+                  eq(schema.reminders.status, "scheduled"),
+                ),
+              )
+              .returning();
+            if (rows.length === 0) {
+              throw new ValidationError("Reminder not found or already fired", {
+                reminderId: input.reminderId,
+              });
+            }
+            return { cancelled: true };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.followup.create",
+          permissions: ["core.followup.write"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            goal: z.string().min(1),
+            fireAt: fireAtSchema,
+            sessionId: z.string().uuid().optional(),
+            branchId: z.string().uuid().optional(),
+          }),
+          output: followUpOutputSchema,
+          handler: async (input, ctx) => {
+            if (input.branchId) {
+              const [branch] = await db
+                .select()
+                .from(schema.branches)
+                .where(
+                  and(
+                    eq(schema.branches.id, input.branchId),
+                    eq(schema.branches.organizationId, ctx.actor.organizationId),
+                  ),
+                );
+              if (!branch) {
+                throw new ValidationError("Branch not found", { branchId: input.branchId });
+              }
+            }
+            const [row] = await db
+              .insert(schema.followUps)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                userId: ctx.actor.userId,
+                createdBy: ctx.actor.userId,
+                goal: input.goal,
+                fireAt: new Date(input.fireAt),
+                sessionId: input.sessionId ?? null,
+                branchId: input.branchId ?? null,
+              })
+              .returning();
+            await notifyUser(db, {
+              organizationId: ctx.actor.organizationId,
+              userId: ctx.actor.userId,
+              kind: "system",
+              title: "Follow-up scheduled",
+              body: `I'll come back to this on ${new Date(input.fireAt).toISOString()}: ${input.goal}`,
+            });
+            return {
+              id: row!.id,
+              goal: row!.goal,
+              fireAt: row!.fireAt.toISOString(),
+              sessionId: row!.sessionId,
+              branchId: row!.branchId,
+              status: row!.status,
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.followup.cancel",
+          permissions: ["core.followup.write"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ followUpId: z.string().uuid() }),
+          output: z.object({ cancelled: z.boolean() }),
+          handler: async (input, ctx) => {
+            const rows = await db
+              .update(schema.followUps)
+              .set({ status: "cancelled" })
+              .where(
+                and(
+                  eq(schema.followUps.id, input.followUpId),
+                  eq(schema.followUps.userId, ctx.actor.userId),
+                  or(
+                    eq(schema.followUps.status, "scheduled"),
+                    eq(schema.followUps.status, "running"),
+                  ),
+                ),
+              )
+              .returning();
+            if (rows.length === 0) {
+              throw new ValidationError("Follow-up not found", { followUpId: input.followUpId });
+            }
+            return { cancelled: true };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.reminder.list",
+          permissions: ["core.reminder.write"],
+          tags: ["core"],
+          input: z.object({ status: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).default({}),
+          output: z.object({
+            reminders: z.array(reminderOutputSchema),
+          }),
+          handler: async (input, ctx) => {
+            const where = and(
+              eq(schema.reminders.userId, ctx.actor.userId),
+              eq(schema.reminders.organizationId, ctx.actor.organizationId),
+              input.status ? eq(schema.reminders.status, input.status) : undefined,
+            );
+            const rows = await db
+              .select()
+              .from(schema.reminders)
+              .where(where)
+              .orderBy(schema.reminders.fireAt)
+              .limit(input.limit ?? 50);
+            return {
+              reminders: rows.map((r) => ({
+                id: r.id,
+                title: r.title,
+                body: r.body,
+                href: r.href,
+                fireAt: r.fireAt.toISOString(),
+                channel: r.channel,
+                status: r.status,
+                branchId: r.branchId,
+              })),
+            };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.followup.list",
+          permissions: ["core.followup.write"],
+          tags: ["core"],
+          input: z.object({ status: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).default({}),
+          output: z.object({
+            followUps: z.array(followUpOutputSchema),
+          }),
+          handler: async (input, ctx) => {
+            const where = and(
+              eq(schema.followUps.userId, ctx.actor.userId),
+              eq(schema.followUps.organizationId, ctx.actor.organizationId),
+              input.status ? eq(schema.followUps.status, input.status) : undefined,
+            );
+            const rows = await db
+              .select()
+              .from(schema.followUps)
+              .where(where)
+              .orderBy(schema.followUps.fireAt)
+              .limit(input.limit ?? 50);
+            return {
+              followUps: rows.map((f) => ({
+                id: f.id,
+                goal: f.goal,
+                fireAt: f.fireAt.toISOString(),
+                sessionId: f.sessionId,
+                branchId: f.branchId,
+                status: f.status,
+              })),
+            };
+          },
+        }),
+      );
+
       // ─── Settings & Preferences ────────────────────────────────────────
 
       const orgSettingsOutputSchema = z.object({
@@ -1908,6 +2196,49 @@ export function createPlatformModule(
           },
         }),
       );
+    },
+  };
+}
+
+/**
+ * C2/C5 schedule processor — the worker's cadence for firing time-bound work.
+ *
+ * Both claim functions use an atomic UPDATE ... RETURNING so concurrent
+ * workers cannot double-fire a job. `processDueReminders` also delivers the
+ * in-app notification; `claimDueFollowUps` hands the claimed rows back so the
+ * caller can re-enter the agent harness with the follow-up goal.
+ */
+export function createScheduleProcessor(db: Db) {
+  return {
+    async processDueReminders(): Promise<number> {
+      const now = new Date();
+      const rows = await db
+        .update(schema.reminders)
+        .set({ status: "fired", firedAt: now })
+        .where(and(eq(schema.reminders.status, "scheduled"), lte(schema.reminders.fireAt, now)))
+        .returning();
+      for (const r of rows) {
+        await notifyUser(db, {
+          organizationId: r.organizationId,
+          userId: r.userId,
+          kind: "reminder",
+          title: r.title,
+          body: r.body ?? undefined,
+          href: r.href ?? undefined,
+          resourceType: "reminder",
+          resourceId: r.id,
+        });
+      }
+      return rows.length;
+    },
+
+    async claimDueFollowUps(): Promise<(typeof schema.followUps.$inferSelect)[]> {
+      const now = new Date();
+      return db
+        .update(schema.followUps)
+        .set({ status: "running" })
+        .where(and(eq(schema.followUps.status, "scheduled"), lte(schema.followUps.fireAt, now)))
+        .returning();
     },
   };
 }
