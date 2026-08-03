@@ -27,6 +27,8 @@ export const PERMISSION_CATALOG: { permission: string; module: string; descripti
   { permission: "core.followup.write", module: "core", description: "Schedule agent follow-ups" },
   { permission: "core.calendar.read", module: "core", description: "See calendars and events in scope" },
   { permission: "core.calendar.write", module: "core", description: "Create and update calendar events" },
+  { permission: "core.email.send", module: "core", description: "Send outbound email" },
+  { permission: "core.marketplace.publish", module: "core", description: "Publish a module listing from a gap ticket" },
   { permission: "crm.customer.create", module: "crm", description: "Create customers" },
   { permission: "crm.customer.read", module: "crm", description: "Read customers" },
   { permission: "acc.account.manage", module: "accounting", description: "Manage chart of accounts" },

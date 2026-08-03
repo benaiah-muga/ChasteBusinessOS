@@ -402,6 +402,29 @@ export const notifications = pgTable(
   ],
 );
 
+/** C6 — outbound email delivery records. Idempotent via provider message ids. */
+export const emailOutbox = pgTable(
+  "email_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    to: text("to").notNull(),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    template: text("template"),
+    status: text("status").notNull().default("queued"),
+    provider: text("provider"),
+    providerMessageId: text("provider_message_id"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("email_outbox_status_idx").on(t.status),
+    index("email_outbox_org_idx").on(t.organizationId),
+  ],
+);
+
 /* ─── AI runtime stores (OpenWorker-benchmark primitives, R2/R5/R7/R10) ─── */
 
 /**

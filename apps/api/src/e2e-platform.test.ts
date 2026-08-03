@@ -21,7 +21,7 @@ import {
 } from "@chaste/kernel";
 import { createDb, runMigrations, schema, type Db, cleanupTestData, hashAuthToken, resolveUserByToken } from "@chaste/db";
 import { eq } from "drizzle-orm";
-import { createPlatformModule, createScheduleProcessor } from "@chaste/module-platform";
+import { createEmailProcessor, createPlatformModule, createScheduleProcessor } from "@chaste/module-platform";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const DB_URL = process.env.DATABASE_URL!;
@@ -59,6 +59,7 @@ const ADMIN_PERMISSIONS = [
   "core.notification.read",
   "core.reminder.write", "core.followup.write",
   "core.calendar.read", "core.calendar.write",
+  "core.email.send", "core.marketplace.publish",
 ];
 
 const OPERATOR_PERMISSIONS = [
@@ -68,6 +69,7 @@ const OPERATOR_PERMISSIONS = [
   "core.capability.catalog.read",
   "core.reminder.write", "core.followup.write",
   "core.calendar.read", "core.calendar.write",
+  "core.email.send",
 ];
 
 let orgA: TestCompany;
@@ -813,6 +815,108 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
     it("denies calendar read without permission", async () => {
       const e = await qryFails(orgA.noPermUser, orgA.orgId, "core.calendar.list", {});
       expect(e.code).toBe("PERMISSION_DENIED");
+    });
+  });
+
+  describe("email outbox (C6)", () => {
+    it("enqueues a plain send as queued", async () => {
+      const created = await cmd(orgA.operatorUser, orgA.orgId, "core.email.send", {
+        to: "ops@example.com",
+        subject: "Test subject",
+        body: "Hello from the outbox",
+      });
+      expect(created.status).toBe("queued");
+      expect(created.subject).toBe("Test subject");
+
+      const list = await qry(orgA.operatorUser, orgA.orgId, "core.email.outbox.list");
+      expect(list.emails.some((e: any) => e.id === created.id)).toBe(true);
+    });
+
+    it("enqueues a versioned template with rendered vars", async () => {
+      const created = await cmd(orgA.operatorUser, orgA.orgId, "core.email.enqueue_template", {
+        to: "invitee@example.com",
+        template: "invite",
+        vars: { name: "Sam", org: "Org A", inviter: "Admin A", link: "https://chaste.local/invite/1" },
+      });
+      expect(created.status).toBe("queued");
+      expect(created.subject).toBe("You're invited to Org A on Chaste BusinessOS");
+    });
+
+    it("worker flush sends queued mail through the adapter", async () => {
+      const created = await cmd(orgA.operatorUser, orgA.orgId, "core.email.send", {
+        to: "worker@example.com",
+        subject: "Flush me",
+        body: "Send on next tick",
+      });
+      const email = createEmailProcessor(db);
+      const sent = await email.flushEmailOutbox();
+      expect(sent).toBeGreaterThanOrEqual(1);
+
+      const [row] = await db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.id, created.id));
+      expect(row!.status).toBe("sent");
+      expect(row!.providerMessageId).toMatch(/^console:/);
+      expect(row!.sentAt).not.toBeNull();
+    });
+  });
+
+  describe("marketplace publish (S4)", () => {
+    it("publishes a confirmed gap ticket as a local extension", async () => {
+      const created = await cmd(orgA.adminUser, orgA.orgId, "core.capability.gap.create", {
+        proposedCapabilityId: "custom-approval-flow",
+        title: "Custom approval flow",
+        abstractRequirement: "Our internal approval workflow with company-specific steps.",
+        acceptanceCriteria: ["Approvals route to finance first"],
+      });
+      const confirmed = await cmd(orgA.adminUser, orgA.orgId, "core.capability.gap.confirm", {
+        ticketId: created.id,
+        deploymentTarget: "local_extension",
+      });
+      expect(confirmed.status).toBe("confirmed");
+
+      const result = await cmd(orgA.adminUser, orgA.orgId, "core.marketplace.publish", {
+        moduleId: "ext-approval",
+        name: "Custom Approval",
+        version: "0.1.0",
+        summary: "Org-specific approval flow",
+        category: "operations",
+        kind: "local_extension",
+        gapTicketId: created.id,
+      });
+      expect(result.published).toBe(true);
+
+      const listing = await qry(orgA.adminUser, orgA.orgId, "core.marketplace.list");
+      const mine = listing.items.find((i: any) => i.moduleId === "ext-approval");
+      expect(mine).toBeTruthy();
+      expect(mine.kind).toBe("custom");
+      expect(mine.summary).toBe("Org-specific approval flow");
+    });
+
+    it("rejects publishing a platform_roadmap ticket", async () => {
+      const created = await cmd(orgA.adminUser, orgA.orgId, "core.capability.gap.create", {
+        proposedCapabilityId: "authz-overrides",
+        title: "Authz overrides",
+        abstractRequirement: "Custom authz rules overriding role-based permissions.",
+        acceptanceCriteria: ["Per-branch overrides"],
+      });
+      const confirmed = await cmd(orgA.adminUser, orgA.orgId, "core.capability.gap.confirm", {
+        ticketId: created.id,
+        deploymentTarget: "platform_roadmap",
+      });
+      expect(confirmed.status).toBe("confirmed");
+
+      const e = await cmdFails(orgA.adminUser, orgA.orgId, "core.marketplace.publish", {
+        moduleId: "ext-authz",
+        name: "Authz Overrides",
+        version: "0.1.0",
+        summary: "Should not publish",
+        category: "security",
+        kind: "marketplace_shared",
+        gapTicketId: created.id,
+      });
+      expect(e.message).toContain("platform maintainers");
     });
   });
 

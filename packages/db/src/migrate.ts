@@ -610,6 +610,24 @@ CREATE INDEX IF NOT EXISTS calendar_events_calendar_idx ON calendar_events(calen
 CREATE INDEX IF NOT EXISTS calendar_events_range_idx
   ON calendar_events(organization_id, starts_at, ends_at);
 
+-- C6 -- outbound email delivery records (scheduling-and-comms.md §5)
+CREATE TABLE IF NOT EXISTS email_outbox (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  "to" text NOT NULL,
+  subject text NOT NULL,
+  body text NOT NULL,
+  template text,
+  status text NOT NULL DEFAULT 'queued',
+  provider text,
+  provider_message_id text,
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS email_outbox_status_idx ON email_outbox(status);
+CREATE INDEX IF NOT EXISTS email_outbox_org_idx ON email_outbox(organization_id);
+
 -- S0 -- machine-readable capability catalog (self-development.md §6)
 CREATE TABLE IF NOT EXISTS capability_catalog_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

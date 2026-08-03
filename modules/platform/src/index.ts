@@ -16,8 +16,9 @@ import {
   type ModuleRegistry,
   ValidationError,
 } from "@chaste/kernel";
-import { and, eq, gte, ilike, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gte, ilike, inArray, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
+import { createEmailAdapter, emailTemplateSchema, renderEmailTemplate, type EmailAdapter } from "./email.js";
 
 /** Capability gap ticket lifecycle (spec: self-development.md §4). */
 const GAP_STATUS = [
@@ -1054,6 +1055,102 @@ export function createPlatformModule(
               .set({ metadata: meta })
               .where(eq(schema.marketplaceListings.moduleId, input.moduleId));
             return { moduleId: input.moduleId, archived: input.archived };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.marketplace.publish",
+          permissions: ["core.marketplace.publish"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            moduleId: z.string().min(1),
+            name: z.string().min(1),
+            version: z.string().min(1),
+            summary: z.string().min(1),
+            category: z.string().min(1),
+            publisher: z.string().optional(),
+            regions: z.array(z.string()).optional(),
+            kind: z.enum(["marketplace_shared", "local_extension", "private_cloud"]).default("marketplace_shared"),
+            gapTicketId: z.string().uuid().optional(),
+          }),
+          output: z.object({ moduleId: z.string(), version: z.string(), published: z.boolean() }),
+          handler: async (input, ctx) => {
+            // S4 — publish from a resolved gap ticket (self-development.md §4/§9).
+            // platform_roadmap is never tenant-published; it goes to maintainers.
+            if (input.gapTicketId) {
+              const [ticket] = await db
+                .select()
+                .from(schema.capabilityGapTickets)
+                .where(
+                  and(
+                    eq(schema.capabilityGapTickets.id, input.gapTicketId),
+                    eq(schema.capabilityGapTickets.organizationId, ctx.actor.organizationId),
+                  ),
+                );
+              if (!ticket) {
+                throw new ValidationError("Gap ticket not found", { ticketId: input.gapTicketId });
+              }
+              if (ticket.status !== "confirmed" && ticket.status !== "resolved") {
+                throw new ValidationError(
+                  "Only confirmed or resolved tickets can be published",
+                  { ticketId: input.gapTicketId, status: ticket.status },
+                );
+              }
+              if (ticket.deploymentTarget === "platform_roadmap") {
+                throw new ValidationError(
+                  "platform_roadmap work goes to platform maintainers, never a tenant publish",
+                  { ticketId: input.gapTicketId },
+                );
+              }
+              if (ticket.deploymentTarget === "undecided") {
+                throw new ValidationError(
+                  "deploymentTarget must be decided before publish",
+                  { ticketId: input.gapTicketId },
+                );
+              }
+            }
+
+            const metadata: Record<string, unknown> = { kind: input.kind, archived: false };
+            if (input.gapTicketId) metadata.gapTicketId = input.gapTicketId;
+            await db
+              .insert(schema.marketplaceListings)
+              .values({
+                moduleId: input.moduleId,
+                name: input.name,
+                version: input.version,
+                summary: input.summary,
+                category: input.category,
+                publisher: input.publisher ?? ctx.actor.organizationId,
+                regions: input.regions ?? ["*"],
+                metadata,
+              })
+              .onConflictDoUpdate({
+                target: schema.marketplaceListings.moduleId,
+                set: {
+                  name: input.name,
+                  version: input.version,
+                  summary: input.summary,
+                  category: input.category,
+                  publisher: input.publisher ?? ctx.actor.organizationId,
+                  regions: input.regions ?? ["*"],
+                  metadata,
+                },
+              });
+
+            await notifyUser(db, {
+              organizationId: ctx.actor.organizationId,
+              userId: ctx.actor.userId,
+              kind: "system",
+              title: `Module published: ${input.moduleId}`,
+              body: `${input.name} v${input.version} is now listed (${input.kind}).`,
+              resourceType: "marketplace_listing",
+              resourceId: input.moduleId,
+            });
+
+            return { moduleId: input.moduleId, version: input.version, published: true };
           },
         }),
       );
@@ -2485,6 +2582,109 @@ export function createPlatformModule(
         }),
       );
 
+      // ─── Email (C6) ───────────────────────────────────────────────────
+
+      const emailOutputSchema = z.object({
+        id: z.string(),
+        to: z.string(),
+        subject: z.string(),
+        template: z.string().nullable(),
+        status: z.string(),
+        createdAt: z.string(),
+      });
+
+      function toEmailRow(row: typeof schema.emailOutbox.$inferSelect) {
+        return {
+          id: row.id,
+          to: row.to,
+          subject: row.subject,
+          template: row.template,
+          status: row.status,
+          createdAt: row.createdAt.toISOString(),
+        };
+      }
+
+      commands.register(
+        defineCommand({
+          name: "core.email.send",
+          permissions: ["core.email.send"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            to: z.string().email(),
+            subject: z.string().min(1),
+            body: z.string().min(1),
+          }),
+          output: emailOutputSchema,
+          handler: async (input, ctx) => {
+            const [row] = await db
+              .insert(schema.emailOutbox)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                to: input.to,
+                subject: input.subject,
+                body: input.body,
+              })
+              .returning();
+            return toEmailRow(row!);
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.email.enqueue_template",
+          permissions: ["core.email.send"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            to: z.string().email(),
+            template: emailTemplateSchema,
+            vars: z.record(z.union([z.string(), z.number(), z.boolean()])).default({}),
+          }),
+          output: emailOutputSchema,
+          handler: async (input, ctx) => {
+            const rendered = renderEmailTemplate(input.template, input.vars);
+            const [row] = await db
+              .insert(schema.emailOutbox)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                to: input.to,
+                subject: rendered.subject,
+                body: rendered.body,
+                template: input.template,
+              })
+              .returning();
+            return toEmailRow(row!);
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.email.outbox.list",
+          permissions: ["core.email.send"],
+          tags: ["core"],
+          input: z
+            .object({ status: z.string().optional(), limit: z.number().int().min(1).max(200).optional() })
+            .default({}),
+          output: z.object({ emails: z.array(emailOutputSchema) }),
+          handler: async (input, ctx) => {
+            const where = and(
+              eq(schema.emailOutbox.organizationId, ctx.actor.organizationId),
+              input.status ? eq(schema.emailOutbox.status, input.status) : undefined,
+            );
+            const rows = await db
+              .select()
+              .from(schema.emailOutbox)
+              .where(where)
+              .orderBy(schema.emailOutbox.createdAt)
+              .limit(input.limit ?? 50);
+            return { emails: rows.map(toEmailRow) };
+          },
+        }),
+      );
+
       // ─── Settings & Preferences ────────────────────────────────────────
 
       const orgSettingsOutputSchema = z.object({
@@ -2662,6 +2862,49 @@ export function createScheduleProcessor(db: Db) {
         .set({ status: "running" })
         .where(and(eq(schema.followUps.status, "scheduled"), lte(schema.followUps.fireAt, now)))
         .returning();
+    },
+  };
+}
+
+/**
+ * C6 — email delivery processor. Claims queued rows atomically, sends through
+ * the adapter, and records provider ids / failures. Run on the worker cadence.
+ */
+export function createEmailProcessor(db: Db, adapter: EmailAdapter = createEmailAdapter()) {
+  return {
+    adapterId: adapter.id,
+    async flushEmailOutbox(batch = 25): Promise<number> {
+      const queued = await db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.status, "queued"))
+        .limit(batch);
+      if (queued.length === 0) return 0;
+      await db
+        .update(schema.emailOutbox)
+        .set({ status: "sending" })
+        .where(inArray(schema.emailOutbox.id, queued.map((r) => r.id)));
+      let sent = 0;
+      for (const row of queued) {
+        try {
+          const { messageId } = await adapter.send({ to: row.to, subject: row.subject, body: row.body });
+          await db
+            .update(schema.emailOutbox)
+            .set({ status: "sent", provider: adapter.id, providerMessageId: messageId, sentAt: new Date() })
+            .where(eq(schema.emailOutbox.id, row.id));
+          sent += 1;
+        } catch (err) {
+          await db
+            .update(schema.emailOutbox)
+            .set({
+              status: "failed",
+              provider: adapter.id,
+              error: err instanceof Error ? err.message : String(err),
+            })
+            .where(eq(schema.emailOutbox.id, row.id));
+        }
+      }
+      return sent;
     },
   };
 }

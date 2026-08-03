@@ -8,7 +8,7 @@
 import { loadConfig } from "@chaste/config";
 import { createDb, PostgresOutboxWriter } from "@chaste/db";
 import { createDefaultProcessor } from "@chaste/kernel";
-import { createScheduleProcessor } from "@chaste/module-platform";
+import { createEmailProcessor, createScheduleProcessor } from "@chaste/module-platform";
 import { createFollowUpHarness, runFollowUp } from "./harness.js";
 
 async function main() {
@@ -17,6 +17,7 @@ async function main() {
   const outbox = new PostgresOutboxWriter(db);
   const processor = createDefaultProcessor();
   const schedule = createScheduleProcessor(db);
+  const email = createEmailProcessor(db);
   const followUps = await createFollowUpHarness(cfg, db);
   const intervalMs = Number(process.env.WORKER_POLL_MS ?? 5_000);
   const maxRetries = Number(process.env.WORKER_MAX_RETRIES ?? 3);
@@ -76,6 +77,29 @@ async function main() {
         JSON.stringify({
           service: "chaste-worker",
           action: "schedule_error",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+
+    // C6 — flush queued email through the provider adapter.
+    try {
+      const sent = await email.flushEmailOutbox();
+      if (sent > 0) {
+        console.log(
+          JSON.stringify({
+            service: "chaste-worker",
+            action: "email_flushed",
+            count: sent,
+            provider: email.adapterId,
+          }),
+        );
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          service: "chaste-worker",
+          action: "email_error",
           error: err instanceof Error ? err.message : String(err),
         }),
       );
