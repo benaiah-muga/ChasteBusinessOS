@@ -176,6 +176,7 @@ function makeDeps(overrides?: {
   provider?: AiProvider;
   allowFullAutonomous?: boolean;
   commands?: CommandRegistry;
+  activeBranch?: { name: string; code: string };
 }) {
   const commands = overrides?.commands ?? createCommandRegistry();
   if (!overrides?.commands) registerTestCommands(commands);
@@ -186,6 +187,7 @@ function makeDeps(overrides?: {
     autonomy: overrides?.autonomy ?? "confirm",
     provider: overrides?.provider,
     allowFullAutonomous: overrides?.allowFullAutonomous,
+    activeBranch: overrides?.activeBranch,
   } satisfies OrchestratorDeps;
 }
 
@@ -210,6 +212,16 @@ class MockProvider implements AiProvider {
     const text = this.responses[this.callIndex] ?? "";
     this.callIndex++;
     return { text, provider: "mock", model: "mock-v1" };
+  }
+}
+
+class CapturingProvider implements AiProvider {
+  readonly id = "mock";
+  lastRequest?: CompletionRequest;
+
+  async complete(req: CompletionRequest): Promise<CompletionResult> {
+    this.lastRequest = req;
+    return { text: "", provider: "mock", model: "mock-v1" };
   }
 }
 
@@ -1592,5 +1604,51 @@ describe("handleChatTurn — R6 compaction wiring", () => {
     // the persisted transcript is untouched — only the outbound view compacts
     // (120 preloaded + the user turn + the confirm-path assistant reply)
     expect(result.session.messages.length).toBe(122);
+  });
+});
+
+// ===================================================================
+// handleChatTurn — active branch context injection
+// ===================================================================
+
+describe("handleChatTurn — active branch context", () => {
+  it("injects the active branch into the last user message sent to the provider", async () => {
+    const provider = new CapturingProvider();
+    const deps = makeDeps({
+      provider,
+      autonomy: "confirm",
+      activeBranch: { name: "Nairobi West", code: "NBO" },
+    });
+
+    await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Tell me a joke",
+      ctx: makeCtx(),
+    });
+
+    const msgs = provider.lastRequest?.messages ?? [];
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    expect(lastUser).toBeDefined();
+    expect(lastUser!.parts.some((p) => p.type === "text" && p.text.includes("[Active branch: Nairobi West (NBO)"))).toBe(
+      true,
+    );
+  });
+
+  it("does not inject branch context when no active branch is set", async () => {
+    const provider = new CapturingProvider();
+    const deps = makeDeps({ provider, autonomy: "confirm" });
+
+    await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Tell me a joke",
+      ctx: makeCtx(),
+    });
+
+    const msgs = provider.lastRequest?.messages ?? [];
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    expect(lastUser).toBeDefined();
+    expect(
+      lastUser!.parts.some((p) => p.type === "text" && p.text.includes("Active branch")),
+    ).toBe(false);
   });
 });

@@ -30,9 +30,11 @@ import {
   resolveUserPermissions,
   DbSessionStore,
   DbMemoryStore,
+  schema,
   type Db,
   type SessionStore,
 } from "@chaste/db";
+import { eq } from "drizzle-orm";
 import {
   type AutonomyLevel,
   autonomyLevelSchema,
@@ -345,6 +347,17 @@ export async function runChat(
     session = { id: sessionId, messages: [] };
   }
 
+  // Branch scope for the LLM's per-turn context (platform spec §4).
+  let activeBranch: { name: string; code: string } | undefined;
+  if (session.activeBranchId) {
+    const [branch] = await app.db
+      .select({ name: schema.branches.name, code: schema.branches.code })
+      .from(schema.branches)
+      .where(eq(schema.branches.id, session.activeBranchId))
+      .limit(1);
+    if (branch) activeBranch = branch;
+  }
+
   const result = await handleChatTurn(
     {
       commands: app.commands,
@@ -358,6 +371,7 @@ export async function runChat(
       skills: app.skills,
       compaction: app.compaction,
       defaultInboxVisibility: app.config.ai.defaultInboxVisibility,
+      activeBranch,
     },
     {
       session,

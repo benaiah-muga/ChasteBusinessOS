@@ -114,6 +114,12 @@ export interface OrchestratorDeps {
    * explanation describing the proposed change.
    */
   mode?: ConversationMode;
+  /**
+   * Multi-branch (platform spec §4): label of the session's active branch,
+   * injected per turn so branch-scoped commands (branch.list / set_active /
+   * domain queries) act on the branch the user means.
+   */
+  activeBranch?: { name: string; code: string };
   /** R6 — context-window-aware compaction when the outbound history is large. */
   compaction?: {
     summarizer: CompactionSummarizer;
@@ -327,6 +333,28 @@ function withModeContext(
   copy[copy.length - 1] = {
     ...last,
     parts: [...last.parts, { type: "text", text: `\n[${note}]` }],
+  };
+  return copy;
+}
+
+/** Multi-branch (platform spec §4) — per-turn active-branch context. */
+function withBranchContext(
+  messages: ChatMessage[],
+  activeBranch: { name: string; code: string } | undefined,
+): ChatMessage[] {
+  if (!activeBranch || messages.length === 0) return messages;
+  const copy = messages.slice();
+  const last = copy[copy.length - 1]!;
+  if (last.role !== "user") return copy;
+  copy[copy.length - 1] = {
+    ...last,
+    parts: [
+      ...last.parts,
+      {
+        type: "text",
+        text: `\n[Active branch: ${activeBranch.name} (${activeBranch.code}) — scope branch-sensitive work to this branch unless the user says otherwise.]`,
+      },
+    ],
   };
   return copy;
 }
@@ -1028,6 +1056,7 @@ export async function handleChatTurn(
   // skill catalog / disable-countermand are appended to the outbound view every
   // turn (both can change mid-session, so they never live in the static prompt).
   outboundMessages = withModeContext(outboundMessages, deps.mode);
+  outboundMessages = withBranchContext(outboundMessages, deps.activeBranch);
   outboundMessages = withSkillContext(outboundMessages, deps, session, input.ctx.actor.organizationId);
 
   // Optional LLM assist when rules miss (provider may be none). Runs a bounded

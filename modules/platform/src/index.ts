@@ -1,5 +1,5 @@
 import type { Db } from "@chaste/db";
-import { PERMISSION_CATALOG, schema } from "@chaste/db";
+import { PERMISSION_CATALOG, resolveUserPermissions, schema } from "@chaste/db";
 import {
   orgSettingsSchema,
   orgSettingsUpdateSchema,
@@ -8,6 +8,7 @@ import {
 } from "@chaste/db";
 import {
   FULL_AUTONOMOUS_WARNING,
+  actorHasPermission,
   autonomyLevelSchema,
   defineCommand,
   defineQuery,
@@ -15,8 +16,96 @@ import {
   type ModuleRegistry,
   ValidationError,
 } from "@chaste/kernel";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { z } from "zod";
+
+/** Capability gap ticket lifecycle (spec: self-development.md §4). */
+const GAP_STATUS = [
+  "draft",
+  "confirmed",
+  "queued",
+  "in_progress",
+  "in_review",
+  "resolved",
+  "wont_fix",
+  "duplicate",
+] as const;
+const gapStatusSchema = z.enum(GAP_STATUS);
+
+const GAP_DEPLOYMENT_TARGET = [
+  "undecided",
+  "local_extension",
+  "marketplace_shared",
+  "private_cloud",
+  "platform_roadmap",
+] as const;
+const gapDeploymentTargetSchema = z.enum(GAP_DEPLOYMENT_TARGET);
+
+const gapTicketOutputSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  status: gapStatusSchema,
+  proposedCapabilityId: z.string(),
+  title: z.string(),
+  abstractRequirement: z.string(),
+  acceptanceCriteria: z.array(z.string()),
+  exampleScenarios: z.array(z.string()),
+  suggestedModuleId: z.string().nullable(),
+  nonGoals: z.array(z.string()),
+  deploymentTarget: gapDeploymentTargetSchema,
+  codingAgent: z.string().nullable(),
+  artifactRef: z.string().nullable(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+function toGapTicket(row: typeof schema.capabilityGapTickets.$inferSelect) {
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    status: row.status as (typeof GAP_STATUS)[number],
+    proposedCapabilityId: row.proposedCapabilityId,
+    title: row.title,
+    abstractRequirement: row.abstractRequirement,
+    acceptanceCriteria: row.acceptanceCriteria,
+    exampleScenarios: row.exampleScenarios,
+    suggestedModuleId: row.suggestedModuleId,
+    nonGoals: row.nonGoals,
+    deploymentTarget: row.deploymentTarget as (typeof GAP_DEPLOYMENT_TARGET)[number],
+    codingAgent: row.codingAgent,
+    artifactRef: row.artifactRef,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/** R1-aligned: in-app notification (spec: scheduling-and-comms.md §4). */
+async function notifyUser(
+  db: Db,
+  input: {
+    organizationId: string;
+    userId: string;
+    kind?: string;
+    title: string;
+    body?: string;
+    href?: string;
+    resourceType?: string;
+    resourceId?: string;
+  },
+): Promise<void> {
+  await db.insert(schema.notifications).values({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    kind: input.kind ?? "info",
+    title: input.title,
+    body: input.body,
+    href: input.href,
+    resourceType: input.resourceType,
+    resourceId: input.resourceId,
+  });
+}
 
 export function createPlatformModule(
   db: Db,
@@ -42,6 +131,12 @@ export function createPlatformModule(
         "core.marketplace.read",
         "core.settings.read",
         "core.settings.manage",
+        "core.branch.read",
+        "core.branch.manage",
+        "core.branch.all",
+        "core.capability.gap.read",
+        "core.capability.gap.manage",
+        "core.notification.read",
       ],
       capabilities: ["core.rbac", "core.marketplace", "core.autonomy"],
       specialist: {
@@ -184,6 +279,7 @@ export function createPlatformModule(
           name: "core.role.create",
           permissions: ["core.role.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({
             key: z.string().min(1).max(64),
             name: z.string().min(1),
@@ -215,13 +311,37 @@ export function createPlatformModule(
           name: "core.user.assignRole",
           permissions: ["core.role.assign"],
           tags: ["core"],
+          // Security-sensitive: no auto role elevation under guarded_auto.
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({ userId: z.string().uuid(), roleId: z.string().uuid() }),
           output: z.object({ ok: z.literal(true) }),
-          handler: async (input) => {
+          handler: async (input, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            const [role] = await db
+              .select()
+              .from(schema.roles)
+              .where(and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)));
+            if (!role) {
+              throw new ValidationError("Role not found", { roleId: input.roleId });
+            }
+            const [user] = await db
+              .select()
+              .from(schema.users)
+              .where(and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)));
+            if (!user) {
+              throw new ValidationError("User not found", { userId: input.userId });
+            }
             await db
               .insert(schema.userRoles)
               .values({ userId: input.userId, roleId: input.roleId })
               .onConflictDoNothing();
+            await notifyUser(db, {
+              organizationId: orgId,
+              userId: input.userId,
+              kind: "security",
+              title: `Role assigned: ${role.name}`,
+              body: `You now have the "${role.name}" role.`,
+            });
             return { ok: true as const };
           },
         }),
@@ -232,6 +352,7 @@ export function createPlatformModule(
           name: "core.user.create",
           permissions: ["core.user.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({
             email: z.string().email(),
             displayName: z.string().min(1),
@@ -244,11 +365,21 @@ export function createPlatformModule(
             authToken: z.string(),
           }),
           handler: async (input, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            if (input.roleId) {
+              const [role] = await db
+                .select()
+                .from(schema.roles)
+                .where(and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)));
+              if (!role) {
+                throw new ValidationError("Role not found", { roleId: input.roleId });
+              }
+            }
             const authToken = crypto.randomUUID();
             const [user] = await db
               .insert(schema.users)
               .values({
-                organizationId: ctx.actor.organizationId,
+                organizationId: orgId,
                 email: input.email,
                 displayName: input.displayName,
                 authToken,
@@ -272,9 +403,98 @@ export function createPlatformModule(
 
       commands.register(
         defineCommand({
+          name: "core.user.invite",
+          permissions: ["core.user.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
+          input: z.object({
+            email: z.string().email(),
+            displayName: z.string().min(1),
+            roleId: z.string().uuid().optional(),
+            branchId: z.string().uuid().optional(),
+          }),
+          output: z.object({
+            id: z.string(),
+            email: z.string(),
+            displayName: z.string(),
+            authToken: z.string(),
+            roleId: z.string().nullable(),
+            branchId: z.string().nullable(),
+          }),
+          handler: async (input, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            if (input.roleId) {
+              const [role] = await db
+                .select()
+                .from(schema.roles)
+                .where(and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)));
+              if (!role) {
+                throw new ValidationError("Role not found", { roleId: input.roleId });
+              }
+            }
+            if (input.branchId) {
+              const [branch] = await db
+                .select()
+                .from(schema.branches)
+                .where(
+                  and(eq(schema.branches.id, input.branchId), eq(schema.branches.organizationId, orgId)),
+                );
+              if (!branch) {
+                throw new ValidationError("Branch not found", { branchId: input.branchId });
+              }
+            }
+
+            const authToken = crypto.randomUUID();
+            const [user] = await db
+              .insert(schema.users)
+              .values({
+                organizationId: orgId,
+                email: input.email,
+                displayName: input.displayName,
+                authToken,
+                activeBranchId: input.branchId ?? null,
+              })
+              .returning();
+
+            if (input.roleId) {
+              await db
+                .insert(schema.userRoles)
+                .values({ userId: user!.id, roleId: input.roleId })
+                .onConflictDoNothing();
+            }
+            if (input.branchId) {
+              await db
+                .insert(schema.userBranchAccess)
+                .values({ userId: user!.id, branchId: input.branchId })
+                .onConflictDoNothing();
+            }
+
+            await notifyUser(db, {
+              organizationId: orgId,
+              userId: user!.id,
+              kind: "security",
+              title: "Welcome to Chaste Business OS",
+              body: `Your account for ${input.displayName} is ready. Sign in with the invite token from your administrator.`,
+            });
+
+            return {
+              id: user!.id,
+              email: user!.email,
+              displayName: user!.displayName,
+              authToken,
+              roleId: input.roleId ?? null,
+              branchId: input.branchId ?? null,
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
           name: "core.user.deactivate",
           permissions: ["core.user.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({ userId: z.string().uuid() }),
           output: z.object({ ok: z.literal(true) }),
           handler: async (input, ctx) => {
@@ -312,9 +532,26 @@ export function createPlatformModule(
           name: "core.user.removeRole",
           permissions: ["core.role.assign"],
           tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({ userId: z.string().uuid(), roleId: z.string().uuid() }),
           output: z.object({ ok: z.literal(true) }),
           handler: async (input, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            const [role] = await db
+              .select()
+              .from(schema.roles)
+              .where(and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)));
+            if (!role) {
+              throw new ValidationError("Role not found", { roleId: input.roleId });
+            }
+            const [user] = await db
+              .select()
+              .from(schema.users)
+              .where(and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)));
+            if (!user) {
+              throw new ValidationError("User not found", { userId: input.userId });
+            }
+
             // Guard: cannot remove own admin-level role
             if (input.userId === ctx.actor.userId) {
               const rolePerms = await db
@@ -380,6 +617,7 @@ export function createPlatformModule(
           name: "core.role.update",
           permissions: ["core.role.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({
             roleId: z.string().uuid(),
             name: z.string().min(1).optional(),
@@ -439,6 +677,7 @@ export function createPlatformModule(
           name: "core.role.delete",
           permissions: ["core.role.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({ roleId: z.string().uuid() }),
           output: z.object({ ok: z.literal(true) }),
           handler: async (input, ctx) => {
@@ -500,6 +739,7 @@ export function createPlatformModule(
           name: "core.user.activate",
           permissions: ["core.user.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({ userId: z.string().uuid() }),
           output: z.object({ ok: z.literal(true) }),
           handler: async (input, ctx) => {
@@ -694,9 +934,22 @@ export function createPlatformModule(
           name: "core.module.install",
           permissions: ["core.modules.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
           input: z.object({ moduleId: z.string().min(1), version: z.string().default("0.1.0") }),
           output: z.object({ moduleId: z.string(), enabled: z.boolean() }),
           handler: async (input, ctx) => {
+            // Reject installs of modules that are not in the marketplace catalog —
+            // otherwise the installs table accumulates phantom rows with no runtime.
+            const [listing] = await db
+              .select()
+              .from(schema.marketplaceListings)
+              .where(eq(schema.marketplaceListings.moduleId, input.moduleId))
+              .limit(1);
+            if (!listing) {
+              throw new ValidationError("Unknown module — not found in marketplace", {
+                moduleId: input.moduleId,
+              });
+            }
             await db
               .insert(schema.moduleInstalls)
               .values({
@@ -719,6 +972,7 @@ export function createPlatformModule(
           name: "core.module.uninstall",
           permissions: ["core.modules.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
           input: z.object({ moduleId: z.string().min(1) }),
           output: z.object({ moduleId: z.string(), uninstalled: z.boolean() }),
           handler: async (input, ctx) => {
@@ -740,6 +994,7 @@ export function createPlatformModule(
           name: "core.module.set_enabled",
           permissions: ["core.modules.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
           input: z.object({ moduleId: z.string().min(1), enabled: z.boolean() }),
           output: z.object({ moduleId: z.string(), enabled: z.boolean() }),
           handler: async (input, ctx) => {
@@ -766,6 +1021,7 @@ export function createPlatformModule(
           name: "core.marketplace.archive",
           permissions: ["core.modules.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
           input: z.object({ moduleId: z.string().min(1), archived: z.boolean() }),
           output: z.object({ moduleId: z.string(), archived: z.boolean() }),
           handler: async (input) => {
@@ -779,12 +1035,741 @@ export function createPlatformModule(
                 moduleId: input.moduleId,
               });
             }
+            // The marketplace catalog is global: archiving hides a listing from
+            // every tenant. Restrict this to platform-owned listings so one org
+            // cannot hide a community/custom package from the rest of the fleet.
+            if (row.publisher !== "chaste") {
+              throw new ValidationError(
+                "Only platform-owned listings can be archived",
+                { moduleId: input.moduleId, publisher: row.publisher },
+              );
+            }
             const meta = { ...(row.metadata ?? {}), archived: input.archived };
             await db
               .update(schema.marketplaceListings)
               .set({ metadata: meta })
               .where(eq(schema.marketplaceListings.moduleId, input.moduleId));
             return { moduleId: input.moduleId, archived: input.archived };
+          },
+        }),
+      );
+
+      // ─── Branches (Horizon A — multi-branch) ───────────────────────────
+
+      queries.register(
+        defineQuery({
+          name: "core.branch.list",
+          permissions: ["core.branch.read"],
+          tags: ["core"],
+          input: z.object({}).default({}),
+          output: z.object({
+            branches: z.array(
+              z.object({
+                id: z.string(),
+                name: z.string(),
+                code: z.string(),
+                timezone: z.string().nullable(),
+                active: z.boolean(),
+                isActiveBranch: z.boolean(),
+                grantType: z.enum(["all", "explicit"]),
+              }),
+            ),
+          }),
+          handler: async (_i, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            const [me] = await db
+              .select({ activeBranchId: schema.users.activeBranchId })
+              .from(schema.users)
+              .where(eq(schema.users.id, ctx.actor.userId));
+            const activeBranchId = me?.activeBranchId ?? null;
+
+            // core.branch.all → every org branch; otherwise only granted ones
+            if (actorHasPermission(ctx.actor, "core.branch.all")) {
+              const rows = await db
+                .select()
+                .from(schema.branches)
+                .where(eq(schema.branches.organizationId, orgId))
+                .orderBy(schema.branches.name);
+              return {
+                branches: rows.map((b) => ({
+                  id: b.id,
+                  name: b.name,
+                  code: b.code,
+                  timezone: b.timezone,
+                  active: b.active,
+                  isActiveBranch: b.id === activeBranchId,
+                  grantType: "all" as const,
+                })),
+              };
+            }
+
+            const rows = await db
+              .select({
+                id: schema.branches.id,
+                name: schema.branches.name,
+                code: schema.branches.code,
+                timezone: schema.branches.timezone,
+                active: schema.branches.active,
+              })
+              .from(schema.branches)
+              .innerJoin(
+                schema.userBranchAccess,
+                eq(schema.branches.id, schema.userBranchAccess.branchId),
+              )
+              .where(
+                and(
+                  eq(schema.branches.organizationId, orgId),
+                  eq(schema.userBranchAccess.userId, ctx.actor.userId),
+                ),
+              )
+              .orderBy(schema.branches.name);
+            return {
+              branches: rows.map((b) => ({
+                ...b,
+                isActiveBranch: b.id === activeBranchId,
+                grantType: "explicit" as const,
+              })),
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.branch.create",
+          permissions: ["core.branch.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            name: z.string().min(1).max(128),
+            code: z.string().min(1).max(16),
+            timezone: z.string().optional(),
+            parentBranchId: z.string().uuid().optional(),
+          }),
+          output: z.object({
+            id: z.string(),
+            name: z.string(),
+            code: z.string(),
+            timezone: z.string().nullable(),
+            active: z.literal(true),
+          }),
+          handler: async (input, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            const [dupCode] = await db
+              .select()
+              .from(schema.branches)
+              .where(
+                and(
+                  eq(schema.branches.organizationId, orgId),
+                  eq(schema.branches.code, input.code.toUpperCase()),
+                ),
+              )
+              .limit(1);
+            if (dupCode) {
+              throw new ValidationError("Branch code already exists in this organization", {
+                code: input.code.toUpperCase(),
+              });
+            }
+            if (input.parentBranchId) {
+              const [parent] = await db
+                .select()
+                .from(schema.branches)
+                .where(
+                  and(
+                    eq(schema.branches.id, input.parentBranchId),
+                    eq(schema.branches.organizationId, orgId),
+                  ),
+                );
+              if (!parent) {
+                throw new ValidationError("Parent branch not found", {
+                  parentBranchId: input.parentBranchId,
+                });
+              }
+            }
+
+            const [branch] = await db
+              .insert(schema.branches)
+              .values({
+                organizationId: orgId,
+                name: input.name,
+                code: input.code.toUpperCase(),
+                timezone: input.timezone ?? "UTC",
+                parentBranchId: input.parentBranchId,
+                active: true,
+              })
+              .returning();
+
+            // Creator gets explicit access + becomes active branch when none set.
+            await db
+              .insert(schema.userBranchAccess)
+              .values({ userId: ctx.actor.userId, branchId: branch!.id })
+              .onConflictDoNothing({
+                target: [schema.userBranchAccess.userId, schema.userBranchAccess.branchId],
+              });
+            await db
+              .update(schema.users)
+              .set({ activeBranchId: branch!.id })
+              .where(
+                and(eq(schema.users.id, ctx.actor.userId), isNull(schema.users.activeBranchId)),
+              );
+
+            await notifyUser(db, {
+              organizationId: orgId,
+              userId: ctx.actor.userId,
+              kind: "system",
+              title: `Branch created: ${branch!.name}`,
+              body: `Branch "${branch!.name}" (${branch!.code}) is active.`,
+              resourceType: "branch",
+              resourceId: branch!.id,
+            });
+
+            return {
+              id: branch!.id,
+              name: branch!.name,
+              code: branch!.code,
+              timezone: branch!.timezone,
+              active: true as const,
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.branch.update",
+          permissions: ["core.branch.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            branchId: z.string().uuid(),
+            name: z.string().min(1).max(128).optional(),
+            code: z.string().min(1).max(16).optional(),
+            timezone: z.string().optional(),
+            active: z.boolean().optional(),
+          }),
+          output: z.object({ id: z.string(), name: z.string(), code: z.string(), active: z.boolean() }),
+          handler: async (input, ctx) => {
+            const [branch] = await db
+              .select()
+              .from(schema.branches)
+              .where(
+                and(
+                  eq(schema.branches.id, input.branchId),
+                  eq(schema.branches.organizationId, ctx.actor.organizationId),
+                ),
+              );
+            if (!branch) {
+              throw new ValidationError("Branch not found", { branchId: input.branchId });
+            }
+
+            // Guard: never deactivate the last active branch in the org.
+            if (input.active === false && branch.active) {
+              const activeCount = await db
+                .select({ id: schema.branches.id })
+                .from(schema.branches)
+                .where(
+                  and(
+                    eq(schema.branches.organizationId, ctx.actor.organizationId),
+                    eq(schema.branches.active, true),
+                  ),
+                );
+              if (activeCount.length <= 1) {
+                throw new ValidationError("Cannot deactivate the last active branch", {
+                  branchId: input.branchId,
+                });
+              }
+            }
+
+            const updates: Record<string, unknown> = {};
+            if (input.name !== undefined) updates.name = input.name;
+            if (input.code !== undefined) updates.code = input.code.toUpperCase();
+            if (input.timezone !== undefined) updates.timezone = input.timezone;
+            if (input.active !== undefined) updates.active = input.active;
+            if (Object.keys(updates).length === 0) {
+              throw new ValidationError("Nothing to update", { branchId: input.branchId });
+            }
+            await db
+              .update(schema.branches)
+              .set(updates)
+              .where(eq(schema.branches.id, input.branchId));
+
+            const [updated] = await db
+              .select()
+              .from(schema.branches)
+              .where(eq(schema.branches.id, input.branchId));
+            return {
+              id: updated!.id,
+              name: updated!.name,
+              code: updated!.code,
+              active: updated!.active,
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.branch.set_active",
+          permissions: ["core.branch.read"],
+          tags: ["core"],
+          input: z.object({ branchId: z.string().uuid() }),
+          output: z.object({ branchId: z.string(), name: z.string(), code: z.string() }),
+          handler: async (input, ctx) => {
+            const [branch] = await db
+              .select()
+              .from(schema.branches)
+              .where(
+                and(
+                  eq(schema.branches.id, input.branchId),
+                  eq(schema.branches.organizationId, ctx.actor.organizationId),
+                ),
+              );
+            if (!branch) {
+              throw new ValidationError("Branch not found", { branchId: input.branchId });
+            }
+            if (!branch.active) {
+              throw new ValidationError("Branch is deactivated", { branchId: input.branchId });
+            }
+
+            const hasAllAccess = actorHasPermission(ctx.actor, "core.branch.all");
+            if (!hasAllAccess) {
+              const [grant] = await db
+                .select()
+                .from(schema.userBranchAccess)
+                .where(
+                  and(
+                    eq(schema.userBranchAccess.userId, ctx.actor.userId),
+                    eq(schema.userBranchAccess.branchId, input.branchId),
+                  ),
+                );
+              if (!grant) {
+                throw new ValidationError("You do not have access to this branch", {
+                  branchId: input.branchId,
+                });
+              }
+            }
+
+            await db
+              .update(schema.users)
+              .set({ activeBranchId: input.branchId })
+              .where(eq(schema.users.id, ctx.actor.userId));
+            return { branchId: branch.id, name: branch.name, code: branch.code };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.branch.grant",
+          permissions: ["core.branch.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
+          input: z.object({ userId: z.string().uuid(), branchId: z.string().uuid() }),
+          output: z.object({ userId: z.string(), branchId: z.string(), ok: z.literal(true) }),
+          handler: async (input, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            const [user] = await db
+              .select()
+              .from(schema.users)
+              .where(and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)));
+            if (!user) {
+              throw new ValidationError("User not found", { userId: input.userId });
+            }
+            const [branch] = await db
+              .select()
+              .from(schema.branches)
+              .where(
+                and(eq(schema.branches.id, input.branchId), eq(schema.branches.organizationId, orgId)),
+              );
+            if (!branch) {
+              throw new ValidationError("Branch not found", { branchId: input.branchId });
+            }
+            await db
+              .insert(schema.userBranchAccess)
+              .values({ userId: input.userId, branchId: input.branchId })
+              .onConflictDoNothing({
+                target: [schema.userBranchAccess.userId, schema.userBranchAccess.branchId],
+              });
+            await notifyUser(db, {
+              organizationId: orgId,
+              userId: input.userId,
+              kind: "system",
+              title: `Access granted to branch: ${branch.name}`,
+              body: `${ctx.actor.displayName ?? "An administrator"} gave you access to the "${branch.name}" branch.`,
+              resourceType: "branch",
+              resourceId: branch.id,
+            });
+            return { userId: input.userId, branchId: input.branchId, ok: true as const };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.branch.revoke",
+          permissions: ["core.branch.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
+          input: z.object({ userId: z.string().uuid(), branchId: z.string().uuid() }),
+          output: z.object({ userId: z.string(), branchId: z.string(), ok: z.literal(true) }),
+          handler: async (input, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            const [user] = await db
+              .select()
+              .from(schema.users)
+              .where(and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)));
+            if (!user) {
+              throw new ValidationError("User not found", { userId: input.userId });
+            }
+            const [branch] = await db
+              .select()
+              .from(schema.branches)
+              .where(
+                and(eq(schema.branches.id, input.branchId), eq(schema.branches.organizationId, orgId)),
+              );
+            if (!branch) {
+              throw new ValidationError("Branch not found", { branchId: input.branchId });
+            }
+
+            if (user.activeBranchId === input.branchId) {
+              throw new ValidationError(
+                "Cannot revoke the user's active branch — switch them first",
+                { userId: input.userId, branchId: input.branchId },
+              );
+            }
+
+            // Guard: don't lock a non-all-access user out of every branch.
+            const perms = await resolveUserPermissions(db, input.userId);
+            if (!perms.includes("core.branch.all")) {
+              const grants = await db
+                .select({ branchId: schema.userBranchAccess.branchId })
+                .from(schema.userBranchAccess)
+                .where(eq(schema.userBranchAccess.userId, input.userId));
+              if (grants.length === 1 && grants[0]!.branchId === input.branchId) {
+                throw new ValidationError(
+                  "Cannot revoke the user's only branch access",
+                  { userId: input.userId, branchId: input.branchId },
+                );
+              }
+            }
+
+            await db
+              .delete(schema.userBranchAccess)
+              .where(
+                and(
+                  eq(schema.userBranchAccess.userId, input.userId),
+                  eq(schema.userBranchAccess.branchId, input.branchId),
+                ),
+              );
+            return { userId: input.userId, branchId: input.branchId, ok: true as const };
+          },
+        }),
+      );
+
+      // ─── Capability gaps (Horizon A — self-development) ────────────────
+
+      commands.register(
+        defineCommand({
+          name: "core.capability.gap.create",
+          permissions: ["core.capability.gap.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            proposedCapabilityId: z.string().min(1).max(128),
+            title: z.string().min(1).max(200),
+            abstractRequirement: z.string().min(1),
+            acceptanceCriteria: z.array(z.string()).default([]),
+            exampleScenarios: z.array(z.string()).default([]),
+            suggestedModuleId: z.string().optional(),
+            nonGoals: z.array(z.string()).default([]),
+            deploymentTarget: gapDeploymentTargetSchema.default("undecided"),
+          }),
+          output: gapTicketOutputSchema,
+          handler: async (input, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            const [ticket] = await db
+              .insert(schema.capabilityGapTickets)
+              .values({
+                organizationId: orgId,
+                status: "draft",
+                proposedCapabilityId: input.proposedCapabilityId,
+                title: input.title,
+                abstractRequirement: input.abstractRequirement,
+                acceptanceCriteria: input.acceptanceCriteria,
+                exampleScenarios: input.exampleScenarios,
+                suggestedModuleId: input.suggestedModuleId,
+                nonGoals: input.nonGoals,
+                deploymentTarget: input.deploymentTarget,
+                createdBy: ctx.actor.userId,
+              })
+              .returning();
+            return toGapTicket(ticket!);
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.capability.gap.update",
+          permissions: ["core.capability.gap.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            ticketId: z.string().uuid(),
+            title: z.string().min(1).max(200).optional(),
+            abstractRequirement: z.string().min(1).optional(),
+            acceptanceCriteria: z.array(z.string()).optional(),
+            exampleScenarios: z.array(z.string()).optional(),
+            suggestedModuleId: z.string().nullable().optional(),
+            nonGoals: z.array(z.string()).optional(),
+            deploymentTarget: gapDeploymentTargetSchema.optional(),
+          }),
+          output: gapTicketOutputSchema,
+          handler: async (input, ctx) => {
+            const [ticket] = await db
+              .select()
+              .from(schema.capabilityGapTickets)
+              .where(
+                and(
+                  eq(schema.capabilityGapTickets.id, input.ticketId),
+                  eq(schema.capabilityGapTickets.organizationId, ctx.actor.organizationId),
+                ),
+              );
+            if (!ticket) {
+              throw new ValidationError("Gap ticket not found", { ticketId: input.ticketId });
+            }
+            // Locked once work begins or is closed.
+            if (!["draft", "confirmed"].includes(ticket.status)) {
+              throw new ValidationError(
+                `Cannot edit a ${ticket.status} ticket`,
+                { ticketId: input.ticketId, status: ticket.status },
+              );
+            }
+
+            const updates: Record<string, unknown> = {};
+            if (input.title !== undefined) updates.title = input.title;
+            if (input.abstractRequirement !== undefined) {
+              updates.abstractRequirement = input.abstractRequirement;
+            }
+            if (input.acceptanceCriteria !== undefined) {
+              updates.acceptanceCriteria = input.acceptanceCriteria;
+            }
+            if (input.exampleScenarios !== undefined) updates.exampleScenarios = input.exampleScenarios;
+            if (input.suggestedModuleId !== undefined) {
+              updates.suggestedModuleId = input.suggestedModuleId;
+            }
+            if (input.nonGoals !== undefined) updates.nonGoals = input.nonGoals;
+            if (input.deploymentTarget !== undefined) {
+              updates.deploymentTarget = input.deploymentTarget;
+            }
+            updates.updatedAt = new Date();
+            await db
+              .update(schema.capabilityGapTickets)
+              .set(updates)
+              .where(eq(schema.capabilityGapTickets.id, input.ticketId));
+
+            const [updated] = await db
+              .select()
+              .from(schema.capabilityGapTickets)
+              .where(eq(schema.capabilityGapTickets.id, input.ticketId));
+            return toGapTicket(updated!);
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.capability.gap.list",
+          permissions: ["core.capability.gap.read"],
+          tags: ["core"],
+          input: z.object({ status: gapStatusSchema.optional() }).default({}),
+          output: z.object({ tickets: z.array(gapTicketOutputSchema) }),
+          handler: async (input, ctx) => {
+            const where = eq(schema.capabilityGapTickets.organizationId, ctx.actor.organizationId);
+            const rows = input.status
+              ? await db
+                  .select()
+                  .from(schema.capabilityGapTickets)
+                  .where(
+                    and(
+                      where,
+                      eq(schema.capabilityGapTickets.status, input.status),
+                    ),
+                  )
+                  .orderBy(schema.capabilityGapTickets.createdAt)
+              : await db
+                  .select()
+                  .from(schema.capabilityGapTickets)
+                  .where(where)
+                  .orderBy(schema.capabilityGapTickets.createdAt);
+            return { tickets: rows.map(toGapTicket) };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.capability.gap.confirm",
+          permissions: ["core.capability.gap.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            ticketId: z.string().uuid(),
+            suggestedModuleId: z.string().optional(),
+            deploymentTarget: gapDeploymentTargetSchema.optional(),
+          }),
+          output: gapTicketOutputSchema,
+          handler: async (input, ctx) => {
+            const [ticket] = await db
+              .select()
+              .from(schema.capabilityGapTickets)
+              .where(
+                and(
+                  eq(schema.capabilityGapTickets.id, input.ticketId),
+                  eq(schema.capabilityGapTickets.organizationId, ctx.actor.organizationId),
+                ),
+              );
+            if (!ticket) {
+              throw new ValidationError("Gap ticket not found", { ticketId: input.ticketId });
+            }
+            if (ticket.status !== "draft" && ticket.status !== "confirmed") {
+              throw new ValidationError(
+                `Cannot confirm a ${ticket.status} ticket`,
+                { ticketId: input.ticketId, status: ticket.status },
+              );
+            }
+
+            const updates: Record<string, unknown> = { status: "confirmed", updatedAt: new Date() };
+            if (input.suggestedModuleId !== undefined) updates.suggestedModuleId = input.suggestedModuleId;
+            if (input.deploymentTarget !== undefined) updates.deploymentTarget = input.deploymentTarget;
+            await db
+              .update(schema.capabilityGapTickets)
+              .set(updates)
+              .where(eq(schema.capabilityGapTickets.id, input.ticketId));
+
+            const [confirmed] = await db
+              .select()
+              .from(schema.capabilityGapTickets)
+              .where(eq(schema.capabilityGapTickets.id, input.ticketId));
+
+            // The creator needs to know their request is confirmed and routed.
+            await notifyUser(db, {
+              organizationId: ctx.actor.organizationId,
+              userId: ticket.createdBy,
+              kind: "system",
+              title: `Capability gap confirmed: ${confirmed!.title}`,
+              body: "The requirement has been confirmed and routed for placement review.",
+              resourceType: "capability_gap",
+              resourceId: confirmed!.id,
+            });
+
+            return toGapTicket(confirmed!);
+          },
+        }),
+      );
+
+      // ─── Notifications (foundation) ────────────────────────────────────
+
+      queries.register(
+        defineQuery({
+          name: "core.notification.list",
+          permissions: ["core.notification.read"],
+          tags: ["core"],
+          input: z.object({ unreadOnly: z.boolean().optional(), limit: z.number().int().min(1).max(200).optional() }).default({}),
+          output: z.object({
+            notifications: z.array(
+              z.object({
+                id: z.string(),
+                kind: z.string(),
+                title: z.string(),
+                body: z.string().nullable(),
+                href: z.string().nullable(),
+                resourceType: z.string().nullable(),
+                resourceId: z.string().nullable(),
+                read: z.boolean(),
+                createdAt: z.string(),
+              }),
+            ),
+          }),
+          handler: async (input, ctx) => {
+            const where = and(
+              eq(schema.notifications.userId, ctx.actor.userId),
+              eq(schema.notifications.organizationId, ctx.actor.organizationId),
+              input.unreadOnly ? isNull(schema.notifications.readAt) : undefined,
+            );
+            const rows = await db
+              .select()
+              .from(schema.notifications)
+              .where(where)
+              .orderBy(schema.notifications.createdAt)
+              .limit(input.limit ?? 50);
+            return {
+              notifications: rows.map((n) => ({
+                id: n.id,
+                kind: n.kind,
+                title: n.title,
+                body: n.body,
+                href: n.href,
+                resourceType: n.resourceType,
+                resourceId: n.resourceId,
+                read: n.readAt !== null,
+                createdAt: n.createdAt.toISOString(),
+              })),
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.notification.mark_read",
+          permissions: ["core.notification.read"],
+          tags: ["core"],
+          input: z.object({ notificationId: z.string().uuid() }),
+          output: z.object({ ok: z.literal(true) }),
+          handler: async (input, ctx) => {
+            const [n] = await db
+              .select()
+              .from(schema.notifications)
+              .where(
+                and(
+                  eq(schema.notifications.id, input.notificationId),
+                  eq(schema.notifications.userId, ctx.actor.userId),
+                ),
+              );
+            if (!n) {
+              throw new ValidationError("Notification not found", {
+                notificationId: input.notificationId,
+              });
+            }
+            await db
+              .update(schema.notifications)
+              .set({ readAt: new Date() })
+              .where(eq(schema.notifications.id, input.notificationId));
+            return { ok: true as const };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.notification.mark_all_read",
+          permissions: ["core.notification.read"],
+          tags: ["core"],
+          input: z.object({}).default({}),
+          output: z.object({ markedCount: z.number().int().nonnegative() }),
+          handler: async (_i, ctx) => {
+            const rows = await db
+              .update(schema.notifications)
+              .set({ readAt: new Date() })
+              .where(
+                and(
+                  eq(schema.notifications.userId, ctx.actor.userId),
+                  isNull(schema.notifications.readAt),
+                ),
+              )
+              .returning();
+            return { markedCount: rows.length };
           },
         }),
       );
@@ -853,6 +1838,7 @@ export function createPlatformModule(
           name: "core.settings.update",
           permissions: ["core.settings.manage"],
           tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
           input: z.object({ settings: z.record(z.string(), z.unknown()) }),
           output: orgSettingsOutputSchema,
           handler: async (input, ctx) => {

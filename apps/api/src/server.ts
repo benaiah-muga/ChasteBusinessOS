@@ -192,6 +192,39 @@ export async function buildServer(appCtx?: AppContext) {
     return (await runQuery(app, "core.marketplace.list", { region }, req.id)).data;
   });
 
+  // Multi-branch (platform spec §4)
+  server.get("/api/v1/branches", async (req) => {
+    return (await runQuery(app, "core.branch.list", {}, req.id)).data;
+  });
+  server.post("/api/v1/branches", async (req) => {
+    const input = z
+      .object({
+        name: z.string().min(1),
+        code: z.string().min(1),
+        timezone: optionalStringSchema,
+        parentBranchId: z.string().uuid().optional(),
+      })
+      .parse(req.body);
+    return (await runCommand(app, "core.branch.create", input, req.id)).data;
+  });
+  server.post("/api/v1/branches/switch", async (req) => {
+    const input = z.object({ branchId: z.string().uuid() }).parse(req.body);
+    return (await runCommand(app, "core.branch.set_active", input, req.id)).data;
+  });
+
+  // Notifications (spec: scheduling-and-comms §4)
+  server.get("/api/v1/notifications", async (req) => {
+    const unreadOnly = (req.query as { unreadOnly?: string }).unreadOnly === "true";
+    return (await runQuery(app, "core.notification.list", { unreadOnly }, req.id)).data;
+  });
+  server.post("/api/v1/notifications/:id/read", async (req) => {
+    const { id } = req.params as { id: string };
+    return (await runCommand(app, "core.notification.mark_read", { notificationId: id }, req.id)).data;
+  });
+  server.post("/api/v1/notifications/read-all", async (req) => {
+    return (await runCommand(app, "core.notification.mark_all_read", {}, req.id)).data;
+  });
+
   server.post("/api/v1/autonomy", async (req) => {
     const input = z
       .object({

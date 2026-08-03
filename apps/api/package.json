@@ -26,6 +26,7 @@
     "@chaste/module-purchasing": "workspace:*",
     "@chaste/ui-schema": "workspace:*",
     "@fastify/cors": "^10.0.1",
+    "drizzle-orm": "^0.38.3",
     "fastify": "^5.2.0",
     "zod": "^3.24.1"
   },
