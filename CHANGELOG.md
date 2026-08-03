@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Specs: portable modules, chat sessions/feedback, UI correctness, PWA/Tailscale access, model eval suite
 - Expanded VISION / ARCHITECTURE / product-architecture-next for harness, gaps, self-dev, multi-branch, proactive agents
 - **Horizon A platform**: multi-branch (list/create/update/set_active/grant), capability gap tickets, in-app notifications foundation
+- **Horizon A platform (cont.)**: capability catalog (search/list) + placement recommender (`core.capability.gap.recommend`) mapping gaps to kernel / private cloud / local extension / marketplace
+- **Agent harness (C5)**: `runFollowUpTurn` re-entry for deterministic follow-up execution, self-contained worker harness with `status: done|failed`, `firedAt`, and persisted `sessionId`
+- **Scheduling & comms (C3/C6)**: calendar CRUD with natural-language event creation (block/schedule/book), email outbox with console adapter and worker flush, templated invite/reminder/digest/gap-ticket emails
+- **Marketplace (S4)**: publish command gated on confirmed/resolved gap tickets, rejecting `platform_roadmap` placements
+- **Platform UI**: calendar week view, reminders, notifications (read/unread), capability gap filing with catalog search + placement, branches page, and a top-bar branch switcher that appears when the org has multiple accessible branches
 - **Chat**: session history API + top-bar continue/new chat, like/dislike feedback, auto titles
 - **Safety**: `resource_link` / `gap_ticket` UiParts with server-side href allowlist verification
 - **PWA**: installable web manifest + service worker registration
@@ -65,6 +70,6 @@ Early alpha release. Not recommended for production use.
 
 - Initial repository with project vision, architecture docs, and Apache 2.0 license
 
-[Unreleased]: https://github.com/benaiah-muga/ChasteBusinessOS/compare/main...feat/ai-intelligence-layer
+[Unreleased]: https://github.com/benaiah-muga/ChasteBusinessOS/compare/main...feat/agent-runtime-from-openworker
 [0.1.0]: https://github.com/benaiah-muga/ChasteBusinessOS/pull/3
 [0.0.1]: https://github.com/benaiah-muga/ChasteBusinessOS/commit/12c275c
