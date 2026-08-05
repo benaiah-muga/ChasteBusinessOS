@@ -5,7 +5,7 @@
 > **AI is how you operate the business.** Manual UIs remain available.  
 > **AI never bypasses business rules.**
 
-*Every action -- AI or human -- flows through the same validated command bus, permission checks, and audit trail.*
+_Every action -- AI or human -- flows through the same validated command bus, permission checks, and audit trail._
 
 [Vision](./VISION.md) · [Architecture](./ARCHITECTURE.md) · [Product roadmap](./docs/product-architecture-next.md) · [Contributing](./CONTRIBUTING.md) · [Agents](./AGENTS.md) · [Changelog](./CHANGELOG.md)
 
@@ -38,15 +38,15 @@ Roadmap detail: [docs/product-architecture-next.md](./docs/product-architecture-
 
 ## Business modules
 
-| Module | Capabilities | AI specialist |
-|---|---|---|
-| **CRM** | Customers and relationship data | CRM Agent |
-| **Accounting** | Chart of accounts, journals, invoices | Accounting Agent |
-| **Inventory** | Warehouses, products, stock movements | Inventory Agent |
-| **Purchasing** | Vendors and purchase orders | Purchasing Agent |
-| **Manufacturing** | Bills of materials and work orders | Manufacturing Agent |
-| **HR** | Employees and payroll preparation | HR Agent |
-| **Platform** | RBAC, module installs, marketplace, org settings, autonomy policy | System Agent |
+| Module            | Capabilities                                                      | AI specialist       |
+| ----------------- | ----------------------------------------------------------------- | ------------------- |
+| **CRM**           | Customers and relationship data                                   | CRM Agent           |
+| **Accounting**    | Chart of accounts, journals, invoices                             | Accounting Agent    |
+| **Inventory**     | Warehouses, products, stock movements                             | Inventory Agent     |
+| **Purchasing**    | Vendors and purchase orders                                       | Purchasing Agent    |
+| **Manufacturing** | Bills of materials and work orders                                | Manufacturing Agent |
+| **HR**            | Employees and payroll preparation                                 | HR Agent            |
+| **Platform**      | RBAC, module installs, marketplace, org settings, autonomy policy | System Agent        |
 
 Modules declare permissions, commands, queries, and optional specialist profiles. New domains ship as installable packages; no kernel fork required.
 
@@ -64,15 +64,15 @@ The Next.js UI provides operational screens alongside the AI chat surface:
 
 ## AI stack
 
-| Layer | Technology | Role |
-|---|---|---|
-| Orchestrator | `@chaste/ai-core` | Intent resolution, autonomy gates, confirm/cancel flows |
-| AI layer | Custom `@chaste/ai-core` | Orchestrator, workflow engine, AiProvider, autonomy + explainability |
-| Tools | Command/query wrappers | AI never calls SQL directly; only registered bus operations |
-| Workflows | Workflow engine | Multi-step business automation with step validation |
-| Memory | PostgreSQL + pgvector | Persistent chat sessions and long-term org memory |
-| Providers | OpenAI, OpenAI-compatible, Ollama, Nvidia NIM | Config-driven via `CHASTE_AI_PROVIDER` |
-| Observability | Langfuse (optional) | Trace LLM calls when keys are configured |
+| Layer         | Technology                                    | Role                                                                 |
+| ------------- | --------------------------------------------- | -------------------------------------------------------------------- |
+| Orchestrator  | `@chaste/ai-core`                             | Intent resolution, autonomy gates, confirm/cancel flows              |
+| AI layer      | Custom `@chaste/ai-core`                      | Orchestrator, workflow engine, AiProvider, autonomy + explainability |
+| Tools         | Command/query wrappers                        | AI never calls SQL directly; only registered bus operations          |
+| Workflows     | Workflow engine                               | Multi-step business automation with step validation                  |
+| Memory        | PostgreSQL + pgvector                         | Persistent chat sessions and long-term org memory                    |
+| Providers     | OpenAI, OpenAI-compatible, Ollama, Nvidia NIM | Config-driven via `CHASTE_AI_PROVIDER`                               |
+| Observability | Langfuse (optional)                           | Trace LLM calls when keys are configured                             |
 
 Set `CHASTE_AI_PROVIDER=none` for deterministic, rule-based planning with no external LLM. See [configuration](./docs/configuration.md) for provider credentials and autonomy settings.
 
@@ -118,12 +118,12 @@ pnpm db:migrate
 pnpm dev          # API + web in parallel (or run services individually below)
 ```
 
-| Service | Command | URL |
-|---|---|---|
-| API | `pnpm --filter @chaste/api dev` | http://localhost:3001 |
-| Web | `pnpm --filter @chaste/web dev` | http://localhost:3000 |
-| Worker | `pnpm --filter @chaste/worker dev` | n/a |
-| Health | n/a | http://localhost:3001/health |
+| Service | Command                            | URL                          |
+| ------- | ---------------------------------- | ---------------------------- |
+| API     | `pnpm --filter @chaste/api dev`    | http://localhost:3001        |
+| Web     | `pnpm --filter @chaste/web dev`    | http://localhost:3000        |
+| Worker  | `pnpm --filter @chaste/worker dev` | n/a                          |
+| Health  | n/a                                | http://localhost:3001/health |
 
 On first run with `CHASTE_BOOTSTRAP=true`, the API seeds a default organization and admin user (see `.env.example`).
 
@@ -140,6 +140,25 @@ pnpm db:generate   # Generate Drizzle migrations after schema changes
 Configuration and secrets: [docs/configuration.md](./docs/configuration.md)  
 Module authoring: [docs/module-development.md](./docs/module-development.md)  
 AI autonomy and safety: [docs/ai-autonomy-and-safety.md](./docs/ai-autonomy-and-safety.md)
+
+## Deployment
+
+Four container images (`migrate`, `api`, `web`, `worker`) build from the
+root [Dockerfile](./Dockerfile) via Docker build targets. Full guides:
+[docs/deploy/](./docs/deploy/).
+
+```bash
+# Single host, Docker Compose (Postgres + Redis included)
+export CHASTE_SESSION_SECRET="$(openssl rand -hex 24)"
+export CHASTE_BACKUP_KEY="$(openssl rand -hex 32)"
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+The `migrate` image runs schema migrations before `api`/`worker` start; the
+worker must run as a single replica (transactional outbox consumer). See
+[`docker-compose.prod.yml`](./docker-compose.prod.yml) for the environment
+contract and the per-provider guides for AWS, GCP, Azure, Fly.io, Render,
+Railway, and Supabase/Neon.
 
 ## Design constraints
 

@@ -15,8 +15,12 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { getApiClient } from "@/lib/api";
+
+function confirmStatus(part: Extract<UiPart, { type: "confirm_action" }>): "pending" | "confirmed" | "cancelled" | "superseded" {
+  return part.status ?? "pending";
+}
 
 function PartView({
   part,
@@ -24,12 +28,15 @@ function PartView({
   onCancel,
   onSuggestion,
   busy,
+  liveConfirmId,
 }: {
   part: UiPart;
   onConfirm: (id: string) => void;
   onCancel: (id: string) => void;
   onSuggestion: (message: string) => void;
   busy: boolean;
+  /** Only this confirmation id may render live Confirm/Cancel controls. */
+  liveConfirmId?: string;
 }) {
   switch (part.type) {
     case "text":
@@ -56,9 +63,32 @@ function PartView({
           ) : null}
         </details>
       );
-    case "confirm_action":
+    case "confirm_action": {
+      const status = confirmStatus(part);
+      const isLive =
+        status === "pending" &&
+        part.confirmLabel !== "Disabled" &&
+        liveConfirmId === part.id;
+      const statusLabel =
+        status === "confirmed"
+          ? "Confirmed"
+          : status === "cancelled"
+            ? "Cancelled"
+            : status === "superseded"
+              ? "Superseded"
+              : part.confirmLabel === "Disabled"
+                ? "Recommendation only"
+                : liveConfirmId && liveConfirmId !== part.id
+                  ? "No longer pending"
+                  : null;
+
       return (
-        <div className="part-confirm">
+        <div
+          className={isLive ? "part-confirm" : "part-confirm resolved"}
+          data-confirm-id={part.id}
+          data-confirm-status={status}
+          data-confirm-live={isLive ? "true" : "false"}
+        >
           <div className="confirm-icon">
             <ClipboardCheck size={18} />
           </div>
@@ -66,24 +96,32 @@ function PartView({
             <strong>{part.title}</strong>
             {part.description ? <p className="muted">{part.description}</p> : null}
             <div className="muted" style={{ fontSize: "0.78rem" }}>{part.command.replace(/\./g, " · ")}</div>
-            <div className="row">
-              <button
-                className="btn"
-                type="button"
-                disabled={busy || part.confirmLabel === "Disabled"}
-                onClick={() => onConfirm(part.id)}
-              >
-                <Check size={16} />
-                {part.confirmLabel}
-              </button>
-              <button className="btn secondary" type="button" disabled={busy} onClick={() => onCancel(part.id)}>
-                <X size={16} />
-                {part.cancelLabel}
-              </button>
-            </div>
+            {isLive ? (
+              <div className="row">
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onConfirm(part.id)}
+                >
+                  <Check size={16} />
+                  {part.confirmLabel}
+                </button>
+                <button className="btn secondary" type="button" disabled={busy} onClick={() => onCancel(part.id)}>
+                  <X size={16} />
+                  {part.cancelLabel}
+                </button>
+              </div>
+            ) : statusLabel ? (
+              <div className="confirm-status" aria-label={`Action ${statusLabel.toLowerCase()}`}>
+                <Check size={14} />
+                {statusLabel}
+              </div>
+            ) : null}
           </div>
         </div>
       );
+    }
     case "table":
       return (
         <div className="table-wrap compact">
@@ -165,19 +203,66 @@ function PartView({
   }
 }
 
+function Composer({
+  text,
+  setText,
+  busy,
+  onSubmit,
+  onFocus,
+  inputId,
+}: {
+  text: string;
+  setText: (value: string) => void;
+  busy: boolean;
+  onSubmit: () => void;
+  onFocus?: () => void;
+  inputId: string;
+}) {
+  return (
+    <form
+      className="agent-composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      <MessageSquareText size={18} aria-hidden />
+      <input
+        id={inputId}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onFocus={onFocus}
+        placeholder="Ask the assistant to create, prepare, list, or explain..."
+        autoComplete="off"
+      />
+      <button className="icon-btn send-btn" type="submit" disabled={busy || !text.trim()} title="Send">
+        <Send size={17} />
+      </button>
+    </form>
+  );
+}
+
 export function ChatWidget({ floating = false }: { floating?: boolean }) {
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [pendingConfirmationId, setPendingConfirmationId] = useState<string | undefined>();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [panelOpen, setPanelOpen] = useState(!floating);
   const [capsuleOpen, setCapsuleOpen] = useState(!floating);
   const [error, setError] = useState<string | null>(null);
+  const composerInputId = useId();
 
   const statusLines = useMemo(() => {
     if (!busy) return ["Ready"];
     return ["Thinking", "Analyzing request", "Checking permissions", "Running"];
   }, [busy]);
+
+  // Exactly one composer surface at a time: full panel when open, otherwise
+  // the floating capsule (when expanded). Never both — the closed panel stays
+  // in the DOM (slide-off animation) but must not expose a second input.
+  const showPanelComposer = panelOpen;
+  const showCapsuleComposer = floating && !panelOpen && capsuleOpen;
 
   async function send(payload: { message?: string; confirmId?: string; cancelId?: string }) {
     setBusy(true);
@@ -188,6 +273,7 @@ export function ChatWidget({ floating = false }: { floating?: boolean }) {
       const res = await api.chat({ sessionId, ...payload });
       setSessionId(res.sessionId);
       setMessages(res.messages);
+      setPendingConfirmationId(res.pendingConfirmationId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chat failed");
     } finally {
@@ -214,30 +300,25 @@ export function ChatWidget({ floating = false }: { floating?: boolean }) {
     return () => window.removeEventListener("chaste-agent-message", onPrompt);
   }, [sessionId]);
 
-  const composer = (
-    <form
-      className="agent-composer"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submitMessage();
-      }}
-    >
-      <MessageSquareText size={18} />
-      <input
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        onFocus={() => setCapsuleOpen(true)}
-        placeholder="Ask the assistant to create, prepare, list, or explain..."
-      />
-      <button className="icon-btn send-btn" type="submit" disabled={busy || !text.trim()} title="Send">
-        <Send size={17} />
-      </button>
-    </form>
-  );
+  const composerProps = {
+    text,
+    setText,
+    busy,
+    onSubmit: () => submitMessage(),
+    inputId: composerInputId,
+  };
 
   return (
     <>
-      <aside className={panelOpen ? "agent-panel open" : "agent-panel"} aria-label="Operations assistant conversation">
+      <aside
+        className={panelOpen ? "agent-panel open" : "agent-panel"}
+        aria-label="Operations assistant conversation"
+        aria-hidden={!panelOpen}
+        // Closed floating panel is only CSS-translated off-screen; keep it out
+        // of the accessibility tree and non-interactive so automation/users
+        // never see a second composer or stale confirm controls.
+        inert={!panelOpen ? true : undefined}
+      >
         <header className="agent-panel-head">
           <div>
             <div className="eyebrow">
@@ -282,6 +363,7 @@ export function ChatWidget({ floating = false }: { floating?: boolean }) {
                     key={`${message.id}-${index}`}
                     part={part}
                     busy={busy}
+                    liveConfirmId={pendingConfirmationId}
                     onConfirm={(id) => send({ confirmId: id })}
                     onCancel={(id) => send({ cancelId: id })}
                     onSuggestion={submitMessage}
@@ -292,13 +374,15 @@ export function ChatWidget({ floating = false }: { floating?: boolean }) {
           )}
           {error ? <div className="part-error">{error}</div> : null}
         </div>
-        {composer}
+        {showPanelComposer ? <Composer {...composerProps} /> : null}
       </aside>
       {floating && !panelOpen ? (
         <div className={capsuleOpen ? "agent-capsule expanded" : "agent-capsule"}>
           {capsuleOpen ? (
             <>
-              {composer}
+              {showCapsuleComposer ? (
+                <Composer {...composerProps} onFocus={() => setCapsuleOpen(true)} />
+              ) : null}
               <button className="icon-btn" type="button" onClick={() => setPanelOpen(true)} title="Open full assistant">
                 <Maximize2 size={17} />
               </button>

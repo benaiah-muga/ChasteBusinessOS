@@ -675,6 +675,23 @@ CREATE TABLE IF NOT EXISTS email_outbox (
 CREATE INDEX IF NOT EXISTS email_outbox_status_idx ON email_outbox(status);
 CREATE INDEX IF NOT EXISTS email_outbox_org_idx ON email_outbox(organization_id);
 
+-- Backup / export / restore -- job ledger (backup-and-deploy.md)
+CREATE TABLE IF NOT EXISTS backups (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'queued',
+  provider text,
+  storage_key text,
+  size_bytes integer,
+  checksum text,
+  created_by uuid,
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS backups_org_idx ON backups(organization_id);
+CREATE INDEX IF NOT EXISTS backups_status_idx ON backups(status);
+
 -- Messaging -- threads, members, messages, read cursors (messaging-and-buzz.md)
 CREATE TABLE IF NOT EXISTS msg_threads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

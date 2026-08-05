@@ -8,16 +8,19 @@
 import { loadConfig } from "@chaste/config";
 import { createDb, PostgresOutboxWriter } from "@chaste/db";
 import { createDefaultProcessor } from "@chaste/kernel";
-import { createEmailProcessor, createScheduleProcessor } from "@chaste/module-platform";
+import { createBackupProcessor, createEmailProcessor, createScheduleProcessor } from "@chaste/module-platform";
 import { createFollowUpHarness, runFollowUp } from "./harness.js";
+import { registerBuzzMirror } from "./buzz.js";
 
 async function main() {
   const cfg = loadConfig();
   const db = createDb(cfg.databaseUrl);
   const outbox = new PostgresOutboxWriter(db);
   const processor = createDefaultProcessor();
+  const buzzBridge = registerBuzzMirror(processor, db);
   const schedule = createScheduleProcessor(db);
   const email = createEmailProcessor(db);
+  const backups = createBackupProcessor(db);
   const followUps = await createFollowUpHarness(cfg, db);
   const intervalMs = Number(process.env.WORKER_POLL_MS ?? 5_000);
   const maxRetries = Number(process.env.WORKER_MAX_RETRIES ?? 3);
@@ -29,7 +32,9 @@ async function main() {
       status: "starting",
       region: cfg.region,
       pollMs: intervalMs,
+      buzzBridge,
       registeredHandlers: processor.registeredTypes(),
+      backupProvider: backups.provider,
     }),
   );
 
@@ -100,6 +105,29 @@ async function main() {
         JSON.stringify({
           service: "chaste-worker",
           action: "email_error",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+
+    // C7 — snapshot + encrypt + store queued backups through the object store.
+    try {
+      const done = await backups.flushBackupJobs();
+      if (done > 0) {
+        console.log(
+          JSON.stringify({
+            service: "chaste-worker",
+            action: "backups_flushed",
+            count: done,
+            provider: backups.provider,
+          }),
+        );
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          service: "chaste-worker",
+          action: "backup_error",
           error: err instanceof Error ? err.message : String(err),
         }),
       );

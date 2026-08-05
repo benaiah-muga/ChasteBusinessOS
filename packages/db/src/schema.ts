@@ -451,6 +451,34 @@ export const emailOutbox = pgTable(
   ],
 );
 
+/* ─── Backup / export / restore (spec: backup-and-deploy.md) ──────── */
+
+/**
+ * Org-scoped backup job records. The payload (a versioned JSON manifest,
+ * AES-256-GCM encrypted) lives in the configured object store; this table is
+ * the job ledger used by the worker for idempotent delivery, like email_outbox.
+ */
+export const backups = pgTable(
+  "backups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    status: text("status").notNull().default("queued"), // queued | running | success | failed
+    provider: text("provider"),
+    storageKey: text("storage_key"),
+    sizeBytes: integer("size_bytes"),
+    checksum: text("checksum"),
+    createdBy: uuid("created_by"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("backups_org_idx").on(t.organizationId),
+    index("backups_status_idx").on(t.status),
+  ],
+);
+
 /* ─── Messaging (spec: messaging-and-buzz.md) ─────────────────────── */
 
 /** A conversation: `direct` (two members) or `group`. */

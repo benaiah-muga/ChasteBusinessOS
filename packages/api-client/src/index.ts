@@ -103,6 +103,23 @@ export type EmailProviderStatus = {
   from: string | null;
 };
 
+export type BackupRow = {
+  id: string;
+  status: string;
+  provider: string | null;
+  storageKey: string | null;
+  sizeBytes: number | null;
+  checksum: string | null;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type BackupProviderStatus = {
+  provider: "s3" | "local" | "memory" | "none";
+  encryptionConfigured: boolean;
+};
+
 export type MessagingThreadDetail = {
   id: string;
   organizationId: string;
@@ -1092,6 +1109,34 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         "/api/v1/commands/core.email.send",
         { method: "POST", body: JSON.stringify({ input }) },
         (d) => d as { data: EmailOutboxRow },
+      );
+    },
+    listBackups(input: { status?: string; limit?: number } = {}) {
+      return request(
+        "/api/v1/queries/core.backup.list",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { backups: BackupRow[] },
+      );
+    },
+    createBackup() {
+      return request(
+        "/api/v1/commands/core.backup.create",
+        { method: "POST", body: JSON.stringify({ input: {} }) },
+        (d) => d as { data: BackupRow },
+      );
+    },
+    restoreBackup(backupId: string) {
+      return request(
+        "/api/v1/commands/core.backup.restore",
+        { method: "POST", body: JSON.stringify({ input: { backupId } }) },
+        (d) => d as { data: { organizationId: string; restoredTables: number; rowCount: number } },
+      );
+    },
+    getBackupProviderStatus() {
+      return request(
+        "/api/v1/queries/core.backup.provider.status",
+        { method: "POST", body: JSON.stringify({ input: {} }) },
+        (d) => d as BackupProviderStatus,
       );
     },
   };

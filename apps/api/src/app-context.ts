@@ -57,6 +57,7 @@ import { createCrmModule } from "@chaste/module-crm";
 import { createHrModule } from "@chaste/module-hr";
 import { createInventoryModule } from "@chaste/module-inventory";
 import { createManufacturingModule } from "@chaste/module-manufacturing";
+import { createMessagingModule } from "@chaste/module-messaging";
 import { createPlatformModule } from "@chaste/module-platform";
 import { createPurchasingModule } from "@chaste/module-purchasing";
 
@@ -172,6 +173,7 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
   await modules.register(createPurchasingModule(db));
   await modules.register(createHrModule(db));
   await modules.register(createManufacturingModule(db));
+  await modules.register(createMessagingModule(db));
   await modules.register(
     createPlatformModule(db, modules, {
       allowFullAutonomous: config.allowFullAutonomous,
@@ -303,6 +305,27 @@ export async function runCommand(
 
 export async function runQuery(app: AppContext, name: string, input: unknown, requestId?: string) {
   return executeQuery(app.queries, name, input, requestCtx(app, requestId));
+}
+
+/**
+ * Run a command under an explicit actor (used by the Buzz inbound webhook,
+ * which posts into a thread as that thread's creator rather than as the
+ * request session user). Still goes through the same command bus, permission
+ * checks, audit, and outbox as every other path.
+ */
+export async function runCommandAsActor(
+  app: AppContext,
+  name: string,
+  input: unknown,
+  actor: Actor,
+  requestId?: string,
+  autonomy?: AutonomyLevel,
+) {
+  const ctx = createRequestContext({ actor, requestId, autonomy });
+  return executeCommand(app.commands, name, input, ctx, {
+    audit: app.audit,
+    outbox: app.outbox,
+  });
 }
 
 function buildOrchestratorDeps(app: AppContext, activeBranch?: { name: string; code: string }) {

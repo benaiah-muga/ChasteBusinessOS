@@ -12,7 +12,7 @@ export async function cleanupTestData(db: Db): Promise<void> {
       chat_feedback, chat_messages, chat_sessions, ai_explanations,
       notifications, capability_gap_tickets, reminders, follow_ups,
       msg_reads, msg_messages, msg_thread_members, msg_threads,
-      email_outbox, calendars, calendar_events,
+      email_outbox, backups, calendars, calendar_events,
       user_branch_access, branches,
       pending_approvals, ai_wakes, ai_skills, channel_session_bindings,
       business_partners,

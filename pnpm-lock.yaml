@@ -56,6 +56,9 @@ importers:
       '@chaste/module-manufacturing':
         specifier: workspace:*
         version: link:../../modules/manufacturing
+      '@chaste/module-messaging':
+        specifier: workspace:*
+        version: link:../../modules/messaging
       '@chaste/module-platform':
         specifier: workspace:*
         version: link:../../modules/platform
@@ -157,6 +160,9 @@ importers:
       '@chaste/module-manufacturing':
         specifier: workspace:*
         version: link:../../modules/manufacturing
+      '@chaste/module-messaging':
+        specifier: workspace:*
+        version: link:../../modules/messaging
       '@chaste/module-platform':
         specifier: workspace:*
         version: link:../../modules/platform
@@ -319,7 +325,7 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
-  modules/platform:
+  modules/messaging:
     dependencies:
       '@chaste/db':
         specifier: workspace:*
@@ -334,6 +340,40 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.1
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
+  modules/platform:
+    dependencies:
+      '@chaste/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@chaste/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@opentelemetry/api@1.9.1)(@types/react@19.2.17)(pg@8.22.0)(postgres@3.4.9)(react@19.2.7)
+      nodemailer:
+        specifier: ^6.9.16
+        version: 6.10.1
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/nodemailer':
+        specifier: ^6.4.17
+        version: 6.4.24
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.1
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -431,6 +471,9 @@ importers:
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
     devDependencies:
       tsx:
         specifier: ^4.19.2
@@ -1194,6 +1237,9 @@ packages:
   '@types/node@22.20.1':
     resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
 
+  '@types/nodemailer@6.4.24':
+    resolution: {integrity: sha512-Ww4u0rT9wQNXh4JiQaIwx3QWdcOFXzOjQA2zc+jtFYNmQiT4mIUqcDin51bDFdkzKubFnQCZNK7FIHlPKQ/q9w==}
+
   '@types/react-dom@19.2.3':
     resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
     peerDependencies:
@@ -1704,6 +1750,10 @@ packages:
         optional: true
       sass:
         optional: true
+
+  nodemailer@6.10.1:
+    resolution: {integrity: sha512-Z+iLaBGVaSjbIzQ4pX6XV41HrooLsQ10ZWPUehGmuantvzWoDVBnmsdUcOIDM1t+yPor5pDhVlDESgOMEGxhHA==}
+    engines: {node: '>=6.0.0'}
 
   obliterator@2.0.5:
     resolution: {integrity: sha512-42CPE9AhahZRsMNslczq0ctAEtqk8Eka26QofnqC346BZdHDySk3LWka23LI7ULIw11NmltpiLagIq8gBozxTw==}
@@ -2527,6 +2577,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/nodemailer@6.4.24':
+    dependencies:
+      '@types/node': 22.20.1
+
   '@types/react-dom@19.2.3(@types/react@19.2.17)':
     dependencies:
       '@types/react': 19.2.17
@@ -2930,6 +2984,8 @@ snapshots:
     transitivePeerDependencies:
       - '@babel/core'
       - babel-plugin-macros
+
+  nodemailer@6.10.1: {}
 
   obliterator@2.0.5: {}
 

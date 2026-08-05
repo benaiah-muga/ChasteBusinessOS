@@ -14,6 +14,7 @@ import {
   ChevronDown,
   CircleDollarSign,
   ClipboardList,
+  Database,
   Factory,
   GitBranch,
   HeartPulse,
@@ -76,6 +77,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   "/rbac": KeyRound,
   "/marketplace": Boxes,
   "/audit": ClipboardList,
+  "/data": Database,
   "/settings": Settings,
 };
 

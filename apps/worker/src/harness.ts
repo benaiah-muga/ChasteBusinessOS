@@ -39,6 +39,7 @@ import { createCrmModule } from "@chaste/module-crm";
 import { createHrModule } from "@chaste/module-hr";
 import { createInventoryModule } from "@chaste/module-inventory";
 import { createManufacturingModule } from "@chaste/module-manufacturing";
+import { createMessagingModule } from "@chaste/module-messaging";
 import { createPlatformModule } from "@chaste/module-platform";
 import { createPurchasingModule } from "@chaste/module-purchasing";
 import { eq } from "drizzle-orm";
@@ -66,6 +67,7 @@ export async function createFollowUpHarness(
   await modules.register(createPurchasingModule(db));
   await modules.register(createHrModule(db));
   await modules.register(createManufacturingModule(db));
+  await modules.register(createMessagingModule(db));
   await modules.register(
     createPlatformModule(db, modules, {
       allowFullAutonomous: cfg.allowFullAutonomous,

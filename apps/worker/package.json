@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --env-file=../../.env ./node_modules/vitest/vitest.mjs run --passWithNoTests"
+    "restore": "tsx --env-file=../../.env src/cli-restore.ts",
+    "test": "tsx --env-file=../../.env ./node_modules/vitest/vitest.mjs run --passWithNoTests --no-file-parallelism"
   },
   "dependencies": {
     "@chaste/ai-core": "workspace:*",
@@ -21,6 +22,7 @@
     "@chaste/module-hr": "workspace:*",
     "@chaste/module-inventory": "workspace:*",
     "@chaste/module-manufacturing": "workspace:*",
+    "@chaste/module-messaging": "workspace:*",
     "@chaste/module-platform": "workspace:*",
     "@chaste/module-purchasing": "workspace:*",
     "drizzle-orm": "^0.38.3"

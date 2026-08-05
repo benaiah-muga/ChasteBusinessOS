@@ -36,6 +36,7 @@ export const MODULE_NAV: ModuleNavItem[] = [
   { moduleId: "gaps", href: "/gaps", label: "Capability gaps", group: "system", always: true },
   { moduleId: "marketplace", href: "/marketplace", label: "Marketplace", group: "system", always: true },
   { moduleId: "audit", href: "/audit", label: "Activity log", group: "system", always: true },
+  { moduleId: "data", href: "/data", label: "Data & backups", group: "system", always: true },
   { moduleId: "settings", href: "/settings", label: "Settings", group: "system", always: true },
 ];
 

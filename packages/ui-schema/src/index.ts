@@ -53,6 +53,13 @@ export const confirmActionPartSchema = z.object({
   input: z.unknown(),
   confirmLabel: z.string().default("Confirm"),
   cancelLabel: z.string().default("Cancel"),
+  /**
+   * Lifecycle of this approval card. Only `pending` (or omitted, for older
+   * transcripts) may render interactive Confirm/Cancel buttons. Once the
+   * user resolves — or a newer plan supersedes this one — the orchestrator
+   * marks the part so the UI never leaves a stale clickable action in the log.
+   */
+  status: z.enum(["pending", "confirmed", "cancelled", "superseded"]).default("pending"),
 });
 
 export const tablePartSchema = z.object({

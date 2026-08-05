@@ -20,6 +20,7 @@ import {
 import { and, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { createEmailAdapter, detectEmailProvider, emailTemplateSchema, renderEmailTemplate, type EmailAdapter } from "./email.js";
+import { createObjectStore, objectStoreStatus, restoreFromStore } from "./backup.js";
 
 /** Capability gap ticket lifecycle (spec: self-development.md §4). */
 const GAP_STATUS = [
@@ -143,6 +144,8 @@ export function createPlatformModule(
         "core.followup.write",
         "core.bpartner.manage",
         "core.bpartner.read",
+        "core.backup.read",
+        "core.backup.manage",
       ],
       capabilities: ["core.rbac", "core.marketplace", "core.autonomy", "core.bpartners"],
       specialist: {
@@ -2737,6 +2740,131 @@ export function createPlatformModule(
         }),
       );
 
+      const backupOutputSchema = z.object({
+        id: z.string(),
+        status: z.string(),
+        provider: z.string().nullable(),
+        storageKey: z.string().nullable(),
+        sizeBytes: z.number().nullable(),
+        checksum: z.string().nullable(),
+        error: z.string().nullable(),
+        createdAt: z.string(),
+        completedAt: z.string().nullable(),
+      });
+
+      const toBackupRow = (row: typeof schema.backups.$inferSelect) => ({
+        id: row.id,
+        status: row.status,
+        provider: row.provider,
+        storageKey: row.storageKey,
+        sizeBytes: row.sizeBytes,
+        checksum: row.checksum,
+        error: row.error,
+        createdAt: row.createdAt.toISOString(),
+        completedAt: row.completedAt ? row.completedAt.toISOString() : null,
+      });
+
+      commands.register(
+        defineCommand({
+          name: "core.backup.create",
+          description: "Enqueue a full encrypted backup of this organization",
+          permissions: ["core.backup.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({}).default({}),
+          output: backupOutputSchema,
+          handler: async (_input, ctx) => {
+            const [row] = await db
+              .insert(schema.backups)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                status: "queued",
+                createdBy: ctx.actor.userId ?? null,
+              })
+              .returning();
+            return toBackupRow(row!);
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.backup.restore",
+          description: "Restore a successful backup for this organization",
+          permissions: ["core.backup.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ backupId: z.string().uuid() }),
+          output: z.object({
+            organizationId: z.string(),
+            restoredTables: z.number(),
+            rowCount: z.number(),
+          }),
+          handler: async (input, ctx) => {
+            const [row] = await db
+              .select()
+              .from(schema.backups)
+              .where(
+                and(
+                  eq(schema.backups.id, input.backupId),
+                  eq(schema.backups.organizationId, ctx.actor.organizationId),
+                  eq(schema.backups.status, "success"),
+                ),
+              )
+              .limit(1);
+            if (!row || !row.storageKey) throw new NotFoundError("Backup");
+            const store = createObjectStore();
+            const result = await restoreFromStore(db, store, row.storageKey);
+            return {
+              organizationId: result.organizationId,
+              restoredTables: result.restoredTables,
+              rowCount: result.rowCount,
+            };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.backup.list",
+          description: "List backup jobs for this organization",
+          permissions: ["core.backup.read"],
+          tags: ["core"],
+          input: z
+            .object({ status: z.string().optional(), limit: z.number().int().min(1).max(200).optional() })
+            .default({}),
+          output: z.object({ backups: z.array(backupOutputSchema) }),
+          handler: async (input, ctx) => {
+            const where = and(
+              eq(schema.backups.organizationId, ctx.actor.organizationId),
+              input.status ? eq(schema.backups.status, input.status) : undefined,
+            );
+            const rows = await db
+              .select()
+              .from(schema.backups)
+              .where(where)
+              .orderBy(schema.backups.createdAt)
+              .limit(input.limit ?? 50);
+            return { backups: rows.map(toBackupRow) };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.backup.provider.status",
+          description: "Report the backup object-store provider (no secrets)",
+          permissions: ["core.backup.read"],
+          tags: ["core"],
+          input: z.object({}).default({}),
+          output: z.object({
+            provider: z.enum(["s3", "local", "memory", "none"]),
+            encryptionConfigured: z.boolean(),
+          }),
+          handler: async () => objectStoreStatus(),
+        }),
+      );
+
       // ─── Settings & Preferences ────────────────────────────────────────
 
       const orgSettingsOutputSchema = z.object({
@@ -3214,3 +3342,28 @@ export function createEmailProcessor(db: Db, adapter: EmailAdapter = createEmail
     },
   };
 }
+
+/* ─── Backup / export / restore (Workstream C) ─────────────────────── */
+
+export {
+  applyManifest,
+  backupManifestSchema,
+  buildManifest,
+  createBackupProcessor,
+  createLocalStore,
+  createMemoryStore,
+  createNullStore,
+  createObjectStore,
+  createS3Store,
+  decryptBackup,
+  encryptBackup,
+  encryptedBlobSchema,
+  fetchAndDecrypt,
+  getBackupKey,
+  manifestChecksum,
+  objectStoreStatus,
+  restoreFromStore,
+  runBackupJob,
+  snapshotOrganization,
+} from "./backup.js";
+export type { BackupManifest, EncryptedBlob, ObjectStore } from "./backup.js";

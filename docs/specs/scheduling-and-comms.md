@@ -107,14 +107,29 @@ Security category ignores some mute settings except hard quiet-hours break-glass
 
 | Concern | Approach |
 |---|---|
-| Provider | Adapter interface: SMTP, SES, Resend, etc. via config |
-| Templates | Versioned templates (invite, reminder, digest, gap ticket) |
-| Auth | No raw secrets in modules; config/vault |
-| Idempotency | `email_outbox` with provider message ids |
-| Bounce/complaint | Worker handles webhooks when available |
-| AI | May draft body; send is a command with autonomy gate |
+| Provider | Pluggable adapter (`EmailAdapter`): `resend` (REST, N/A SDK) and `smtp` (nodemailer); `console` fallback. Selected by config, never by the caller. |
+| Selection | `createEmailAdapter()` precedence: `CHASTE_RESEND_API_KEY` → `CHASTE_SMTP_HOST` → console. |
+| Templates | Versioned templates (invite, reminder, digest, gap_ticket) via `renderEmailTemplate` (missing vars throw). |
+| Auth | No raw secrets in modules; SMTP creds + Resend key come from env/config/vault. |
+| Idempotency | `email_outbox` with `provider`/`providerMessageId`; `core.email.retry` re-queues failed for the same org only. |
+| Bounce/complaint | Worker handles webhooks when available. |
+| AI | May draft body; send is a command with autonomy gate (`guarded_auto`). |
 
-Commands (illustrative): `core.email.send`, `core.email.enqueue_template`.
+Commands: `core.email.send`, `core.email.enqueue_template`, `core.email.retry`.
+Queries: `core.email.outbox.list`, `core.email.provider.status` (reports active provider + from-address only, never secrets).
+
+### 5.1 Config reference
+
+| Env | Purpose |
+|---|---|
+| `CHASTE_RESEND_API_KEY` | Enables the Resend adapter. |
+| `CHASTE_RESEND_FROM` | From-address for Resend (default `Chaste BusinessOS <onboarding@resend.dev>`). |
+| `CHASTE_SMTP_HOST` | Enables the SMTP adapter. |
+| `CHASTE_SMTP_PORT` | Default `587`. |
+| `CHASTE_SMTP_SECURE` | `"true"` for implicit TLS (465), default `"false"` (STARTTLS). |
+| `CHASTE_SMTP_USER` / `CHASTE_SMTP_PASS` | SMTP auth (anonymous if unset). |
+| `CHASTE_SMTP_FROM` | From-address for SMTP (default `Chaste BusinessOS <no-reply@chaste.local>`). |
+| `CHASTE_EMAIL_FROM` | Shared override used when the provider-specific `FROM` is unset. |
 
 ## 6. Worker architecture
 

@@ -1,0 +1,34 @@
+# Node / package manager artifacts
+**/node_modules
+node_modules
+.pnpm-store
+
+# Build outputs
+**/dist
+**/.next
+**/.turbo
+**/coverage
+**/next-env.d.ts
+**/*.tsbuildinfo
+
+# Local data & secrets
+**/.env
+**/.env.*
+!**/.env.example
+data
+*.pem
+*.key
+
+# Git & tooling
+.git
+.gitignore
+.qoder
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode
+.idea
+*.swp

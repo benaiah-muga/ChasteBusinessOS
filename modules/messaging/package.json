@@ -1,5 +1,5 @@
 {
-  "name": "@chaste/module-platform",
+  "name": "@chaste/module-messaging",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,15 +10,14 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "tsx --env-file=../../.env ./node_modules/vitest/vitest.mjs run --passWithNoTests --no-file-parallelism",
     "dev": "tsc -p tsconfig.json --watch"
   },
   "dependencies": {
     "@chaste/db": "workspace:*",
     "@chaste/kernel": "workspace:*",
     "drizzle-orm": "^0.38.3",
-    "nodemailer": "^6.9.16",
     "zod": "^3.24.1"
   },
-  "devDependencies": { "@types/nodemailer": "^6.4.17", "typescript": "^5.7.2", "vitest": "^2.1.8", "tsx": "^4.19.2" }
+  "devDependencies": { "tsx": "^4.19.2", "typescript": "^5.7.2", "vitest": "^2.1.8" }
 }

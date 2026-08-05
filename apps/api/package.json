@@ -22,6 +22,7 @@
     "@chaste/module-hr": "workspace:*",
     "@chaste/module-inventory": "workspace:*",
     "@chaste/module-manufacturing": "workspace:*",
+    "@chaste/module-messaging": "workspace:*",
     "@chaste/module-platform": "workspace:*",
     "@chaste/module-purchasing": "workspace:*",
     "@chaste/ui-schema": "workspace:*",

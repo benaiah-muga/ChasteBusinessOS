@@ -172,6 +172,32 @@ function msg(role: ChatMessage["role"], parts: UiPart[]): ChatMessage {
 }
 
 /**
+ * Mark interactive `confirm_action` parts as resolved so the chat log never
+ * keeps a clickable Confirm/Cancel for an already-handled (or superseded)
+ * approval. The canonical once-only gate lives in Inbox/`session.pending`;
+ * this only keeps the rendered transcript honest for UI and automation.
+ */
+function resolveConfirmParts(
+  messages: ChatMessage[],
+  opts: {
+    /** Specific confirmation id to update. Omit to touch every pending card. */
+    id?: string;
+    status: "confirmed" | "cancelled" | "superseded";
+  },
+): ChatMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => {
+      if (part.type !== "confirm_action") return part;
+      const current = part.status ?? "pending";
+      if (current !== "pending") return part;
+      if (opts.id && part.id !== opts.id) return part;
+      return { ...part, status: opts.status };
+    }),
+  }));
+}
+
+/**
  * R2/R3/R4 — mirror a freshly-created `session.pending` confirmation to the
  * canonical Inbox store. The Inbox becomes the durable store of record; the
  * in-chat `pending` blob remains for synchronous callers (API clients reading
@@ -1024,6 +1050,10 @@ export async function handleChatTurn(
         .find((i) => i.toolCallId === cancelled.id);
       if (existing) deps.inbox.resolve(existing.id, "deny");
     }
+    session.messages = resolveConfirmParts(session.messages, {
+      id: cancelled.id,
+      status: "cancelled",
+    });
     session.messages.push(
       msg("assistant", [{ type: "text", text: "Cancelled. No changes were made." }]),
     );
@@ -1112,6 +1142,10 @@ export async function handleChatTurn(
         if (!deps.inbox.resolve(item.id, resolution)) {
           // already resolved by another surface — treat as already-executed
           session.pending = undefined;
+          session.messages = resolveConfirmParts(session.messages, {
+            id: pending.id,
+            status: "confirmed",
+          });
           session.messages.push(
             msg("assistant", [
               { type: "text", text: "This request was already actioned from another surface." },
@@ -1130,6 +1164,11 @@ export async function handleChatTurn(
     const stepOutputs = await executePlanSteps(deps, stepsToRun, aiCtx);
 
     session.pending = undefined;
+    session.messages = resolveConfirmParts(session.messages, {
+      id: pending.id,
+      status: "confirmed",
+    });
+
     const last = stepOutputs[stepOutputs.length - 1]!;
     const explanation: AiExplanation = {
       runId: aiCtx.actor.aiRunId!,
@@ -1482,6 +1521,8 @@ export async function handleChatTurn(
     }
 
     const confirmId = crypto.randomUUID();
+    // Any earlier pending cards in the log must not stay clickable.
+    session.messages = resolveConfirmParts(session.messages, { status: "superseded" });
     session.pending = {
       id: confirmId,
       command: multiPlan[0]!.command,
@@ -1525,6 +1566,7 @@ export async function handleChatTurn(
           input: { steps: planSteps },
           confirmLabel: effectiveMulti === "recommend" ? "Disabled" : "Confirm all",
           cancelLabel: "Cancel",
+          status: "pending",
         },
       ]),
     );
@@ -1665,6 +1707,8 @@ export async function handleChatTurn(
   }
 
   const confirmId = crypto.randomUUID();
+  // Any earlier pending cards in the log must not stay clickable.
+  session.messages = resolveConfirmParts(session.messages, { status: "superseded" });
   session.pending = {
     id: confirmId,
     command: planned.command,
@@ -1705,6 +1749,7 @@ export async function handleChatTurn(
         input: planned.input,
         confirmLabel: recommendOnly ? "Disabled" : "Confirm",
         cancelLabel: "Cancel",
+        status: "pending",
       },
     ]),
   );

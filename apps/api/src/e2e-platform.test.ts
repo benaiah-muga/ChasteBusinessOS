@@ -860,6 +860,71 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
       expect(row!.providerMessageId).toMatch(/^console:/);
       expect(row!.sentAt).not.toBeNull();
     });
+
+    it("outbox rows expose provider + error + sentAt for the admin UI", async () => {
+      const created = await cmd(orgA.operatorUser, orgA.orgId, "core.email.send", {
+        to: "fields@example.com",
+        subject: "Field check",
+        body: "Check the fields",
+      });
+      const email = createEmailProcessor(db);
+      await email.flushEmailOutbox();
+
+      const list = await qry(orgA.operatorUser, orgA.orgId, "core.email.outbox.list");
+      const mine = list.emails.find((e: any) => e.id === created.id);
+      expect(mine).toBeTruthy();
+      expect(mine.provider).toBe("console");
+      expect(mine.providerMessageId).toMatch(/^console:/);
+      expect(mine.sentAt).not.toBeNull();
+      expect(mine.error).toBeNull();
+    });
+
+    it("core.email.provider.status reports the active provider without secrets", async () => {
+      const status = await qry(orgA.operatorUser, orgA.orgId, "core.email.provider.status");
+      expect(["resend", "smtp", "console"]).toContain(status.provider);
+      expect(JSON.stringify(status)).not.toMatch(/API_KEY|SMTP_PASS|CHASTE_/);
+    });
+
+    it("core.email.retry re-queues a failed email for the owning org", async () => {
+      const [failed] = await db
+        .insert(schema.emailOutbox)
+        .values({
+          organizationId: orgA.orgId,
+          to: "retry@example.com",
+          subject: "Retry me",
+          body: "Nudge",
+          status: "failed",
+          provider: "console",
+          error: "simulated provider failure",
+        })
+        .returning();
+
+      const requeued = await cmd(orgA.operatorUser, orgA.orgId, "core.email.retry", {
+        emailId: failed!.id,
+      });
+      expect(requeued.status).toBe("queued");
+      expect(requeued.error).toBeNull();
+      expect(requeued.provider).toBeNull();
+    });
+
+    it("core.email.retry cannot touch another org's email", async () => {
+      const [failed] = await db
+        .insert(schema.emailOutbox)
+        .values({
+          organizationId: orgA.orgId,
+          to: "private@example.com",
+          subject: "Org A only",
+          body: "Secret",
+          status: "failed",
+          error: "boom",
+        })
+        .returning();
+
+      const e = await cmdFails(orgB.adminUser, orgB.orgId, "core.email.retry", {
+        emailId: failed!.id,
+      });
+      expect(e.code).toBe("NOT_FOUND");
+    });
   });
 
   describe("marketplace publish (S4)", () => {

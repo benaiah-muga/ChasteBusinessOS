@@ -1352,6 +1352,27 @@ textarea:focus {
   background: var(--accent-soft);
 }
 
+.part-confirm.resolved {
+  border-color: var(--line);
+  background: var(--surface-2);
+  opacity: 0.88;
+}
+
+.part-confirm.resolved .confirm-icon {
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.confirm-status {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
 .confirm-icon {
   width: 32px;
   height: 32px;
