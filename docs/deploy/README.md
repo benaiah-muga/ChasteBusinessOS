@@ -20,6 +20,20 @@ once, `turbo` compiles only the target's dependency graph, and
 `pnpm deploy --prod` produces a self-contained tree with workspace `dist`
 output inlined. No build tools ship in runtime images.
 
+### Prebuilt images (GHCR)
+
+Released images are public on GitHub Container Registry — no Docker Hub account
+needed:
+
+```bash
+docker pull ghcr.io/benaiah-muga/chastebusinessos:api-v0.1.0
+docker pull ghcr.io/benaiah-muga/chastebusinessos:web-v0.1.0
+docker pull ghcr.io/benaiah-muga/chastebusinessos:worker-v0.1.0
+docker pull ghcr.io/benaiah-muga/chastebusinessos:migrate-v0.1.0
+```
+
+Each image also gets a `-latest` tag. To build yourself instead:
+
 ```bash
 docker build --target migrate -t chaste/migrate:0.1.0 .
 docker build --target api     -t chaste/api:0.1.0 .

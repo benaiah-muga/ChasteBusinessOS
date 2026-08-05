@@ -204,7 +204,7 @@ Per-provider guides: **AWS** · **GCP** · **Azure** · **Fly.io** · **Render**
 docker build --target api -t chaste/api:0.1.0 .
 ```
 
-Public images are published to **GHCR** (`ghcr.io/benaiah-muga/ChasteBusinessOS`). See [docs/deploy/README.md](docs/deploy/README.md).
+Public images are published to **GHCR** (`ghcr.io/benaiah-muga/chastebusinessos`, tag per image: `api-`, `web-`, `worker-`, `migrate-`). See [docs/deploy/README.md](docs/deploy/README.md).
 
 ---
 
