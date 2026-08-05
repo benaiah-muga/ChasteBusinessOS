@@ -1,6 +1,7 @@
 import type { CommandRegistry } from "@chaste/kernel";
 import type { AiProvider } from "../providers.js";
 import type { WorkflowDefinition, WorkflowStepDef } from "./engine.js";
+import { normalizeFieldNames } from "./engine.js";
 
 export interface WorkflowBuilderConfig {
   commandRegistry: CommandRegistry;
@@ -12,36 +13,46 @@ export interface WorkflowBuilderAgent {
   systemPrompt: string;
 }
 
-const BUILDER_SYSTEM_PROMPT = `You are a workflow builder for ChasteBusinessOS. Your job is to convert natural language requests into structured workflow definitions.
+const COMMAND_FIELD_HINTS: Record<string, string> = {
+  "crm.customer.create": "{ name: string, email?: string, city?: string, country?: string }",
+  "crm.customer.list": "{}",
+  "acc.invoice.create": "{ number: string, total: number, currency?: string, customerId?: uuid }",
+  "acc.journal.create": "{ reference: string, lines: array }",
+  "inv.product.create": "{ sku: string, name: string }",
+  "inv.stock.adjust": "{ productId: string, quantity: number, warehouseId?: string }",
+  "pur.po.create": "{ vendorId: string, lines?: array }",
+  "pur.vendor.create": "{ name: string }",
+  "hr.employee.create": "{ employeeNumber: string, fullName: string }",
+  "hr.payroll.prepare": "{ periodLabel: string }",
+  "mfg.workorder.create": "{ productId: string, quantity: number }",
+};
 
-AVAILABLE COMMAND TYPES:
-Every registered business command can be used as a workflow step with type "command".
-Common commands include:
-- crm.customer.create — Create a new customer
-- crm.customer.list — List all customers
-- acc.invoice.create — Create an invoice
-- acc.journal.create — Create a journal entry
-- inv.product.create — Create a product
-- inv.stock.adjust — Adjust stock levels
-- pur.po.create — Create a purchase order
-- pur.vendor.create — Create a vendor
-- hr.employee.create — Create an employee
-- hr.payroll.prepare — Prepare payroll
-- mfg.workorder.create — Create a work order
+const BUILDER_SYSTEM_PROMPT = `You are a workflow builder for ChasteBusinessOS. Convert natural language into structured workflow definitions.
+
+COMMAND INPUT SCHEMAS (use these exact field names — never invent aliases):
+${Object.entries(COMMAND_FIELD_HINTS)
+  .map(([cmd, schema]) => `- ${cmd}: ${schema}`)
+  .join("\n")}
 
 STEP TYPES:
-- "command": Execute a business command
-- "approval": Pause for human approval (use before destructive or financial actions)
-- "condition": Evaluate a condition and branch
+- "command": Execute a business command (preferred for all business actions)
+- "approval": Pause for human approval (only when the user asks, or before irreversible financial posts)
+- "condition": Evaluate a condition
 - "agent": Delegate to a specialist AI agent
 - "parallel": Run multiple steps concurrently
 
+VARIABLE REFERENCES:
+- Reference prior step outputs with "\${stepId.field}" e.g. "\${step1.id}" for customerId
+- Reference run input with "\${fieldName}" or "\${input.fieldName}"
+- Prefer embedding literal values from the user request when they are known
+
 WORKFLOW RULES:
-1. Financial actions (invoices, journal entries, payroll) MUST have an approval step before them
-2. Steps can reference previous step outputs using "\${stepId}" syntax in input values
+1. Use exact schema field names (city not location, total not amount, customerId not customer_id)
+2. Do NOT insert approval steps unless the user asks for approval/review, or the action is posting/voiding financial entries
 3. Keep workflows linear unless parallel execution is explicitly needed
-4. Include descriptive names for each step
+4. Include a descriptive name and description
 5. Set onError to "bail" for critical steps, "continue" for non-critical
+6. Every command step MUST include a "command" field with a registered command name
 
 OUTPUT FORMAT:
 Return ONLY a JSON object matching this exact structure:
@@ -51,11 +62,11 @@ Return ONLY a JSON object matching this exact structure:
   "trigger": "manual",
   "steps": [
     {
-      "id": "step_id",
-      "type": "command|approval|condition|agent|parallel",
-      "command": "command.name",
+      "id": "step1",
+      "type": "command",
+      "command": "crm.customer.create",
       "description": "what this step does",
-      "input": { "field": "value" },
+      "input": { "name": "Acme", "city": "Nairobi" },
       "onError": "bail"
     }
   ]
@@ -66,7 +77,12 @@ Do not include any text outside the JSON block. Wrap the JSON in \`\`\`json and 
 export function createWorkflowBuilderAgent(cfg: WorkflowBuilderConfig): WorkflowBuilderAgent {
   const commandList = cfg.commandRegistry
     .list()
-    .map((c) => `- ${c.name}: ${c.description ?? c.name}`)
+    .map((c) => {
+      const hint = COMMAND_FIELD_HINTS[c.name];
+      return hint
+        ? `- ${c.name}: ${c.description ?? c.name} — input ${hint}`
+        : `- ${c.name}: ${c.description ?? c.name}`;
+    })
     .join("\n");
 
   return {
@@ -108,35 +124,7 @@ function parseWorkflowJson(json: string): WorkflowDefinition {
   const parsed = JSON.parse(json) as Record<string, unknown>;
 
   const steps: WorkflowStepDef[] = (Array.isArray(parsed.steps) ? parsed.steps : []).map(
-    (s: Record<string, unknown>) => ({
-      id: String(s.id ?? `step_${Date.now()}`),
-      type: (["command", "approval", "condition", "agent", "parallel"].includes(String(s.type))
-        ? s.type
-        : "command") as WorkflowStepDef["type"],
-      command: s.command ? String(s.command) : undefined,
-      agentId: s.agentId ? String(s.agentId) : undefined,
-      condition: s.condition ? String(s.condition) : undefined,
-      approveBy: s.approveBy ? String(s.approveBy) : undefined,
-      description: s.description ? String(s.description) : undefined,
-      input: (typeof s.input === "object" && s.input !== null ? s.input : {}) as Record<string, unknown>,
-      steps: Array.isArray(s.steps)
-        ? (s.steps as Record<string, unknown>[]).map((sub) => ({
-            id: String(sub.id ?? `sub_${Date.now()}`),
-            type: (["command", "approval", "condition", "agent", "parallel"].includes(String(sub.type))
-              ? sub.type
-              : "command") as WorkflowStepDef["type"],
-            command: sub.command ? String(sub.command) : undefined,
-            description: sub.description ? String(sub.description) : undefined,
-            input: (typeof sub.input === "object" && sub.input !== null ? sub.input : {}) as Record<string, unknown>,
-            onError: (["bail", "retry", "continue"].includes(String(sub.onError))
-              ? sub.onError
-              : "bail") as WorkflowStepDef["onError"],
-          }))
-        : undefined,
-      onError: (["bail", "retry", "continue"].includes(String(s.onError))
-        ? s.onError
-        : "bail") as WorkflowStepDef["onError"],
-    }),
+    (s: Record<string, unknown>, index: number) => normalizeStep(s, index),
   );
 
   return {
@@ -149,5 +137,36 @@ function parseWorkflowJson(json: string): WorkflowDefinition {
     steps,
     createdBy: "ai",
     createdAt: new Date().toISOString(),
+  };
+}
+
+function normalizeStep(s: Record<string, unknown>, index: number): WorkflowStepDef {
+  const rawType = String(s.type ?? "command");
+  const type = (
+    ["command", "approval", "condition", "agent", "parallel"].includes(rawType)
+      ? rawType
+      : "command"
+  ) as WorkflowStepDef["type"];
+
+  const rawInput =
+    typeof s.input === "object" && s.input !== null
+      ? (s.input as Record<string, unknown>)
+      : {};
+
+  return {
+    id: String(s.id ?? `step_${index + 1}`),
+    type,
+    command: s.command ? String(s.command) : undefined,
+    agentId: s.agentId ? String(s.agentId) : undefined,
+    condition: s.condition ? String(s.condition) : undefined,
+    approveBy: s.approveBy ? String(s.approveBy) : undefined,
+    description: s.description ? String(s.description) : undefined,
+    input: normalizeFieldNames(rawInput),
+    steps: Array.isArray(s.steps)
+      ? (s.steps as Record<string, unknown>[]).map((sub, i) => normalizeStep(sub, i))
+      : undefined,
+    onError: (["bail", "retry", "continue"].includes(String(s.onError))
+      ? s.onError
+      : "bail") as WorkflowStepDef["onError"],
   };
 }

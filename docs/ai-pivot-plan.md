@@ -1,8 +1,11 @@
 # AI Pivot Plan: Mastra Integration
 
-> **Objective:** Replace the hand-rolled AI orchestrator with Mastra as the core
-> AI orchestration layer, making ChasteBusinessOS genuinely AI-native while
-> preserving the command bus architecture, audit trails, and autonomy system.
+> **SUPERSEDED (2026-07-27).** This document is historical.
+> The project adopted **custom AI orchestration** instead of Mastra as the core.
+> See [ADR 0006](./adr/0006-custom-ai-orchestration.md).
+>
+> Original objective (no longer active): replace the hand-rolled AI orchestrator
+> with Mastra as the core AI orchestration layer.
 
 ---
 

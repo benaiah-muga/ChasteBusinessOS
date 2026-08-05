@@ -1,0 +1,4 @@
+FROM qwen3.5:0.8b
+PARAMETER temperature 0.3
+PARAMETER num_ctx 4096
+SYSTEM "You are a concise assistant. Be direct and answer without unnecessary reasoning or thinking out loud. Do not output <think> tags or internal monologue."

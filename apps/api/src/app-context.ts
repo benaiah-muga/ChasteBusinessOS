@@ -4,20 +4,23 @@ import {
   handleChatTurn,
   type AiExplanation,
   type AiProvider,
-  createMastraInstance,
-  type ChasteMastra,
-  createConversationalAgent,
-  createNvidiaProvider,
   createWorkflowBuilderAgent,
   generateWorkflowFromNL,
   executeDynamicWorkflow,
   type WorkflowDefinition,
-  type NvidiaProvider,
   type WorkflowExecutionContext,
   createTracer,
   type AiTracer,
   TracedProvider,
+  WakeStore,
+  InMemorySkillStore,
+  runFollowUpTurn,
+  SUMMARY_SYSTEM_PROMPT,
+  type SkillStore,
+  type CompactionSummarizer,
+  type CompletionRequest,
 } from "@chaste/ai-core";
+import type { ChatMessage } from "@chaste/ui-schema";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
 import {
   bootstrapPlatform,
@@ -28,9 +31,14 @@ import {
   resolveUserPermissions,
   DbSessionStore,
   DbMemoryStore,
+  schema,
   type Db,
   type SessionStore,
 } from "@chaste/db";
+import { eq } from "drizzle-orm";
+import { createRequire } from "node:module";
+const pkgRequire = createRequire(import.meta.url);
+const pkg = pkgRequire("../package.json") as { version: string };
 import {
   type AutonomyLevel,
   autonomyLevelSchema,
@@ -40,6 +48,7 @@ import {
   createRequestContext,
   executeCommand,
   executeQuery,
+  InboxStore,
   NotFoundError,
   type Actor,
   type CommandRegistry,
@@ -51,6 +60,7 @@ import { createCrmModule } from "@chaste/module-crm";
 import { createHrModule } from "@chaste/module-hr";
 import { createInventoryModule } from "@chaste/module-inventory";
 import { createManufacturingModule } from "@chaste/module-manufacturing";
+import { createMessagingModule } from "@chaste/module-messaging";
 import { createPlatformModule } from "@chaste/module-platform";
 import { createPurchasingModule } from "@chaste/module-purchasing";
 
@@ -75,12 +85,18 @@ export interface AppContext {
   outbox: PostgresOutboxWriter;
   sessionStore: SessionStore;
   memoryStore: DbMemoryStore;
+  /** R2 — the canonical human-attention queue (in-memory kernel store; durable `pending_approvals` table exists for the Postgres-backed swap). */
+  inbox: InboxStore;
+  /** R5 — durable self-wake records for scheduled re-entry. */
+  wakes: WakeStore;
+  /** R7 — org/platform AI skill catalog (progressive disclosure). */
+  skills: SkillStore;
+  /** R6 — compaction summarizer over the configured provider. */
+  compaction?: { summarizer: CompactionSummarizer };
   explanations: AiExplanation[];
   sessionUser: SessionUser;
   provider: AiProvider;
   tracer: AiTracer;
-  mastra: ChasteMastra;
-  nvidiaProvider: NvidiaProvider | null;
   workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
   workflows: Map<string, WorkflowDefinition>;
 }
@@ -139,14 +155,14 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
 
   // Observability — Langfuse traces all LLM calls when configured
   const tracer = createTracer({
-    langfusePublicKey: config.mastra.langfusePublicKey,
-    langfuseSecretKey: config.mastra.langfuseSecretKey,
-    langfuseBaseUrl: config.mastra.langfuseBaseUrl,
-    observabilityEnabled: config.mastra.observabilityEnabled,
+    langfusePublicKey: config.observability.langfusePublicKey,
+    langfuseSecretKey: config.observability.langfuseSecretKey,
+    langfuseBaseUrl: config.observability.langfuseBaseUrl,
+    observabilityEnabled: config.observability.enabled,
   });
 
   // Wrap provider with tracing if Langfuse is enabled
-  const tracedProvider = config.mastra.observabilityEnabled
+  const tracedProvider = config.observability.enabled
     ? new TracedProvider(provider, tracer)
     : provider;
 
@@ -160,6 +176,7 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
   await modules.register(createPurchasingModule(db));
   await modules.register(createHrModule(db));
   await modules.register(createManufacturingModule(db));
+  await modules.register(createMessagingModule(db));
   await modules.register(
     createPlatformModule(db, modules, {
       allowFullAutonomous: config.allowFullAutonomous,
@@ -167,32 +184,57 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     }),
   );
 
-  // Mastra instance (PG storage is optional — degrades gracefully)
-  const mastra = createMastraInstance({
-    databaseUrl: config.databaseUrl,
-    schemaName: config.mastra.storageSchema,
-  });
-
-  // Nvidia NIM provider (for Mastra agents)
-  let nvidiaProvider: NvidiaProvider | null = null;
+  // Workflow builder uses AiProvider.complete() (rules + structured LLM)
   let workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null = null;
-
-  const nvidiaKey = config.ai.nvidiaApiKey;
-  if (nvidiaKey) {
-    nvidiaProvider = createNvidiaProvider({
-      apiKey: nvidiaKey,
-      baseUrl: config.ai.nvidiaBaseUrl,
-      model: config.ai.model,
-    });
-  }
-
-  // Workflow builder uses the simpler AiProvider.complete() for reliability
   if (provider.id !== "none") {
     workflowBuilder = createWorkflowBuilderAgent({
       commandRegistry: commands,
       aiProvider: provider,
     });
   }
+
+  // R2/R5/R7 runtime stores — the durable Postgres-backed counterparts
+  // (`pending_approvals`, `ai_wakes`, `ai_skills`) exist in the schema; the
+  // in-memory kernel stores satisfy the same interfaces so the runtime works
+  // today and can be swapped without touching the orchestrator.
+  const inbox = new InboxStore();
+  const wakes = new WakeStore();
+  const skills = new InMemorySkillStore();
+
+  // R6 — compaction summarizer reuses the configured provider with the
+  // fixed 8-section OpenWorker summary contract.
+  const compaction =
+    provider.id !== "none"
+      ? {
+          summarizer: {
+            modelUsed: provider.id,
+            async summarize(messages: ChatMessage[], priorSummary: string): Promise<string> {
+              const req: CompletionRequest = {
+                system: SUMMARY_SYSTEM_PROMPT,
+                messages,
+              };
+              if (priorSummary) {
+                req.messages = [
+                  ...messages,
+                  {
+                    id: crypto.randomUUID(),
+                    role: "user",
+                    parts: [
+                      {
+                        type: "text",
+                        text: `Previous compaction summary — fold its still-relevant content into the new summary:\n${priorSummary}`,
+                      },
+                    ],
+                    createdAt: new Date().toISOString(),
+                  },
+                ];
+              }
+              const res = await provider.complete(req);
+              return res.text || "(no summary returned by provider)";
+            },
+          },
+        }
+      : undefined;
 
   return {
     config,
@@ -204,12 +246,14 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     outbox,
     sessionStore: new DbSessionStore(db),
     memoryStore,
+    inbox,
+    wakes,
+    skills,
+    compaction,
     explanations: [],
     sessionUser,
     provider: tracedProvider,
     tracer,
-    mastra,
-    nvidiaProvider,
     workflowBuilder,
     workflows: new Map(),
   };
@@ -266,21 +310,42 @@ export async function runQuery(app: AppContext, name: string, input: unknown, re
   return executeQuery(app.queries, name, input, requestCtx(app, requestId));
 }
 
-export async function getMastraAgent(app: AppContext) {
-  const modelId = app.config.ai.model ?? "nvidia/llama-3.3-nemotron-super-49b-v1.5";
-  const model = app.nvidiaProvider
-    ? app.nvidiaProvider.model(modelId)
-    : modelId;
+/**
+ * Run a command under an explicit actor (used by the Buzz inbound webhook,
+ * which posts into a thread as that thread's creator rather than as the
+ * request session user). Still goes through the same command bus, permission
+ * checks, audit, and outbox as every other path.
+ */
+export async function runCommandAsActor(
+  app: AppContext,
+  name: string,
+  input: unknown,
+  actor: Actor,
+  requestId?: string,
+  autonomy?: AutonomyLevel,
+) {
+  const ctx = createRequestContext({ actor, requestId, autonomy });
+  return executeCommand(app.commands, name, input, ctx, {
+    audit: app.audit,
+    outbox: app.outbox,
+  });
+}
 
-  const { agent } = await createConversationalAgent({
-    model,
-    commandRegistry: app.commands,
-    queryRegistry: app.queries,
-    requestCtx: requestCtx(app),
+function buildOrchestratorDeps(app: AppContext, activeBranch?: { name: string; code: string }) {
+  return {
+    commands: app.commands,
+    queries: app.queries,
     helpers: { audit: app.audit, outbox: app.outbox },
     autonomy: app.sessionUser.autonomy,
-  });
-  return agent;
+    provider: app.provider,
+    allowFullAutonomous: app.config.allowFullAutonomous,
+    inbox: app.inbox,
+    wake: app.wakes,
+    skills: app.skills,
+    compaction: app.compaction,
+    defaultInboxVisibility: app.config.ai.defaultInboxVisibility,
+    activeBranch,
+  };
 }
 
 export async function runChat(
@@ -290,7 +355,9 @@ export async function runChat(
   await refreshSessionUser(app);
   let sessionId = body.sessionId ?? crypto.randomUUID();
 
-  // Load session from DB or create new
+  // Load session from DB or create new.
+  // Only reuse org+user sticky session when the client omits sessionId.
+  // An explicit unknown sessionId always starts a fresh conversation (isolation).
   let dbSession = await app.sessionStore.load(sessionId);
   let session: ChatSessionState;
   if (dbSession) {
@@ -298,38 +365,45 @@ export async function runChat(
       id: dbSession.id,
       messages: dbSession.messages as ChatSessionState["messages"],
       pending: dbSession.pending,
+      unattended: dbSession.unattended ?? false,
+      compactionState: dbSession.compactionState as ChatSessionState["compactionState"],
     };
-  } else {
-    // Try loading by org+user for existing sessions
+  } else if (!body.sessionId) {
     const existing = await app.sessionStore.loadByOrgUser(
       app.sessionUser.organizationId,
       app.sessionUser.id,
     );
-    if (existing && existing.id !== sessionId) {
+    if (existing) {
       sessionId = existing.id;
       session = {
         id: existing.id,
         messages: existing.messages as ChatSessionState["messages"],
         pending: existing.pending,
+        unattended: existing.unattended ?? false,
+        compactionState: existing.compactionState as ChatSessionState["compactionState"],
       };
     } else {
       await app.sessionStore.create(sessionId, app.sessionUser.organizationId, app.sessionUser.id);
       session = { id: sessionId, messages: [] };
     }
+  } else {
+    await app.sessionStore.create(sessionId, app.sessionUser.organizationId, app.sessionUser.id);
+    session = { id: sessionId, messages: [] };
   }
 
-  const mastraAgent = await getMastraAgent(app);
+  // Branch scope for the LLM's per-turn context (platform spec §4).
+  let activeBranch: { name: string; code: string } | undefined;
+  if (session.activeBranchId) {
+    const [branch] = await app.db
+      .select({ name: schema.branches.name, code: schema.branches.code })
+      .from(schema.branches)
+      .where(eq(schema.branches.id, session.activeBranchId))
+      .limit(1);
+    if (branch) activeBranch = branch;
+  }
 
   const result = await handleChatTurn(
-    {
-      commands: app.commands,
-      queries: app.queries,
-      helpers: { audit: app.audit, outbox: app.outbox },
-      autonomy: app.sessionUser.autonomy,
-      provider: app.provider,
-      allowFullAutonomous: app.config.allowFullAutonomous,
-      mastraAgent,
-    },
+    buildOrchestratorDeps(app, activeBranch),
     {
       session,
       userText: body.message,
@@ -349,6 +423,10 @@ export async function runChat(
       createdAt: m.createdAt,
     })),
     result.session.pending,
+    {
+      unattended: result.session.unattended ?? false,
+      compactionState: result.session.compactionState ?? null,
+    },
   );
   if (result.explanation) {
     app.explanations.push(result.explanation);
@@ -361,12 +439,128 @@ export async function runChat(
   };
 }
 
+/**
+ * C5 — follow-up harness re-entry. Runs a due follow-up through the orchestrator
+ * under the follow-up's owning user/org policy, persists the session, and
+ * transitions the durable job to done/failed. Returns a short status string.
+ */
+export async function runFollowUp(
+  app: AppContext,
+  followUpId: string,
+  requestId?: string,
+): Promise<{ status: string; sessionId?: string }> {
+  const [fu] = await app.db
+    .select()
+    .from(schema.followUps)
+    .where(eq(schema.followUps.id, followUpId))
+    .limit(1);
+  if (!fu || fu.status !== "running") {
+    return { status: fu ? `not_${fu.status}` : "not_found" };
+  }
+
+  const userRow = await getUserWithOrg(app.db, fu.userId);
+  if (!userRow || !userRow.isActive) {
+    await app.db
+      .update(schema.followUps)
+      .set({ status: "failed" })
+      .where(eq(schema.followUps.id, followUpId));
+    return { status: "user_missing" };
+  }
+  const permissions = await resolveUserPermissions(app.db, fu.userId);
+  const autonomy = autonomyLevelSchema.catch(app.config.defaultAutonomy).parse(userRow.autonomy);
+  const actor: Actor = {
+    kind: "ai_assisted",
+    userId: fu.userId,
+    organizationId: fu.organizationId,
+    displayName: userRow.displayName,
+    permissions: new Set(permissions),
+    aiRunId: crypto.randomUUID(),
+  };
+  const ctx = createRequestContext({ actor, requestId, autonomy });
+
+  // Session: prefer the follow-up's pinned session, else the user's sticky one.
+  let sessionId = fu.sessionId ?? crypto.randomUUID();
+  let dbSession = fu.sessionId ? await app.sessionStore.load(sessionId) : undefined;
+  let session: ChatSessionState;
+  if (dbSession) {
+    session = {
+      id: dbSession.id,
+      messages: dbSession.messages as ChatSessionState["messages"],
+      pending: dbSession.pending,
+      unattended: dbSession.unattended ?? false,
+      compactionState: dbSession.compactionState as ChatSessionState["compactionState"],
+    };
+  } else {
+    const sticky = await app.sessionStore.loadByOrgUser(fu.organizationId, fu.userId);
+    if (sticky) {
+      sessionId = sticky.id;
+      session = {
+        id: sticky.id,
+        messages: sticky.messages as ChatSessionState["messages"],
+        pending: sticky.pending,
+        unattended: sticky.unattended ?? false,
+        compactionState: sticky.compactionState as ChatSessionState["compactionState"],
+      };
+    } else {
+      await app.sessionStore.create(sessionId, fu.organizationId, fu.userId);
+      session = { id: sessionId, messages: [] };
+    }
+  }
+
+  let activeBranch: { name: string; code: string } | undefined;
+  const branchId = fu.branchId ?? session.activeBranchId;
+  if (branchId) {
+    const [branch] = await app.db
+      .select({ name: schema.branches.name, code: schema.branches.code })
+      .from(schema.branches)
+      .where(eq(schema.branches.id, branchId))
+      .limit(1);
+    if (branch) activeBranch = branch;
+  }
+
+  try {
+    const result = await runFollowUpTurn(
+      buildOrchestratorDeps(app, activeBranch),
+      { session, ctx, goal: fu.goal },
+    );
+    await app.sessionStore.save(
+      sessionId,
+      result.session.messages.map((m: ChatMessage) => ({
+        id: m.id,
+        role: m.role,
+        parts: m.parts,
+        createdAt: m.createdAt,
+      })),
+      result.session.pending,
+      {
+        unattended: result.session.unattended ?? false,
+        compactionState: result.session.compactionState ?? null,
+      },
+    );
+    await app.db
+      .update(schema.followUps)
+      .set({ status: "done", firedAt: new Date(), sessionId })
+      .where(eq(schema.followUps.id, followUpId));
+    return { status: "done", sessionId };
+  } catch (err) {
+    await app.db
+      .update(schema.followUps)
+      .set({ status: "failed" })
+      .where(eq(schema.followUps.id, followUpId));
+    return { status: "failed", sessionId };
+  }
+}
+
 export async function buildWorkflow(
   app: AppContext,
   request: string,
 ): Promise<{ workflow: WorkflowDefinition | null; error?: string }> {
   if (!app.workflowBuilder) {
-    return { workflow: null, error: "Nvidia NIM not configured. Set NVIDIA_API_KEY to enable workflow builder." };
+    return {
+      workflow: null,
+      error:
+        "AI provider not configured. Set CHASTE_AI_PROVIDER (e.g. nvidia_nim) and the matching API key to enable workflow builder.",
+    };
   }
 
   try {
@@ -388,6 +582,7 @@ export async function executeWorkflowRun(
   app: AppContext,
   workflowId: string,
   input: Record<string, unknown> = {},
+  options: { approvedStepIds?: string[] } = {},
 ) {
   const wf = app.workflows.get(workflowId);
   if (!wf) {
@@ -400,14 +595,16 @@ export async function executeWorkflowRun(
     helpers: { audit: app.audit, outbox: app.outbox },
   };
 
-  return executeDynamicWorkflow(wf, input, ctx);
+  return executeDynamicWorkflow(wf, input, ctx, {
+    approvedStepIds: options.approvedStepIds,
+  });
 }
 
 export function healthPayload(app: AppContext) {
   return {
     ok: true as const,
     service: "chaste-api",
-    version: "0.4.0",
+    version: pkg.version,
     config: publicConfigView(app.config),
   };
 }

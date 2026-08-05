@@ -42,7 +42,141 @@ export const customerListSchema = z.object({
   items: z.array(customerSchema),
 });
 
-export const sessionSchema = z.object({
+export const contactSchema = z.object({
+  id: z.string(),
+  customerId: z.string(),
+  name: z.string(),
+  role: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  createdAt: z.string(),
+});
+
+export type Contact = z.infer<typeof contactSchema>;
+
+export const contactListSchema = z.object({
+  items: z.array(contactSchema),
+});
+
+export type MessagingThreadSummary = {
+  id: string;
+  type: "direct" | "group";
+  name: string | null;
+  otherMemberNames: string[];
+  lastMessageBody: string | null;
+  lastMessageAt: string | null;
+  lastSenderId: string | null;
+  lastSenderName: string | null;
+  unreadCount: number;
+  isArchived: boolean;
+  updatedAt: string;
+};
+
+export type MessagingMessage = {
+  id: string;
+  threadId: string;
+  senderId: string;
+  senderName: string | null;
+  kind: string;
+  body: string;
+  parentId: string | null;
+  createdAt: string;
+  editedAt: string | null;
+  deleted: boolean;
+};
+
+export type EmailOutboxRow = {
+  id: string;
+  to: string;
+  subject: string;
+  template: string | null;
+  status: string;
+  provider: string | null;
+  providerMessageId: string | null;
+  error: string | null;
+  createdAt: string;
+  sentAt: string | null;
+};
+
+export type EmailProviderStatus = {
+  provider: "resend" | "smtp" | "console";
+  from: string | null;
+};
+
+export type BackupRow = {
+  id: string;
+  status: string;
+  provider: string | null;
+  storageKey: string | null;
+  sizeBytes: number | null;
+  checksum: string | null;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type BackupProviderStatus = {
+  provider: "s3" | "local" | "memory" | "none";
+  encryptionConfigured: boolean;
+};
+
+export type MessagingThreadDetail = {
+  id: string;
+  organizationId: string;
+  type: "direct" | "group";
+  name: string | null;
+  isArchived: boolean;
+  members: { userId: string; displayName: string; email: string; role: string }[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const interactionSchema = z.object({
+  id: z.string(),
+  customerId: z.string(),
+  kind: z.string(),
+  summary: z.string(),
+  detail: z.string().nullable().optional(),
+  createdAt: z.string(),
+});
+
+export type Interaction = z.infer<typeof interactionSchema>;
+
+export const interactionListSchema = z.object({
+  items: z.array(interactionSchema),
+});
+
+export const businessPartnerSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  type: z.enum(["person", "organization"]),
+  name: z.string(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  status: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type BusinessPartner = z.infer<typeof businessPartnerSchema>;
+
+export const businessPartnerListSchema = z.object({
+  items: z.array(businessPartnerSchema),
+});
+
+
+export type CatalogItem = {
+  id: string;
+  moduleId: string;
+  capabilityId: string;
+  name: string;
+  description: string;
+  keywords: string[];
+  implemented: boolean;
+};export const sessionSchema = z.object({
   userId: z.string(),
   organizationId: z.string(),
   email: z.string(),
@@ -139,6 +273,68 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         (d) => queryResultSchema.parse(d),
       );
     },
+    listBusinessPartners(filters?: {
+      search?: string;
+      type?: "person" | "organization";
+      includeArchived?: boolean;
+    }) {
+      const qs = new URLSearchParams();
+      if (filters?.search) qs.set("search", filters.search);
+      if (filters?.type) qs.set("type", filters.type);
+      if (filters?.includeArchived) qs.set("includeArchived", "true");
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request(
+        `/api/v1/business-partners${suffix}`,
+        { method: "GET" },
+        (d) => businessPartnerListSchema.parse(d),
+      );
+    },
+    getBusinessPartner(id: string) {
+      return request(
+        `/api/v1/business-partners/${encodeURIComponent(id)}`,
+        { method: "GET" },
+        (d) => businessPartnerSchema.parse(d),
+      );
+    },
+    createBusinessPartner(input: {
+      type?: "person" | "organization";
+      name: string;
+      email?: string;
+      phone?: string;
+      city?: string;
+      country?: string;
+      notes?: string;
+    }) {
+      return request(
+        "/api/v1/business-partners",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => businessPartnerSchema.parse(d),
+      );
+    },
+    updateBusinessPartner(
+      id: string,
+      input: {
+        name?: string;
+        email?: string;
+        phone?: string;
+        city?: string;
+        country?: string;
+        notes?: string;
+      },
+    ) {
+      return request(
+        `/api/v1/business-partners/${encodeURIComponent(id)}`,
+        { method: "PATCH", body: JSON.stringify(input) },
+        (d) => businessPartnerSchema.parse(d),
+      );
+    },
+    deleteBusinessPartner(id: string) {
+      return request(
+        `/api/v1/business-partners/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+        (d) => d as { businessPartnerId: string; deleted: true },
+      );
+    },
     listCustomers() {
       return request("/api/v1/crm/customers", { method: "GET" }, (d) =>
         customerListSchema.parse(d),
@@ -149,6 +345,87 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         "/api/v1/crm/customers",
         { method: "POST", body: JSON.stringify(input) },
         (d) => customerSchema.parse(d),
+      );
+    },
+    listCustomersFiltered(filters?: { search?: string; status?: string; includeDeleted?: boolean }) {
+      const qs = new URLSearchParams();
+      if (filters?.search) qs.set("search", filters.search);
+      if (filters?.status) qs.set("status", filters.status);
+      if (filters?.includeDeleted) qs.set("includeDeleted", "true");
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return request(
+        `/api/v1/crm/customers${suffix}`,
+        { method: "GET" },
+        (d) => customerListSchema.parse(d),
+      );
+    },
+    getCustomer(id: string) {
+      return request(
+        `/api/v1/crm/customers/${encodeURIComponent(id)}`,
+        { method: "GET" },
+        (d) => customerSchema.parse(d),
+      );
+    },
+    updateCustomer(id: string, input: { name?: string; email?: string; city?: string; country?: string }) {
+      return request(
+        `/api/v1/crm/customers/${encodeURIComponent(id)}`,
+        { method: "PATCH", body: JSON.stringify(input) },
+        (d) => customerSchema.parse(d),
+      );
+    },
+    setCustomerStatus(id: string, input: { status: string; note?: string }) {
+      return request(
+        `/api/v1/crm/customers/${encodeURIComponent(id)}/status`,
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => customerSchema.parse(d),
+      );
+    },
+    deleteCustomer(id: string) {
+      return request(
+        `/api/v1/crm/customers/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+        (d) => d as { customerId: string; deleted: true },
+      );
+    },
+    listContacts(customerId: string) {
+      return request(
+        `/api/v1/crm/customers/${encodeURIComponent(customerId)}/contacts`,
+        { method: "GET" },
+        (d) => contactListSchema.parse(d),
+      );
+    },
+    createContact(
+      customerId: string,
+      input: { name: string; role?: string; email?: string; phone?: string },
+    ) {
+      return request(
+        `/api/v1/crm/customers/${encodeURIComponent(customerId)}/contacts`,
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => contactSchema.parse(d),
+      );
+    },
+    deleteContact(contactId: string) {
+      return request(
+        `/api/v1/crm/contacts/${encodeURIComponent(contactId)}`,
+        { method: "DELETE" },
+        (d) => d as { contactId: string; deleted: true },
+      );
+    },
+    listInteractions(customerId: string) {
+      return request(
+        `/api/v1/crm/customers/${encodeURIComponent(customerId)}/interactions`,
+        { method: "GET" },
+        (d) => interactionListSchema.parse(d),
+      );
+    },
+    logInteraction(
+      customerId: string,
+      input: { kind?: "note" | "email" | "call" | "meeting"; summary: string; detail?: string },
+    ) {
+      return request(
+        `/api/v1/crm/customers/${encodeURIComponent(customerId)}/interactions`,
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => interactionSchema.parse(d),
       );
     },
     listAccounts() {
@@ -432,19 +709,32 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         (d) => d as { id: string },
       );
     },
-    runWorkflow(id: string, input: Record<string, unknown>) {
+    runWorkflow(
+      id: string,
+      input: Record<string, unknown> = {},
+      options: { approvedStepIds?: string[]; approveStepId?: string } = {},
+    ) {
       return request(
         `/api/v1/workflows/${encodeURIComponent(id)}/execute`,
-        { method: "POST", body: JSON.stringify({ input }) },
-        (d) => d as {
-          runId?: string;
-          status: string;
-          steps?: unknown[];
-          pendingApproval?: { stepId: string; command?: string; input?: unknown };
-          results?: unknown[];
-          startedAt?: string;
-          finishedAt?: string;
+        {
+          method: "POST",
+          body: JSON.stringify({
+            input,
+            approvedStepIds: options.approvedStepIds,
+            approveStepId: options.approveStepId,
+          }),
         },
+        (d) =>
+          d as {
+            success?: boolean;
+            runId?: string;
+            status?: string;
+            stepResults?: { stepId: string; status: string; error?: string; output?: unknown }[];
+            steps?: unknown[];
+            error?: string;
+            pendingApproval?: { stepId: string; description?: string; approveBy?: string };
+            output?: Record<string, unknown>;
+          },
       );
     },
     chat(body: {
@@ -508,6 +798,346 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
           stepCount: number;
         }[];
       });
+    },
+    listBranches() {
+      return request("/api/v1/branches", { method: "GET" }, (d) => d as {
+        branches: {
+          id: string;
+          name: string;
+          code: string;
+          timezone: string | null;
+          active: boolean;
+          isActiveBranch: boolean;
+          grantType: "all" | "explicit";
+        }[];
+      });
+    },
+    createBranch(input: { name: string; code: string; timezone?: string; parentBranchId?: string }) {
+      return request(
+        "/api/v1/branches",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => d as { id: string; name: string; code: string },
+      );
+    },
+    setActiveBranch(input: { branchId: string }) {
+      return request(
+        "/api/v1/branches/switch",
+        { method: "POST", body: JSON.stringify(input) },
+        (d) => d as { activeBranchId: string },
+      );
+    },
+    listNotifications(unreadOnly = false) {
+      return request(
+        `/api/v1/notifications${unreadOnly ? "?unreadOnly=true" : ""}`,
+        { method: "GET" },
+        (d) => d as {
+          notifications: {
+            id: string;
+            kind: string;
+            title: string;
+            body: string | null;
+            href: string | null;
+            resourceType: string | null;
+            resourceId: string | null;
+            read: boolean;
+            createdAt: string;
+          }[];
+        },
+      );
+    },
+    markNotificationRead(notificationId: string) {
+      return request(
+        `/api/v1/notifications/${encodeURIComponent(notificationId)}/read`,
+        { method: "POST" },
+        (d) => d as { ok: boolean },
+      );
+    },
+    markAllNotificationsRead() {
+      return request(
+        "/api/v1/notifications/read-all",
+        { method: "POST" },
+        (d) => d as { ok: boolean },
+      );
+    },
+    listReminders(status?: string) {
+      return request(
+        `/api/v1/reminders${status ? `?status=${status}` : ""}`,
+        { method: "GET" },
+        (d) => d as any,
+      );
+    },
+    createReminder(input: {
+      title: string;
+      body?: string;
+      fireAt: string;
+      channel?: "in_app" | "email" | "both";
+      branchId?: string;
+    }) {
+      return request("/api/v1/reminders", { method: "POST", body: JSON.stringify(input) }, (d) => d as any);
+    },
+    cancelReminder(reminderId: string) {
+      return request(
+        `/api/v1/reminders/${encodeURIComponent(reminderId)}/cancel`,
+        { method: "POST" },
+        (d) => d as { cancelled: boolean },
+      );
+    },
+    listCalendarEvents(input: { from?: string; to?: string; branchId?: string } = {}) {
+      const qs = new URLSearchParams(
+        Object.entries(input).filter(([, v]) => v !== undefined) as [string, string][],
+      ).toString();
+      return request(
+        `/api/v1/calendar${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+        (d) => d as any,
+      );
+    },
+    createCalendarEvent(input: {
+      title: string;
+      startsAt: string;
+      endsAt: string;
+      timezone?: string;
+      description?: string;
+      branchId?: string;
+      attendees?: string[];
+    }) {
+      return request("/api/v1/calendar/events", { method: "POST", body: JSON.stringify(input) }, (d) => d as any);
+    },
+    cancelCalendarEvent(eventId: string) {
+      return request(
+        `/api/v1/calendar/events/${encodeURIComponent(eventId)}/cancel`,
+        { method: "POST" },
+        (d) => d as { cancelled: boolean },
+      );
+    },
+    listMessagingThreads(includeArchived = false) {
+      return request(
+        "/api/v1/queries/messaging.thread.list",
+        { method: "POST", body: JSON.stringify({ input: { includeArchived } }) },
+        (d) => d as { items: MessagingThreadSummary[] },
+      );
+    },
+    messagingUnreadCount() {
+      return request(
+        "/api/v1/queries/messaging.unread.count",
+        { method: "POST", body: JSON.stringify({ input: {} }) },
+        (d) => d as { unread: number },
+      );
+    },
+    getMessagingThread(threadId: string, opts: { before?: string; limit?: number } = {}) {
+      return request(
+        "/api/v1/queries/messaging.thread.get",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            input: { threadId, before: opts.before, limit: opts.limit },
+          }),
+        },
+        (d) =>
+          d as {
+            thread: MessagingThreadDetail;
+            messages: MessagingMessage[];
+            nextCursor: string | null;
+          },
+      );
+    },
+    createMessagingThread(input: {
+      kind: "direct" | "group";
+      name?: string;
+      memberIds: string[];
+    }) {
+      return request(
+        "/api/v1/commands/messaging.thread.create",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { data: MessagingThreadDetail },
+      );
+    },
+    sendMessagingMessage(input: { threadId: string; body: string; parentId?: string }) {
+      return request(
+        "/api/v1/commands/messaging.thread.send",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { data: MessagingMessage },
+      );
+    },
+    addMessagingMember(input: { threadId: string; userId: string }) {
+      return request(
+        "/api/v1/commands/messaging.thread.add_member",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { data: MessagingThreadDetail },
+      );
+    },
+    removeMessagingMember(input: { threadId: string; userId: string }) {
+      return request(
+        "/api/v1/commands/messaging.thread.remove_member",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { data: MessagingThreadDetail },
+      );
+    },
+    leaveMessagingThread(input: { threadId: string }) {
+      return request(
+        "/api/v1/commands/messaging.thread.leave",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { data: { threadId: string; left: boolean } },
+      );
+    },
+    renameMessagingThread(input: { threadId: string; name: string }) {
+      return request(
+        "/api/v1/commands/messaging.thread.rename",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { data: MessagingThreadDetail },
+      );
+    },
+    archiveMessagingThread(input: { threadId: string; archived: boolean }) {
+      return request(
+        "/api/v1/commands/messaging.thread.archive",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { data: MessagingThreadDetail },
+      );
+    },
+    markMessagingThreadRead(input: { threadId: string; lastReadMessageId?: string }) {
+      return request(
+        "/api/v1/commands/messaging.thread.mark_read",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { data: { threadId: string; read: boolean } },
+      );
+    },
+    listDirectoryUsers() {
+      return request(
+        "/api/v1/queries/core.user.list",
+        { method: "POST", body: JSON.stringify({ input: {} }) },
+        (d) => d as { users: { id: string; email: string; displayName: string; isActive: boolean }[] },
+      );
+    },
+    listCapabilityGaps(status?: string) {
+      return request(
+        "/api/v1/queries/core.capability.gap.list",
+        { method: "POST", body: JSON.stringify({ input: status ? { status } : {} }) },
+        (d) => d as {
+          tickets: {
+            id: string;
+            organizationId: string;
+            status: string;
+            proposedCapabilityId: string;
+            title: string;
+            abstractRequirement: string;
+            suggestedModuleId: string | null;
+            deploymentTarget: string;
+            codingAgent: string | null;
+            artifactRef: string | null;
+            createdAt: string;
+          }[];
+        },
+      );
+    },
+    createCapabilityGap(input: {
+      proposedCapabilityId: string;
+      title: string;
+      abstractRequirement: string;
+      acceptanceCriteria?: string[];
+      exampleScenarios?: string[];
+      nonGoals?: string[];
+      deploymentTarget?: string;
+    }) {
+      return request(
+        "/api/v1/commands/core.capability.gap.create",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    confirmCapabilityGap(input: { ticketId: string; suggestedModuleId?: string; deploymentTarget?: string }) {
+      return request(
+        "/api/v1/commands/core.capability.gap.confirm",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => commandResultSchema.parse(d),
+      );
+    },
+    listCapabilityCatalog(moduleId?: string) {
+      return request(
+        "/api/v1/queries/core.capability.catalog.list",
+        { method: "POST", body: JSON.stringify({ input: moduleId ? { moduleId } : {} }) },
+        (d) => d as { items: CatalogItem[] },
+      );
+    },
+    searchCapabilityCatalog(input: { query: string; moduleId?: string }) {
+      return request(
+        "/api/v1/queries/core.capability.catalog.search",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { items: CatalogItem[] },
+      );
+    },
+    recommendCapability(input: {
+      abstractRequirement: string;
+      acceptanceCriteria?: string[];
+      exampleScenarios?: string[];
+      suggestedModuleId?: string;
+    }) {
+      return request(
+        "/api/v1/queries/core.capability.gap.recommend",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) =>
+          d as {
+            deploymentTarget: string;
+            suggestedModuleId: string | null;
+            rationale: string[];
+            signals: string[];
+          },
+      );
+    },
+    listEmailOutbox(input: { status?: string; limit?: number } = {}) {
+      return request(
+        "/api/v1/queries/core.email.outbox.list",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { emails: EmailOutboxRow[] },
+      );
+    },
+    getEmailProviderStatus() {
+      return request(
+        "/api/v1/queries/core.email.provider.status",
+        { method: "POST", body: JSON.stringify({ input: {} }) },
+        (d) => d as EmailProviderStatus,
+      );
+    },
+    retryEmail(emailId: string) {
+      return request(
+        "/api/v1/commands/core.email.retry",
+        { method: "POST", body: JSON.stringify({ input: { emailId } }) },
+        (d) => d as { data: EmailOutboxRow },
+      );
+    },
+    sendEmail(input: { to: string; subject: string; body: string }) {
+      return request(
+        "/api/v1/commands/core.email.send",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { data: EmailOutboxRow },
+      );
+    },
+    listBackups(input: { status?: string; limit?: number } = {}) {
+      return request(
+        "/api/v1/queries/core.backup.list",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { backups: BackupRow[] },
+      );
+    },
+    createBackup() {
+      return request(
+        "/api/v1/commands/core.backup.create",
+        { method: "POST", body: JSON.stringify({ input: {} }) },
+        (d) => d as { data: BackupRow },
+      );
+    },
+    restoreBackup(backupId: string) {
+      return request(
+        "/api/v1/commands/core.backup.restore",
+        { method: "POST", body: JSON.stringify({ input: { backupId } }) },
+        (d) => d as { data: { organizationId: string; restoredTables: number; rowCount: number } },
+      );
+    },
+    getBackupProviderStatus() {
+      return request(
+        "/api/v1/queries/core.backup.provider.status",
+        { method: "POST", body: JSON.stringify({ input: {} }) },
+        (d) => d as BackupProviderStatus,
+      );
     },
   };
 }

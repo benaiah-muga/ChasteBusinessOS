@@ -37,6 +37,124 @@ async function main() {
     return r.json();
   });
   results.customer = (customer as { name: string }).name;
+  const customerId = (customer as { id: string }).id;
+
+  // CRM depth contract (update, status, contact, interaction, soft delete)
+  const updated = await fetch(`${base}/api/v1/crm/customers/${customerId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ city: "Mombasa", name: "E2E Acme Updated" }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`update customer ${r.status} ${await r.text()}`);
+    return r.json();
+  });
+  results.crmUpdatedCity = (updated as { city: string }).city;
+
+  const moved = await fetch(`${base}/api/v1/crm/customers/${customerId}/status`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status: "negotiable", note: "Moved in e2e" }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`setStatus ${r.status} ${await r.text()}`);
+    return r.json();
+  });
+  results.crmStatus = (moved as { status: string }).status;
+
+  const contact = await fetch(`${base}/api/v1/crm/customers/${customerId}/contacts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Jane Ops", role: "Procurement", email: "jane@acme.example" }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`create contact ${r.status} ${await r.text()}`);
+    return r.json();
+  });
+  results.crmContact = (contact as { name: string }).name;
+
+  const contacts = await fetch(`${base}/api/v1/crm/customers/${customerId}/contacts`).then(
+    (r) => r.json() as Promise<{ items: unknown[] }>,
+  );
+  results.crmContactCount = contacts.items.length;
+
+  const interaction = await fetch(`${base}/api/v1/crm/customers/${customerId}/interactions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "call", summary: "Discovery call", detail: "Discussed needs" }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`log interaction ${r.status} ${await r.text()}`);
+    return r.json();
+  });
+  results.crmInteraction = (interaction as { kind: string }).kind;
+
+  const interactions = await fetch(`${base}/api/v1/crm/customers/${customerId}/interactions`).then(
+    (r) => r.json() as Promise<{ items: unknown[] }>,
+  );
+  results.crmInteractionCount = interactions.items.length;
+
+  const archived = await fetch(`${base}/api/v1/crm/customers/${customerId}`, {
+    method: "DELETE",
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`delete customer ${r.status} ${await r.text()}`);
+    return r.json();
+  });
+  results.crmDeleted = (archived as { deleted: boolean }).deleted;
+
+  const afterDelete = await fetch(
+    `${base}/api/v1/crm/customers?search=E2E%20Acme%20Updated`,
+  ).then((r) => r.json() as Promise<{ items: { name: string; status: string }[] }>);
+  results.crmHiddenAfterDelete = afterDelete.items.length === 0;
+
+  // Business partner master data (ADR 0009): create, update, list-filter, archive
+  const bp = await fetch(`${base}/api/v1/business-partners`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "organization", name: "E2E Partner Co", email: "ops@partner.example", city: "Kisumu" }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`create bp ${r.status} ${await r.text()}`);
+    return r.json();
+  });
+  results.bpCreated = (bp as { name: string }).name;
+  const bpId = (bp as { id: string }).id;
+
+  const bpUpdated = await fetch(`${base}/api/v1/business-partners/${bpId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ city: "Eldoret", notes: "Updated in e2e" }),
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`update bp ${r.status} ${await r.text()}`);
+    return r.json();
+  });
+  results.bpUpdatedCity = (bpUpdated as { city: string }).city;
+
+  const bpList = await fetch(`${base}/api/v1/business-partners?type=organization&search=Partner`).then(
+    (r) => r.json() as Promise<{ items: { id: string }[] }>,
+  );
+  results.bpListFound = bpList.items.length === 1 && bpList.items[0].id === bpId;
+
+  const bpPerson = await fetch(`${base}/api/v1/business-partners`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "person", name: "E2E Jane Smith", email: "jane@example.com" }),
+  }).then((r) => r.json() as Promise<{ id: string; type: string }>);
+
+  const bpPeopleOnly = await fetch(`${base}/api/v1/business-partners?type=person`).then(
+    (r) => r.json() as Promise<{ items: { type: string }[] }>,
+  );
+  results.bpPeopleFilter = bpPeopleOnly.items.every((p) => p.type === "person");
+  results.bpPersonType = bpPerson.type;
+
+  const bpArchived = await fetch(`${base}/api/v1/business-partners/${bpId}`, {
+    method: "DELETE",
+  }).then(async (r) => {
+    if (!r.ok) throw new Error(`archive bp ${r.status} ${await r.text()}`);
+    return r.json();
+  });
+  results.bpArchived = (bpArchived as { deleted: boolean }).deleted;
+
+  const bpAfterArchive = await fetch(`${base}/api/v1/business-partners?search=Partner Co`).then(
+    (r) => r.json() as Promise<{ items: unknown[] }>,
+  );
+  results.bpHiddenAfterArchive = bpAfterArchive.items.length === 0;
+
 
   const invoice = await fetch(`${base}/api/v1/accounting/invoices`, {
     method: "POST",

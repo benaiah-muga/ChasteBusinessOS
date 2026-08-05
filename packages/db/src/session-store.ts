@@ -20,13 +20,22 @@ export interface DbSession {
   id: string;
   messages: StoredMessage[];
   pending?: { id: string; command: string; input: unknown; createdAt: string };
+  /** R3 — session is unattended: approvals park in the cross-session Inbox. */
+  unattended?: boolean;
+  /** R6 — compaction watermark/summary state for the session. */
+  compactionState?: unknown | null;
   createdAt: Date;
 }
 
 export interface SessionStore {
   load(sessionId: string): Promise<DbSession | undefined>;
   loadByOrgUser(orgId: string, userId: string): Promise<DbSession | undefined>;
-  save(sessionId: string, messages: StoredMessage[], pending?: { id: string; command: string; input: unknown; createdAt: string }): Promise<void>;
+  save(
+    sessionId: string,
+    messages: StoredMessage[],
+    pending?: { id: string; command: string; input: unknown; createdAt: string },
+    opts?: { unattended?: boolean; compactionState?: unknown | null },
+  ): Promise<void>;
   create(sessionId: string, orgId: string, userId: string): Promise<void>;
 }
 
@@ -55,6 +64,8 @@ export class DbSessionStore implements SessionStore {
         id: sessionId,
         messages: [],
         pending: (sess.pending as DbSession["pending"]) ?? undefined,
+        unattended: sess.unattended ?? undefined,
+        compactionState: sess.compactionState,
         createdAt: sess.createdAt,
       };
     }
@@ -75,6 +86,8 @@ export class DbSessionStore implements SessionStore {
       id: sessionId,
       messages,
       pending: (sess.pending as DbSession["pending"]) ?? undefined,
+      unattended: sess.unattended ?? undefined,
+      compactionState: sess.compactionState,
       createdAt: sess.createdAt,
     };
   }
@@ -95,7 +108,12 @@ export class DbSessionStore implements SessionStore {
     return this.load(latest.id);
   }
 
-  async save(sessionId: string, messages: StoredMessage[], pending?: { id: string; command: string; input: unknown; createdAt: string }): Promise<void> {
+  async save(
+    sessionId: string,
+    messages: StoredMessage[],
+    pending?: { id: string; command: string; input: unknown; createdAt: string },
+    opts?: { unattended?: boolean; compactionState?: unknown | null },
+  ): Promise<void> {
     const existing = await this.db
       .select()
       .from(chatSessions)
@@ -106,10 +124,14 @@ export class DbSessionStore implements SessionStore {
       throw new Error(`Session ${sessionId} does not exist. Call create() first.`);
     }
 
-    // Update pending state on the session
+    // Update pending + runtime state on the session
     await this.db
       .update(chatSessions)
-      .set({ pending: pending ?? null })
+      .set({
+        pending: pending ?? null,
+        unattended: opts?.unattended ?? false,
+        compactionState: opts?.compactionState ?? null,
+      })
       .where(eq(chatSessions.id, sessionId));
 
     // Delete existing messages

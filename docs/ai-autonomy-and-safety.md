@@ -26,3 +26,20 @@ must show a clear warning at enablement time and keep a complete audit trail.
 
 Specialists (CRM, Accounting, …) only narrow tools and prompts. Safety still
 applies at the orchestrator and command bus.
+
+## Harness boundaries
+
+The AI layer is a **harness** for operating and (optionally) extending the
+product. See [VISION.md](../VISION.md) and [ADR 0007](./adr/0007-harness-memory-and-self-dev.md).
+
+Additional rules:
+
+- **Security-sensitive** actions (role elevation, secret access, break-glass)
+  force a human confirm floor; never full autonomous by default.
+- **Missing capability** must become a Capability Gap Ticket (or honest refusal),
+  not a fabricated tool call.
+- **Self-development** (coding-agent handoff) may only write allowed surfaces,
+  must pass lint/typecheck/test gates, and still installs modules through the
+  same permissioned install path as humans.
+- **Memory** may inform the model; it must not replace SoR reads/writes for
+  balances, stock, or legal records.

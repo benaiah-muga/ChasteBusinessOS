@@ -16,8 +16,32 @@ export const PERMISSION_CATALOG: { permission: string; module: string; descripti
   { permission: "core.marketplace.read", module: "core", description: "Browse marketplace" },
   { permission: "core.settings.read", module: "core", description: "Read org settings" },
   { permission: "core.settings.manage", module: "core", description: "Manage org settings" },
+  { permission: "core.branch.read", module: "core", description: "List and view branches" },
+  { permission: "core.branch.manage", module: "core", description: "Create and update branches" },
+  { permission: "core.branch.all", module: "core", description: "Access all branches without explicit grant" },
+  { permission: "core.capability.gap.read", module: "core", description: "View capability gap tickets" },
+  { permission: "core.capability.gap.manage", module: "core", description: "Create and update capability gap tickets" },
+  { permission: "core.capability.catalog.read", module: "core", description: "Search the machine capability catalog" },
+  { permission: "core.notification.read", module: "core", description: "Read own notifications" },
+  { permission: "core.reminder.write", module: "core", description: "Set and manage reminders" },
+  { permission: "core.followup.write", module: "core", description: "Schedule agent follow-ups" },
+  { permission: "core.calendar.read", module: "core", description: "See calendars and events in scope" },
+  { permission: "core.calendar.write", module: "core", description: "Create and update calendar events" },
+  { permission: "core.email.send", module: "core", description: "Send outbound email" },
+  { permission: "messaging.thread.read", module: "messaging", description: "List threads and read messages you belong to" },
+  { permission: "messaging.thread.write", module: "messaging", description: "Send messages and open direct conversations" },
+  { permission: "messaging.group.create", module: "messaging", description: "Create group conversations" },
+  { permission: "messaging.group.manage", module: "messaging", description: "Add/remove members, rename, archive groups" },
+  { permission: "core.marketplace.publish", module: "core", description: "Publish a module listing from a gap ticket" },
+  { permission: "core.bpartner.manage", module: "core", description: "Create and update business partners" },
+  { permission: "core.bpartner.read", module: "core", description: "Read business partners" },
   { permission: "crm.customer.create", module: "crm", description: "Create customers" },
   { permission: "crm.customer.read", module: "crm", description: "Read customers" },
+  { permission: "crm.customer.update", module: "crm", description: "Update customers, change status" },
+  { permission: "crm.contact.manage", module: "crm", description: "Manage customer contacts" },
+  { permission: "crm.contact.read", module: "crm", description: "Read customer contacts" },
+  { permission: "crm.interaction.write", module: "crm", description: "Log customer interactions" },
+  { permission: "crm.interaction.read", module: "crm", description: "Read customer interactions" },
   { permission: "acc.account.manage", module: "accounting", description: "Manage chart of accounts" },
   { permission: "acc.account.read", module: "accounting", description: "Read accounts" },
   { permission: "acc.journal.post", module: "accounting", description: "Post journal entries" },
@@ -88,6 +112,14 @@ const MARKETPLACE = [
     version: "0.1.0",
     summary: "Bills of materials and work orders",
     category: "operations",
+    kind: "builtin" as const,
+  },
+  {
+    moduleId: "messaging",
+    name: "Messaging",
+    version: "0.1.0",
+    summary: "Direct and group conversations for your organization",
+    category: "collaboration",
     kind: "builtin" as const,
   },
   {
@@ -210,6 +242,38 @@ export async function bootstrapPlatform(db: Db, cfg: AppConfig): Promise<Bootstr
       });
   }
 
+  // Default HQ branch + grant admin access
+  let [hqBranch] = await db
+    .select()
+    .from(schema.branches)
+    .where(eq(schema.branches.organizationId, org.id))
+    .limit(1);
+  if (!hqBranch) {
+    const [created] = await db
+      .insert(schema.branches)
+      .values({
+        organizationId: org.id,
+        name: "Headquarters",
+        code: "HQ",
+        timezone: "UTC",
+        active: true,
+      })
+      .returning();
+    hqBranch = created!;
+  }
+  await db
+    .insert(schema.userBranchAccess)
+    .values({ userId: admin.id, branchId: hqBranch.id })
+    .onConflictDoNothing({
+      target: [schema.userBranchAccess.userId, schema.userBranchAccess.branchId],
+    });
+  if (!admin.activeBranchId) {
+    await db
+      .update(schema.users)
+      .set({ activeBranchId: hqBranch.id })
+      .where(eq(schema.users.id, admin.id));
+  }
+
   // Operator role (read-heavy)
   let [opsRole] = await db
     .select()
@@ -229,7 +293,12 @@ export async function bootstrapPlatform(db: Db, cfg: AppConfig): Promise<Bootstr
       .returning();
     opsRole = created!;
     const opsPerms = ALL_PERMS.filter(
-      (p) => p.endsWith(".read") || p.includes(".create") || p.includes(".move") || p.includes(".run"),
+      (p) =>
+        p.endsWith(".read") ||
+        p.includes(".create") ||
+        p.includes(".move") ||
+        p.includes(".run") ||
+        p.includes(".write"),
     );
     for (const permission of opsPerms) {
       await db.insert(schema.rolePermissions).values({ roleId: opsRole.id, permission });

@@ -48,6 +48,8 @@ pnpm db:generate      # Generate migrations after schema changes
 - Domain specialists are tool/profile scopes, not private backends
 - Autonomy gates: recommend → confirm → guarded_auto → full_autonomous
 - Set `CHASTE_AI_PROVIDER=none` for deterministic planning
+- Product direction (harness, memory, gaps, self-dev): `docs/product-architecture-next.md` and `docs/specs/`
+- When implementing modules from gap tickets: follow `skills/module-author` + `skills/command-safety`; prefer extensions/marketplace over core bloat
 
 ## Architecture Constraints
 
@@ -58,6 +60,8 @@ pnpm db:generate      # Generate migrations after schema changes
 | AI tools | Wrap commands; never raw SQL |
 | Specialists | Tool/profile scopes, not private backends |
 | Events | Publish via transactional outbox after commit |
+| Missing features | Capability gap ticket -- do not hallucinate commands |
+| Self-dev | Sandbox/worktree + tests; no privilege bypass |
 
 ## File Locations
 

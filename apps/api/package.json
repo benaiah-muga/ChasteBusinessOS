@@ -22,11 +22,12 @@
     "@chaste/module-hr": "workspace:*",
     "@chaste/module-inventory": "workspace:*",
     "@chaste/module-manufacturing": "workspace:*",
+    "@chaste/module-messaging": "workspace:*",
     "@chaste/module-platform": "workspace:*",
     "@chaste/module-purchasing": "workspace:*",
     "@chaste/ui-schema": "workspace:*",
     "@fastify/cors": "^10.0.1",
-    "@mastra/fastify": "^1.4.7",
+    "drizzle-orm": "^0.38.3",
     "fastify": "^5.2.0",
     "zod": "^3.24.1"
   },

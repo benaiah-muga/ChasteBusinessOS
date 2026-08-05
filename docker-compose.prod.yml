@@ -1,0 +1,171 @@
+# Production Compose — ChasteBusinessOS (api + web + worker + postgres + redis).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Secrets come from the host environment (or a secret manager injected as env);
+# every value below has a safe dev default. For real deployments set:
+#   DATABASE_URL, CHASTE_SESSION_SECRET, and optionally CHASTE_AI_*,
+#   CHASTE_RESEND_*/CHASTE_SMTP_*, CHASTE_BACKUP_KEY + CHASTE_S3_*.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chaste}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chaste}
+      POSTGRES_DB: ${POSTGRES_DB:-chaste}
+    volumes:
+      - chaste_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chaste} -d ${POSTGRES_DB:-chaste}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - chaste_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://chaste:chaste@postgres:5432/chaste}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: api
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3001
+      API_URL: ${API_URL:-http://localhost:3001}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      DATABASE_URL: ${DATABASE_URL:-postgres://chaste:chaste@postgres:5432/chaste}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      CHASTE_SESSION_SECRET: ${CHASTE_SESSION_SECRET:-dev-only-change-me-32chars!!}
+      CHASTE_REGION: ${CHASTE_REGION:-local}
+      CHASTE_REGIONS: ${CHASTE_REGIONS:-local}
+      CHASTE_BOOTSTRAP: ${CHASTE_BOOTSTRAP:-true}
+      CHASTE_ORG_NAME: ${CHASTE_ORG_NAME:-Primary Organization}
+      CHASTE_ADMIN_EMAIL: ${CHASTE_ADMIN_EMAIL:-admin@localhost}
+      CHASTE_ADMIN_NAME: ${CHASTE_ADMIN_NAME:-System Admin}
+      CHASTE_AI_PROVIDER: ${CHASTE_AI_PROVIDER:-none}
+      CHASTE_AI_MODEL: ${CHASTE_AI_MODEL:-meta/llama-3.1-8b-instruct}
+      CHASTE_AI_BASE_URL: ${CHASTE_AI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      CHASTE_RESEND_API_KEY: ${CHASTE_RESEND_API_KEY:-}
+      CHASTE_RESEND_FROM: ${CHASTE_RESEND_FROM:-}
+      CHASTE_SMTP_HOST: ${CHASTE_SMTP_HOST:-}
+      CHASTE_SMTP_PORT: ${CHASTE_SMTP_PORT:-587}
+      CHASTE_SMTP_SECURE: ${CHASTE_SMTP_SECURE:-false}
+      CHASTE_SMTP_USER: ${CHASTE_SMTP_USER:-}
+      CHASTE_SMTP_PASS: ${CHASTE_SMTP_PASS:-}
+      CHASTE_SMTP_FROM: ${CHASTE_SMTP_FROM:-}
+      CHASTE_EMAIL_FROM: ${CHASTE_EMAIL_FROM:-}
+      CHASTE_BUZZ_WEBHOOK_SECRET: ${CHASTE_BUZZ_WEBHOOK_SECRET:-}
+      CHASTE_BUZZ_OUTBOUND_WEBHOOK_URL: ${CHASTE_BUZZ_OUTBOUND_WEBHOOK_URL:-}
+      CHASTE_BACKUP_KEY: ${CHASTE_BACKUP_KEY:-}
+      CHASTE_BACKUP_DIR: ${CHASTE_BACKUP_DIR:-}
+      CHASTE_S3_BUCKET: ${CHASTE_S3_BUCKET:-}
+      CHASTE_S3_REGION: ${CHASTE_S3_REGION:-us-east-1}
+      CHASTE_S3_ACCESS_KEY_ID: ${CHASTE_S3_ACCESS_KEY_ID:-}
+      CHASTE_S3_SECRET_ACCESS_KEY: ${CHASTE_S3_SECRET_ACCESS_KEY:-}
+      CHASTE_S3_SESSION_TOKEN: ${CHASTE_S3_SESSION_TOKEN:-}
+      CHASTE_S3_ENDPOINT: ${CHASTE_S3_ENDPOINT:-}
+    ports:
+      - "${API_BIND:-3001}:3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgres://chaste:chaste@postgres:5432/chaste}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      CHASTE_REGION: ${CHASTE_REGION:-local}
+      CHASTE_REGIONS: ${CHASTE_REGIONS:-local}
+      CHASTE_AI_PROVIDER: ${CHASTE_AI_PROVIDER:-none}
+      CHASTE_AI_MODEL: ${CHASTE_AI_MODEL:-meta/llama-3.1-8b-instruct}
+      CHASTE_AI_BASE_URL: ${CHASTE_AI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      CHASTE_RESEND_API_KEY: ${CHASTE_RESEND_API_KEY:-}
+      CHASTE_RESEND_FROM: ${CHASTE_RESEND_FROM:-}
+      CHASTE_SMTP_HOST: ${CHASTE_SMTP_HOST:-}
+      CHASTE_SMTP_PORT: ${CHASTE_SMTP_PORT:-587}
+      CHASTE_SMTP_USER: ${CHASTE_SMTP_USER:-}
+      CHASTE_SMTP_PASS: ${CHASTE_SMTP_PASS:-}
+      CHASTE_SMTP_FROM: ${CHASTE_SMTP_FROM:-}
+      CHASTE_EMAIL_FROM: ${CHASTE_EMAIL_FROM:-}
+      CHASTE_BUZZ_WEBHOOK_SECRET: ${CHASTE_BUZZ_WEBHOOK_SECRET:-}
+      CHASTE_BUZZ_OUTBOUND_WEBHOOK_URL: ${CHASTE_BUZZ_OUTBOUND_WEBHOOK_URL:-}
+      CHASTE_BACKUP_KEY: ${CHASTE_BACKUP_KEY:-}
+      CHASTE_BACKUP_DIR: ${CHASTE_BACKUP_DIR:-}
+      CHASTE_S3_BUCKET: ${CHASTE_S3_BUCKET:-}
+      CHASTE_S3_REGION: ${CHASTE_S3_REGION:-us-east-1}
+      CHASTE_S3_ACCESS_KEY_ID: ${CHASTE_S3_ACCESS_KEY_ID:-}
+      CHASTE_S3_SECRET_ACCESS_KEY: ${CHASTE_S3_SECRET_ACCESS_KEY:-}
+      CHASTE_S3_SESSION_TOKEN: ${CHASTE_S3_SESSION_TOKEN:-}
+      CHASTE_S3_ENDPOINT: ${CHASTE_S3_ENDPOINT:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        # Baked into browser bundles; the SSR server reads API_URL at runtime.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    environment:
+      NODE_ENV: production
+      API_URL: ${API_URL:-http://localhost:3001}
+    ports:
+      - "${WEB_BIND:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  chaste_pg:
+  chaste_redis:

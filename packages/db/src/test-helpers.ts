@@ -9,8 +9,14 @@ export async function cleanupTestData(db: Db): Promise<void> {
   await db.execute(
     sql`TRUNCATE TABLE
       audit_log, outbox_events, org_memories,
-      chat_sessions, chat_messages, ai_explanations,
-      crm_customers,
+      chat_feedback, chat_messages, chat_sessions, ai_explanations,
+      notifications, capability_gap_tickets, reminders, follow_ups,
+      msg_reads, msg_messages, msg_thread_members, msg_threads,
+      email_outbox, backups, calendars, calendar_events,
+      user_branch_access, branches,
+      pending_approvals, ai_wakes, ai_skills, channel_session_bindings,
+      business_partners,
+      crm_customers, crm_contacts, crm_interactions,
       inv_stock_moves, inv_stock_levels, inv_warehouses, inv_products,
       acc_journal_lines, acc_journal_entries, acc_invoices, acc_accounts,
       hr_payroll_runs, hr_employees,

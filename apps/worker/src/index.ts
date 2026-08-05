@@ -8,12 +8,20 @@
 import { loadConfig } from "@chaste/config";
 import { createDb, PostgresOutboxWriter } from "@chaste/db";
 import { createDefaultProcessor } from "@chaste/kernel";
+import { createBackupProcessor, createEmailProcessor, createScheduleProcessor } from "@chaste/module-platform";
+import { createFollowUpHarness, runFollowUp } from "./harness.js";
+import { registerBuzzMirror } from "./buzz.js";
 
 async function main() {
   const cfg = loadConfig();
   const db = createDb(cfg.databaseUrl);
   const outbox = new PostgresOutboxWriter(db);
   const processor = createDefaultProcessor();
+  const buzzBridge = registerBuzzMirror(processor, db);
+  const schedule = createScheduleProcessor(db);
+  const email = createEmailProcessor(db);
+  const backups = createBackupProcessor(db);
+  const followUps = await createFollowUpHarness(cfg, db);
   const intervalMs = Number(process.env.WORKER_POLL_MS ?? 5_000);
   const maxRetries = Number(process.env.WORKER_MAX_RETRIES ?? 3);
   const retryDelayMs = Number(process.env.WORKER_RETRY_DELAY_MS ?? 1_000);
@@ -24,11 +32,107 @@ async function main() {
       status: "starting",
       region: cfg.region,
       pollMs: intervalMs,
+      buzzBridge,
       registeredHandlers: processor.registeredTypes(),
+      backupProvider: backups.provider,
     }),
   );
 
   async function tick() {
+    // C2/C5 — fire due reminders and claim due follow-ups before draining the
+    // outbox, so the resulting notifications/events land in the same poll cycle.
+    try {
+      const fired = await schedule.processDueReminders();
+      if (fired > 0) {
+        console.log(JSON.stringify({ service: "chaste-worker", action: "reminders_fired", count: fired }));
+      }
+      const dueFollowUps = await schedule.claimDueFollowUps();
+      for (const f of dueFollowUps) {
+        // C5 — re-enter the agent harness with the follow-up goal under the
+        // owner's org autonomy policy, then transition the durable job.
+        try {
+          const result = await runFollowUp(followUps, f.id, f.id);
+          console.log(
+            JSON.stringify({
+              service: "chaste-worker",
+              action: "followup_fired",
+              followUpId: f.id,
+              orgId: f.organizationId,
+              userId: f.userId,
+              status: result.status,
+              sessionId: result.sessionId,
+              goal: f.goal,
+            }),
+          );
+        } catch (err) {
+          console.error(
+            JSON.stringify({
+              service: "chaste-worker",
+              action: "followup_failed",
+              followUpId: f.id,
+              orgId: f.organizationId,
+              userId: f.userId,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          service: "chaste-worker",
+          action: "schedule_error",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+
+    // C6 — flush queued email through the provider adapter.
+    try {
+      const sent = await email.flushEmailOutbox();
+      if (sent > 0) {
+        console.log(
+          JSON.stringify({
+            service: "chaste-worker",
+            action: "email_flushed",
+            count: sent,
+            provider: email.adapterId,
+          }),
+        );
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          service: "chaste-worker",
+          action: "email_error",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+
+    // C7 — snapshot + encrypt + store queued backups through the object store.
+    try {
+      const done = await backups.flushBackupJobs();
+      if (done > 0) {
+        console.log(
+          JSON.stringify({
+            service: "chaste-worker",
+            action: "backups_flushed",
+            count: done,
+            provider: backups.provider,
+          }),
+        );
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          service: "chaste-worker",
+          action: "backup_error",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+
     const batch = await outbox.listUnprocessed(50);
     for (const event of batch) {
       let lastError: Error | null = null;
