@@ -1,13 +1,17 @@
-import { FULL_AUTONOMOUS_WARNING, ChasteError, NotFoundError } from "@chaste/kernel";
+import { FULL_AUTONOMOUS_WARNING, ChasteError, NotFoundError, type Actor } from "@chaste/kernel";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
+import { getUserWithOrg, resolveUserPermissions, schema } from "@chaste/db";
 import {
   createAppContext,
   healthPayload,
   refreshSessionUser,
   runChat,
   runCommand,
+  runCommandAsActor,
   runQuery,
   buildWorkflow,
   executeWorkflowRun,
@@ -86,6 +90,63 @@ export async function buildServer(appCtx?: AppContext) {
   server.get("/api/v1/queries", async () => ({ items: app.queries.list() }));
   server.get("/api/v1/specialists", async () => ({ items: app.modules.specialists() }));
 
+  // ─── Business partners (master data) ────────────────────────────────
+  server.get("/api/v1/business-partners", async (req) => {
+    const { search, type, includeArchived } = req.query as {
+      search?: string;
+      type?: string;
+      includeArchived?: string;
+    };
+    return (
+      await runQuery(
+        app,
+        "core.bpartner.list",
+        {
+          search,
+          type: type === "person" || type === "organization" ? type : undefined,
+          includeArchived: includeArchived === "true" ? true : undefined,
+        },
+        req.id,
+      )
+    ).data;
+  });
+  server.post("/api/v1/business-partners", async (req) => {
+    const input = z
+      .object({
+        type: z.enum(["person", "organization"]).default("person"),
+        name: z.string().min(1),
+        email: optionalEmailSchema,
+        phone: optionalStringSchema,
+        city: optionalStringSchema,
+        country: optionalStringSchema,
+        notes: optionalStringSchema,
+      })
+      .parse(req.body ?? {});
+    return (await runCommand(app, "core.bpartner.create", input, req.id)).data;
+  });
+  server.get("/api/v1/business-partners/:id", async (req) => {
+    const { id } = req.params as { id: string };
+    return (await runQuery(app, "core.bpartner.get", { businessPartnerId: id }, req.id)).data;
+  });
+  server.patch("/api/v1/business-partners/:id", async (req) => {
+    const { id } = req.params as { id: string };
+    const patch = z
+      .object({
+        name: optionalStringSchema,
+        email: optionalEmailSchema,
+        phone: optionalStringSchema,
+        city: optionalStringSchema,
+        country: optionalStringSchema,
+        notes: optionalStringSchema,
+      })
+      .parse(req.body ?? {});
+    return (await runCommand(app, "core.bpartner.update", { businessPartnerId: id, ...patch }, req.id)).data;
+  });
+  server.delete("/api/v1/business-partners/:id", async (req) => {
+    const { id } = req.params as { id: string };
+    return (await runCommand(app, "core.bpartner.delete", { businessPartnerId: id }, req.id)).data;
+  });
+
   server.post("/api/v1/commands/:name", async (req) => {
     const name = (req.params as { name: string }).name;
     const body = z.object({ input: z.unknown().default({}) }).parse(req.body ?? {});
@@ -98,9 +159,85 @@ export async function buildServer(appCtx?: AppContext) {
     return runQuery(app, name, body.input, req.id);
   });
 
+  // ─── Buzz bridge inbound ─────────────────────────────────────────────
+  // Signed webhook (X-Chaste-Signature: HMAC-SHA256 over the canonical JSON
+  // body) that files an external Buzz channel message into an internal
+  // thread. Posts via `messaging.thread.send` as the thread creator, so the
+  // message is fully audited and permission-checked like any other send.
+  server.post("/api/v1/buzz/webhook", async (req, reply) => {
+    const secret = process.env.CHASTE_BUZZ_WEBHOOK_SECRET;
+    if (!secret) {
+      return reply
+        .status(503)
+        .send({ message: "Buzz bridge is not configured", code: "BUZZ_NOT_CONFIGURED" });
+    }
+    const body = z
+      .object({ threadId: z.string().uuid(), body: z.string().min(1).max(8000) })
+      .parse(req.body ?? {});
+    const provided = String(req.headers["x-chaste-signature"] ?? "");
+    const expected = createHmac("sha256", secret)
+      .update(JSON.stringify(body))
+      .digest("hex");
+    const providedBuf = Buffer.from(provided, "utf8");
+    const expectedBuf = Buffer.from(expected, "utf8");
+    if (
+      providedBuf.length !== expectedBuf.length ||
+      !timingSafeEqual(providedBuf, expectedBuf)
+    ) {
+      return reply
+        .status(401)
+        .send({ message: "Invalid signature", code: "BUZZ_SIGNATURE_INVALID" });
+    }
+
+    const [thread] = await app.db
+      .select()
+      .from(schema.msgThreads)
+      .where(eq(schema.msgThreads.id, body.threadId))
+      .limit(1);
+    if (!thread) {
+      return reply.status(404).send({ message: "Thread not found", code: "NOT_FOUND" });
+    }
+    const creatorRow = await getUserWithOrg(app.db, thread.createdBy);
+    if (!creatorRow) {
+      return reply
+        .status(404)
+        .send({ message: "Thread creator not found", code: "NOT_FOUND" });
+    }
+    const permissions = await resolveUserPermissions(app.db, thread.createdBy);
+    const actor: Actor = {
+      kind: "user",
+      userId: thread.createdBy,
+      organizationId: thread.organizationId,
+      displayName: creatorRow.displayName,
+      permissions: new Set(permissions),
+    };
+    const result = await runCommandAsActor(
+      app,
+      "messaging.thread.send",
+      { threadId: body.threadId, body: `[via Buzz] ${body.body}` },
+      actor,
+      req.id,
+    );
+    return result.data;
+  });
+
   // CRM convenience
   server.get("/api/v1/crm/customers", async (req) => {
-    const result = await runQuery(app, "crm.customer.list", {}, req.id);
+    const { search, status, includeDeleted } = req.query as {
+      search?: string;
+      status?: string;
+      includeDeleted?: string;
+    };
+    const result = await runQuery(
+      app,
+      "crm.customer.list",
+      {
+        search,
+        status,
+        includeDeleted: includeDeleted === "true" ? true : undefined,
+      },
+      req.id,
+    );
     return result.data;
   });
   server.post("/api/v1/crm/customers", async (req) => {
@@ -114,6 +251,81 @@ export async function buildServer(appCtx?: AppContext) {
       .parse(req.body);
     const result = await runCommand(app, "crm.customer.create", input, req.id);
     return result.data;
+  });
+
+  server.get("/api/v1/crm/customers/:id", async (req) => {
+    const { id } = req.params as { id: string };
+    return (await runQuery(app, "crm.customer.get", { customerId: id }, req.id)).data;
+  });
+  server.patch("/api/v1/crm/customers/:id", async (req) => {
+    const { id } = req.params as { id: string };
+    const patch = z
+      .object({
+        name: optionalStringSchema,
+        email: optionalEmailSchema,
+        city: optionalStringSchema,
+        country: optionalStringSchema,
+      })
+      .parse(req.body ?? {});
+    return (
+      await runCommand(app, "crm.customer.update", { customerId: id, ...patch }, req.id)
+    ).data;
+  });
+  server.post("/api/v1/crm/customers/:id/status", async (req) => {
+    const { id } = req.params as { id: string };
+    const input = z.object({ status: z.string(), note: optionalStringSchema }).parse(req.body);
+    return (
+      await runCommand(app, "crm.customer.setStatus", { customerId: id, ...input }, req.id)
+    ).data;
+  });
+  server.delete("/api/v1/crm/customers/:id", async (req) => {
+    const { id } = req.params as { id: string };
+    return (await runCommand(app, "crm.customer.delete", { customerId: id }, req.id)).data;
+  });
+
+  server.get("/api/v1/crm/customers/:id/contacts", async (req) => {
+    const { id } = req.params as { id: string };
+    return (
+      (await runQuery(app, "crm.contact.list", { customerId: id }, req.id)).data
+    );
+  });
+  server.post("/api/v1/crm/customers/:id/contacts", async (req) => {
+    const { id } = req.params as { id: string };
+    const input = z
+      .object({
+        name: z.string().min(1),
+        role: optionalStringSchema,
+        email: optionalEmailSchema,
+        phone: optionalStringSchema,
+      })
+      .parse(req.body);
+    return (
+      await runCommand(app, "crm.contact.create", { customerId: id, ...input }, req.id)
+    ).data;
+  });
+  server.delete("/api/v1/crm/contacts/:id", async (req) => {
+    const { id } = req.params as { id: string };
+    return (await runCommand(app, "crm.contact.delete", { contactId: id }, req.id)).data;
+  });
+
+  server.get("/api/v1/crm/customers/:id/interactions", async (req) => {
+    const { id } = req.params as { id: string };
+    return (
+      (await runQuery(app, "crm.interaction.list", { customerId: id }, req.id)).data
+    );
+  });
+  server.post("/api/v1/crm/customers/:id/interactions", async (req) => {
+    const { id } = req.params as { id: string };
+    const input = z
+      .object({
+        kind: z.enum(["note", "email", "call", "meeting"]).default("note"),
+        summary: z.string().min(1),
+        detail: optionalStringSchema,
+      })
+      .parse(req.body);
+    return (
+      await runCommand(app, "crm.interaction.log", { customerId: id, ...input }, req.id)
+    ).data;
   });
 
   // Domain convenience routes (all still command/query backed)

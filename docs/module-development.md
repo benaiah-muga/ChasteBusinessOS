@@ -158,16 +158,36 @@ use `always: true`.
 Every module landing screen should follow this pattern:
 
 1. **Overview tab** -- KPIs + charts (Recharts via `components/ui/Chart`)
-2. **Primary list tabs** -- tables for core entities
+2. **Primary list tabs** -- tables for core entities with search, filter, and
+   per-row actions (view / edit / delete)
 3. **Create / action tabs** -- forms that call the same APIs as the agent
-4. Human copy only (no raw command names or HTTP paths in the operator UI)
+4. **Detail pages** -- `app/<module>/<entity>/[id]/page.tsx` for drill-down with
+   related panels, lifecycle controls, and an activity timeline
+5. Human copy only (no raw command names or HTTP paths in the operator UI)
 
-Shared primitives:
+**Deep module pattern** (ADR 0008): a module is "deep" when it covers the full
+lifecycle end-to-end — list (with filter/search), detail (with related data),
+create + edit + status transitions + soft-delete, and an activity timeline.
+CRM is the reference implementation; copy its structure for new modules.
+
+Shared primitives (`apps/web/src/components/ui/`):
 
 - `Tabs` / `Tab` / `TabPanel`
 - `Kpi`
 - `ChartCard`, `AreaSeries`, `BarSeries`, `DonutChart`
 - `Select` for styled dropdowns
+- `Modal`, `ConfirmDialog` for dialogs and destructive-action confirmation
+- `StatusBadge` for pipeline / lifecycle state pills
+- `Timeline` for activity history (created, status changes, notes, calls, …)
+
+Backend depth checklist (per entity):
+
+- `*.create`, `*.update`, `*.delete` (soft), `*.setStatus` commands
+- `*.list` (with search/filter), `*.get` (detail) queries
+- Outbox events for every write
+- Activity/interaction log table + `*.interaction.log` command + `*.interaction.list` query
+- Permission strings in `PERMISSION_CATALOG` seed
+- Contract test coverage (e2e or vitest)
 
 ### 6. Checklist
 

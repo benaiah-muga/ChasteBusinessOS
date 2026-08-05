@@ -44,6 +44,32 @@ export const users = pgTable(
   ],
 );
 
+export const businessPartners = pgTable(
+  "business_partners",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** What the partner IS: an individual or a company. */
+    type: text("type").notNull().default("person"), // "person" | "organization"
+    name: text("name").notNull(),
+    email: text("email"),
+    phone: text("phone"),
+    city: text("city"),
+    country: text("country"),
+    notes: text("notes"),
+    /** Lifecycle: active | archived. Archived hides from default lists. */
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("business_partners_org_idx").on(t.organizationId),
+    index("business_partners_org_type_idx").on(t.organizationId, t.type),
+  ],
+);
+
 export const roles = pgTable(
   "roles",
   {
@@ -425,6 +451,81 @@ export const emailOutbox = pgTable(
   ],
 );
 
+/* ─── Messaging (spec: messaging-and-buzz.md) ─────────────────────── */
+
+/** A conversation: `direct` (two members) or `group`. */
+export const msgThreads = pgTable(
+  "msg_threads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    type: text("type").notNull().default("direct"), // direct | group
+    name: text("name"),
+    createdBy: uuid("created_by").notNull(),
+    isArchived: boolean("is_archived").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("msg_threads_org_idx").on(t.organizationId),
+    index("msg_threads_member_updated_idx").on(t.organizationId, t.updatedAt),
+  ],
+);
+
+export const msgThreadMembers = pgTable(
+  "msg_thread_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => msgThreads.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    role: text("role").notNull().default("member"), // member | admin
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("msg_thread_members_uidx").on(t.threadId, t.userId),
+    index("msg_thread_members_user_idx").on(t.userId),
+  ],
+);
+
+export const msgMessages = pgTable(
+  "msg_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => msgThreads.id, { onDelete: "cascade" }),
+    senderId: uuid("sender_id").notNull(),
+    kind: text("kind").notNull().default("text"), // text | system
+    body: text("body").notNull(),
+    parentId: uuid("parent_id"),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("msg_messages_thread_created_idx").on(t.threadId, t.createdAt),
+    index("msg_messages_org_idx").on(t.organizationId),
+  ],
+);
+
+/** Per-member read cursor for unread counts. */
+export const msgReads = pgTable(
+  "msg_reads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => msgThreads.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    lastReadMessageId: uuid("last_read_message_id"),
+    lastReadAt: timestamp("last_read_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("msg_reads_uidx").on(t.threadId, t.userId)],
+);
+
 /* ─── AI runtime stores (OpenWorker-benchmark primitives, R2/R5/R7/R10) ─── */
 
 /**
@@ -563,10 +664,52 @@ export const crmCustomers = pgTable(
     email: text("email"),
     city: text("city"),
     country: text("country"),
+    businessPartnerId: uuid("business_partner_id").references(() => businessPartners.id),
     status: text("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("crm_customers_org_idx").on(t.organizationId)],
+);
+
+export const crmContacts = pgTable(
+  "crm_contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => crmCustomers.id, { onDelete: "cascade" }),
+    businessPartnerId: uuid("business_partner_id").references(() => businessPartners.id),
+    name: text("name").notNull(),
+    role: text("role"),
+    email: text("email"),
+    phone: text("phone"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("crm_contacts_org_idx").on(t.organizationId),
+    index("crm_contacts_customer_idx").on(t.customerId),
+  ],
+);
+
+export const crmInteractions = pgTable(
+  "crm_interactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => crmCustomers.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("note"),
+    summary: text("summary").notNull(),
+    detail: text("detail"),
+    actorUserId: uuid("actor_user_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("crm_interactions_org_idx").on(t.organizationId),
+    index("crm_interactions_customer_idx").on(t.customerId),
+  ],
 );
 
 /* ─── Accounting ─────────────────────────────────────────────────── */
@@ -684,6 +827,7 @@ export const purVendors = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     organizationId: uuid("organization_id").notNull(),
+    businessPartnerId: uuid("business_partner_id").references(() => businessPartners.id),
     name: text("name").notNull(),
     email: text("email"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -710,6 +854,7 @@ export const hrEmployees = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     organizationId: uuid("organization_id").notNull(),
+    businessPartnerId: uuid("business_partner_id").references(() => businessPartners.id),
     employeeNumber: text("employee_number").notNull(),
     fullName: text("full_name").notNull(),
     email: text("email"),

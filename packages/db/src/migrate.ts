@@ -30,6 +30,23 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
 CREATE UNIQUE INDEX IF NOT EXISTS users_org_email_uidx ON users(organization_id, email);
 
+CREATE TABLE IF NOT EXISTS business_partners (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL REFERENCES organizations(id),
+  type text NOT NULL DEFAULT 'person',
+  name text NOT NULL,
+  email text,
+  phone text,
+  city text,
+  country text,
+  notes text,
+  status text NOT NULL DEFAULT 'active',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS business_partners_org_idx ON business_partners(organization_id);
+CREATE INDEX IF NOT EXISTS business_partners_org_type_idx ON business_partners(organization_id, type);
+
 CREATE TABLE IF NOT EXISTS roles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL REFERENCES organizations(id),
@@ -154,6 +171,34 @@ CREATE TABLE IF NOT EXISTS crm_customers (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS crm_customers_org_idx ON crm_customers(organization_id);
+ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS business_partner_id uuid;
+
+CREATE TABLE IF NOT EXISTS crm_contacts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  customer_id uuid NOT NULL REFERENCES crm_customers(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  role text,
+  email text,
+  phone text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS crm_contacts_org_idx ON crm_contacts(organization_id);
+CREATE INDEX IF NOT EXISTS crm_contacts_customer_idx ON crm_contacts(customer_id);
+ALTER TABLE crm_contacts ADD COLUMN IF NOT EXISTS business_partner_id uuid;
+
+CREATE TABLE IF NOT EXISTS crm_interactions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  customer_id uuid NOT NULL REFERENCES crm_customers(id) ON DELETE CASCADE,
+  kind text NOT NULL DEFAULT 'note',
+  summary text NOT NULL,
+  detail text,
+  actor_user_id uuid,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS crm_interactions_org_idx ON crm_interactions(organization_id);
+CREATE INDEX IF NOT EXISTS crm_interactions_customer_idx ON crm_interactions(customer_id);
 
 CREATE TABLE IF NOT EXISTS acc_accounts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -247,6 +292,7 @@ CREATE TABLE IF NOT EXISTS pur_vendors (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS pur_vendors_org_idx ON pur_vendors(organization_id);
+ALTER TABLE pur_vendors ADD COLUMN IF NOT EXISTS business_partner_id uuid;
 
 CREATE TABLE IF NOT EXISTS pur_purchase_orders (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -271,6 +317,7 @@ CREATE TABLE IF NOT EXISTS hr_employees (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS hr_emp_num_uidx ON hr_employees(organization_id, employee_number);
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS business_partner_id uuid;
 
 CREATE TABLE IF NOT EXISTS hr_payroll_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -627,6 +674,54 @@ CREATE TABLE IF NOT EXISTS email_outbox (
 );
 CREATE INDEX IF NOT EXISTS email_outbox_status_idx ON email_outbox(status);
 CREATE INDEX IF NOT EXISTS email_outbox_org_idx ON email_outbox(organization_id);
+
+-- Messaging -- threads, members, messages, read cursors (messaging-and-buzz.md)
+CREATE TABLE IF NOT EXISTS msg_threads (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  type text NOT NULL DEFAULT 'direct',
+  name text,
+  created_by uuid NOT NULL,
+  is_archived boolean NOT NULL DEFAULT FALSE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS msg_threads_org_idx ON msg_threads(organization_id);
+CREATE INDEX IF NOT EXISTS msg_threads_member_updated_idx ON msg_threads(organization_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS msg_thread_members (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  thread_id uuid NOT NULL REFERENCES msg_threads(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL,
+  role text NOT NULL DEFAULT 'member',
+  joined_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS msg_thread_members_uidx ON msg_thread_members(thread_id, user_id);
+CREATE INDEX IF NOT EXISTS msg_thread_members_user_idx ON msg_thread_members(user_id);
+
+CREATE TABLE IF NOT EXISTS msg_messages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  thread_id uuid NOT NULL REFERENCES msg_threads(id) ON DELETE CASCADE,
+  sender_id uuid NOT NULL,
+  kind text NOT NULL DEFAULT 'text',
+  body text NOT NULL,
+  parent_id uuid,
+  edited_at timestamptz,
+  deleted_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS msg_messages_thread_created_idx ON msg_messages(thread_id, created_at);
+CREATE INDEX IF NOT EXISTS msg_messages_org_idx ON msg_messages(organization_id);
+
+CREATE TABLE IF NOT EXISTS msg_reads (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  thread_id uuid NOT NULL REFERENCES msg_threads(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL,
+  last_read_message_id uuid,
+  last_read_at timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS msg_reads_uidx ON msg_reads(thread_id, user_id);
 
 -- S0 -- machine-readable capability catalog (self-development.md §6)
 CREATE TABLE IF NOT EXISTS capability_catalog_items (

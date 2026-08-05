@@ -1,34 +1,31 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
   DollarSign,
+  Eye,
   LayoutDashboard,
   ListFilter,
   Mail,
   MapPin,
+  Pencil,
   Plus,
+  Trash2,
   Users,
 } from "lucide-react";
 import { AreaSeries, BarSeries, ChartCard, DonutChart } from "@/components/ui/Chart";
 import { Kpi } from "@/components/ui/Kpi";
 import { Tab, TabPanel, Tabs } from "@/components/ui/Tabs";
+import { Modal } from "@/components/ui/Modal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import type { Customer } from "@chaste/api-client";
-import { CustomerCreateFormInline } from "./CustomerCreateForm";
 import { getApiClient } from "@/lib/api";
+import { CustomerForm } from "./CustomerForm";
 
 type Props = { initialCustomers: Customer[] };
 
-const STAGE_COLORS: Record<string, string> = {
-  lead: "#475569",
-  prospect: "#2563eb",
-  qualified: "#0f8c86",
-  negotiable: "#c27803",
-  won: "#15803d",
-  lost: "#be123c",
-  active: "#15803d",
-  churned: "#be123c",
-};
 const HUMAN_STAGE: Record<string, string> = {
   lead: "Lead",
   prospect: "Prospect",
@@ -40,9 +37,12 @@ const HUMAN_STAGE: Record<string, string> = {
   churned: "Churned",
 };
 
+const FILTER_OPTIONS = ["all", "lead", "prospect", "qualified", "negotiable", "won", "active", "churned", "lost"] as const;
+
 export function CrmWorkspace({ initialCustomers }: Props) {
   const [customers, setCustomers] = useState(initialCustomers);
   const [tab, setTab] = useState("overview");
+  const [filter, setFilter] = useState<string>("all");
 
   async function refresh() {
     try {
@@ -52,6 +52,11 @@ export function CrmWorkspace({ initialCustomers }: Props) {
       /* keep */
     }
   }
+
+  const visible = useMemo(
+    () => (filter === "all" ? customers : customers.filter((c) => c.status === filter)),
+    [customers, filter],
+  );
 
   const stageCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -136,7 +141,7 @@ export function CrmWorkspace({ initialCustomers }: Props) {
       </TabPanel>
 
       <TabPanel value="customers">
-        <CustomerTable customers={customers} onRefresh={refresh} />
+        <CustomerTable customers={visible} allCount={total} filter={filter} onFilterChange={setFilter} onRefresh={refresh} />
       </TabPanel>
 
       <TabPanel value="pipeline">
@@ -144,7 +149,7 @@ export function CrmWorkspace({ initialCustomers }: Props) {
           <ChartCard title="Pipeline stages" subtitle="Distribution across funnel" height={280}>
             <BarSeries data={stageCounts} xKey="name" keys={[{ key: "value", label: "Count" }]} />
           </ChartCard>
-          <CustomerTable customers={customers} onRefresh={refresh} />
+          <CustomerTable customers={visible} allCount={total} filter={filter} onFilterChange={setFilter} onRefresh={refresh} />
         </div>
       </TabPanel>
 
@@ -157,8 +162,9 @@ export function CrmWorkspace({ initialCustomers }: Props) {
       <TabPanel value="add">
         <section className="card stack">
           <h2>Add a customer</h2>
-          <CustomerCreateFormInline
-            onCreated={async () => {
+          <CustomerForm
+            mode="create"
+            onDone={async () => {
               await refresh();
               setTab("customers");
             }}
@@ -171,12 +177,23 @@ export function CrmWorkspace({ initialCustomers }: Props) {
 
 function CustomerTable({
   customers,
+  allCount,
+  filter,
+  onFilterChange,
   onRefresh,
 }: {
   customers: Customer[];
+  allCount: number;
+  filter: string;
+  onFilterChange: (f: string) => void;
   onRefresh: () => void;
 }) {
   const [q, setQ] = useState("");
+  const [editTarget, setEditTarget] = useState<Customer | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
   const filtered = useMemo(() => {
     if (!q.trim()) return customers;
     const term = q.toLowerCase();
@@ -189,12 +206,40 @@ function CustomerTable({
     );
   }, [q, customers]);
 
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setErr(null);
+    try {
+      await getApiClient().deleteCustomer(deleteTarget.id);
+      setDeleteTarget(null);
+      await onRefresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to delete customer");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <section className="card stack">
       <div className="toolbar">
         <div className="page-title-block" style={{ flex: 1 }}>
           <h2 style={{ margin: 0 }}>Customers</h2>
         </div>
+        <select
+          className="search"
+          style={{ width: "auto" }}
+          value={filter}
+          onChange={(e) => onFilterChange(e.target.value)}
+          aria-label="Filter by status"
+        >
+          {FILTER_OPTIONS.map((f) => (
+            <option key={f} value={f}>
+              {f === "all" ? `All statuses (${allCount})` : `${HUMAN_STAGE[f] ?? f}`}
+            </option>
+          ))}
+        </select>
         <input
           className="search"
           type="search"
@@ -206,6 +251,7 @@ function CustomerTable({
           Refresh
         </button>
       </div>
+      {err ? <p className="error">{err}</p> : null}
       {filtered.length === 0 ? (
         <div className="empty-state">
           <div className="icon"><Users size={20} /></div>
@@ -222,44 +268,95 @@ function CustomerTable({
                 <th>City</th>
                 <th>Country</th>
                 <th>Stage</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => {
-                const stage = c.status ?? "lead";
-                return (
-                  <tr key={c.id}>
-                    <td>{c.name}</td>
-                    <td>
-                      {c.email ? (
-                        <span className="row" style={{ gap: 4 }}>
-                          <Mail size={12} /> {c.email}
-                        </span>
-                      ) : (
-                        <span className="placeholder">not set</span>
-                      )}
-                    </td>
-                    <td>{c.city ?? <span className="placeholder">not set</span>}</td>
-                    <td>{c.country ?? <span className="placeholder">not set</span>}</td>
-                    <td>
-                      <span
-                        className="badge"
-                        style={{
-                          background: `${STAGE_COLORS[stage] ?? "#475569"}1f`,
-                          color: STAGE_COLORS[stage] ?? "#475569",
-                          borderColor: `${STAGE_COLORS[stage] ?? "#475569"}55`,
-                        }}
-                      >
-                        {HUMAN_STAGE[stage] ?? stage}
+              {filtered.map((c) => (
+                <tr key={c.id}>
+                  <td>
+                    <Link href={`/crm/customers/${c.id}`} className="clickable">
+                      {c.name}
+                    </Link>
+                  </td>
+                  <td>
+                    {c.email ? (
+                      <span className="row" style={{ gap: 4 }}>
+                        <Mail size={12} /> {c.email}
                       </span>
-                    </td>
-                  </tr>
-                );
-              })}
+                    ) : (
+                      <span className="placeholder">not set</span>
+                    )}
+                  </td>
+                  <td>{c.city ?? <span className="placeholder">not set</span>}</td>
+                  <td>{c.country ?? <span className="placeholder">not set</span>}</td>
+                  <td>
+                    <StatusBadge status={c.status ?? "lead"} />
+                  </td>
+                  <td>
+                    <div className="row-actions">
+                      <Link
+                        className="icon-btn tip"
+                        data-tip="View"
+                        href={`/crm/customers/${c.id}`}
+                        aria-label="View customer"
+                      >
+                        <Eye size={14} />
+                      </Link>
+                      <button
+                        className="icon-btn tip"
+                        data-tip="Edit"
+                        type="button"
+                        aria-label="Edit customer"
+                        onClick={() => setEditTarget(c)}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        className="icon-btn tip"
+                        data-tip="Delete"
+                        type="button"
+                        aria-label="Delete customer"
+                        onClick={() => setDeleteTarget(c)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <Modal
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        title="Edit customer"
+      >
+        {editTarget ? (
+          <CustomerForm
+            mode="edit"
+            customer={editTarget}
+            onDone={async () => {
+              setEditTarget(null);
+              await onRefresh();
+            }}
+            onCancel={() => setEditTarget(null)}
+          />
+        ) : null}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete customer"
+        message={`Archive "${deleteTarget?.name ?? ""}"? History is preserved but the customer is hidden from lists.`}
+        confirmLabel="Archive"
+        busy={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </section>
   );
 }

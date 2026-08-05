@@ -14,11 +14,12 @@ import {
   defineQuery,
   type BusinessModule,
   type ModuleRegistry,
+  NotFoundError,
   ValidationError,
 } from "@chaste/kernel";
-import { and, eq, gte, ilike, inArray, isNull, lt, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, or } from "drizzle-orm";
 import { z } from "zod";
-import { createEmailAdapter, emailTemplateSchema, renderEmailTemplate, type EmailAdapter } from "./email.js";
+import { createEmailAdapter, detectEmailProvider, emailTemplateSchema, renderEmailTemplate, type EmailAdapter } from "./email.js";
 
 /** Capability gap ticket lifecycle (spec: self-development.md §4). */
 const GAP_STATUS = [
@@ -140,8 +141,10 @@ export function createPlatformModule(
         "core.notification.read",
         "core.reminder.write",
         "core.followup.write",
+        "core.bpartner.manage",
+        "core.bpartner.read",
       ],
-      capabilities: ["core.rbac", "core.marketplace", "core.autonomy"],
+      capabilities: ["core.rbac", "core.marketplace", "core.autonomy", "core.bpartners"],
       specialist: {
         id: "system",
         displayName: "System Agent",
@@ -2590,7 +2593,11 @@ export function createPlatformModule(
         subject: z.string(),
         template: z.string().nullable(),
         status: z.string(),
+        provider: z.string().nullable(),
+        providerMessageId: z.string().nullable(),
+        error: z.string().nullable(),
         createdAt: z.string(),
+        sentAt: z.string().nullable(),
       });
 
       function toEmailRow(row: typeof schema.emailOutbox.$inferSelect) {
@@ -2600,7 +2607,11 @@ export function createPlatformModule(
           subject: row.subject,
           template: row.template,
           status: row.status,
+          provider: row.provider,
+          providerMessageId: row.providerMessageId,
+          error: row.error,
           createdAt: row.createdAt.toISOString(),
+          sentAt: row.sentAt ? row.sentAt.toISOString() : null,
         };
       }
 
@@ -2682,6 +2693,47 @@ export function createPlatformModule(
               .limit(input.limit ?? 50);
             return { emails: rows.map(toEmailRow) };
           },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.email.retry",
+          description: "Re-queue a failed email for delivery",
+          permissions: ["core.email.send"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ emailId: z.string().uuid() }),
+          output: emailOutputSchema,
+          handler: async (input, ctx) => {
+            const [row] = await db
+              .update(schema.emailOutbox)
+              .set({ status: "queued", error: null, provider: null, sentAt: null })
+              .where(
+                and(
+                  eq(schema.emailOutbox.id, input.emailId),
+                  eq(schema.emailOutbox.organizationId, ctx.actor.organizationId),
+                ),
+              )
+              .returning();
+            if (!row) throw new NotFoundError("Email");
+            return toEmailRow(row);
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.email.provider.status",
+          description: "Report the active delivery provider (no secrets)",
+          permissions: ["core.email.send"],
+          tags: ["core"],
+          input: z.object({}).default({}),
+          output: z.object({
+            provider: z.enum(["resend", "smtp", "console"]),
+            from: z.string().nullable(),
+          }),
+          handler: async () => detectEmailProvider(),
         }),
       );
 
@@ -2819,6 +2871,219 @@ export function createPlatformModule(
           },
         }),
       );
+      // ─── Business partners (master data: customers, vendors, employees, contacts) ──
+      const bpOutputSchema = z.object({
+        id: z.string(),
+        organizationId: z.string(),
+        type: z.enum(["person", "organization"]),
+        name: z.string(),
+        email: z.string().nullable().optional(),
+        phone: z.string().nullable().optional(),
+        city: z.string().nullable().optional(),
+        country: z.string().nullable().optional(),
+        notes: z.string().nullable().optional(),
+        status: z.string(),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+      });
+
+      function mapBp(row: typeof schema.businessPartners.$inferSelect) {
+        return {
+          id: row.id,
+          organizationId: row.organizationId,
+          type: row.type as "person" | "organization",
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          city: row.city,
+          country: row.country,
+          notes: row.notes,
+          status: row.status,
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        };
+      }
+
+      async function getBpRow(orgId: string, id: string) {
+        const rows = await db
+          .select()
+          .from(schema.businessPartners)
+          .where(and(eq(schema.businessPartners.organizationId, orgId), eq(schema.businessPartners.id, id)))
+          .limit(1);
+        const row = rows[0];
+        if (!row) throw new NotFoundError("Business partner");
+        return row;
+      }
+
+      commands.register(
+        defineCommand({
+          name: "core.bpartner.create",
+          description: "Create a business partner (person or organization)",
+          permissions: ["core.bpartner.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            type: z.enum(["person", "organization"]).default("person"),
+            name: z.string().min(1).max(200),
+            email: z.string().email().optional(),
+            phone: z.string().max(60).optional(),
+            city: z.string().max(120).optional(),
+            country: z.string().max(120).optional(),
+            notes: z.string().max(2000).optional(),
+          }),
+          output: bpOutputSchema,
+          handler: async (input, ctx, helpers) => {
+            const [row] = await db
+              .insert(schema.businessPartners)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                type: input.type,
+                name: input.name,
+                email: input.email,
+                phone: input.phone,
+                city: input.city,
+                country: input.country,
+                notes: input.notes,
+              })
+              .returning();
+            await helpers.outbox.enqueue({
+              id: crypto.randomUUID(),
+              type: "core.bpartner.created",
+              organizationId: ctx.actor.organizationId,
+              occurredAt: ctx.now().toISOString(),
+              payload: { businessPartnerId: row!.id, name: row!.name, type: row!.type },
+              correlationId: ctx.requestId,
+            });
+            return mapBp(row!);
+          },
+        }),
+      );
+      commands.register(
+        defineCommand({
+          name: "core.bpartner.update",
+          description: "Update a business partner's shared identity fields",
+          permissions: ["core.bpartner.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            businessPartnerId: z.string().uuid(),
+            name: z.string().min(1).max(200).optional(),
+            email: z.string().email().optional(),
+            phone: z.string().max(60).optional(),
+            city: z.string().max(120).optional(),
+            country: z.string().max(120).optional(),
+            notes: z.string().max(2000).optional(),
+          }),
+          output: bpOutputSchema,
+          handler: async (input, ctx, helpers) => {
+            const row = await getBpRow(ctx.actor.organizationId, input.businessPartnerId);
+            const [updated] = await db
+              .update(schema.businessPartners)
+              .set({
+                name: input.name ?? row.name,
+                email: input.email === undefined ? row.email : input.email,
+                phone: input.phone === undefined ? row.phone : input.phone,
+                city: input.city === undefined ? row.city : input.city,
+                country: input.country === undefined ? row.country : input.country,
+                notes: input.notes === undefined ? row.notes : input.notes,
+                updatedAt: new Date(),
+              })
+              .where(and(eq(schema.businessPartners.organizationId, ctx.actor.organizationId), eq(schema.businessPartners.id, input.businessPartnerId)))
+              .returning();
+            await helpers.outbox.enqueue({
+              id: crypto.randomUUID(),
+              type: "core.bpartner.updated",
+              organizationId: ctx.actor.organizationId,
+              occurredAt: ctx.now().toISOString(),
+              payload: { businessPartnerId: input.businessPartnerId },
+              correlationId: ctx.requestId,
+            });
+            return mapBp(updated!);
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.bpartner.delete",
+          description: "Archive a business partner (soft delete; role history preserved)",
+          permissions: ["core.bpartner.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ businessPartnerId: z.string().uuid() }),
+          output: z.object({ businessPartnerId: z.string(), deleted: z.literal(true) }),
+          handler: async (input, ctx, helpers) => {
+            await getBpRow(ctx.actor.organizationId, input.businessPartnerId);
+            await db
+              .update(schema.businessPartners)
+              .set({ status: "archived", updatedAt: new Date() })
+              .where(and(eq(schema.businessPartners.organizationId, ctx.actor.organizationId), eq(schema.businessPartners.id, input.businessPartnerId)));
+            await helpers.outbox.enqueue({
+              id: crypto.randomUUID(),
+              type: "core.bpartner.archived",
+              organizationId: ctx.actor.organizationId,
+              occurredAt: ctx.now().toISOString(),
+              payload: { businessPartnerId: input.businessPartnerId },
+              correlationId: ctx.requestId,
+            });
+            return { businessPartnerId: input.businessPartnerId, deleted: true as const };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.bpartner.list",
+          description: "List business partners with optional search and type filter",
+          permissions: ["core.bpartner.read"],
+          tags: ["core"],
+          input: z.object({
+            search: z.string().max(200).optional(),
+            type: z.enum(["person", "organization"]).optional(),
+            includeArchived: z.boolean().optional(),
+          }).default({}),
+          output: z.object({ items: z.array(bpOutputSchema) }),
+          handler: async (input, ctx) => {
+            const org = ctx.actor.organizationId;
+            const conds = [eq(schema.businessPartners.organizationId, org)];
+            if (!input.includeArchived) conds.push(ne(schema.businessPartners.status, "archived"));
+            if (input.type) conds.push(eq(schema.businessPartners.type, input.type));
+            const rows = await db
+              .select()
+              .from(schema.businessPartners)
+              .where(and(...conds))
+              .orderBy(desc(schema.businessPartners.createdAt));
+            const term = input.search?.toLowerCase().trim();
+            const filtered = term
+              ? rows.filter(
+                  (r) =>
+                    r.name.toLowerCase().includes(term) ||
+                    (r.email ?? "").toLowerCase().includes(term) ||
+                    (r.city ?? "").toLowerCase().includes(term) ||
+                    (r.country ?? "").toLowerCase().includes(term),
+                )
+              : rows;
+            return { items: filtered.map(mapBp) };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.bpartner.get",
+          description: "Get a single business partner by id",
+          permissions: ["core.bpartner.read"],
+          tags: ["core"],
+          input: z.object({ businessPartnerId: z.string().uuid() }),
+          output: bpOutputSchema,
+          handler: async (input, ctx) => {
+            const row = await getBpRow(ctx.actor.organizationId, input.businessPartnerId);
+            return mapBp(row);
+          },
+        }),
+      );
+
+
     },
   };
 }

@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Deep CRM module (ADR 0008)**: CRM is now the flagship "deep module" template.
+  Backend gains `crm.customer.update`, `crm.customer.setStatus` (guarded lifecycle
+  transitions), `crm.customer.delete` (soft-delete/archive), `crm.contact.create` /
+  `crm.contact.delete`, `crm.interaction.log`, plus `crm.customer.get`,
+  `crm.contact.list`, `crm.interaction.list` queries. Two new namespaced tables
+  (`crm_contacts`, `crm_interactions`) with cascading FKs and org-scoped indexes.
+  New permissions: `crm.customer.update`, `crm.contact.manage`, `crm.contact.read`,
+  `crm.interaction.write`, `crm.interaction.read`.
+- **CRM UI depth**: customer detail page (`/crm/customers/[id]`) with header KPIs,
+  pipeline status transitions, contacts panel, and an activity timeline; deepened
+  customer list with status filter, search, and per-row view/edit/delete actions
+  (edit in modal, delete via confirm dialog).
+- **Shared UI primitives**: `Modal`, `ConfirmDialog`, `StatusBadge`, `Timeline`
+  components in `apps/web/src/components/ui/` for reuse across module workspaces.
+- **Typed API client**: `getCustomer`, `updateCustomer`, `setCustomerStatus`,
+  `deleteCustomer`, `listContacts`, `createContact`, `deleteContact`,
+  `listInteractions`, `logInteraction`, `listCustomersFiltered` methods on
+  `@chaste/api-client`; `Contact` and `Interaction` DTO types.
+- **E2E contract**: `apps/api/src/e2e.ts` now exercises the full CRM depth flow
+  (update → status → contact → interaction → soft-delete → hidden-from-list).
+- **Business partner master data (ADR 0009)**: introduces a platform-level
+  `business_partners` table with `type: person | organization`, holding the
+  shared identity (name, email, phone, city, country, notes) for any party the
+  org has a relationship with. Module role tables (`crm_customers`,
+  `pur_vendors`, `hr_employees`, `crm_contacts`) gain a nullable
+  `businessPartnerId` FK — one identity per party, multiple roles (customer AND
+  vendor, employee AND contact). Platform module owns `core.bpartner.create`,
+  `.update`, `.delete` (archive), `.list`, `.get` with Zod schemas, outbox
+  events, and audit. New permissions: `core.bpartner.manage`, `core.bpartner.read`.
+- **Directory UI**: new `/directory` page (nav: "Directory") listing all business
+  partners with type filter, search, KPI strip, create/edit modal, and archive
+  confirmation — the single place to manage parties across the org.
+- **Typed API client**: `listBusinessPartners`, `getBusinessPartner`,
+  `createBusinessPartner`, `updateBusinessPartner`, `deleteBusinessPartner`
+  methods; `BusinessPartner` DTO type and Zod schema.
+
 ### Changed
 
 - **AI stack**: remove Mastra; custom orchestrator + `AiProvider` + workflow engine only (see ADR 0006)
