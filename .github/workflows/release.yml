@@ -33,6 +33,10 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
+      - name: Compute lowercase repo
+        id: repo
+        run: echo "name=${GITHUB_REPOSITORY@L}" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -43,8 +47,8 @@ jobs:
           target: migrate
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:migrate-${{ steps.version.outputs.tag }}
-            ghcr.io/${{ github.repository }}:migrate-latest
+            ghcr.io/${{ steps.repo.outputs.name }}:migrate-${{ steps.version.outputs.tag }}
+            ghcr.io/${{ steps.repo.outputs.name }}:migrate-latest
 
       - name: Build and push api
         uses: docker/build-push-action@v6
@@ -53,8 +57,8 @@ jobs:
           target: api
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:api-${{ steps.version.outputs.tag }}
-            ghcr.io/${{ github.repository }}:api-latest
+            ghcr.io/${{ steps.repo.outputs.name }}:api-${{ steps.version.outputs.tag }}
+            ghcr.io/${{ steps.repo.outputs.name }}:api-latest
 
       - name: Build and push web
         uses: docker/build-push-action@v6
@@ -65,8 +69,8 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
           tags: |
-            ghcr.io/${{ github.repository }}:web-${{ steps.version.outputs.tag }}
-            ghcr.io/${{ github.repository }}:web-latest
+            ghcr.io/${{ steps.repo.outputs.name }}:web-${{ steps.version.outputs.tag }}
+            ghcr.io/${{ steps.repo.outputs.name }}:web-latest
 
       - name: Build and push worker
         uses: docker/build-push-action@v6
@@ -75,22 +79,23 @@ jobs:
           target: worker
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:worker-${{ steps.version.outputs.tag }}
-            ghcr.io/${{ github.repository }}:worker-latest
+            ghcr.io/${{ steps.repo.outputs.name }}:worker-${{ steps.version.outputs.tag }}
+            ghcr.io/${{ steps.repo.outputs.name }}:worker-latest
 
       - name: Generate release notes
         id: notes
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.tag }}
+          REPO_LC: ${{ steps.repo.outputs.name }}
         run: |
           VER="${RELEASE_VERSION#v}"
           {
             echo "## Container images (GHCR)"
             echo ""
-            echo "\`ghcr.io/${GITHUB_REPOSITORY}:api-${RELEASE_VERSION}\`"
-            echo "\`ghcr.io/${GITHUB_REPOSITORY}:web-${RELEASE_VERSION}\`"
-            echo "\`ghcr.io/${GITHUB_REPOSITORY}:worker-${RELEASE_VERSION}\`"
-            echo "\`ghcr.io/${GITHUB_REPOSITORY}:migrate-${RELEASE_VERSION}\`"
+            echo "\`ghcr.io/${REPO_LC}:api-${RELEASE_VERSION}\`"
+            echo "\`ghcr.io/${REPO_LC}:web-${RELEASE_VERSION}\`"
+            echo "\`ghcr.io/${REPO_LC}:worker-${RELEASE_VERSION}\`"
+            echo "\`ghcr.io/${REPO_LC}:migrate-${RELEASE_VERSION}\`"
             echo ""
             echo "## Changelog"
             echo ""
