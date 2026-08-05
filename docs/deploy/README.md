@@ -21,10 +21,10 @@ once, `turbo` compiles only the target's dependency graph, and
 output inlined. No build tools ship in runtime images.
 
 ```bash
-docker build --target migrate -t chaste/migrate:0.4.0 .
-docker build --target api     -t chaste/api:0.4.0 .
-docker build --target web     -t chaste/web:0.4.0 .
-docker build --target worker  -t chaste/worker:0.4.0 .
+docker build --target migrate -t chaste/migrate:0.1.0 .
+docker build --target api     -t chaste/api:0.1.0 .
+docker build --target web     -t chaste/web:0.1.0 .
+docker build --target worker  -t chaste/worker:0.1.0 .
 ```
 
 ## Service wiring

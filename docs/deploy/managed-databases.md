@@ -24,7 +24,7 @@ Run the `migrate` image once pointing at the managed DB:
 ```bash
 docker run --rm \
   -e DATABASE_URL='postgres://…' \
-  chaste/migrate:0.4.0
+  chaste/migrate:0.1.0
 ```
 
 The `CREATE TABLE … IF NOT EXISTS` DDL is idempotent; re-running after

@@ -1,88 +1,139 @@
+<div align="center">
+
 # ChasteBusinessOS
 
-**AI-native Business Operating System** for SMBs: modular, open source, and built for trust.
+**An AI-native Business Operating System for SMBs — modular, open source, built for trust.**
+
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](#)
+[![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 > **AI is how you operate the business.** Manual UIs remain available.  
-> **AI never bypasses business rules.**
+> **AI never bypasses business rules.**  
+> Every action — AI or human — flows through the same validated command bus, permission checks, and audit trail.
 
-_Every action -- AI or human -- flows through the same validated command bus, permission checks, and audit trail._
+[Docs](#documentation) · [Vision](VISION.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](docs/product-architecture-next.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
-[Vision](./VISION.md) · [Architecture](./ARCHITECTURE.md) · [Product roadmap](./docs/product-architecture-next.md) · [Contributing](./CONTRIBUTING.md) · [Agents](./AGENTS.md) · [Changelog](./CHANGELOG.md)
+</div>
 
-## Status
+---
 
-**Early alpha, active development.** The platform ships a production-shaped foundation: kernel command/query bus, full web UI, seven business modules, RBAC and settings, audit trails, transactional outbox, and a custom conversation intelligence layer (plan → confirm → command bus). Not yet recommended for production workloads.
+## What is this?
 
-## What it is
+ChasteBusinessOS is an open-source operating system for running a business — **not an ERP with a chatbot bolted on**. Operate through natural language or traditional screens. Either way, every mutation runs through the **same native bus**: human clicks and AI requests share identical validation, permission checks, and audit records (see [AI/manual parity](AGENTS.md#non-negotiable-product-invariants)).
 
-ChasteBusinessOS is an open-source operating system for running a business, not an ERP with a chatbot bolted on. Users can operate through natural language or traditional screens. Either way, every mutation flows through the same validated command bus, permission checks, and audit trail.
+The goal is **trustworthy automation**: AI that plans, clarifies, and suggests — without elevated privileges or hidden write paths.
 
-The goal is **trustworthy automation**: AI that plans, clarifies, and suggests, without elevated privileges or hidden write paths.
+Six business modules plus a platform layer are installable as packages. No kernel fork required to add a domain.
 
-## Highlights
+| Module            | Capabilities                                              | AI specialist       |
+| ----------------- | --------------------------------------------------------- | ------------------- |
+| **CRM**           | Customers and relationship data                           | CRM Agent           |
+| **Accounting**    | Chart of accounts, journals, invoices                     | Accounting Agent    |
+| **Inventory**     | Warehouses, products, stock movements                     | Inventory Agent     |
+| **Purchasing**    | Vendors and purchase orders                               | Purchasing Agent    |
+| **Manufacturing** | Bills of materials and work orders                        | Manufacturing Agent |
+| **HR**            | Employees and payroll preparation                         | HR Agent            |
+| **Platform**      | RBAC, module installs, marketplace, org settings, autonomy | System Agent        |
 
-- **Agent harness**: models operate the business through the same tools as humans (no elevated privileges)
-- **Single command bus**: humans and AI execute the same commands with identical authz and audit coverage
-- **Installable modules**: Odoo-inspired modularity; enable only what your organization needs
-- **Conversation intelligence**: multi-turn memory, clarifying questions, multi-step plans, and proactive suggestions
-- **Domain specialists**: scoped AI agents (CRM, Accounting, Inventory, …) over module tool registries, not private backends
-- **Capability gaps → self-dev path** (roadmap): honest tickets, optional coding-agent handoff, marketplace/extensions instead of core bloat
-- **Semantic memory** (roadmap): jcode-inspired embeddings, passive recall, extraction, consolidation
-- **Configurable autonomy**: recommend → confirm → guarded auto → full autonomous (with explicit warnings)
-- **HTTP-first clients**: the web app consumes REST APIs only; no kernel or DB imports in the browser
-- **Explainable AI actions**: every assisted path can record what happened, why, and which rules applied
-- **Zod-validated boundaries**: intents, commands, settings, and generative chat UI parts
-- **Observable stack**: optional Langfuse tracing for LLM calls; transactional outbox for domain events
+---
 
-Roadmap detail: [docs/product-architecture-next.md](./docs/product-architecture-next.md) · specs under [docs/specs/](./docs/specs/).
+## Key features
 
-## Business modules
+- **Single command bus** — humans and AI execute the same commands with identical authz and audit coverage
+- **Agent harness** — models operate the business through the same tools as humans (no elevated privileges)
+- **Installable modules** — Odoo-inspired modularity; enable only what your organization needs
+- **Conversation intelligence** — multi-turn memory, clarifying questions, multi-step plans, proactive suggestions
+- **Domain specialists** — scoped AI agents (CRM, Accounting, Inventory, …) over module tool registries
+- **Configurable autonomy** — `recommend → confirm → guarded_auto → full_autonomous`
+- **HTTP-first clients** — the web app talks REST only; no kernel or DB imports in the browser
+- **Explainable AI** — every assisted path can record *what* happened, *why*, and *which rules* applied
+- **Transactional outbox** — domain events publish after commit; no dual-write races
+- **Built-in messaging, email, and encrypted backups** — with Docker deployment
 
-| Module            | Capabilities                                                      | AI specialist       |
-| ----------------- | ----------------------------------------------------------------- | ------------------- |
-| **CRM**           | Customers and relationship data                                   | CRM Agent           |
-| **Accounting**    | Chart of accounts, journals, invoices                             | Accounting Agent    |
-| **Inventory**     | Warehouses, products, stock movements                             | Inventory Agent     |
-| **Purchasing**    | Vendors and purchase orders                                       | Purchasing Agent    |
-| **Manufacturing** | Bills of materials and work orders                                | Manufacturing Agent |
-| **HR**            | Employees and payroll preparation                                 | HR Agent            |
-| **Platform**      | RBAC, module installs, marketplace, org settings, autonomy policy | System Agent        |
+---
 
-Modules declare permissions, commands, queries, and optional specialist profiles. New domains ship as installable packages; no kernel fork required.
+## Quick start
 
-## Web application
+You have two options: **Docker** (recommended, minimal setup) or **running from source**.
 
-The Next.js UI provides operational screens alongside the AI chat surface:
+### Option 1 — Docker (recommended)
 
-- **Dashboard**: activity, audit summaries, and quick actions
-- **CRM, Accounting, Inventory, Purchasing, Manufacturing, HR**: module workspaces
-- **Workflows**: multi-step automation builder and run history
-- **Audit trail**: searchable record of commands and policy events
-- **RBAC**: roles, permissions, and user management
-- **Settings**: organization policy and user preferences
-- **Marketplace**: discover and manage installable modules
+```bash
+git clone https://github.com/benaiah-muga/ChasteBusinessOS.git
+cd ChasteBusinessOS
 
-## AI stack
+# Generate secrets
+export CHASTE_SESSION_SECRET="$(openssl rand -hex 24)"
+export CHASTE_BACKUP_KEY="$(openssl rand -hex 32)"
 
-| Layer         | Technology                                    | Role                                                                 |
-| ------------- | --------------------------------------------- | -------------------------------------------------------------------- |
-| Orchestrator  | `@chaste/ai-core`                             | Intent resolution, autonomy gates, confirm/cancel flows              |
-| AI layer      | Custom `@chaste/ai-core`                      | Orchestrator, workflow engine, AiProvider, autonomy + explainability |
-| Tools         | Command/query wrappers                        | AI never calls SQL directly; only registered bus operations          |
-| Workflows     | Workflow engine                               | Multi-step business automation with step validation                  |
-| Memory        | PostgreSQL + pgvector                         | Persistent chat sessions and long-term org memory                    |
-| Providers     | OpenAI, OpenAI-compatible, Ollama, Nvidia NIM | Config-driven via `CHASTE_AI_PROVIDER`                               |
-| Observability | Langfuse (optional)                           | Trace LLM calls when keys are configured                             |
+# Build and start everything (Postgres + Redis included)
+docker compose -f docker-compose.prod.yml up -d --build
+```
 
-Set `CHASTE_AI_PROVIDER=none` for deterministic, rule-based planning with no external LLM. See [configuration](./docs/configuration.md) for provider credentials and autonomy settings.
+- Web app → <http://localhost:3000>
+- API health → <http://localhost:3001/health>
+- The default admin is seeded on first boot (see logs / `CHASTE_ADMIN_*`).
 
-## Monorepo
+### Option 2 — From source
+
+**Prerequisites:** [Node.js](https://nodejs.org) 22+, [pnpm](https://pnpm.io) 9+, [PostgreSQL](https://www.postgresql.org) 16+. Redis is optional.
+
+```bash
+git clone https://github.com/benaiah-muga/ChasteBusinessOS.git
+cd ChasteBusinessOS
+
+pnpm install
+cp .env.example .env            # then edit DATABASE_URL
+createdb chaste                 # if needed
+pnpm db:migrate                # apply schema
+pnpm dev                       # API + web in parallel
+```
+
+| Service | URL |
+| ------- | --- |
+| **Web app** | <http://localhost:3000> |
+| **API** | <http://localhost:3001> |
+| **Health** | <http://localhost:3001/health> |
+
+On first run with `CHASTE_BOOTSTRAP=true`, the API seeds a default organization and admin user.
+
+> Want **messaging**, **email**, or **backups** working in a few minutes? See [Docs → Features](#documentation).
+
+---
+
+## Screenshots
+
+> Screenshots coming soon.
+
+---
+
+## Architecture
+
+```
+┌─────────────┐      HTTP / JSON       ┌──────────────────────────────┐
+│  apps/web   │ ──────────────────────▶│             apps/api          │
+│  Next.js UI │                        │   Fastify · auth · command    │
+│ (API client │                        │   /query dispatch · chat      │
+│  only)      │                        └──────────────┬───────────────┘
+└─────────────┘                                       │ command bus
+                                               ┌──────▼──────┐
+                                               │ apps/worker │  outbox,
+                                               └──────┬──────┘  email, backup
+                                                      │
+                                         ┌────────────▼─────────────┐
+                                         │ PostgreSQL + pgvector * * │
+                                         └──────────────────────────┘
+```
+
+**Monorepo layout**
 
 ```
 apps/
   api/            Fastify HTTP API: auth, routes, chat, command/query dispatch
   web/            Next.js UI (API client only; no kernel/db imports)
-  worker/         Outbox processor and background jobs
+  worker/         Outbox processor and background jobs (email, backups)
 
 packages/
   kernel/         Command/query bus, authz, audit, module registry
@@ -100,65 +151,62 @@ modules/
   manufacturing/  BOMs, work orders
   hr/             Employees, payroll prep
   platform/       RBAC, settings, marketplace, autonomy
+  messaging/      Internal messaging
   core-system/    Always-on system queries
-  demo-crm/       Reference vertical slice for contributors
 ```
 
-## Quick start
+## Tech stack
 
-**Prerequisites:** Node.js 22+, pnpm 9+, PostgreSQL. Redis is optional (reserved for future queue scale-out).
+| Layer         | Technology                                    | Role                                                                 |
+| ------------- | --------------------------------------------- | -------------------------------------------------------------------- |
+| Orchestrator  | `@chaste/ai-core`                             | Intent resolution, autonomy gates, confirm/cancel flows              |
+| Command bus   | `@chaste/kernel`                              | Authz, audit, module registry                                        |
+| Database      | PostgreSQL + pgvector                         | Persistence and long-term memory                                     |
+| Schema        | Drizzle ORM + Zod                             | Typed, validated boundaries                                          |
+| Providers     | OpenAI, OpenAI-compatible, Ollama, Nvidia NIM | Config-driven via `CHASTE_AI_PROVIDER` (or `none` for rules-only)    |
+| Email         | SMTP (nodemailer) / Resend                    | Config-driven outbound email                                         |
+| Backups       | AES-256-GCM + S3 / local store                | Encrypted snapshot + restore                                         |
+| Observability | Langfuse (optional)                           | Trace LLM calls when keys are configured                             |
+| Deploy        | Docker (multi-target build)                   | `migrate` · `api` · `web` · `worker` images                         |
 
-```bash
-pnpm install
-cp .env.example .env
-# Edit DATABASE_URL for your local Postgres, e.g.:
-# DATABASE_URL=postgres://$USER@/chaste?host=/var/run/postgresql
-createdb chaste   # if needed
-pnpm db:migrate
-pnpm dev          # API + web in parallel (or run services individually below)
-```
+Set `CHASTE_AI_PROVIDER=none` for deterministic, rule-based planning with no external LLM — useful for zero-cost local evaluation.
 
-| Service | Command                            | URL                          |
-| ------- | ---------------------------------- | ---------------------------- |
-| API     | `pnpm --filter @chaste/api dev`    | http://localhost:3001        |
-| Web     | `pnpm --filter @chaste/web dev`    | http://localhost:3000        |
-| Worker  | `pnpm --filter @chaste/worker dev` | n/a                          |
-| Health  | n/a                                | http://localhost:3001/health |
-
-On first run with `CHASTE_BOOTSTRAP=true`, the API seeds a default organization and admin user (see `.env.example`).
+---
 
 ## Development
 
 ```bash
-pnpm lint          # ESLint across the monorepo
-pnpm typecheck     # TypeScript strict checks
+pnpm lint          # TypeScript strict lint across the monorepo
+pnpm typecheck     # TypeScript strict type checks
 pnpm test          # Unit and integration tests
 pnpm e2e           # Full API + Postgres end-to-end verification
-pnpm db:generate   # Generate Drizzle migrations after schema changes
+pnpm build         # Compile all packages and apps
 ```
 
-Configuration and secrets: [docs/configuration.md](./docs/configuration.md)  
-Module authoring: [docs/module-development.md](./docs/module-development.md)  
-AI autonomy and safety: [docs/ai-autonomy-and-safety.md](./docs/ai-autonomy-and-safety.md)
+> Run `pnpm test` with a local PostgreSQL available. See [docs/configuration.md](docs/configuration.md) for environment setup.
 
+---
 ## Deployment
 
-Four container images (`migrate`, `api`, `web`, `worker`) build from the
-root [Dockerfile](./Dockerfile) via Docker build targets. Full guides:
-[docs/deploy/](./docs/deploy/).
+Four container images (`migrate`, `api`, `web`, `worker`) are produced from a single [Dockerfile](Dockerfile) build targets (see [docs/deploy](docs/deploy/)):
+
+| Target  | Runs                     |
+| ------- | ------------------------ |
+| `migrate` | one-off schema migrations |
+| `api`     | HTTP API (`:3001`)       |
+| `web`     | Next.js UI (`:3000`)     |
+| `worker`  | outbox, email, backups   |
+
+Per-provider guides: **AWS** · **GCP** · **Azure** · **Fly.io** · **Render** · **Railway** · **Supabase/Neon**.
 
 ```bash
-# Single host, Docker Compose (Postgres + Redis included)
-export CHASTE_SESSION_SECRET="$(openssl rand -hex 24)"
-export CHASTE_BACKUP_KEY="$(openssl rand -hex 32)"
-docker compose -f docker-compose.prod.yml up -d --build
+# Example: build one target
+docker build --target api -t chaste/api:0.1.0 .
 ```
 
-The `migrate` image runs schema migrations before `api`/`worker` start; the
-worker must run as a single replica (transactional outbox consumer). See
-[`docker-compose.prod.yml`](./docker-compose.prod.yml) for the environment
-contract and the per-provider guides for AWS, GCP, Azure, Fly.io, Render,
-Railway, and Supabase/Neon.
+Public images are published to **GHCR** (`ghcr.io/benaiah-muga/ChasteBusinessOS`). See [docs/deploy/README.md](docs/deploy/README.md).
+
+---
 
 ## Design constraints
 
@@ -168,10 +216,28 @@ Railway, and Supabase/Neon.
 4. Domain specialists are tool/profile scopes, not private backends
 5. Events publish via transactional outbox after commit
 
+---
+
+## Documentation
+
+| Doc | Purpose |
+| --- | ------- |
+| [configuration.md](docs/configuration.md) | Environment variables, AI providers, autonomy |
+| [module-development.md](docs/module-development.md) | Authoring a new business module |
+| [ai-autonomy-and-safety.md](docs/ai-autonomy-and-safety.md) | Autonomy levels and safety model |
+| [deploy/](docs/deploy/) | Deployment guides + Docker usage |
+| [specs/](docs/specs/) | Feature specifications (messaging, backup, AI, …) |
+| [adr/](docs/adr/) | Architecture decision records |
+| [AGENTS.md](AGENTS.md) | Rules for AI coding agents |
+
+## Roadmap
+
+See [docs/product-architecture-next.md](docs/product-architecture-next.md) for the full roadmap — semantic memory, capability-gap self-development, and marketplace extensions.
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the checks in [AGENTS.md](AGENTS.md).
+
 ## License
 
-[Apache License 2.0](./LICENSE)
-
-## Security
-
-See [SECURITY.md](./SECURITY.md).
+Distributed under the [Apache License 2.0](LICENSE). See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.

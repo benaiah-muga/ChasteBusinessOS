@@ -36,6 +36,9 @@ import {
   type SessionStore,
 } from "@chaste/db";
 import { eq } from "drizzle-orm";
+import { createRequire } from "node:module";
+const pkgRequire = createRequire(import.meta.url);
+const pkg = pkgRequire("../package.json") as { version: string };
 import {
   type AutonomyLevel,
   autonomyLevelSchema,
@@ -601,7 +604,7 @@ export function healthPayload(app: AppContext) {
   return {
     ok: true as const,
     service: "chaste-api",
-    version: "0.4.0",
+    version: pkg.version,
     config: publicConfigView(app.config),
   };
 }
