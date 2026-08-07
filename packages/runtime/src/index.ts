@@ -37,6 +37,7 @@ import { createMasterDataModule } from "@chaste/module-master-data";
 import { createMessagingModule } from "@chaste/module-messaging";
 import { createPlatformModule } from "@chaste/module-platform";
 import { createPurchasingModule } from "@chaste/module-purchasing";
+import { createSchedulingModule } from "@chaste/module-scheduling";
 import { PostgresInboxStore } from "./postgres-inbox-store.js";
 import { PostgresWakeStore } from "./postgres-wake-store.js";
 import { PostgresSkillStore } from "./postgres-skill-store.js";
@@ -77,6 +78,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   await modules.register(createManufacturingModule(db));
   await modules.register(createMasterDataModule(db));
   await modules.register(createMessagingModule(db));
+  await modules.register(createSchedulingModule(db));
   await modules.register(
     createPlatformModule(db, modules, {
       allowFullAutonomous: config.allowFullAutonomous,
