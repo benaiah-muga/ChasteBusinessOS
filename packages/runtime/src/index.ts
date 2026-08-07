@@ -33,6 +33,7 @@ import { createCrmModule } from "@chaste/module-crm";
 import { createHrModule } from "@chaste/module-hr";
 import { createInventoryModule } from "@chaste/module-inventory";
 import { createManufacturingModule } from "@chaste/module-manufacturing";
+import { createMasterDataModule } from "@chaste/module-master-data";
 import { createMessagingModule } from "@chaste/module-messaging";
 import { createPlatformModule } from "@chaste/module-platform";
 import { createPurchasingModule } from "@chaste/module-purchasing";
@@ -74,6 +75,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   await modules.register(createPurchasingModule(db));
   await modules.register(createHrModule(db));
   await modules.register(createManufacturingModule(db));
+  await modules.register(createMasterDataModule(db));
   await modules.register(createMessagingModule(db));
   await modules.register(
     createPlatformModule(db, modules, {
