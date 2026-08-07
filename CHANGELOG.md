@@ -5,6 +5,46 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Shared durable runtime (`@chaste/runtime`)** — a single `createRuntime(config, db)`
+  factory builds the command/query registries, registers every shipped module once,
+  and wires Postgres-backed stores (`pending_approvals`, `ai_wakes`, `ai_skills`).
+  Both the API and the worker consume it, eliminating process-local store drift so
+  standing rules / wakes / skills minted over HTTP are honored by scheduled
+  follow-ups (ARCH-4, SC-4).
+- **Per-request bearer-token authentication** — the API resolves the acting user from
+  an `Authorization: Bearer` token per request instead of a process-wide session
+  singleton (with bootstrap-admin fallback for dev/legacy). Adds `POST /api/v1/auth/login`
+  and a token-scoped `GET /api/v1/session`. Request-scoped `runCommandAsAuth` /
+  `runQueryAsAuth` execute under the request principal while sharing the per-request
+  audit/outbox transaction (ARCH-1).
+- **Persisted workflows** — AI-built workflows and their runs now survive restarts,
+  stored in `workflow_definitions` / `workflow_runs` and reached exclusively via the
+  command/query bus (`core.workflow.create` / `get` / `list`), which humans and AI share
+  (ARCH-5).
+- **Command-bus transactional outbox** — business writes, outbox enqueues, and audit
+  events commit in one DB transaction via `createCommandHelpers`; success audit is
+  in-transaction and failure audit is written out-of-transaction (ARCH-2).
+
+### Changed
+
+- **Command/query execution** — the kernel `InboxStore` and ai-core `WakeStore` /
+  `SkillStore` became async interfaces with separate in-memory and Postgres
+  implementations (ARCH-4, SC-4).
+- **Module boot integrity** — removed the dead `core-system` and `demo-crm` modules and
+  added a boot-time registry integrity test that fails on duplicate command/query names
+  or missing platform queries (ARCH-6).
+- **Chat confirmation cards** — only the live confirmation renders after a turn; stale
+  cards from a previous confirmation are pruned.
+
+### Fixed
+
+- **Stale chat confirm cards** — approving/answering one confirmation no longer leaves
+  a second duplicate card visible in the composer.
+
 ## [0.1.0] - 2026-08-05
 
 First tagged release. Early alpha — not recommended for production workloads.
