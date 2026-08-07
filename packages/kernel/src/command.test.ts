@@ -5,6 +5,7 @@ import {
   createCommandRegistry,
   defineCommand,
   executeCommand,
+  type CommandHelpers,
 } from "./command.js";
 import { createRequestContext } from "./context.js";
 import { PermissionError, ValidationError } from "./errors.js";
@@ -63,5 +64,75 @@ describe("executeCommand", () => {
     await expect(
       executeCommand(registry, "demo.ping", { name: "" }, ctx, { audit, outbox }),
     ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("runs the handler inside the provided transaction (ARCH-2)", async () => {
+    const { registry, ctx } = setup(["demo.ping"]);
+    const outerAudit = new InMemoryAuditWriter();
+    const txAudit = new InMemoryAuditWriter();
+
+    const helpers: CommandHelpers = {
+      audit: outerAudit,
+      outbox: new InMemoryOutboxWriter(),
+      db: {},
+      async transaction<T>(fn: (tx: CommandHelpers) => Promise<T>): Promise<T> {
+        // Simulate a DB transaction: tx-scoped writers are distinct from outer.
+        return fn({ audit: txAudit, outbox: new InMemoryOutboxWriter(), db: {} });
+      },
+    };
+
+    const result = await executeCommand(registry, "demo.ping", { name: "Acme" }, ctx, helpers);
+    expect(result.data).toEqual({ id: "1", name: "Acme" });
+
+    // Success audit must be written through the tx-scoped writer (inside the tx).
+    expect(txAudit.entries).toHaveLength(1);
+    expect(txAudit.entries[0]?.success).toBe(true);
+    // Nothing written to the outer audit on the success path.
+    expect(outerAudit.entries).toHaveLength(0);
+  });
+
+  it("writes the failure audit OUTSIDE the transaction when the handler throws", async () => {
+    const registry = createCommandRegistry();
+    const failing = defineCommand({
+      name: "demo.boom",
+      permissions: ["demo.boom"],
+      input: z.object({}),
+      output: z.object({}),
+      handler: async () => {
+        throw new Error("kernel-level failure");
+      },
+    });
+    registry.register(failing);
+    const ctx = createRequestContext({
+      actor: {
+        kind: "user",
+        userId: "u1",
+        organizationId: "o1",
+        permissions: new Set(["demo.boom"]),
+      },
+    });
+
+    const outerAudit = new InMemoryAuditWriter();
+    const txAudit = new InMemoryAuditWriter();
+
+    const helpers: CommandHelpers = {
+      audit: outerAudit,
+      outbox: new InMemoryOutboxWriter(),
+      async transaction<T>(fn: (tx: CommandHelpers) => Promise<T>): Promise<T> {
+        // A real DB would roll back partial writes here; the handler already threw.
+        return fn({ audit: txAudit, outbox: new InMemoryOutboxWriter() });
+      },
+    };
+
+    await expect(executeCommand(registry, "demo.boom", {}, ctx, helpers)).rejects.toThrow(
+      "kernel-level failure",
+    );
+
+    // No success audit written inside the (rolled-back) tx.
+    expect(txAudit.entries).toHaveLength(0);
+    // The failure audit is recorded via the OUTER writer (survives the rollback).
+    expect(outerAudit.entries).toHaveLength(1);
+    expect(outerAudit.entries[0]?.success).toBe(false);
+    expect(outerAudit.entries[0]?.action).toBe("demo.boom");
   });
 });

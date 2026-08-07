@@ -45,7 +45,21 @@ export interface CommandDefinition<TIn extends z.ZodType, TOut extends z.ZodType
 export interface CommandHelpers {
   audit: AuditWriter;
   outbox: OutboxWriter;
+  /**
+   * Transaction-scoped DB handle (opaque in the kernel; concrete type supplied
+   * by `@chaste/db`). Command handlers MUST use this for all writes so business
+   * data + outbox event + audit commit atomically (transactional outbox).
+   */
+  db?: unknown;
+  /**
+   * Run a callback inside a single DB transaction. The callback receives
+   * transaction-scoped helpers so writes are atomic. Optional: when omitted
+   * (in-memory/test helpers) it runs the callback with the same helpers, which
+   * is correct because in-memory stores have no partial-commit concern.
+   */
+  transaction?: <T>(fn: (tx: CommandHelpers) => Promise<T>) => Promise<T>;
 }
+
 
 export interface CommandRegistry {
   register<TIn extends z.ZodType, TOut extends z.ZodType>(
@@ -148,33 +162,45 @@ export async function executeCommand<T = unknown>(
     throw new ValidationError(`Invalid input for ${name}`, parsed.error.flatten());
   }
 
-  try {
-    const data = await def.handler(parsed.data, ctx, helpers);
-    const out = def.output.safeParse(data);
-    if (!out.success) {
-      throw new ValidationError(`Invalid output for ${name}`, out.error.flatten());
-    }
+  const runInTransaction: (fn: (tx: CommandHelpers) => Promise<T>) => Promise<T> =
+    helpers.transaction ?? ((fn) => fn(helpers));
 
-    await helpers.audit.write({
-      id: crypto.randomUUID(),
-      at: ctx.now().toISOString(),
-      organizationId: ctx.actor.organizationId,
-      actorUserId: ctx.actor.userId,
-      actorKind: ctx.actor.kind,
-      aiRunId: ctx.actor.aiRunId,
-      action: name,
-      success: true,
-      requestId: ctx.requestId,
-      inputSummary: parsed.data,
+  try {
+    const result = await runInTransaction(async (txHelpers) => {
+      const data = await def.handler(parsed.data, ctx, txHelpers);
+      const out = def.output.safeParse(data);
+      if (!out.success) {
+        throw new ValidationError(`Invalid output for ${name}`, out.error.flatten());
+      }
+
+      // Success audit is transactional with the business writes — if any part
+      // fails the whole mutation (business data + outbox + audit) rolls back.
+      await txHelpers.audit.write({
+        id: crypto.randomUUID(),
+        at: ctx.now().toISOString(),
+        organizationId: ctx.actor.organizationId,
+        actorUserId: ctx.actor.userId,
+        actorKind: ctx.actor.kind,
+        aiRunId: ctx.actor.aiRunId,
+        action: name,
+        success: true,
+        requestId: ctx.requestId,
+        inputSummary: parsed.data,
+      });
+
+      return out.data as T;
     });
 
     return {
       ok: true,
-      data: out.data as T,
+      data: result,
       command: name,
       requestId: ctx.requestId,
     };
   } catch (err) {
+    // Failure audit is written OUTSIDE the (rolled-back) transaction so the
+    // failure is always recorded even though any partial business writes were
+    // undone by the rollback.
     const message = err instanceof Error ? err.message : String(err);
     const code = err instanceof Error && "code" in err ? String((err as { code: string }).code) : "HANDLER_ERROR";
     await helpers.audit.write({

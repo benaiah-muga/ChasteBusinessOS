@@ -7,4 +7,5 @@ export * from "./memory-store.js";
 export * from "./session-store.js";
 export * from "./seed.js";
 export * from "./settings-schemas.js";
+export { createCommandHelpers } from "./command-helpers.js";
 export { cleanupTestData, findUserByEmail, findWarehouseByName, findFirstWarehouse, findUserById, findUsersByOrg } from "./test-helpers.js";

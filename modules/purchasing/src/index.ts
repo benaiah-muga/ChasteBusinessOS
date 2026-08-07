@@ -29,8 +29,9 @@ export function createPurchasingModule(db: Db): BusinessModule {
           tags: ["purchasing"],
           input: z.object({ name: z.string().min(1), email: z.string().email().optional() }),
           output: z.object({ id: z.string(), name: z.string() }),
-          handler: async (input, ctx) => {
-            const [row] = await db
+          handler: async (input, ctx, helpers) => {
+            const tx = (helpers.db ?? db) as Db;
+            const [row] = await tx
               .insert(schema.purVendors)
               .values({
                 organizationId: ctx.actor.organizationId,
@@ -61,7 +62,8 @@ export function createPurchasingModule(db: Db): BusinessModule {
             total: z.string(),
           }),
           handler: async (input, ctx, helpers) => {
-            const [row] = await db
+            const tx = (helpers.db ?? db) as Db;
+            const [row] = await tx
               .insert(schema.purPurchaseOrders)
               .values({
                 organizationId: ctx.actor.organizationId,

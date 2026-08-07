@@ -146,6 +146,9 @@ export function createPlatformModule(
         "core.bpartner.read",
         "core.backup.read",
         "core.backup.manage",
+        "core.workflow.read",
+        "core.workflow.manage",
+        "core.workflow.run",
       ],
       capabilities: ["core.rbac", "core.marketplace", "core.autonomy", "core.bpartners"],
       specialist: {
@@ -296,8 +299,9 @@ export function createPlatformModule(
             permissions: z.array(z.string()).default([]),
           }),
           output: z.object({ id: z.string(), key: z.string(), name: z.string() }),
-          handler: async (input, ctx) => {
-            const [role] = await db
+          handler: async (input, ctx, helpers) => {
+            const tx = (helpers.db ?? db) as Db;
+            const [role] = await tx
               .insert(schema.roles)
               .values({
                 organizationId: ctx.actor.organizationId,
@@ -308,7 +312,7 @@ export function createPlatformModule(
               })
               .returning();
             for (const permission of input.permissions) {
-              await db.insert(schema.rolePermissions).values({ roleId: role!.id, permission });
+              await tx.insert(schema.rolePermissions).values({ roleId: role!.id, permission });
             }
             return { id: role!.id, key: role!.key, name: role!.name };
           },
@@ -691,8 +695,9 @@ export function createPlatformModule(
           minAutonomyForAuto: "full_autonomous",
           input: z.object({ roleId: z.string().uuid() }),
           output: z.object({ ok: z.literal(true) }),
-          handler: async (input, ctx) => {
-            const [role] = await db
+          handler: async (input, ctx, helpers) => {
+            const tx = (helpers.db ?? db) as Db;
+            const [role] = await tx
               .select()
               .from(schema.roles)
               .where(eq(schema.roles.id, input.roleId));
@@ -707,13 +712,13 @@ export function createPlatformModule(
             }
 
             // Check if any user has this as their only admin role
-            const usersWithRole = await db
+            const usersWithRole = await tx
               .select({ userId: schema.userRoles.userId })
               .from(schema.userRoles)
               .where(eq(schema.userRoles.roleId, input.roleId));
 
             for (const { userId } of usersWithRole) {
-              const otherAdminRoles = await db
+              const otherAdminRoles = await tx
                 .select({ roleId: schema.rolePermissions.roleId })
                 .from(schema.rolePermissions)
                 .innerJoin(schema.userRoles, eq(schema.rolePermissions.roleId, schema.userRoles.roleId))
@@ -737,7 +742,7 @@ export function createPlatformModule(
             }
 
             // Cascade delete handles role_permissions and user_roles
-            await db.delete(schema.roles).where(eq(schema.roles.id, input.roleId));
+            await tx.delete(schema.roles).where(eq(schema.roles.id, input.roleId));
             return { ok: true as const };
           },
         }),

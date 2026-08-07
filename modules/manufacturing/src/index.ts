@@ -41,8 +41,9 @@ export function createManufacturingModule(db: Db): BusinessModule {
               .default([]),
           }),
           output: z.object({ id: z.string(), name: z.string() }),
-          handler: async (input, ctx) => {
-            const [bom] = await db
+          handler: async (input, ctx, helpers) => {
+            const tx = (helpers.db ?? db) as Db;
+            const [bom] = await tx
               .insert(schema.mfgBoms)
               .values({
                 organizationId: ctx.actor.organizationId,
@@ -52,7 +53,7 @@ export function createManufacturingModule(db: Db): BusinessModule {
               })
               .returning();
             for (const c of input.components) {
-              await db.insert(schema.mfgBomLines).values({
+              await tx.insert(schema.mfgBomLines).values({
                 bomId: bom!.id,
                 componentProductId: c.componentProductId,
                 quantity: c.quantity,
@@ -81,7 +82,8 @@ export function createManufacturingModule(db: Db): BusinessModule {
             quantity: z.number(),
           }),
           handler: async (input, ctx, helpers) => {
-            const [row] = await db
+            const tx = (helpers.db ?? db) as Db;
+            const [row] = await tx
               .insert(schema.mfgWorkOrders)
               .values({
                 organizationId: ctx.actor.organizationId,
