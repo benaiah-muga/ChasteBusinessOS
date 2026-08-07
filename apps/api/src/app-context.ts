@@ -100,7 +100,6 @@ export interface AppContext {
   provider: AiProvider;
   tracer: AiTracer;
   workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
-  workflows: Map<string, WorkflowDefinition>;
 }
 
 export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Promise<AppContext> {
@@ -235,7 +234,6 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     provider: tracedProvider,
     tracer,
     workflowBuilder,
-    workflows: new Map(),
   };
 }
 
@@ -680,8 +678,24 @@ export async function buildWorkflow(
     if (!workflow) {
       return { workflow: null, error: "Failed to generate workflow from request. Try a more specific description." };
     }
-    app.workflows.set(workflow.id, workflow);
-    return { workflow };
+    // ARCH-5 — persist through the command bus so humans and AI share one path
+    // and the definition survives restarts. The active session's org owns it.
+    const res = await executeCommand(
+      app.commands,
+      "core.workflow.create",
+      {
+        id: workflow.id,
+        name: workflow.name,
+        description: workflow.description,
+        trigger: workflow.trigger,
+        triggerConfig: workflow.triggerConfig ?? {},
+        steps: workflow.steps,
+        createdBy: workflow.createdBy,
+      },
+      requestCtx(app),
+      createCommandHelpers({ audit: app.audit, outbox: app.outbox, db: app.db }),
+    );
+    return { workflow: res.data as WorkflowDefinition };
   } catch (err) {
     return {
       workflow: null,
@@ -696,7 +710,14 @@ export async function executeWorkflowRun(
   input: Record<string, unknown> = {},
   options: { approvedStepIds?: string[] } = {},
 ) {
-  const wf = app.workflows.get(workflowId);
+  // ARCH-5 — source the definition from Postgres, not process memory.
+  const res = await executeQuery(
+    app.queries,
+    "core.workflow.get",
+    { workflowId },
+    requestCtx(app),
+  );
+  const wf = res.data as WorkflowDefinition;
   if (!wf) {
     throw new NotFoundError("Workflow");
   }

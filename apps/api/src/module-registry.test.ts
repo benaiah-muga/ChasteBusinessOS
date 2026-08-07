@@ -56,6 +56,7 @@ describe("module registry boot integrity", () => {
 
     // Sanity: platform-provided queries the web/API depends on are present.
     expect(queryNames).toContain("core.modules.list");
+    expect(commandNames).toContain("core.workflow.create");
     expect(commandNames).toContain("crm.customer.create");
   });
 });

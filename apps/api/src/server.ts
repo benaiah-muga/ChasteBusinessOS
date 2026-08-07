@@ -5,7 +5,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { getUserWithOrg, resolveUserPermissions, schema } from "@chaste/db";
-import { workflowDefinitionSchema } from "@chaste/ai-core";
 import {
   createAppContext,
   healthPayload,
@@ -602,24 +601,27 @@ export async function buildServer(appCtx?: AppContext) {
     return runChat(app, body, getAuth(req));
   });
 
-  // ─── Workflow endpoints (in-memory until ARCH-5 persistence lands) ──
+  // ─── Workflow endpoints (ARCH-5 — persisted via the command/query bus) ──
 
-  server.get("/api/v1/workflows", async () => {
-    const items = Array.from(app.workflows.values()).map((wf) => ({
-      id: wf.id,
-      name: wf.name,
-      description: wf.description,
-      trigger: wf.trigger,
-      createdBy: wf.createdBy,
-      stepCount: wf.steps.length,
-    }));
-    return { items };
+  server.get("/api/v1/workflows", async (req) => {
+    const result = await runQueryAsAuth(app, "core.workflow.list", {}, getAuth(req), req.id);
+    return result.data;
   });
 
-  server.post("/api/v1/workflows", async (req) => {
-    const input = workflowDefinitionSchema.parse(req.body);
-    app.workflows.set(input.id, input);
-    return input;
+  server.post("/api/v1/workflows", async (req, reply) => {
+    const input = z
+      .object({
+        id: z.string().optional(),
+        name: z.string().min(1),
+        description: z.string().default(""),
+        trigger: z.enum(["manual", "event", "schedule"]).default("manual"),
+        triggerConfig: z.record(z.unknown()).default({}),
+        steps: z.array(z.unknown()),
+        createdBy: z.enum(["user", "ai"]).default("user"),
+      })
+      .parse(req.body);
+    const result = await runCommandAsAuth(app, "core.workflow.create", input, getAuth(req), req.id);
+    return result.data;
   });
 
   server.post("/api/v1/workflows/build", async (req) => {
@@ -630,11 +632,8 @@ export async function buildServer(appCtx?: AppContext) {
 
   server.get("/api/v1/workflows/:id", async (req) => {
     const { id } = req.params as { id: string };
-    const wf = app.workflows.get(id);
-    if (!wf) {
-      throw new NotFoundError("Workflow");
-    }
-    return wf;
+    const result = await runQueryAsAuth(app, "core.workflow.get", { workflowId: id }, getAuth(req), req.id);
+    return result.data;
   });
 
   server.post("/api/v1/workflows/:id/execute", async (req) => {
