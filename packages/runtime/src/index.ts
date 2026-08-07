@@ -31,6 +31,7 @@ import type { SkillStore, WakeStore } from "@chaste/ai-core";
 import { createAccountingModule } from "@chaste/module-accounting";
 import { createCrmModule } from "@chaste/module-crm";
 import { createHrModule } from "@chaste/module-hr";
+import { createIdentityModule } from "@chaste/module-identity";
 import { createInventoryModule } from "@chaste/module-inventory";
 import { createManufacturingModule } from "@chaste/module-manufacturing";
 import { createMasterDataModule } from "@chaste/module-master-data";
@@ -75,6 +76,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   await modules.register(createInventoryModule(db));
   await modules.register(createPurchasingModule(db));
   await modules.register(createHrModule(db));
+  await modules.register(createIdentityModule(db));
   await modules.register(createManufacturingModule(db));
   await modules.register(createMasterDataModule(db));
   await modules.register(createMessagingModule(db));

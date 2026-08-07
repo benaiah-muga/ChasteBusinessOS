@@ -26,6 +26,7 @@
     "@chaste/module-accounting": "workspace:*",
     "@chaste/module-crm": "workspace:*",
     "@chaste/module-hr": "workspace:*",
+    "@chaste/module-identity": "workspace:*",
     "@chaste/module-inventory": "workspace:*",
     "@chaste/module-manufacturing": "workspace:*",
     "@chaste/module-master-data": "workspace:*",

@@ -19,6 +19,7 @@ import {
 } from "@chaste/kernel";
 import { createDb, runMigrations, resolveUserPermissions, schema, type Db, cleanupTestData } from "@chaste/db";
 import { createPlatformModule } from "@chaste/module-platform";
+import { createIdentityModule } from "@chaste/module-identity";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const DB_URL = process.env.DATABASE_URL!;
@@ -111,6 +112,7 @@ describe.skipIf(!hasDb)("settings & preferences E2E", () => {
       regions: ["local", "us-east", "eu-west"],
     });
     platform.register({ commands, queries });
+    createIdentityModule(db).register({ commands, queries });
 
     // Create test org
     const [org] = await db.insert(schema.organizations).values({

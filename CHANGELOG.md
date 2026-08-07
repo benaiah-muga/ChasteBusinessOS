@@ -38,11 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   added a boot-time registry integrity test that fails on duplicate command/query names
   or missing platform queries (ARCH-6).
 - **Platform module decomposition (ARCH-3)** — the platform "god module" is being split
-  into bounded-context packages: `business-partner master data` (`core.bpartner.*`) and
-  `scheduling` (`core.reminder.*`, `core.followup.*`, `core.calendar.*`) now live in
-  `@chaste/module-master-data` and `@chaste/module-scheduling`. Command/query names and
-  permissions are unchanged; ownership and contract tests moved with the code. `platform`
-  shrinks and will keep shedding bounded contexts toward a thin aggregator.
+  into bounded-context packages: `business-partner master data` (`core.bpartner.*`),
+  `scheduling` (`core.reminder.*`, `core.followup.*`, `core.calendar.*`), and `identity`
+  (`core.rbac.*`, `core.role.*`, `core.user.*`) now live in
+  `@chaste/module-master-data`, `@chaste/module-scheduling`, and
+  `@chaste/module-identity`. Command/query names and permissions are unchanged;
+  ownership and contract tests moved with the code. `platform` shrinks and will keep
+  shedding bounded contexts toward a thin aggregator.
 - **Chat confirmation cards** — only the live confirmation renders after a turn; stale
   cards from a previous confirmation are pruned.
 

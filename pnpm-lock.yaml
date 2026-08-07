@@ -50,6 +50,9 @@ importers:
       '@chaste/module-hr':
         specifier: workspace:*
         version: link:../../modules/hr
+      '@chaste/module-identity':
+        specifier: workspace:*
+        version: link:../../modules/identity
       '@chaste/module-inventory':
         specifier: workspace:*
         version: link:../../modules/inventory
@@ -237,6 +240,28 @@ importers:
         version: 2.1.9(@types/node@22.20.1)
 
   modules/hr:
+    dependencies:
+      '@chaste/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@chaste/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@opentelemetry/api@1.9.1)(@types/react@19.2.17)(pg@8.22.0)(postgres@3.4.9)(react@19.2.7)
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
+  modules/identity:
     dependencies:
       '@chaste/db':
         specifier: workspace:*
@@ -542,6 +567,9 @@ importers:
       '@chaste/module-hr':
         specifier: workspace:*
         version: link:../../modules/hr
+      '@chaste/module-identity':
+        specifier: workspace:*
+        version: link:../../modules/identity
       '@chaste/module-inventory':
         specifier: workspace:*
         version: link:../../modules/inventory
