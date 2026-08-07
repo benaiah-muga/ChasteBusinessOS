@@ -212,7 +212,7 @@ function resolveConfirmParts(
  * approval surfaces in the cross-session queue (mobile, Slack dm). Default is
  * `inline` — attended sessions answer in the composer.
  */
-function mirrorToInbox(
+async function mirrorToInbox(
   deps: OrchestratorDeps,
   session: ChatSessionState,
   ctx: { organizationId: string; userId: string },
@@ -220,7 +220,7 @@ function mirrorToInbox(
   opts: { summary: string; commandMeta?: CommandMeta; input?: Record<string, unknown> } = {
     summary: pending.command,
   },
-): InboxItem | undefined {
+): Promise<InboxItem | undefined> {
   if (!deps.inbox) return undefined;
   const visibility = session.unattended ? "inbox" : (deps.defaultInboxVisibility ?? "inline");
   const pendingInput = (opts.input ?? (pending.input as Record<string, unknown>)) ?? {};
@@ -262,8 +262,7 @@ function mirrorToInbox(
   });
 }
 
-/** Look up a command's metadata in the registry (undefined when module not loaded). */
-function commandMetaOf(deps: OrchestratorDeps, command: string): CommandMeta | undefined {
+/** Look up a command's metadata in the registry (undefined when module not loaded). */function commandMetaOf(deps: OrchestratorDeps, command: string): CommandMeta | undefined {
   return deps.commands.list().find((c) => c.name === command) as CommandMeta | undefined;
 }
 
@@ -285,13 +284,13 @@ function riskOf(
  * a concrete off-platform target are eligible (the safety floor that makes
  * "allow always" scoped, never blanket).
  */
-function standingDecision(
+async function standingDecision(
   deps: OrchestratorDeps,
   session: ChatSessionState,
   command: string,
   input: unknown,
   meta?: CommandMeta,
-): StandingRuleDecision | null {
+): Promise<StandingRuleDecision | null> {
   if (!deps.inbox) return null;
   const classifiable = classifiableFromMeta(meta);
   if (classify(command, { classifiable, overrides: deps.riskOverrides }) !== "external") {
@@ -386,19 +385,19 @@ function withBranchContext(
 }
 
 /** R7 — per-turn skill catalog + loaded-skill disable countermand, appended to outbound. */
-function withSkillContext(
+async function withSkillContext(
   messages: ChatMessage[],
   deps: OrchestratorDeps,
   session: ChatSessionState,
   organizationId: string,
-): ChatMessage[] {
+): Promise<ChatMessage[]> {
   if (!deps.skills) return messages;
   const filter = {
     organizationId,
     branchId: session.activeBranchId,
   };
-  const catalog = skillCatalogText(deps.skills, filter);
-  const countermand = disableCountermand(deps.skills, filter, session.loadedSkillNames ?? []);
+  const catalog = await skillCatalogText(deps.skills, filter);
+  const countermand = await disableCountermand(deps.skills, filter, session.loadedSkillNames ?? []);
   if (!catalog && !countermand) return messages;
   const copy = messages.slice();
   const last = copy[copy.length - 1]!;
@@ -882,7 +881,7 @@ async function executeAgentTool(
     case "loadSkill": {
       if (!deps.skills) return { message: "Skill catalog not available on this instance." };
       const filter = { organizationId: ctx.organizationId, branchId: ctx.branchId };
-      const skill = deps.skills.get(String(args.name ?? ""), filter);
+      const skill = await deps.skills.get(String(args.name ?? ""), filter);
       if (!skill || !skill.enabled) {
         return { message: `Skill "${args.name}" is not available (unknown or disabled).` };
       }
@@ -899,7 +898,7 @@ async function executeAgentTool(
         organizationId: ctx.organizationId,
         branchId: ctx.branchId,
       });
-      const res = tools.saveSkill({
+      const res = await tools.saveSkill({
         name: String(args.name ?? ""),
         title: String(args.title ?? args.name ?? ""),
         summary: String(args.summary ?? ""),
@@ -910,7 +909,7 @@ async function executeAgentTool(
       // through the Inbox card (no self-grant path).
       let inboxItemId: string | undefined;
       if (deps.inbox) {
-        const item = deps.inbox.addApproval({
+        const item = await deps.inbox.addApproval({
           sessionId: session.id,
           organizationId: ctx.organizationId,
           userId: ctx.userId,
@@ -937,22 +936,22 @@ async function executeAgentTool(
       const tools = selfWakeTools(deps.wake, session.id);
       switch (name) {
         case "sleepFor": {
-          const r = tools.sleepFor(Number(args.seconds ?? 0), args.note as string | undefined);
+          const r = await tools.sleepFor(Number(args.seconds ?? 0), args.note as string | undefined);
           return { message: `Sleeping ${args.seconds}s; wake ${r.wakeId} fires ${r.fireAt}.` };
         }
         case "sleepUntil": {
-          const r = tools.sleepUntil(
+          const r = await tools.sleepUntil(
             String(args.isoTimestamp ?? args.when ?? ""),
             args.note as string | undefined,
           );
           return { message: `Wake ${r.wakeId} scheduled for ${r.fireAt}.` };
         }
         case "wakeOnJob": {
-          const r = tools.wakeOnJob(String(args.jobId ?? ""), args.note as string | undefined);
+          const r = await tools.wakeOnJob(String(args.jobId ?? ""), args.note as string | undefined);
           return { message: `Will resume when job ${r.jobId} completes (wake ${r.wakeId}).` };
         }
         default: {
-          const r = tools.wakeOnEvent(
+          const r = await tools.wakeOnEvent(
             String(args.eventKey ?? ""),
             args.note as string | undefined,
           );
@@ -1045,10 +1044,10 @@ export async function handleChatTurn(
       // `id` — the item's id is a fresh UUID, while `toolCallId` carries the
       // in-chat pending confirmation id. Searching by `id` never matches and
       // leaves a dangling "pending" approval on cancel.
-      const existing = deps.inbox
-        .list({ sessionId: session.id })
-        .find((i) => i.toolCallId === cancelled.id);
-      if (existing) deps.inbox.resolve(existing.id, "deny");
+      const existing = (await deps.inbox.list({ sessionId: session.id })).find(
+        (i) => i.toolCallId === cancelled.id,
+      );
+      if (existing) await deps.inbox.resolve(existing.id, "deny");
     }
     session.messages = resolveConfirmParts(session.messages, {
       id: cancelled.id,
@@ -1081,15 +1080,15 @@ export async function handleChatTurn(
   // approval. The draft was created disabled; an allow/always enables it, deny
   // leaves it disabled. No self-grant path exists.
   if (input.confirmId && deps.inbox && deps.skills) {
-    const skillItem = deps.inbox
-      .list({ sessionId: session.id, state: "pending" })
-      .find((i) => i.kind === "approval" && i.data?.skillSave != null && i.id === input.confirmId);
+    const skillItem = (await deps.inbox.list({ sessionId: session.id, state: "pending" })).find(
+      (i) => i.kind === "approval" && i.data?.skillSave != null && i.id === input.confirmId,
+    );
     if (skillItem) {
       const skillName = String(skillItem.data?.skillSave);
       const resolution = input.inboxResolution ?? "allow";
-      deps.inbox.resolve(skillItem.id, resolution);
+      await deps.inbox.resolve(skillItem.id, resolution);
       if (resolution === "allow" || resolution === "always") {
-        deps.skills.setEnabled(
+        await deps.skills.setEnabled(
           skillName,
           { organizationId: skillItem.organizationId, branchId: session.activeBranchId },
           true,
@@ -1134,12 +1133,12 @@ export async function handleChatTurn(
       // item's `id` is a fresh UUID minted by addApproval; `toolCallId` carries
       // the in-chat `pending.id` that mirrorToInbox stored, so a retry/confirm
       // from any surface finds and resolves the SAME canonical record.
-      const item = deps.inbox
-        .list({ sessionId: session.id })
-        .find((i) => i.toolCallId === pending.id);
+      const item = (await deps.inbox.list({ sessionId: session.id })).find(
+        (i) => i.toolCallId === pending.id,
+      );
       if (item) {
         const resolution = input.inboxResolution ?? "allow";
-        if (!deps.inbox.resolve(item.id, resolution)) {
+        if (!(await deps.inbox.resolve(item.id, resolution))) {
           // already resolved by another surface — treat as already-executed
           session.pending = undefined;
           session.messages = resolveConfirmParts(session.messages, {
@@ -1298,7 +1297,7 @@ export async function handleChatTurn(
   // turn (both can change mid-session, so they never live in the static prompt).
   outboundMessages = withModeContext(outboundMessages, deps.mode);
   outboundMessages = withBranchContext(outboundMessages, deps.activeBranch);
-  outboundMessages = withSkillContext(outboundMessages, deps, session, input.ctx.actor.organizationId);
+  outboundMessages = await withSkillContext(outboundMessages, deps, session, input.ctx.actor.organizationId);
 
   // Optional LLM assist when rules miss (provider may be none). Runs a bounded
   // agent-tool loop (R5 self-wake / R7 skills) and retries once after a
@@ -1445,8 +1444,10 @@ export async function handleChatTurn(
     const planAuto = planMayAutoExecute(deps.autonomy, stepMetas);
     // R4 — a plan may skip the confirmation entirely when every step is already
     // covered by a standing approval rule (scoped to command + external target).
-    const planRules = multiPlan.map((p) =>
-      standingDecision(deps, session, p.command, p.input, commandMetaOf(deps, p.command)),
+    const planRules = await Promise.all(
+      multiPlan.map((p) =>
+        standingDecision(deps, session, p.command, p.input, commandMetaOf(deps, p.command)),
+      ),
     );
     const coveredByRules = planRules.every((r) => r !== null);
     const runIdMulti = crypto.randomUUID();
@@ -1536,7 +1537,7 @@ export async function handleChatTurn(
     };
     {
       const firstCmdMeta = catalog.find((c) => c.name === multiPlan[0]!.command);
-      void mirrorToInbox(
+      await mirrorToInbox(
         deps,
         session,
         { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },
@@ -1618,7 +1619,7 @@ export async function handleChatTurn(
   const effective = effectiveAutonomyForCommand(deps.autonomy, meta);
   // R4 — a standing approval rule (command → external target) lets the call run
   // without a fresh confirmation; the rule string is recorded for audit.
-  const standing = standingDecision(deps, session, planned!.command, planned!.input, meta);
+  const standing = await standingDecision(deps, session, planned!.command, planned!.input, meta);
   const runId = crypto.randomUUID();
 
   const explanation: AiExplanation = {
@@ -1722,7 +1723,7 @@ export async function handleChatTurn(
   // not just multi-step plans. The item carries `toolCallId === pending.id` so
   // the shared confirm/cancel handler (which now looks up by toolCallId) finds
   // and resolves the same canonical record.
-  mirrorToInbox(
+  await mirrorToInbox(
     deps,
     session,
     { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },

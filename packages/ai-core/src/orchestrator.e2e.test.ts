@@ -19,7 +19,7 @@ import {
   defineCommand,
   InMemoryAuditWriter,
   InMemoryOutboxWriter,
-  InboxStore,
+  InMemoryInboxStore,
   type CommandRegistry,
   type QueryRegistry,
   type AutonomyLevel,
@@ -42,7 +42,7 @@ import { generateSuggestions } from "./suggestions.js";
 import { InMemoryMemoryStore } from "./memory.js";
 import type { AiProvider, CompletionResult } from "./providers.js";
 import { NoneProvider } from "./providers.js";
-import { WakeStore } from "./selfwake.js";
+import { InMemoryWakeStore } from "./selfwake.js";
 import { InMemorySkillStore } from "./skills.js";
 
 // ---------------------------------------------------------------------------
@@ -587,6 +587,76 @@ describe("handleChatTurn — confirm flow (autonomy=confirm)", () => {
     expect(tablePart).toBeDefined();
     expect(tablePart!.rows.length).toBeGreaterThan(0);
   });
+
+  /**
+   * Issue #7 — resolved confirm cards must not stay interactive in the log.
+   * The orchestrator marks `confirm_action.status` so the web client can render
+   * a non-clickable "Confirmed"/"Cancelled"/"Superseded" badge instead of buttons.
+   */
+  it("marks confirm_action status confirmed after execution (issue #7)", async () => {
+    const deps = makeDeps({ autonomy: "confirm" });
+    const ctx = makeCtx();
+
+    const plan = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer Acme Ltd",
+      ctx,
+    });
+    const pendingId = plan.session.pending!.id;
+    const pendingPart = plan.session.messages
+      .flatMap((m) => m.parts)
+      .find((p) => p.type === "confirm_action" && p.id === pendingId) as
+      | { type: "confirm_action"; status?: string }
+      | undefined;
+    expect(pendingPart?.status ?? "pending").toBe("pending");
+
+    const confirmed = await handleChatTurn(deps, {
+      session: plan.session,
+      confirmId: pendingId,
+      ctx,
+    });
+
+    const resolved = confirmed.session.messages
+      .flatMap((m) => m.parts)
+      .find((p) => p.type === "confirm_action" && p.id === pendingId) as
+      | { type: "confirm_action"; status?: string }
+      | undefined;
+    expect(resolved?.status).toBe("confirmed");
+    expect(confirmed.session.pending).toBeUndefined();
+  });
+
+  it("supersedes earlier pending confirm_action when a new plan is prepared (issue #7)", async () => {
+    const deps = makeDeps({ autonomy: "confirm" });
+    const ctx = makeCtx();
+
+    const first = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer FirstCo",
+      ctx,
+    });
+    const firstId = first.session.pending!.id;
+
+    const second = await handleChatTurn(deps, {
+      session: first.session,
+      userText: "Create customer SecondCo",
+      ctx,
+    });
+    const secondId = second.session.pending!.id;
+    expect(secondId).not.toBe(firstId);
+
+    const parts = second.session.messages
+      .flatMap((m) => m.parts)
+      .filter((p) => p.type === "confirm_action") as {
+      type: "confirm_action";
+      id: string;
+      status?: string;
+    }[];
+
+    expect(parts.find((p) => p.id === firstId)?.status).toBe("superseded");
+    expect(parts.find((p) => p.id === secondId)?.status ?? "pending").toBe("pending");
+    // Exactly one live (pending) card — the current session.pending
+    expect(parts.filter((p) => (p.status ?? "pending") === "pending")).toHaveLength(1);
+  });
 });
 
 // ===================================================================
@@ -616,6 +686,39 @@ describe("handleChatTurn — cancel flow", () => {
     const lastMsg = cancelled.session.messages[cancelled.session.messages.length - 1]!;
     const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
     expect(textPart?.text).toContain("Cancelled");
+  });
+
+  it("marks confirm_action status cancelled so the chat log has no live buttons (issue #7)", async () => {
+    const deps = makeDeps({ autonomy: "confirm" });
+    const ctx = makeCtx();
+
+    const plan = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer Acme Ltd",
+      ctx,
+    });
+    const pendingId = plan.session.pending!.id;
+    const before = plan.session.messages
+      .flatMap((m) => m.parts)
+      .find((p) => p.type === "confirm_action" && p.id === pendingId) as
+      | { type: "confirm_action"; status?: string }
+      | undefined;
+    expect(before?.status ?? "pending").toBe("pending");
+
+    const cancelled = await handleChatTurn(deps, {
+      session: plan.session,
+      cancelId: pendingId,
+      ctx,
+    });
+
+    const after = cancelled.session.messages
+      .flatMap((m) => m.parts)
+      .filter((p) => p.type === "confirm_action") as { type: "confirm_action"; id: string; status?: string }[];
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((p) => p.status === "cancelled" || p.id !== pendingId)).toBe(true);
+    expect(after.find((p) => p.id === pendingId)?.status).toBe("cancelled");
+    // No interactive pending cards remain in the transcript
+    expect(after.some((p) => (p.status ?? "pending") === "pending")).toBe(false);
   });
 
   it("does not execute on confirm after cancel", async () => {
@@ -979,7 +1082,7 @@ describe("handleChatTurn — LLM integration", () => {
 
 describe("handleChatTurn — inbox-mirrored confirm/cancel (R2/R3)", () => {
   it("confirming a multi-step plan resolves the mirrored inbox approval", async () => {
-    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InboxStore() };
+    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
     const session = freshSession();
 
     const planned = await handleChatTurn(deps, {
@@ -990,7 +1093,7 @@ describe("handleChatTurn — inbox-mirrored confirm/cancel (R2/R3)", () => {
     expect(planned.session.pending?.plan).toHaveLength(2);
 
     // The plan preparation must have mirrored a pending approval for this session.
-    const pendingBefore = deps.inbox.pending({ sessionId: session.id });
+    const pendingBefore = await deps.inbox.pending({ sessionId: session.id });
     expect(pendingBefore).toHaveLength(1);
 
     const confirmed = await handleChatTurn(deps, {
@@ -1001,14 +1104,14 @@ describe("handleChatTurn — inbox-mirrored confirm/cancel (R2/R3)", () => {
     expect(confirmed.session.pending).toBeUndefined();
 
     // The canonical inbox item must be resolved (not left dangling as pending).
-    const remaining = deps.inbox.list({ sessionId: session.id });
+    const remaining = await deps.inbox.list({ sessionId: session.id });
     expect(remaining).toHaveLength(1);
     expect(remaining[0]!.state).toBe("resolved");
     expect(remaining[0]!.toolCallId).toBe(planned.session.pending!.id);
   });
 
   it("cancelling a multi-step plan resolves the mirrored inbox approval as deny", async () => {
-    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InboxStore() };
+    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
     const session = freshSession();
 
     const planned = await handleChatTurn(deps, {
@@ -1017,7 +1120,7 @@ describe("handleChatTurn — inbox-mirrored confirm/cancel (R2/R3)", () => {
       ctx: makeCtx(),
     });
     expect(planned.session.pending?.plan).toHaveLength(2);
-    expect(deps.inbox.pending({ sessionId: session.id })).toHaveLength(1);
+    expect(await deps.inbox.pending({ sessionId: session.id })).toHaveLength(1);
 
     const cancelled = await handleChatTurn(deps, {
       session: planned.session,
@@ -1026,7 +1129,7 @@ describe("handleChatTurn — inbox-mirrored confirm/cancel (R2/R3)", () => {
     });
     expect(cancelled.session.pending).toBeUndefined();
 
-    const after = deps.inbox.list({ sessionId: session.id });
+    const after = await deps.inbox.list({ sessionId: session.id });
     expect(after).toHaveLength(1);
     expect(after[0]!.state).toBe("resolved");
     expect(after[0]!.resolution).toBe("deny");
@@ -1035,7 +1138,7 @@ describe("handleChatTurn — inbox-mirrored confirm/cancel (R2/R3)", () => {
   it("a confirm retry from another surface is once-only via the canonical item", async () => {
     // If the inbox item is already resolved (e.g. answered from mobile), an
     // in-app confirm retry must NOT re-run the plan.
-    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InboxStore() };
+    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
     const session = freshSession();
 
     const planned = await handleChatTurn(deps, {
@@ -1044,12 +1147,12 @@ describe("handleChatTurn — inbox-mirrored confirm/cancel (R2/R3)", () => {
       ctx: makeCtx(),
     });
     const pendingId = planned.session.pending!.id;
-    const item = deps.inbox.pending({ sessionId: session.id })[0]!;
+    const item = (await deps.inbox.pending({ sessionId: session.id }))[0]!;
     expect(item.toolCallId).toBe(pendingId);
 
     // Another surface resolves first.
-    expect(deps.inbox.resolve(item.id, "deny")).toBe(true);
-    expect(deps.inbox.resolve(item.id, "deny")).toBe(false); // once-only
+    expect(await deps.inbox.resolve(item.id, "deny")).toBe(true);
+    expect(await deps.inbox.resolve(item.id, "deny")).toBe(false); // once-only
 
     const retried = await handleChatTurn(deps, {
       session: planned.session,
@@ -1493,9 +1596,9 @@ describe("handleChatTurn — R4 standing approval rules", () => {
     const commands = createCommandRegistry();
     registerTestCommands(commands);
     registerExternalCommands(commands);
-    const inbox = new InboxStore();
+    const inbox = new InMemoryInboxStore();
     // Pre-mint: "allow email.send → user@x.com always"
-    const approval = inbox.addApproval({
+    const approval = await inbox.addApproval({
       sessionId: "s1",
       organizationId: "o1",
       userId: "u1",
@@ -1503,7 +1606,7 @@ describe("handleChatTurn — R4 standing approval rules", () => {
       toolCallId: "t0",
       data: { commandId: "email.send", standingTarget: "user@x.com" },
     });
-    inbox.resolve(approval.id, "always");
+    await inbox.resolve(approval.id, "always");
 
     const provider = new MockProvider(
       JSON.stringify({
@@ -1534,8 +1637,8 @@ describe("handleChatTurn — R4 standing approval rules", () => {
     const commands = createCommandRegistry();
     registerTestCommands(commands);
     registerExternalCommands(commands);
-    const inbox = new InboxStore();
-    const approval = inbox.addApproval({
+    const inbox = new InMemoryInboxStore();
+    const approval = await inbox.addApproval({
       sessionId: "s1",
       organizationId: "o1",
       userId: "u1",
@@ -1543,7 +1646,7 @@ describe("handleChatTurn — R4 standing approval rules", () => {
       toolCallId: "t0",
       data: { commandId: "email.send", standingTarget: "user@x.com" },
     });
-    inbox.resolve(approval.id, "always");
+    await inbox.resolve(approval.id, "always");
 
     const provider = new MockProvider(
       JSON.stringify({
@@ -1647,7 +1750,7 @@ describe("handleChatTurn — R9 read-only mode gate (post-LLM)", () => {
 describe("handleChatTurn — R5+R7 agent tool loop", () => {
   it("runs loadSkill, records the loaded skill, then plans the command", async () => {
     const skills = new InMemorySkillStore();
-    skills.upsert({
+    await skills.upsert({
       name: "crm.lead-prioritization",
       scope: "platform",
       title: "Lead prioritization",
@@ -1672,7 +1775,7 @@ describe("handleChatTurn — R5+R7 agent tool loop", () => {
 
   it("saveSkill parks a disabled draft behind an inbox approval", async () => {
     const skills = new InMemorySkillStore();
-    const inbox = new InboxStore();
+    const inbox = new InMemoryInboxStore();
     const provider = new MockProvider(
       JSON.stringify({
         toolCall: {
@@ -1694,15 +1797,15 @@ describe("handleChatTurn — R5+R7 agent tool loop", () => {
       ctx: makeCtx(),
     });
 
-    const draft = skills.get("acc.cycle-close", { organizationId: "o1" });
+    const draft = await skills.get("acc.cycle-close", { organizationId: "o1" });
     expect(draft).toBeDefined();
     expect(draft!.enabled).toBe(false); // disabled until a human approves
-    const pending = inbox.pending({ sessionId: "s1" });
+    const pending = await inbox.pending({ sessionId: "s1" });
     expect(pending.some((i) => i.data?.skillSave === "acc.cycle-close")).toBe(true);
   });
 
   it("sleepUntil creates a durable wake record and the model continues", async () => {
-    const wakes = new WakeStore();
+    const wakes = new InMemoryWakeStore();
     const provider = new MockProvider(
       JSON.stringify({
         toolCall: { name: "sleepUntil", args: { isoTimestamp: "2026-09-01T08:00:00Z", note: "digest" } },
@@ -1716,8 +1819,8 @@ describe("handleChatTurn — R5+R7 agent tool loop", () => {
       ctx: makeCtx(),
     });
 
-    expect(wakes.pending("s1")).toHaveLength(1);
-    expect(wakes.pending("s1")[0]!.kind).toBe("timer");
+    expect(await wakes.pending("s1")).toHaveLength(1);
+    expect((await wakes.pending("s1"))[0]!.kind).toBe("timer");
     expect(result.session.pending?.command).toBe("crm.customer.create");
   });
 });
@@ -1885,7 +1988,7 @@ describe("parseScheduleFireAt / parseScheduleRange — deterministic clocks", ()
 // ===================================================================
 describe("handleChatTurn — single-command inbox mirror (R2/R3)", () => {
   it("mirrors a single pending confirmation and resolves it on confirm", async () => {
-    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InboxStore() };
+    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
     const session = freshSession();
 
     const planned = await handleChatTurn(deps, {
@@ -1895,7 +1998,7 @@ describe("handleChatTurn — single-command inbox mirror (R2/R3)", () => {
     });
     expect(planned.session.pending).toBeDefined();
     const pendingId = planned.session.pending!.id;
-    const items = deps.inbox.pending({ sessionId: session.id });
+    const items = await deps.inbox.pending({ sessionId: session.id });
     expect(items).toHaveLength(1);
     expect(items[0]!.toolCallId).toBe(pendingId); // matches the fix key
 
@@ -1905,13 +2008,13 @@ describe("handleChatTurn — single-command inbox mirror (R2/R3)", () => {
       ctx: makeCtx(),
     });
     expect(confirmed.session.pending).toBeUndefined();
-    const after = deps.inbox.list({ sessionId: session.id });
+    const after = await deps.inbox.list({ sessionId: session.id });
     expect(after[0]!.state).toBe("resolved");
     expect(after[0]!.resolution).toBe("allow");
   });
 
   it("resolves the mirrored single-command approval as deny on cancel", async () => {
-    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InboxStore() };
+    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
     const session = freshSession();
 
     const planned = await handleChatTurn(deps, {
@@ -1926,12 +2029,11 @@ describe("handleChatTurn — single-command inbox mirror (R2/R3)", () => {
       cancelId: pendingId,
       ctx: makeCtx(),
     });
-    const after = deps.inbox.list({ sessionId: session.id });
+    const after = await deps.inbox.list({ sessionId: session.id });
     expect(after[0]!.state).toBe("resolved");
     expect(after[0]!.resolution).toBe("deny");
   });
 });
-
 
 // ===================================================================
 // Humanlike interaction — easy / medium / complex across modules.

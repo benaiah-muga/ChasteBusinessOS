@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  InMemoryWakeStore,
   selfWakeTools,
-  WakeStore,
   type WakeKind,
   type WakeRecord,
   type WakeState,
@@ -9,86 +9,86 @@ import {
 import { ChannelSessionStore } from "./channels.js";
 
 describe("WakeStore", () => {
-  it("adds a timer wake and fires only after the fireAt passes", () => {
+  it("adds a timer wake and fires only after the fireAt passes", async () => {
     const start = new Date("2026-08-01T10:00:00Z");
-    const store = new WakeStore({ now: () => start });
+    const store = new InMemoryWakeStore({ now: () => start });
 
-    const w = store.addTimer("s1", new Date("2026-08-01T11:00:00Z"), { note: "weekly" });
+    const w = await store.addTimer("s1", new Date("2026-08-01T11:00:00Z"), { note: "weekly" });
     expect(w.kind).toBe<WakeKind>("timer");
     expect(w.state).toBe<WakeState>("pending");
     expect(w.fireAt).toBe("2026-08-01T11:00:00.000Z");
-    expect(store.due(start)).toEqual([]); // not yet
-    expect(store.due(new Date("2026-08-01T11:30:00Z")).map((x) => x.id)).toEqual([w.id]);
-    store.markFired(w.id);
-    expect(store.due(new Date("2026-08-01T12:00:00Z"))).toEqual([]);
+    expect(await store.due(start)).toEqual([]); // not yet
+    expect((await store.due(new Date("2026-08-01T11:30:00Z"))).map((x) => x.id)).toEqual([w.id]);
+    await store.markFired(w.id);
+    expect(await store.due(new Date("2026-08-01T12:00:00Z"))).toEqual([]);
   });
 
-  it("completion wakes are inert until completeJob marks the same jobId due", () => {
-    const store = new WakeStore();
-    const w = store.addCompletion("s1", "job-7");
-    expect(store.due()).toEqual([]);
-    const marked = store.completeJob("other-job");
+  it("completion wakes are inert until completeJob marks the same jobId due", async () => {
+    const store = new InMemoryWakeStore();
+    const w = await store.addCompletion("s1", "job-7");
+    expect(await store.due()).toEqual([]);
+    const marked = await store.completeJob("other-job");
     expect(marked).toEqual([]);
-    const due = store.completeJob("job-7");
+    const due = await store.completeJob("job-7");
     expect(due.map((x) => x.id)).toEqual([w.id]);
-    expect(store.due().map((x) => x.id)).toEqual([w.id]);
-    store.markFired(w.id);
-    expect(store.due()).toEqual([]);
+    expect((await store.due()).map((x) => x.id)).toEqual([w.id]);
+    await store.markFired(w.id);
+    expect(await store.due()).toEqual([]);
   });
 
-  it("event wakes fire when fireEvent matches the eventKey", () => {
-    const store = new WakeStore();
-    const w = store.addEvent("s1", "hr.payroll.completed");
-    expect(store.fireEvent("something.else")).toEqual([]);
-    const marked = store.fireEvent("hr.payroll.completed");
+  it("event wakes fire when fireEvent matches the eventKey", async () => {
+    const store = new InMemoryWakeStore();
+    const w = await store.addEvent("s1", "hr.payroll.completed");
+    expect(await store.fireEvent("something.else")).toEqual([]);
+    const marked = await store.fireEvent("hr.payroll.completed");
     expect(marked.map((x) => x.id)).toEqual([w.id]);
-    expect(store.due().map((x) => x.id)).toEqual([w.id]);
+    expect((await store.due()).map((x) => x.id)).toEqual([w.id]);
   });
 
-  it("preserves stable createdAt order across mixed kinds", () => {
+  it("preserves stable createdAt order across mixed kinds", async () => {
     const t0 = new Date("2026-08-01T10:00:00Z");
     const t1 = new Date("2026-08-01T10:05:00Z");
-    const store = new WakeStore({ now: () => t0 });
-    const a = store.addTimer("s1", t1);
-    const b = store.addCompletion("s1", "j1");
+    const store = new InMemoryWakeStore({ now: () => t0 });
+    const a = await store.addTimer("s1", t1);
+    const b = await store.addCompletion("s1", "j1");
     // b's createdAt is also t0; both pending. Fire them and the order must keep createdAt-stable
-    store.completeJob("j1");
-    const due = store.due(new Date("2026-08-01T11:00:00Z"));
+    await store.completeJob("j1");
+    const due = await store.due(new Date("2026-08-01T11:00:00Z"));
     // both fire; expect them in insertion order by createdAt (both equal -> stable sort returns insertion order)
     expect(due.map((x) => x.id)).toEqual([a.id, b.id]);
   });
 
-  it("`pending(sessionId)` filters by session and excludes fired", () => {
-    const store = new WakeStore();
-    const a = store.addTimer("s1", new Date(Date.now() + 1000));
-    const b = store.addTimer("s2", new Date(Date.now() + 1000));
-    store.markFired(a.id);
-    expect(store.pending("s1")).toEqual([]);
-    expect(store.pending("s2").map((x) => x.id)).toEqual([b.id]);
+  it("`pending(sessionId)` filters by session and excludes fired", async () => {
+    const store = new InMemoryWakeStore();
+    const a = await store.addTimer("s1", new Date(Date.now() + 1000));
+    const b = await store.addTimer("s2", new Date(Date.now() + 1000));
+    await store.markFired(a.id);
+    expect(await store.pending("s1")).toEqual([]);
+    expect((await store.pending("s2")).map((x) => x.id)).toEqual([b.id]);
   });
 });
 
 describe("selfWakeTools", () => {
-  it("returns the same durable record the store holds", () => {
-    const store = new WakeStore();
+  it("returns the same durable record the store holds", async () => {
+    const store = new InMemoryWakeStore();
     const tools = selfWakeTools(store, "s1", { taskId: "task-1" });
-    const r1 = tools.sleepFor(60, "weekly digest");
-    expect(store.pending("s1").some((w) => w.id === r1.wakeId)).toBe(true);
+    const r1 = await tools.sleepFor(60, "weekly digest");
+    expect((await store.pending("s1")).some((w) => w.id === r1.wakeId)).toBe(true);
 
-    const t = tools.sleepUntil("2026-09-01T08:00:00Z");
+    const t = await tools.sleepUntil("2026-09-01T08:00:00Z");
     expect(t.fireAt).toBe("2026-09-01T08:00:00.000Z");
 
-    const c = tools.wakeOnJob("job-42");
+    const c = await tools.wakeOnJob("job-42");
     expect(c.jobId).toBe("job-42");
 
-    const e = tools.wakeOnEvent("hr.payroll.completed");
+    const e = await tools.wakeOnEvent("hr.payroll.completed");
     expect(e.eventKey).toBe("hr.payroll.completed");
   });
 
-  it("sleepUntil rejects malformed timestamps (never silently fires immediately)", () => {
-    const store = new WakeStore();
+  it("sleepUntil rejects malformed timestamps (never silently fires immediately)", async () => {
+    const store = new InMemoryWakeStore();
     const tools = selfWakeTools(store, "s1");
-    expect(() => tools.sleepUntil("not-a-date")).toThrow(/invalid iso timestamp/);
+    await expect(tools.sleepUntil("not-a-date")).rejects.toThrow(/invalid iso timestamp/);
   });
 });
 

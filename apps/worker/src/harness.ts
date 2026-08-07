@@ -3,12 +3,12 @@
  * synthesized turn under its owning user/org policy, persists the session, and
  * transitions the durable job to done/failed.
  *
- * The registries are built here (not in app-context) so the worker is a
- * self-contained host — same modules, same boundaries, no fastify coupling.
+ * The registries and Postgres-backed stores are built by the shared
+ * `@chaste/runtime` factory — the same one apps/api consumes — so standing
+ * rules / wakes / skills minted over HTTP are honored here with no
+ * process-local store drift.
  */
 import {
-  InMemorySkillStore,
-  WakeStore,
   createAiProvider,
   runFollowUpTurn,
   type ChatSessionState,
@@ -16,9 +16,7 @@ import {
 } from "@chaste/ai-core";
 import type { AppConfig } from "@chaste/config";
 import {
-  DbSessionStore,
-  PostgresAuditWriter,
-  PostgresOutboxWriter,
+  createCommandHelpers,
   createDb,
   getUserWithOrg,
   resolveUserPermissions,
@@ -26,29 +24,19 @@ import {
   type Db,
 } from "@chaste/db";
 import {
-  InboxStore,
   autonomyLevelSchema,
-  createCommandRegistry,
-  createModuleRegistry,
-  createQueryRegistry,
   createRequestContext,
   type Actor,
 } from "@chaste/kernel";
-import { createAccountingModule } from "@chaste/module-accounting";
-import { createCrmModule } from "@chaste/module-crm";
-import { createHrModule } from "@chaste/module-hr";
-import { createInventoryModule } from "@chaste/module-inventory";
-import { createManufacturingModule } from "@chaste/module-manufacturing";
-import { createMessagingModule } from "@chaste/module-messaging";
-import { createPlatformModule } from "@chaste/module-platform";
-import { createPurchasingModule } from "@chaste/module-purchasing";
+import { createRuntime, type Runtime } from "@chaste/runtime";
 import { eq } from "drizzle-orm";
 
 export interface FollowUpHarness {
   db: Db;
   cfg: AppConfig;
+  runtime: Runtime;
   deps: (autonomy: ReturnType<typeof autonomyLevelSchema.parse>, activeBranch?: { name: string; code: string }) => OrchestratorDeps;
-  sessionStore: DbSessionStore;
+  sessionStore: Runtime["sessionStore"];
 }
 
 export async function createFollowUpHarness(
@@ -56,40 +44,19 @@ export async function createFollowUpHarness(
   db: Db = createDb(cfg.databaseUrl),
   providerOverride?: OrchestratorDeps["provider"],
 ): Promise<FollowUpHarness> {
-  const commands = createCommandRegistry();
-  const queries = createQueryRegistry();
-  const modules = createModuleRegistry(commands, queries);
+  const runtime = await createRuntime(cfg, db);
+  const { commands, queries, inbox, wakes, skills, audit, outbox, sessionStore } = runtime;
   const provider = providerOverride ?? createAiProvider(cfg.ai);
-
-  await modules.register(createCrmModule(db));
-  await modules.register(createAccountingModule(db));
-  await modules.register(createInventoryModule(db));
-  await modules.register(createPurchasingModule(db));
-  await modules.register(createHrModule(db));
-  await modules.register(createManufacturingModule(db));
-  await modules.register(createMessagingModule(db));
-  await modules.register(
-    createPlatformModule(db, modules, {
-      allowFullAutonomous: cfg.allowFullAutonomous,
-      regions: cfg.regions,
-    }),
-  );
-
-  const sessionStore = new DbSessionStore(db);
-  const inbox = new InboxStore();
-  const wakes = new WakeStore();
-  const skills = new InMemorySkillStore();
-  const audit = new PostgresAuditWriter(db);
-  const outbox = new PostgresOutboxWriter(db);
 
   return {
     db,
     cfg,
+    runtime,
     sessionStore,
     deps: (autonomy, activeBranch) => ({
       commands,
       queries,
-      helpers: { audit, outbox },
+      helpers: createCommandHelpers({ audit, outbox, db }),
       autonomy,
       provider,
       allowFullAutonomous: cfg.allowFullAutonomous,
