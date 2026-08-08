@@ -36,6 +36,7 @@ import { createPurchasingModule } from "@chaste/module-purchasing";
 import { createHrModule } from "@chaste/module-hr";
 import { createManufacturingModule } from "@chaste/module-manufacturing";
 import { createPlatformModule } from "@chaste/module-platform";
+import { createIdentityModule } from "@chaste/module-identity";
 
 // ---------------------------------------------------------------------------
 // Test infrastructure
@@ -296,6 +297,7 @@ describe.skipIf(!hasDb)("Real-world lifecycle E2E", () => {
     await modules.register(createPurchasingModule(db));
     await modules.register(createHrModule(db));
     await modules.register(createManufacturingModule(db));
+    await modules.register(createIdentityModule(db));
     await modules.register(createPlatformModule(db, modules, {
       allowFullAutonomous: true,
       regions: ["local", "us-east", "eu-west"],
@@ -320,7 +322,7 @@ describe.skipIf(!hasDb)("Real-world lifecycle E2E", () => {
 
     it("1.2 Sarah (CEO) verifies platform modules are installed", async () => {
       const installed = await qry(novatech.adminUser, novatech.orgId, "core.modules.list");
-      expect(installed.registered).toHaveLength(7);
+      expect(installed.registered).toHaveLength(8);
       expect(installed.installed).toHaveLength(6);
     });
 
