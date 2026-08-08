@@ -253,6 +253,13 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
     session() {
       return request("/api/v1/session", { method: "GET" }, (d) => sessionSchema.parse(d));
     },
+    login(token: string) {
+      return request(
+        "/api/v1/auth/login",
+        { method: "POST", headers: { authorization: `Bearer ${token}` } },
+        (d) => sessionSchema.extend({ token: z.string() }).parse(d),
+      );
+    },
     listModules() {
       return request("/api/v1/modules", { method: "GET" }, (d) => d as {
         registered: { id: string; name: string; version: string }[];
