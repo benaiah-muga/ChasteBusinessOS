@@ -180,7 +180,8 @@ export function createCrmModule(db: Db): BusinessModule {
           }),
           output: customerSchema,
           handler: async (input, ctx, helpers) => {
-            const [row] = await db
+            const tx = (helpers.db ?? db) as Db;
+            const [row] = await tx
               .insert(schema.crmCustomers)
               .values({
                 organizationId: ctx.actor.organizationId,
@@ -190,7 +191,7 @@ export function createCrmModule(db: Db): BusinessModule {
                 country: input.country,
               })
               .returning();
-            await db.insert(schema.crmInteractions).values({
+            await tx.insert(schema.crmInteractions).values({
               organizationId: ctx.actor.organizationId,
               customerId: row!.id,
               kind: "created",
@@ -225,8 +226,9 @@ export function createCrmModule(db: Db): BusinessModule {
           }),
           output: customerSchema,
           handler: async (input, ctx, helpers) => {
-            const row = await getCustomerRow(db, ctx.actor.organizationId, input.customerId);
-            const [updated] = await db
+            const tx = (helpers.db ?? db) as Db;
+            const row = await getCustomerRow(tx, ctx.actor.organizationId, input.customerId);
+            const [updated] = await tx
               .update(schema.crmCustomers)
               .set({
                 name: input.name ?? row.name,
@@ -268,7 +270,8 @@ export function createCrmModule(db: Db): BusinessModule {
           }),
           output: customerSchema,
           handler: async (input, ctx, helpers) => {
-            const row = await getCustomerRow(db, ctx.actor.organizationId, input.customerId);
+            const tx = (helpers.db ?? db) as Db;
+            const row = await getCustomerRow(tx, ctx.actor.organizationId, input.customerId);
             if (row.status === input.status) return mapCustomer(row);
             const allowed = TRANSITIONS[row.status] ?? [];
             if (!allowed.includes(input.status)) {
@@ -276,7 +279,7 @@ export function createCrmModule(db: Db): BusinessModule {
                 `Cannot move customer from "${row.status}" to "${input.status}"`,
               );
             }
-            const [updated] = await db
+            const [updated] = await tx
               .update(schema.crmCustomers)
               .set({ status: input.status })
               .where(
@@ -286,7 +289,7 @@ export function createCrmModule(db: Db): BusinessModule {
                 ),
               )
               .returning();
-            await db.insert(schema.crmInteractions).values({
+            await tx.insert(schema.crmInteractions).values({
               organizationId: ctx.actor.organizationId,
               customerId: input.customerId,
               kind: "status_change",
@@ -317,8 +320,9 @@ export function createCrmModule(db: Db): BusinessModule {
           input: z.object({ customerId: z.string().uuid() }),
           output: z.object({ customerId: z.string(), deleted: z.literal(true) }),
           handler: async (input, ctx, helpers) => {
-            await getCustomerRow(db, ctx.actor.organizationId, input.customerId);
-            await db
+            const tx = (helpers.db ?? db) as Db;
+            await getCustomerRow(tx, ctx.actor.organizationId, input.customerId);
+            await tx
               .update(schema.crmCustomers)
               .set({ status: "deleted" })
               .where(
@@ -327,7 +331,7 @@ export function createCrmModule(db: Db): BusinessModule {
                   eq(schema.crmCustomers.id, input.customerId),
                 ),
               );
-            await db.insert(schema.crmInteractions).values({
+            await tx.insert(schema.crmInteractions).values({
               organizationId: ctx.actor.organizationId,
               customerId: input.customerId,
               kind: "deleted",
@@ -362,8 +366,9 @@ export function createCrmModule(db: Db): BusinessModule {
           }),
           output: contactSchema,
           handler: async (input, ctx, helpers) => {
-            await getCustomerRow(db, ctx.actor.organizationId, input.customerId);
-            const [row] = await db
+            const tx = (helpers.db ?? db) as Db;
+            await getCustomerRow(tx, ctx.actor.organizationId, input.customerId);
+            const [row] = await tx
               .insert(schema.crmContacts)
               .values({
                 organizationId: ctx.actor.organizationId,
@@ -374,7 +379,7 @@ export function createCrmModule(db: Db): BusinessModule {
                 phone: input.phone,
               })
               .returning();
-            await db.insert(schema.crmInteractions).values({
+            await tx.insert(schema.crmInteractions).values({
               organizationId: ctx.actor.organizationId,
               customerId: input.customerId,
               kind: "contact_added",
@@ -404,7 +409,8 @@ export function createCrmModule(db: Db): BusinessModule {
           input: z.object({ contactId: z.string().uuid() }),
           output: z.object({ contactId: z.string(), deleted: z.literal(true) }),
           handler: async (input, ctx, helpers) => {
-            const rows = await db
+            const tx = (helpers.db ?? db) as Db;
+            const rows = await tx
               .select()
               .from(schema.crmContacts)
               .where(
@@ -416,8 +422,8 @@ export function createCrmModule(db: Db): BusinessModule {
               .limit(1);
             const contact = rows[0];
             if (!contact) throw new NotFoundError("Contact");
-            await db.delete(schema.crmContacts).where(eq(schema.crmContacts.id, input.contactId));
-            await db.insert(schema.crmInteractions).values({
+            await tx.delete(schema.crmContacts).where(eq(schema.crmContacts.id, input.contactId));
+            await tx.insert(schema.crmInteractions).values({
               organizationId: ctx.actor.organizationId,
               customerId: contact.customerId,
               kind: "contact_removed",
@@ -452,8 +458,9 @@ export function createCrmModule(db: Db): BusinessModule {
           }),
           output: interactionSchema,
           handler: async (input, ctx, helpers) => {
-            await getCustomerRow(db, ctx.actor.organizationId, input.customerId);
-            const [row] = await db
+            const tx = (helpers.db ?? db) as Db;
+            await getCustomerRow(tx, ctx.actor.organizationId, input.customerId);
+            const [row] = await tx
               .insert(schema.crmInteractions)
               .values({
                 organizationId: ctx.actor.organizationId,

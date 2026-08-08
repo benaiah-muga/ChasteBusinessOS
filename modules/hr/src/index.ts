@@ -46,8 +46,9 @@ export function createHrModule(db: Db): BusinessModule {
             fullName: z.string(),
             baseSalary: z.string(),
           }),
-          handler: async (input, ctx) => {
-            const [row] = await db
+          handler: async (input, ctx, helpers) => {
+            const tx = (helpers.db ?? db) as Db;
+            const [row] = await tx
               .insert(schema.hrEmployees)
               .values({
                 organizationId: ctx.actor.organizationId,
@@ -84,13 +85,14 @@ export function createHrModule(db: Db): BusinessModule {
             employeeCount: z.number(),
           }),
           handler: async (input, ctx, helpers) => {
-            const employees = await db
+            const tx = (helpers.db ?? db) as Db;
+            const employees = await tx
               .select()
               .from(schema.hrEmployees)
               .where(eq(schema.hrEmployees.organizationId, ctx.actor.organizationId));
             const active = employees.filter((e) => e.status === "active");
             const total = active.reduce((s, e) => s + Number(e.baseSalary), 0);
-            const [row] = await db
+            const [row] = await tx
               .insert(schema.hrPayrollRuns)
               .values({
                 organizationId: ctx.actor.organizationId,

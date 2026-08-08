@@ -125,6 +125,7 @@ export function createAccountingModule(db: Db): BusinessModule {
           }),
           output: z.object({ id: z.string(), reference: z.string(), status: z.string() }),
           handler: async (input, ctx, helpers) => {
+            const tx = (helpers.db ?? db) as Db;
             const totalDebit = input.lines.reduce((s, l) => s + l.debit, 0);
             const totalCredit = input.lines.reduce((s, l) => s + l.credit, 0);
             if (Math.abs(totalDebit - totalCredit) > 0.001) {
@@ -133,7 +134,7 @@ export function createAccountingModule(db: Db): BusinessModule {
                 totalCredit,
               });
             }
-            const [entry] = await db
+            const [entry] = await tx
               .insert(schema.accJournalEntries)
               .values({
                 organizationId: ctx.actor.organizationId,
@@ -143,7 +144,7 @@ export function createAccountingModule(db: Db): BusinessModule {
               })
               .returning();
             for (const line of input.lines) {
-              await db.insert(schema.accJournalLines).values({
+              await tx.insert(schema.accJournalLines).values({
                 entryId: entry!.id,
                 accountId: line.accountId,
                 debit: line.debit.toFixed(2),

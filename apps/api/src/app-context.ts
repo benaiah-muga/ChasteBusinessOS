@@ -24,6 +24,7 @@ import type { ChatMessage } from "@chaste/ui-schema";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
 import {
   bootstrapPlatform,
+  createCommandHelpers,
   createDb,
   getUserWithOrg,
   PostgresAuditWriter,
@@ -300,10 +301,11 @@ export async function runCommand(
   input: unknown,
   requestId?: string,
 ) {
-  return executeCommand(app.commands, name, input, requestCtx(app, requestId), {
+  return executeCommand(app.commands, name, input, requestCtx(app, requestId), createCommandHelpers({
     audit: app.audit,
     outbox: app.outbox,
-  });
+    db: app.db,
+  }));
 }
 
 export async function runQuery(app: AppContext, name: string, input: unknown, requestId?: string) {
@@ -325,17 +327,20 @@ export async function runCommandAsActor(
   autonomy?: AutonomyLevel,
 ) {
   const ctx = createRequestContext({ actor, requestId, autonomy });
-  return executeCommand(app.commands, name, input, ctx, {
-    audit: app.audit,
-    outbox: app.outbox,
-  });
+  return executeCommand(
+    app.commands,
+    name,
+    input,
+    ctx,
+    createCommandHelpers({ audit: app.audit, outbox: app.outbox, db: app.db }),
+  );
 }
 
 function buildOrchestratorDeps(app: AppContext, activeBranch?: { name: string; code: string }) {
   return {
     commands: app.commands,
     queries: app.queries,
-    helpers: { audit: app.audit, outbox: app.outbox },
+    helpers: createCommandHelpers({ audit: app.audit, outbox: app.outbox, db: app.db }),
     autonomy: app.sessionUser.autonomy,
     provider: app.provider,
     allowFullAutonomous: app.config.allowFullAutonomous,
@@ -592,7 +597,7 @@ export async function executeWorkflowRun(
   const ctx: WorkflowExecutionContext = {
     registry: app.commands,
     requestCtx: requestCtx(app),
-    helpers: { audit: app.audit, outbox: app.outbox },
+    helpers: createCommandHelpers({ audit: app.audit, outbox: app.outbox, db: app.db }),
   };
 
   return executeDynamicWorkflow(wf, input, ctx, {

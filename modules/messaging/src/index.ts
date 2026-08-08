@@ -197,20 +197,21 @@ export function createMessagingModule(db: Db): BusinessModule {
               }
             }),
           output: threadDetailSchema,
-          handler: async (input, ctx) => {
+handler: async (input, ctx, helpers) => {
             const orgId = ctx.actor.organizationId;
             const me = ctx.actor.userId;
+            const tx = (helpers.db ?? db) as Db;
             if (input.kind === "group" && !actorHasPermission(ctx.actor, GROUP_CREATE)) {
               throw new PermissionError(GROUP_CREATE);
             }
-            const members = await resolveMembers(db, orgId, [me, ...input.memberIds]);
+            const members = await resolveMembers(tx, orgId, [me, ...input.memberIds]);
             if (members.length !== 1 + input.memberIds.length) {
               throw new ValidationError("One or more members are not valid users of this organization");
             }
             // Avoid duplicate direct threads between the same two users.
             if (input.kind === "direct") {
               const other = input.memberIds[0]!;
-              const existing = await db
+              const existing = await tx
                 .select({ threadId: schema.msgThreads.id })
                 .from(schema.msgThreads)
                 .innerJoin(
@@ -230,19 +231,19 @@ export function createMessagingModule(db: Db): BusinessModule {
               // Existing DM found when both members appear under the same direct thread.
               const candidateIds = [...new Set(existing.map((e) => e.threadId))];
               for (const candidate of candidateIds) {
-                const m = await db
+                const m = await tx
                   .select()
                   .from(schema.msgThreadMembers)
                   .where(eq(schema.msgThreadMembers.threadId, candidate));
                 const ids = m.map((x) => x.userId).sort();
                 if (ids.length === 2 && ids[0] === [me, other].sort()[0] && ids[1] === [me, other].sort()[1]) {
-                  const row = await getThreadRow(db, orgId, candidate);
-                  return buildThreadDetail(db, row);
+                  const row = await getThreadRow(tx, orgId, candidate);
+                  return buildThreadDetail(tx, row);
                 }
               }
             }
 
-            const [thread] = await db
+            const [thread] = await tx
               .insert(schema.msgThreads)
               .values({
                 organizationId: orgId,
@@ -251,11 +252,11 @@ export function createMessagingModule(db: Db): BusinessModule {
                 createdBy: me,
               })
               .returning();
-            await db.insert(schema.msgThreadMembers).values({ threadId: thread!.id, userId: me, role: "admin" });
+            await tx.insert(schema.msgThreadMembers).values({ threadId: thread!.id, userId: me, role: "admin" });
             for (const uid of input.memberIds) {
-              await db.insert(schema.msgThreadMembers).values({ threadId: thread!.id, userId: uid, role: "member" });
+              await tx.insert(schema.msgThreadMembers).values({ threadId: thread!.id, userId: uid, role: "member" });
             }
-            return buildThreadDetail(db, thread!);
+            return buildThreadDetail(tx, thread!);
           },
         }),
       );
@@ -276,12 +277,13 @@ export function createMessagingModule(db: Db): BusinessModule {
           handler: async (input, ctx, helpers) => {
             const orgId = ctx.actor.organizationId;
             const me = ctx.actor.userId;
-            await getThreadRow(db, orgId, input.threadId);
-            await requireMember(db, orgId, input.threadId, me);
+            const tx = (helpers.db ?? db) as Db;
+            await getThreadRow(tx, orgId, input.threadId);
+            await requireMember(tx, orgId, input.threadId, me);
             const displayName = (
-              await db.select().from(schema.users).where(eq(schema.users.id, me)).limit(1)
+              await tx.select().from(schema.users).where(eq(schema.users.id, me)).limit(1)
             )[0]?.displayName;
-            const [msg] = await db
+            const [msg] = await tx
               .insert(schema.msgMessages)
               .values({
                 organizationId: orgId,
@@ -292,13 +294,13 @@ export function createMessagingModule(db: Db): BusinessModule {
                 parentId: input.parentId,
               })
               .returning();
-            await db
+            await tx
               .update(schema.msgThreads)
               .set({ updatedAt: new Date() })
               .where(eq(schema.msgThreads.id, input.threadId));
-            await upsertRead(db, input.threadId, me, msg!.id);
+            await upsertRead(tx, input.threadId, me, msg!.id);
 
-            const others = await db
+            const others = await tx
               .select({ userId: schema.msgThreadMembers.userId })
               .from(schema.msgThreadMembers)
               .where(
@@ -308,7 +310,7 @@ export function createMessagingModule(db: Db): BusinessModule {
                 ),
               );
             for (const other of others) {
-              await notifyUser(db, {
+              await notifyUser(tx, {
                 organizationId: orgId,
                 userId: other.userId,
                 kind: "message",
@@ -352,20 +354,21 @@ export function createMessagingModule(db: Db): BusinessModule {
           minAutonomyForAuto: "guarded_auto",
           input: z.object({ threadId: z.string().uuid(), userId: z.string().uuid() }),
           output: threadDetailSchema,
-          handler: async (input, ctx) => {
+          handler: async (input, ctx, helpers) => {
             const orgId = ctx.actor.organizationId;
-            const thread = await getThreadRow(db, orgId, input.threadId);
+            const tx = (helpers.db ?? db) as Db;
+            const thread = await getThreadRow(tx, orgId, input.threadId);
             if (thread.type !== "group") throw new ValidationError("Only group conversations can add members");
-            await requireMember(db, orgId, input.threadId, ctx.actor.userId);
-            await requireThreadAdmin(db, input.threadId, ctx.actor.userId);
-            const users = await resolveMembers(db, orgId, [input.userId]);
+            await requireMember(tx, orgId, input.threadId, ctx.actor.userId);
+            await requireThreadAdmin(tx, input.threadId, ctx.actor.userId);
+            const users = await resolveMembers(tx, orgId, [input.userId]);
             if (users.length !== 1) throw new ValidationError("Member is not a valid user of this organization");
-            await db
+            await tx
               .insert(schema.msgThreadMembers)
               .values({ threadId: input.threadId, userId: input.userId, role: "member" })
               .onConflictDoNothing({ target: [schema.msgThreadMembers.threadId, schema.msgThreadMembers.userId] });
-            await insertSystem(db, orgId, input.threadId, ctx.actor.userId, "added");
-            return buildThreadDetail(db, thread);
+            await insertSystem(tx, orgId, input.threadId, ctx.actor.userId, "added");
+            return buildThreadDetail(tx, thread);
           },
         }),
       );
@@ -379,18 +382,19 @@ export function createMessagingModule(db: Db): BusinessModule {
           minAutonomyForAuto: "guarded_auto",
           input: z.object({ threadId: z.string().uuid(), userId: z.string().uuid() }),
           output: threadDetailSchema,
-          handler: async (input, ctx) => {
+          handler: async (input, ctx, helpers) => {
             const orgId = ctx.actor.organizationId;
-            const thread = await getThreadRow(db, orgId, input.threadId);
+            const tx = (helpers.db ?? db) as Db;
+            const thread = await getThreadRow(tx, orgId, input.threadId);
             if (thread.type !== "group") throw new ValidationError("Only group conversations can remove members");
-            await requireMember(db, orgId, input.threadId, ctx.actor.userId);
-            await requireThreadAdmin(db, input.threadId, ctx.actor.userId);
+            await requireMember(tx, orgId, input.threadId, ctx.actor.userId);
+            await requireThreadAdmin(tx, input.threadId, ctx.actor.userId);
             if (input.userId === ctx.actor.userId) throw new ValidationError("Use leave to exit a conversation");
-            await db
+            await tx
               .delete(schema.msgThreadMembers)
               .where(and(eq(schema.msgThreadMembers.threadId, input.threadId), eq(schema.msgThreadMembers.userId, input.userId)));
-            await insertSystem(db, orgId, input.threadId, ctx.actor.userId, "removed");
-            return buildThreadDetail(db, thread);
+            await insertSystem(tx, orgId, input.threadId, ctx.actor.userId, "removed");
+            return buildThreadDetail(tx, thread);
           },
         }),
       );
@@ -404,10 +408,11 @@ export function createMessagingModule(db: Db): BusinessModule {
           minAutonomyForAuto: "guarded_auto",
           input: z.object({ threadId: z.string().uuid() }),
           output: z.object({ threadId: z.string(), left: z.literal(true) }),
-          handler: async (input, ctx) => {
+          handler: async (input, ctx, helpers) => {
             const orgId = ctx.actor.organizationId;
-            await getThreadRow(db, orgId, input.threadId);
-            await db
+            const tx = (helpers.db ?? db) as Db;
+            await getThreadRow(tx, orgId, input.threadId);
+            await tx
               .delete(schema.msgThreadMembers)
               .where(and(eq(schema.msgThreadMembers.threadId, input.threadId), eq(schema.msgThreadMembers.userId, ctx.actor.userId)));
             return { threadId: input.threadId, left: true as const };
@@ -424,20 +429,21 @@ export function createMessagingModule(db: Db): BusinessModule {
           minAutonomyForAuto: "guarded_auto",
           input: z.object({ threadId: z.string().uuid(), name: z.string().min(1).max(120) }),
           output: threadDetailSchema,
-          handler: async (input, ctx) => {
+          handler: async (input, ctx, helpers) => {
             const orgId = ctx.actor.organizationId;
-            const thread = await getThreadRow(db, orgId, input.threadId);
+            const tx = (helpers.db ?? db) as Db;
+            const thread = await getThreadRow(tx, orgId, input.threadId);
             if (thread.type !== "group") throw new ValidationError("Only group conversations can be renamed");
-            await requireMember(db, orgId, input.threadId, ctx.actor.userId);
-            await requireThreadAdmin(db, input.threadId, ctx.actor.userId);
-            const [updated] = await db
+            await requireMember(tx, orgId, input.threadId, ctx.actor.userId);
+            await requireThreadAdmin(tx, input.threadId, ctx.actor.userId);
+            const [updated] = await tx
               .update(schema.msgThreads)
               .set({ name: input.name, updatedAt: new Date() })
               .where(and(eq(schema.msgThreads.id, input.threadId), eq(schema.msgThreads.organizationId, orgId)))
               .returning();
-            await insertSystem(db, orgId, input.threadId, ctx.actor.userId, "renamed");
+            await insertSystem(tx, orgId, input.threadId, ctx.actor.userId, "renamed");
             void thread;
-            return buildThreadDetail(db, updated!);
+            return buildThreadDetail(tx, updated!);
           },
         }),
       );
@@ -451,17 +457,18 @@ export function createMessagingModule(db: Db): BusinessModule {
           minAutonomyForAuto: "guarded_auto",
           input: z.object({ threadId: z.string().uuid(), archived: z.boolean() }),
           output: threadDetailSchema,
-          handler: async (input, ctx) => {
+          handler: async (input, ctx, helpers) => {
             const orgId = ctx.actor.organizationId;
-            const thread = await getThreadRow(db, orgId, input.threadId);
-            await requireMember(db, orgId, input.threadId, ctx.actor.userId);
-            const [updated] = await db
+            const tx = (helpers.db ?? db) as Db;
+            const thread = await getThreadRow(tx, orgId, input.threadId);
+            await requireMember(tx, orgId, input.threadId, ctx.actor.userId);
+            const [updated] = await tx
               .update(schema.msgThreads)
               .set({ isArchived: input.archived, updatedAt: new Date() })
               .where(and(eq(schema.msgThreads.id, input.threadId), eq(schema.msgThreads.organizationId, orgId)))
               .returning();
             void thread;
-            return buildThreadDetail(db, updated!);
+            return buildThreadDetail(tx, updated!);
           },
         }),
       );
@@ -475,11 +482,12 @@ export function createMessagingModule(db: Db): BusinessModule {
           minAutonomyForAuto: "guarded_auto",
           input: z.object({ threadId: z.string().uuid(), lastReadMessageId: z.string().uuid().optional() }),
           output: z.object({ threadId: z.string(), read: z.literal(true) }),
-          handler: async (input, ctx) => {
+          handler: async (input, ctx, helpers) => {
             const orgId = ctx.actor.organizationId;
-            await getThreadRow(db, orgId, input.threadId);
-            await requireMember(db, orgId, input.threadId, ctx.actor.userId);
-            await db
+            const tx = (helpers.db ?? db) as Db;
+            await getThreadRow(tx, orgId, input.threadId);
+            await requireMember(tx, orgId, input.threadId, ctx.actor.userId);
+            await tx
               .insert(schema.msgReads)
               .values({
                 threadId: input.threadId,

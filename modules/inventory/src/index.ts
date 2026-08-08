@@ -38,8 +38,9 @@ export function createInventoryModule(db: Db): BusinessModule {
             city: z.string().optional(),
           }),
           output: z.object({ id: z.string(), code: z.string(), name: z.string() }),
-          handler: async (input, ctx) => {
-            const [row] = await db
+          handler: async (input, ctx, helpers) => {
+            const tx = (helpers.db ?? db) as Db;
+            const [row] = await tx
               .insert(schema.invWarehouses)
               .values({
                 organizationId: ctx.actor.organizationId,
@@ -65,8 +66,9 @@ export function createInventoryModule(db: Db): BusinessModule {
             reorderLevel: z.number().int().nonnegative().default(0),
           }),
           output: z.object({ id: z.string(), sku: z.string(), name: z.string() }),
-          handler: async (input, ctx) => {
-            const [row] = await db
+          handler: async (input, ctx, helpers) => {
+            const tx = (helpers.db ?? db) as Db;
+            const [row] = await tx
               .insert(schema.invProducts)
               .values({
                 organizationId: ctx.actor.organizationId,
@@ -100,7 +102,8 @@ export function createInventoryModule(db: Db): BusinessModule {
             quantity: z.number(),
           }),
           handler: async (input, ctx, helpers) => {
-            const [existing] = await db
+            const tx = (helpers.db ?? db) as Db;
+            const [existing] = await tx
               .select()
               .from(schema.invStockLevels)
               .where(
@@ -114,13 +117,13 @@ export function createInventoryModule(db: Db): BusinessModule {
             let quantity: number;
             if (existing) {
               quantity = existing.quantity + input.quantityDelta;
-              await db
+              await tx
                 .update(schema.invStockLevels)
                 .set({ quantity, updatedAt: new Date() })
                 .where(eq(schema.invStockLevels.id, existing.id));
             } else {
               quantity = input.quantityDelta;
-              await db.insert(schema.invStockLevels).values({
+              await tx.insert(schema.invStockLevels).values({
                 organizationId: ctx.actor.organizationId,
                 warehouseId: input.warehouseId,
                 productId: input.productId,
@@ -128,7 +131,7 @@ export function createInventoryModule(db: Db): BusinessModule {
               });
             }
 
-            await db.insert(schema.invStockMoves).values({
+            await tx.insert(schema.invStockMoves).values({
               organizationId: ctx.actor.organizationId,
               warehouseId: input.warehouseId,
               productId: input.productId,
