@@ -152,7 +152,6 @@ modules/
   hr/             Employees, payroll prep
   platform/       RBAC, settings, marketplace, autonomy
   messaging/      Internal messaging
-  core-system/    Always-on system queries
 ```
 
 ## Tech stack

@@ -1,7 +1,7 @@
 # Module spec: Platform (branches, identity, gaps, marketplace, time)
 
 **Status:** Draft SMB baseline  
-**Module id:** `platform` (+ `core-system` always-on queries)  
+**Module id:** `platform`
 **Related:** [product-architecture-next.md](../../product-architecture-next.md), [agent-harness.md](../agent-harness.md), [self-development.md](../self-development.md), [scheduling-and-comms.md](../scheduling-and-comms.md)
 
 ## 1. Purpose

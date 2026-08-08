@@ -60,7 +60,7 @@ Never dump every tenant one-off into core.
 
 | Phase | Deliverable |
 |---|---|
-| P0 | Document + enforce namespace rules; demo-crm as portable sample |
+| P0 | Document + enforce namespace rules; a `demo.*` namespace portable sample |
 | P1 | `manifest.json` export + pack command |
 | P2 | Side-load install + signature/digest verify |
 | P3 | Cross-instance marketplace sync |

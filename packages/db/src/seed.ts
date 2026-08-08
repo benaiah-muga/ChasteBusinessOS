@@ -65,7 +65,15 @@ export const PERMISSION_CATALOG: { permission: string; module: string; descripti
 
 const ALL_PERMS = PERMISSION_CATALOG.map((p) => p.permission);
 
-const MARKETPLACE = [
+const MARKETPLACE: {
+  moduleId: string;
+  name: string;
+  version: string;
+  summary: string;
+  category: string;
+  kind: "builtin" | "marketplace" | "local_extension" | "private_cloud" | "custom";
+  publisher?: string;
+}[] = [
   {
     moduleId: "crm",
     name: "CRM",
@@ -121,15 +129,6 @@ const MARKETPLACE = [
     summary: "Direct and group conversations for your organization",
     category: "collaboration",
     kind: "builtin" as const,
-  },
-  {
-    moduleId: "demo-crm",
-    name: "Demo CRM Extension",
-    version: "0.1.0",
-    summary: "Sample custom module showing third-party style packaging",
-    category: "sales",
-    publisher: "community",
-    kind: "custom" as const,
   },
 ];
 
