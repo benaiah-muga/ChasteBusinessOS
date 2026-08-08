@@ -12,11 +12,10 @@ import {
   createTracer,
   type AiTracer,
   TracedProvider,
-  WakeStore,
-  InMemorySkillStore,
   runFollowUpTurn,
   SUMMARY_SYSTEM_PROMPT,
   type SkillStore,
+  type WakeStore,
   type CompactionSummarizer,
   type CompletionRequest,
 } from "@chaste/ai-core";
@@ -31,7 +30,6 @@ import {
   PostgresOutboxWriter,
   resolveUserPermissions,
   resolveUserByToken,
-  DbSessionStore,
   DbMemoryStore,
   schema,
   type Db,
@@ -45,28 +43,18 @@ const pkg = pkgRequire("../package.json") as { version: string };
 import {
   type AutonomyLevel,
   autonomyLevelSchema,
-  createCommandRegistry,
-  createModuleRegistry,
-  createQueryRegistry,
   createRequestContext,
   executeCommand,
   executeQuery,
   FULL_AUTONOMOUS_WARNING,
-  InboxStore,
   NotFoundError,
   type Actor,
   type CommandRegistry,
+  type InboxStore,
   type ModuleRegistry,
   type QueryRegistry,
 } from "@chaste/kernel";
-import { createAccountingModule } from "@chaste/module-accounting";
-import { createCrmModule } from "@chaste/module-crm";
-import { createHrModule } from "@chaste/module-hr";
-import { createInventoryModule } from "@chaste/module-inventory";
-import { createManufacturingModule } from "@chaste/module-manufacturing";
-import { createMessagingModule } from "@chaste/module-messaging";
-import { createPlatformModule } from "@chaste/module-platform";
-import { createPurchasingModule } from "@chaste/module-purchasing";
+import { createRuntime } from "@chaste/runtime";
 
 export interface SessionUser {
   id: string;
@@ -160,11 +148,15 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     region: userRow.region,
   };
 
-  const commands = createCommandRegistry();
-  const queries = createQueryRegistry();
-  const modules = createModuleRegistry(commands, queries);
-  const audit = new PostgresAuditWriter(db);
-  const outbox = new PostgresOutboxWriter(db);
+  // ARCH-4 — the shared runtime factory builds registries, registers every
+  // module once, and wires the durable Postgres-backed stores
+  // (`pending_approvals`, `ai_wakes`, `ai_skills`). The worker consumes the
+  // same factory, so standing rules / wakes / skills minted here are honored
+  // by scheduled follow-ups — no more process-local store drift.
+  const runtime = await createRuntime(config, db);
+  const { commands, queries, modules, inbox, wakes, skills, audit, outbox, sessionStore, memoryStore } =
+    runtime;
+
   const provider = createAiProvider(config.ai);
 
   // Observability — Langfuse traces all LLM calls when configured
@@ -180,24 +172,6 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     ? new TracedProvider(provider, tracer)
     : provider;
 
-  // Memory store — persistent tiered storage for AI context
-  const memoryStore = new DbMemoryStore(db);
-
-  // Domain modules first (dependency order)
-  await modules.register(createCrmModule(db));
-  await modules.register(createAccountingModule(db));
-  await modules.register(createInventoryModule(db));
-  await modules.register(createPurchasingModule(db));
-  await modules.register(createHrModule(db));
-  await modules.register(createManufacturingModule(db));
-  await modules.register(createMessagingModule(db));
-  await modules.register(
-    createPlatformModule(db, modules, {
-      allowFullAutonomous: config.allowFullAutonomous,
-      regions: config.regions,
-    }),
-  );
-
   // Workflow builder uses AiProvider.complete() (rules + structured LLM)
   let workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null = null;
   if (provider.id !== "none") {
@@ -206,14 +180,6 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
       aiProvider: provider,
     });
   }
-
-  // R2/R5/R7 runtime stores — the durable Postgres-backed counterparts
-  // (`pending_approvals`, `ai_wakes`, `ai_skills`) exist in the schema; the
-  // in-memory kernel stores satisfy the same interfaces so the runtime works
-  // today and can be swapped without touching the orchestrator.
-  const inbox = new InboxStore();
-  const wakes = new WakeStore();
-  const skills = new InMemorySkillStore();
 
   // R6 — compaction summarizer reuses the configured provider with the
   // fixed 8-section OpenWorker summary contract.
@@ -258,7 +224,7 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     modules,
     audit,
     outbox,
-    sessionStore: new DbSessionStore(db),
+    sessionStore,
     memoryStore,
     inbox,
     wakes,

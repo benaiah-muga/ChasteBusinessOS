@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { argsPreview, type InboxItem, InboxStore } from "./inbox.js";
+import { argsPreview, InMemoryInboxStore, type InboxItem, type InboxStore } from "./inbox.js";
 
 function fixedClock(): { now: () => Date; t: Date } {
   const t = new Date("2026-08-01T10:00:00Z");
@@ -20,10 +20,10 @@ function baseline(overrides: Partial<Parameters<InboxStore["addApproval"]>[0]> =
 }
 
 describe("InboxStore — adding items", () => {
-  it("adds an approval item with default state, visibility, and inbox", () => {
+  it("adds an approval item with default state, visibility, and inbox", async () => {
     const clock = fixedClock();
-    const store = new InboxStore({ now: clock.now });
-    const item = store.addApproval(baseline());
+    const store = new InMemoryInboxStore({ now: clock.now });
+    const item = await store.addApproval(baseline());
     expect(item.state).toBe<InboxItem["state"]>("pending");
     expect(item.visibility).toBe<InboxItem["visibility"]>("inbox");
     expect(item.inbox).toBe("default");
@@ -31,15 +31,15 @@ describe("InboxStore — adding items", () => {
     expect(item.toolCallId).toBeUndefined();
   });
 
-  it("allows inline visibility for attended sessions (the R3 attending path)", () => {
-    const store = new InboxStore();
-    const item = store.addApproval(baseline({ visibility: "inline" }));
+  it("allows inline visibility for attended sessions (the R3 attending path)", async () => {
+    const store = new InMemoryInboxStore();
+    const item = await store.addApproval(baseline({ visibility: "inline" }));
     expect(item.visibility).toBe<InboxItem["visibility"]>("inline");
   });
 
-  it("adds a question with quick-reply options and the always-present Other escape", () => {
-    const store = new InboxStore();
-    const q = store.addQuestion({
+  it("adds a question with quick-reply options and the always-present Other escape", async () => {
+    const store = new InMemoryInboxStore();
+    const q = await store.addQuestion({
       sessionId: "s1",
       organizationId: "o1",
       userId: "u1",
@@ -50,73 +50,73 @@ describe("InboxStore — adding items", () => {
     expect(q.allowText).toBe(true);
   });
 
-  it("idempotently dedupes by (sessionId, toolCallId) — re-raise returns the same record", () => {
-    const store = new InboxStore();
-    const first = store.addApproval(baseline({ toolCallId: "tc1" }));
-    const second = store.addApproval(baseline({ toolCallId: "tc1", title: "DIFFERENT" }));
+  it("idempotently dedupes by (sessionId, toolCallId) — re-raise returns the same record", async () => {
+    const store = new InMemoryInboxStore();
+    const first = await store.addApproval(baseline({ toolCallId: "tc1" }));
+    const second = await store.addApproval(baseline({ toolCallId: "tc1", title: "DIFFERENT" }));
     expect(second.id).toBe(first.id);
     expect(second.title).toBe(first.title); // not the duplicate
   });
 });
 
 describe("InboxStore — the state machine", () => {
-  it("resolves an item exactly once; first responder wins", () => {
-    const store = new InboxStore();
-    const item = store.addApproval(baseline());
-    expect(store.resolve(item.id, "allow")).toBe(true);
-    expect(store.resolve(item.id, "deny")).toBe(false);
-    const got = store.get(item.id)!;
+  it("resolves an item exactly once; first responder wins", async () => {
+    const store = new InMemoryInboxStore();
+    const item = await store.addApproval(baseline());
+    expect(await store.resolve(item.id, "allow")).toBe(true);
+    expect(await store.resolve(item.id, "deny")).toBe(false);
+    const got = (await store.get(item.id))!;
     expect(got.state).toBe("resolved");
     expect(got.resolution).toBe("allow");
   });
 
-  it("resolves a deletion of all session item to closed count", () => {
-    const store = new InboxStore();
-    store.addApproval(baseline({ sessionId: "sx" }));
-    store.addApproval(baseline({ sessionId: "sx" }));
-    store.addApproval(baseline({ sessionId: "sy" }));
-    const closed = store.resolveSession("sx", "session deleted");
+  it("resolves a deletion of all session item to closed count", async () => {
+    const store = new InMemoryInboxStore();
+    await store.addApproval(baseline({ sessionId: "sx" }));
+    await store.addApproval(baseline({ sessionId: "sx" }));
+    await store.addApproval(baseline({ sessionId: "sy" }));
+    const closed = await store.resolveSession("sx", "session deleted");
     expect(closed).toBe(2);
-    expect(store.pending({ sessionId: "sx" })).toEqual([]);
-    expect(store.pending({ sessionId: "sy" })).toHaveLength(1);
+    expect(await store.pending({ sessionId: "sx" })).toEqual([]);
+    expect(await store.pending({ sessionId: "sy" })).toHaveLength(1);
   });
 
   it("`wait` resolves with the recorded resolution; later waits see it immediately", async () => {
-    const store = new InboxStore();
-    const item = store.addApproval(baseline());
+    const store = new InMemoryInboxStore();
+    const item = await store.addApproval(baseline());
     const prom = store.wait(item.id);
     // microtask: should not resolve before we call resolve()
     let resolved: string | undefined;
     prom.then((r) => (resolved = r));
     await Promise.resolve();
     expect(resolved).toBeUndefined();
-    store.resolve(item.id, "allow");
+    await store.resolve(item.id, "allow");
     expect(await prom).toBe("allow");
     // second waiter sees the persisted resolution immediately
     const later = await store.wait(item.id);
     expect(later).toBe("allow");
   });
 
-  it("lists items with filters and orders oldest-first", () => {
+  it("lists items with filters and orders oldest-first", async () => {
     const t0 = new Date("2026-08-01T10:00:00Z");
     const t1 = new Date("2026-08-01T11:00:00Z");
-    const store = new InboxStore({ now: () => t0 });
-    const a = store.addApproval(baseline({ sessionId: "sx" }));
+    const store = new InMemoryInboxStore({ now: () => t0 });
+    const a = await store.addApproval(baseline({ sessionId: "sx" }));
     store["now"] = () => t1; // mutate clock for the second insert
-    const b = store.addApproval(baseline({ sessionId: "sy", title: "later" }));
+    const b = await store.addApproval(baseline({ sessionId: "sy", title: "later" }));
 
-    expect(store.list({ sessionId: "sx" }).map((i) => i.id)).toEqual([a.id]);
-    expect(store.list({ state: "pending" }).map((i) => i.id)).toEqual([a.id, b.id]);
-    expect(store.pending().map((i) => i.id)).toEqual([a.id, b.id]);
-    store.resolve(b.id, "allow");
-    expect(store.pending().map((i) => i.id)).toEqual([a.id]);
+    expect((await store.list({ sessionId: "sx" })).map((i) => i.id)).toEqual([a.id]);
+    expect((await store.list({ state: "pending" })).map((i) => i.id)).toEqual([a.id, b.id]);
+    expect((await store.pending()).map((i) => i.id)).toEqual([a.id, b.id]);
+    await store.resolve(b.id, "allow");
+    expect((await store.pending()).map((i) => i.id)).toEqual([a.id]);
   });
 });
 
 describe("InboxStore — standing approval rules (R4)", () => {
-  it("mints a task-scoped standing rule on `always` for an eligible approval", () => {
-    const store = new InboxStore();
-    const item = store.addApproval(
+  it("mints a task-scoped standing rule on `always` for an eligible approval", async () => {
+    const store = new InMemoryInboxStore();
+    const item = await store.addApproval(
       baseline({
         toolCallId: "tc1",
         data: {
@@ -126,9 +126,9 @@ describe("InboxStore — standing approval rules (R4)", () => {
         },
       }),
     );
-    expect(store.resolve(item.id, "always")).toBe(true);
+    expect(await store.resolve(item.id, "always")).toBe(true);
 
-    const decision = store.standingRuleFor({
+    const decision = await store.standingRuleFor({
       taskId: "task-7",
       sessionId: "s1",
       commandId: "email.send",
@@ -141,12 +141,12 @@ describe("InboxStore — standing approval rules (R4)", () => {
     });
   });
 
-  it("does NOT mint a rule when missing task/target/command metadata", () => {
-    const store = new InboxStore();
-    const item = store.addApproval(baseline({ toolCallId: "tc2" }));
-    store.resolve(item.id, "always");
+  it("does NOT mint a rule when missing task/target/command metadata", async () => {
+    const store = new InMemoryInboxStore();
+    const item = await store.addApproval(baseline({ toolCallId: "tc2" }));
+    await store.resolve(item.id, "always");
     expect(
-      store.standingRuleFor({
+      await store.standingRuleFor({
         sessionId: "s1",
         commandId: "email.send",
         target: "user@x.com",
@@ -154,9 +154,9 @@ describe("InboxStore — standing approval rules (R4)", () => {
     ).toBeNull();
   });
 
-  it("falls back to scoping by sessionId when no taskId is set", () => {
-    const store = new InboxStore();
-    const item = store.addApproval(
+  it("falls back to scoping by sessionId when no taskId is set", async () => {
+    const store = new InMemoryInboxStore();
+    const item = await store.addApproval(
       baseline({
         toolCallId: "tc3",
         data: {
@@ -165,8 +165,8 @@ describe("InboxStore — standing approval rules (R4)", () => {
         },
       }),
     );
-    expect(store.resolve(item.id, "always")).toBe(true);
-    const decision = store.standingRuleFor({
+    expect(await store.resolve(item.id, "always")).toBe(true);
+    const decision = await store.standingRuleFor({
       sessionId: "s1",
       commandId: "slack.send",
       target: "#ops-alerts",
@@ -178,18 +178,18 @@ describe("InboxStore — standing approval rules (R4)", () => {
     });
   });
 
-  it("never auto-allows an unmatched target even when rule exists for the command", () => {
-    const store = new InboxStore();
-    const item = store.addApproval(
+  it("never auto-allows an unmatched target even when rule exists for the command", async () => {
+    const store = new InMemoryInboxStore();
+    const item = await store.addApproval(
       baseline({
         toolCallId: "tc4",
         data: { taskId: "T", commandId: "slack.send", standingTarget: "#ops" },
       }),
     );
-    store.resolve(item.id, "always");
+    await store.resolve(item.id, "always");
 
     expect(
-      store.standingRuleFor({
+      await store.standingRuleFor({
         taskId: "T",
         sessionId: "s1",
         commandId: "slack.send",
