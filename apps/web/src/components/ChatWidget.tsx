@@ -78,7 +78,7 @@ function PartView({
               ? "Superseded"
               : part.confirmLabel === "Disabled"
                 ? "Recommendation only"
-                : liveConfirmId && liveConfirmId !== part.id
+                : !isLive
                   ? "No longer pending"
                   : null;
 
