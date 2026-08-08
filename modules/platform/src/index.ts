@@ -3216,6 +3216,181 @@ export function createPlatformModule(
         }),
       );
 
+      // ─── ARCH-5 — AI workflow persistence ────────────────────────────
+      // Workflows and their runs are persisted to Postgres (workflow_definitions
+      // / workflow_runs) so automations survive process restarts and horizontal
+      // scale. Humans and AI reach them through the bus, never process memory.
+
+      const workflowStepInputSchema: z.ZodType<unknown> = z.lazy(() =>
+        z.object({
+          id: z.string(),
+          type: z.enum(["command", "agent", "approval", "condition", "parallel"]),
+          command: z.string().optional(),
+          agentId: z.string().optional(),
+          condition: z.string().optional(),
+          approveBy: z.string().optional(),
+          description: z.string().optional(),
+          input: z.record(z.unknown()).optional(),
+          steps: z.array(workflowStepInputSchema).optional(),
+          onError: z.enum(["bail", "retry", "continue"]).default("bail"),
+        }),
+      );
+
+      const workflowInputSchema = z.object({
+        id: z.string().min(1).optional(),
+        name: z.string().min(1),
+        description: z.string().default(""),
+        trigger: z.enum(["manual", "event", "schedule"]).default("manual"),
+        triggerConfig: z.record(z.unknown()).default({}),
+        steps: z.array(workflowStepInputSchema),
+        createdBy: z.enum(["user", "ai"]).default("user"),
+      });
+      type WorkflowInput = z.infer<typeof workflowInputSchema>;
+      type WorkflowRow = typeof schema.workflowDefinitions.$inferSelect;
+
+      const workflowOutputSchema = z.object({
+        id: z.string(),
+        name: z.string(),
+        description: z.string(),
+        trigger: z.string(),
+        triggerConfig: z.record(z.unknown()),
+        steps: z.array(z.unknown()),
+        createdBy: z.string(),
+        createdAt: z.string(),
+      });
+
+      async function getWorkflowRow(
+        organizationId: string,
+        workflowId: string,
+      ): Promise<WorkflowRow> {
+        const [row] = await db
+          .select()
+          .from(schema.workflowDefinitions)
+          .where(
+            and(
+              eq(schema.workflowDefinitions.id, workflowId),
+              eq(schema.workflowDefinitions.organizationId, organizationId),
+            ),
+          );
+        if (!row) throw new NotFoundError("Workflow");
+        return row;
+      }
+
+      function mapWorkflow(row: WorkflowRow) {
+        return {
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          trigger: row.trigger,
+          triggerConfig: row.triggerConfig ?? {},
+          steps: row.steps as unknown[],
+          createdBy: row.createdBy,
+          createdAt: row.createdAt.toISOString(),
+        };
+      }
+
+      commands.register(
+        defineCommand({
+          name: "core.workflow.create",
+          description: "Create or upsert a persisted workflow definition",
+          permissions: ["core.workflow.manage"],
+          tags: ["core"],
+          input: workflowInputSchema,
+          output: workflowOutputSchema,
+          handler: async (input: WorkflowInput, ctx, helpers) => {
+            const tx = (helpers.db ?? db) as Db;
+            const workflowId = input.id ?? crypto.randomUUID();
+            if (input.id) {
+              await getWorkflowRow(ctx.actor.organizationId, input.id);
+            }
+            const [row] = await tx
+              .insert(schema.workflowDefinitions)
+              .values({
+                id: workflowId,
+                organizationId: ctx.actor.organizationId,
+                name: input.name,
+                description: input.description,
+                trigger: input.trigger,
+                triggerConfig: input.triggerConfig ?? {},
+                steps: input.steps as unknown[],
+                createdBy: input.createdBy,
+              })
+              .onConflictDoUpdate({
+                target: [schema.workflowDefinitions.id],
+                set: {
+                  name: input.name,
+                  description: input.description,
+                  trigger: input.trigger,
+                  triggerConfig: input.triggerConfig ?? {},
+                  steps: input.steps as unknown[],
+                  updatedAt: new Date(),
+                },
+              })
+              .returning();
+            await helpers.outbox.enqueue({
+              id: crypto.randomUUID(),
+              type: "core.workflow.created",
+              organizationId: ctx.actor.organizationId,
+              occurredAt: ctx.now().toISOString(),
+              payload: { workflowId: row!.id, name: row!.name },
+              correlationId: ctx.requestId,
+            });
+            return mapWorkflow(row!);
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.workflow.list",
+          description: "List persisted workflows for the organization",
+          permissions: ["core.workflow.read"],
+          tags: ["core"],
+          input: z.object({}).default({}),
+          output: z.object({ items: z.array(workflowOutputSchema) }),
+          handler: async (_i, ctx) => {
+            const rows = await db
+              .select()
+              .from(schema.workflowDefinitions)
+              .where(eq(schema.workflowDefinitions.organizationId, ctx.actor.organizationId))
+              .orderBy(desc(schema.workflowDefinitions.createdAt));
+            return { items: rows.map(mapWorkflow) };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.workflow.get",
+          description: "Get a single persisted workflow by id",
+          permissions: ["core.workflow.read"],
+          tags: ["core"],
+          input: z.object({ workflowId: z.string() }),
+          output: workflowOutputSchema,
+          handler: async (input, ctx) => {
+            return mapWorkflow(await getWorkflowRow(ctx.actor.organizationId, input.workflowId));
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.workflow.delete",
+          description: "Delete a persisted workflow definition",
+          permissions: ["core.workflow.manage"],
+          tags: ["core"],
+          input: z.object({ workflowId: z.string() }),
+          output: z.object({ ok: z.literal(true) }),
+          handler: async (input, ctx) => {
+            await getWorkflowRow(ctx.actor.organizationId, input.workflowId);
+            await db
+              .delete(schema.workflowDefinitions)
+              .where(eq(schema.workflowDefinitions.id, input.workflowId));
+            return { ok: true as const };
+          },
+        }),
+      );
+
 
     },
   };

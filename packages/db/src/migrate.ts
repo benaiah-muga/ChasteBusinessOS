@@ -810,6 +810,38 @@ INSERT INTO capability_catalog_items (module_id, capability_id, name, descriptio
    'Create and route manufacturing orders and production.',
    '["manufacturing","production","batch","routing","work order"]')
 ON CONFLICT (module_id, capability_id) DO NOTHING;
+
+-- ARCH-5 -- AI workflows. These mirror Drizzle schema workflow_definitions /
+-- workflow_runs; they were absent from this blob and are now persisted so a
+-- process restart no longer loses user-built automations (ARCH-5).
+CREATE TABLE IF NOT EXISTS workflow_definitions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL REFERENCES organizations(id),
+  name text NOT NULL,
+  description text NOT NULL,
+  trigger text NOT NULL DEFAULT 'manual',
+  trigger_config jsonb NOT NULL DEFAULT '{}',
+  steps jsonb NOT NULL,
+  created_by text NOT NULL DEFAULT 'user',
+  enabled boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS wf_def_org_idx ON workflow_definitions(organization_id);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id uuid NOT NULL REFERENCES workflow_definitions(id) ON DELETE CASCADE,
+  organization_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'running',
+  context jsonb NOT NULL DEFAULT '{}',
+  steps jsonb NOT NULL DEFAULT '[]',
+  error text,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS wf_run_org_idx ON workflow_runs(organization_id);
+CREATE INDEX IF NOT EXISTS wf_run_wf_idx ON workflow_runs(workflow_id);
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {
