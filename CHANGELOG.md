@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Module boot integrity** — removed the dead `core-system` and `demo-crm` modules and
   added a boot-time registry integrity test that fails on duplicate command/query names
   or missing platform queries (ARCH-6).
+- **Platform module decomposition (ARCH-3, slice 1)** — business-partner master data
+  (`core.bpartner.*`) extracted from the platform "god module" into a new
+  `@chaste/module-master-data` package. Command/query names and permissions are
+  unchanged; ownership and a contract test moved with the code. `platform` shrinks and
+  will keep shedding bounded contexts toward a thin aggregator.
 - **Chat confirmation cards** — only the live confirmation renders after a turn; stale
   cards from a previous confirmation are pruned.
 
