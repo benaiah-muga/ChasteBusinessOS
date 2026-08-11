@@ -63,6 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shedding bounded contexts toward a thin aggregator.
 - **Chat confirmation cards** — only the live confirmation renders after a turn; stale
   cards from a previous confirmation are pruned.
+- **AI orchestration robustness (natural clarification)** — the R10 recognition guard
+  discards an LLM-materialized plan when a deterministic intent is recognized but a
+  required field is missing (e.g. `Create customer in Nairobi`), parking a focused
+  clarification instead of a confirm with invented values; clarify probes now preserve
+  trailing context (city, amount) so the answer merges correctly; the learned-context
+  memory block and LLM prompt forbid copying past-execution values into new plans.
+- **Postgres e2e self-cleanup** — `apps/api/src/e2e.test.ts` deletes the customers,
+  invoices, memories, and chat sessions it creates, so test runs no longer pollute the
+  shared dev database.
 
 ### Security (2026-08-08 audit remediation)
 
