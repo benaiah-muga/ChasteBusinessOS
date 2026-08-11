@@ -120,6 +120,17 @@ export type BackupProviderStatus = {
   encryptionConfigured: boolean;
 };
 
+export type DeadLetterEventRow = {
+  id: string;
+  type: string;
+  occurredAt: string;
+  lastError: string | null;
+  errorCode: string | null;
+  attempts: number;
+  deadLetteredAt: string;
+  replayedAt: string | null;
+};
+
 export type MessagingThreadDetail = {
   id: string;
   organizationId: string;
@@ -232,7 +243,9 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
     const res = await fetchImpl(new URL(path, options.baseUrl).toString(), {
       ...init,
       headers: {
-        "content-type": "application/json",
+        // Content-type only when there is a body — Fastify rejects an empty
+        // JSON body with FST_ERR_CTP_EMPTY_JSON_BODY (e.g. /auth/login).
+        ...(init.body ? { "content-type": "application/json" } : {}),
         ...extra,
         ...(init.headers ?? {}),
       },
@@ -1144,6 +1157,20 @@ export function createChasteApiClient(options: ChasteApiClientOptions) {
         "/api/v1/queries/core.backup.provider.status",
         { method: "POST", body: JSON.stringify({ input: {} }) },
         (d) => d as BackupProviderStatus,
+      );
+    },
+    listDeadLetterEvents(input: { limit?: number; includeReplayed?: boolean } = {}) {
+      return request(
+        "/api/v1/queries/core.outbox.listDead",
+        { method: "POST", body: JSON.stringify({ input }) },
+        (d) => d as { events: DeadLetterEventRow[] },
+      );
+    },
+    replayOutboxEvents(eventIds: string[]) {
+      return request(
+        "/api/v1/commands/core.outbox.replay",
+        { method: "POST", body: JSON.stringify({ input: { eventIds } }) },
+        (d) => d as { data: { replayed: number } },
       );
     },
   };

@@ -37,6 +37,12 @@ describe("identity module contract", () => {
     expect(commandByName.get("core.user.assignRole")?.permissions).toEqual(["core.role.assign"]);
     expect(commandByName.get("core.user.removeRole")?.permissions).toEqual(["core.role.assign"]);
 
+    // API keys — org-scoped machine credentials.
+    expect(commandByName.get("core.apikey.create")?.permissions).toEqual(["core.apikey.manage"]);
+    expect(commandByName.get("core.apikey.revoke")?.permissions).toEqual(["core.apikey.manage"]);
+    expect(commandByName.get("core.apikey.rotate")?.permissions).toEqual(["core.apikey.manage"]);
+    expect(queryByName.get("core.apikey.list")?.permissions).toEqual(["core.apikey.read"]);
+
     expect(modules.list().map((m) => m.id)).toContain("identity");
   });
 });

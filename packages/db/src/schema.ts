@@ -33,6 +33,8 @@ export const users = pgTable(
     email: text("email").notNull(),
     displayName: text("display_name").notNull(),
     authToken: text("auth_token"),
+    /** F5 — bearer tokens now expire. Null = never expires (bootstrap admin). */
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
     settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
     activeBranchId: uuid("active_branch_id"),
     isActive: boolean("is_active").notNull().default(true),
@@ -133,16 +135,56 @@ export const auditLog = pgTable(
   (t) => [index("audit_log_org_idx").on(t.organizationId)],
 );
 
-export const outboxEvents = pgTable("outbox_events", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  type: text("type").notNull(),
-  organizationId: uuid("organization_id").notNull(),
-  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
-  payload: jsonb("payload").notNull(),
-  correlationId: text("correlation_id"),
-  causationId: text("causation_id"),
-  processedAt: timestamp("processed_at", { withTimezone: true }),
-});
+export const outboxEvents = pgTable(
+  "outbox_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    type: text("type").notNull(),
+    organizationId: uuid("organization_id").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    payload: jsonb("payload").notNull(),
+    correlationId: text("correlation_id"),
+    causationId: text("causation_id"),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    /**
+     * ARCH-9/REL-2 — durable delivery accounting. `attempts` counts failed
+     * executions; `last_error` records the most recent failure. `claimed_at`
+     * is the claim lease (set on claim, cleared on ack) so a crashed worker's
+     * row is reclaimed after the lease window. `next_attempt_at` gates retry
+     * backoff. `dead_lettered_at` marks rows routed to `dead_letter_events`.
+     */
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    deadLetteredAt: timestamp("dead_lettered_at", { withTimezone: true }),
+  },
+  (t) => [index("outbox_events_pending_idx").on(t.organizationId, t.occurredAt)],
+);
+
+/**
+ * ARCH-9/REL-2 — dead-letter outbox. Append-only record of events that
+ * exhausted their retries. `replayed_at` marks rows returned to the outbox by
+ * `core.outbox.replay` so the DLQ keeps an audit trail of the replay.
+ */
+export const deadLetterEvents = pgTable(
+  "dead_letter_events",
+  {
+    id: uuid("id").primaryKey(),
+    type: text("type").notNull(),
+    organizationId: uuid("organization_id").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    payload: jsonb("payload").notNull(),
+    correlationId: text("correlation_id"),
+    causationId: text("causation_id"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    errorCode: text("error_code"),
+    deadLetteredAt: timestamp("dead_lettered_at", { withTimezone: true }).notNull().defaultNow(),
+    replayedAt: timestamp("replayed_at", { withTimezone: true }),
+  },
+  (t) => [index("dead_letter_events_org_idx").on(t.organizationId)],
+);
 
 export const moduleInstalls = pgTable(
   "module_installs",
@@ -207,6 +249,42 @@ export const userBranchAccess = pgTable(
   (t) => [uniqueIndex("user_branch_access_uidx").on(t.userId, t.branchId)],
 );
 
+/**
+ * API keys — org-scoped machine credentials with their own permission scopes.
+ *
+ * Keys are a distinct identity class from user bearer tokens: they are owned by
+ * an organization (created by a user), exercise only the declared `scopes`
+ * (a subset of the permission catalog), and are independently revocable /
+ * rotatable / expirable. The raw secret is returned exactly once at creation;
+ * the column only ever stores the SHA-256 digest (see `hashApiKeySecret`).
+ */
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** SHA-256 digest of the raw secret — never the raw value. */
+    hashedSecret: text("hashed_secret").notNull(),
+    /** Display-only prefix (e.g. `chaste_ab12…`) — not a usable credential. */
+    prefix: text("prefix").notNull(),
+    /** Permission strings the key may exercise (subset of PERMISSION_CATALOG). */
+    scopes: text("scopes").array().notNull().default([]),
+    /** "active" | "revoked" */
+    status: text("status").notNull().default("active"),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("api_keys_secret_uidx").on(t.hashedSecret)],
+);
+
 export const chatSessions = pgTable(
   "chat_sessions",
   {
@@ -215,7 +293,11 @@ export const chatSessions = pgTable(
     userId: uuid("user_id").notNull(),
     title: text("title"),
     activeBranchId: uuid("active_branch_id"),
-    pending: jsonb("pending").$type<{ id: string; command: string; input: unknown; createdAt: string }>(),
+    pending: jsonb("pending").$type<{
+      id: string;
+      createdAt: string;
+      [key: string]: unknown;
+    } | null>(),
     /** R3 — unattended sessions park approvals in the cross-session Inbox queue instead of inline. */
     unattended: boolean("unattended").notNull().default(false),
     /** R6 — outbound compaction boundary + summary + mechanical working state (JSONB). */
@@ -473,10 +555,7 @@ export const backups = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
-  (t) => [
-    index("backups_org_idx").on(t.organizationId),
-    index("backups_status_idx").on(t.status),
-  ],
+  (t) => [index("backups_org_idx").on(t.organizationId), index("backups_status_idx").on(t.status)],
 );
 
 /* ─── Messaging (spec: messaging-and-buzz.md) ─────────────────────── */
@@ -628,6 +707,7 @@ export const aiSkills = pgTable(
     summary: text("summary").notNull(),
     instructions: text("instructions").notNull(),
     files: jsonb("files").$type<unknown[]>().default([]),
+    refinements: jsonb("refinements").$type<unknown[]>().default([]),
     enabled: boolean("enabled").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

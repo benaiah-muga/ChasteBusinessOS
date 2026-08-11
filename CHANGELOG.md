@@ -28,6 +28,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Command-bus transactional outbox** — business writes, outbox enqueues, and audit
   events commit in one DB transaction via `createCommandHelpers`; success audit is
   in-transaction and failure audit is written out-of-transaction (ARCH-2).
+- **Org-scoped API keys** (`core.apikey.*`) — first-class machine credentials with
+  their own permission scopes (subset of the catalog, validated at creation),
+  hash-at-rest secrets, and an independent revoke / rotate / expire lifecycle.
+  Authenticate with `X-Api-Key: <secret>`; audit attributes command execution to
+  the `api_key` actor (`actorKind: "api_key"`).
+- **Durable outbox delivery (ARCH-9/REL-2)** — the worker now claims events with
+  `FOR UPDATE SKIP LOCKED` (no double-processing across workers), tracks
+  `attempts` / `last_error` on `outbox_events`, applies exponential backoff via
+  `next_attempt_at`, and copies events that exhaust retries to an append-only
+  `dead_letter_events` table. Operators are notified in-app (`kind: "dead_letter"`)
+  and can inspect / re-queue via `core.outbox.listDead` (`core.outbox.read`) and
+  `core.outbox.replay` (`core.outbox.manage`), both org-scoped and audit-covered.
+  Scheduled reminders/follow-ups run through a schedule driver that prefers
+  Redis/BullMQ (per-item atomic claims) and falls back to the poll loop when Redis
+  is unavailable. The worker now shuts down cleanly on SIGTERM/SIGINT (queue
+  workers, Redis and the Postgres client are closed).
 
 ### Changed
 
@@ -47,6 +63,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shedding bounded contexts toward a thin aggregator.
 - **Chat confirmation cards** — only the live confirmation renders after a turn; stale
   cards from a previous confirmation are pruned.
+
+### Security (2026-08-08 audit remediation)
+
+- **F1 — no more anonymous admin bypass in production.** The "no token ⇒
+  bootstrap admin" fallback is now a dev-only flag (`CHASTE_ALLOW_ANON_ADMIN`);
+  production forces it off at config load (fail closed) and the prod Compose
+  sets it explicitly. Bootstrap admin is now authenticatable: first boot mints a
+  hashed-at-rest credential (`CHASTE_ADMIN_TOKEN` or a one-time generated token
+  printed in dev only).
+- **F2 — workflow `condition` steps no longer execute code.** `new Function`
+  was replaced by a restricted predicate interpreter (`evaluateCondition`,
+  tokenizer + recursive-descent parser with no function calls / global access),
+  so a stored or LLM-injected condition can at worst evaluate to `false`.
+  `lookupPath` also rejects prototype-key traversal (`__proto__`/`constructor`).
+- **F3 — workflow build/execute and the two remaining list routes run under the
+  authenticated caller** (`requestCtxForAuth`), not the bootstrap admin — org
+  ownership and audit attribution match the requester.
+- **F4 — chat sessions are ownership-checked** (`DbSession.userId`); loading or
+  continuing another user's session (incl. pending planned actions) is denied.
+- **F5 — bearer tokens expire.** `users.token_expires_at` is set on
+  invite/create (`CHASTE_SESSION_TOKEN_TTL`, default 30 days) and enforced in
+  `resolveUserByToken`; the previously-dead TTL config is now live.
+- **F7 — `core.user.create` stores tokens hashed at rest** (SHA-256), matching
+  `core.user.invite`; the legacy plaintext lookup remains only as a migration
+  fallback for pre-hash rows.
+- **F6 — rate limiting at the HTTP edge** — dependency-free fixed-window
+  limiters (`apps/api/src/rate-limit.ts`): `/auth/login` 10 req/15s per IP,
+  `/ai/chat` 30 req/15s per IP plus 120 req/min per authenticated user;
+  throttled responses carry `retry-after` and `429 RATE_LIMITED`.
+- **F8 — the external risk floor is now live** — `core.email.send` /
+  `core.email.enqueue_template` declare `riskClass: "external"` (target-bound
+  per `to`), and `core.backup.restore` declares `riskClass: "exec"`; all three
+  require `full_autonomous` to auto-run, so standing rules can no longer send
+  email or restore backups under `guarded_auto`.
+- **F9 — CORS allow-list** — the API now accepts only the configured
+  `webOrigin` instead of reflecting any `Origin` header; non-browser
+  (no-Origin) callers are unaffected.
 
 ### Fixed
 

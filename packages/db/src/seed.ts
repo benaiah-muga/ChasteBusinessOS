@@ -2,50 +2,135 @@ import type { AppConfig } from "@chaste/config";
 import { eq } from "drizzle-orm";
 import type { Db } from "./client.js";
 import * as schema from "./schema.js";
+import { hashAuthToken } from "./auth.js";
 
 /** Platform permission catalog used by seed + RBAC UI. */
 export const PERMISSION_CATALOG: { permission: string; module: string; description: string }[] = [
   { permission: "core.modules.read", module: "core", description: "List modules" },
   { permission: "core.modules.manage", module: "core", description: "Install/enable modules" },
   { permission: "core.rbac.read", module: "core", description: "View roles and users" },
-  { permission: "core.user.manage", module: "core", description: "Create, activate, deactivate users" },
+  {
+    permission: "core.user.manage",
+    module: "core",
+    description: "Create, activate, deactivate users",
+  },
   { permission: "core.user.read", module: "core", description: "List users in organization" },
   { permission: "core.role.manage", module: "core", description: "Create, update, delete roles" },
-  { permission: "core.role.assign", module: "core", description: "Assign or remove roles from users" },
+  {
+    permission: "core.role.assign",
+    module: "core",
+    description: "Assign or remove roles from users",
+  },
   { permission: "core.autonomy.manage", module: "core", description: "Change AI autonomy" },
   { permission: "core.marketplace.read", module: "core", description: "Browse marketplace" },
   { permission: "core.settings.read", module: "core", description: "Read org settings" },
   { permission: "core.settings.manage", module: "core", description: "Manage org settings" },
   { permission: "core.branch.read", module: "core", description: "List and view branches" },
   { permission: "core.branch.manage", module: "core", description: "Create and update branches" },
-  { permission: "core.branch.all", module: "core", description: "Access all branches without explicit grant" },
-  { permission: "core.capability.gap.read", module: "core", description: "View capability gap tickets" },
-  { permission: "core.capability.gap.manage", module: "core", description: "Create and update capability gap tickets" },
-  { permission: "core.capability.catalog.read", module: "core", description: "Search the machine capability catalog" },
+  {
+    permission: "core.branch.all",
+    module: "core",
+    description: "Access all branches without explicit grant",
+  },
+  {
+    permission: "core.capability.gap.read",
+    module: "core",
+    description: "View capability gap tickets",
+  },
+  {
+    permission: "core.capability.gap.manage",
+    module: "core",
+    description: "Create and update capability gap tickets",
+  },
+  {
+    permission: "core.capability.catalog.read",
+    module: "core",
+    description: "Search the machine capability catalog",
+  },
   { permission: "core.notification.read", module: "core", description: "Read own notifications" },
   { permission: "core.reminder.write", module: "core", description: "Set and manage reminders" },
   { permission: "core.followup.write", module: "core", description: "Schedule agent follow-ups" },
-  { permission: "core.calendar.read", module: "core", description: "See calendars and events in scope" },
-  { permission: "core.calendar.write", module: "core", description: "Create and update calendar events" },
+  {
+    permission: "core.calendar.read",
+    module: "core",
+    description: "See calendars and events in scope",
+  },
+  {
+    permission: "core.calendar.write",
+    module: "core",
+    description: "Create and update calendar events",
+  },
   { permission: "core.email.send", module: "core", description: "Send outbound email" },
-  { permission: "messaging.thread.read", module: "messaging", description: "List threads and read messages you belong to" },
-  { permission: "messaging.thread.write", module: "messaging", description: "Send messages and open direct conversations" },
-  { permission: "messaging.group.create", module: "messaging", description: "Create group conversations" },
-  { permission: "messaging.group.manage", module: "messaging", description: "Add/remove members, rename, archive groups" },
-  { permission: "core.marketplace.publish", module: "core", description: "Publish a module listing from a gap ticket" },
-  { permission: "core.bpartner.manage", module: "core", description: "Create and update business partners" },
+  { permission: "core.outbox.manage", module: "core", description: "Replay dead-lettered outbox events" },
+  { permission: "core.outbox.read", module: "core", description: "Read the dead-letter queue" },
+  {
+    permission: "messaging.thread.read",
+    module: "messaging",
+    description: "List threads and read messages you belong to",
+  },
+  {
+    permission: "messaging.thread.write",
+    module: "messaging",
+    description: "Send messages and open direct conversations",
+  },
+  {
+    permission: "messaging.group.create",
+    module: "messaging",
+    description: "Create group conversations",
+  },
+  {
+    permission: "messaging.group.manage",
+    module: "messaging",
+    description: "Add/remove members, rename, archive groups",
+  },
+  {
+    permission: "core.marketplace.publish",
+    module: "core",
+    description: "Publish a module listing from a gap ticket",
+  },
+  {
+    permission: "core.bpartner.manage",
+    module: "core",
+    description: "Create and update business partners",
+  },
   { permission: "core.bpartner.read", module: "core", description: "Read business partners" },
-  { permission: "core.workflow.read", module: "core", description: "List and read persisted AI workflows" },
-  { permission: "core.workflow.manage", module: "core", description: "Create, update, and delete persisted AI workflows" },
-  { permission: "core.workflow.run", module: "core", description: "Trigger persisted AI workflow runs" },
+  {
+    permission: "core.workflow.read",
+    module: "core",
+    description: "List and read persisted AI workflows",
+  },
+  {
+    permission: "core.workflow.manage",
+    module: "core",
+    description: "Create, update, and delete persisted AI workflows",
+  },
+  {
+    permission: "core.workflow.run",
+    module: "core",
+    description: "Trigger persisted AI workflow runs",
+  },
+  {
+    permission: "core.apikey.manage",
+    module: "core",
+    description: "Create, revoke, and rotate API keys",
+  },
+  { permission: "core.apikey.read", module: "core", description: "List API keys" },
   { permission: "crm.customer.create", module: "crm", description: "Create customers" },
   { permission: "crm.customer.read", module: "crm", description: "Read customers" },
-  { permission: "crm.customer.update", module: "crm", description: "Update customers, change status" },
+  {
+    permission: "crm.customer.update",
+    module: "crm",
+    description: "Update customers, change status",
+  },
   { permission: "crm.contact.manage", module: "crm", description: "Manage customer contacts" },
   { permission: "crm.contact.read", module: "crm", description: "Read customer contacts" },
   { permission: "crm.interaction.write", module: "crm", description: "Log customer interactions" },
   { permission: "crm.interaction.read", module: "crm", description: "Read customer interactions" },
-  { permission: "acc.account.manage", module: "accounting", description: "Manage chart of accounts" },
+  {
+    permission: "acc.account.manage",
+    module: "accounting",
+    description: "Manage chart of accounts",
+  },
   { permission: "acc.account.read", module: "accounting", description: "Read accounts" },
   { permission: "acc.journal.post", module: "accounting", description: "Post journal entries" },
   { permission: "acc.invoice.manage", module: "accounting", description: "Manage invoices" },
@@ -139,6 +224,12 @@ export interface BootstrapResult {
   organizationId: string;
   adminUserId: string;
   roleId: string;
+  /**
+   * The raw bootstrap-admin credential, present ONLY when this boot minted a
+   * fresh token (no `CHASTE_ADMIN_TOKEN` was configured). The caller decides
+   * whether/where to reveal it — dev may print, production must not.
+   */
+  adminAuthToken?: string;
 }
 
 export async function bootstrapPlatform(db: Db, cfg: AppConfig): Promise<BootstrapResult> {
@@ -162,11 +253,7 @@ export async function bootstrapPlatform(db: Db, cfg: AppConfig): Promise<Bootstr
   if (!cfg.bootstrap.enabled) {
     const [org] = await db.select().from(schema.organizations).limit(1);
     const [user] = org
-      ? await db
-          .select()
-          .from(schema.users)
-          .where(eq(schema.users.organizationId, org.id))
-          .limit(1)
+      ? await db.select().from(schema.users).where(eq(schema.users.organizationId, org.id)).limit(1)
       : [];
     if (!org || !user) {
       throw new Error("Bootstrap disabled and no organization/user found");
@@ -360,9 +447,29 @@ export async function bootstrapPlatform(db: Db, cfg: AppConfig): Promise<Bootstr
       target: [schema.invWarehouses.organizationId, schema.invWarehouses.code],
     });
 
+  // F1 — the bootstrap admin must be able to authenticate over HTTP once the
+  // anonymous fallback is gone. Mint a hashed-at-rest credential on first boot:
+  // either the operator-provided `CHASTE_ADMIN_TOKEN` or a generated secret
+  // surfaced exactly once by the caller (dev only). Never overwrite an existing
+  // token, so restarts and re-seeds don't invalidate the current credential.
+  let adminAuthToken: string | undefined;
+  if (!admin.authToken) {
+    const rawToken =
+      cfg.auth.bootstrapAdminToken ??
+      `chaste_${globalThis.crypto.randomUUID().replaceAll("-", "")}${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
+    await db
+      .update(schema.users)
+      .set({ authToken: hashAuthToken(rawToken) })
+      .where(eq(schema.users.id, admin.id));
+    if (!cfg.auth.bootstrapAdminToken) {
+      adminAuthToken = rawToken;
+    }
+  }
+
   return {
     organizationId: org.id,
     adminUserId: admin.id,
     roleId: adminRole.id,
+    adminAuthToken,
   };
 }

@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   ClipboardList,
@@ -10,7 +13,7 @@ import { DashboardCharts } from "@/components/dashboard/DashboardCharts";
 import { QuickActionButton } from "@/components/QuickActionButton";
 import { getApiClient } from "@/lib/api";
 
-export const dynamic = "force-dynamic";
+const api = getApiClient();
 
 function relativeTime(value: string): string {
   const elapsed = Date.now() - new Date(value).getTime();
@@ -76,28 +79,47 @@ function buildActivityDays(
   return days;
 }
 
-export default async function HomePage() {
-  const api = getApiClient();
-  let session: Awaited<ReturnType<typeof api.session>> | null = null;
-  let health: Awaited<ReturnType<typeof api.health>> | null = null;
-  let modules: Awaited<ReturnType<typeof api.listModules>> | null = null;
-  let customers: Awaited<ReturnType<typeof api.listCustomers>>["items"] = [];
-  let audit: Awaited<ReturnType<typeof api.listAudit>>["items"] = [];
-  let workflows: Awaited<ReturnType<typeof api.listWorkflows>>["items"] = [];
-  let error: string | null = null;
+export default function HomePage() {
+  const [session, setSession] = useState<Awaited<ReturnType<typeof api.session>> | null>(null);
+  const [health, setHealth] = useState<Awaited<ReturnType<typeof api.health>> | null>(null);
+  const [modules, setModules] = useState<Awaited<ReturnType<typeof api.listModules>> | null>(null);
+  const [customers, setCustomers] = useState<
+    Awaited<ReturnType<typeof api.listCustomers>>["items"]
+  >([]);
+  const [audit, setAudit] = useState<Awaited<ReturnType<typeof api.listAudit>>["items"]>([]);
+  const [workflows, setWorkflows] = useState<
+    Awaited<ReturnType<typeof api.listWorkflows>>["items"]
+  >([]);
+  const [error, setError] = useState<string | null>(null);
 
-  try {
-    [health, session, modules, customers, audit, workflows] = await Promise.all([
-      api.health(),
-      api.session(),
-      api.listModules(),
-      api.listCustomers().then((res) => res.items),
-      api.listAudit().then((res) => res.items),
-      api.listWorkflows().then((res) => res.items),
-    ]);
-  } catch (err) {
-    error = err instanceof Error ? err.message : "Failed to reach API";
-  }
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [h, s, m, cs, a, ws] = await Promise.all([
+          api.health(),
+          api.session(),
+          api.listModules(),
+          api.listCustomers().then((res) => res.items),
+          api.listAudit().then((res) => res.items),
+          api.listWorkflows().then((res) => res.items),
+        ]);
+        if (cancelled) return;
+        setHealth(h);
+        setSession(s);
+        setModules(m);
+        setCustomers(cs);
+        setAudit(a);
+        setWorkflows(ws);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to reach API");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const moduleCount = modules?.registered.length ?? 0;
   const installedCount = modules?.installed.filter((item) => item.enabled).length ?? 0;

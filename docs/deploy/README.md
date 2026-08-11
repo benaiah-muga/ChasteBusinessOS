@@ -55,12 +55,15 @@ scale-out is introduced (Redis is wired but not yet load-bearing for outbox).
 
 Required everywhere:
 
-| Variable                                                       | Notes                                                                |
-| -------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `DATABASE_URL`                                                 | `postgres://…` — must reach a `pgvector/pgvector:pg16`-compatible DB |
-| `CHASTE_SESSION_SECRET`                                        | ≥16 chars, HMAC session signing. Rotate via token expiry             |
-| `CHASTE_BOOTSTRAP`                                             | `true` on first boot to seed org + admin                             |
-| `CHASTE_ADMIN_EMAIL` / `CHASTE_ADMIN_NAME` / `CHASTE_ORG_NAME` | bootstrap identity                                                   |
+| Variable                                                       | Notes                                                                       |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                 | `postgres://…` — must reach a `pgvector/pgvector:pg16`-compatible DB        |
+| `CHASTE_SESSION_SECRET`                                        | ≥16 chars, HMAC session signing. Rotate via token expiry                    |
+| `CHASTE_BOOTSTRAP`                                             | `true` on first boot to seed org + admin                                    |
+| `CHASTE_ADMIN_EMAIL` / `CHASTE_ADMIN_NAME` / `CHASTE_ORG_NAME` | bootstrap identity                                                          |
+| `CHASTE_ALLOW_ANON_ADMIN`                                      | dev-only "no token ⇒ bootstrap admin" fallback; **production forces false** |
+| `CHASTE_ADMIN_TOKEN`                                           | static bootstrap-admin credential (≥16 chars), stored hashed at rest        |
+| `CHASTE_SESSION_TOKEN_TTL`                                     | bearer token TTL in seconds (default 30 days)                               |
 
 Optional (feature-dependent):
 

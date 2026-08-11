@@ -104,7 +104,7 @@ export async function runFollowUp(harness: FollowUpHarness, followUpId: string, 
     session = {
       id: dbSession.id,
       messages: dbSession.messages as ChatSessionState["messages"],
-      pending: dbSession.pending,
+      pending: dbSession.pending as ChatSessionState["pending"],
       unattended: dbSession.unattended ?? false,
       compactionState: dbSession.compactionState as ChatSessionState["compactionState"],
     };
@@ -115,7 +115,7 @@ export async function runFollowUp(harness: FollowUpHarness, followUpId: string, 
       session = {
         id: sticky.id,
         messages: sticky.messages as ChatSessionState["messages"],
-        pending: sticky.pending,
+        pending: sticky.pending as ChatSessionState["pending"],
         unattended: sticky.unattended ?? false,
         compactionState: sticky.compactionState as ChatSessionState["compactionState"],
       };

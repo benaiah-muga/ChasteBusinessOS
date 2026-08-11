@@ -32,7 +32,8 @@ export function getApiBaseUrl(): string {
 /**
  * Attach the stored auth token as `Authorization: Bearer <token>` on every
  * request. The API preHandler resolves the acting user from this token
- * (ARCH-1); requests without a token fall back to the bootstrap admin in dev.
+ * (ARCH-1). In production, missing tokens are rejected with 401; the
+ * anonymous bootstrap-admin fallback is a dev-only flag (F1 remediation).
  */
 function getAuthHeaders(): Record<string, string> {
   const token = getStoredAuthToken();

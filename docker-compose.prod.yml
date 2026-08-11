@@ -1,18 +1,24 @@
 # Production Compose — ChasteBusinessOS (api + web + worker + postgres + redis).
 #
+#   cp .env.example .env   # then set real secrets
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
-# Secrets come from the host environment (or a secret manager injected as env);
-# every value below has a safe dev default. For real deployments set:
-#   DATABASE_URL, CHASTE_SESSION_SECRET, and optionally CHASTE_AI_*,
-#   CHASTE_RESEND_*/CHASTE_SMTP_*, CHASTE_BACKUP_KEY + CHASTE_S3_*.
+# Secrets are REQUIRED (fail closed): CHASTE_SESSION_SECRET and
+# POSTGRES_PASSWORD have no shipped defaults. Set DATABASE_URL explicitly or
+# it is derived from POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB.
+#
+# Optional private overlay (ADR 0012 — Headscale): run with
+#   docker compose -f docker-compose.prod.yml --profile mesh up -d
+# which adds a Headscale control plane + Tailscale sidecars and lets hosts
+# reach services at tailnet IPs. Set API_BIND=/WEB_BIND= (empty) to stop
+# publishing those ports to the host and rely on the tailnet (see README).
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-chaste}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chaste}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-chaste}
     volumes:
       - chaste_pg:/var/lib/postgresql/data
@@ -25,11 +31,18 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    # Optional Redis auth: when REDIS_PASSWORD is set, require it and include
+    # it in the app-side REDIS_URL (handled below via RedisAuthURL).
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - ${REDIS_PASSWORD:+"--requirepass"}
+      - ${REDIS_PASSWORD:+${REDIS_PASSWORD}}
     volumes:
       - chaste_redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -56,12 +69,18 @@ services:
       PORT: 3001
       API_URL: ${API_URL:-http://localhost:3001}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
-      DATABASE_URL: ${DATABASE_URL:-postgres://chaste:chaste@postgres:5432/chaste}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      CHASTE_SESSION_SECRET: ${CHASTE_SESSION_SECRET:-dev-only-change-me-32chars!!}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-chaste}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-chaste}}
+      REDIS_URL: ${REDIS_URL:-${REDIS_PASSWORD:+redis://:${REDIS_PASSWORD}@redis:6379}}
+      CHASTE_SESSION_SECRET: ${CHASTE_SESSION_SECRET:?set CHASTE_SESSION_SECRET}
+      CHASTE_SESSION_TOKEN_TTL: ${CHASTE_SESSION_TOKEN_TTL:-2592000}
+      # F1 — production must never ship the anonymous-admin fallback.
+      CHASTE_ALLOW_ANON_ADMIN: "false"
+      CHASTE_ADMIN_TOKEN: ${CHASTE_ADMIN_TOKEN:-}
       CHASTE_REGION: ${CHASTE_REGION:-local}
       CHASTE_REGIONS: ${CHASTE_REGIONS:-local}
-      CHASTE_BOOTSTRAP: ${CHASTE_BOOTSTRAP:-true}
+      # F10 — bootstrap admin is opt-in and only for first boot; require an
+      # explicit admin token instead of anonymous bootstrap admin.
+      CHASTE_BOOTSTRAP: ${CHASTE_BOOTSTRAP:-false}
       CHASTE_ORG_NAME: ${CHASTE_ORG_NAME:-Primary Organization}
       CHASTE_ADMIN_EMAIL: ${CHASTE_ADMIN_EMAIL:-admin@localhost}
       CHASTE_ADMIN_NAME: ${CHASTE_ADMIN_NAME:-System Admin}

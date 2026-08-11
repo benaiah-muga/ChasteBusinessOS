@@ -3,14 +3,55 @@
  * to registered handlers. Each handler is idempotent and may be called
  * more than once for the same event.
  *
+ * ARCH-9/REL-2 — delivery is now claim-based (FOR UPDATE SKIP LOCKED) with
+ * attempts/last_error accounting, exponential backoff via next_attempt_at,
+ * and a dead-letter queue (dead_letter_events) after retries are exhausted.
+ * Operators get an in-app notification (kind "dead_letter") when an event is
+ * dead-lettered. Scheduled reminders/follow-ups run through a schedule driver
+ * that prefers Redis/BullMQ and falls back to the poll loop.
+ *
  * Secrets via env (DATABASE_URL); no elevated business privileges.
  */
 import { loadConfig } from "@chaste/config";
-import { createDb, PostgresOutboxWriter } from "@chaste/db";
+import { createDb, PostgresOutboxWriter, schema, usersWithPermission } from "@chaste/db";
 import { createDefaultProcessor } from "@chaste/kernel";
 import { createBackupProcessor, createEmailProcessor, createScheduleProcessor } from "@chaste/module-platform";
-import { createFollowUpHarness, runFollowUp } from "./harness.js";
+import { createFollowUpHarness } from "./harness.js";
 import { registerBuzzMirror } from "./buzz.js";
+import { drainOnce, type OutboxEventRow } from "./drain.js";
+import { createScheduleDriver } from "./scheduler.js";
+
+/**
+ * Notify operators (holders of `core.outbox.manage`) that an event hit the
+ * dead-letter queue. Notification insert is best-effort: a notification failure
+ * must not take the event down or loop back into the outbox.
+ */
+async function notifyDeadLetter(db: ReturnType<typeof createDb>, row: OutboxEventRow): Promise<void> {
+  try {
+    const admins = await usersWithPermission(db, row.organizationId, "core.outbox.manage");
+    for (const admin of admins) {
+      await db.insert(schema.notifications).values({
+        organizationId: row.organizationId,
+        userId: admin.userId,
+        kind: "dead_letter",
+        title: `Event ${row.type} dead-lettered`,
+        body: `Outbox event ${row.id} exhausted its retries and was moved to the dead-letter queue.`,
+        href: "/ops/outbox",
+        resourceType: "outbox_event",
+        resourceId: row.id,
+      });
+    }
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        service: "chaste-worker",
+        action: "dead_letter_notify_failed",
+        eventId: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+}
 
 async function main() {
   const cfg = loadConfig();
@@ -22,9 +63,16 @@ async function main() {
   const email = createEmailProcessor(db);
   const backups = createBackupProcessor(db);
   const followUps = await createFollowUpHarness(cfg, db);
+  const driver = await createScheduleDriver({
+    db,
+    redisUrl: cfg.redisUrl,
+    schedule,
+    followUps,
+  });
   const intervalMs = Number(process.env.WORKER_POLL_MS ?? 5_000);
+  const batchSize = Number(process.env.WORKER_OUTBOX_BATCH ?? 50);
   const maxRetries = Number(process.env.WORKER_MAX_RETRIES ?? 3);
-  const retryDelayMs = Number(process.env.WORKER_RETRY_DELAY_MS ?? 1_000);
+  const backoffMs = Number(process.env.WORKER_BACKOFF_MS ?? 10_000);
 
   console.log(
     JSON.stringify({
@@ -32,6 +80,7 @@ async function main() {
       status: "starting",
       region: cfg.region,
       pollMs: intervalMs,
+      scheduleMode: driver.mode,
       buzzBridge,
       registeredHandlers: processor.registeredTypes(),
       backupProvider: backups.provider,
@@ -39,44 +88,10 @@ async function main() {
   );
 
   async function tick() {
-    // C2/C5 — fire due reminders and claim due follow-ups before draining the
-    // outbox, so the resulting notifications/events land in the same poll cycle.
+    // C2/C5 — fire due reminders / follow-ups (poll mode) or enqueue them for
+    // the BullMQ workers (bullmq mode). Single-fire is guaranteed by the DB claim.
     try {
-      const fired = await schedule.processDueReminders();
-      if (fired > 0) {
-        console.log(JSON.stringify({ service: "chaste-worker", action: "reminders_fired", count: fired }));
-      }
-      const dueFollowUps = await schedule.claimDueFollowUps();
-      for (const f of dueFollowUps) {
-        // C5 — re-enter the agent harness with the follow-up goal under the
-        // owner's org autonomy policy, then transition the durable job.
-        try {
-          const result = await runFollowUp(followUps, f.id, f.id);
-          console.log(
-            JSON.stringify({
-              service: "chaste-worker",
-              action: "followup_fired",
-              followUpId: f.id,
-              orgId: f.organizationId,
-              userId: f.userId,
-              status: result.status,
-              sessionId: result.sessionId,
-              goal: f.goal,
-            }),
-          );
-        } catch (err) {
-          console.error(
-            JSON.stringify({
-              service: "chaste-worker",
-              action: "followup_failed",
-              followUpId: f.id,
-              orgId: f.organizationId,
-              userId: f.userId,
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          );
-        }
-      }
+      await driver.tick();
     } catch (err) {
       console.error(
         JSON.stringify({
@@ -133,48 +148,31 @@ async function main() {
       );
     }
 
-    const batch = await outbox.listUnprocessed(50);
-    for (const event of batch) {
-      let lastError: Error | null = null;
-
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          await processor.process({
-            id: event.id,
-            type: event.type,
-            organizationId: event.organizationId,
-            occurredAt: event.occurredAt.toISOString(),
-            payload: event.payload,
-            correlationId: event.correlationId ?? undefined,
-            causationId: event.causationId ?? undefined,
-          });
-          lastError = null;
-          break;
-        } catch (err) {
-          lastError = err instanceof Error ? err : new Error(String(err));
-          if (attempt < maxRetries) {
-            await new Promise((r) => setTimeout(r, retryDelayMs * attempt));
-          }
-        }
-      }
-
-      if (lastError) {
-        console.error(
+    // ARCH-9/REL-2 — claim-and-ack outbox drain with retries → dead-letter.
+    try {
+      const result = await drainOnce(outbox, processor, (row) => notifyDeadLetter(db, row), {
+        batch: batchSize,
+        maxRetries,
+        backoffMs,
+        errorCode: "HANDLER_ERROR",
+      });
+      if (result.claimed > 0) {
+        console.log(
           JSON.stringify({
             service: "chaste-worker",
-            action: "event_failed",
-            eventId: event.id,
-            type: event.type,
-            orgId: event.organizationId,
-            error: lastError.message,
-            retriesExhausted: true,
+            action: "outbox_drained",
+            ...result,
           }),
         );
       }
-
-      // Always mark processed — failed events are logged, not re-queued.
-      // For production: add a dead-letter queue or error_count column.
-      await outbox.markProcessed(event.id);
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          service: "chaste-worker",
+          action: "outbox_error",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
     }
   }
 
@@ -204,6 +202,18 @@ async function main() {
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 
+  await driver.close();
+  try {
+    await db.$client.end({ timeout: 5 });
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        service: "chaste-worker",
+        action: "db_close_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
   console.log(JSON.stringify({ service: "chaste-worker", status: "stopped" }));
 }
 

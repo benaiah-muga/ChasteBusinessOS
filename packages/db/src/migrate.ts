@@ -100,6 +100,30 @@ CREATE TABLE IF NOT EXISTS outbox_events (
   causation_id text,
   processed_at timestamptz
 );
+-- ARCH-9/REL-2 -- durable delivery accounting + claim lease + backoff + DLQ marker
+ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;
+ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS last_error text;
+ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
+ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS dead_lettered_at timestamptz;
+CREATE INDEX IF NOT EXISTS outbox_events_pending_idx ON outbox_events(organization_id, occurred_at);
+
+-- ARCH-9/REL-2 -- append-only dead-letter queue; replayed_at records replays.
+CREATE TABLE IF NOT EXISTS dead_letter_events (
+  id uuid PRIMARY KEY,
+  type text NOT NULL,
+  organization_id uuid NOT NULL,
+  occurred_at timestamptz NOT NULL,
+  payload jsonb NOT NULL,
+  correlation_id text,
+  causation_id text,
+  attempts integer NOT NULL DEFAULT 0,
+  last_error text,
+  error_code text,
+  dead_lettered_at timestamptz NOT NULL DEFAULT now(),
+  replayed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS dead_letter_events_org_idx ON dead_letter_events(organization_id);
 
 CREATE TABLE IF NOT EXISTS module_installs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -383,6 +407,26 @@ ALTER TABLE org_memories ADD COLUMN IF NOT EXISTS expires_at timestamptz;
 -- Users: add auth_token for simple token-based auth
 ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_token text;
 CREATE UNIQUE INDEX IF NOT EXISTS users_auth_token_uidx ON users (auth_token) WHERE auth_token IS NOT NULL;
+-- F5 -- bearer tokens now expire (null = never expires, e.g. bootstrap admin)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at timestamptz;
+
+-- API keys -- org-scoped machine credentials with their own permission scopes.
+CREATE TABLE IF NOT EXISTS api_keys (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL REFERENCES organizations(id),
+  name text NOT NULL,
+  description text,
+  hashed_secret text NOT NULL,
+  prefix text NOT NULL,
+  scopes text[] NOT NULL DEFAULT '{}',
+  status text NOT NULL DEFAULT 'active',
+  created_by_user_id uuid NOT NULL REFERENCES users(id),
+  expires_at timestamptz,
+  last_used_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS api_keys_secret_uidx ON api_keys(hashed_secret);
+CREATE INDEX IF NOT EXISTS api_keys_org_idx ON api_keys(organization_id);
 
 -- Unique constraint: one memory per org+kind+key
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_memories_org_kind_key
@@ -569,6 +613,8 @@ CREATE TABLE IF NOT EXISTS ai_skills (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ai_skills_name_scope_uidx ON ai_skills(name, organization_id, branch_id);
 CREATE INDEX IF NOT EXISTS ai_skills_org_idx ON ai_skills(organization_id);
+-- Continual-Harness refine history (evidence-backed edits, revertible by ID)
+ALTER TABLE ai_skills ADD COLUMN IF NOT EXISTS refinements jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 -- R10 -- inbound channel to session ownership
 CREATE TABLE IF NOT EXISTS channel_session_bindings (
@@ -859,10 +905,12 @@ export async function runMigrations(databaseUrl?: string): Promise<void> {
 
 // CLI entry point
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runMigrations().then(() => {
-    console.log("Migrations applied successfully.");
-  }).catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  runMigrations()
+    .then(() => {
+      console.log("Migrations applied successfully.");
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
 }

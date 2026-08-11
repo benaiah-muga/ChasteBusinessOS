@@ -18,8 +18,16 @@ export interface StoredMessage {
 
 export interface DbSession {
   id: string;
+  /** Owner — used to enforce session ownership (F4): only the owner may load a session. */
+  userId: string;
   messages: StoredMessage[];
-  pending?: { id: string; command: string; input: unknown; createdAt: string };
+  /**
+   * In-chat pending state: either a command/plan confirmation
+   * (PendingConfirmation) or a natural-language clarification request
+   * (PendingClarification). Kept structurally open so the DB layer does not
+   * depend on @chaste/ai-core types.
+   */
+  pending?: { id: string; createdAt: string; [key: string]: unknown };
   /** R3 — session is unattended: approvals park in the cross-session Inbox. */
   unattended?: boolean;
   /** R6 — compaction watermark/summary state for the session. */
@@ -33,7 +41,13 @@ export interface SessionStore {
   save(
     sessionId: string,
     messages: StoredMessage[],
-    pending?: { id: string; command: string; input: unknown; createdAt: string },
+    /**
+     * Opaque JSON pending state (command confirmation or clarification). The
+     * DB layer must not depend on @chaste/ai-core types, so the boundary is
+     * `unknown` and the JSONB write casts at the implementation. Serializers
+     * (e.g. PendingState) satisfy this structurally.
+     */
+    pending?: unknown,
     opts?: { unattended?: boolean; compactionState?: unknown | null },
   ): Promise<void>;
   create(sessionId: string, orgId: string, userId: string): Promise<void>;
@@ -62,6 +76,7 @@ export class DbSessionStore implements SessionStore {
     if (rows.length === 0) {
       return {
         id: sessionId,
+        userId: sess.userId,
         messages: [],
         pending: (sess.pending as DbSession["pending"]) ?? undefined,
         unattended: sess.unattended ?? undefined,
@@ -84,6 +99,7 @@ export class DbSessionStore implements SessionStore {
 
     return {
       id: sessionId,
+      userId: sess.userId,
       messages,
       pending: (sess.pending as DbSession["pending"]) ?? undefined,
       unattended: sess.unattended ?? undefined,
@@ -111,7 +127,7 @@ export class DbSessionStore implements SessionStore {
   async save(
     sessionId: string,
     messages: StoredMessage[],
-    pending?: { id: string; command: string; input: unknown; createdAt: string },
+    pending?: unknown,
     opts?: { unattended?: boolean; compactionState?: unknown | null },
   ): Promise<void> {
     const existing = await this.db
@@ -124,20 +140,19 @@ export class DbSessionStore implements SessionStore {
       throw new Error(`Session ${sessionId} does not exist. Call create() first.`);
     }
 
-    // Update pending + runtime state on the session
+    // Update pending + runtime state on the session. `pending` is opaque JSON;
+    // narrow to the JSONB column type at the boundary.
     await this.db
       .update(chatSessions)
       .set({
-        pending: pending ?? null,
+        pending: (pending ?? null) as unknown as (typeof chatSessions.$inferInsert)["pending"],
         unattended: opts?.unattended ?? false,
         compactionState: opts?.compactionState ?? null,
       })
       .where(eq(chatSessions.id, sessionId));
 
     // Delete existing messages
-    await this.db
-      .delete(chatMessages)
-      .where(eq(chatMessages.sessionId, sessionId));
+    await this.db.delete(chatMessages).where(eq(chatMessages.sessionId, sessionId));
 
     // Insert each ChatMessage as a single row — store the full message as the JSON payload
     if (messages.length > 0) {

@@ -27,6 +27,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
+  clarifyFromText,
   handleChatTurn,
   planFromText,
   planManyFromText,
@@ -39,7 +40,7 @@ import {
   type OrchestratorDeps,
 } from "./orchestrator.js";
 import { generateSuggestions } from "./suggestions.js";
-import { InMemoryMemoryStore } from "./memory.js";
+import { InMemoryMemoryStore, type MemoryStore } from "./memory.js";
 import type { AiProvider, CompletionResult } from "./providers.js";
 import { NoneProvider } from "./providers.js";
 import { InMemoryWakeStore } from "./selfwake.js";
@@ -60,28 +61,30 @@ function makeCtx(overrides?: { permissions?: Set<string>; autonomy?: AutonomyLev
       kind: "user" as const,
       userId: "u1",
       organizationId: "o1",
-      permissions: overrides?.permissions ?? new Set([
-        "crm.customer.create",
-        "crm.customer.read",
-        "hr.payroll.run",
-        "hr.employee.create",
-        "hr.employee.read",
-        "acc.invoice.create",
-        "acc.invoice.read",
-        "acc.journal.post",
-        "acc.account.read",
-        "pur.vendor.create",
-        "pur.po.read",
-        "inv.product.create",
-        "inv.stock.move",
-        "inv.stock.read",
-        "inv.warehouse.manage",
-        "mfg.bom.manage",
-        "mfg.wo.manage",
-        "mfg.wo.read",
-        "core.modules.read",
-        "core.rbac.read",
-      ]),
+      permissions:
+        overrides?.permissions ??
+        new Set([
+          "crm.customer.create",
+          "crm.customer.read",
+          "hr.payroll.run",
+          "hr.employee.create",
+          "hr.employee.read",
+          "acc.invoice.create",
+          "acc.invoice.read",
+          "acc.journal.post",
+          "acc.account.read",
+          "pur.vendor.create",
+          "pur.po.read",
+          "inv.product.create",
+          "inv.stock.move",
+          "inv.stock.read",
+          "inv.warehouse.manage",
+          "mfg.bom.manage",
+          "mfg.wo.manage",
+          "mfg.wo.read",
+          "core.modules.read",
+          "core.rbac.read",
+        ]),
     },
     autonomy: overrides?.autonomy ?? "confirm",
   });
@@ -108,7 +111,11 @@ function registerTestCommands(commands: CommandRegistry) {
       tags: ["hr"],
       input: z.object({ periodLabel: z.string().min(1) }),
       output: z.object({ id: z.string(), periodLabel: z.string(), status: z.string() }),
-      handler: async (input) => ({ id: "pr-1", periodLabel: input.periodLabel, status: "prepared" }),
+      handler: async (input) => ({
+        id: "pr-1",
+        periodLabel: input.periodLabel,
+        status: "prepared",
+      }),
     }),
   );
   commands.register(
@@ -169,7 +176,11 @@ function registerTestCommands(commands: CommandRegistry) {
         fullName: z.string().min(1),
       }),
       output: z.object({ id: z.string(), employeeNumber: z.string(), fullName: z.string() }),
-      handler: async (input) => ({ id: "emp-1", employeeNumber: input.employeeNumber, fullName: input.fullName }),
+      handler: async (input) => ({
+        id: "emp-1",
+        employeeNumber: input.employeeNumber,
+        fullName: input.fullName,
+      }),
     }),
   );
 }
@@ -444,7 +455,8 @@ describe("handleChatTurn — empty input", () => {
 
     expect(result.session.pending).toBeUndefined();
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as
+      { type: "text"; text: string } | undefined;
     expect(textPart?.text).toContain("Send a message or confirm");
   });
 
@@ -457,7 +469,8 @@ describe("handleChatTurn — empty input", () => {
     });
 
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as
+      { type: "text"; text: string } | undefined;
     expect(textPart?.text).toContain("I can prepare validated business actions");
   });
 });
@@ -494,7 +507,9 @@ describe("handleChatTurn — confirm flow (autonomy=confirm)", () => {
     expect(confirmed.explanation!.plannedCommand).toBe("crm.customer.create");
 
     // Verify audit trail
-    expect(deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create")).toBe(true);
+    expect(
+      deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create"),
+    ).toBe(true);
   });
 
   it("creates vendor through plan → confirm → execute", async () => {
@@ -516,7 +531,9 @@ describe("handleChatTurn — confirm flow (autonomy=confirm)", () => {
     });
 
     expect(confirmed.session.pending).toBeUndefined();
-    expect(deps.helpers.audit.entries.some((e) => e.success && e.action === "pur.vendor.create")).toBe(true);
+    expect(
+      deps.helpers.audit.entries.some((e) => e.success && e.action === "pur.vendor.create"),
+    ).toBe(true);
   });
 
   it("creates employee through plan → confirm → execute", async () => {
@@ -538,7 +555,9 @@ describe("handleChatTurn — confirm flow (autonomy=confirm)", () => {
     });
 
     expect(confirmed.session.pending).toBeUndefined();
-    expect(deps.helpers.audit.entries.some((e) => e.success && e.action === "hr.employee.create")).toBe(true);
+    expect(
+      deps.helpers.audit.entries.some((e) => e.success && e.action === "hr.employee.create"),
+    ).toBe(true);
   });
 
   it("posts explanation parts in confirmed response", async () => {
@@ -558,8 +577,8 @@ describe("handleChatTurn — confirm flow (autonomy=confirm)", () => {
     });
 
     // The confirmation message (with explanation + table) is followed by suggestions message
-    const confirmMsg = confirmed.session.messages.find(
-      (m) => m.parts.some((p) => p.type === "explanation"),
+    const confirmMsg = confirmed.session.messages.find((m) =>
+      m.parts.some((p) => p.type === "explanation"),
     );
     expect(confirmMsg).toBeDefined();
   });
@@ -580,10 +599,11 @@ describe("handleChatTurn — confirm flow (autonomy=confirm)", () => {
       ctx,
     });
 
-    const confirmMsg = confirmed.session.messages.find(
-      (m) => m.parts.some((p) => p.type === "table"),
+    const confirmMsg = confirmed.session.messages.find((m) =>
+      m.parts.some((p) => p.type === "table"),
     );
-    const tablePart = confirmMsg?.parts.find((p) => p.type === "table") as { type: "table"; rows: unknown[] } | undefined;
+    const tablePart = confirmMsg?.parts.find((p) => p.type === "table") as
+      { type: "table"; rows: unknown[] } | undefined;
     expect(tablePart).toBeDefined();
     expect(tablePart!.rows.length).toBeGreaterThan(0);
   });
@@ -606,8 +626,7 @@ describe("handleChatTurn — confirm flow (autonomy=confirm)", () => {
     const pendingPart = plan.session.messages
       .flatMap((m) => m.parts)
       .find((p) => p.type === "confirm_action" && p.id === pendingId) as
-      | { type: "confirm_action"; status?: string }
-      | undefined;
+      { type: "confirm_action"; status?: string } | undefined;
     expect(pendingPart?.status ?? "pending").toBe("pending");
 
     const confirmed = await handleChatTurn(deps, {
@@ -619,8 +638,7 @@ describe("handleChatTurn — confirm flow (autonomy=confirm)", () => {
     const resolved = confirmed.session.messages
       .flatMap((m) => m.parts)
       .find((p) => p.type === "confirm_action" && p.id === pendingId) as
-      | { type: "confirm_action"; status?: string }
-      | undefined;
+      { type: "confirm_action"; status?: string } | undefined;
     expect(resolved?.status).toBe("confirmed");
     expect(confirmed.session.pending).toBeUndefined();
   });
@@ -684,7 +702,8 @@ describe("handleChatTurn — cancel flow", () => {
 
     expect(cancelled.session.pending).toBeUndefined();
     const lastMsg = cancelled.session.messages[cancelled.session.messages.length - 1]!;
-    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as
+      { type: "text"; text: string } | undefined;
     expect(textPart?.text).toContain("Cancelled");
   });
 
@@ -701,8 +720,7 @@ describe("handleChatTurn — cancel flow", () => {
     const before = plan.session.messages
       .flatMap((m) => m.parts)
       .find((p) => p.type === "confirm_action" && p.id === pendingId) as
-      | { type: "confirm_action"; status?: string }
-      | undefined;
+      { type: "confirm_action"; status?: string } | undefined;
     expect(before?.status ?? "pending").toBe("pending");
 
     const cancelled = await handleChatTurn(deps, {
@@ -713,7 +731,11 @@ describe("handleChatTurn — cancel flow", () => {
 
     const after = cancelled.session.messages
       .flatMap((m) => m.parts)
-      .filter((p) => p.type === "confirm_action") as { type: "confirm_action"; id: string; status?: string }[];
+      .filter((p) => p.type === "confirm_action") as {
+      type: "confirm_action";
+      id: string;
+      status?: string;
+    }[];
     expect(after.length).toBeGreaterThan(0);
     expect(after.every((p) => p.status === "cancelled" || p.id !== pendingId)).toBe(true);
     expect(after.find((p) => p.id === pendingId)?.status).toBe("cancelled");
@@ -751,7 +773,8 @@ describe("handleChatTurn — cancel flow", () => {
     expect(confirmed.session.pending).toBeUndefined();
     // The only message should be "Send a message or confirm"
     const lastMsg = confirmed.session.messages[confirmed.session.messages.length - 1]!;
-    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as
+      { type: "text"; text: string } | undefined;
     expect(textPart?.text).toContain("Send a message");
   });
 });
@@ -773,7 +796,8 @@ describe("handleChatTurn — autonomy levels", () => {
 
     expect(plan.session.pending).toBeDefined();
     const lastMsg = plan.session.messages[plan.session.messages.length - 1]!;
-    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as
+      { type: "text"; text: string } | undefined;
     expect(textPart?.text).toContain("Recommendation only");
   });
 
@@ -805,9 +829,12 @@ describe("handleChatTurn — autonomy levels", () => {
 
     expect(result.session.pending).toBeUndefined();
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as
+      { type: "text"; text: string } | undefined;
     expect(textPart?.text).toContain("Executed automatically");
-    expect(deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create")).toBe(true);
+    expect(
+      deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create"),
+    ).toBe(true);
   });
 
   it("full_autonomous auto-executes with warning", async () => {
@@ -822,7 +849,10 @@ describe("handleChatTurn — autonomy levels", () => {
 
     expect(result.session.pending).toBeUndefined();
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const textParts = lastMsg.parts.filter((p) => p.type === "text") as { type: "text"; text: string }[];
+    const textParts = lastMsg.parts.filter((p) => p.type === "text") as {
+      type: "text";
+      text: string;
+    }[];
     const autoText = textParts.find((p) => p.text.includes("Executed automatically"));
     expect(autoText).toBeDefined();
   });
@@ -839,7 +869,8 @@ describe("handleChatTurn — autonomy levels", () => {
 
     expect(result.session.pending).toBeUndefined();
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const errorPart = lastMsg.parts.find((p) => p.type === "error") as { type: "error"; code: string } | undefined;
+    const errorPart = lastMsg.parts.find((p) => p.type === "error") as
+      { type: "error"; code: string } | undefined;
     expect(errorPart?.code).toBe("AUTONOMY_DISABLED");
   });
 });
@@ -873,7 +904,9 @@ describe("handleChatTurn — permission enforcement", () => {
     });
 
     expect(result.session.pending).toBeUndefined();
-    expect(deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create")).toBe(true);
+    expect(
+      deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create"),
+    ).toBe(true);
   });
 });
 
@@ -907,7 +940,8 @@ describe("handleChatTurn — module missing", () => {
     });
 
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const errorPart = lastMsg.parts.find((p) => p.type === "error") as { type: "error"; code: string } | undefined;
+    const errorPart = lastMsg.parts.find((p) => p.type === "error") as
+      { type: "error"; code: string } | undefined;
     expect(errorPart?.code).toBe("MODULE_MISSING");
   });
 });
@@ -920,7 +954,9 @@ describe("handleChatTurn — LLM integration", () => {
   it("LLM clarify response emits clarification questions", async () => {
     const deps = makeDeps();
     const provider = new MockProvider(
-      JSON.stringify({ clarify: ["What is the customer's email?", "Which city are they based in?"] }),
+      JSON.stringify({
+        clarify: ["What is the customer's email?", "Which city are they based in?"],
+      }),
     );
 
     const result = await handleChatTurn(
@@ -932,12 +968,15 @@ describe("handleChatTurn — LLM integration", () => {
       },
     );
 
-    expect(result.session.pending).toBeUndefined();
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const clarifyPart = lastMsg.parts.find((p) => p.type === "clarify") as { type: "clarify"; questions: string[] } | undefined;
+    const clarifyPart = lastMsg.parts.find((p) => p.type === "clarify") as
+      { type: "clarify"; questions: string[] } | undefined;
     expect(clarifyPart).toBeDefined();
     expect(clarifyPart!.questions).toHaveLength(2);
     expect(clarifyPart!.questions).toContain("What is the customer's email?");
+    // A clarification is parked in session.pending (PendingClarification) so
+    // the UI can render the question set; it is NOT a command confirmation.
+    expect(result.session.pending?.type).toBe("clarification");
   });
 
   it("LLM command response creates pending action", async () => {
@@ -960,6 +999,42 @@ describe("handleChatTurn — LLM integration", () => {
     expect(result.session.pending!.input).toMatchObject({ name: "LLM Corp" });
   });
 
+  it("recognition guard overrides an LLM plan that fills a recognized-but-missing field", async () => {
+    const deps = makeDeps();
+    const provider = new MockProvider(
+      JSON.stringify({ command: "crm.customer.create", input: { name: "Invented Co", city: "Nairobi" } }),
+    );
+
+    const first = await handleChatTurn(
+      { ...deps, provider },
+      {
+        session: freshSession(),
+        userText: "Create customer in Nairobi",
+        ctx: makeCtx(),
+      },
+    );
+
+    // The request is recognized as a customer-create but the name is missing;
+    // the LLM's fabricated plan must not reach the user as a confirm.
+    expect(first.session.pending?.type).toBe("clarification");
+    expect(first.session.pending?.probe).toBe("create customer {answer} in Nairobi");
+    const last = first.session.messages[first.session.messages.length - 1]!;
+    expect(last.parts.some((p) => p.type === "clarify")).toBe(true);
+    expect(last.parts.some((p) => p.type === "confirm_action")).toBe(false);
+
+    // The answer merges through the probe and keeps the trailing city context.
+    const second = await handleChatTurn(
+      { ...deps, provider },
+      {
+        session: first.session,
+        userText: "Roboto Ltd",
+        ctx: makeCtx(),
+      },
+    );
+    expect(second.session.pending?.command).toBe("crm.customer.create");
+    expect(second.session.pending?.input).toMatchObject({ name: "Roboto Ltd", city: "Nairobi" });
+  });
+
   it("rule-based multi-step request creates pending multi plan", async () => {
     const deps = makeDeps({ autonomy: "confirm" });
     const result = await handleChatTurn(deps, {
@@ -977,8 +1052,16 @@ describe("handleChatTurn — LLM integration", () => {
     const provider = new MockProvider(
       JSON.stringify({
         plan: [
-          { command: "crm.customer.create", input: { name: "PlanCo" }, description: "Create customer" },
-          { command: "acc.invoice.create", input: { number: "INV-PLAN-1", total: 500 }, description: "Create invoice" },
+          {
+            command: "crm.customer.create",
+            input: { name: "PlanCo" },
+            description: "Create customer",
+          },
+          {
+            command: "acc.invoice.create",
+            input: { number: "INV-PLAN-1", total: 500 },
+            description: "Create invoice",
+          },
         ],
       }),
     );
@@ -999,12 +1082,12 @@ describe("handleChatTurn — LLM integration", () => {
       customerId: "${step1.id}",
     });
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const planPart = lastMsg.parts.find((p) => p.type === "plan") as { type: "plan"; steps: unknown[] } | undefined;
+    const planPart = lastMsg.parts.find((p) => p.type === "plan") as
+      { type: "plan"; steps: unknown[] } | undefined;
     expect(planPart).toBeDefined();
     expect(planPart!.steps).toHaveLength(2);
     const confirmPart = lastMsg.parts.find((p) => p.type === "confirm_action") as
-      | { type: "confirm_action"; confirmLabel: string }
-      | undefined;
+      { type: "confirm_action"; confirmLabel: string } | undefined;
     expect(confirmPart?.confirmLabel).toBe("Confirm all");
   });
 
@@ -1026,13 +1109,16 @@ describe("handleChatTurn — LLM integration", () => {
     expect(confirmed.session.pending).toBeUndefined();
     const done = confirmed.session.messages[confirmed.session.messages.length - 1]!;
     // last message may be suggestions; find the Done message
-    const doneMsg = [...confirmed.session.messages].reverse().find((m) =>
-      m.parts.some((p) => p.type === "text" && "text" in p && String(p.text).includes("Executed 2 steps")),
-    );
+    const doneMsg = [...confirmed.session.messages]
+      .reverse()
+      .find((m) =>
+        m.parts.some(
+          (p) => p.type === "text" && "text" in p && String(p.text).includes("Executed 2 steps"),
+        ),
+      );
     expect(doneMsg).toBeDefined();
     const table = doneMsg!.parts.find((p) => p.type === "table") as
-      | { type: "table"; rows: { command: string; result: string }[] }
-      | undefined;
+      { type: "table"; rows: { command: string; result: string }[] } | undefined;
     expect(table?.rows).toHaveLength(2);
     expect(table!.rows[1]!.result).toContain("cust-1");
     void done;
@@ -1052,7 +1138,8 @@ describe("handleChatTurn — LLM integration", () => {
     );
 
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as
+      { type: "text"; text: string } | undefined;
     expect(textPart?.text).toContain("I can prepare validated business actions");
   });
 
@@ -1066,108 +1153,108 @@ describe("handleChatTurn — LLM integration", () => {
     });
 
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as
+      { type: "text"; text: string } | undefined;
     expect(textPart?.text).toContain("I can prepare validated business actions");
   });
 
-// ===================================================================
-// handleChatTurn — inbox-mirrored confirmation resolution (R2/R3)
-//
-// Regression: when an InboxStore is wired, mirrorToInbox mints a canonical
-// approval whose `toolCallId` carries the in-chat pending confirmation id
-// (the item's own `id` is a fresh UUID). Confirming OR cancelling a pending
-// multi-step plan must resolve THAT inbox item so it doesn't dangle as
-// "pending" in the cross-surface queue.
-// ===================================================================
+  // ===================================================================
+  // handleChatTurn — inbox-mirrored confirmation resolution (R2/R3)
+  //
+  // Regression: when an InboxStore is wired, mirrorToInbox mints a canonical
+  // approval whose `toolCallId` carries the in-chat pending confirmation id
+  // (the item's own `id` is a fresh UUID). Confirming OR cancelling a pending
+  // multi-step plan must resolve THAT inbox item so it doesn't dangle as
+  // "pending" in the cross-surface queue.
+  // ===================================================================
 
-describe("handleChatTurn — inbox-mirrored confirm/cancel (R2/R3)", () => {
-  it("confirming a multi-step plan resolves the mirrored inbox approval", async () => {
-    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
-    const session = freshSession();
+  describe("handleChatTurn — inbox-mirrored confirm/cancel (R2/R3)", () => {
+    it("confirming a multi-step plan resolves the mirrored inbox approval", async () => {
+      const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
+      const session = freshSession();
 
-    const planned = await handleChatTurn(deps, {
-      session,
-      userText: "Create customer InboxCo and create invoice INV-INBOX for 30.00 USD",
-      ctx: makeCtx(),
+      const planned = await handleChatTurn(deps, {
+        session,
+        userText: "Create customer InboxCo and create invoice INV-INBOX for 30.00 USD",
+        ctx: makeCtx(),
+      });
+      expect(planned.session.pending?.plan).toHaveLength(2);
+
+      // The plan preparation must have mirrored a pending approval for this session.
+      const pendingBefore = await deps.inbox.pending({ sessionId: session.id });
+      expect(pendingBefore).toHaveLength(1);
+
+      const confirmed = await handleChatTurn(deps, {
+        session: planned.session,
+        confirmId: planned.session.pending!.id,
+        ctx: makeCtx(),
+      });
+      expect(confirmed.session.pending).toBeUndefined();
+
+      // The canonical inbox item must be resolved (not left dangling as pending).
+      const remaining = await deps.inbox.list({ sessionId: session.id });
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0]!.state).toBe("resolved");
+      expect(remaining[0]!.toolCallId).toBe(planned.session.pending!.id);
     });
-    expect(planned.session.pending?.plan).toHaveLength(2);
 
-    // The plan preparation must have mirrored a pending approval for this session.
-    const pendingBefore = await deps.inbox.pending({ sessionId: session.id });
-    expect(pendingBefore).toHaveLength(1);
+    it("cancelling a multi-step plan resolves the mirrored inbox approval as deny", async () => {
+      const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
+      const session = freshSession();
 
-    const confirmed = await handleChatTurn(deps, {
-      session: planned.session,
-      confirmId: planned.session.pending!.id,
-      ctx: makeCtx(),
+      const planned = await handleChatTurn(deps, {
+        session,
+        userText: "Create customer CancelCo and create invoice INV-CL for 40.00 USD",
+        ctx: makeCtx(),
+      });
+      expect(planned.session.pending?.plan).toHaveLength(2);
+      expect(await deps.inbox.pending({ sessionId: session.id })).toHaveLength(1);
+
+      const cancelled = await handleChatTurn(deps, {
+        session: planned.session,
+        cancelId: planned.session.pending!.id,
+        ctx: makeCtx(),
+      });
+      expect(cancelled.session.pending).toBeUndefined();
+
+      const after = await deps.inbox.list({ sessionId: session.id });
+      expect(after).toHaveLength(1);
+      expect(after[0]!.state).toBe("resolved");
+      expect(after[0]!.resolution).toBe("deny");
     });
-    expect(confirmed.session.pending).toBeUndefined();
 
-    // The canonical inbox item must be resolved (not left dangling as pending).
-    const remaining = await deps.inbox.list({ sessionId: session.id });
-    expect(remaining).toHaveLength(1);
-    expect(remaining[0]!.state).toBe("resolved");
-    expect(remaining[0]!.toolCallId).toBe(planned.session.pending!.id);
+    it("a confirm retry from another surface is once-only via the canonical item", async () => {
+      // If the inbox item is already resolved (e.g. answered from mobile), an
+      // in-app confirm retry must NOT re-run the plan.
+      const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
+      const session = freshSession();
+
+      const planned = await handleChatTurn(deps, {
+        session,
+        userText: "Create customer OnceCo and create invoice INV-ONCE for 55.00 USD",
+        ctx: makeCtx(),
+      });
+      const pendingId = planned.session.pending!.id;
+      const item = (await deps.inbox.pending({ sessionId: session.id }))[0]!;
+      expect(item.toolCallId).toBe(pendingId);
+
+      // Another surface resolves first.
+      expect(await deps.inbox.resolve(item.id, "deny")).toBe(true);
+      expect(await deps.inbox.resolve(item.id, "deny")).toBe(false); // once-only
+
+      const retried = await handleChatTurn(deps, {
+        session: planned.session,
+        confirmId: pendingId,
+        ctx: makeCtx(),
+      });
+      // Treats it as already-actioned: pending cleared, no re-execution.
+      expect(retried.session.pending).toBeUndefined();
+      const text = retried.session.messages
+        .map((m) => m.parts.map((p) => ("text" in p ? p.text : "")).join(" "))
+        .join(" ");
+      expect(text).toContain("already actioned from another surface");
+    });
   });
-
-  it("cancelling a multi-step plan resolves the mirrored inbox approval as deny", async () => {
-    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
-    const session = freshSession();
-
-    const planned = await handleChatTurn(deps, {
-      session,
-      userText: "Create customer CancelCo and create invoice INV-CL for 40.00 USD",
-      ctx: makeCtx(),
-    });
-    expect(planned.session.pending?.plan).toHaveLength(2);
-    expect(await deps.inbox.pending({ sessionId: session.id })).toHaveLength(1);
-
-    const cancelled = await handleChatTurn(deps, {
-      session: planned.session,
-      cancelId: planned.session.pending!.id,
-      ctx: makeCtx(),
-    });
-    expect(cancelled.session.pending).toBeUndefined();
-
-    const after = await deps.inbox.list({ sessionId: session.id });
-    expect(after).toHaveLength(1);
-    expect(after[0]!.state).toBe("resolved");
-    expect(after[0]!.resolution).toBe("deny");
-  });
-
-  it("a confirm retry from another surface is once-only via the canonical item", async () => {
-    // If the inbox item is already resolved (e.g. answered from mobile), an
-    // in-app confirm retry must NOT re-run the plan.
-    const deps = { ...makeDeps({ autonomy: "confirm" }), inbox: new InMemoryInboxStore() };
-    const session = freshSession();
-
-    const planned = await handleChatTurn(deps, {
-      session,
-      userText: "Create customer OnceCo and create invoice INV-ONCE for 55.00 USD",
-      ctx: makeCtx(),
-    });
-    const pendingId = planned.session.pending!.id;
-    const item = (await deps.inbox.pending({ sessionId: session.id }))[0]!;
-    expect(item.toolCallId).toBe(pendingId);
-
-    // Another surface resolves first.
-    expect(await deps.inbox.resolve(item.id, "deny")).toBe(true);
-    expect(await deps.inbox.resolve(item.id, "deny")).toBe(false); // once-only
-
-    const retried = await handleChatTurn(deps, {
-      session: planned.session,
-      confirmId: pendingId,
-      ctx: makeCtx(),
-    });
-    // Treats it as already-actioned: pending cleared, no re-execution.
-    expect(retried.session.pending).toBeUndefined();
-    const text = retried.session.messages
-      .map((m) => m.parts.map((p) => ("text" in p ? p.text : "")).join(" "))
-      .join(" ");
-    expect(text).toContain("already actioned from another surface");
-  });
-});
-
 
   it("rules take priority over LLM (rule match wins)", async () => {
     const deps = makeDeps();
@@ -1283,7 +1370,9 @@ describe("generateSuggestions", () => {
   it("returns empty when LLM errors", async () => {
     const brokenProvider: AiProvider = {
       id: "broken",
-      complete: async () => { throw new Error("LLM is down"); },
+      complete: async () => {
+        throw new Error("LLM is down");
+      },
     };
     const result = await generateSuggestions("custom.command", {}, brokenProvider);
     expect(result.suggestions).toHaveLength(0);
@@ -1318,9 +1407,21 @@ describe("InMemoryMemoryStore", () => {
 
   it("searches memories by content", async () => {
     const store = new InMemoryMemoryStore();
-    await store.write({ organizationId: "o1", kind: "short_term_chat", content: "User prefers dark mode" });
-    await store.write({ organizationId: "o1", kind: "long_term_org", content: "Company HQ is in Nairobi" });
-    await store.write({ organizationId: "o2", kind: "short_term_chat", content: "User prefers light mode" });
+    await store.write({
+      organizationId: "o1",
+      kind: "short_term_chat",
+      content: "User prefers dark mode",
+    });
+    await store.write({
+      organizationId: "o1",
+      kind: "long_term_org",
+      content: "Company HQ is in Nairobi",
+    });
+    await store.write({
+      organizationId: "o2",
+      kind: "short_term_chat",
+      content: "User prefers light mode",
+    });
 
     const results = await store.search("o1", "dark");
     expect(results).toHaveLength(1);
@@ -1385,7 +1486,11 @@ describe("InMemoryMemoryStore", () => {
 
   it("search is case-insensitive", async () => {
     const store = new InMemoryMemoryStore();
-    await store.write({ organizationId: "o1", kind: "short_term_chat", content: "User prefers Dark Mode" });
+    await store.write({
+      organizationId: "o1",
+      kind: "short_term_chat",
+      content: "User prefers Dark Mode",
+    });
 
     const results = await store.search("o1", "dark mode");
     expect(results).toHaveLength(1);
@@ -1718,8 +1823,7 @@ describe("handleChatTurn — R8 progress narration part", () => {
 
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
     const progress = lastMsg.parts.find((p) => p.type === "progress") as
-      | { type: "progress"; text: string }
-      | undefined;
+      { type: "progress"; text: string } | undefined;
     expect(progress).toBeDefined();
     expect(progress!.text).toContain("crm.customer.create");
   });
@@ -1741,7 +1845,8 @@ describe("handleChatTurn — R9 read-only mode gate (post-LLM)", () => {
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
     expect(
       lastMsg.parts.some(
-        (p) => p.type === "text" && "text" in p && String(p.text).includes("Discuss mode is active"),
+        (p) =>
+          p.type === "text" && "text" in p && String(p.text).includes("Discuss mode is active"),
       ),
     ).toBe(true);
   });
@@ -1759,7 +1864,9 @@ describe("handleChatTurn — R5+R7 agent tool loop", () => {
       enabled: true,
     });
     const provider = new MockProvider(
-      JSON.stringify({ toolCall: { name: "loadSkill", args: { name: "crm.lead-prioritization" } } }),
+      JSON.stringify({
+        toolCall: { name: "loadSkill", args: { name: "crm.lead-prioritization" } },
+      }),
       JSON.stringify({ command: "crm.customer.create", input: { name: "ToolCo" } }),
     );
     const deps = { ...makeDeps({ provider }), skills };
@@ -1804,11 +1911,254 @@ describe("handleChatTurn — R5+R7 agent tool loop", () => {
     expect(pending.some((i) => i.data?.skillSave === "acc.cycle-close")).toBe(true);
   });
 
+  it("refineSkill parks an evidence-backed proposal without mutating the skill", async () => {
+    const skills = new InMemorySkillStore();
+    await skills.upsert({
+      name: "acc.cycle-close",
+      scope: "organization",
+      organizationId: "o1",
+      title: "Cycle close",
+      summary: "Monthly accounting close procedure",
+      instructions: "Run all accruals, then reconcile.",
+      enabled: true,
+    });
+    const inbox = new InMemoryInboxStore();
+    const provider = new MockProvider(
+      JSON.stringify({
+        toolCall: {
+          name: "refineSkill",
+          args: {
+            name: "acc.cycle-close",
+            instructions: "Run all accruals, then reconcile, then verify the trial balance.",
+            trigger: "Turn 9: the user asked to verify the trial balance after closing.",
+          },
+        },
+      }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "RefineCo" } }),
+    );
+    const deps = { ...makeDeps({ provider }), skills, inbox };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Update the cycle-close skill to verify the trial balance",
+      ctx: makeCtx(),
+    });
+
+    // No state change before approval — the proposal lives only in the Inbox.
+    const untouched = await skills.get("acc.cycle-close", { organizationId: "o1" });
+    expect(untouched!.instructions).toBe("Run all accruals, then reconcile.");
+    expect(untouched!.refinements).toBeUndefined();
+    const pending = await inbox.pending({ sessionId: "s1" });
+    expect(pending.some((i) => i.data?.skillRefine?.name === "acc.cycle-close")).toBe(true);
+    expect(pending.some((i) => i.data?.skillRefine?.trigger)).toBe(true);
+    expect(result.inboxItemId).toBeDefined();
+  });
+
+  it("approving a refineSkill applies the minimal patch and records evidence + snapshot", async () => {
+    const skills = new InMemorySkillStore();
+    await skills.upsert({
+      name: "acc.cycle-close",
+      scope: "organization",
+      organizationId: "o1",
+      title: "Cycle close",
+      summary: "Monthly accounting close procedure",
+      instructions: "Run all accruals, then reconcile.",
+      enabled: true,
+    });
+    const inbox = new InMemoryInboxStore();
+    const provider = new MockProvider(
+      JSON.stringify({
+        toolCall: {
+          name: "refineSkill",
+          args: {
+            name: "acc.cycle-close",
+            instructions: "Run all accruals, then reconcile, then verify the trial balance.",
+            trigger: "Turn 9: verify the trial balance after closing.",
+          },
+        },
+      }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "RefineCo" } }),
+    );
+    const deps = { ...makeDeps({ provider }), skills, inbox };
+    const planned = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Update the cycle-close skill to verify the trial balance",
+      ctx: makeCtx(),
+    });
+    const approvalId = planned.inboxItemId!;
+
+    const confirmed = await handleChatTurn(deps, {
+      session: planned.session,
+      confirmId: approvalId,
+      ctx: makeCtx(),
+    });
+
+    const refined = await skills.get("acc.cycle-close", { organizationId: "o1" });
+    expect(refined!.instructions).toBe(
+      "Run all accruals, then reconcile, then verify the trial balance.",
+    );
+    expect(refined!.summary).toBe("Monthly accounting close procedure"); // untouched
+    expect(refined!.refinements).toHaveLength(1);
+    const entry = refined!.refinements![0]!;
+    expect(entry.trigger).toContain("verify the trial balance");
+    expect(entry.before.instructions).toBe("Run all accruals, then reconcile.");
+    expect(entry.after.instructions).toContain("verify the trial balance");
+    expect(refined!.enabled).toBe(true); // live skill stays enabled
+    // The refine approval card resolved exactly once (a follow-up command
+    // approval may still be pending in the same inbox).
+    const remainingRefine = await inbox.list({ sessionId: "s1", state: "pending" });
+    expect(remainingRefine.some((i) => i.data?.skillRefine != null)).toBe(false);
+    expect(
+      confirmed.session.messages.some((m) =>
+        m.parts.some((p) => p.type === "text" && p.text.includes("refined")),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejecting a refineSkill leaves the skill unchanged", async () => {
+    const skills = new InMemorySkillStore();
+    await skills.upsert({
+      name: "acc.cycle-close",
+      scope: "organization",
+      organizationId: "o1",
+      title: "Cycle close",
+      summary: "Monthly accounting close procedure",
+      instructions: "Run all accruals, then reconcile.",
+      enabled: true,
+    });
+    const inbox = new InMemoryInboxStore();
+    const provider = new MockProvider(
+      JSON.stringify({
+        toolCall: {
+          name: "refineSkill",
+          args: {
+            name: "acc.cycle-close",
+            instructions: "Run all accruals, then reconcile, then verify the trial balance.",
+            trigger: "evidence",
+          },
+        },
+      }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "RefineCo" } }),
+    );
+    const deps = { ...makeDeps({ provider }), skills, inbox };
+    const planned = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Update the cycle-close skill",
+      ctx: makeCtx(),
+    });
+    const approvalId = planned.inboxItemId!;
+
+    await handleChatTurn(deps, {
+      session: planned.session,
+      confirmId: approvalId,
+      inboxResolution: "deny",
+      ctx: makeCtx(),
+    });
+
+    const unchanged = await skills.get("acc.cycle-close", { organizationId: "o1" });
+    expect(unchanged!.instructions).toBe("Run all accruals, then reconcile.");
+    expect(unchanged!.refinements).toBeUndefined();
+  });
+
+  it("reverts a refinement via approval, restoring the snapshot and chaining the reversal", async () => {
+    const skills = new InMemorySkillStore();
+    await skills.upsert({
+      name: "acc.cycle-close",
+      scope: "organization",
+      organizationId: "o1",
+      title: "Cycle close",
+      summary: "Monthly accounting close procedure",
+      instructions: "Run all accruals, then reconcile.",
+      enabled: true,
+    });
+    const inbox = new InMemoryInboxStore();
+    const auditWriter = new InMemoryAuditWriter();
+    const refineProvider = new MockProvider(
+      JSON.stringify({
+        toolCall: {
+          name: "refineSkill",
+          args: {
+            name: "acc.cycle-close",
+            instructions: "Run all accruals, then reconcile, then verify the trial balance.",
+            trigger: "Turn 9: verify the trial balance.",
+          },
+        },
+      }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "RevertCo" } }),
+    );
+    const planDeps = {
+      ...makeDeps({ provider: refineProvider }),
+      skills,
+      inbox,
+      helpers: { audit: auditWriter, outbox: new InMemoryOutboxWriter() },
+    };
+    const planned = await handleChatTurn(planDeps, {
+      session: freshSession(),
+      userText: "Update the cycle-close skill",
+      ctx: makeCtx(),
+    });
+    await handleChatTurn(planDeps, {
+      session: planned.session,
+      confirmId: planned.inboxItemId!,
+      ctx: makeCtx(),
+    });
+    const refined = await skills.get("acc.cycle-close", { organizationId: "o1" });
+    const refineId = refined!.refinements![0]!.id;
+
+    // The agent proposes the revert; it also needs a fresh session to avoid
+    // re-entering the previous resolved approval.
+    const revertProvider = new MockProvider(
+      JSON.stringify({
+        toolCall: {
+          name: "revertSkillRefinement",
+          args: { name: "acc.cycle-close", refinementId: refineId },
+        },
+      }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "RevertCo" } }),
+    );
+    const revertDeps = {
+      ...makeDeps({ provider: revertProvider }),
+      skills,
+      inbox,
+      helpers: { audit: auditWriter, outbox: new InMemoryOutboxWriter() },
+    };
+    const revertSession = { ...freshSession(), id: "s2" };
+    const proposed = await handleChatTurn(revertDeps, {
+      session: revertSession,
+      userText: "Undo that last change to the cycle-close skill",
+      ctx: makeCtx(),
+    });
+    const revertItem = (await inbox.pending({ sessionId: "s2" })).find(
+      (i) => i.data?.skillRevert?.name === "acc.cycle-close",
+    );
+    expect(revertItem).toBeDefined();
+
+    await handleChatTurn(revertDeps, {
+      session: proposed.session,
+      confirmId: revertItem!.id,
+      ctx: makeCtx(),
+    });
+
+    const restored = await skills.get("acc.cycle-close", { organizationId: "o1" });
+    expect(restored!.instructions).toBe("Run all accruals, then reconcile.");
+    const reversal = restored!.refinements![1]!;
+    expect(reversal.reversalRefinementId).toBe(refineId);
+    expect(reversal.after.instructions).toBe("Run all accruals, then reconcile.");
+    // The refinement + reversal were both audited (evidence-backed mut records).
+    const audited = auditWriter.entries.filter(
+      (e) => e.resourceType === "ai_skill" && e.resourceId === "acc.cycle-close",
+    );
+    expect(audited.map((a) => a.action).sort()).toEqual(["ai_skill.refine", "ai_skill.revert"]);
+    expect(audited.every((a) => a.success === true)).toBe(true);
+  });
+
   it("sleepUntil creates a durable wake record and the model continues", async () => {
     const wakes = new InMemoryWakeStore();
     const provider = new MockProvider(
       JSON.stringify({
-        toolCall: { name: "sleepUntil", args: { isoTimestamp: "2026-09-01T08:00:00Z", note: "digest" } },
+        toolCall: {
+          name: "sleepUntil",
+          args: { isoTimestamp: "2026-09-01T08:00:00Z", note: "digest" },
+        },
       }),
       JSON.stringify({ command: "crm.customer.create", input: { name: "WakeCo" } }),
     );
@@ -1884,9 +2234,11 @@ describe("handleChatTurn — active branch context", () => {
     const msgs = provider.lastRequest?.messages ?? [];
     const lastUser = [...msgs].reverse().find((m) => m.role === "user");
     expect(lastUser).toBeDefined();
-    expect(lastUser!.parts.some((p) => p.type === "text" && p.text.includes("[Active branch: Nairobi West (NBO)"))).toBe(
-      true,
-    );
+    expect(
+      lastUser!.parts.some(
+        (p) => p.type === "text" && p.text.includes("[Active branch: Nairobi West (NBO)"),
+      ),
+    ).toBe(true);
   });
 
   it("does not inject branch context when no active branch is set", async () => {
@@ -1902,9 +2254,9 @@ describe("handleChatTurn — active branch context", () => {
     const msgs = provider.lastRequest?.messages ?? [];
     const lastUser = [...msgs].reverse().find((m) => m.role === "user");
     expect(lastUser).toBeDefined();
-    expect(
-      lastUser!.parts.some((p) => p.type === "text" && p.text.includes("Active branch")),
-    ).toBe(false);
+    expect(lastUser!.parts.some((p) => p.type === "text" && p.text.includes("Active branch"))).toBe(
+      false,
+    );
   });
 });
 
@@ -1924,12 +2276,13 @@ describe("runFollowUpTurn", () => {
     });
 
     // The goal runs under the pipeline and executes under guarded_auto.
-    expect(deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create")).toBe(
-      true,
-    );
+    expect(
+      deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create"),
+    ).toBe(true);
     // The assistant turn explains the outcome.
     const lastMsg = result.session.messages[result.session.messages.length - 1]!;
-    const textPart = lastMsg.parts.find((p) => p.type === "text") as { type: "text"; text: string } | undefined;
+    const textPart = lastMsg.parts.find((p) => p.type === "text") as
+      { type: "text"; text: string } | undefined;
     expect(textPart?.text).toBeTruthy();
   });
 
@@ -2043,7 +2396,9 @@ describe("handleChatTurn — single-command inbox mirror (R2/R3)", () => {
 describe("humanlike interaction — easy / medium / complex across modules", () => {
   function texts(messages: ChatSessionState["messages"]): string {
     return messages
-      .map((m) => m.parts.map((p) => ("text" in p && typeof p.text === "string" ? p.text : "")).join(" "))
+      .map((m) =>
+        m.parts.map((p) => ("text" in p && typeof p.text === "string" ? p.text : "")).join(" "),
+      )
       .join("\n");
   }
 
@@ -2069,10 +2424,14 @@ describe("humanlike interaction — easy / medium / complex across modules", () 
     const table = [...confirmed.session.messages]
       .reverse()
       .find((m) => m.parts.some((p) => p.type === "table"))!;
-    const rows = (table.parts.find((p) => p.type === "table") as { rows: { field: string; value: string }[] }).rows;
+    const rows = (
+      table.parts.find((p) => p.type === "table") as { rows: { field: string; value: string }[] }
+    ).rows;
     expect(rows.some((r) => r.value === "cust-1")).toBe(true);
     // audit trail written for the executed command
-    expect(deps.helpers.audit.entries.some((e) => e.action === "crm.customer.create" && e.success)).toBe(true);
+    expect(
+      deps.helpers.audit.entries.some((e) => e.action === "crm.customer.create" && e.success),
+    ).toBe(true);
   });
 
   it("MEDIUM: a cross-module multi-step plan (Accounting + CRM) wires prior-step ids", async () => {
@@ -2098,20 +2457,29 @@ describe("humanlike interaction — easy / medium / complex across modules", () 
     const table = [...confirmed.session.messages]
       .reverse()
       .find((m) => m.parts.some((p) => p.type === "table"))!;
-    const tableRows = (table.parts.find((p) => p.type === "table") as { rows: { result: string }[] }).rows;
+    const tableRows = (
+      table.parts.find((p) => p.type === "table") as { rows: { result: string }[] }
+    ).rows;
     // acc.invoice.create wiring resolved ${step1.id} → cust-1
     expect(tableRows[1]!.result).toContain("cust-1");
   });
-
 
   it("COMPLEX: a multi-turn, multi-module session (CRM → Purchasing · Inventory → Accounting)", async () => {
     const deps = makeDeps({ autonomy: "confirm" });
     let session = freshSession();
 
     // Turn 1 — CRM
-    const t1 = await handleChatTurn(deps, { session, userText: "Create customer Globex Corp in Nairobi", ctx: makeCtx() });
+    const t1 = await handleChatTurn(deps, {
+      session,
+      userText: "Create customer Globex Corp in Nairobi",
+      ctx: makeCtx(),
+    });
     session = t1.session;
-    const c1 = await handleChatTurn(deps, { session, confirmId: session.pending!.id, ctx: makeCtx() });
+    const c1 = await handleChatTurn(deps, {
+      session,
+      confirmId: session.pending!.id,
+      ctx: makeCtx(),
+    });
     session = c1.session;
     expect(texts(session.messages)).toContain("crm.customer.create");
 
@@ -2123,22 +2491,42 @@ describe("humanlike interaction — easy / medium / complex across modules", () 
     });
     session = t2.session;
     expect(session.pending?.plan).toHaveLength(2);
-    const c2 = await handleChatTurn(deps, { session, confirmId: session.pending!.id, ctx: makeCtx() });
+    const c2 = await handleChatTurn(deps, {
+      session,
+      confirmId: session.pending!.id,
+      ctx: makeCtx(),
+    });
     session = c2.session;
     expect(texts(session.messages)).toContain("pur.vendor.create");
     expect(texts(session.messages)).toContain("inv.product.create");
 
     // Turn 3 — HR (single module, different specialist)
-    const t3 = await handleChatTurn(deps, { session, userText: "Prepare payroll for June 2026", ctx: makeCtx() });
+    const t3 = await handleChatTurn(deps, {
+      session,
+      userText: "Prepare payroll for June 2026",
+      ctx: makeCtx(),
+    });
     session = t3.session;
-    const c3 = await handleChatTurn(deps, { session, confirmId: session.pending!.id, ctx: makeCtx() });
+    const c3 = await handleChatTurn(deps, {
+      session,
+      confirmId: session.pending!.id,
+      ctx: makeCtx(),
+    });
     session = c3.session;
     expect(texts(session.messages)).toContain("hr.payroll.prepare");
 
     // Turn 4 — Accounting (single invoice, distinct specialist)
-    const t4 = await handleChatTurn(deps, { session, userText: "Create invoice INV-CPX for 400.00 USD", ctx: makeCtx() });
+    const t4 = await handleChatTurn(deps, {
+      session,
+      userText: "Create invoice INV-CPX for 400.00 USD",
+      ctx: makeCtx(),
+    });
     session = t4.session;
-    const c4 = await handleChatTurn(deps, { session, confirmId: session.pending!.id, ctx: makeCtx() });
+    const c4 = await handleChatTurn(deps, {
+      session,
+      confirmId: session.pending!.id,
+      ctx: makeCtx(),
+    });
     session = c4.session;
     expect(texts(session.messages)).toContain("acc.invoice.create");
 
@@ -2208,7 +2596,9 @@ describe("reliability: RBAC permission enforcement + injection guardrail", () =>
     ).rejects.toThrow(/Missing permission: crm\.customer\.create/);
 
     // ...and the failed attempt is audited, not silently allowed.
-    const denied = deps.helpers.audit.entries.find((e) => e.action === "crm.customer.create" && !e.success);
+    const denied = deps.helpers.audit.entries.find(
+      (e) => e.action === "crm.customer.create" && !e.success,
+    );
     expect(denied).toBeDefined();
     expect(denied!.errorCode).toBe("PERMISSION_DENIED");
   });
@@ -2228,3 +2618,404 @@ describe("reliability: RBAC permission enforcement + injection guardrail", () =>
   });
 });
 
+// ===================================================================
+// Issue 4 — diverse natural-language parsing and natural clarification
+// ===================================================================
+
+describe("planFromText — diverse natural-language phrasings", () => {
+  const cases: { text: string; command: string; input: Record<string, unknown> }[] = [
+    {
+      text: "Add a customer called Roboto Ltd in Kisumu",
+      command: "crm.customer.create",
+      input: { name: "Roboto Ltd", city: "Kisumu" },
+    },
+    {
+      text: "Could you kindly set up a new client named Wema Company in Mombasa please",
+      command: "crm.customer.create",
+      input: { name: "Wema Company", city: "Mombasa" },
+    },
+    {
+      text: "Please create customer Global Foods in Nakuru",
+      command: "crm.customer.create",
+      input: { name: "Global Foods", city: "Nakuru" },
+    },
+    {
+      text: "register a new customer Sunrise Millers",
+      command: "crm.customer.create",
+      input: { name: "Sunrise Millers" },
+    },
+    {
+      text: "add a client called Delta Logistics, please",
+      command: "crm.customer.create",
+      input: { name: "Delta Logistics" },
+    },
+    {
+      text: "Please register vendor Acme Hardware",
+      command: "pur.vendor.create",
+      input: { name: "Acme Hardware" },
+    },
+    {
+      text: "Set up a vendor called Northline Supplies",
+      command: "pur.vendor.create",
+      input: { name: "Northline Supplies" },
+    },
+    {
+      text: "Create product SKU-9 Turbo Widget",
+      command: "inv.product.create",
+      input: { sku: "SKU-9", name: "Turbo Widget" },
+    },
+    {
+      text: "register a product called SKU-7 Ceramic Tile",
+      command: "inv.product.create",
+      input: { sku: "SKU-7", name: "Ceramic Tile" },
+    },
+    {
+      text: "Add employee E-77 John Kamau",
+      command: "hr.employee.create",
+      input: { employeeNumber: "E-77", fullName: "John Kamau" },
+    },
+    {
+      text: "hire an employee called E-88 Sarah Njeri",
+      command: "hr.employee.create",
+      input: { employeeNumber: "E-88", fullName: "Sarah Njeri" },
+    },
+    {
+      text: "Please generate the payroll for March 2026",
+      command: "hr.payroll.prepare",
+      input: { periodLabel: "March 2026" },
+    },
+    {
+      text: "Process payroll for April 2026",
+      command: "hr.payroll.prepare",
+      input: { periodLabel: "April 2026" },
+    },
+    {
+      text: "Create invoice INV-900 for 500 USD",
+      command: "acc.invoice.create",
+      input: { number: "INV-900", total: 500, currency: "USD" },
+    },
+    {
+      text: "Generate a bill B-1 for 1200.50 GBP",
+      command: "acc.invoice.create",
+      input: { number: "B-1", total: 1200.5, currency: "GBP" },
+    },
+  ];
+
+  for (const c of cases) {
+    it(`parses: ${c.text}`, () => {
+      const plan = planFromText(c.text);
+      expect(plan?.command).toBe(c.command);
+      expect(plan?.input ?? {}).toMatchObject(c.input);
+    });
+  }
+
+  it("does NOT treat an underspecified customer ('Create customer in Nairobi') as complete", () => {
+    expect(planFromText("Create customer in Nairobi")).toBeNull();
+  });
+});
+
+describe("clarifyFromText — natural ambiguity clarification", () => {
+  it("asks for a missing customer name", () => {
+    const c = clarifyFromText("Create customer");
+    expect(c?.type).toBe("clarification");
+    expect(c?.questions[0]).toMatch(/name/i);
+    expect(c?.probe).toBe("create customer {answer}");
+  });
+
+  it("asks for the name even when a city is present", () => {
+    const c = clarifyFromText("Create customer in Nairobi");
+    expect(c?.questions[0]).toMatch(/name/i);
+  });
+
+  it("asks for a missing vendor name", () => {
+    const c = clarifyFromText("Add vendor");
+    expect(c?.questions[0]).toMatch(/vendor/i);
+  });
+
+  it("asks for a missing invoice number", () => {
+    const c = clarifyFromText("Create an invoice");
+    expect(c?.questions[0]).toMatch(/invoice number/i);
+    expect(c?.probe).toBe("create invoice {answer}");
+  });
+
+  it("asks for employee details when incomplete", () => {
+    const c = clarifyFromText("Add an employee");
+    expect(c?.questions[0]).toMatch(/employee number/i);
+  });
+
+  it("asks when a reminder has no time", () => {
+    const c = clarifyFromText("remind me to call Acme");
+    expect(c?.questions[0]).toMatch(/when should I remind/i);
+    expect(c?.probe).toContain("{answer}");
+  });
+
+  it("returns null for a complete request", () => {
+    expect(clarifyFromText("Create customer Acme in Nairobi")).toBeNull();
+  });
+});
+
+describe("handleChatTurn — natural clarification multi-turn", () => {
+  it("parks a clarification (not a command) for an underspecified request", async () => {
+    const deps = makeDeps({ autonomy: "confirm" });
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer in Nairobi",
+      ctx: makeCtx(),
+    });
+
+    expect(result.session.pending?.type).toBe("clarification");
+    const last = result.session.messages[result.session.messages.length - 1]!;
+    expect(last.parts.some((p) => p.type === "clarify")).toBe(true);
+    expect(deps.helpers.audit.entries.some((e) => e.action === "crm.customer.create")).toBe(false);
+  });
+
+  it("merges the answer through the probe and continues to a normal confirm", async () => {
+    const deps = makeDeps({ autonomy: "confirm" });
+    const ctx = makeCtx();
+
+    const first = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer",
+      ctx,
+    });
+    expect(first.session.pending?.type).toBe("clarification");
+
+    const second = await handleChatTurn(deps, {
+      session: first.session,
+      userText: "Roboto Ltd",
+      ctx,
+    });
+    expect(second.session.pending?.id).not.toBe(first.session.pending!.id);
+    expect(second.session.pending?.type).not.toBe("clarification");
+    expect(second.session.pending?.command).toBe("crm.customer.create");
+    expect(second.session.pending?.input).toMatchObject({ name: "Roboto Ltd" });
+
+    const confirmed = await handleChatTurn(deps, {
+      session: second.session,
+      confirmId: second.session.pending!.id,
+      ctx,
+    });
+    expect(confirmed.session.pending).toBeUndefined();
+    expect(
+      deps.helpers.audit.entries.some((e) => e.success && e.action === "crm.customer.create"),
+    ).toBe(true);
+  });
+
+  it("recaps the earlier clarification into the LLM view for the answer turn", async () => {
+    const provider = new CapturingProvider();
+    const deps = { ...makeDeps({ provider, autonomy: "confirm" }) };
+
+    const session = freshSession();
+    session.pending = {
+      id: "clar-1",
+      type: "clarification",
+      questions: ["Which customer name should I use?"],
+      probe: "{answer}",
+      createdAt: new Date().toISOString(),
+    };
+
+    await handleChatTurn(deps, {
+      session,
+      userText: "Rockwell & Co",
+      ctx: makeCtx(),
+    });
+
+    const msgs = provider.lastRequest?.messages ?? [];
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    const text = lastUser?.parts
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join("\n");
+    expect(text).toContain("Earlier I asked: Which customer name should I use?");
+    expect(text).toContain("Rockwell & Co");
+  });
+
+  it("LLM clarify parks a PendingClarification that answers naturally", async () => {
+    const deps = makeDeps({ autonomy: "confirm" });
+    const ctx = makeCtx();
+    const provider = new MockProvider(
+      JSON.stringify({
+        clarify: ["What is the customer's name?"],
+      }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "Acme Corp" } }),
+    );
+    const llmDeps = { ...deps, provider };
+
+    const first = await handleChatTurn(llmDeps, {
+      session: freshSession(),
+      userText: "Add a brand new customer",
+      ctx,
+    });
+    expect(first.session.pending?.type).toBe("clarification");
+
+    const second = await handleChatTurn(llmDeps, {
+      session: first.session,
+      userText: "Acme Corp",
+      ctx,
+    });
+    expect(second.session.pending?.type).not.toBe("clarification");
+    expect(second.session.pending?.command).toBe("crm.customer.create");
+    expect(second.session.pending?.input).toMatchObject({ name: "Acme Corp" });
+  });
+});
+
+// ===================================================================
+// Issue 3 — adaptive learning / memory integration
+// ===================================================================
+
+describe("handleChatTurn — adaptive memory", () => {
+  it("records executed commands into org memory (long_term_org)", async () => {
+    const memory = new InMemoryMemoryStore();
+    const deps = { ...makeDeps({ autonomy: "confirm" }), memory };
+    const ctx = makeCtx();
+
+    const planned = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer Acme Ltd in Nairobi",
+      ctx,
+    });
+    expect(planned.session.pending?.command).toBe("crm.customer.create");
+
+    const confirmed = await handleChatTurn(deps, {
+      session: planned.session,
+      confirmId: planned.session.pending!.id,
+      ctx,
+    });
+    expect(confirmed.session.pending).toBeUndefined();
+
+    const hits = await memory.search("o1", "Acme");
+    const learned = hits.find(
+      (r) => r.kind === "long_term_org" && r.content.includes("crm.customer.create"),
+    );
+    expect(learned).toBeDefined();
+    expect(learned!.metadata).toMatchObject({
+      command: "crm.customer.create",
+      input: { name: "Acme Ltd", city: "Nairobi" },
+    });
+  });
+
+  it("records each step of an auto-executed multi-step plan", async () => {
+    const memory = new InMemoryMemoryStore();
+    const deps = { ...makeDeps({ autonomy: "guarded_auto" }), memory };
+    const ctx = makeCtx();
+
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer MultiCo in Mombasa and create invoice INV-MEM for 150.00 USD",
+      ctx,
+    });
+    // guarded_auto — the plan auto-executes (covered by rule, no confirm gate)
+    expect(result.session.pending).toBeUndefined();
+
+    expect(
+      (await memory.search("o1", "MultiCo")).some((r) => r.content.includes("crm.customer.create")),
+    ).toBe(true);
+    expect(
+      (await memory.search("o1", "INV-MEM")).some((r) => r.content.includes("acc.invoice.create")),
+    ).toBe(true);
+  });
+
+  it("recalls learned context into the LLM outbound view", async () => {
+    const memory = new InMemoryMemoryStore();
+    await memory.write({
+      organizationId: "o1",
+      kind: "long_term_org",
+      key: "acme-notes",
+      content: "[prior] Acme prefers quarterly reports and weekly catch-ups",
+    });
+    const provider = new CapturingProvider();
+    const deps = { ...makeDeps({ provider, autonomy: "confirm" }), memory };
+
+    await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Do we have any internal notes about Acme?",
+      ctx: makeCtx(),
+    });
+
+    const msgs = provider.lastRequest?.messages ?? [];
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    const text = lastUser?.parts
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join("\n");
+    expect(text).toContain("[Learned context from this workspace");
+    expect(text).toContain("Acme prefers quarterly reports");
+  });
+
+  it("does not inject memory context when nothing matches", async () => {
+    const memory = new InMemoryMemoryStore();
+    const provider = new CapturingProvider();
+    const deps = { ...makeDeps({ provider, autonomy: "confirm" }), memory };
+
+    await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Tell me a joke",
+      ctx: makeCtx(),
+    });
+
+    const msgs = provider.lastRequest?.messages ?? [];
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    const text = lastUser?.parts
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join("\n");
+    expect(text ?? "").not.toContain("[Learned context from this workspace]");
+  });
+
+  it("exposes memory.search / memory.store as agent tools", async () => {
+    const memory = new InMemoryMemoryStore();
+    const provider = new MockProvider(
+      JSON.stringify({
+        toolCall: {
+          name: "memory.store",
+          args: { content: "Acme prefers quarterly reports", kind: "short_term_chat" },
+        },
+      }),
+      JSON.stringify({ command: "crm.customer.create", input: { name: "MemoryCo" } }),
+    );
+    const deps = { ...makeDeps({ provider, autonomy: "confirm" }), memory };
+
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Remember that Acme prefers quarterly reports, then add MemoryCo as a customer",
+      ctx: makeCtx(),
+    });
+
+    expect(result.session.pending?.command).toBe("crm.customer.create");
+    const hits = await memory.search("o1", "quarterly reports");
+    expect(hits.some((r) => r.content.includes("quarterly reports"))).toBe(true);
+  });
+
+  it("memory store failures never fail the business action", async () => {
+    const deps = {
+      ...makeDeps({ autonomy: "confirm" }),
+      memory: {
+        write: async () => {
+          throw new Error("db down");
+        },
+        search: async () => {
+          throw new Error("db down");
+        },
+        forget: async () => {
+          throw new Error("db down");
+        },
+      } satisfies MemoryStore,
+    } satisfies OrchestratorDeps;
+    const ctx = makeCtx();
+
+    const planned = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Create customer Resilient Co in Eldoret",
+      ctx,
+    });
+    const confirmed = await handleChatTurn(deps, {
+      session: planned.session,
+      confirmId: planned.session.pending!.id,
+      ctx,
+    });
+    expect(confirmed.session.pending).toBeUndefined();
+    expect(
+      deps.helpers.audit.entries.some((e) => e.action === "crm.customer.create" && e.success),
+    ).toBe(true);
+  });
+});

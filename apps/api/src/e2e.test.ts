@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { and, eq, inArray, like } from "drizzle-orm";
+import { schema } from "@chaste/db";
 import { buildServer } from "./server.js";
 import type { AppContext } from "./app-context.js";
 
@@ -9,6 +11,7 @@ describe.skipIf(!hasDb)("postgres e2e", () => {
   let server: FastifyInstance;
   let app: AppContext;
   let base: string;
+  let aiSessionId: string | undefined;
 
   beforeAll(async () => {
     const built = await buildServer();
@@ -21,6 +24,24 @@ describe.skipIf(!hasDb)("postgres e2e", () => {
   }, 60_000);
 
   afterAll(async () => {
+    // Test isolation — remove artifacts this suite writes to the shared DB so
+    // subsequent manual/AI verification isn't polluted by run artifacts.
+    if (app.db) {
+      await app.db.delete(schema.orgMemories).where(like(schema.orgMemories.content, "%Vitest%"));
+      if (aiSessionId) {
+        await app.db.delete(schema.chatMessages).where(eq(schema.chatMessages.sessionId, aiSessionId));
+        await app.db.delete(schema.chatSessions).where(eq(schema.chatSessions.id, aiSessionId));
+      }
+      const vitest = await app.db
+        .select({ id: schema.crmCustomers.id })
+        .from(schema.crmCustomers)
+        .where(like(schema.crmCustomers.name, "Vitest%"));
+      const ids = vitest.map((c) => c.id);
+      if (ids.length > 0) {
+        await app.db.delete(schema.accInvoices).where(inArray(schema.accInvoices.customerId, ids));
+        await app.db.delete(schema.crmCustomers).where(inArray(schema.crmCustomers.id, ids));
+      }
+    }
     await server.close();
   });
 
@@ -54,6 +75,7 @@ describe.skipIf(!hasDb)("postgres e2e", () => {
       body: JSON.stringify({ message: `Create customer Vitest AI ${Date.now()} in Nairobi` }),
     }).then((r) => r.json())) as { sessionId: string; pendingConfirmationId?: string };
     expect(chat.pendingConfirmationId).toBeTruthy();
+    aiSessionId = chat.sessionId;
     await fetch(`${base}/api/v1/ai/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
