@@ -2175,19 +2175,51 @@ export function createScheduleProcessor(db: Db) {
       return row ?? null;
     },
 
-    /** Deliver one claimed reminder's in-app notification. Returns true on success. */
+    /** Deliver one claimed reminder's notification. Returns true on success. */
     async deliverReminder(r: typeof schema.reminders.$inferSelect): Promise<boolean> {
       try {
-        await notifyUser(db, {
-          organizationId: r.organizationId,
-          userId: r.userId,
-          kind: "reminder",
-          title: r.title,
-          body: r.body ?? undefined,
-          href: r.href ?? undefined,
-          resourceType: "reminder",
-          resourceId: r.id,
-        });
+        const channel = r.channel ?? "in_app";
+        const shouldNotifyInApp = channel === "in_app" || channel === "both";
+        const shouldEmail = channel === "email" || channel === "both";
+
+        // Send in-app notification if applicable
+        if (shouldNotifyInApp) {
+          await notifyUser(db, {
+            organizationId: r.organizationId,
+            userId: r.userId,
+            kind: "reminder",
+            title: r.title,
+            body: r.body ?? undefined,
+            href: r.href ?? undefined,
+            resourceType: "reminder",
+            resourceId: r.id,
+          });
+        }
+
+        // Send email if applicable
+        if (shouldEmail) {
+          // Fetch user email address
+          const [user] = await db
+            .select({ email: schema.users.email, displayName: schema.users.displayName })
+            .from(schema.users)
+            .where(eq(schema.users.id, r.userId));
+
+          if (user?.email) {
+            const emailAdapter = createEmailAdapter();
+            const templateVars = {
+              title: r.title,
+              body: r.body ?? "",
+              name: user.displayName ?? "User",
+            };
+            const { subject, body } = renderEmailTemplate("reminder", templateVars);
+            await emailAdapter.send({
+              to: user.email,
+              subject,
+              body,
+            });
+          }
+        }
+
         return true;
       } catch (err) {
         // Record the failure on this reminder instead of aborting the batch.

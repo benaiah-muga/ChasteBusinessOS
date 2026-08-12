@@ -1,14 +1,3 @@
-node_modules
-dist
-.next
-.turbo
-coverage
-.env
-.env.local
-*.log
-.DS_Store
-*.tsbuildinfo
-drizzle/meta
-.vscode/*
-!.vscode/extensions.json
-.research
+```ts
+
+```
