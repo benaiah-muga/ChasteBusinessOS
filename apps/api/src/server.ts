@@ -1,23 +1,27 @@
 import { FULL_AUTONOMOUS_WARNING, ChasteError, NotFoundError, type Actor } from "@chaste/kernel";
 import cors from "@fastify/cors";
-import Fastify from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { getUserWithOrg, resolveUserPermissions, schema } from "@chaste/db";
+import { workflowDefinitionSchema } from "@chaste/ai-core";
 import {
   createAppContext,
   healthPayload,
-  refreshSessionUser,
+  getSessionPayload,
   runChat,
-  runCommand,
   runCommandAsActor,
+  runCommandAsAuth,
   runQuery,
+  runQueryAsAuth,
+  extractBearerToken,
+  resolveRequestAuth,
   buildWorkflow,
   executeWorkflowRun,
   type AppContext,
+  type RequestAuth,
 } from "./app-context.js";
-import { workflowDefinitionSchema } from "@chaste/ai-core";
 
 /** Form posts often send "" for optional fields — treat as omitted, not invalid. */
 const optionalEmailSchema = z.preprocess(
@@ -43,6 +47,29 @@ export async function buildServer(appCtx?: AppContext) {
 
   await server.register(cors, { origin: true });
 
+  /**
+   * ARCH-1 — per-request authentication. Resolve the acting principal from
+   * `Authorization: Bearer <token>` for every /api/v1 request. When no token is
+   * supplied we retain the bootstrap admin as the actor (dev/legacy); an
+   * invalid token is rejected with 401 so RBAC is enforced at the HTTP edge.
+   */
+  server.decorateRequest("auth", null);
+  server.addHook("preHandler", async (req, reply) => {
+    const header = req.headers["authorization"];
+    const auth = await resolveRequestAuth(app, Array.isArray(header) ? header[0] : header);
+    if (auth === null) {
+      return reply
+        .status(401)
+        .send({ message: "Authentication required", code: "UNAUTHORIZED" });
+    }
+    (req as unknown as { auth: RequestAuth }).auth = auth;
+    return undefined;
+  });
+
+  /** Read the authenticated principal decorated on `req` by the preHandler. */
+  const getAuth = (req: FastifyRequest): RequestAuth =>
+    (req as unknown as { auth: RequestAuth }).auth;
+
   server.setErrorHandler((err, _req, reply) => {
     if (err instanceof ChasteError) {
       return reply.status(err.status).send({
@@ -64,25 +91,31 @@ export async function buildServer(appCtx?: AppContext) {
 
   server.get("/health", async () => healthPayload(app));
 
-  server.get("/api/v1/session", async () => {
-    await refreshSessionUser(app);
+  server.get("/api/v1/session", async (req) => {
+    const auth = getAuth(req);
+    return getSessionPayload(auth, app);
+  });
+
+  /**
+   * ARCH-1 — login. Validates the bearer credential and returns the session
+   * payload the web client persists. The token is the raw invite/onboarding
+   * credential returned by `core.user.invite`; it is stored hashed at rest.
+   */
+  server.post("/api/v1/auth/login", async (req, reply) => {
+    const header = req.headers["authorization"];
+    const token = Array.isArray(header) ? header[0] : header ?? "";
+    const auth = await resolveRequestAuth(app, token);
+    if (!auth) {
+      return reply.status(401).send({ message: "Invalid or expired token", code: "UNAUTHORIZED" });
+    }
     return {
-      userId: app.sessionUser.id,
-      organizationId: app.sessionUser.organizationId,
-      email: app.sessionUser.email,
-      displayName: app.sessionUser.displayName,
-      permissions: app.sessionUser.permissions,
-      autonomy: app.sessionUser.autonomy,
-      orgName: app.sessionUser.orgName,
-      region: app.sessionUser.region,
-      fullAutonomousWarning: FULL_AUTONOMOUS_WARNING,
-      allowFullAutonomous: app.config.allowFullAutonomous,
-      aiProvider: app.provider.id,
+      token: extractBearerToken(token),
+      ...getSessionPayload(auth, app),
     };
   });
 
   server.get("/api/v1/modules", async (req) => {
-    const result = await runQuery(app, "core.modules.list", {}, req.id);
+    const result = await runQueryAsAuth(app,  "core.modules.list",  {}, getAuth(req), req.id);
     return result.data;
   });
 
@@ -122,11 +155,11 @@ export async function buildServer(appCtx?: AppContext) {
         notes: optionalStringSchema,
       })
       .parse(req.body ?? {});
-    return (await runCommand(app, "core.bpartner.create", input, req.id)).data;
+    return (await runCommandAsAuth(app, "core.bpartner.create", input, getAuth(req), req.id)).data;
   });
   server.get("/api/v1/business-partners/:id", async (req) => {
     const { id } = req.params as { id: string };
-    return (await runQuery(app, "core.bpartner.get", { businessPartnerId: id }, req.id)).data;
+    return (await runQueryAsAuth(app,  "core.bpartner.get",  { businessPartnerId: id }, getAuth(req), req.id)).data;
   });
   server.patch("/api/v1/business-partners/:id", async (req) => {
     const { id } = req.params as { id: string };
@@ -140,23 +173,23 @@ export async function buildServer(appCtx?: AppContext) {
         notes: optionalStringSchema,
       })
       .parse(req.body ?? {});
-    return (await runCommand(app, "core.bpartner.update", { businessPartnerId: id, ...patch }, req.id)).data;
+    return (await runCommandAsAuth(app, "core.bpartner.update", { businessPartnerId: id, ...patch }, getAuth(req), req.id)).data;
   });
   server.delete("/api/v1/business-partners/:id", async (req) => {
     const { id } = req.params as { id: string };
-    return (await runCommand(app, "core.bpartner.delete", { businessPartnerId: id }, req.id)).data;
+    return (await runCommandAsAuth(app, "core.bpartner.delete", { businessPartnerId: id }, getAuth(req), req.id)).data;
   });
 
   server.post("/api/v1/commands/:name", async (req) => {
     const name = (req.params as { name: string }).name;
     const body = z.object({ input: z.unknown().default({}) }).parse(req.body ?? {});
-    return runCommand(app, name, body.input, req.id);
+    return runCommandAsAuth(app, name, body.input, getAuth(req), req.id);
   });
 
   server.post("/api/v1/queries/:name", async (req) => {
     const name = (req.params as { name: string }).name;
     const body = z.object({ input: z.unknown().default({}) }).parse(req.body ?? {});
-    return runQuery(app, name, body.input, req.id);
+    return runQueryAsAuth(app, name, body.input, getAuth(req), req.id);
   });
 
   // ─── Buzz bridge inbound ─────────────────────────────────────────────
@@ -249,13 +282,13 @@ export async function buildServer(appCtx?: AppContext) {
         country: optionalStringSchema,
       })
       .parse(req.body);
-    const result = await runCommand(app, "crm.customer.create", input, req.id);
+    const result = await runCommandAsAuth(app, "crm.customer.create", input, getAuth(req), req.id);
     return result.data;
   });
 
   server.get("/api/v1/crm/customers/:id", async (req) => {
     const { id } = req.params as { id: string };
-    return (await runQuery(app, "crm.customer.get", { customerId: id }, req.id)).data;
+    return (await runQueryAsAuth(app,  "crm.customer.get",  { customerId: id }, getAuth(req), req.id)).data;
   });
   server.patch("/api/v1/crm/customers/:id", async (req) => {
     const { id } = req.params as { id: string };
@@ -268,25 +301,25 @@ export async function buildServer(appCtx?: AppContext) {
       })
       .parse(req.body ?? {});
     return (
-      await runCommand(app, "crm.customer.update", { customerId: id, ...patch }, req.id)
+      await runCommandAsAuth(app, "crm.customer.update", { customerId: id, ...patch }, getAuth(req), req.id)
     ).data;
   });
   server.post("/api/v1/crm/customers/:id/status", async (req) => {
     const { id } = req.params as { id: string };
     const input = z.object({ status: z.string(), note: optionalStringSchema }).parse(req.body);
     return (
-      await runCommand(app, "crm.customer.setStatus", { customerId: id, ...input }, req.id)
+      await runCommandAsAuth(app, "crm.customer.setStatus", { customerId: id, ...input }, getAuth(req), req.id)
     ).data;
   });
   server.delete("/api/v1/crm/customers/:id", async (req) => {
     const { id } = req.params as { id: string };
-    return (await runCommand(app, "crm.customer.delete", { customerId: id }, req.id)).data;
+    return (await runCommandAsAuth(app, "crm.customer.delete", { customerId: id }, getAuth(req), req.id)).data;
   });
 
   server.get("/api/v1/crm/customers/:id/contacts", async (req) => {
     const { id } = req.params as { id: string };
     return (
-      (await runQuery(app, "crm.contact.list", { customerId: id }, req.id)).data
+      (await runQueryAsAuth(app,  "crm.contact.list",  { customerId: id }, getAuth(req), req.id)).data
     );
   });
   server.post("/api/v1/crm/customers/:id/contacts", async (req) => {
@@ -300,18 +333,18 @@ export async function buildServer(appCtx?: AppContext) {
       })
       .parse(req.body);
     return (
-      await runCommand(app, "crm.contact.create", { customerId: id, ...input }, req.id)
+      await runCommandAsAuth(app, "crm.contact.create", { customerId: id, ...input }, getAuth(req), req.id)
     ).data;
   });
   server.delete("/api/v1/crm/contacts/:id", async (req) => {
     const { id } = req.params as { id: string };
-    return (await runCommand(app, "crm.contact.delete", { contactId: id }, req.id)).data;
+    return (await runCommandAsAuth(app, "crm.contact.delete", { contactId: id }, getAuth(req), req.id)).data;
   });
 
   server.get("/api/v1/crm/customers/:id/interactions", async (req) => {
     const { id } = req.params as { id: string };
     return (
-      (await runQuery(app, "crm.interaction.list", { customerId: id }, req.id)).data
+      (await runQueryAsAuth(app,  "crm.interaction.list",  { customerId: id }, getAuth(req), req.id)).data
     );
   });
   server.post("/api/v1/crm/customers/:id/interactions", async (req) => {
@@ -324,16 +357,16 @@ export async function buildServer(appCtx?: AppContext) {
       })
       .parse(req.body);
     return (
-      await runCommand(app, "crm.interaction.log", { customerId: id, ...input }, req.id)
+      await runCommandAsAuth(app, "crm.interaction.log", { customerId: id, ...input }, getAuth(req), req.id)
     ).data;
   });
 
   // Domain convenience routes (all still command/query backed)
   server.get("/api/v1/accounting/accounts", async (req) => {
-    return (await runQuery(app, "acc.account.list", {}, req.id)).data;
+    return (await runQueryAsAuth(app,  "acc.account.list",  {}, getAuth(req), req.id)).data;
   });
   server.get("/api/v1/accounting/invoices", async (req) => {
-    return (await runQuery(app, "acc.invoice.list", {}, req.id)).data;
+    return (await runQueryAsAuth(app,  "acc.invoice.list",  {}, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/accounting/invoices", async (req) => {
     const input = z
@@ -344,11 +377,11 @@ export async function buildServer(appCtx?: AppContext) {
         customerId: z.string().uuid().optional(),
       })
       .parse(req.body);
-    return (await runCommand(app, "acc.invoice.create", input, req.id)).data;
+    return (await runCommandAsAuth(app, "acc.invoice.create", input, getAuth(req), req.id)).data;
   });
 
   server.get("/api/v1/inventory/stock", async (req) => {
-    return (await runQuery(app, "inv.stock.list", {}, req.id)).data;
+    return (await runQueryAsAuth(app,  "inv.stock.list",  {}, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/inventory/products", async (req) => {
     const input = z
@@ -359,19 +392,19 @@ export async function buildServer(appCtx?: AppContext) {
         reorderLevel: optionalNonNegativeNumberSchema,
       })
       .parse(req.body);
-    return (await runCommand(app, "inv.product.create", input, req.id)).data;
+    return (await runCommandAsAuth(app, "inv.product.create", input, getAuth(req), req.id)).data;
   });
 
   server.get("/api/v1/purchasing", async (req) => {
-    return (await runQuery(app, "pur.po.list", {}, req.id)).data;
+    return (await runQueryAsAuth(app,  "pur.po.list",  {}, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/purchasing/vendors", async (req) => {
     const input = z.object({ name: z.string(), email: optionalEmailSchema }).parse(req.body);
-    return (await runCommand(app, "pur.vendor.create", input, req.id)).data;
+    return (await runCommandAsAuth(app, "pur.vendor.create", input, getAuth(req), req.id)).data;
   });
 
   server.get("/api/v1/hr", async (req) => {
-    return (await runQuery(app, "hr.overview", {}, req.id)).data;
+    return (await runQueryAsAuth(app,  "hr.overview",  {}, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/hr/employees", async (req) => {
     const input = z
@@ -384,29 +417,29 @@ export async function buildServer(appCtx?: AppContext) {
         jobTitle: optionalStringSchema,
       })
       .parse(req.body);
-    return (await runCommand(app, "hr.employee.create", input, req.id)).data;
+    return (await runCommandAsAuth(app, "hr.employee.create", input, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/hr/payroll", async (req) => {
     const input = z.object({ periodLabel: z.string() }).parse(req.body);
-    return (await runCommand(app, "hr.payroll.prepare", input, req.id)).data;
+    return (await runCommandAsAuth(app, "hr.payroll.prepare", input, getAuth(req), req.id)).data;
   });
 
   server.get("/api/v1/manufacturing", async (req) => {
-    return (await runQuery(app, "mfg.overview", {}, req.id)).data;
+    return (await runQueryAsAuth(app,  "mfg.overview",  {}, getAuth(req), req.id)).data;
   });
 
   server.get("/api/v1/rbac", async (req) => {
-    return (await runQuery(app, "core.rbac.overview", {}, req.id)).data;
+    return (await runQueryAsAuth(app,  "core.rbac.overview",  {}, getAuth(req), req.id)).data;
   });
 
   server.get("/api/v1/marketplace", async (req) => {
     const region = (req.query as { region?: string }).region;
-    return (await runQuery(app, "core.marketplace.list", { region }, req.id)).data;
+    return (await runQueryAsAuth(app,  "core.marketplace.list",  { region }, getAuth(req), req.id)).data;
   });
 
   // Multi-branch (platform spec §4)
   server.get("/api/v1/branches", async (req) => {
-    return (await runQuery(app, "core.branch.list", {}, req.id)).data;
+    return (await runQueryAsAuth(app,  "core.branch.list",  {}, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/branches", async (req) => {
     const input = z
@@ -417,30 +450,30 @@ export async function buildServer(appCtx?: AppContext) {
         parentBranchId: z.string().uuid().optional(),
       })
       .parse(req.body);
-    return (await runCommand(app, "core.branch.create", input, req.id)).data;
+    return (await runCommandAsAuth(app, "core.branch.create", input, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/branches/switch", async (req) => {
     const input = z.object({ branchId: z.string().uuid() }).parse(req.body);
-    return (await runCommand(app, "core.branch.set_active", input, req.id)).data;
+    return (await runCommandAsAuth(app, "core.branch.set_active", input, getAuth(req), req.id)).data;
   });
 
   // Notifications (spec: scheduling-and-comms §4)
   server.get("/api/v1/notifications", async (req) => {
     const unreadOnly = (req.query as { unreadOnly?: string }).unreadOnly === "true";
-    return (await runQuery(app, "core.notification.list", { unreadOnly }, req.id)).data;
+    return (await runQueryAsAuth(app,  "core.notification.list",  { unreadOnly }, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/notifications/:id/read", async (req) => {
     const { id } = req.params as { id: string };
-    return (await runCommand(app, "core.notification.mark_read", { notificationId: id }, req.id)).data;
+    return (await runCommandAsAuth(app, "core.notification.mark_read", { notificationId: id }, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/notifications/read-all", async (req) => {
-    return (await runCommand(app, "core.notification.mark_all_read", {}, req.id)).data;
+    return (await runCommandAsAuth(app, "core.notification.mark_all_read", {}, getAuth(req), req.id)).data;
   });
 
   // Reminders & follow-ups (spec: scheduling-and-comms §2/§3)
   server.get("/api/v1/reminders", async (req) => {
     const { status } = req.query as { status?: string };
-    return (await runQuery(app, "core.reminder.list", { status }, req.id)).data;
+    return (await runQueryAsAuth(app,  "core.reminder.list",  { status }, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/reminders", async (req) => {
     const input = z
@@ -453,16 +486,16 @@ export async function buildServer(appCtx?: AppContext) {
         branchId: z.string().uuid().optional(),
       })
       .parse(req.body);
-    return (await runCommand(app, "core.reminder.set", input, req.id)).data;
+    return (await runCommandAsAuth(app, "core.reminder.set", input, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/reminders/:id/cancel", async (req) => {
     const { id } = req.params as { id: string };
-    return (await runCommand(app, "core.reminder.cancel", { reminderId: id }, req.id)).data;
+    return (await runCommandAsAuth(app, "core.reminder.cancel", { reminderId: id }, getAuth(req), req.id)).data;
   });
 
   server.get("/api/v1/followups", async (req) => {
     const { status } = req.query as { status?: string };
-    return (await runQuery(app, "core.followup.list", { status }, req.id)).data;
+    return (await runQueryAsAuth(app,  "core.followup.list",  { status }, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/followups", async (req) => {
     const input = z
@@ -473,17 +506,17 @@ export async function buildServer(appCtx?: AppContext) {
         branchId: z.string().uuid().optional(),
       })
       .parse(req.body);
-    return (await runCommand(app, "core.followup.create", input, req.id)).data;
+    return (await runCommandAsAuth(app, "core.followup.create", input, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/followups/:id/cancel", async (req) => {
     const { id } = req.params as { id: string };
-    return (await runCommand(app, "core.followup.cancel", { followUpId: id }, req.id)).data;
+    return (await runCommandAsAuth(app, "core.followup.cancel", { followUpId: id }, getAuth(req), req.id)).data;
   });
 
   // Calendar (spec: scheduling-and-comms §2.1)
   server.get("/api/v1/calendar", async (req) => {
     const { from, to, branchId } = req.query as { from?: string; to?: string; branchId?: string };
-    return (await runQuery(app, "core.calendar.list", { from, to, branchId }, req.id)).data;
+    return (await runQueryAsAuth(app,  "core.calendar.list",  { from, to, branchId }, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/calendar/events", async (req) => {
     const input = z
@@ -499,7 +532,7 @@ export async function buildServer(appCtx?: AppContext) {
         linkedResources: z.array(z.object({ type: z.string(), id: z.string() })).optional(),
       })
       .parse(req.body);
-    return (await runCommand(app, "core.calendar.event.create", input, req.id)).data;
+    return (await runCommandAsAuth(app, "core.calendar.event.create", input, getAuth(req), req.id)).data;
   });
   server.patch("/api/v1/calendar/events/:id", async (req) => {
     const { id } = req.params as { id: string };
@@ -515,11 +548,11 @@ export async function buildServer(appCtx?: AppContext) {
         linkedResources: z.array(z.object({ type: z.string(), id: z.string() })).optional(),
       })
       .parse(req.body);
-    return (await runCommand(app, "core.calendar.event.update", { eventId: id, ...body }, req.id)).data;
+    return (await runCommandAsAuth(app, "core.calendar.event.update", { eventId: id, ...body }, getAuth(req), req.id)).data;
   });
   server.post("/api/v1/calendar/events/:id/cancel", async (req) => {
     const { id } = req.params as { id: string };
-    return (await runCommand(app, "core.calendar.event.cancel", { eventId: id }, req.id)).data;
+    return (await runCommandAsAuth(app, "core.calendar.event.cancel", { eventId: id }, getAuth(req), req.id)).data;
   });
 
   server.post("/api/v1/autonomy", async (req) => {
@@ -529,32 +562,31 @@ export async function buildServer(appCtx?: AppContext) {
         acknowledgeFullAutonomous: z.boolean().optional(),
       })
       .parse(req.body);
-    const result = await runCommand(app, "core.autonomy.set", input, req.id);
-    await refreshSessionUser(app);
+    const result = await runCommandAsAuth(app, "core.autonomy.set", input, getAuth(req), req.id);
     return result.data;
   });
 
   // ─── Settings & Preferences ──────────────────────────────────────────
 
   server.get("/api/v1/settings", async (req) => {
-    const result = await runQuery(app, "core.settings.get", {}, req.id);
+    const result = await runQueryAsAuth(app,  "core.settings.get",  {}, getAuth(req), req.id);
     return result.data;
   });
 
   server.put("/api/v1/settings", async (req) => {
     const input = z.object({ settings: z.record(z.unknown()) }).parse(req.body);
-    const result = await runCommand(app, "core.settings.update", input, req.id);
+    const result = await runCommandAsAuth(app, "core.settings.update", input, getAuth(req), req.id);
     return result.data;
   });
 
   server.get("/api/v1/preferences", async (req) => {
-    const result = await runQuery(app, "core.preferences.get", {}, req.id);
+    const result = await runQueryAsAuth(app,  "core.preferences.get",  {}, getAuth(req), req.id);
     return result.data;
   });
 
   server.put("/api/v1/preferences", async (req) => {
     const input = z.object({ preferences: z.record(z.unknown()) }).parse(req.body);
-    const result = await runCommand(app, "core.preferences.update", input, req.id);
+    const result = await runCommandAsAuth(app, "core.preferences.update", input, getAuth(req), req.id);
     return result.data;
   });
 
@@ -567,10 +599,10 @@ export async function buildServer(appCtx?: AppContext) {
         cancelId: z.string().optional(),
       })
       .parse(req.body ?? {});
-    return runChat(app, body);
+    return runChat(app, body, getAuth(req));
   });
 
-  // ─── Workflow endpoints ──────────────────────────────────────────────
+  // ─── Workflow endpoints (in-memory until ARCH-5 persistence lands) ──
 
   server.get("/api/v1/workflows", async () => {
     const items = Array.from(app.workflows.values()).map((wf) => ({
@@ -625,8 +657,8 @@ export async function buildServer(appCtx?: AppContext) {
     return executeWorkflowRun(app, id, input, { approvedStepIds });
   });
 
-  server.get("/api/v1/audit", async () => {
-    const items = await app.audit.list(app.sessionUser.organizationId, 100);
+  server.get("/api/v1/audit", async (req) => {
+    const items = await app.audit.list(getAuth(req).sessionUser.organizationId, 100);
     return {
       items: items.map((e) => ({
         id: e.id,

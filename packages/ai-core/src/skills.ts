@@ -59,26 +59,26 @@ export interface SkillStore {
     organizationId: string;
     branchId?: string;
     enabledOnly?: boolean;
-  }): SkillRecord[];
-  get(name: string, filter: { organizationId: string; branchId?: string }): SkillRecord | undefined;
-  upsert(record: Omit<SkillRecord, "createdAt" | "updatedAt">): SkillRecord;
-  setEnabled(name: string, filter: { organizationId: string; branchId?: string }, enabled: boolean): void;
+  }): Promise<SkillRecord[]>;
+  get(name: string, filter: { organizationId: string; branchId?: string }): Promise<SkillRecord | undefined>;
+  upsert(record: Omit<SkillRecord, "createdAt" | "updatedAt">): Promise<SkillRecord>;
+  setEnabled(name: string, filter: { organizationId: string; branchId?: string }, enabled: boolean): Promise<void>;
 }
 
 /**
- * In-memory skill store. A Postgres-backed implementation would use the
- * `ai_skills` table (see migration additions). The interface is identical
- * either way so callers swap stores freely.
+ * In-memory skill store. A Postgres-backed implementation (in `@chaste/runtime`)
+ * uses the `ai_skills` table (see migration additions). The interface is
+ * identical either way so callers swap stores freely.
  */
 export class InMemorySkillStore implements SkillStore {
   private readonly skills = new Map<string, SkillRecord>();
   private readonly now = () => new Date();
 
-  list(filter: {
+  async list(filter: {
     organizationId: string;
     branchId?: string;
     enabledOnly?: boolean;
-  }): SkillRecord[] {
+  }): Promise<SkillRecord[]> {
     const out: SkillRecord[] = [];
     for (const s of this.skills.values()) {
       if (s.scope === "platform" || s.organizationId === filter.organizationId) {
@@ -90,11 +90,11 @@ export class InMemorySkillStore implements SkillStore {
     return out.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  get(name: string, filter: { organizationId: string; branchId?: string }): SkillRecord | undefined {
-    return this.list(filter).find((s) => s.name === name);
+  async get(name: string, filter: { organizationId: string; branchId?: string }): Promise<SkillRecord | undefined> {
+    return (await this.list(filter)).find((s) => s.name === name);
   }
 
-  upsert(record: Omit<SkillRecord, "createdAt" | "updatedAt">): SkillRecord {
+  async upsert(record: Omit<SkillRecord, "createdAt" | "updatedAt">): Promise<SkillRecord> {
     const key = `${record.scope}:${record.organizationId ?? "platform"}:${record.branchId ?? "-"}:${record.name}`;
     const existing = this.skills.get(key);
     const ts = this.now().toISOString();
@@ -107,8 +107,8 @@ export class InMemorySkillStore implements SkillStore {
     return rec;
   }
 
-  setEnabled(name: string, filter: { organizationId: string; branchId?: string }, enabled: boolean): void {
-    const s = this.get(name, filter);
+  async setEnabled(name: string, filter: { organizationId: string; branchId?: string }, enabled: boolean): Promise<void> {
+    const s = await this.get(name, filter);
     if (!s) return;
     s.enabled = enabled;
     s.updatedAt = this.now().toISOString();
@@ -122,11 +122,11 @@ export class InMemorySkillStore implements SkillStore {
  * enabled skill with a one-line description. Matches OpenWorker's catalog:
  * `"name  -- summary"` lines. Empty (`""`) when no skills are available.
  */
-export function skillCatalogText(store: SkillStore, filter: {
+export async function skillCatalogText(store: SkillStore, filter: {
   organizationId: string;
   branchId?: string;
-}): string {
-  const skills = store.list({ ...filter, enabledOnly: true });
+}): Promise<string> {
+  const skills = await store.list({ ...filter, enabledOnly: true });
   if (skills.length === 0) return "";
   const lines = [
     "Available skills (call `loadSkill(name)` to load a skill's instructions into the conversation):",
@@ -151,14 +151,14 @@ export function skillCatalogText(store: SkillStore, filter: {
  * explanation parts. For the kernel-side path, we walk message parts for
  * `explanation` parts whose `rulesApplied` mentions `load_skill`.
  */
-export function disableCountermand(
+export async function disableCountermand(
   store: SkillStore,
   filter: { organizationId: string; branchId?: string },
   loadedSkillNames: string[],
-): string {
+): Promise<string> {
   if (loadedSkillNames.length === 0) return "";
   const available = new Set(
-    store.list({ ...filter, enabledOnly: true }).map((s) => s.name),
+    (await store.list({ ...filter, enabledOnly: true })).map((s) => s.name),
   );
   const disappeared = loadedSkillNames.filter((n) => !available.has(n));
   if (disappeared.length === 0) return "";
@@ -179,14 +179,14 @@ export function disableCountermand(
  * `disableCountermand` on the next turn.
  */
 export interface SkillTools {
-  loadSkill: (name: string) => { ok: true; skill: SkillRecord } | { ok: false; error: string };
+  loadSkill: (name: string) => Promise<{ ok: true; skill: SkillRecord } | { ok: false; error: string }>;
   saveSkill: (input: {
     name: string;
     title: string;
     summary: string;
     instructions: string;
     files?: SkillFile[];
-  }) => { ok: true; requiresApproval: true; skill: SkillRecord };
+  }) => Promise<{ ok: true; requiresApproval: true; skill: SkillRecord }>;
 }
 
 export function skillTools(
@@ -194,18 +194,18 @@ export function skillTools(
   filter: { organizationId: string; branchId?: string },
 ): SkillTools {
   return {
-    loadSkill(name: string) {
-      const skill = store.get(name, filter);
+    async loadSkill(name: string) {
+      const skill = await store.get(name, filter);
       if (!skill || !skill.enabled) {
-        return { ok: false, error: `Skill ${name} not available.` };
+        return { ok: false as const, error: `Skill ${name} not available.` };
       }
-      return { ok: true, skill };
+      return { ok: true as const, skill };
     },
-    saveSkill(input) {
+    async saveSkill(input) {
       // Always requires approval: routes through the standard inbox approver.
       // The orchestrator intercepts the resulting approval_id and calls
       // `store.upsert(...)` on resolution === "allow" / "always".
-      const record = store.upsert({
+      const record = await store.upsert({
         scope: "organization",
         organizationId: filter.organizationId,
         branchId: filter.branchId,
@@ -216,7 +216,7 @@ export function skillTools(
         files: input.files,
         enabled: false, // disabled until the approval resolves
       });
-      return { ok: true, requiresApproval: true, skill: record };
+      return { ok: true as const, requiresApproval: true as const, skill: record };
     },
   };
 }

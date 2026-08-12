@@ -12,11 +12,10 @@ import {
   createTracer,
   type AiTracer,
   TracedProvider,
-  WakeStore,
-  InMemorySkillStore,
   runFollowUpTurn,
   SUMMARY_SYSTEM_PROMPT,
   type SkillStore,
+  type WakeStore,
   type CompactionSummarizer,
   type CompletionRequest,
 } from "@chaste/ai-core";
@@ -30,11 +29,12 @@ import {
   PostgresAuditWriter,
   PostgresOutboxWriter,
   resolveUserPermissions,
-  DbSessionStore,
+  resolveUserByToken,
   DbMemoryStore,
   schema,
   type Db,
   type SessionStore,
+  type AuthenticatedUser,
 } from "@chaste/db";
 import { eq } from "drizzle-orm";
 import { createRequire } from "node:module";
@@ -43,27 +43,18 @@ const pkg = pkgRequire("../package.json") as { version: string };
 import {
   type AutonomyLevel,
   autonomyLevelSchema,
-  createCommandRegistry,
-  createModuleRegistry,
-  createQueryRegistry,
   createRequestContext,
   executeCommand,
   executeQuery,
-  InboxStore,
+  FULL_AUTONOMOUS_WARNING,
   NotFoundError,
   type Actor,
   type CommandRegistry,
+  type InboxStore,
   type ModuleRegistry,
   type QueryRegistry,
 } from "@chaste/kernel";
-import { createAccountingModule } from "@chaste/module-accounting";
-import { createCrmModule } from "@chaste/module-crm";
-import { createHrModule } from "@chaste/module-hr";
-import { createInventoryModule } from "@chaste/module-inventory";
-import { createManufacturingModule } from "@chaste/module-manufacturing";
-import { createMessagingModule } from "@chaste/module-messaging";
-import { createPlatformModule } from "@chaste/module-platform";
-import { createPurchasingModule } from "@chaste/module-purchasing";
+import { createRuntime } from "@chaste/runtime";
 
 export interface SessionUser {
   id: string;
@@ -74,6 +65,16 @@ export interface SessionUser {
   autonomy: AutonomyLevel;
   orgName: string;
   region: string;
+}
+
+/**
+ * Per-request authenticated principal. Carries the resolved user's session
+ * view (permissions, autonomy, org) plus the command-bus Actor. This replaces
+ * the boot-time `app.sessionUser` singleton for request handling.
+ */
+export interface RequestAuth {
+  sessionUser: SessionUser;
+  actor: Actor;
 }
 
 export interface AppContext {
@@ -147,11 +148,15 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     region: userRow.region,
   };
 
-  const commands = createCommandRegistry();
-  const queries = createQueryRegistry();
-  const modules = createModuleRegistry(commands, queries);
-  const audit = new PostgresAuditWriter(db);
-  const outbox = new PostgresOutboxWriter(db);
+  // ARCH-4 — the shared runtime factory builds registries, registers every
+  // module once, and wires the durable Postgres-backed stores
+  // (`pending_approvals`, `ai_wakes`, `ai_skills`). The worker consumes the
+  // same factory, so standing rules / wakes / skills minted here are honored
+  // by scheduled follow-ups — no more process-local store drift.
+  const runtime = await createRuntime(config, db);
+  const { commands, queries, modules, inbox, wakes, skills, audit, outbox, sessionStore, memoryStore } =
+    runtime;
+
   const provider = createAiProvider(config.ai);
 
   // Observability — Langfuse traces all LLM calls when configured
@@ -167,24 +172,6 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     ? new TracedProvider(provider, tracer)
     : provider;
 
-  // Memory store — persistent tiered storage for AI context
-  const memoryStore = new DbMemoryStore(db);
-
-  // Domain modules first (dependency order)
-  await modules.register(createCrmModule(db));
-  await modules.register(createAccountingModule(db));
-  await modules.register(createInventoryModule(db));
-  await modules.register(createPurchasingModule(db));
-  await modules.register(createHrModule(db));
-  await modules.register(createManufacturingModule(db));
-  await modules.register(createMessagingModule(db));
-  await modules.register(
-    createPlatformModule(db, modules, {
-      allowFullAutonomous: config.allowFullAutonomous,
-      regions: config.regions,
-    }),
-  );
-
   // Workflow builder uses AiProvider.complete() (rules + structured LLM)
   let workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null = null;
   if (provider.id !== "none") {
@@ -193,14 +180,6 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
       aiProvider: provider,
     });
   }
-
-  // R2/R5/R7 runtime stores — the durable Postgres-backed counterparts
-  // (`pending_approvals`, `ai_wakes`, `ai_skills`) exist in the schema; the
-  // in-memory kernel stores satisfy the same interfaces so the runtime works
-  // today and can be swapped without touching the orchestrator.
-  const inbox = new InboxStore();
-  const wakes = new WakeStore();
-  const skills = new InMemorySkillStore();
 
   // R6 — compaction summarizer reuses the configured provider with the
   // fixed 8-section OpenWorker summary contract.
@@ -245,7 +224,7 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     modules,
     audit,
     outbox,
-    sessionStore: new DbSessionStore(db),
+    sessionStore,
     memoryStore,
     inbox,
     wakes,
@@ -277,6 +256,127 @@ export function requestCtx(app: AppContext, requestId?: string) {
     requestId,
     autonomy: app.sessionUser.autonomy,
   });
+}
+
+/**
+ * ARCH-1 — build an `Actor` from an authenticated `AuthenticatedUser`.
+ * Shared by the HTTP auth preHandler and the follow-up harness.
+ */
+export function actorFromAuthenticatedUser(
+  au: AuthenticatedUser,
+  aiRunId?: string,
+): Actor {
+  return {
+    kind: aiRunId ? "ai_assisted" : "user",
+    userId: au.userId,
+    organizationId: au.organizationId,
+    displayName: au.displayName,
+    permissions: new Set(au.permissions),
+    aiRunId,
+  };
+}
+
+/**
+ * ARCH-1 — resolve a per-request principal from an HTTP Authorization header.
+ * Returns the session user + actor whose permissions/org are used for the
+ * request. Falls back to the bootstrap admin only when no token is supplied
+ * (dev/legacy). An invalid token yields null (caller decides 401).
+ */
+export async function resolveRequestAuth(
+  app: AppContext,
+  authorizationHeader?: string,
+): Promise<RequestAuth | null> {
+  const token = extractBearerToken(authorizationHeader);
+  if (!token) {
+    return {
+      sessionUser: app.sessionUser,
+      actor: actorFromSession(app),
+    };
+  }
+  const au = await resolveUserByToken(app.db, token);
+  if (!au) return null;
+  const autonomy = autonomyLevelSchema.catch(app.config.defaultAutonomy).parse(au.autonomy);
+  return {
+    sessionUser: {
+      id: au.userId,
+      organizationId: au.organizationId,
+      email: au.email,
+      displayName: au.displayName,
+      permissions: au.permissions,
+      autonomy,
+      orgName: au.orgName,
+      region: au.region,
+    },
+    actor: actorFromAuthenticatedUser(au),
+  };
+}
+
+export function extractBearerToken(header?: string): string | null {
+  if (!header) return null;
+  const m = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return m?.[1] ?? null;
+}
+
+/** Shared session payload returned by `/session` and `/auth/login`. */
+export function getSessionPayload(auth: RequestAuth, app: AppContext) {
+  return {
+    userId: auth.sessionUser.id,
+    organizationId: auth.sessionUser.organizationId,
+    email: auth.sessionUser.email,
+    displayName: auth.sessionUser.displayName,
+    permissions: auth.sessionUser.permissions,
+    autonomy: auth.sessionUser.autonomy,
+    orgName: auth.sessionUser.orgName,
+    region: auth.sessionUser.region,
+    fullAutonomousWarning: FULL_AUTONOMOUS_WARNING,
+    allowFullAutonomous: app.config.allowFullAutonomous,
+    aiProvider: app.provider.id,
+  };
+}
+
+/** Per-request variant of `requestCtx` driven by an explicit `RequestAuth`. */
+export function requestCtxForAuth(auth: RequestAuth, requestId?: string) {
+  return createRequestContext({
+    actor: auth.actor,
+    requestId,
+    autonomy: auth.sessionUser.autonomy,
+  });
+}
+
+/**
+ * Run a command under a request-scoped principal. Uses the authenticated
+ * actor + autonomy; the per-request audit/outbox still share the same DB
+ * transaction via createCommandHelpers.
+ */
+export async function runCommandAsAuth(
+  app: AppContext,
+  name: string,
+  input: unknown,
+  auth: RequestAuth,
+  requestId?: string,
+) {
+  return executeCommand(
+    app.commands,
+    name,
+    input,
+    createRequestContext({ actor: auth.actor, requestId, autonomy: auth.sessionUser.autonomy }),
+    createCommandHelpers({ audit: app.audit, outbox: app.outbox, db: app.db }),
+  );
+}
+
+export async function runQueryAsAuth(
+  app: AppContext,
+  name: string,
+  input: unknown,
+  auth: RequestAuth,
+  requestId?: string,
+) {
+  return executeQuery(
+    app.queries,
+    name,
+    input,
+    createRequestContext({ actor: auth.actor, requestId, autonomy: auth.sessionUser.autonomy }),
+  );
 }
 
 export async function refreshSessionUser(app: AppContext): Promise<void> {
@@ -336,12 +436,17 @@ export async function runCommandAsActor(
   );
 }
 
-function buildOrchestratorDeps(app: AppContext, activeBranch?: { name: string; code: string }) {
+function buildOrchestratorDeps(
+  app: AppContext,
+  auth: RequestAuth | null,
+  activeBranch?: { name: string; code: string },
+) {
+  const sessionUser = auth?.sessionUser ?? app.sessionUser;
   return {
     commands: app.commands,
     queries: app.queries,
     helpers: createCommandHelpers({ audit: app.audit, outbox: app.outbox, db: app.db }),
-    autonomy: app.sessionUser.autonomy,
+    autonomy: sessionUser.autonomy,
     provider: app.provider,
     allowFullAutonomous: app.config.allowFullAutonomous,
     inbox: app.inbox,
@@ -356,8 +461,10 @@ function buildOrchestratorDeps(app: AppContext, activeBranch?: { name: string; c
 export async function runChat(
   app: AppContext,
   body: { sessionId?: string; message?: string; confirmId?: string; cancelId?: string },
+  auth?: RequestAuth,
 ) {
-  await refreshSessionUser(app);
+  const auth0: RequestAuth = auth ?? { sessionUser: app.sessionUser, actor: actorFromSession(app) };
+  const sessionUser = auth0.sessionUser;
   let sessionId = body.sessionId ?? crypto.randomUUID();
 
   // Load session from DB or create new.
@@ -375,8 +482,8 @@ export async function runChat(
     };
   } else if (!body.sessionId) {
     const existing = await app.sessionStore.loadByOrgUser(
-      app.sessionUser.organizationId,
-      app.sessionUser.id,
+      sessionUser.organizationId,
+      sessionUser.id,
     );
     if (existing) {
       sessionId = existing.id;
@@ -388,11 +495,11 @@ export async function runChat(
         compactionState: existing.compactionState as ChatSessionState["compactionState"],
       };
     } else {
-      await app.sessionStore.create(sessionId, app.sessionUser.organizationId, app.sessionUser.id);
+      await app.sessionStore.create(sessionId, sessionUser.organizationId, sessionUser.id);
       session = { id: sessionId, messages: [] };
     }
   } else {
-    await app.sessionStore.create(sessionId, app.sessionUser.organizationId, app.sessionUser.id);
+    await app.sessionStore.create(sessionId, sessionUser.organizationId, sessionUser.id);
     session = { id: sessionId, messages: [] };
   }
 
@@ -408,13 +515,13 @@ export async function runChat(
   }
 
   const result = await handleChatTurn(
-    buildOrchestratorDeps(app, activeBranch),
+    buildOrchestratorDeps(app, auth0, activeBranch),
     {
       session,
       userText: body.message,
       confirmId: body.confirmId,
       cancelId: body.cancelId,
-      ctx: requestCtx(app),
+      ctx: requestCtxForAuth(auth0),
     },
   );
 
@@ -525,7 +632,7 @@ export async function runFollowUp(
 
   try {
     const result = await runFollowUpTurn(
-      buildOrchestratorDeps(app, activeBranch),
+      buildOrchestratorDeps(app, null, activeBranch),
       { session, ctx, goal: fu.goal },
     );
     await app.sessionStore.save(

@@ -87,8 +87,12 @@ export const appConfigSchema = z.object({
   session: z.object({
     /** HMAC secret for signed session tokens (dev default only). */
     secret: z.string().min(16).default("dev-only-change-me-32chars!!"),
+    /** Auth token TTL in seconds (Bearer sessions). */
+    tokenTtlSeconds: z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
   }),
 });
+
+/** Holds the actor/resolver wiring knobs surfaced as a single auth block. */
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
 
@@ -138,6 +142,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     session: {
       secret: env.CHASTE_SESSION_SECRET,
+      tokenTtlSeconds: env.CHASTE_SESSION_TOKEN_TTL,
     },
   };
 

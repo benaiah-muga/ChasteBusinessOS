@@ -25,6 +25,7 @@
     "@chaste/module-messaging": "workspace:*",
     "@chaste/module-platform": "workspace:*",
     "@chaste/module-purchasing": "workspace:*",
+    "@chaste/runtime": "workspace:*",
     "@chaste/ui-schema": "workspace:*",
     "@fastify/cors": "^10.0.1",
     "drizzle-orm": "^0.38.3",

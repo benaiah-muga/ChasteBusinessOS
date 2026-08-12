@@ -65,6 +65,9 @@ importers:
       '@chaste/module-purchasing':
         specifier: workspace:*
         version: link:../../modules/purchasing
+      '@chaste/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       '@chaste/ui-schema':
         specifier: workspace:*
         version: link:../../packages/ui-schema
@@ -169,6 +172,9 @@ importers:
       '@chaste/module-purchasing':
         specifier: workspace:*
         version: link:../../modules/purchasing
+      '@chaste/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       drizzle-orm:
         specifier: ^0.38.3
         version: 0.38.4(@opentelemetry/api@1.9.1)(@types/react@19.2.17)(pg@8.22.0)(postgres@3.4.9)(react@19.2.7)
@@ -205,22 +211,6 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
-  modules/core-system:
-    dependencies:
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      zod:
-        specifier: ^3.24.1
-        version: 3.25.76
-    devDependencies:
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.20.1)
-
   modules/crm:
     dependencies:
       '@chaste/db':
@@ -232,22 +222,6 @@ importers:
       drizzle-orm:
         specifier: ^0.38.3
         version: 0.38.4(@opentelemetry/api@1.9.1)(@types/react@19.2.17)(pg@8.22.0)(postgres@3.4.9)(react@19.2.7)
-      zod:
-        specifier: ^3.24.1
-        version: 3.25.76
-    devDependencies:
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.20.1)
-
-  modules/demo-crm:
-    dependencies:
-      '@chaste/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -490,6 +464,55 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
+  packages/runtime:
+    dependencies:
+      '@chaste/ai-core':
+        specifier: workspace:*
+        version: link:../ai-core
+      '@chaste/config':
+        specifier: workspace:*
+        version: link:../config
+      '@chaste/db':
+        specifier: workspace:*
+        version: link:../db
+      '@chaste/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@chaste/module-accounting':
+        specifier: workspace:*
+        version: link:../../modules/accounting
+      '@chaste/module-crm':
+        specifier: workspace:*
+        version: link:../../modules/crm
+      '@chaste/module-hr':
+        specifier: workspace:*
+        version: link:../../modules/hr
+      '@chaste/module-inventory':
+        specifier: workspace:*
+        version: link:../../modules/inventory
+      '@chaste/module-manufacturing':
+        specifier: workspace:*
+        version: link:../../modules/manufacturing
+      '@chaste/module-messaging':
+        specifier: workspace:*
+        version: link:../../modules/messaging
+      '@chaste/module-platform':
+        specifier: workspace:*
+        version: link:../../modules/platform
+      '@chaste/module-purchasing':
+        specifier: workspace:*
+        version: link:../../modules/purchasing
+      drizzle-orm:
+        specifier: ^0.38.3
+        version: 0.38.4(@opentelemetry/api@1.9.1)(@types/react@19.2.17)(pg@8.22.0)(postgres@3.4.9)(react@19.2.7)
     devDependencies:
       typescript:
         specifier: ^5.7.2

@@ -45,7 +45,38 @@ export interface WakeStoreOptions {
   now?: () => Date;
 }
 
-export class WakeStore {
+/**
+ * Durable self-wake store contract. The kernel-adjacent `InMemoryWakeStore`
+ * (below) and `@chaste/runtime`'s Postgres-backed `PostgresWakeStore` (over
+ * `ai_wakes`) both implement this, so the orchestrator and any host swap
+ * stores freely.
+ */
+export interface WakeStore {
+  addTimer(
+    sessionId: string,
+    fireAt: Date,
+    opts?: { taskId?: string; proactiveText?: string; note?: string },
+  ): Promise<WakeRecord>;
+  addCompletion(
+    sessionId: string,
+    jobId: string,
+    opts?: { taskId?: string; proactiveText?: string; note?: string },
+  ): Promise<WakeRecord>;
+  addEvent(
+    sessionId: string,
+    eventKey: string,
+    opts?: { taskId?: string; proactiveText?: string; note?: string },
+  ): Promise<WakeRecord>;
+  due(now?: Date): Promise<WakeRecord[]>;
+  completeJob(jobId: string): Promise<WakeRecord[]>;
+  fireEvent(eventKey: string): Promise<WakeRecord[]>;
+  markFired(wakeId: string): Promise<void>;
+  pending(sessionId?: string): Promise<WakeRecord[]>;
+  reset(): Promise<void>;
+  inspect(): Promise<WakeRecord[]>;
+}
+
+export class InMemoryWakeStore implements WakeStore {
   private readonly wakes = new Map<string, WakeRecord>();
   private readonly now: () => Date;
 
@@ -53,11 +84,11 @@ export class WakeStore {
     this.now = opts.now ?? (() => new Date());
   }
 
-  addTimer(
+  async addTimer(
     sessionId: string,
     fireAt: Date,
     opts: { taskId?: string; proactiveText?: string; note?: string } = {},
-  ): WakeRecord {
+  ): Promise<WakeRecord> {
     return this.put({
       kind: "timer",
       sessionId,
@@ -66,11 +97,11 @@ export class WakeStore {
     });
   }
 
-  addCompletion(
+  async addCompletion(
     sessionId: string,
     jobId: string,
     opts: { taskId?: string; proactiveText?: string; note?: string } = {},
-  ): WakeRecord {
+  ): Promise<WakeRecord> {
     return this.put({
       kind: "completion",
       sessionId,
@@ -79,11 +110,11 @@ export class WakeStore {
     });
   }
 
-  addEvent(
+  async addEvent(
     sessionId: string,
     eventKey: string,
     opts: { taskId?: string; proactiveText?: string; note?: string } = {},
-  ): WakeRecord {
+  ): Promise<WakeRecord> {
     return this.put({
       kind: "event",
       sessionId,
@@ -93,7 +124,7 @@ export class WakeStore {
   }
 
   /** Timer wakes whose fire time has passed + completion/event wakes that have been signaled. */
-  due(now: Date = this.now()): WakeRecord[] {
+  async due(now: Date = this.now()): Promise<WakeRecord[]> {
     const out: WakeRecord[] = [];
     for (const w of this.wakes.values()) {
       if (w.state === "fired") continue;
@@ -114,16 +145,16 @@ export class WakeStore {
   }
 
   /** Mark every completion wake for `jobId` as due (the job exited). Returns the marked rows. */
-  completeJob(jobId: string): WakeRecord[] {
+  async completeJob(jobId: string): Promise<WakeRecord[]> {
     return this.markDue((w) => w.kind === "completion" && w.jobId === jobId);
   }
 
   /** Mark every event wake for `eventKey` as due (a connector/webhook fired). */
-  fireEvent(eventKey: string): WakeRecord[] {
+  async fireEvent(eventKey: string): Promise<WakeRecord[]> {
     return this.markDue((w) => w.kind === "event" && w.eventKey === eventKey);
   }
 
-  markFired(wakeId: string): void {
+  async markFired(wakeId: string): Promise<void> {
     const w = this.wakes.get(wakeId);
     if (w) {
       w.state = "fired";
@@ -131,7 +162,7 @@ export class WakeStore {
     }
   }
 
-  pending(sessionId?: string): WakeRecord[] {
+  async pending(sessionId?: string): Promise<WakeRecord[]> {
     return [...this.wakes.values()].filter(
       (w) => w.state !== "fired" && (sessionId == null || w.sessionId === sessionId),
     );
@@ -139,11 +170,11 @@ export class WakeStore {
 
   // ---- test/debug helpers --------------------------------------------------
 
-  reset(): void {
+  async reset(): Promise<void> {
     this.wakes.clear();
   }
 
-  inspect(): WakeRecord[] {
+  async inspect(): Promise<WakeRecord[]> {
     return [...this.wakes.values()];
   }
 
@@ -184,19 +215,19 @@ export interface SelfWakeTools {
   sleepFor: (
     seconds: number,
     note?: string,
-  ) => { ok: true; wakeId: string; fireAt: string };
+  ) => Promise<{ ok: true; wakeId: string; fireAt: string }>;
   sleepUntil: (
     isoTimestamp: string,
     note?: string,
-  ) => { ok: true; wakeId: string; fireAt: string };
+  ) => Promise<{ ok: true; wakeId: string; fireAt: string }>;
   wakeOnJob: (
     jobId: string,
     note?: string,
-  ) => { ok: true; wakeId: string; jobId: string };
+  ) => Promise<{ ok: true; wakeId: string; jobId: string }>;
   wakeOnEvent: (
     eventKey: string,
     note?: string,
-  ) => { ok: true; wakeId: string; eventKey: string };
+  ) => Promise<{ ok: true; wakeId: string; eventKey: string }>;
 }
 
 /**
@@ -210,23 +241,23 @@ export function selfWakeTools(
   sessionId: string,
   opts: { taskId?: string; proactiveText?: string } = {},
 ): SelfWakeTools {
-  function sleepFor(seconds: number, note?: string) {
+  async function sleepFor(seconds: number, note?: string) {
     const when = new Date(Date.now() + Math.max(0, Math.trunc(seconds) * 1000));
-    const w = store.addTimer(sessionId, when, { ...opts, note });
+    const w = await store.addTimer(sessionId, when, { ...opts, note });
     return { ok: true as const, wakeId: w.id, fireAt: w.fireAt! };
   }
-  function sleepUntil(isoTimestamp: string, note?: string) {
+  async function sleepUntil(isoTimestamp: string, note?: string) {
     const when = new Date(isoTimestamp);
     if (Number.isNaN(when.getTime())) throw new Error(`invalid iso timestamp: ${isoTimestamp}`);
-    const w = store.addTimer(sessionId, when, { ...opts, note });
+    const w = await store.addTimer(sessionId, when, { ...opts, note });
     return { ok: true as const, wakeId: w.id, fireAt: w.fireAt! };
   }
-  function wakeOnJob(jobId: string, note?: string) {
-    const w = store.addCompletion(sessionId, jobId, { ...opts, note });
+  async function wakeOnJob(jobId: string, note?: string) {
+    const w = await store.addCompletion(sessionId, jobId, { ...opts, note });
     return { ok: true as const, wakeId: w.id, jobId };
   }
-  function wakeOnEvent(eventKey: string, note?: string) {
-    const w = store.addEvent(sessionId, eventKey, { ...opts, note });
+  async function wakeOnEvent(eventKey: string, note?: string) {
+    const w = await store.addEvent(sessionId, eventKey, { ...opts, note });
     return { ok: true as const, wakeId: w.id, eventKey };
   }
   return { sleepFor, sleepUntil, wakeOnJob, wakeOnEvent };

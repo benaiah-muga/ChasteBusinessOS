@@ -5,8 +5,9 @@
  * multi-tenant command-bus world. Where OpenWorker writes JSON files to the local
  * machine, the kernel store remains pure logic; the durable Postgres schema for
  * the same records lives in `@chaste/db` (`pending_approvals`) and a
- * Postgres-backed `InboxStore` can implement this interface against that table —
- * so callers swap stores freely.
+ * Postgres-backed `PostgresInboxStore` (in `@chaste/runtime`) implements the
+ * `InboxStore` interface below against that table — so callers swap stores
+ * freely.
  *
  * Anti-race contract (verbatim from OpenWorker): each item is `pending → resolved`,
  * resolved **once**, idempotent + first-responder-wins — so answering from any
@@ -138,7 +139,43 @@ export interface InboxStoreOptions {
   now?: () => Date;
 }
 
-export class InboxStore {
+/**
+ * The canonical human-attention queue contract. Both the kernel's
+ * `InMemoryInboxStore` and `@chaste/runtime`'s Postgres-backed
+ * `PostgresInboxStore` implement this interface, so the orchestrator and any
+ * host swap stores freely without changing behavior. `wait()` is a
+ * single-process affordance (tests, same-process approval flows); cross-process
+ * hosts poll `pending()`/`list()` instead.
+ */
+export interface InboxStore {
+  addApproval(input: AddApprovalInput): Promise<InboxItem>;
+  addQuestion(input: AddQuestionInput): Promise<InboxItem>;
+  addNotification(input: AddNotificationInput): Promise<InboxItem>;
+  addPlan(input: AddPlanInput): Promise<InboxItem>;
+  get(itemId: string): Promise<InboxItem | undefined>;
+  list(filter?: {
+    sessionId?: string;
+    organizationId?: string;
+    state?: InboxState;
+    visibility?: InboxVisibility;
+    kind?: InboxKind;
+  }): Promise<InboxItem[]>;
+  pending(filter?: { sessionId?: string; organizationId?: string }): Promise<InboxItem[]>;
+  resolve(itemId: string, resolution: string): Promise<boolean>;
+  resolveSession(sessionId: string, resolution?: string): Promise<number>;
+  standingRuleFor(opts: {
+    taskId?: string;
+    sessionId: string;
+    commandId: string;
+    target: string;
+  }): Promise<StandingRuleDecision | null>;
+  inspectStandingRules(): Promise<StandingRules>;
+  reset(): Promise<void>;
+  wait(itemId: string): Promise<string>;
+  reconcile(sessionId: string): Promise<{ pending: InboxItem[]; recap: InboxItem[] }>;
+}
+
+export class InMemoryInboxStore implements InboxStore {
   private readonly items = new Map<string, InboxItem>();
   private readonly waiters = new Map<string, Array<(resolution: string) => void>>();
   /** task_id → (command_id → set[allowed targets]); sessions without a task fall back to their id. */
@@ -150,7 +187,7 @@ export class InboxStore {
   }
 
   /** Idempotent by (sessionId, toolCallId): a resume re-raises the same prompt. */
-  addApproval(input: AddApprovalInput): InboxItem {
+  async addApproval(input: AddApprovalInput): Promise<InboxItem> {
     if (input.toolCallId) {
       const existing = this.forToolCall(input.sessionId, input.toolCallId);
       if (existing) return existing;
@@ -162,7 +199,7 @@ export class InboxStore {
     });
   }
 
-  addQuestion(input: AddQuestionInput): InboxItem {
+  async addQuestion(input: AddQuestionInput): Promise<InboxItem> {
     if (input.toolCallId) {
       const existing = this.forToolCall(input.sessionId, input.toolCallId);
       if (existing) return existing;
@@ -177,7 +214,7 @@ export class InboxStore {
     });
   }
 
-  addNotification(input: AddNotificationInput): InboxItem {
+  async addNotification(input: AddNotificationInput): Promise<InboxItem> {
     return this.put({
       kind: "notification",
       ...input,
@@ -185,7 +222,7 @@ export class InboxStore {
     });
   }
 
-  addPlan(input: AddPlanInput): InboxItem {
+  async addPlan(input: AddPlanInput): Promise<InboxItem> {
     if (input.toolCallId) {
       const existing = this.forToolCall(input.sessionId, input.toolCallId);
       if (existing) return existing;
@@ -197,17 +234,17 @@ export class InboxStore {
     });
   }
 
-  get(itemId: string): InboxItem | undefined {
+  async get(itemId: string): Promise<InboxItem | undefined> {
     return this.items.get(itemId);
   }
 
-  list(filter: {
+  async list(filter: {
     sessionId?: string;
     organizationId?: string;
     state?: InboxState;
     visibility?: InboxVisibility;
     kind?: InboxKind;
-  } = {}): InboxItem[] {
+  } = {}): Promise<InboxItem[]> {
     const out: InboxItem[] = [];
     for (const item of this.items.values()) {
       if (filter.sessionId !== undefined && item.sessionId !== filter.sessionId) continue;
@@ -222,7 +259,7 @@ export class InboxStore {
     return out;
   }
 
-  pending(filter: { sessionId?: string; organizationId?: string } = {}): InboxItem[] {
+  async pending(filter: { sessionId?: string; organizationId?: string } = {}): Promise<InboxItem[]> {
     return this.list({ ...filter, state: "pending" });
   }
 
@@ -234,7 +271,7 @@ export class InboxStore {
    * eligible), the rule is minted/cached here so subsequent eligible calls
    * are auto-allowed.
    */
-  resolve(itemId: string, resolution: string): boolean {
+  async resolve(itemId: string, resolution: string): Promise<boolean> {
     const item = this.items.get(itemId);
     if (!item || item.state === "resolved") return false;
 
@@ -269,10 +306,10 @@ export class InboxStore {
   }
 
   /** Resolve every still-pending item of a session (called when a session is deleted). */
-  resolveSession(sessionId: string, resolution = "session deleted"): number {
+  async resolveSession(sessionId: string, resolution = "session deleted"): Promise<number> {
     let closed = 0;
-    for (const item of this.pending({ sessionId })) {
-      if (this.resolve(item.id, resolution)) closed += 1;
+    for (const item of await this.pending({ sessionId })) {
+      if (await this.resolve(item.id, resolution)) closed += 1;
     }
     return closed;
   }
@@ -281,12 +318,12 @@ export class InboxStore {
    * Check whether a call is allowed by an existing standing rule.
    * Returns the triggering rule string when yes; `null` when no.
    */
-  standingRuleFor(opts: {
+  async standingRuleFor(opts: {
     taskId?: string;
     sessionId: string;
     commandId: string;
     target: string;
-  }): StandingRuleDecision | null {
+  }): Promise<StandingRuleDecision | null> {
     const ownerKey = opts.taskId ?? opts.sessionId;
     const cmds = this.rules.get(ownerKey);
     if (!cmds) return null;
@@ -301,19 +338,19 @@ export class InboxStore {
   }
 
   /** Test/debug hook — exposes the rule table without exposing internals. */
-  inspectStandingRules(): StandingRules {
+  async inspectStandingRules(): Promise<StandingRules> {
     return { byOwner: this.rules };
   }
 
   /** Test/debug hook — clears the store. Not used by the orchestrator. */
-  reset(): void {
+  async reset(): Promise<void> {
     this.items.clear();
     this.waiters.clear();
     this.rules.clear();
   }
 
   /** Promise that resolves with the recorded resolution when the item is answered. */
-  wait(itemId: string): Promise<string> {
+  async wait(itemId: string): Promise<string> {
     const item = this.items.get(itemId);
     if (item?.state === "resolved") return Promise.resolve(item.resolution ?? "");
     return new Promise((resolve) => {
@@ -327,10 +364,10 @@ export class InboxStore {
    * Surfaced by `reconcileOnResume` on the OpenWorker side; we route via
    * `pending({...})` from callers, so this is mostly a convenience.
    */
-  reconcile(sessionId: string): { pending: InboxItem[]; recap: InboxItem[] } {
+  async reconcile(sessionId: string): Promise<{ pending: InboxItem[]; recap: InboxItem[] }> {
     return {
-      pending: this.pending({ sessionId }),
-      recap: this.list({ sessionId, state: "resolved" }),
+      pending: await this.pending({ sessionId }),
+      recap: await this.list({ sessionId, state: "resolved" }),
     };
   }
 
