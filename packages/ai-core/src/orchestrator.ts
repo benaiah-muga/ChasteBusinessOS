@@ -5,6 +5,7 @@ import {
   type QueryRegistry,
   type RequestContext,
   executeCommand,
+  executeQuery,
   type CommandHelpers,
   FULL_AUTONOMOUS_WARNING,
   type ConversationMode,
@@ -625,6 +626,198 @@ const DAY_NAMES = [
   "friday",
   "saturday",
 ] as const;
+
+/**
+ * Deterministic schedule-question handling — the read side of the assistant.
+ *
+ * Recognizes natural "what do I have …" requests (schedule / agenda / tasks /
+ * meetings / reminders / calendar / appointments) with an optional day window
+ * (today, tomorrow, this week, next week, on <weekday>), and maps them to the
+ * same read queries a human would call (core.calendar.list / core.reminder.list
+ * / core.followup.list). Runs before the LLM so common questions are answered
+ * reliably even without a provider, and the "nothing scheduled" case returns a
+ * clear statement instead of a clarification or a made-up answer.
+ */
+function scheduleDayRange(
+  text: string,
+  now: Date = new Date(),
+): { from: string; to: string; label: string } | null {
+  const t = text.toLowerCase();
+  const dayOfWeek = t.match(/\bon\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
+  let start = new Date(todayStart);
+  let end: Date;
+  let label: string;
+
+  if (/\btomorrow\b/.test(t)) {
+    start.setDate(start.getDate() + 1);
+    end = new Date(start);
+    end.setHours(23, 59, 59, 999);
+    label = "tomorrow";
+  } else if (/\bnext week\b/.test(t)) {
+    start.setDate(start.getDate() + ((7 - start.getDay() + 1) % 7 || 7));
+    end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    label = "next week";
+  } else if (/\bthis week\b/.test(t)) {
+    start.setDate(start.getDate() - start.getDay() + 1);
+    end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    label = "this week";
+  } else if (dayOfWeek?.[1]) {
+    const target = DAY_NAMES.findIndex((d) => d.startsWith(dayOfWeek[1]!.slice(0, 3)));
+    let delta = (target - start.getDay() + 7) % 7;
+    if (delta === 0) delta = 7;
+    start.setDate(start.getDate() + delta);
+    end = new Date(start);
+    end.setHours(23, 59, 59, 999);
+    label = `on ${dayOfWeek[1].toLowerCase()}`;
+  } else {
+    end = new Date(todayStart);
+    end.setHours(23, 59, 59, 999);
+    label = "today";
+  }
+
+  return { from: start.toISOString(), to: end.toISOString(), label };
+}
+
+const SCHEDULE_QUESTION_READ_MARKERS =
+  /\b(?:what|what'?s|what is|what are|do i have|does my|do we have|how many|any|show me|tell me|is there|are there|when|did i|have i)\b/i;
+
+const SCHEDULE_QUESTION_POSSESSIVE =
+  /\b(?:my|our|the|his|her|your)\s+(?:schedule|calendar|agenda|tasks|meetings|events|appointments|reminders|plans)\b/i;
+
+const SCHEDULE_QUESTION_NOUNS =
+  /\b(?:tasks|task|schedule|agenda|calendar|meetings|meeting|events|event|appointments|appointment|reminders|reminder|plans|plan|todo|todos|to-dos|itinerary)\b/i;
+
+const SCHEDULE_ACTION_VERBS =
+  /\b(?:create|add|make|register|set\s+up|book|block|remind|run|prepare|delete|remove|cancel|update|edit|move|schedule\s+(?:a|an|the|this|that|in|for|on|into|it|us))\b/i;
+
+export function planScheduleQuestion(
+  text: string,
+  now: Date = new Date(),
+): {
+  queries: { name: string; input: Record<string, unknown> }[];
+  summary: string;
+  range: { from: string; to: string; label: string };
+} | null {
+  if (SCHEDULE_ACTION_VERBS.test(text)) return null;
+  const hasMarker =
+    SCHEDULE_QUESTION_READ_MARKERS.test(text) || SCHEDULE_QUESTION_POSSESSIVE.test(text);
+  if (!hasMarker) return null;
+  if (!SCHEDULE_QUESTION_NOUNS.test(text)) return null;
+  const range = scheduleDayRange(text, now);
+  if (!range) return null;
+  return {
+    queries: [
+      { name: "core.calendar.list", input: { from: range.from, to: range.to } },
+      { name: "core.reminder.list", input: {} },
+      { name: "core.followup.list", input: {} },
+    ],
+    summary: `Schedule for ${range.label}`,
+    range,
+  };
+}
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * Run read queries through the same bus humans use (executeQuery — permission +
+ * zod + request context) and render an answer, including a clear "nothing"
+ * statement when the window is empty.
+ */
+async function answerScheduleQuestion(
+  deps: OrchestratorDeps,
+  ctx: RequestContext,
+  plan: NonNullable<ReturnType<typeof planScheduleQuestion>>,
+): Promise<{ parts: UiPart[]; explanation: AiExplanation }> {
+  const { from, to, label } = plan.range;
+  const results: Record<string, unknown>[] = [];
+  const errors: string[] = [];
+  for (const q of plan.queries) {
+    try {
+      const res = await executeQuery(deps.queries, q.name, q.input, ctx);
+      results.push(res.data as Record<string, unknown>);
+    } catch (err) {
+      errors.push(`${q.name}: ${(err as Error).message}`);
+    }
+  }
+
+  const events = (results.find((r) => Array.isArray(r.events))?.events ?? []) as Record<
+    string,
+    unknown
+  >[];
+  const reminders = (results.find((r) => Array.isArray(r.reminders))?.reminders ?? []) as Record<
+    string,
+    unknown
+  >[];
+  const followUps = (results.find((r) => Array.isArray(r.followUps))?.followUps ?? []) as Record<
+    string,
+    unknown
+  >[];
+
+  const inRange = (fireAt: unknown): boolean => {
+    const t = new Date(fireAt as string).getTime();
+    return Number.isFinite(t) && t >= new Date(from).getTime() && t <= new Date(to).getTime();
+  };
+  const due = reminders.filter((r) => inRange(r.fireAt)).slice(0, 20);
+  const dueF = followUps.filter((f) => inRange(f.fireAt)).slice(0, 20);
+
+  const title = (r: Record<string, unknown>) => String(r.title ?? r.goal ?? "Untitled");
+  const rows = [
+    ...events.map((e) => ({ time: fmtTime(e.startsAt as string), type: "Meeting", title: title(e) })),
+    ...due.map((r) => ({ time: fmtTime(r.fireAt as string), type: "Reminder", title: title(r) })),
+    ...dueF.map((f) => ({ time: fmtTime(f.fireAt as string), type: "Follow-up", title: title(f) })),
+  ].sort((a, b) => a.time.localeCompare(b.time));
+
+  const total = rows.length;
+  const parts: UiPart[] = [
+    {
+      type: "text",
+      text:
+        total === 0
+          ? `You have nothing scheduled ${label === "today" ? "today" : label}.`
+          : `You have ${total} ${total === 1 ? "item" : "items"} on your schedule for ${label}:`,
+    },
+  ];
+  if (rows.length > 0) {
+    parts.push({
+      type: "table",
+      columns: [
+        { key: "time", label: "Time" },
+        { key: "type", label: "Type" },
+        { key: "title", label: "Title" },
+      ],
+      rows,
+    });
+  }
+  if (errors.length > 0) {
+    parts.push({
+      type: "text",
+      text: `(Some parts of your schedule couldn't be read: ${errors.join("; ")})`,
+    });
+  }
+
+  const explanation: AiExplanation = {
+    runId: crypto.randomUUID(),
+    summary: plan.summary,
+    reasons: ["Answered from org data via the read-query bus", "Schedule window resolved deterministically"],
+    rulesApplied: ["ai_manual_parity", "read_via_query_bus", "zod_validation_on_execute", "permission_check_on_execute"],
+    dataUsed: ["user message", "query catalog"],
+    autonomy: "recommend",
+    plannedCommand: plan.queries.map((q) => q.name).join(", "),
+  };
+
+  return { parts, explanation };
+}
 
 /**
  * Deterministic datetime phrase extraction for "remind me …" / "follow up …".
@@ -1500,9 +1693,53 @@ async function runAgentToolLoop(
 interface ParsedLlmResponse {
   command?: string;
   input?: Record<string, unknown>;
+  query?: string;
   clarify?: string[];
   plan?: { command: string; input?: Record<string, unknown>; description?: string }[];
   toolCall?: AgentToolCall;
+}
+
+/** Render the result of one or more read queries as an assistant answer. */
+function queryResultParts(
+  rows: { label: string; value: string }[],
+  text: string,
+  explanation: AiExplanation,
+): UiPart[] {
+  const parts: UiPart[] = [{ type: "text", text }];
+  if (rows.length > 0) {
+    parts.push({
+      type: "table",
+      columns: [
+        { key: "label", label: "Item" },
+        { key: "value", label: "Details" },
+      ],
+      rows,
+    });
+  }
+  parts.push(toExplanationPart(explanation));
+  return parts;
+}
+
+/** Flatten a query result object into display rows for a generic answer. */
+function rowsFromQueryData(data: Record<string, unknown>): { label: string; value: string }[] {
+  const arrs = Object.entries(data).filter(
+    ([, v]) => Array.isArray(v) && (v as unknown[]).length > 0,
+  );
+  if (arrs.length === 0) {
+    const scalar = Object.entries(data)
+      .filter(([, v]) => v != null && typeof v !== "object")
+      .map(([k, v]) => `${k}: ${String(v)}`);
+    return scalar.length ? [{ label: "Result", value: scalar.join(", ") }] : [];
+  }
+  return arrs.flatMap(([key, items]) =>
+    (items as Record<string, unknown>[]).map((item) => {
+      const detail = Object.entries(item)
+        .filter(([, v]) => v != null && v !== "" && typeof v !== "object")
+        .map(([k, v]) => `${k}=${String(v)}`)
+        .join(", ");
+      return { label: key.replace(/_/g, " "), value: detail || "(empty)" };
+    }),
+  );
 }
 
 export async function handleChatTurn(
@@ -1987,6 +2224,17 @@ async function writeSkillAudit(
   let planned: PlannedAction | null = rulePlans.length === 1 ? rulePlans[0]! : null;
   let multiPlan: PlannedAction[] | null = rulePlans.length > 1 ? rulePlans : null;
 
+  // Read-query intent (R11) — schedule/task questions are answered directly
+  // from org data through the same read-query bus a human uses. Runs before
+  // the LLM and before the write gates: reads are side-effect free, need no
+  // confirmation, and the "nothing scheduled" case gets a clear statement.
+  const schedulePlan = planScheduleQuestion(ruleText);
+  if (schedulePlan) {
+    const { parts, explanation } = await answerScheduleQuestion(deps, input.ctx, schedulePlan);
+    session.messages.push(msg("assistant", [...parts, toExplanationPart(explanation)]));
+    return { session, explanation };
+  }
+
   // R9 — read-only mode gate. In discuss/plan mode the orchestrator can still
   // plan and propose but cannot execute writes/exec. This check fires BEFORE
   // the LLM assist: rules that detected a write action emit a "describe in chat"
@@ -2042,18 +2290,20 @@ async function writeSkillAudit(
   // Optional LLM assist when rules miss (provider may be none). Runs a bounded
   // agent-tool loop (R5 self-wake / R7 skills) and retries once after a
   // context-overflow error with a no-LLM trim.
+  let llmQuery: { name: string; input: Record<string, unknown> } | undefined;
   if (!planned && !multiPlan && deps.provider && deps.provider.id !== "none") {
     const agentTools = agentToolList(deps);
+    const queryCatalog = deps.queries ? deps.queries.list() : [];
     const system =
-      `You map user requests to JSON actions using only: ${catalog.map((c) => c.name).join(", ")}.\n` +
-      `For a single action: {"command":"...","input":{...}}\n` +
-      `For multiple sequential actions: {"plan":[{"command":"...","input":{...},"description":"..."},{"command":"...","input":{...}}]}\n` +
+      `You are a business assistant. WRITE actions: {"command":"<name>","input":{...}} using only: ${catalog.map((c) => c.name).join(", ")}.\n` +
+      `READ questions (answering from data): {"query":"<name>","input":{...}} using only: ${queryCatalog.map((q) => q.name).join(", ")}.\n` +
+      `For multiple sequential write actions: {"plan":[{"command":"...","input":{...},"description":"..."},{"command":"...","input":{...}}]}\n` +
       `If ambiguous or missing required info: {"clarify":["question1","question2"]}\n` +
       `Do not copy field values from the [Learned context] block into a new plan; if a required field is absent from the request, reply {"clarify":[...]} instead.\n` +
       (agentTools
         ? `Before planning, you may call an agent tool to pull in context or schedule follow-ups.\nAvailable agent tools: ${agentTools}.\nTo call one, reply {"toolCall":{"name":"loadSkill","args":{"name":"..."}}} — you will receive the result and should then continue planning.\n`
         : "") +
-      `Reply JSON only. Never invent field values — use null for unknown required fields.`;
+      `Reply JSON only. Never invent field values — use null for unknown required fields. For a read question with no explicit date, default to today's range.`;
 
     let parsed: ParsedLlmResponse | null = null;
     try {
@@ -2135,6 +2385,17 @@ async function writeSkillAudit(
           specialist: catalog.find((c) => c.name === parsed.command)?.tags?.[0],
         };
       }
+      if (
+        !planned &&
+        !multiPlan &&
+        !parsed.command &&
+        !parsed.plan &&
+        !parsed.clarify &&
+        parsed.query &&
+        deps.queries?.list().some((q) => q.name === parsed.query)
+      ) {
+        llmQuery = { name: parsed.query, input: normalizeFieldNames(parsed.input ?? {}) };
+      }
     }
   }
 
@@ -2163,6 +2424,51 @@ async function writeSkillAudit(
         ]),
       );
       return { session };
+    }
+  }
+
+  // R11 — LLM read-query path. When the model answered a data question with a
+  // valid read query, run it through the same bus a human uses (permission +
+  // zod + request context). Reads are side-effect free, so no confirmation.
+  if (llmQuery) {
+    try {
+      const res = await executeQuery(deps.queries, llmQuery.name, llmQuery.input, input.ctx);
+      const rows = rowsFromQueryData(res.data as Record<string, unknown>);
+      const explanation: AiExplanation = {
+        runId: crypto.randomUUID(),
+        summary: `Read: ${llmQuery.name}`,
+        reasons: ["Answered from org data via the read-query bus"],
+        rulesApplied: ["ai_manual_parity", "read_via_query_bus", "zod_validation_on_execute", "permission_check_on_execute"],
+        dataUsed: ["user message", "query catalog", `provider:${deps.provider?.id ?? "none"}`],
+        autonomy: "recommend",
+        plannedCommand: llmQuery.name,
+      };
+      const text =
+        rows.length === 0
+          ? `Nothing found for ${llmQuery.name}.`
+          : `Here's what I found (${rows.length} ${rows.length === 1 ? "result" : "results"}):`;
+      session.messages.push(msg("assistant", queryResultParts(rows, text, explanation)));
+      return { session, explanation, inboxItemId: pendingInboxItemId };
+    } catch (err) {
+      session.messages.push(
+        msg("assistant", [
+          {
+            type: "error" as const,
+            message: `I couldn't read that: ${(err as Error).message}`,
+            code: "QUERY_FAILED",
+          },
+          toExplanationPart({
+            runId: crypto.randomUUID(),
+            summary: `Read failed: ${llmQuery.name}`,
+            reasons: [(err as Error).message],
+            rulesApplied: ["read_via_query_bus"],
+            dataUsed: ["user message", "query catalog", `provider:${deps.provider?.id ?? "none"}`],
+            autonomy: "recommend",
+            plannedCommand: llmQuery.name,
+          }),
+        ]),
+      );
+      return { session, inboxItemId: pendingInboxItemId };
     }
   }
 

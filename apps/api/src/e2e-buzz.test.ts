@@ -22,9 +22,7 @@ describe.skipIf(!hasDb)("buzz bridge webhook", () => {
   let threadId: string;
 
   function sign(payload: unknown): string {
-    return createHmac("sha256", SECRET)
-      .update(JSON.stringify(payload))
-      .digest("hex");
+    return createHmac("sha256", SECRET).update(JSON.stringify(payload)).digest("hex");
   }
 
   beforeAll(async () => {
@@ -46,13 +44,19 @@ describe.skipIf(!hasDb)("buzz bridge webhook", () => {
 
     const [member] = await app.db
       .insert(schema.users)
-      .values({ organizationId: orgId, email: `buzz-${Date.now()}@test.local`, displayName: "Buzz Member" })
+      .values({
+        organizationId: orgId,
+        email: `buzz-${Date.now()}@test.local`,
+        displayName: "Buzz Member",
+      })
       .returning();
 
     const created = (await fetch(`${base}/api/v1/commands/messaging.thread.create`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ input: { kind: "group", name: "Buzz Bridge Test", memberIds: [member!.id] } }),
+      body: JSON.stringify({
+        input: { kind: "group", name: "Buzz Bridge Test", memberIds: [member!.id] },
+      }),
     }).then((r) => r.json())) as { data: { id: string } };
     threadId = created.data.id;
   }, 60_000);
@@ -66,7 +70,7 @@ describe.skipIf(!hasDb)("buzz bridge webhook", () => {
     const res = await fetch(`${base}/api/v1/buzz/webhook`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ threadId, body: "hello" }),
+      body: JSON.stringify({ threadId, body: "hello", ts: Math.floor(Date.now() / 1000) }),
     });
     expect(res.status).toBe(401);
   });
@@ -77,16 +81,35 @@ describe.skipIf(!hasDb)("buzz bridge webhook", () => {
       headers: {
         "content-type": "application/json",
         "x-chaste-signature": createHmac("sha256", "wrong-secret")
-          .update(JSON.stringify({ threadId, body: "hello" }))
+          .update(JSON.stringify({ threadId, body: "hello", ts: Math.floor(Date.now() / 1000) }))
           .digest("hex"),
       },
-      body: JSON.stringify({ threadId, body: "hello" }),
+      body: JSON.stringify({ threadId, body: "hello", ts: Math.floor(Date.now() / 1000) }),
     });
     expect(res.status).toBe(401);
   });
 
+  it("rejects a replayed webhook with a stale timestamp (F18)", async () => {
+    const payload = {
+      threadId,
+      body: "stale",
+      ts: Math.floor(Date.now() / 1000) - 3600,
+    };
+    const res = await fetch(`${base}/api/v1/buzz/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-chaste-signature": sign(payload),
+      },
+      body: JSON.stringify(payload),
+    });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("BUZZ_STALE_TIMESTAMP");
+  });
+
   it("posts a valid signed message into the thread as its creator", async () => {
-    const payload = { threadId, body: "Hello from Buzz" };
+    const payload = { threadId, body: "Hello from Buzz", ts: Math.floor(Date.now() / 1000) };
     const res = await fetch(`${base}/api/v1/buzz/webhook`, {
       method: "POST",
       headers: {
@@ -110,7 +133,11 @@ describe.skipIf(!hasDb)("buzz bridge webhook", () => {
   });
 
   it("returns 404 for an unknown thread", async () => {
-    const payload = { threadId: "00000000-0000-0000-0000-000000000000", body: "lost" };
+    const payload = {
+      threadId: "00000000-0000-0000-0000-000000000000",
+      body: "lost",
+      ts: Math.floor(Date.now() / 1000),
+    };
     const res = await fetch(`${base}/api/v1/buzz/webhook`, {
       method: "POST",
       headers: {

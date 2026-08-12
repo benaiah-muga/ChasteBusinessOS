@@ -100,7 +100,9 @@ function createPollDriver(deps: ScheduleDriverDeps): ScheduleDriver {
       const { schedule, followUps } = deps;
       const fired = await schedule.processDueReminders();
       if (fired > 0) {
-        console.log(JSON.stringify({ service: "chaste-worker", action: "reminders_fired", count: fired }));
+        console.log(
+          JSON.stringify({ service: "chaste-worker", action: "reminders_fired", count: fired }),
+        );
       }
       const dueFollowUps = await schedule.claimDueFollowUps();
       for (const f of dueFollowUps) {
@@ -115,7 +117,6 @@ function createPollDriver(deps: ScheduleDriverDeps): ScheduleDriver {
               userId: f.userId,
               status: result.status,
               sessionId: result.sessionId,
-              goal: f.goal,
             }),
           );
         } catch (err) {
@@ -166,18 +167,14 @@ function createBullMqDriver(deps: ScheduleDriverDeps): ScheduleDriver {
       return enqueueDue(deps.schedule, {
         async enqueue(kind, id, delayMs) {
           const name = kind === "reminder" ? "scheduling.reminder.fire" : "scheduling.followup.run";
-          await queue.add(
-            name,
-            kind === "reminder" ? { reminderId: id } : { followUpId: id },
-            {
-              jobId: `${kind}-${id}`,
-              delay: delayMs,
-              attempts: 5,
-              backoff: { type: "exponential", delay: 5_000 },
-              removeOnComplete: { count: 1_000 },
-              removeOnFail: { count: 1_000 },
-            },
-          );
+          await queue.add(name, kind === "reminder" ? { reminderId: id } : { followUpId: id }, {
+            jobId: `${kind}-${id}`,
+            delay: delayMs,
+            attempts: 5,
+            backoff: { type: "exponential", delay: 5_000 },
+            removeOnComplete: { count: 1_000 },
+            removeOnFail: { count: 1_000 },
+          });
         },
       });
     },

@@ -55,6 +55,19 @@ export interface IdentityModuleOptions {
 
 const DEFAULT_AUTH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
+/**
+ * F13 — role permissions must be a subset of the shipped permission catalog.
+ * `*` (and any other un-catalogued string) is rejected so a role can never
+ * silently grant more than the platform defines.
+ */
+function assertValidRolePermissions(permissions: string[]): void {
+  const catalog = new Set(PERMISSION_CATALOG.map((p) => p.permission));
+  const unknown = permissions.filter((p) => !catalog.has(p));
+  if (unknown.length > 0) {
+    throw new ValidationError("Unknown permission(s) — not in the permission catalog", { unknown });
+  }
+}
+
 export function createIdentityModule(db: Db, opts: IdentityModuleOptions = {}): BusinessModule {
   const authTokenTtlMs = opts.authTokenTtlMs ?? DEFAULT_AUTH_TOKEN_TTL_MS;
   const tokenExpiresAt = () => new Date(Date.now() + authTokenTtlMs);
@@ -179,6 +192,8 @@ export function createIdentityModule(db: Db, opts: IdentityModuleOptions = {}): 
           }),
           output: z.object({ id: z.string(), key: z.string(), name: z.string() }),
           handler: async (input, ctx, helpers) => {
+            // F13 — only catalogued permissions can be assigned to roles.
+            assertValidRolePermissions(input.permissions);
             const tx = (helpers.db ?? db) as Db;
             const [role] = await tx
               .insert(schema.roles)
@@ -568,6 +583,8 @@ export function createIdentityModule(db: Db, opts: IdentityModuleOptions = {}): 
             }
 
             if (input.permissions !== undefined) {
+              // F13 — only catalogued permissions can be assigned to roles.
+              assertValidRolePermissions(input.permissions);
               // Replace all permissions
               await db
                 .delete(schema.rolePermissions)

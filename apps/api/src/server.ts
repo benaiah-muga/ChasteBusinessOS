@@ -268,7 +268,12 @@ export async function buildServer(appCtx?: AppContext) {
         .send({ message: "Buzz bridge is not configured", code: "BUZZ_NOT_CONFIGURED" });
     }
     const body = z
-      .object({ threadId: z.string().uuid(), body: z.string().min(1).max(8000) })
+      .object({
+        threadId: z.string().uuid(),
+        body: z.string().min(1).max(8000),
+        // F18 — anti-replay: unix-seconds timestamp covered by the signature.
+        ts: z.number().int().nonnegative(),
+      })
       .parse(req.body ?? {});
     const provided = String(req.headers["x-chaste-signature"] ?? "");
     const expected = createHmac("sha256", secret).update(JSON.stringify(body)).digest("hex");
@@ -278,6 +283,13 @@ export async function buildServer(appCtx?: AppContext) {
       return reply
         .status(401)
         .send({ message: "Invalid signature", code: "BUZZ_SIGNATURE_INVALID" });
+    }
+    // F18 — reject stale replayed webhooks (allow ≤5 min clock skew).
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSec - body.ts) > 300) {
+      return reply
+        .status(401)
+        .send({ message: "Stale webhook timestamp", code: "BUZZ_STALE_TIMESTAMP" });
     }
 
     const [thread] = await app.db
@@ -804,17 +816,10 @@ export async function buildServer(appCtx?: AppContext) {
   });
 
   server.get("/api/v1/audit", async (req) => {
-    const items = await app.audit.list(getAuth(req).sessionUser.organizationId, 100);
-    return {
-      items: items.map((e) => ({
-        id: e.id,
-        at: e.at.toISOString(),
-        action: e.action,
-        success: e.success,
-        actorKind: e.actorKind,
-        errorCode: e.errorCode,
-      })),
-    };
+    // F16 — audit reads go through the permissioned query bus (core.rbac.read),
+    // not a direct store call accessible to any authenticated user.
+    const result = await runQueryAsAuth(app, "core.audit.list", {}, getAuth(req), req.id);
+    return result.data as { items: unknown[] };
   });
 
   return { server, app };

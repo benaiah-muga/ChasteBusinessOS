@@ -20,6 +20,7 @@ export const aiProviderSchema = z.enum([
   "openai_compatible",
   "ollama",
   "nvidia_nim",
+  "auto",
 ]);
 
 export const appConfigSchema = z.object({
@@ -75,6 +76,11 @@ export const appConfigSchema = z.object({
     nvidiaApiKey: z.string().optional(),
     /** Nvidia NIM base URL override */
     nvidiaBaseUrl: z.string().url().optional(),
+    /**
+     * Prefer this detected coding agent when provider is "auto". Ignored if
+     * the agent isn't installed/authenticated (falls back to registry order).
+     */
+    codingAgentPrefer: z.string().nullable().default(null),
     /** R2 — where new approvals surface by default for attended sessions. */
     defaultInboxVisibility: z.enum(["inline", "inbox"]).default("inline"),
   }),
@@ -162,6 +168,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       baseUrl: env.CHASTE_AI_BASE_URL,
       nvidiaApiKey: env.NVIDIA_API_KEY,
       nvidiaBaseUrl: env.NVIDIA_BASE_URL,
+      codingAgentPrefer: env.CHASTE_AI_PREFER_CODING_AGENT ?? null,
       defaultInboxVisibility: env.CHASTE_DEFAULT_INBOX_VISIBILITY === "inbox" ? "inbox" : "inline",
     },
     observability: {
@@ -201,7 +208,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (
       parsed.data.allowFullAutonomous &&
       !parsed.data.ai.apiKey &&
-      parsed.data.ai.provider !== "ollama"
+      parsed.data.ai.provider !== "ollama" &&
+      parsed.data.ai.provider !== "auto"
     ) {
       // allow but warn via log level — full auto without LLM is still rule-based
     }
@@ -221,7 +229,11 @@ export function publicConfigView(cfg: AppConfig) {
     aiProvider: cfg.ai.provider,
     aiModel: cfg.ai.model,
     aiConfigured:
-      Boolean(cfg.ai.apiKey) || cfg.ai.provider === "ollama" || Boolean(cfg.ai.nvidiaApiKey),
+      Boolean(cfg.ai.apiKey) ||
+      cfg.ai.provider === "ollama" ||
+      Boolean(cfg.ai.nvidiaApiKey) ||
+      cfg.ai.provider === "auto",
+    preferredCodingAgent: cfg.ai.codingAgentPrefer,
     bootstrapEnabled: cfg.bootstrap.enabled,
     observabilityEnabled: cfg.observability.enabled,
     nvidiaConfigured: Boolean(cfg.ai.nvidiaApiKey),

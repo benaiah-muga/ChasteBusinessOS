@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
+  agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
+  Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +
+  credential as an `AiProvider`, so operators bring their own subscription
+  instead of configuring a second API key. Add an `AnthropicMessagesProvider`,
+  a data-driven agent registry in `@chaste/ai-core` (`coding-agents.ts`), and a
+  `prefer` override (`CHASTE_AI_PREFER_CODING_AGENT`). Agents are completion
+  backends only — no elevated privileges; OAuth-only agents (Cursor, Copilot,
+  Devin, …) are reported as installed for the self-dev handoff, not reused.
+  Docs: `docs/specs/coding-agent-reuse.md`, ADR 0013.
+
 - **Shared durable runtime (`@chaste/runtime`)** — a single `createRuntime(config, db)`
   factory builds the command/query registries, registers every shipped module once,
   and wires Postgres-backed stores (`pending_approvals`, `ai_wakes`, `ai_skills`).
@@ -109,6 +120,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **F9 — CORS allow-list** — the API now accepts only the configured
   `webOrigin` instead of reflecting any `Origin` header; non-browser
   (no-Origin) callers are unaffected.
+
+### Security (2026-08-08 — F10–F24 remediation)
+
+- **F10 — infra fails closed.** Prod Compose requires `CHASTE_SESSION_SECRET`,
+  `POSTGRES_PASSWORD`, and `REDIS_PASSWORD` (`:?` — no shipped defaults);
+  `CHASTE_BOOTSTRAP` defaults to `false` (first boot requires
+  `CHASTE_ADMIN_TOKEN`); Redis runs with mandatory auth; all runtime images
+  (`api`, `web`, `worker`, `migrate`) run as the non-root `node` user.
+- **F12 — audit log hygiene.** The command bus redacts sensitive free-text
+  inputs (`body`, `note`, `goal`, `salary`, credentials, …) before writing
+  `input_summary` (`kernel/src/redact.ts`); the worker no longer logs
+  follow-up `goal` text.
+- **F13 — role permissions are catalog-validated.** `core.role.create/update`
+  reject any permission not in `PERMISSION_CATALOG` — including `*` — so a role
+  can never silently grant more than the platform defines.
+- **F14 — backup restore is org-bound.** `core.backup.restore` refuses a
+  manifest whose `organizationId` differs from the caller's org.
+- **F15 — client-side token hygiene.** The web client clears the stored bearer
+  token on any 401 so an expired/revoked credential drops back to login.
+- **F16 — audit reads are permissioned.** `/api/v1/audit` now goes through the
+  `core.audit.list` query (requires `core.rbac.read`) instead of a direct
+  store call available to any authenticated user.
+- **F18 — Buzz webhook anti-replay.** Signed webhooks carry a unix-seconds `ts`
+  covered by the HMAC; payloads older than 5 minutes are rejected.
+- **F20 — legacy web forms authenticate.** `CreateVendorForm`,
+  `CreateProductForm`, and `HrActions` route through `apiFetch` (Bearer
+  attached) instead of raw `fetch` — no more "executes as the admin".
+- **F21 — security headers.** `next.config.mjs` adds CSP (with connect-src for
+  the API origin), `nosniff`, `DENY` framing, `Referrer-Policy: no-referrer`,
+  HSTS, and a restrictive `Permissions-Policy`.
+- **F23 — CI least-privilege.** `ci.yml` scopes `GITHUB_TOKEN` to
+  `contents: read` and adds a non-blocking `pnpm audit` step.
+- **F24 — reminders honor their channel.** `channel: email|both` now enqueues
+  an outbound email through the email outbox (delivered by the worker), instead
+  of being stored and never sent.
+- **Private overlay mesh (ADR 0012)** — opt-in `--profile mesh` adds a Headscale
+  control plane (`deploy/mesh/config.yaml` + `acl.json`) and Tailscale sidecars
+  for `api`/`web`/`worker`; host port publication can be disabled (`API_BIND=` /
+  `WEB_BIND=`) so services are reachable only over the tailnet.
 
 ### Fixed
 

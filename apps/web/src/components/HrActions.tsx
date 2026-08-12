@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getApiBaseUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 export function HrActions() {
   const [employeeNumber, setEmployeeNumber] = useState(`E-${Date.now().toString().slice(-4)}`);
@@ -16,23 +16,11 @@ export function HrActions() {
     setMsg(null);
     setBusy(true);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/v1/hr/employees`, {
+      // F20 — apiFetch attaches the Bearer token (execute as the user, not admin).
+      const body = (await apiFetch("/api/v1/hr/employees", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          employeeNumber,
-          fullName,
-          baseSalary: Number(salary),
-        }),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        message?: string;
-        fullName?: string;
-      };
-      if (!res.ok) {
-        setMsg(body.message ?? "Failed to add employee");
-        return;
-      }
+        body: JSON.stringify({ employeeNumber, fullName, baseSalary: Number(salary) }),
+      })) as { fullName?: string };
       setMsg(`Added ${body.fullName ?? fullName}`);
       window.location.reload();
     } catch (err) {
@@ -46,19 +34,10 @@ export function HrActions() {
     setMsg(null);
     setBusy(true);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/v1/hr/payroll`, {
+      const body = (await apiFetch("/api/v1/hr/payroll", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ periodLabel: period }),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        message?: string;
-        periodLabel?: string;
-      };
-      if (!res.ok) {
-        setMsg(body.message ?? "Failed to prepare payroll");
-        return;
-      }
+      })) as { periodLabel?: string };
       setMsg(`Prepared payroll ${body.periodLabel ?? period}`);
       window.location.reload();
     } catch (err) {

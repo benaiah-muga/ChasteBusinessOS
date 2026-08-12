@@ -17,6 +17,7 @@ import {
   createQueryRegistry,
   createRequestContext,
   defineCommand,
+  defineQuery,
   InMemoryAuditWriter,
   InMemoryOutboxWriter,
   InMemoryInboxStore,
@@ -3017,5 +3018,201 @@ describe("handleChatTurn — adaptive memory", () => {
     expect(
       deps.helpers.audit.entries.some((e) => e.action === "crm.customer.create" && e.success),
     ).toBe(true);
+  });
+});
+
+// ===================================================================
+// R11 — read-query path (schedule questions + LLM queries)
+// ===================================================================
+
+function makeScheduleQueries(opts: {
+  events?: { startsAt: string; title: string }[];
+  reminders?: { fireAt: string; title: string }[];
+  followUps?: { fireAt: string; goal: string }[];
+} = {}) {
+  const q = createQueryRegistry();
+  q.register(
+    defineQuery({
+      name: "core.calendar.list",
+      permissions: ["core.calendar.read"],
+      tags: ["core"],
+      input: z
+        .object({ from: z.string().optional(), to: z.string().optional() })
+        .default({}),
+      output: z.object({ events: z.array(z.any()) }),
+      handler: async (input) => ({
+        events: (opts.events ?? []).filter((e) => {
+          const t = new Date(e.startsAt).getTime();
+          if (input.from && t < new Date(input.from).getTime()) return false;
+          if (input.to && t > new Date(input.to).getTime()) return false;
+          return true;
+        }),
+      }),
+    }),
+  );
+  q.register(
+    defineQuery({
+      name: "core.reminder.list",
+      permissions: ["core.reminder.write"],
+      tags: ["core"],
+      input: z.object({}).default({}),
+      output: z.object({ reminders: z.array(z.any()) }),
+      handler: async () => ({ reminders: opts.reminders ?? [] }),
+    }),
+  );
+  q.register(
+    defineQuery({
+      name: "core.followup.list",
+      permissions: ["core.followup.write"],
+      tags: ["core"],
+      input: z.object({}).default({}),
+      output: z.object({ followUps: z.array(z.any()) }),
+      handler: async () => ({ followUps: opts.followUps ?? [] }),
+    }),
+  );
+  return q;
+}
+
+describe("handleChatTurn — schedule / read-query path (R11)", () => {
+  const now = new Date();
+  const later = new Date(now.getTime() + 60 * 60 * 1000);
+
+  it("answers 'what tasks do I have today?' from calendar events", async () => {
+    const deps = {
+      ...makeDeps(),
+      queries: makeScheduleQueries({
+        events: [{ startsAt: now.toISOString(), title: "Standup" }],
+      }),
+    };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "what tasks do I have for today?",
+      ctx: makeCtx({
+        permissions: new Set(["core.calendar.read", "core.reminder.write", "core.followup.write"]),
+      }),
+    });
+    const last = result.session.messages[result.session.messages.length - 1]!;
+    const table = last.parts.find((p) => p.type === "table") as
+      | { type: "table"; rows: { time: string; type: string; title: string }[] }
+      | undefined;
+    expect(table?.rows.some((r) => r.title === "Standup" && r.type === "Meeting")).toBe(true);
+    expect(result.session.pending).toBeUndefined();
+  });
+
+  it("says clearly when nothing is scheduled", async () => {
+    const deps = { ...makeDeps(), queries: makeScheduleQueries() };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "do I have any meetings today?",
+      ctx: makeCtx(),
+    });
+    const last = result.session.messages[result.session.messages.length - 1]!;
+    const text = last.parts
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join(" ");
+    expect(text).toMatch(/nothing scheduled/i);
+  });
+
+  it("lists reminders and follow-ups due in the window", async () => {
+    const deps = {
+      ...makeDeps(),
+      queries: makeScheduleQueries({
+        reminders: [{ fireAt: later.toISOString(), title: "Call Daniel" }],
+        followUps: [{ fireAt: later.toISOString(), goal: "Follow up on quote" }],
+      }),
+    };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "my schedule today",
+      ctx: makeCtx({
+        permissions: new Set(["core.calendar.read", "core.reminder.write", "core.followup.write"]),
+      }),
+    });
+    const last = result.session.messages[result.session.messages.length - 1]!;
+    const table = last.parts.find((p) => p.type === "table") as
+      | { type: "table"; rows: { time: string; type: string; title: string }[] }
+      | undefined;
+    expect(table?.rows.some((r) => r.title === "Call Daniel" && r.type === "Reminder")).toBe(true);
+    expect(table?.rows.some((r) => r.title === "Follow up on quote" && r.type === "Follow-up")).toBe(true);
+  });
+
+  it("does NOT treat a create request as a schedule question", async () => {
+    const deps = { ...makeDeps(), queries: makeScheduleQueries() };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "schedule a meeting for tomorrow",
+      ctx: makeCtx(),
+    });
+    const last = result.session.messages[result.session.messages.length - 1]!;
+    expect(last.parts.some((p) => p.type === "table")).toBe(false);
+  });
+
+  it("executes an LLM-chosen read query through the query bus", async () => {
+    const q = createQueryRegistry();
+    q.register(
+      defineQuery({
+        name: "acc.invoice.list",
+        permissions: ["acc.invoice.read"],
+        tags: ["accounting"],
+        input: z.object({ status: z.string().optional() }).default({}),
+        output: z.object({ invoices: z.array(z.any()) }),
+        handler: async () => ({
+          invoices: [{ number: "INV-900", total: "120.00", currency: "USD" }],
+        }),
+      }),
+    );
+    const deps = {
+      ...makeDeps(),
+      queries: q,
+      provider: new MockProvider(
+        JSON.stringify({ query: "acc.invoice.list", input: {} }),
+      ),
+    };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Any open invoices?",
+      ctx: makeCtx(),
+    });
+    const last = result.session.messages[result.session.messages.length - 1]!;
+    const table = last.parts.find((p) => p.type === "table") as
+      | { type: "table"; rows: Record<string, string>[] }
+      | undefined;
+    const flattened = JSON.stringify(table?.rows ?? []);
+    expect(flattened).toContain("INV-900");
+    expect(table).toBeDefined();
+    expect(result.session.pending).toBeUndefined();
+  });
+
+  it("surfaces a query error instead of a confirmation card", async () => {
+    const q = createQueryRegistry();
+    q.register(
+      defineQuery({
+        name: "acc.invoice.list",
+        permissions: ["acc.invoice.read"],
+        tags: ["accounting"],
+        input: z.object({}).default({}),
+        output: z.object({ invoices: z.array(z.any()) }),
+        handler: async () => {
+          throw new Error("db unavailable");
+        },
+      }),
+    );
+    const deps = {
+      ...makeDeps(),
+      queries: q,
+      provider: new MockProvider(JSON.stringify({ query: "acc.invoice.list", input: {} })),
+    };
+    const result = await handleChatTurn(deps, {
+      session: freshSession(),
+      userText: "Any open invoices?",
+      ctx: makeCtx(),
+    });
+    const last = result.session.messages[result.session.messages.length - 1]!;
+    const err = last.parts.find((p) => p.type === "error") as
+      | { type: "error"; code?: string }
+      | undefined;
+    expect(err?.code).toBe("QUERY_FAILED");
+    expect(result.session.pending).toBeUndefined();
   });
 });

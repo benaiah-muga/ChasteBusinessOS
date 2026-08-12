@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# F23 — default GITHUB_TOKEN is read-only; the release flow opts into writes.
+permissions:
+  contents: read
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -54,3 +58,6 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      # F23 — dependency advisories (non-blocking; surfaces warnings in the log).
+      - name: Audit dependencies (non-blocking)
+        run: pnpm audit --prod || echo "::warning::pnpm audit reported advisories (see step log)"

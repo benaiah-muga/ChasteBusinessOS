@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getApiBaseUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 export function CreateVendorForm() {
   const [name, setName] = useState("");
@@ -14,19 +14,12 @@ export function CreateVendorForm() {
     setMsg(null);
     setBusy(true);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/v1/purchasing/vendors`, {
+      // F20 — route through apiFetch so the Bearer token is attached and the
+      // action is executed/audited as the logged-in user, not the admin.
+      const body = (await apiFetch("/api/v1/purchasing/vendors", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name,
-          email: email.trim() || undefined,
-        }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { message?: string; name?: string };
-      if (!res.ok) {
-        setMsg(body.message ?? "Failed to create vendor");
-        return;
-      }
+        body: JSON.stringify({ name, email: email.trim() || undefined }),
+      })) as { name?: string };
       setMsg(`Created ${body.name ?? name}`);
       window.location.reload();
     } catch (err) {

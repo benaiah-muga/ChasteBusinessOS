@@ -62,6 +62,11 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
     code?: string;
   };
   if (!res.ok) {
+    // F15 — a 401 means the stored credential is invalid/expired; drop it so
+    // the UI falls back to login instead of silently acting as no one.
+    if (res.status === 401) {
+      setStoredAuthToken(null);
+    }
     const detail = body.message ?? res.statusText;
     const code = body.code ? ` (${body.code})` : "";
     throw new Error(`${detail}${code}`);

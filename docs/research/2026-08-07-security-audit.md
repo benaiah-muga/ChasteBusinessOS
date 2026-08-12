@@ -5,17 +5,24 @@
 **Method:** Manual source review of all 188 TypeScript sources + infra/CI + working-tree state (branch `fix/arch-3-identity-extract`).
 **Notable caveat:** The working tree is mid-refactor (ARCH-3: identity extraction). Findings reference the current working tree.
 
-> **Remediation status (2026-08-08):** F1–F9 are fixed on the
+> **Remediation status (2026-08-08):** F1–F24 are fixed on the
 > `fix/arch-3-identity-extract` branch (see `CHANGELOG.md` — "Security"
-> section, and ADRs `docs/adr/0011-api-keys.md` / `0012-headscale-overlay-network.md`).
+> sections, and ADRs `docs/adr/0011-api-keys.md` / `0012-headscale-overlay-network.md`).
 > F1's anonymous-admin fallback is now dev-only and fails closed in production;
 > F2's workflow conditions are a restricted predicate interpreter; F6 adds
-> fixed-window per-IP (login/chat) and per-user (chat) rate limiting without a
-> new dependency; F8 declares `riskClass` on email/backup commands so they
-> cannot auto-run below full autonomy; F9 replaces `origin: true` CORS with a
-> config-driven allow-list. New additions include org-scoped API keys. The
-> medium/low findings (prompt-injection hardening, F10 container root, etc.)
-> remain open.
+> per-IP/per-user rate limiting; F8 declares `riskClass` on email/backup
+> commands; F9 replaces `origin: true` CORS with a config-driven allow-list;
+> F10 makes the prod Compose fail closed (required secrets, mandatory Redis
+> auth, non-root containers); F12 redacts audit inputs; F13 catalog-validates
+> role permissions; F14 org-binds backup restore; F15 clears stale client
+> tokens; F16 permission-gates audit reads; F18 adds webhook anti-replay; F20
+> authenticates legacy web forms; F21 adds security headers; F23 scopes CI
+> tokens; F24 delivers email-channel reminders. New additions include org-scoped
+> API keys and an opt-in Headscale/Tailscale overlay (ADR 0012). F11
+> (prompt-injection hardening — nonce CSP, output-side guards) and F25
+> (direct-thread TOCTOU unique constraint) are documented follow-ups; F22
+> requires rotating the leaked NVIDIA key on the host and is operational, not
+> code.
 
 ---
 

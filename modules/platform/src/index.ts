@@ -1685,7 +1685,8 @@ export function createPlatformModule(
               .limit(1);
             if (!row || !row.storageKey) throw new NotFoundError("Backup");
             const store = createObjectStore();
-            const result = await restoreFromStore(db, store, row.storageKey);
+            // F14 — the manifest must belong to the caller's org.
+            const result = await restoreFromStore(db, store, row.storageKey, ctx.actor.organizationId);
             return {
               organizationId: result.organizationId,
               restoredTables: result.restoredTables,
@@ -2062,6 +2063,63 @@ export function createPlatformModule(
 
       queries.register(
         defineQuery({
+          name: "core.audit.list",
+          description: "List the org's audit trail (permissioned — F16)",
+          permissions: ["core.rbac.read"],
+          tags: ["core"],
+          input: z
+            .object({
+              limit: z.number().int().min(1).max(500).default(100),
+              action: z.string().optional(),
+              success: z.boolean().optional(),
+            })
+            .default({}),
+          output: z.object({
+            items: z.array(
+              z.object({
+                id: z.string(),
+                at: z.string(),
+                action: z.string(),
+                actorKind: z.string(),
+                actorUserId: z.string(),
+                success: z.boolean(),
+                errorCode: z.string().nullable(),
+                errorMessage: z.string().nullable(),
+              }),
+            ),
+          }),
+          handler: async (input, ctx) => {
+            const where = and(
+              eq(schema.auditLog.organizationId, ctx.actor.organizationId),
+              input.action ? eq(schema.auditLog.action, input.action) : undefined,
+              input.success !== undefined
+                ? eq(schema.auditLog.success, input.success)
+                : undefined,
+            );
+            const rows = await db
+              .select()
+              .from(schema.auditLog)
+              .where(where)
+              .orderBy(desc(schema.auditLog.at))
+              .limit(input.limit);
+            return {
+              items: rows.map((e) => ({
+                id: e.id,
+                at: e.at.toISOString(),
+                action: e.action,
+                actorKind: e.actorKind,
+                actorUserId: e.actorUserId,
+                success: e.success,
+                errorCode: e.errorCode,
+                errorMessage: e.errorMessage,
+              })),
+            };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
           name: "core.workflow.list",
           description: "List persisted workflows for the organization",
           permissions: ["core.workflow.read"],
@@ -2188,6 +2246,24 @@ export function createScheduleProcessor(db: Db) {
           resourceType: "reminder",
           resourceId: r.id,
         });
+        // F24 — `channel: email|both` must actually leave the platform: enqueue
+        // an outbound email row (the worker's email processor sends it). A
+        // reminder that only ever existed as a stored flag was a false promise.
+        if (r.channel === "email" || r.channel === "both") {
+          const [user] = await db
+            .select({ email: schema.users.email })
+            .from(schema.users)
+            .where(eq(schema.users.id, r.userId))
+            .limit(1);
+          if (user?.email) {
+            await db.insert(schema.emailOutbox).values({
+              organizationId: r.organizationId,
+              to: user.email,
+              subject: `Reminder: ${r.title}`,
+              body: [r.body ?? r.title, r.href ?? ""].filter(Boolean).join("\n\n"),
+            });
+          }
+        }
         return true;
       } catch (err) {
         // Record the failure on this reminder instead of aborting the batch.
