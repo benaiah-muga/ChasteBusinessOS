@@ -53,14 +53,18 @@ scale-out is introduced (Redis is wired but not yet load-bearing for outbox).
 
 ## Environment contract
 
-Required everywhere:
+Required everywhere (fail closed — no shipped defaults):
 
-| Variable                                                       | Notes                                                                |
-| -------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `DATABASE_URL`                                                 | `postgres://…` — must reach a `pgvector/pgvector:pg16`-compatible DB |
-| `CHASTE_SESSION_SECRET`                                        | ≥16 chars, HMAC session signing. Rotate via token expiry             |
-| `CHASTE_BOOTSTRAP`                                             | `true` on first boot to seed org + admin                             |
-| `CHASTE_ADMIN_EMAIL` / `CHASTE_ADMIN_NAME` / `CHASTE_ORG_NAME` | bootstrap identity                                                   |
+| Variable                                                       | Notes                                                                       |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                 | `postgres://…` — must reach a `pgvector/pgvector:pg16`-compatible DB        |
+| `CHASTE_SESSION_SECRET`                                        | ≥16 chars, HMAC session signing. Rotate via token expiry                    |
+| `POSTGRES_PASSWORD` \| `REDIS_PASSWORD`                        | DB/cache credentials — the prod Compose requires them (`:?`)                |
+| `CHASTE_BOOTSTRAP`                                             | `false` by default; set `true` + `CHASTE_ADMIN_TOKEN` on first boot         |
+| `CHASTE_ADMIN_EMAIL` / `CHASTE_ADMIN_NAME` / `CHASTE_ORG_NAME` | bootstrap identity                                                          |
+| `CHASTE_ALLOW_ANON_ADMIN`                                      | dev-only "no token ⇒ bootstrap admin" fallback; **production forces false** |
+| `CHASTE_ADMIN_TOKEN`                                           | static bootstrap-admin credential (≥16 chars), stored hashed at rest        |
+| `CHASTE_SESSION_TOKEN_TTL`                                     | bearer token TTL in seconds (default 30 days)                               |
 
 Optional (feature-dependent):
 
@@ -82,17 +86,62 @@ Backup object store prefers S3, then local dir, then none.
 
 ```bash
 export CHASTE_SESSION_SECRET="$(openssl rand -hex 24)"
+export POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+export REDIS_PASSWORD="$(openssl rand -hex 16)"
 export CHASTE_BACKUP_KEY="$(openssl rand -hex 32)"
+# first boot only:
+export CHASTE_BOOTSTRAP=true
+export CHASTE_ADMIN_TOKEN="$(openssl rand -hex 24)"
+export CHASTE_ADMIN_EMAIL=admin@example.com
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+The Compose file fails closed: it refuses to start without
+`CHASTE_SESSION_SECRET`, `POSTGRES_PASSWORD`, and `REDIS_PASSWORD`, and the
+containers run as the non-root `node` user (F10 remediation).
+
 - API → http://localhost:3001/health
 - Web → http://localhost:3000
-- Bootstrapped admin credentials are emitted to the api logs on first boot.
 
 Overrides for TLS/reverse proxy: set `API_URL`, `WEB_ORIGIN`, and
 `NEXT_PUBLIC_API_URL` to the public HTTPS origins. `WEB_ORIGIN` is the CORS
 allow-list origin of the web app; `API_URL` is the public origin of the API.
+
+## Private overlay mesh (Headscale + Tailscale clients) — ADR 0012
+
+An optional second security layer: a fully self-hosted private network. All
+containers run as the non-root `node` user; the mesh keeps every service —
+including Postgres and Redis, which never publish host ports — reachable only
+from authenticated, ACL-approved mesh peers.
+
+```bash
+# 1. Start the control plane + its own node:
+docker compose -f docker-compose.prod.yml --profile mesh up -d headscale
+
+# 2. Create a user and a preauth key (24h window):
+docker compose -f docker-compose.prod.yml --profile mesh exec headscale \
+  headscale users create chaste
+docker compose -f docker-compose.prod.yml --profile mesh exec headscale \
+  headscale preauthkeys create --user chaste --reusable --expiration 24h
+
+# 3. Re-run with the key (nodes join on boot) and hide host ports:
+export TAILSCALE_AUTH_KEY="$(the-key-from-step-2)"
+export API_BIND=          # empty → stop publishing :3001 to the host
+export WEB_BIND=          # empty → stop publishing :3000 to the host
+docker compose -f docker-compose.prod.yml --profile mesh up -d
+```
+
+Nodes (`api`, `web`, `worker`) join the tailnet via the `tailscale/tailscale`
+sidecars that share their network namespaces (`network_mode: service:…`), so
+your own devices (and future multi-host nodes) reach them at tailnet IPs.
+Outbound service ACLs are defined in `deploy/mesh/acl.json`
+(`tag:chaste-api` ⇄ db/cache, `tag:chaste-worker` ⇄ db/cache, operator ⇄ app).
+The Headscale control plane config lives in `deploy/mesh/config.yaml`; its
+`server_url` must be the address nodes can actually reach (set it to your
+host's tailnet/static IP if clients are remote).
+
+> The mesh is **infrastructure only** and does not replace app-level
+> authentication; it complements RBAC + API keys (see `docs/adr/0012-headscale-overlay-network.md`).
 
 ## Platform guides
 

@@ -7,8 +7,14 @@
  * to its own package.
  */
 import type { Db } from "@chaste/db";
-import { PERMISSION_CATALOG, hashAuthToken, schema } from "@chaste/db";
-import { ValidationError, defineCommand, defineQuery, type BusinessModule } from "@chaste/kernel";
+import { PERMISSION_CATALOG, hashAuthToken, hashApiKeySecret, schema } from "@chaste/db";
+import {
+  NotFoundError,
+  ValidationError,
+  defineCommand,
+  defineQuery,
+  type BusinessModule,
+} from "@chaste/kernel";
 import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
 
@@ -38,7 +44,33 @@ async function notifyUser(
   });
 }
 
-export function createIdentityModule(db: Db): BusinessModule {
+export interface IdentityModuleOptions {
+  /**
+   * F5 — bearer token TTL in milliseconds. Tokens minted by `core.user.invite`
+   * / `core.user.create` expire after this window (resolved by
+   * `resolveUserByToken`, which rejects expired tokens). Defaults to 90 days.
+   */
+  authTokenTtlMs?: number;
+}
+
+const DEFAULT_AUTH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * F13 — role permissions must be a subset of the shipped permission catalog.
+ * `*` (and any other un-catalogued string) is rejected so a role can never
+ * silently grant more than the platform defines.
+ */
+function assertValidRolePermissions(permissions: string[]): void {
+  const catalog = new Set(PERMISSION_CATALOG.map((p) => p.permission));
+  const unknown = permissions.filter((p) => !catalog.has(p));
+  if (unknown.length > 0) {
+    throw new ValidationError("Unknown permission(s) — not in the permission catalog", { unknown });
+  }
+}
+
+export function createIdentityModule(db: Db, opts: IdentityModuleOptions = {}): BusinessModule {
+  const authTokenTtlMs = opts.authTokenTtlMs ?? DEFAULT_AUTH_TOKEN_TTL_MS;
+  const tokenExpiresAt = () => new Date(Date.now() + authTokenTtlMs);
   return {
     manifest: {
       id: "identity",
@@ -52,6 +84,8 @@ export function createIdentityModule(db: Db): BusinessModule {
         "core.user.read",
         "core.role.manage",
         "core.role.assign",
+        "core.apikey.manage",
+        "core.apikey.read",
       ],
       capabilities: ["core.rbac"],
       specialist: {
@@ -158,6 +192,8 @@ export function createIdentityModule(db: Db): BusinessModule {
           }),
           output: z.object({ id: z.string(), key: z.string(), name: z.string() }),
           handler: async (input, ctx, helpers) => {
+            // F13 — only catalogued permissions can be assigned to roles.
+            assertValidRolePermissions(input.permissions);
             const tx = (helpers.db ?? db) as Db;
             const [role] = await tx
               .insert(schema.roles)
@@ -191,14 +227,18 @@ export function createIdentityModule(db: Db): BusinessModule {
             const [role] = await db
               .select()
               .from(schema.roles)
-              .where(and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)));
+              .where(
+                and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)),
+              );
             if (!role) {
               throw new ValidationError("Role not found", { roleId: input.roleId });
             }
             const [user] = await db
               .select()
               .from(schema.users)
-              .where(and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)));
+              .where(
+                and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)),
+              );
             if (!user) {
               throw new ValidationError("User not found", { userId: input.userId });
             }
@@ -241,7 +281,9 @@ export function createIdentityModule(db: Db): BusinessModule {
               const [role] = await db
                 .select()
                 .from(schema.roles)
-                .where(and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)));
+                .where(
+                  and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)),
+                );
               if (!role) {
                 throw new ValidationError("Role not found", { roleId: input.roleId });
               }
@@ -253,7 +295,11 @@ export function createIdentityModule(db: Db): BusinessModule {
                 organizationId: orgId,
                 email: input.email,
                 displayName: input.displayName,
-                authToken,
+                // F7 — at-rest the column holds only the digest; the raw token
+                // is returned exactly once (same as core.user.invite).
+                authToken: hashAuthToken(authToken),
+                // F5 — invite tokens expire.
+                tokenExpiresAt: tokenExpiresAt(),
               })
               .returning();
             if (input.roleId) {
@@ -298,7 +344,9 @@ export function createIdentityModule(db: Db): BusinessModule {
               const [role] = await db
                 .select()
                 .from(schema.roles)
-                .where(and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)));
+                .where(
+                  and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)),
+                );
               if (!role) {
                 throw new ValidationError("Role not found", { roleId: input.roleId });
               }
@@ -308,7 +356,10 @@ export function createIdentityModule(db: Db): BusinessModule {
                 .select()
                 .from(schema.branches)
                 .where(
-                  and(eq(schema.branches.id, input.branchId), eq(schema.branches.organizationId, orgId)),
+                  and(
+                    eq(schema.branches.id, input.branchId),
+                    eq(schema.branches.organizationId, orgId),
+                  ),
                 );
               if (!branch) {
                 throw new ValidationError("Branch not found", { branchId: input.branchId });
@@ -326,6 +377,8 @@ export function createIdentityModule(db: Db): BusinessModule {
                 // returned exactly once (see hashAuthToken in @chaste/db).
                 authToken: hashAuthToken(rawToken),
                 activeBranchId: input.branchId ?? null,
+                // F5 — invite tokens expire.
+                tokenExpiresAt: tokenExpiresAt(),
               })
               .returning();
 
@@ -379,7 +432,10 @@ export function createIdentityModule(db: Db): BusinessModule {
             const adminPerms = await db
               .select({ userId: schema.userRoles.userId })
               .from(schema.userRoles)
-              .innerJoin(schema.rolePermissions, eq(schema.userRoles.roleId, schema.rolePermissions.roleId))
+              .innerJoin(
+                schema.rolePermissions,
+                eq(schema.userRoles.roleId, schema.rolePermissions.roleId),
+              )
               .where(
                 or(
                   eq(schema.rolePermissions.permission, "core.user.manage"),
@@ -413,14 +469,18 @@ export function createIdentityModule(db: Db): BusinessModule {
             const [role] = await db
               .select()
               .from(schema.roles)
-              .where(and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)));
+              .where(
+                and(eq(schema.roles.id, input.roleId), eq(schema.roles.organizationId, orgId)),
+              );
             if (!role) {
               throw new ValidationError("Role not found", { roleId: input.roleId });
             }
             const [user] = await db
               .select()
               .from(schema.users)
-              .where(and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)));
+              .where(
+                and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)),
+              );
             if (!user) {
               throw new ValidationError("User not found", { userId: input.userId });
             }
@@ -432,9 +492,7 @@ export function createIdentityModule(db: Db): BusinessModule {
                 .from(schema.rolePermissions)
                 .where(eq(schema.rolePermissions.roleId, input.roleId));
               const hasAdminPerms = rolePerms.some(
-                (p) =>
-                  p.permission === "core.role.manage" ||
-                  p.permission === "core.user.manage",
+                (p) => p.permission === "core.role.manage" || p.permission === "core.user.manage",
               );
               if (hasAdminPerms) {
                 throw new ValidationError("Cannot remove admin role from yourself");
@@ -452,7 +510,10 @@ export function createIdentityModule(db: Db): BusinessModule {
               const otherAdminRoles = await db
                 .select({ roleId: schema.rolePermissions.roleId })
                 .from(schema.rolePermissions)
-                .innerJoin(schema.userRoles, eq(schema.rolePermissions.roleId, schema.userRoles.roleId))
+                .innerJoin(
+                  schema.userRoles,
+                  eq(schema.rolePermissions.roleId, schema.userRoles.roleId),
+                )
                 .where(
                   and(
                     eq(schema.userRoles.userId, input.userId),
@@ -518,13 +579,12 @@ export function createIdentityModule(db: Db): BusinessModule {
             if (input.description !== undefined) updates.description = input.description;
 
             if (Object.keys(updates).length > 0) {
-              await db
-                .update(schema.roles)
-                .set(updates)
-                .where(eq(schema.roles.id, input.roleId));
+              await db.update(schema.roles).set(updates).where(eq(schema.roles.id, input.roleId));
             }
 
             if (input.permissions !== undefined) {
+              // F13 — only catalogued permissions can be assigned to roles.
+              assertValidRolePermissions(input.permissions);
               // Replace all permissions
               await db
                 .delete(schema.rolePermissions)
@@ -579,7 +639,10 @@ export function createIdentityModule(db: Db): BusinessModule {
               const otherAdminRoles = await tx
                 .select({ roleId: schema.rolePermissions.roleId })
                 .from(schema.rolePermissions)
-                .innerJoin(schema.userRoles, eq(schema.rolePermissions.roleId, schema.userRoles.roleId))
+                .innerJoin(
+                  schema.userRoles,
+                  eq(schema.rolePermissions.roleId, schema.userRoles.roleId),
+                )
                 .where(
                   and(
                     eq(schema.userRoles.userId, userId),
@@ -589,9 +652,9 @@ export function createIdentityModule(db: Db): BusinessModule {
                     ),
                   ),
                 );
-              const otherRoleIds = [
-                ...new Set(otherAdminRoles.map((r) => r.roleId)),
-              ].filter((id) => id !== input.roleId);
+              const otherRoleIds = [...new Set(otherAdminRoles.map((r) => r.roleId))].filter(
+                (id) => id !== input.roleId,
+              );
               if (otherRoleIds.length === 0) {
                 throw new ValidationError(
                   `Cannot delete role: user ${userId} would have no admin permissions`,
@@ -649,9 +712,7 @@ export function createIdentityModule(db: Db): BusinessModule {
                 email: z.string(),
                 displayName: z.string(),
                 isActive: z.boolean(),
-                roles: z.array(
-                  z.object({ id: z.string(), key: z.string(), name: z.string() }),
-                ),
+                roles: z.array(z.object({ id: z.string(), key: z.string(), name: z.string() })),
                 createdAt: z.string(),
               }),
             ),
@@ -685,6 +746,170 @@ export function createIdentityModule(db: Db): BusinessModule {
             }
 
             return { users: result };
+          },
+        }),
+      );
+
+      // ─── API keys (org-scoped machine credentials with their own scopes) ──
+
+      commands.register(
+        defineCommand({
+          name: "core.apikey.create",
+          permissions: ["core.apikey.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
+          input: z.object({
+            name: z.string().min(1).max(80),
+            description: z.string().max(500).optional(),
+            scopes: z.array(z.string().min(1)).min(1).max(100),
+            expiresAt: z.string().datetime().optional(),
+          }),
+          output: z.object({
+            id: z.string(),
+            name: z.string(),
+            description: z.string().nullable(),
+            secret: z.string(),
+            prefix: z.string(),
+            scopes: z.array(z.string()),
+            expiresAt: z.string().nullable(),
+          }),
+          handler: async (input, ctx) => {
+            const orgId = ctx.actor.organizationId;
+            // Scopes must be a subset of the permission catalog; a key can never
+            // exceed what the platform ships (least privilege, validated here).
+            const catalog = new Set(PERMISSION_CATALOG.map((p) => p.permission));
+            const unknown = input.scopes.filter((s) => !catalog.has(s));
+            if (unknown.length > 0) {
+              throw new ValidationError("Unknown permission(s) in scopes", { unknown });
+            }
+            const secret = `chaste_${globalThis.crypto.randomUUID().replaceAll("-", "")}${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
+            const prefix = `chaste_${secret.slice(7, 15)}`;
+            const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
+            const [key] = await db
+              .insert(schema.apiKeys)
+              .values({
+                organizationId: orgId,
+                name: input.name,
+                description: input.description ?? null,
+                hashedSecret: hashApiKeySecret(secret),
+                prefix,
+                scopes: input.scopes,
+                status: "active",
+                createdByUserId: ctx.actor.userId,
+                expiresAt,
+              })
+              .returning();
+            return {
+              id: key!.id,
+              name: key!.name,
+              description: key!.description,
+              secret,
+              prefix: key!.prefix,
+              scopes: key!.scopes,
+              expiresAt: key!.expiresAt ? key!.expiresAt.toISOString() : null,
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.apikey.revoke",
+          permissions: ["core.apikey.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
+          input: z.object({ apiKeyId: z.string().uuid() }),
+          output: z.object({ id: z.string(), status: z.literal("revoked") }),
+          handler: async (input, ctx) => {
+            const rows = await db
+              .update(schema.apiKeys)
+              .set({ status: "revoked" })
+              .where(
+                and(
+                  eq(schema.apiKeys.id, input.apiKeyId),
+                  eq(schema.apiKeys.organizationId, ctx.actor.organizationId),
+                ),
+              )
+              .returning({ id: schema.apiKeys.id });
+            if (rows.length === 0) {
+              throw new NotFoundError("API key");
+            }
+            return { id: rows[0]!.id, status: "revoked" as const };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.apikey.rotate",
+          permissions: ["core.apikey.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "full_autonomous",
+          input: z.object({ apiKeyId: z.string().uuid() }),
+          output: z.object({ id: z.string(), secret: z.string(), prefix: z.string() }),
+          handler: async (input, ctx) => {
+            const secret = `chaste_${globalThis.crypto.randomUUID().replaceAll("-", "")}${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
+            const prefix = `chaste_${secret.slice(7, 15)}`;
+            const rows = await db
+              .update(schema.apiKeys)
+              .set({ hashedSecret: hashApiKeySecret(secret), prefix })
+              .where(
+                and(
+                  eq(schema.apiKeys.id, input.apiKeyId),
+                  eq(schema.apiKeys.organizationId, ctx.actor.organizationId),
+                ),
+              )
+              .returning({ id: schema.apiKeys.id });
+            if (rows.length === 0) {
+              throw new NotFoundError("API key");
+            }
+            return { id: rows[0]!.id, secret, prefix };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.apikey.list",
+          permissions: ["core.apikey.read"],
+          tags: ["core"],
+          input: z.object({}).default({}),
+          output: z.object({
+            items: z.array(
+              z.object({
+                id: z.string(),
+                name: z.string(),
+                description: z.string().nullable(),
+                prefix: z.string(),
+                scopes: z.array(z.string()),
+                status: z.string(),
+                createdByUserId: z.string(),
+                lastUsedAt: z.string().nullable(),
+                expiresAt: z.string().nullable(),
+                createdAt: z.string(),
+              }),
+            ),
+          }),
+          handler: async (_i, ctx) => {
+            const rows = await db
+              .select()
+              .from(schema.apiKeys)
+              .where(eq(schema.apiKeys.organizationId, ctx.actor.organizationId))
+              .orderBy(schema.apiKeys.createdAt);
+            return {
+              items: rows.map((k) => ({
+                id: k.id,
+                name: k.name,
+                description: k.description,
+                prefix: k.prefix,
+                scopes: k.scopes,
+                status: k.status,
+                createdByUserId: k.createdByUserId,
+                lastUsedAt: k.lastUsedAt ? k.lastUsedAt.toISOString() : null,
+                expiresAt: k.expiresAt ? k.expiresAt.toISOString() : null,
+                createdAt: k.createdAt.toISOString(),
+              })),
+            };
           },
         }),
       );

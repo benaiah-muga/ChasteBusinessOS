@@ -18,6 +18,7 @@ import {
   type WakeStore,
   type CompactionSummarizer,
   type CompletionRequest,
+  type MemoryStore,
 } from "@chaste/ai-core";
 import type { ChatMessage } from "@chaste/ui-schema";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
@@ -25,11 +26,14 @@ import {
   bootstrapPlatform,
   createCommandHelpers,
   createDb,
+  getUserByEmail,
   getUserWithOrg,
   PostgresAuditWriter,
   PostgresOutboxWriter,
   resolveUserPermissions,
   resolveUserByToken,
+  resolveApiKeyBySecret,
+  type ApiKeyPrincipal,
   DbMemoryStore,
   schema,
   type Db,
@@ -48,6 +52,7 @@ import {
   executeQuery,
   FULL_AUTONOMOUS_WARNING,
   NotFoundError,
+  PermissionError,
   type Actor,
   type CommandRegistry,
   type InboxStore,
@@ -87,6 +92,8 @@ export interface AppContext {
   outbox: PostgresOutboxWriter;
   sessionStore: SessionStore;
   memoryStore: DbMemoryStore;
+  /** AI memory (passive recall + explicit memory tools) over `org_memories`. */
+  memory: MemoryStore;
   /** R2 — the canonical human-attention queue (in-memory kernel store; durable `pending_approvals` table exists for the Postgres-backed swap). */
   inbox: InboxStore;
   /** R5 — durable self-wake records for scheduled re-entry. */
@@ -100,6 +107,80 @@ export interface AppContext {
   provider: AiProvider;
   tracer: AiTracer;
   workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
+}
+
+/**
+ * Build the bootstrap admin's session view from its id. `getUserWithOrg`
+ * fails closed (throws) when the row is gone, so callers can distinguish a
+ * truly-unresolvable principal from a plain permission/org read.
+ */
+async function sessionUserForBootstrapAdmin(
+  db: Db,
+  config: AppConfig,
+  adminUserId: string,
+): Promise<SessionUser> {
+  const permissions = await resolveUserPermissions(db, adminUserId);
+  const userRow = await getUserWithOrg(db, adminUserId);
+  if (!userRow) {
+    throw new Error("Bootstrap admin user not found after seed");
+  }
+  const autonomy = autonomyLevelSchema.catch(config.defaultAutonomy).parse(userRow.autonomy);
+  return {
+    id: userRow.userId,
+    organizationId: userRow.organizationId,
+    email: userRow.email,
+    displayName: userRow.displayName,
+    permissions,
+    autonomy,
+    orgName: userRow.orgName,
+    region: userRow.region,
+  };
+}
+
+/**
+ * Re-resolve the anonymous (dev-only) fallback session from the database.
+ *
+ * The boot-time `app.sessionUser` is a snapshot taken when the process started.
+ * When the DB is truncated/reseeded while the API is alive (test runs, manual
+ * resets, seed scripts), that snapshot's org/user ids point at deleted rows and
+ * every org-scoped query silently returns empty. Instead of trusting the cached
+ * snapshot, resolve the bootstrap admin fresh on each anonymous request:
+ *
+ *  - find the first org, then the bootstrap admin by `config.bootstrap.adminEmail`;
+ *  - if bootstrap is disabled, fall back to the first org's first user
+ *    (mirrors `bootstrapPlatform`'s disabled branch);
+ *  - if the org/admin rows are missing entirely (freshly-wiped DB), re-run the
+ *    idempotent `bootstrapPlatform` to re-seed, then re-read;
+ *  - keep `app.sessionUser` in sync so `actorFromSession`/`requestCtx`/`runChat`
+ *    fallback stay fresh for the whole process.
+ */
+async function resolveBootstrapSession(app: AppContext): Promise<SessionUser> {
+  const db = app.db;
+  const config = app.config;
+
+  const [org] = await db.select().from(schema.organizations).limit(1);
+  if (org) {
+    const admin = config.bootstrap.enabled
+      ? await getUserByEmail(db, org.id, config.bootstrap.adminEmail)
+      : (
+          await db
+            .select()
+            .from(schema.users)
+            .where(eq(schema.users.organizationId, org.id))
+            .limit(1)
+        )[0];
+    if (admin) {
+      const sessionUser = await sessionUserForBootstrapAdmin(db, config, admin.id);
+      app.sessionUser = sessionUser;
+      return sessionUser;
+    }
+  }
+
+  // DB was wiped under us — re-seed idempotently, then resolve the fresh admin.
+  const bootstrap = await bootstrapPlatform(db, config);
+  const sessionUser = await sessionUserForBootstrapAdmin(db, config, bootstrap.adminUserId);
+  app.sessionUser = sessionUser;
+  return sessionUser;
 }
 
 export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Promise<AppContext> {
@@ -128,24 +209,14 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
   const db = createDb(dbConfig);
   const bootstrap = await bootstrapPlatform(db, config);
 
-  const permissions = await resolveUserPermissions(db, bootstrap.adminUserId);
-  const userRow = await getUserWithOrg(db, bootstrap.adminUserId);
-  if (!userRow) {
-    throw new Error("Bootstrap admin user not found after seed");
+  // F1 — prod never reveals a generated admin credential; dev prints it once so
+  // a fresh local database can be driven over HTTP (the anonymous fallback is
+  // also still on in dev, but this gives a first real bearer credential).
+  if (bootstrap.adminAuthToken && config.nodeEnv !== "production") {
+    console.warn(`[auth] Bootstrap admin token (dev, show once): ${bootstrap.adminAuthToken}`);
   }
 
-  const autonomy = autonomyLevelSchema.catch(config.defaultAutonomy).parse(userRow.autonomy);
-
-  const sessionUser: SessionUser = {
-    id: userRow.userId,
-    organizationId: userRow.organizationId,
-    email: userRow.email,
-    displayName: userRow.displayName,
-    permissions,
-    autonomy,
-    orgName: userRow.orgName,
-    region: userRow.region,
-  };
+  const sessionUser = await sessionUserForBootstrapAdmin(db, config, bootstrap.adminUserId);
 
   // ARCH-4 — the shared runtime factory builds registries, registers every
   // module once, and wires the durable Postgres-backed stores
@@ -153,8 +224,19 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
   // same factory, so standing rules / wakes / skills minted here are honored
   // by scheduled follow-ups — no more process-local store drift.
   const runtime = await createRuntime(config, db);
-  const { commands, queries, modules, inbox, wakes, skills, audit, outbox, sessionStore, memoryStore } =
-    runtime;
+  const {
+    commands,
+    queries,
+    modules,
+    inbox,
+    wakes,
+    skills,
+    audit,
+    outbox,
+    sessionStore,
+    memoryStore,
+    memory,
+  } = runtime;
 
   const provider = createAiProvider(config.ai);
 
@@ -225,6 +307,7 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     outbox,
     sessionStore,
     memoryStore,
+    memory,
     inbox,
     wakes,
     skills,
@@ -260,10 +343,7 @@ export function requestCtx(app: AppContext, requestId?: string) {
  * ARCH-1 — build an `Actor` from an authenticated `AuthenticatedUser`.
  * Shared by the HTTP auth preHandler and the follow-up harness.
  */
-export function actorFromAuthenticatedUser(
-  au: AuthenticatedUser,
-  aiRunId?: string,
-): Actor {
+export function actorFromAuthenticatedUser(au: AuthenticatedUser, aiRunId?: string): Actor {
   return {
     kind: aiRunId ? "ai_assisted" : "user",
     userId: au.userId,
@@ -276,20 +356,38 @@ export function actorFromAuthenticatedUser(
 
 /**
  * ARCH-1 — resolve a per-request principal from an HTTP Authorization header.
+ *
+ * Two credential classes are supported:
+ *  - `Authorization: Bearer <user-token>` — a user bearer credential;
+ *  - `X-Api-Key: <secret>` — an org-scoped API key with its own permission scopes.
+ *
  * Returns the session user + actor whose permissions/org are used for the
- * request. Falls back to the bootstrap admin only when no token is supplied
- * (dev/legacy). An invalid token yields null (caller decides 401).
+ * request. When no credential is supplied we fall back to the bootstrap admin
+ * ONLY if `auth.allowAnonymousAdmin` is enabled (local dev); otherwise null.
+ * An invalid/revoked/expired credential always yields null (caller → 401).
  */
 export async function resolveRequestAuth(
   app: AppContext,
   authorizationHeader?: string,
+  apiKeyHeader?: string,
 ): Promise<RequestAuth | null> {
+  const apiKey = typeof apiKeyHeader === "string" ? apiKeyHeader.trim() : undefined;
+  if (apiKey) {
+    const ak = await resolveApiKeyBySecret(app.db, apiKey);
+    if (!ak) return null;
+    return apiKeyAuthToRequestAuth(app, ak);
+  }
+
   const token = extractBearerToken(authorizationHeader);
   if (!token) {
-    return {
-      sessionUser: app.sessionUser,
-      actor: actorFromSession(app),
-    };
+    if (app.config.auth.allowAnonymousAdmin) {
+      const sessionUser = await resolveBootstrapSession(app);
+      return {
+        sessionUser,
+        actor: actorFromSession(app),
+      };
+    }
+    return null;
   }
   const au = await resolveUserByToken(app.db, token);
   if (!au) return null;
@@ -307,6 +405,35 @@ export async function resolveRequestAuth(
     },
     actor: actorFromAuthenticatedUser(au),
   };
+}
+
+/**
+ * Build the session+actor view for an org API key. The actor is
+ * `kind: "api_key"`, carries the key's id as `clientId` (audit attribution),
+ * and its permissions are the key's declared scopes — never the creator's
+ * fuller role set.
+ */
+export function apiKeyAuthToRequestAuth(app: AppContext, ak: ApiKeyPrincipal): RequestAuth {
+  const displayName = `apikey:${ak.name}`;
+  const actor: Actor = {
+    kind: "api_key",
+    userId: ak.createdByUserId,
+    organizationId: ak.organizationId,
+    displayName,
+    clientId: ak.apiKeyId,
+    permissions: new Set(ak.scopes),
+  };
+  const sessionUser: SessionUser = {
+    id: ak.createdByUserId,
+    organizationId: ak.organizationId,
+    email: `api-key:${ak.apiKeyId}`,
+    displayName,
+    permissions: ak.scopes,
+    autonomy: app.config.defaultAutonomy,
+    orgName: ak.orgName,
+    region: ak.region,
+  };
+  return { sessionUser, actor };
 }
 
 export function extractBearerToken(header?: string): string | null {
@@ -379,7 +506,12 @@ export async function runQueryAsAuth(
 
 export async function refreshSessionUser(app: AppContext): Promise<void> {
   const userRow = await getUserWithOrg(app.db, app.sessionUser.id);
-  if (!userRow) return;
+  if (!userRow) {
+    // Cached principal no longer exists (DB reseeded) — re-resolve the
+    // bootstrap admin from live rows so the fallback session stays valid.
+    await resolveBootstrapSession(app);
+    return;
+  }
   const permissions = await resolveUserPermissions(app.db, app.sessionUser.id);
   app.sessionUser = {
     id: userRow.userId,
@@ -399,11 +531,17 @@ export async function runCommand(
   input: unknown,
   requestId?: string,
 ) {
-  return executeCommand(app.commands, name, input, requestCtx(app, requestId), createCommandHelpers({
-    audit: app.audit,
-    outbox: app.outbox,
-    db: app.db,
-  }));
+  return executeCommand(
+    app.commands,
+    name,
+    input,
+    requestCtx(app, requestId),
+    createCommandHelpers({
+      audit: app.audit,
+      outbox: app.outbox,
+      db: app.db,
+    }),
+  );
 }
 
 export async function runQuery(app: AppContext, name: string, input: unknown, requestId?: string) {
@@ -450,6 +588,7 @@ function buildOrchestratorDeps(
     inbox: app.inbox,
     wake: app.wakes,
     skills: app.skills,
+    memory: app.memory,
     compaction: app.compaction,
     defaultInboxVisibility: app.config.ai.defaultInboxVisibility,
     activeBranch,
@@ -461,7 +600,10 @@ export async function runChat(
   body: { sessionId?: string; message?: string; confirmId?: string; cancelId?: string },
   auth?: RequestAuth,
 ) {
-  const auth0: RequestAuth = auth ?? { sessionUser: app.sessionUser, actor: actorFromSession(app) };
+  const auth0: RequestAuth = auth ?? {
+    sessionUser: await resolveBootstrapSession(app),
+    actor: actorFromSession(app),
+  };
   const sessionUser = auth0.sessionUser;
   let sessionId = body.sessionId ?? crypto.randomUUID();
 
@@ -469,12 +611,17 @@ export async function runChat(
   // Only reuse org+user sticky session when the client omits sessionId.
   // An explicit unknown sessionId always starts a fresh conversation (isolation).
   let dbSession = await app.sessionStore.load(sessionId);
+  // F4 — sessions are private to their owner: loading another user's session
+  // (including its pending planned actions) is an IDOR and must be denied.
+  if (dbSession && dbSession.userId !== sessionUser.id) {
+    throw new PermissionError("session.access");
+  }
   let session: ChatSessionState;
   if (dbSession) {
     session = {
       id: dbSession.id,
       messages: dbSession.messages as ChatSessionState["messages"],
-      pending: dbSession.pending,
+      pending: dbSession.pending as ChatSessionState["pending"],
       unattended: dbSession.unattended ?? false,
       compactionState: dbSession.compactionState as ChatSessionState["compactionState"],
     };
@@ -488,7 +635,7 @@ export async function runChat(
       session = {
         id: existing.id,
         messages: existing.messages as ChatSessionState["messages"],
-        pending: existing.pending,
+        pending: existing.pending as ChatSessionState["pending"],
         unattended: existing.unattended ?? false,
         compactionState: existing.compactionState as ChatSessionState["compactionState"],
       };
@@ -512,16 +659,13 @@ export async function runChat(
     if (branch) activeBranch = branch;
   }
 
-  const result = await handleChatTurn(
-    buildOrchestratorDeps(app, auth0, activeBranch),
-    {
-      session,
-      userText: body.message,
-      confirmId: body.confirmId,
-      cancelId: body.cancelId,
-      ctx: requestCtxForAuth(auth0),
-    },
-  );
+  const result = await handleChatTurn(buildOrchestratorDeps(app, auth0, activeBranch), {
+    session,
+    userText: body.message,
+    confirmId: body.confirmId,
+    cancelId: body.cancelId,
+    ctx: requestCtxForAuth(auth0),
+  });
 
   // Persist to DB
   await app.sessionStore.save(
@@ -596,7 +740,7 @@ export async function runFollowUp(
     session = {
       id: dbSession.id,
       messages: dbSession.messages as ChatSessionState["messages"],
-      pending: dbSession.pending,
+      pending: dbSession.pending as ChatSessionState["pending"],
       unattended: dbSession.unattended ?? false,
       compactionState: dbSession.compactionState as ChatSessionState["compactionState"],
     };
@@ -607,7 +751,7 @@ export async function runFollowUp(
       session = {
         id: sticky.id,
         messages: sticky.messages as ChatSessionState["messages"],
-        pending: sticky.pending,
+        pending: sticky.pending as ChatSessionState["pending"],
         unattended: sticky.unattended ?? false,
         compactionState: sticky.compactionState as ChatSessionState["compactionState"],
       };
@@ -629,10 +773,11 @@ export async function runFollowUp(
   }
 
   try {
-    const result = await runFollowUpTurn(
-      buildOrchestratorDeps(app, null, activeBranch),
-      { session, ctx, goal: fu.goal },
-    );
+    const result = await runFollowUpTurn(buildOrchestratorDeps(app, null, activeBranch), {
+      session,
+      ctx,
+      goal: fu.goal,
+    });
     await app.sessionStore.save(
       sessionId,
       result.session.messages.map((m: ChatMessage) => ({
@@ -664,6 +809,7 @@ export async function runFollowUp(
 export async function buildWorkflow(
   app: AppContext,
   request: string,
+  auth: RequestAuth,
 ): Promise<{ workflow: WorkflowDefinition | null; error?: string }> {
   if (!app.workflowBuilder) {
     return {
@@ -676,10 +822,14 @@ export async function buildWorkflow(
   try {
     const workflow = await generateWorkflowFromNL(app.workflowBuilder, request);
     if (!workflow) {
-      return { workflow: null, error: "Failed to generate workflow from request. Try a more specific description." };
+      return {
+        workflow: null,
+        error: "Failed to generate workflow from request. Try a more specific description.",
+      };
     }
     // ARCH-5 — persist through the command bus so humans and AI share one path
-    // and the definition survives restarts. The active session's org owns it.
+    // and the definition survives restarts. Runs under the authenticated
+    // caller so org ownership + audit attribution match the requester (F3).
     const res = await executeCommand(
       app.commands,
       "core.workflow.create",
@@ -692,7 +842,7 @@ export async function buildWorkflow(
         steps: workflow.steps,
         createdBy: workflow.createdBy,
       },
-      requestCtx(app),
+      requestCtxForAuth(auth),
       createCommandHelpers({ audit: app.audit, outbox: app.outbox, db: app.db }),
     );
     return { workflow: res.data as WorkflowDefinition };
@@ -709,13 +859,14 @@ export async function executeWorkflowRun(
   workflowId: string,
   input: Record<string, unknown> = {},
   options: { approvedStepIds?: string[] } = {},
+  auth: RequestAuth,
 ) {
   // ARCH-5 — source the definition from Postgres, not process memory.
   const res = await executeQuery(
     app.queries,
     "core.workflow.get",
     { workflowId },
-    requestCtx(app),
+    requestCtxForAuth(auth),
   );
   const wf = res.data as WorkflowDefinition;
   if (!wf) {
@@ -724,7 +875,7 @@ export async function executeWorkflowRun(
 
   const ctx: WorkflowExecutionContext = {
     registry: app.commands,
-    requestCtx: requestCtx(app),
+    requestCtx: requestCtxForAuth(auth),
     helpers: createCommandHelpers({ audit: app.audit, outbox: app.outbox, db: app.db }),
   };
 

@@ -5,6 +5,7 @@ import {
   type QueryRegistry,
   type RequestContext,
   executeCommand,
+  executeQuery,
   type CommandHelpers,
   FULL_AUTONOMOUS_WARNING,
   type ConversationMode,
@@ -50,6 +51,8 @@ import {
   type SkillStore,
   type SkillTools,
   type SkillFile,
+  type SkillRecord,
+  type SkillRefinement,
 } from "./skills.js";
 import {
   selfWakeTools,
@@ -57,6 +60,7 @@ import {
   type SelfWakeTools,
 } from "./selfwake.js";
 import type { StandingRuleDecision } from "@chaste/kernel";
+import type { MemoryKind, MemoryRecord, MemoryStore } from "./memory.js";
 
 export interface PendingPlanStep {
   command: string;
@@ -71,7 +75,32 @@ export interface PendingConfirmation {
   createdAt: string;
   /** When set, confirmation executes all plan steps in order. */
   plan?: PendingPlanStep[];
+  /** Discriminator for the shared pending union (absent on legacy records). */
+  type?: "confirmation";
 }
+
+/**
+ * Natural-language clarification (docs/ai-intelligence-plan.md §2e). When the
+ * intent is recognized but required information is missing — either by the
+ * deterministic parser or the LLM assist path — the assistant parks a
+ * clarification instead of guessing. The user's answer on the next turn is
+ * merged through `probe` (a template with an `{answer}` placeholder) and the
+ * full plan/confirm pipeline re-runs. `command`/`input`/`plan` are optional
+ * purely so callers reading the shared pending union keep compiling; a real
+ * clarification never carries them.
+ */
+export interface PendingClarification {
+  id: string;
+  type: "clarification";
+  questions: string[];
+  probe: string;
+  createdAt: string;
+  command?: string;
+  input?: unknown;
+  plan?: PendingPlanStep[];
+}
+
+export type PendingState = PendingConfirmation | PendingClarification;
 
 /**
  * The orchestrator's in-process session shape. When the kernel `InboxStore` is
@@ -82,7 +111,7 @@ export interface PendingConfirmation {
 export interface ChatSessionState {
   id: string;
   messages: ChatMessage[];
-  pending?: PendingConfirmation;
+  pending?: PendingState;
   /** R3: when true, the orchestrator parks approvals in the Inbox, not inline. */
   unattended?: boolean;
   /** R6: persisted compaction state (boundary + summary + working state). */
@@ -138,6 +167,12 @@ export interface OrchestratorDeps {
    * per-turn catalog is injected and `loadSkill`/`saveSkill` become callable.
    */
   skills?: SkillStore;
+  /**
+   * Adaptive learning — org-scoped memory. When provided, prior learned context
+   * is passively recalled into the per-turn view, executions write memory, and
+   * the `memory.search`/`memory.store` agent tools become callable.
+   */
+  memory?: MemoryStore;
   /**
    * Background audit span for mechanical state extraction on compaction. When
    * unset, compaction's `workingState` is empty (preserved cap, fewer features).
@@ -409,11 +444,159 @@ async function withSkillContext(
   return copy;
 }
 
+// Cap for the passively-recalled memory block so it stays a small budgeted
+// context injection, not a transcript dump.
+const MEMORY_RECALL_LIMIT = 5;
+const MEMORY_RECALL_CHAR_CAP = 1200;
+
+/** Stopwords + the action/domain vocabulary never become recall terms. */
+const RECALL_STOPWORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "about", "any", "be", "by", "can", "could",
+  "create", "add", "new", "customer", "client", "vendor", "invoice", "bill",
+  "product", "employee", "payroll", "remind", "reminder", "follow", "please",
+  "for", "from", "get", "have", "has", "how", "is", "it", "kindly", "know",
+  "let", "me", "do", "does", "our", "the", "this", "that", "these", "those",
+  "to", "us", "we", "what", "when", "where", "which", "who", "will", "with",
+  "work", "business", "you", "your", "please", "notes", "internal",
+]);
+
+/** Derive a few concrete recall terms from the user's message. */
+function recallTerms(text: string): string[] {
+  const terms = new Set<string>();
+  for (const q of text.match(/\"([^\"]+)\"|'([^']+)'/g) ?? []) {
+    terms.add(q.replace(/["']/g, ""));
+  }
+  for (const tok of text.match(/[A-Za-z][A-Za-z0-9&.'-]{1,}/g) ?? []) {
+    const lower = tok.toLowerCase();
+    if (lower.length < 2 || RECALL_STOPWORDS.has(lower)) continue;
+    if (/[A-Z]/.test(tok) || /\d/.test(tok) || /[&'.-]/.test(tok)) terms.add(tok);
+    else terms.add(lower);
+  }
+  return [...terms].filter(Boolean).slice(0, 6);
+}
+
+/**
+ * Adaptive learning — passive recall. Recall the most-recent org-scoped memory
+ * entries that mention the user's current request, and inject a small bounded
+ * block of learned context into the outbound view (sibling of the skill
+ * catalog: appended to the last user message, never persisted).
+ */
+async function withMemoryContext(
+  messages: ChatMessage[],
+  deps: OrchestratorDeps,
+  organizationId: string,
+): Promise<ChatMessage[]> {
+  if (!deps.memory || messages.length === 0) return messages;
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  const query =
+    lastUser?.parts
+      .filter((p): p is Extract<UiPart, { type: "text" }> => p.type === "text")
+      .map((p) => p.text)
+      .join(" ")
+      .trim() ?? "";
+  if (!query) return messages;
+
+  const hits = new Map<string, MemoryRecord>();
+  for (const term of recallTerms(query)) {
+    try {
+      const found = await deps.memory.search(organizationId, term, MEMORY_RECALL_LIMIT);
+      for (const r of found) {
+        if (!hits.has(r.id)) hits.set(r.id, r);
+        if (hits.size >= MEMORY_RECALL_LIMIT * 3) break;
+      }
+    } catch {
+      // memory is best-effort; a failing store never breaks the turn
+    }
+  }
+  const lines = [...hits.values()]
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+    .map((r) => r.content.trim())
+    .filter(Boolean)
+    .slice(0, MEMORY_RECALL_LIMIT);
+  if (lines.length === 0) return messages;
+
+  let block =
+    "\n[Learned context from this workspace - these are RECORDS OF PAST EXECUTIONS only. " +
+    "Never copy their field values into a new plan. If a required field is missing from the current request, ask for it.]\n" +
+    lines.map((l) => `- ${l}`).join("\n");
+  if (block.length > MEMORY_RECALL_CHAR_CAP) {
+    block = block.slice(0, MEMORY_RECALL_CHAR_CAP) + "\n…";
+  }
+
+  const copy = messages.slice();
+  const last = copy[copy.length - 1]!;
+  if (last.role !== "user") return copy;
+  copy[copy.length - 1] = {
+    ...last,
+    parts: [...last.parts, { type: "text", text: block }],
+  };
+  return copy;
+}
+
+/** Human-readable execution summary for memory recall ("what did we set up?"). */
+function describeExecution(command: string, input: unknown, summary?: string): string {
+  const base = summary && summary !== `Execute ${command}` ? summary : command;
+  try {
+    const entries = Object.entries((input as Record<string, unknown>) ?? {}).filter(
+      ([, v]) => v != null && v !== "" && typeof v !== "object",
+    );
+    const detail = entries.map(([k, v]) => `${k}: ${String(v)}`).join(", ");
+    return detail ? `${base} (${detail})` : base;
+  } catch {
+    return base;
+  }
+}
+
+/** Record an executed action into org memory (kind long_term_org, deduped by key). */
+async function rememberExecution(
+  deps: OrchestratorDeps,
+  ctx: { organizationId: string; userId: string; sessionId?: string },
+  executed: { command: string; input: unknown; summary?: string },
+): Promise<void> {
+  if (!deps.memory) return;
+  try {
+    const content = describeExecution(executed.command, executed.input, executed.summary);
+    const key = `${executed.command}:${JSON.stringify(executed.input ?? {})}`.slice(0, 200);
+    await deps.memory.write({
+      organizationId: ctx.organizationId,
+      kind: "long_term_org" as MemoryKind,
+      key,
+      content: `Executed ${content}`,
+      metadata: { command: executed.command, input: executed.input },
+      userId: ctx.userId,
+      sessionId: ctx.sessionId,
+    });
+  } catch {
+    // memory is best-effort; never fail a business action on a write error
+  }
+}
+
 export interface PlannedAction {
   command: string;
   input: Record<string, unknown>;
   summary: string;
   specialist?: string;
+}
+
+/**
+ * §2e — when the previous turn asked a clarification, recap the questions and
+ * the user's answer into the outbound view so the LLM assist path replans with
+ * the full picture (the transcript's clarify part is not text-serialized to
+ * providers). Never persisted.
+ */
+function withClarifyAnswerContext(
+  messages: ChatMessage[],
+  ctx: { questions: string[]; answer: string },
+): ChatMessage[] {
+  const copy = messages.slice();
+  const last = copy[copy.length - 1]!;
+  if (last.role !== "user") return copy;
+  const recap = `\n[Earlier I asked: ${ctx.questions.join(" ")} The user replied: "${ctx.answer}". Resolve the original request with this answer.]`;
+  copy[copy.length - 1] = {
+    ...last,
+    parts: [...last.parts, { type: "text", text: recap }],
+  };
+  return copy;
 }
 
 /** Split compound requests into segments for multi-step planning. */
@@ -424,8 +607,10 @@ function splitCompoundRequest(text: string): string[] {
     .filter(Boolean);
   if (parts.length > 1) return parts;
 
-  // "create X and create Y" / "create X and also create Y"
-  const andCreate = text.split(/\s+and\s+(?=create\s+|prepare\s+)/i);
+  // "create X and create Y" / "create X and also create Y" / "… and add vendor Z"
+  const andCreate = text.split(
+    /\s+and\s+(?=(?:create|add|register|set up|make|prepare|run|hire|block|schedule)\s+|(?:vendor|product|customer|employee|invoice|bill|payroll)\s+)/i,
+  );
   if (andCreate.length > 1) {
     return andCreate.map((p) => p.trim()).filter(Boolean);
   }
@@ -441,6 +626,198 @@ const DAY_NAMES = [
   "friday",
   "saturday",
 ] as const;
+
+/**
+ * Deterministic schedule-question handling — the read side of the assistant.
+ *
+ * Recognizes natural "what do I have …" requests (schedule / agenda / tasks /
+ * meetings / reminders / calendar / appointments) with an optional day window
+ * (today, tomorrow, this week, next week, on <weekday>), and maps them to the
+ * same read queries a human would call (core.calendar.list / core.reminder.list
+ * / core.followup.list). Runs before the LLM so common questions are answered
+ * reliably even without a provider, and the "nothing scheduled" case returns a
+ * clear statement instead of a clarification or a made-up answer.
+ */
+function scheduleDayRange(
+  text: string,
+  now: Date = new Date(),
+): { from: string; to: string; label: string } | null {
+  const t = text.toLowerCase();
+  const dayOfWeek = t.match(/\bon\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
+  let start = new Date(todayStart);
+  let end: Date;
+  let label: string;
+
+  if (/\btomorrow\b/.test(t)) {
+    start.setDate(start.getDate() + 1);
+    end = new Date(start);
+    end.setHours(23, 59, 59, 999);
+    label = "tomorrow";
+  } else if (/\bnext week\b/.test(t)) {
+    start.setDate(start.getDate() + ((7 - start.getDay() + 1) % 7 || 7));
+    end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    label = "next week";
+  } else if (/\bthis week\b/.test(t)) {
+    start.setDate(start.getDate() - start.getDay() + 1);
+    end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    label = "this week";
+  } else if (dayOfWeek?.[1]) {
+    const target = DAY_NAMES.findIndex((d) => d.startsWith(dayOfWeek[1]!.slice(0, 3)));
+    let delta = (target - start.getDay() + 7) % 7;
+    if (delta === 0) delta = 7;
+    start.setDate(start.getDate() + delta);
+    end = new Date(start);
+    end.setHours(23, 59, 59, 999);
+    label = `on ${dayOfWeek[1].toLowerCase()}`;
+  } else {
+    end = new Date(todayStart);
+    end.setHours(23, 59, 59, 999);
+    label = "today";
+  }
+
+  return { from: start.toISOString(), to: end.toISOString(), label };
+}
+
+const SCHEDULE_QUESTION_READ_MARKERS =
+  /\b(?:what|what'?s|what is|what are|do i have|does my|do we have|how many|any|show me|tell me|is there|are there|when|did i|have i)\b/i;
+
+const SCHEDULE_QUESTION_POSSESSIVE =
+  /\b(?:my|our|the|his|her|your)\s+(?:schedule|calendar|agenda|tasks|meetings|events|appointments|reminders|plans)\b/i;
+
+const SCHEDULE_QUESTION_NOUNS =
+  /\b(?:tasks|task|schedule|agenda|calendar|meetings|meeting|events|event|appointments|appointment|reminders|reminder|plans|plan|todo|todos|to-dos|itinerary)\b/i;
+
+const SCHEDULE_ACTION_VERBS =
+  /\b(?:create|add|make|register|set\s+up|book|block|remind|run|prepare|delete|remove|cancel|update|edit|move|schedule\s+(?:a|an|the|this|that|in|for|on|into|it|us))\b/i;
+
+export function planScheduleQuestion(
+  text: string,
+  now: Date = new Date(),
+): {
+  queries: { name: string; input: Record<string, unknown> }[];
+  summary: string;
+  range: { from: string; to: string; label: string };
+} | null {
+  if (SCHEDULE_ACTION_VERBS.test(text)) return null;
+  const hasMarker =
+    SCHEDULE_QUESTION_READ_MARKERS.test(text) || SCHEDULE_QUESTION_POSSESSIVE.test(text);
+  if (!hasMarker) return null;
+  if (!SCHEDULE_QUESTION_NOUNS.test(text)) return null;
+  const range = scheduleDayRange(text, now);
+  if (!range) return null;
+  return {
+    queries: [
+      { name: "core.calendar.list", input: { from: range.from, to: range.to } },
+      { name: "core.reminder.list", input: {} },
+      { name: "core.followup.list", input: {} },
+    ],
+    summary: `Schedule for ${range.label}`,
+    range,
+  };
+}
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * Run read queries through the same bus humans use (executeQuery — permission +
+ * zod + request context) and render an answer, including a clear "nothing"
+ * statement when the window is empty.
+ */
+async function answerScheduleQuestion(
+  deps: OrchestratorDeps,
+  ctx: RequestContext,
+  plan: NonNullable<ReturnType<typeof planScheduleQuestion>>,
+): Promise<{ parts: UiPart[]; explanation: AiExplanation }> {
+  const { from, to, label } = plan.range;
+  const results: Record<string, unknown>[] = [];
+  const errors: string[] = [];
+  for (const q of plan.queries) {
+    try {
+      const res = await executeQuery(deps.queries, q.name, q.input, ctx);
+      results.push(res.data as Record<string, unknown>);
+    } catch (err) {
+      errors.push(`${q.name}: ${(err as Error).message}`);
+    }
+  }
+
+  const events = (results.find((r) => Array.isArray(r.events))?.events ?? []) as Record<
+    string,
+    unknown
+  >[];
+  const reminders = (results.find((r) => Array.isArray(r.reminders))?.reminders ?? []) as Record<
+    string,
+    unknown
+  >[];
+  const followUps = (results.find((r) => Array.isArray(r.followUps))?.followUps ?? []) as Record<
+    string,
+    unknown
+  >[];
+
+  const inRange = (fireAt: unknown): boolean => {
+    const t = new Date(fireAt as string).getTime();
+    return Number.isFinite(t) && t >= new Date(from).getTime() && t <= new Date(to).getTime();
+  };
+  const due = reminders.filter((r) => inRange(r.fireAt)).slice(0, 20);
+  const dueF = followUps.filter((f) => inRange(f.fireAt)).slice(0, 20);
+
+  const title = (r: Record<string, unknown>) => String(r.title ?? r.goal ?? "Untitled");
+  const rows = [
+    ...events.map((e) => ({ time: fmtTime(e.startsAt as string), type: "Meeting", title: title(e) })),
+    ...due.map((r) => ({ time: fmtTime(r.fireAt as string), type: "Reminder", title: title(r) })),
+    ...dueF.map((f) => ({ time: fmtTime(f.fireAt as string), type: "Follow-up", title: title(f) })),
+  ].sort((a, b) => a.time.localeCompare(b.time));
+
+  const total = rows.length;
+  const parts: UiPart[] = [
+    {
+      type: "text",
+      text:
+        total === 0
+          ? `You have nothing scheduled ${label === "today" ? "today" : label}.`
+          : `You have ${total} ${total === 1 ? "item" : "items"} on your schedule for ${label}:`,
+    },
+  ];
+  if (rows.length > 0) {
+    parts.push({
+      type: "table",
+      columns: [
+        { key: "time", label: "Time" },
+        { key: "type", label: "Type" },
+        { key: "title", label: "Title" },
+      ],
+      rows,
+    });
+  }
+  if (errors.length > 0) {
+    parts.push({
+      type: "text",
+      text: `(Some parts of your schedule couldn't be read: ${errors.join("; ")})`,
+    });
+  }
+
+  const explanation: AiExplanation = {
+    runId: crypto.randomUUID(),
+    summary: plan.summary,
+    reasons: ["Answered from org data via the read-query bus", "Schedule window resolved deterministically"],
+    rulesApplied: ["ai_manual_parity", "read_via_query_bus", "zod_validation_on_execute", "permission_check_on_execute"],
+    dataUsed: ["user message", "query catalog"],
+    autonomy: "recommend",
+    plannedCommand: plan.queries.map((q) => q.name).join(", "),
+  };
+
+  return { parts, explanation };
+}
 
 /**
  * Deterministic datetime phrase extraction for "remind me …" / "follow up …".
@@ -580,21 +957,40 @@ export function parseScheduleRange(text: string, now: Date = new Date()): {
   return { startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), cleaned };
 }
 
-/** Parse a single intent segment (no compound splitting). */
+/** Strip politeness phrasing (leading and trailing) so it never changes intent. */
+function normalizeRequestPhrasing(text: string): string {
+  let out = text.trim();
+  let previous: string;
+  do {
+    previous = out;
+    out = out
+      .replace(/^(?:please|kindly|could you|can you|would you)\s+/i, "")
+      .replace(/[\s,;]*(?:please|kindly|thanks|thank you)[\s,;]*$/i, "")
+      .replace(/[\s.,!;]+$/, "");
+  } while (out !== previous && out.length > 0);
+  return out.trim();
+}
+
+/**
+ * Parse a single intent segment (no compound splitting). Returns null when the
+ * segment is recognized but incomplete (so callers can clarify naturally).
+ */
 function planSingleSegment(text: string): PlannedAction | null {
-  const trimmed = text.trim().replace(/[.!]+$/, "");
+  // Politeness/interjections never change intent.
+  const trimmed = normalizeRequestPhrasing(text);
 
   // Reminders & follow-ups (spec: scheduling-and-comms §3). Deterministic
-  // datetime phrases map to an ISO fireAt; anything else falls through to the
-  // LLM assist path, which may clarify the time.
+  // datetime phrases map to an ISO fireAt; anything else falls through to a
+  // natural clarification ("when should I…") instead of an examples dump.
   let m = trimmed.match(/^(?:remind me(?: to)?|set a reminder(?: to)?)\s+(.+)$/i);
   if (m?.[1]) {
     const { fireAt, cleaned } = parseScheduleFireAt(m[1]);
     if (fireAt) {
+      const title = cleaned.replace(/^to\s+/i, "").trim();
       return {
         command: "core.reminder.set",
-        input: { title: cleaned, fireAt },
-        summary: `Remind me: ${cleaned}`,
+        input: { title, fireAt },
+        summary: `Remind me: ${title}`,
         specialist: "core",
       };
     }
@@ -604,10 +1000,11 @@ function planSingleSegment(text: string): PlannedAction | null {
   if (m?.[1]) {
     const { fireAt, cleaned } = parseScheduleFireAt(m[1]);
     if (fireAt) {
+      const goal = cleaned.replace(/^to\s+/i, "").trim();
       return {
         command: "core.followup.create",
-        input: { goal: cleaned, fireAt },
-        summary: `Follow up: ${cleaned}`,
+        input: { goal, fireAt },
+        summary: `Follow up: ${goal}`,
         specialist: "core",
       };
     }
@@ -626,8 +1023,10 @@ function planSingleSegment(text: string): PlannedAction | null {
     }
   }
 
+  // CRM customer — natural phrasings: create/add/register/set up [a] [new]
+  // customer/client [called|named] <name> [in <city>].
   m = trimmed.match(
-    /^create\s+customer\s+(.+?)(?:\s+in\s+([A-Za-z][A-Za-z\s-]+))?$/i,
+    /^(?:create|add|register|set up)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?(?:customer|client)\b(?:\s+(?:called|named))?\s+(?!in\b)(.+?)(?:\s+in\s+([A-Za-z][A-Za-z\s-]+))?$/i,
   );
   if (m?.[1]) {
     return {
@@ -638,7 +1037,7 @@ function planSingleSegment(text: string): PlannedAction | null {
     };
   }
 
-  m = trimmed.match(/^prepare\s+payroll\s+for\s+(.+)$/i);
+  m = trimmed.match(/^(?:prepare|run|process|generate)\s+(?:the\s+)?payroll\s+(?:for\s+)?(.+)$/i);
   if (m?.[1]) {
     return {
       command: "hr.payroll.prepare",
@@ -648,8 +1047,9 @@ function planSingleSegment(text: string): PlannedAction | null {
     };
   }
 
+  // Invoice — (create|add|make|raise|generate|issue) [a|an] (invoice|bill) <ref> [for <amt> [CUR]].
   m = trimmed.match(
-    /^create\s+(?:invoice|bill)\s+(\S+)(?:\s+for\s+([\d.]+))?(?:\s+([A-Z]{3}))?$/i,
+    /^(?:create|add|make|raise|generate|issue)\s+(?:an\s+|a\s+)?(?:invoice|bill)\s+(?!for\b)(\S+)(?:\s+for\s+([\d.]+))?(?:\s+([A-Z]{3}))?$/i,
   );
   if (m?.[1]) {
     return {
@@ -664,7 +1064,9 @@ function planSingleSegment(text: string): PlannedAction | null {
     };
   }
 
-  m = trimmed.match(/^create\s+vendor\s+(.+)$/i);
+  m = trimmed.match(
+    /^(?:create|add|register|set up)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?vendor\b(?:\s+(?:called|named))?\s+(?!in\b)(.+)$/i,
+  );
   if (m?.[1]) {
     return {
       command: "pur.vendor.create",
@@ -674,7 +1076,9 @@ function planSingleSegment(text: string): PlannedAction | null {
     };
   }
 
-  m = trimmed.match(/^create\s+product\s+(\S+)\s+(.+)$/i);
+  m = trimmed.match(
+    /^(?:create|add|register|set up)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?product\s+(?:(?:called|named)\s+)?(\S+)\s+(.+)$/i,
+  );
   if (m?.[1] && m[2]) {
     return {
       command: "inv.product.create",
@@ -684,13 +1088,145 @@ function planSingleSegment(text: string): PlannedAction | null {
     };
   }
 
-  m = trimmed.match(/^create\s+employee\s+(\S+)\s+(.+)$/i);
+  m = trimmed.match(
+    /^(?:create|add|hire|register|set up)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?employee\s+(?:(?:called|named)\s+)?(\S+)\s+(.+)$/i,
+  );
   if (m?.[1] && m[2]) {
     return {
       command: "hr.employee.create",
       input: { employeeNumber: m[1], fullName: m[2].trim() },
       summary: `Create employee ${m[2].trim()}`,
       specialist: "hr",
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Natural clarification for recognized-but-incomplete requests. Returns the
+ * pending clarification the orchestrator parks when a deterministic intent is
+ * clear but a required field/time is missing — the assistant asks a focused,
+ * natural question instead of dumping examples. The probe template carries an
+ * `{answer}` placeholder so the user's reply can be merged on the next turn.
+ */
+export function clarifyFromText(text: string): PendingClarification | null {
+  const trimmed = normalizeRequestPhrasing(text);
+  // Already actionable — nothing to clarify.
+  if (planSingleSegment(trimmed)) return null;
+  const now = new Date().toISOString();
+
+  let m = trimmed.match(/^(?:remind me(?: to)?|set a reminder(?: to)?)\s+(.+)$/i);
+  if (m?.[1] && !parseScheduleFireAt(m[1]).fireAt) {
+    const clause = m[1].replace(/^to\s+/i, "").trim();
+    return {
+      id: crypto.randomUUID(),
+      type: "clarification",
+      questions: [
+        `When should I remind you to ${clause}? (for example: "tomorrow at 9am" or "in 30 minutes")`,
+      ],
+      probe: `remind me {answer} to ${clause}`,
+      createdAt: now,
+    };
+  }
+
+  m = trimmed.match(/^follow up(?:\s+with)?\s+(.+)$/i);
+  if (m?.[1] && !parseScheduleFireAt(m[1]).fireAt) {
+    return {
+      id: crypto.randomUUID(),
+      type: "clarification",
+      questions: [
+        `When should I follow up? (for example: "tomorrow at 10am")`,
+      ],
+      probe: `follow up with ${m[1].replace(/^to\s+/i, "").trim()} {answer}`,
+      createdAt: now,
+    };
+  }
+
+  m = trimmed.match(/^(?:block|schedule|book)\s+(.+)$/i);
+  if (m?.[1] && !parseScheduleRange(m[1])) {
+    return {
+      id: crypto.randomUUID(),
+      type: "clarification",
+      questions: [
+        `When should I schedule this, and what should I call it? (for example: "tomorrow 2pm to 3pm for a stock count")`,
+      ],
+      probe: `block {answer}`,
+      createdAt: now,
+    };
+  }
+
+  const customer = trimmed.match(
+    /^(?:create|add|register|set up)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?(?:customer|client)\b/i,
+  );
+  if (customer) {
+    const cityTrail = trimmed.match(/\bin\s+([A-Za-z][A-Za-z\s-]+)$/i);
+    const city = cityTrail?.[1]?.trim();
+    return {
+      id: crypto.randomUUID(),
+      type: "clarification",
+      questions: ["What is the customer's name? (for example: Acme Ltd)"],
+      probe: `create customer {answer}` + (city ? ` in ${city}` : ""),
+      createdAt: now,
+    };
+  }
+
+  const vendor = trimmed.match(
+    /^(?:create|add|register|set up)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?vendor\b/i,
+  );
+  if (vendor) {
+    return {
+      id: crypto.randomUUID(),
+      type: "clarification",
+      questions: ["What is the vendor's name?"],
+      probe: `create vendor {answer}`,
+      createdAt: now,
+    };
+  }
+
+  const invoice = trimmed.match(
+    /^(?:create|add|make|raise|generate|issue)\s+(?:an\s+|a\s+)?(?:invoice|bill)\b/i,
+  );
+  if (invoice) {
+    const amountTrail = trimmed.match(/\bfor\s+([\d.]+)(?:\s+([A-Z]{3}))?$/i);
+    return {
+      id: crypto.randomUUID(),
+      type: "clarification",
+      questions: ["What invoice number should I use? (for example: INV-101)"],
+      probe:
+        `create invoice {answer}` +
+        (amountTrail ? ` for ${amountTrail[1]}${amountTrail[2] ? ` ${amountTrail[2]}` : ""}` : ""),
+      createdAt: now,
+    };
+  }
+
+  const product = trimmed.match(
+    /^(?:create|add|register|set up)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?product\b/i,
+  );
+  if (product) {
+    return {
+      id: crypto.randomUUID(),
+      type: "clarification",
+      questions: [
+        "What product SKU and name should I register? (for example: SKU-9 Wireless Mouse)",
+      ],
+      probe: `create product {answer}`,
+      createdAt: now,
+    };
+  }
+
+  const employee = trimmed.match(
+    /^(?:create|add|hire|register|set up)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?employee\b/i,
+  );
+  if (employee) {
+    return {
+      id: crypto.randomUUID(),
+      type: "clarification",
+      questions: [
+        "What employee number and full name should I use? (for example: E-101 Grace Hopper)",
+      ],
+      probe: `create employee {answer}`,
+      createdAt: now,
     };
   }
 
@@ -836,8 +1372,10 @@ async function executePlanSteps(
 // The orchestrator executes the tool, appends the result into the outbound
 // view, and re-invokes the model — a bounded loop. Tool execution is safe by
 // construction: skills only READ instructions into context; saveSkill parks a
-// disabled draft behind an Inbox approval; self-wake only creates durable wake
-// records (no immediate side effect on real state).
+// disabled draft behind an Inbox approval; refineSkill and revertSkillRefinement
+// park an evidence-backed minimal patch / reversal behind an Inbox approval with
+// NO state change until resolved; self-wake only creates durable wake records
+// (no immediate side effect on real state).
 // ---------------------------------------------------------------------------
 
 interface AgentToolCall {
@@ -854,8 +1392,13 @@ const AGENT_TOOL_MAX_ITERATIONS = 3;
 
 function agentToolList(deps: OrchestratorDeps): string {
   const tools: string[] = [];
-  if (deps.skills) {
-    tools.push("loadSkill(name)", "saveSkill({name,title,summary,instructions,files?})");
+if (deps.skills) {
+    tools.push(
+      "loadSkill(name)",
+      "saveSkill({name,title,summary,instructions,files?})",
+      "refineSkill({name,summary?,instructions?,trigger,note?})",
+      "revertSkillRefinement({name,refinementId,note?})",
+    );
   }
   if (deps.wake) {
     tools.push(
@@ -864,6 +1407,9 @@ function agentToolList(deps: OrchestratorDeps): string {
       "wakeOnJob(jobId,note?)",
       "wakeOnEvent(eventKey,note?)",
     );
+  }
+  if (deps.memory) {
+    tools.push("memory.search(query,limit?)", "memory.store({content,kind?,key?})");
   }
   return tools.join(", ");
 }
@@ -928,6 +1474,98 @@ async function executeAgentTool(
       };
     }
 
+    case "refineSkill": {
+      if (!deps.skills) return { message: "Skill store not available on this instance." };
+      const tools = skillTools(deps.skills, {
+        organizationId: ctx.organizationId,
+        branchId: ctx.branchId,
+      });
+      const res = await tools.refineSkill({
+        name: String(args.name ?? ""),
+        summary: args.summary != null ? String(args.summary) : undefined,
+        instructions: args.instructions != null ? String(args.instructions) : undefined,
+        trigger: String(args.trigger ?? ""),
+        note: args.note != null ? String(args.note) : undefined,
+      });
+      if (!res.ok) return { message: `Cannot refine skill: ${res.reason}` };
+      // Continual-Harness rule: the *smallest* evidence-backed edit parks behind
+      // the approval card. Unlike saveSkill we do NOT write even a disabled
+      // draft — refining a live skill must leave state untouched until a human
+      // resolves, so the proposal lives only in the Inbox `data` blob.
+      let inboxItemId: string | undefined;
+      if (deps.inbox) {
+        const changed = Object.keys(res.refinement.after).join(" + ");
+        const item = await deps.inbox.addApproval({
+          sessionId: session.id,
+          organizationId: ctx.organizationId,
+          userId: ctx.userId,
+          title: `Refine skill "${res.skill.name}" (${changed})?`,
+          body: `Evidence/trigger: ${res.refinement.trigger}`,
+          data: {
+            skillRefine: {
+              name: res.skill.name,
+              before: res.refinement.before,
+              after: res.refinement.after,
+              trigger: res.refinement.trigger,
+              note: res.refinement.note,
+            },
+          },
+        });
+        inboxItemId = item.id;
+      }
+      return {
+        message:
+          `Refinement for skill "${res.skill.name}" drafted and awaiting human approval` +
+          (inboxItemId ? ` (inbox item ${inboxItemId})` : "") +
+          `. No change is applied until approved.`,
+        inboxItemId,
+      };
+    }
+
+    case "revertSkillRefinement": {
+      if (!deps.skills) return { message: "Skill store not available on this instance." };
+      const tools = skillTools(deps.skills, {
+        organizationId: ctx.organizationId,
+        branchId: ctx.branchId,
+      });
+      const res = await tools.revertSkillRefinement({
+        name: String(args.name ?? ""),
+        refinementId: String(args.refinementId ?? ""),
+        note: args.note != null ? String(args.note) : undefined,
+      });
+      if (!res.ok) return { message: `Cannot revert skill refinement: ${res.reason}` };
+      // Same Continual-Harness contract as refineSkill: the reversal parks in
+      // the Inbox `data` blob; nothing mutates until a human approves.
+      let inboxItemId: string | undefined;
+      if (deps.inbox) {
+        const item = await deps.inbox.addApproval({
+          sessionId: session.id,
+          organizationId: ctx.organizationId,
+          userId: ctx.userId,
+          title: `Revert refinement of skill "${res.skill.name}"?`,
+          body: `Reverts refinement "${res.refinement.reversalRefinementId}".\nEvidence/trigger: ${res.refinement.trigger}`,
+          data: {
+            skillRevert: {
+              name: res.skill.name,
+              before: res.refinement.before,
+              after: res.refinement.after,
+              trigger: res.refinement.trigger,
+              reversalRefinementId: res.refinement.reversalRefinementId,
+              note: res.refinement.note,
+            },
+          },
+        });
+        inboxItemId = item.id;
+      }
+      return {
+        message:
+          `Revert for skill "${res.skill.name}" drafted and awaiting human approval` +
+          (inboxItemId ? ` (inbox item ${inboxItemId})` : "") +
+          `. No change is applied until approved.`,
+        inboxItemId,
+      };
+    }
+
     case "sleepFor":
     case "sleepUntil":
     case "wakeOnJob":
@@ -958,6 +1596,38 @@ async function executeAgentTool(
           return { message: `Will resume when event "${r.eventKey}" fires (wake ${r.wakeId}).` };
         }
       }
+    }
+
+    case "memory.search": {
+      if (!deps.memory) return { message: "Memory store not available on this instance." };
+      const q = String(args.query ?? "");
+      if (!q.trim()) return { message: "memory.search requires a query." };
+      const limit = Number(args.limit ?? 5);
+      const results = await deps.memory.search(ctx.organizationId, q, Number.isFinite(limit) ? limit : 5);
+      if (results.length === 0) return { message: "No matching learned context found." };
+      return { message: results.map((r) => `[${r.kind}] ${r.content}`).join("\n") };
+    }
+
+    case "memory.store": {
+      if (!deps.memory) return { message: "Memory store not available on this instance." };
+      const content = String(args.content ?? "");
+      if (!content.trim()) return { message: "memory.store requires content." };
+      const valid = new Set<MemoryKind>([
+        "short_term_chat",
+        "workflow_session",
+        "long_term_org",
+        "permanent_business_pointer",
+      ]);
+      const kind = valid.has(args.kind as MemoryKind) ? (args.kind as MemoryKind) : "long_term_org";
+      await deps.memory.write({
+        organizationId: ctx.organizationId,
+        kind,
+        key: args.key ? String(args.key) : undefined,
+        content: content.trim(),
+        userId: ctx.userId,
+        sessionId: session.id,
+      });
+      return { message: `Stored memory (${kind}): ${content.trim().slice(0, 120)}` };
     }
 
     default:
@@ -1023,9 +1693,53 @@ async function runAgentToolLoop(
 interface ParsedLlmResponse {
   command?: string;
   input?: Record<string, unknown>;
+  query?: string;
   clarify?: string[];
   plan?: { command: string; input?: Record<string, unknown>; description?: string }[];
   toolCall?: AgentToolCall;
+}
+
+/** Render the result of one or more read queries as an assistant answer. */
+function queryResultParts(
+  rows: { label: string; value: string }[],
+  text: string,
+  explanation: AiExplanation,
+): UiPart[] {
+  const parts: UiPart[] = [{ type: "text", text }];
+  if (rows.length > 0) {
+    parts.push({
+      type: "table",
+      columns: [
+        { key: "label", label: "Item" },
+        { key: "value", label: "Details" },
+      ],
+      rows,
+    });
+  }
+  parts.push(toExplanationPart(explanation));
+  return parts;
+}
+
+/** Flatten a query result object into display rows for a generic answer. */
+function rowsFromQueryData(data: Record<string, unknown>): { label: string; value: string }[] {
+  const arrs = Object.entries(data).filter(
+    ([, v]) => Array.isArray(v) && (v as unknown[]).length > 0,
+  );
+  if (arrs.length === 0) {
+    const scalar = Object.entries(data)
+      .filter(([, v]) => v != null && typeof v !== "object")
+      .map(([k, v]) => `${k}: ${String(v)}`);
+    return scalar.length ? [{ label: "Result", value: scalar.join(", ") }] : [];
+  }
+  return arrs.flatMap(([key, items]) =>
+    (items as Record<string, unknown>[]).map((item) => {
+      const detail = Object.entries(item)
+        .filter(([, v]) => v != null && v !== "" && typeof v !== "object")
+        .map(([k, v]) => `${k}=${String(v)}`)
+        .join(", ");
+      return { label: key.replace(/_/g, " "), value: detail || "(empty)" };
+    }),
+  );
 }
 
 export async function handleChatTurn(
@@ -1036,6 +1750,9 @@ export async function handleChatTurn(
     ...input.session,
     messages: [...input.session.messages],
   };
+  // Surfaced to the caller when an agent tool (e.g. skill-save / skill-refine)
+  // parked a human approval behind an Inbox card during this turn.
+  let pendingInboxItemId: string | undefined;
   if (input.cancelId && session.pending?.id === input.cancelId) {
     const cancelled = session.pending;
     session.pending = undefined;
@@ -1076,7 +1793,39 @@ export async function handleChatTurn(
     return { session };
   }
 
-  // R7 — skill-save approvals resolve through the same Inbox card as any other
+  /**
+ * Audit a skill-catalog mutation applied after human approval. Skill writes are
+ * not (yet) kernel commands, so the Inbox resolution + this audit entry are the
+ * explainability record (action/actor/evidence). `success:false` is reserved
+ * for "approved but not applied" (e.g. the skill vanished mid-review).
+ */
+async function writeSkillAudit(
+  deps: OrchestratorDeps,
+  ctx: { requestId: string; actor: { userId: string; organizationId: string; aiRunId?: string } },
+  action: string,
+  resourceId: string,
+  success: boolean,
+  inputSummary: Record<string, unknown>,
+  errorCode?: string,
+): Promise<void> {
+  await deps.helpers.audit.write({
+    id: crypto.randomUUID(),
+    at: new Date().toISOString(),
+    organizationId: ctx.actor.organizationId,
+    actorUserId: ctx.actor.userId,
+    actorKind: "ai_assisted",
+    aiRunId: ctx.actor.aiRunId ?? crypto.randomUUID(),
+    action,
+    resourceType: "ai_skill",
+    resourceId,
+    success,
+    requestId: ctx.requestId,
+    inputSummary,
+    errorCode,
+  });
+}
+
+// R7 — skill-save approvals resolve through the same Inbox card as any other
   // approval. The draft was created disabled; an allow/always enables it, deny
   // leaves it disabled. No self-grant path exists.
   if (input.confirmId && deps.inbox && deps.skills) {
@@ -1112,7 +1861,208 @@ export async function handleChatTurn(
     }
   }
 
-  if (input.confirmId && session.pending?.id === input.confirmId) {
+  // R7 — Continual-Harness skill-refine approvals. The proposal (minimal,
+  // evidence-backed edit) was parked in the Inbox `data` blob with NO state
+  // change. On allow/always we re-read the current skill and apply only the
+  // proposed fields, recording the before/after snapshot + trigger as a
+  // refinement entry (revertible by ID). Deny leaves the skill untouched.
+  if (input.confirmId && deps.inbox && deps.skills) {
+    const refineItem = (await deps.inbox.list({ sessionId: session.id, state: "pending" })).find(
+      (i) => i.kind === "approval" && i.data?.skillRefine != null && i.id === input.confirmId,
+    );
+    if (refineItem) {
+      const proposal = refineItem.data?.skillRefine as {
+        name: string;
+        before: { summary?: string; instructions?: string };
+        after: { summary?: string; instructions?: string };
+        trigger: string;
+        note?: string;
+      };
+      const resolution = input.inboxResolution ?? "allow";
+      await deps.inbox.resolve(refineItem.id, resolution);
+      if (resolution === "allow" || resolution === "always") {
+        const filter = { organizationId: refineItem.organizationId, branchId: session.activeBranchId };
+        const current = await deps.skills.get(proposal.name, filter);
+        const refinement: SkillRefinement = {
+          id: crypto.randomUUID(),
+          trigger: proposal.trigger,
+          note: proposal.note,
+          before: proposal.before,
+          after: proposal.after,
+          createdAt: new Date().toISOString(),
+        };
+        if (current) {
+          const merged: Omit<SkillRecord, "createdAt" | "updatedAt"> = {
+            ...current,
+            summary: proposal.after.summary ?? current.summary,
+            instructions: proposal.after.instructions ?? current.instructions,
+            refinements: [...(current.refinements ?? []), refinement],
+          };
+          await deps.skills.upsert(merged);
+          await writeSkillAudit(
+            deps,
+            {
+              requestId: input.ctx.requestId,
+              actor: {
+                ...input.ctx.actor,
+                userId: refineItem.userId,
+                organizationId: refineItem.organizationId,
+              },
+            },
+            "ai_skill.refine",
+            proposal.name,
+            true,
+            {
+              refinementId: refinement.id,
+              trigger: proposal.trigger,
+              before: proposal.before,
+              after: proposal.after,
+            },
+          );
+        } else {
+          await writeSkillAudit(
+            deps,
+            {
+              requestId: input.ctx.requestId,
+              actor: {
+                ...input.ctx.actor,
+                userId: refineItem.userId,
+                organizationId: refineItem.organizationId,
+              },
+            },
+            "ai_skill.refine",
+            proposal.name,
+            false,
+            { trigger: proposal.trigger },
+            "skill_not_found",
+          );
+        }
+        session.messages.push(
+          msg("assistant", [
+            {
+              type: "text",
+              text: current
+                ? `Skill "${proposal.name}" was refined and is now active (refinement ${refinement.id}).`
+                : `Refinement for "${proposal.name}" could not be applied (skill no longer exists).`,
+            },
+          ]),
+        );
+      } else {
+        session.messages.push(
+          msg("assistant", [
+            {
+              type: "text",
+              text: `Skill refinement for "${proposal.name}" was rejected; no change was applied.`,
+            },
+          ]),
+        );
+      }
+      return { session };
+    }
+  }
+
+  // R7 — Continual-Harness skill-revert approvals. Mirrors refine: the reversal
+  // parks in the Inbox and applies only on allow/always, appending a chained
+  // refinement entry (`reversalRefinementId` → the entry being undone). The
+  // revert itself is reversible, so double-reverting yields the forwarded state.
+  if (input.confirmId && deps.inbox && deps.skills) {
+    const revertItem = (await deps.inbox.list({ sessionId: session.id, state: "pending" })).find(
+      (i) => i.kind === "approval" && i.data?.skillRevert != null && i.id === input.confirmId,
+    );
+    if (revertItem) {
+      const proposal = revertItem.data?.skillRevert as {
+        name: string;
+        before: { summary?: string; instructions?: string };
+        after: { summary?: string; instructions?: string };
+        trigger: string;
+        reversalRefinementId?: string;
+        note?: string;
+      };
+      const resolution = input.inboxResolution ?? "allow";
+      await deps.inbox.resolve(revertItem.id, resolution);
+      if (resolution === "allow" || resolution === "always") {
+        const filter = { organizationId: revertItem.organizationId, branchId: session.activeBranchId };
+        const current = await deps.skills.get(proposal.name, filter);
+        const reversal: SkillRefinement = {
+          id: crypto.randomUUID(),
+          trigger: proposal.trigger,
+          note: proposal.note,
+          before: proposal.before,
+          after: proposal.after,
+          reversalRefinementId: proposal.reversalRefinementId,
+          createdAt: new Date().toISOString(),
+        };
+        if (current) {
+          const merged: Omit<SkillRecord, "createdAt" | "updatedAt"> = {
+            ...current,
+            summary: proposal.after.summary ?? current.summary,
+            instructions: proposal.after.instructions ?? current.instructions,
+            refinements: [...(current.refinements ?? []), reversal],
+          };
+          await deps.skills.upsert(merged);
+          await writeSkillAudit(
+            deps,
+            {
+              requestId: input.ctx.requestId,
+              actor: {
+                ...input.ctx.actor,
+                userId: revertItem.userId,
+                organizationId: revertItem.organizationId,
+              },
+            },
+            "ai_skill.revert",
+            proposal.name,
+            true,
+            {
+              reversalId: reversal.id,
+              reverts: proposal.reversalRefinementId,
+              before: proposal.before,
+              after: proposal.after,
+            },
+          );
+        } else {
+          await writeSkillAudit(
+            deps,
+            {
+              requestId: input.ctx.requestId,
+              actor: {
+                ...input.ctx.actor,
+                userId: revertItem.userId,
+                organizationId: revertItem.organizationId,
+              },
+            },
+            "ai_skill.revert",
+            proposal.name,
+            false,
+            { reverts: proposal.reversalRefinementId },
+            "skill_not_found",
+          );
+        }
+        session.messages.push(
+          msg("assistant", [
+            {
+              type: "text",
+              text: current
+                ? `Refinement of skill "${proposal.name}" was reverted (reversal ${reversal.id}).`
+                : `Revert of "${proposal.name}" could not be applied (skill no longer exists).`,
+            },
+          ]),
+        );
+      } else {
+        session.messages.push(
+          msg("assistant", [
+            {
+              type: "text",
+              text: `Skill revert for "${proposal.name}" was rejected; no change was applied.`,
+            },
+          ]),
+        );
+      }
+      return { session };
+    }
+  }
+
+  if (input.confirmId && session.pending && session.pending.type !== "clarification" && session.pending.id === input.confirmId) {
     const pending = session.pending;
     const aiCtx: RequestContext = {
       ...input.ctx,
@@ -1161,6 +2111,15 @@ export async function handleChatTurn(
         : [{ command: pending.command, input: pending.input, description: pending.command }];
 
     const stepOutputs = await executePlanSteps(deps, stepsToRun, aiCtx);
+    // Adaptive learning — record what was executed so later turns can recall it.
+    for (let i = 0; i < stepOutputs.length; i++) {
+      const step = stepOutputs[i]!;
+      await rememberExecution(
+        deps,
+        { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId, sessionId: session.id },
+        { command: step.command, input: stepsToRun[i]?.input ?? step.data },
+      );
+    }
 
     session.pending = undefined;
     session.messages = resolveConfirmParts(session.messages, {
@@ -1244,12 +2203,37 @@ export async function handleChatTurn(
     return { session };
   }
 
+  // §2e — natural clarification answer: the previous turn parked a
+  // clarification (missing required info). The user's answer is merged through
+  // the stored probe so intent resolution re-runs with the full picture, and
+  // the recap is injected for the LLM assist path.
+  let ruleText = input.userText;
+  let clarifyContext: { questions: string[]; answer: string } | undefined;
+  if (session.pending && session.pending.type === "clarification") {
+    const prior = session.pending;
+    const answer = input.userText.trim();
+    ruleText = prior.probe.replace("{answer}", answer);
+    clarifyContext = { questions: prior.questions, answer };
+    session.pending = undefined;
+  }
+
   session.messages.push(msg("user", [{ type: "text", text: input.userText }]));
 
   const catalog = deps.commands.list();
-  const rulePlans = planManyFromText(input.userText);
+  const rulePlans = planManyFromText(ruleText);
   let planned: PlannedAction | null = rulePlans.length === 1 ? rulePlans[0]! : null;
   let multiPlan: PlannedAction[] | null = rulePlans.length > 1 ? rulePlans : null;
+
+  // Read-query intent (R11) — schedule/task questions are answered directly
+  // from org data through the same read-query bus a human uses. Runs before
+  // the LLM and before the write gates: reads are side-effect free, need no
+  // confirmation, and the "nothing scheduled" case gets a clear statement.
+  const schedulePlan = planScheduleQuestion(ruleText);
+  if (schedulePlan) {
+    const { parts, explanation } = await answerScheduleQuestion(deps, input.ctx, schedulePlan);
+    session.messages.push(msg("assistant", [...parts, toExplanationPart(explanation)]));
+    return { session, explanation };
+  }
 
   // R9 — read-only mode gate. In discuss/plan mode the orchestrator can still
   // plan and propose but cannot execute writes/exec. This check fires BEFORE
@@ -1298,26 +2282,32 @@ export async function handleChatTurn(
   outboundMessages = withModeContext(outboundMessages, deps.mode);
   outboundMessages = withBranchContext(outboundMessages, deps.activeBranch);
   outboundMessages = await withSkillContext(outboundMessages, deps, session, input.ctx.actor.organizationId);
+  outboundMessages = await withMemoryContext(outboundMessages, deps, input.ctx.actor.organizationId);
+  if (clarifyContext) {
+    outboundMessages = withClarifyAnswerContext(outboundMessages, clarifyContext);
+  }
 
   // Optional LLM assist when rules miss (provider may be none). Runs a bounded
   // agent-tool loop (R5 self-wake / R7 skills) and retries once after a
   // context-overflow error with a no-LLM trim.
+  let llmQuery: { name: string; input: Record<string, unknown> } | undefined;
   if (!planned && !multiPlan && deps.provider && deps.provider.id !== "none") {
     const agentTools = agentToolList(deps);
+    const queryCatalog = deps.queries ? deps.queries.list() : [];
     const system =
-      `You map user requests to JSON actions using only: ${catalog.map((c) => c.name).join(", ")}.\n` +
-      `For a single action: {"command":"...","input":{...}}\n` +
-      `For multiple sequential actions: {"plan":[{"command":"...","input":{...},"description":"..."},{"command":"...","input":{...}}]}\n` +
+      `You are a business assistant. WRITE actions: {"command":"<name>","input":{...}} using only: ${catalog.map((c) => c.name).join(", ")}.\n` +
+      `READ questions (answering from data): {"query":"<name>","input":{...}} using only: ${queryCatalog.map((q) => q.name).join(", ")}.\n` +
+      `For multiple sequential write actions: {"plan":[{"command":"...","input":{...},"description":"..."},{"command":"...","input":{...}}]}\n` +
       `If ambiguous or missing required info: {"clarify":["question1","question2"]}\n` +
+      `Do not copy field values from the [Learned context] block into a new plan; if a required field is absent from the request, reply {"clarify":[...]} instead.\n` +
       (agentTools
         ? `Before planning, you may call an agent tool to pull in context or schedule follow-ups.\nAvailable agent tools: ${agentTools}.\nTo call one, reply {"toolCall":{"name":"loadSkill","args":{"name":"..."}}} — you will receive the result and should then continue planning.\n`
         : "") +
-      `Reply JSON only. Never invent field values — use null for unknown required fields.`;
+      `Reply JSON only. Never invent field values — use null for unknown required fields. For a read question with no explicit date, default to today's range.`;
 
     let parsed: ParsedLlmResponse | null = null;
-    let inboxItemId: string | undefined;
     try {
-      ({ parsed, inboxItemId } = await runAgentToolLoop(
+      ({ parsed, inboxItemId: pendingInboxItemId } = await runAgentToolLoop(
         deps,
         session,
         { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },
@@ -1333,7 +2323,7 @@ export async function handleChatTurn(
         if (trimmed) session = { ...session, compactionState: trimmed };
         outboundMessages = applyToOutbound(session.messages, session.compactionState ?? null);
         try {
-          ({ parsed, inboxItemId } = await runAgentToolLoop(
+          ({ parsed, inboxItemId: pendingInboxItemId } = await runAgentToolLoop(
             deps,
             session,
             { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },
@@ -1350,6 +2340,15 @@ export async function handleChatTurn(
 
     if (parsed) {
       if (parsed.clarify && parsed.clarify.length > 0) {
+        // §2e — park the clarification so the user's next answer is merged
+        // through the probe and the pipeline re-runs with full context.
+        session.pending = {
+          id: crypto.randomUUID(),
+          type: "clarification",
+          questions: parsed.clarify,
+          probe: "{answer}",
+          createdAt: new Date().toISOString(),
+        };
         session.messages.push({
           id: crypto.randomUUID(),
           role: "assistant",
@@ -1359,7 +2358,7 @@ export async function handleChatTurn(
           ],
           createdAt: new Date().toISOString(),
         });
-        return { session, explanation: undefined, inboxItemId };
+        return { session, explanation: undefined, inboxItemId: pendingInboxItemId };
       }
       if (parsed.plan && parsed.plan.length > 0) {
         const steps = wireSequentialPlanInputs(
@@ -1386,6 +2385,90 @@ export async function handleChatTurn(
           specialist: catalog.find((c) => c.name === parsed.command)?.tags?.[0],
         };
       }
+      if (
+        !planned &&
+        !multiPlan &&
+        !parsed.command &&
+        !parsed.plan &&
+        !parsed.clarify &&
+        parsed.query &&
+        deps.queries?.list().some((q) => q.name === parsed.query)
+      ) {
+        llmQuery = { name: parsed.query, input: normalizeFieldNames(parsed.input ?? {}) };
+      }
+    }
+  }
+
+  // R10 — recognition guard. When the deterministic intent is recognized but
+  // incomplete (the rule parser missed, yet the natural-language clarifier
+  // knows exactly which required field is missing), an LLM materialized plan
+  // is discarded and the focused, auditable clarification is parked instead.
+  // This stops the LLM from inventing a value for the missing field (e.g.
+  // copying one out of the learned-context memory block) and keeps intent
+  // resolution on the deterministic probe path. Single-intent requests only;
+  // multi-intent or rule-planned requests never reach this branch.
+  if (
+    rulePlans.length === 0 &&
+    (planned || multiPlan) &&
+    splitCompoundRequest(ruleText).length === 1
+  ) {
+    const clarification = clarifyFromText(ruleText);
+    if (clarification) {
+      planned = null;
+      multiPlan = null;
+      session.pending = clarification;
+      session.messages.push(
+        msg("assistant", [
+          { type: "text" as const, text: "I need a bit more information to proceed." },
+          { type: "clarify" as const, questions: clarification.questions },
+        ]),
+      );
+      return { session };
+    }
+  }
+
+  // R11 — LLM read-query path. When the model answered a data question with a
+  // valid read query, run it through the same bus a human uses (permission +
+  // zod + request context). Reads are side-effect free, so no confirmation.
+  if (llmQuery) {
+    try {
+      const res = await executeQuery(deps.queries, llmQuery.name, llmQuery.input, input.ctx);
+      const rows = rowsFromQueryData(res.data as Record<string, unknown>);
+      const explanation: AiExplanation = {
+        runId: crypto.randomUUID(),
+        summary: `Read: ${llmQuery.name}`,
+        reasons: ["Answered from org data via the read-query bus"],
+        rulesApplied: ["ai_manual_parity", "read_via_query_bus", "zod_validation_on_execute", "permission_check_on_execute"],
+        dataUsed: ["user message", "query catalog", `provider:${deps.provider?.id ?? "none"}`],
+        autonomy: "recommend",
+        plannedCommand: llmQuery.name,
+      };
+      const text =
+        rows.length === 0
+          ? `Nothing found for ${llmQuery.name}.`
+          : `Here's what I found (${rows.length} ${rows.length === 1 ? "result" : "results"}):`;
+      session.messages.push(msg("assistant", queryResultParts(rows, text, explanation)));
+      return { session, explanation, inboxItemId: pendingInboxItemId };
+    } catch (err) {
+      session.messages.push(
+        msg("assistant", [
+          {
+            type: "error" as const,
+            message: `I couldn't read that: ${(err as Error).message}`,
+            code: "QUERY_FAILED",
+          },
+          toExplanationPart({
+            runId: crypto.randomUUID(),
+            summary: `Read failed: ${llmQuery.name}`,
+            reasons: [(err as Error).message],
+            rulesApplied: ["read_via_query_bus"],
+            dataUsed: ["user message", "query catalog", `provider:${deps.provider?.id ?? "none"}`],
+            autonomy: "recommend",
+            plannedCommand: llmQuery.name,
+          }),
+        ]),
+      );
+      return { session, inboxItemId: pendingInboxItemId };
     }
   }
 
@@ -1500,6 +2583,15 @@ export async function handleChatTurn(
         })),
         aiCtx,
       );
+      // Adaptive learning — record each auto-executed step for later recall.
+      for (let i = 0; i < stepOutputs.length; i++) {
+        const step = stepOutputs[i]!;
+        await rememberExecution(
+          deps,
+          { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId, sessionId: session.id },
+          { command: step.command, input: multiPlan[i]?.input ?? step.data },
+        );
+      }
       parts.push(
         { type: "plan", id: runIdMulti, title: "Multi-step plan", steps: planSteps },
         toExplanationPart(explanation),
@@ -1575,6 +2667,19 @@ export async function handleChatTurn(
   }
 
   if (!planned) {
+    // §2e — recognized-but-incomplete intent: ask a focused natural question
+    // instead of dumping examples. The user's answer merges through the probe.
+    const clarification = clarifyFromText(ruleText);
+    if (clarification) {
+      session.pending = clarification;
+      session.messages.push(
+        msg("assistant", [
+          { type: "text", text: "I need a bit more information to proceed." },
+          { type: "clarify", questions: clarification.questions },
+        ]),
+      );
+      return { session };
+    }
     session.messages.push(
       msg("assistant", [
         {
@@ -1673,6 +2778,12 @@ export async function handleChatTurn(
       aiCtx,
       deps.helpers,
     );
+    // Adaptive learning — record the auto-executed action for later recall.
+    await rememberExecution(
+      deps,
+      { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId, sessionId: session.id },
+      { command: planned.command, input: planned.input, summary: planned.summary },
+    );
     const parts: UiPart[] = [
       // R8 — live narration line for a consequential single command.
       {
@@ -1755,7 +2866,7 @@ export async function handleChatTurn(
     ]),
   );
 
-  return { session, explanation };
+  return { session, explanation, inboxItemId: pendingInboxItemId };
 }
 
 /**

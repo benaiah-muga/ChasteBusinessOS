@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
+  agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
+  Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +
+  credential as an `AiProvider`, so operators bring their own subscription
+  instead of configuring a second API key. Add an `AnthropicMessagesProvider`,
+  a data-driven agent registry in `@chaste/ai-core` (`coding-agents.ts`), and a
+  `prefer` override (`CHASTE_AI_PREFER_CODING_AGENT`). Agents are completion
+  backends only — no elevated privileges; OAuth-only agents (Cursor, Copilot,
+  Devin, …) are reported as installed for the self-dev handoff, not reused.
+  Docs: `docs/specs/coding-agent-reuse.md`, ADR 0013.
+
 - **Shared durable runtime (`@chaste/runtime`)** — a single `createRuntime(config, db)`
   factory builds the command/query registries, registers every shipped module once,
   and wires Postgres-backed stores (`pending_approvals`, `ai_wakes`, `ai_skills`).
@@ -28,6 +39,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Command-bus transactional outbox** — business writes, outbox enqueues, and audit
   events commit in one DB transaction via `createCommandHelpers`; success audit is
   in-transaction and failure audit is written out-of-transaction (ARCH-2).
+- **Org-scoped API keys** (`core.apikey.*`) — first-class machine credentials with
+  their own permission scopes (subset of the catalog, validated at creation),
+  hash-at-rest secrets, and an independent revoke / rotate / expire lifecycle.
+  Authenticate with `X-Api-Key: <secret>`; audit attributes command execution to
+  the `api_key` actor (`actorKind: "api_key"`).
+- **Durable outbox delivery (ARCH-9/REL-2)** — the worker now claims events with
+  `FOR UPDATE SKIP LOCKED` (no double-processing across workers), tracks
+  `attempts` / `last_error` on `outbox_events`, applies exponential backoff via
+  `next_attempt_at`, and copies events that exhaust retries to an append-only
+  `dead_letter_events` table. Operators are notified in-app (`kind: "dead_letter"`)
+  and can inspect / re-queue via `core.outbox.listDead` (`core.outbox.read`) and
+  `core.outbox.replay` (`core.outbox.manage`), both org-scoped and audit-covered.
+  Scheduled reminders/follow-ups run through a schedule driver that prefers
+  Redis/BullMQ (per-item atomic claims) and falls back to the poll loop when Redis
+  is unavailable. The worker now shuts down cleanly on SIGTERM/SIGINT (queue
+  workers, Redis and the Postgres client are closed).
 
 ### Changed
 
@@ -47,6 +74,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shedding bounded contexts toward a thin aggregator.
 - **Chat confirmation cards** — only the live confirmation renders after a turn; stale
   cards from a previous confirmation are pruned.
+- **AI orchestration robustness (natural clarification)** — the R10 recognition guard
+  discards an LLM-materialized plan when a deterministic intent is recognized but a
+  required field is missing (e.g. `Create customer in Nairobi`), parking a focused
+  clarification instead of a confirm with invented values; clarify probes now preserve
+  trailing context (city, amount) so the answer merges correctly; the learned-context
+  memory block and LLM prompt forbid copying past-execution values into new plans.
+- **Postgres e2e self-cleanup** — `apps/api/src/e2e.test.ts` deletes the customers,
+  invoices, memories, and chat sessions it creates, so test runs no longer pollute the
+  shared dev database.
+
+### Security (2026-08-08 audit remediation)
+
+- **F1 — no more anonymous admin bypass in production.** The "no token ⇒
+  bootstrap admin" fallback is now a dev-only flag (`CHASTE_ALLOW_ANON_ADMIN`);
+  production forces it off at config load (fail closed) and the prod Compose
+  sets it explicitly. Bootstrap admin is now authenticatable: first boot mints a
+  hashed-at-rest credential (`CHASTE_ADMIN_TOKEN` or a one-time generated token
+  printed in dev only).
+- **F2 — workflow `condition` steps no longer execute code.** `new Function`
+  was replaced by a restricted predicate interpreter (`evaluateCondition`,
+  tokenizer + recursive-descent parser with no function calls / global access),
+  so a stored or LLM-injected condition can at worst evaluate to `false`.
+  `lookupPath` also rejects prototype-key traversal (`__proto__`/`constructor`).
+- **F3 — workflow build/execute and the two remaining list routes run under the
+  authenticated caller** (`requestCtxForAuth`), not the bootstrap admin — org
+  ownership and audit attribution match the requester.
+- **F4 — chat sessions are ownership-checked** (`DbSession.userId`); loading or
+  continuing another user's session (incl. pending planned actions) is denied.
+- **F5 — bearer tokens expire.** `users.token_expires_at` is set on
+  invite/create (`CHASTE_SESSION_TOKEN_TTL`, default 30 days) and enforced in
+  `resolveUserByToken`; the previously-dead TTL config is now live.
+- **F7 — `core.user.create` stores tokens hashed at rest** (SHA-256), matching
+  `core.user.invite`; the legacy plaintext lookup remains only as a migration
+  fallback for pre-hash rows.
+- **F6 — rate limiting at the HTTP edge** — dependency-free fixed-window
+  limiters (`apps/api/src/rate-limit.ts`): `/auth/login` 10 req/15s per IP,
+  `/ai/chat` 30 req/15s per IP plus 120 req/min per authenticated user;
+  throttled responses carry `retry-after` and `429 RATE_LIMITED`.
+- **F8 — the external risk floor is now live** — `core.email.send` /
+  `core.email.enqueue_template` declare `riskClass: "external"` (target-bound
+  per `to`), and `core.backup.restore` declares `riskClass: "exec"`; all three
+  require `full_autonomous` to auto-run, so standing rules can no longer send
+  email or restore backups under `guarded_auto`.
+- **F9 — CORS allow-list** — the API now accepts only the configured
+  `webOrigin` instead of reflecting any `Origin` header; non-browser
+  (no-Origin) callers are unaffected.
+
+### Security (2026-08-08 — F10–F24 remediation)
+
+- **F10 — infra fails closed.** Prod Compose requires `CHASTE_SESSION_SECRET`,
+  `POSTGRES_PASSWORD`, and `REDIS_PASSWORD` (`:?` — no shipped defaults);
+  `CHASTE_BOOTSTRAP` defaults to `false` (first boot requires
+  `CHASTE_ADMIN_TOKEN`); Redis runs with mandatory auth; all runtime images
+  (`api`, `web`, `worker`, `migrate`) run as the non-root `node` user.
+- **F12 — audit log hygiene.** The command bus redacts sensitive free-text
+  inputs (`body`, `note`, `goal`, `salary`, credentials, …) before writing
+  `input_summary` (`kernel/src/redact.ts`); the worker no longer logs
+  follow-up `goal` text.
+- **F13 — role permissions are catalog-validated.** `core.role.create/update`
+  reject any permission not in `PERMISSION_CATALOG` — including `*` — so a role
+  can never silently grant more than the platform defines.
+- **F14 — backup restore is org-bound.** `core.backup.restore` refuses a
+  manifest whose `organizationId` differs from the caller's org.
+- **F15 — client-side token hygiene.** The web client clears the stored bearer
+  token on any 401 so an expired/revoked credential drops back to login.
+- **F16 — audit reads are permissioned.** `/api/v1/audit` now goes through the
+  `core.audit.list` query (requires `core.rbac.read`) instead of a direct
+  store call available to any authenticated user.
+- **F18 — Buzz webhook anti-replay.** Signed webhooks carry a unix-seconds `ts`
+  covered by the HMAC; payloads older than 5 minutes are rejected.
+- **F20 — legacy web forms authenticate.** `CreateVendorForm`,
+  `CreateProductForm`, and `HrActions` route through `apiFetch` (Bearer
+  attached) instead of raw `fetch` — no more "executes as the admin".
+- **F21 — security headers.** `next.config.mjs` adds CSP (with connect-src for
+  the API origin), `nosniff`, `DENY` framing, `Referrer-Policy: no-referrer`,
+  HSTS, and a restrictive `Permissions-Policy`.
+- **F23 — CI least-privilege.** `ci.yml` scopes `GITHUB_TOKEN` to
+  `contents: read` and adds a non-blocking `pnpm audit` step.
+- **F24 — reminders honor their channel.** `channel: email|both` now enqueues
+  an outbound email through the email outbox (delivered by the worker), instead
+  of being stored and never sent.
+- **Private overlay mesh (ADR 0012)** — opt-in `--profile mesh` adds a Headscale
+  control plane (`deploy/mesh/config.yaml` + `acl.json`) and Tailscale sidecars
+  for `api`/`web`/`worker`; host port publication can be disabled (`API_BIND=` /
+  `WEB_BIND=`) so services are reachable only over the tailnet.
 
 ### Fixed
 

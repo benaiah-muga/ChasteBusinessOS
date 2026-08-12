@@ -32,7 +32,8 @@ export function getApiBaseUrl(): string {
 /**
  * Attach the stored auth token as `Authorization: Bearer <token>` on every
  * request. The API preHandler resolves the acting user from this token
- * (ARCH-1); requests without a token fall back to the bootstrap admin in dev.
+ * (ARCH-1). In production, missing tokens are rejected with 401; the
+ * anonymous bootstrap-admin fallback is a dev-only flag (F1 remediation).
  */
 function getAuthHeaders(): Record<string, string> {
   const token = getStoredAuthToken();
@@ -61,6 +62,11 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
     code?: string;
   };
   if (!res.ok) {
+    // F15 — a 401 means the stored credential is invalid/expired; drop it so
+    // the UI falls back to login instead of silently acting as no one.
+    if (res.status === 401) {
+      setStoredAuthToken(null);
+    }
     const detail = body.message ?? res.statusText;
     const code = body.code ? ` (${body.code})` : "";
     throw new Error(`${detail}${code}`);

@@ -1,5 +1,10 @@
 import type { Db } from "@chaste/db";
-import { resolveUserPermissions, schema } from "@chaste/db";
+import {
+  resolveUserPermissions,
+  schema,
+  listDeadLetterEvents,
+  replayDeadLetterEvents,
+} from "@chaste/db";
 import {
   orgSettingsSchema,
   orgSettingsUpdateSchema,
@@ -19,7 +24,13 @@ import {
 } from "@chaste/kernel";
 import { and, desc, eq, ilike, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { z } from "zod";
-import { createEmailAdapter, detectEmailProvider, emailTemplateSchema, renderEmailTemplate, type EmailAdapter } from "./email.js";
+import {
+  createEmailAdapter,
+  detectEmailProvider,
+  emailTemplateSchema,
+  renderEmailTemplate,
+  type EmailAdapter,
+} from "./email.js";
 import { createObjectStore, objectStoreStatus, restoreFromStore } from "./backup.js";
 
 /** Capability gap ticket lifecycle (spec: self-development.md §4). */
@@ -146,6 +157,8 @@ export function createPlatformModule(
         "core.bpartner.read",
         "core.backup.read",
         "core.backup.manage",
+        "core.outbox.read",
+        "core.outbox.manage",
         "core.workflow.read",
         "core.workflow.manage",
         "core.workflow.run",
@@ -242,8 +255,7 @@ export function createPlatformModule(
               .where(eq(schema.organizations.id, ctx.actor.organizationId));
             return {
               autonomy: input.autonomy,
-              warning:
-                input.autonomy === "full_autonomous" ? FULL_AUTONOMOUS_WARNING : undefined,
+              warning: input.autonomy === "full_autonomous" ? FULL_AUTONOMOUS_WARNING : undefined,
             };
           },
         }),
@@ -428,10 +440,10 @@ export function createPlatformModule(
             // every tenant. Restrict this to platform-owned listings so one org
             // cannot hide a community/custom package from the rest of the fleet.
             if (row.publisher !== "chaste") {
-              throw new ValidationError(
-                "Only platform-owned listings can be archived",
-                { moduleId: input.moduleId, publisher: row.publisher },
-              );
+              throw new ValidationError("Only platform-owned listings can be archived", {
+                moduleId: input.moduleId,
+                publisher: row.publisher,
+              });
             }
             const meta = { ...(row.metadata ?? {}), archived: input.archived };
             await db
@@ -457,7 +469,9 @@ export function createPlatformModule(
             category: z.string().min(1),
             publisher: z.string().optional(),
             regions: z.array(z.string()).optional(),
-            kind: z.enum(["marketplace_shared", "local_extension", "private_cloud"]).default("marketplace_shared"),
+            kind: z
+              .enum(["marketplace_shared", "local_extension", "private_cloud"])
+              .default("marketplace_shared"),
             gapTicketId: z.string().uuid().optional(),
           }),
           output: z.object({ moduleId: z.string(), version: z.string(), published: z.boolean() }),
@@ -478,10 +492,10 @@ export function createPlatformModule(
                 throw new ValidationError("Gap ticket not found", { ticketId: input.gapTicketId });
               }
               if (ticket.status !== "confirmed" && ticket.status !== "resolved") {
-                throw new ValidationError(
-                  "Only confirmed or resolved tickets can be published",
-                  { ticketId: input.gapTicketId, status: ticket.status },
-                );
+                throw new ValidationError("Only confirmed or resolved tickets can be published", {
+                  ticketId: input.gapTicketId,
+                  status: ticket.status,
+                });
               }
               if (ticket.deploymentTarget === "platform_roadmap") {
                 throw new ValidationError(
@@ -490,10 +504,9 @@ export function createPlatformModule(
                 );
               }
               if (ticket.deploymentTarget === "undecided") {
-                throw new ValidationError(
-                  "deploymentTarget must be decided before publish",
-                  { ticketId: input.gapTicketId },
-                );
+                throw new ValidationError("deploymentTarget must be decided before publish", {
+                  ticketId: input.gapTicketId,
+                });
               }
             }
 
@@ -732,7 +745,12 @@ export function createPlatformModule(
             timezone: z.string().optional(),
             active: z.boolean().optional(),
           }),
-          output: z.object({ id: z.string(), name: z.string(), code: z.string(), active: z.boolean() }),
+          output: z.object({
+            id: z.string(),
+            name: z.string(),
+            code: z.string(),
+            active: z.boolean(),
+          }),
           handler: async (input, ctx) => {
             const [branch] = await db
               .select()
@@ -856,7 +874,9 @@ export function createPlatformModule(
             const [user] = await db
               .select()
               .from(schema.users)
-              .where(and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)));
+              .where(
+                and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)),
+              );
             if (!user) {
               throw new ValidationError("User not found", { userId: input.userId });
             }
@@ -864,7 +884,10 @@ export function createPlatformModule(
               .select()
               .from(schema.branches)
               .where(
-                and(eq(schema.branches.id, input.branchId), eq(schema.branches.organizationId, orgId)),
+                and(
+                  eq(schema.branches.id, input.branchId),
+                  eq(schema.branches.organizationId, orgId),
+                ),
               );
             if (!branch) {
               throw new ValidationError("Branch not found", { branchId: input.branchId });
@@ -902,7 +925,9 @@ export function createPlatformModule(
             const [user] = await db
               .select()
               .from(schema.users)
-              .where(and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)));
+              .where(
+                and(eq(schema.users.id, input.userId), eq(schema.users.organizationId, orgId)),
+              );
             if (!user) {
               throw new ValidationError("User not found", { userId: input.userId });
             }
@@ -910,7 +935,10 @@ export function createPlatformModule(
               .select()
               .from(schema.branches)
               .where(
-                and(eq(schema.branches.id, input.branchId), eq(schema.branches.organizationId, orgId)),
+                and(
+                  eq(schema.branches.id, input.branchId),
+                  eq(schema.branches.organizationId, orgId),
+                ),
               );
             if (!branch) {
               throw new ValidationError("Branch not found", { branchId: input.branchId });
@@ -931,10 +959,10 @@ export function createPlatformModule(
                 .from(schema.userBranchAccess)
                 .where(eq(schema.userBranchAccess.userId, input.userId));
               if (grants.length === 1 && grants[0]!.branchId === input.branchId) {
-                throw new ValidationError(
-                  "Cannot revoke the user's only branch access",
-                  { userId: input.userId, branchId: input.branchId },
-                );
+                throw new ValidationError("Cannot revoke the user's only branch access", {
+                  userId: input.userId,
+                  branchId: input.branchId,
+                });
               }
             }
 
@@ -1025,10 +1053,10 @@ export function createPlatformModule(
             }
             // Locked once work begins or is closed.
             if (!["draft", "confirmed"].includes(ticket.status)) {
-              throw new ValidationError(
-                `Cannot edit a ${ticket.status} ticket`,
-                { ticketId: input.ticketId, status: ticket.status },
-              );
+              throw new ValidationError(`Cannot edit a ${ticket.status} ticket`, {
+                ticketId: input.ticketId,
+                status: ticket.status,
+              });
             }
 
             const updates: Record<string, unknown> = {};
@@ -1039,7 +1067,8 @@ export function createPlatformModule(
             if (input.acceptanceCriteria !== undefined) {
               updates.acceptanceCriteria = input.acceptanceCriteria;
             }
-            if (input.exampleScenarios !== undefined) updates.exampleScenarios = input.exampleScenarios;
+            if (input.exampleScenarios !== undefined)
+              updates.exampleScenarios = input.exampleScenarios;
             if (input.suggestedModuleId !== undefined) {
               updates.suggestedModuleId = input.suggestedModuleId;
             }
@@ -1075,12 +1104,7 @@ export function createPlatformModule(
               ? await db
                   .select()
                   .from(schema.capabilityGapTickets)
-                  .where(
-                    and(
-                      where,
-                      eq(schema.capabilityGapTickets.status, input.status),
-                    ),
-                  )
+                  .where(and(where, eq(schema.capabilityGapTickets.status, input.status)))
                   .orderBy(schema.capabilityGapTickets.createdAt)
               : await db
                   .select()
@@ -1118,15 +1142,17 @@ export function createPlatformModule(
               throw new ValidationError("Gap ticket not found", { ticketId: input.ticketId });
             }
             if (ticket.status !== "draft" && ticket.status !== "confirmed") {
-              throw new ValidationError(
-                `Cannot confirm a ${ticket.status} ticket`,
-                { ticketId: input.ticketId, status: ticket.status },
-              );
+              throw new ValidationError(`Cannot confirm a ${ticket.status} ticket`, {
+                ticketId: input.ticketId,
+                status: ticket.status,
+              });
             }
 
             const updates: Record<string, unknown> = { status: "confirmed", updatedAt: new Date() };
-            if (input.suggestedModuleId !== undefined) updates.suggestedModuleId = input.suggestedModuleId;
-            if (input.deploymentTarget !== undefined) updates.deploymentTarget = input.deploymentTarget;
+            if (input.suggestedModuleId !== undefined)
+              updates.suggestedModuleId = input.suggestedModuleId;
+            if (input.deploymentTarget !== undefined)
+              updates.deploymentTarget = input.deploymentTarget;
             await db
               .update(schema.capabilityGapTickets)
               .set(updates)
@@ -1176,7 +1202,11 @@ export function createPlatformModule(
             const rows = await db
               .select()
               .from(schema.capabilityCatalogItems)
-              .where(input.moduleId ? eq(schema.capabilityCatalogItems.moduleId, input.moduleId) : undefined)
+              .where(
+                input.moduleId
+                  ? eq(schema.capabilityCatalogItems.moduleId, input.moduleId)
+                  : undefined,
+              )
               .orderBy(schema.capabilityCatalogItems.capabilityId);
             return {
               items: rows.map((r) => ({
@@ -1207,8 +1237,13 @@ export function createPlatformModule(
               .from(schema.capabilityCatalogItems)
               .where(
                 and(
-                  input.moduleId ? eq(schema.capabilityCatalogItems.moduleId, input.moduleId) : undefined,
-                  or(ilike(schema.capabilityCatalogItems.name, like), ilike(schema.capabilityCatalogItems.description, like)),
+                  input.moduleId
+                    ? eq(schema.capabilityCatalogItems.moduleId, input.moduleId)
+                    : undefined,
+                  or(
+                    ilike(schema.capabilityCatalogItems.name, like),
+                    ilike(schema.capabilityCatalogItems.description, like),
+                  ),
                 ),
               )
               .orderBy(schema.capabilityCatalogItems.capabilityId)
@@ -1266,18 +1301,32 @@ export function createPlatformModule(
               signals.push("org-specific on cloud tenant");
               target = "private_cloud";
               rationale.push("Requirement describes an org-specific package for a cloud tenant.");
-            } else if (/\b(kernel|authz|authorization|payment|billing|security sensitive|permission|rbac|audit)\b/.test(lower)) {
+            } else if (
+              /\b(kernel|authz|authorization|payment|billing|security sensitive|permission|rbac|audit)\b/.test(
+                lower,
+              )
+            ) {
               signals.push("touches kernel authz/payments/core");
               target = "platform_roadmap";
-              rationale.push("Touches kernel authz/payments — needs platform maintainers, never a single tenant.");
-            } else if (/\b(org-specific|company-specific|internal|our workflow|our process|self-host|local process|proprietary)\b/.test(lower)) {
+              rationale.push(
+                "Touches kernel authz/payments — needs platform maintainers, never a single tenant.",
+              );
+            } else if (
+              /\b(org-specific|company-specific|internal|our workflow|our process|self-host|local process|proprietary)\b/.test(
+                lower,
+              )
+            ) {
               signals.push("org-specific local process");
               target = "local_extension";
-              rationale.push("Appears to be an org-specific process that should stay a local extension.");
+              rationale.push(
+                "Appears to be an org-specific process that should stay a local extension.",
+              );
             } else {
               signals.push("common SMB need");
               target = "marketplace_shared";
-              rationale.push("Looks like a common, non-proprietary need — suitable for a shared marketplace package.");
+              rationale.push(
+                "Looks like a common, non-proprietary need — suitable for a shared marketplace package.",
+              );
             }
 
             const suggestedModuleId: string | null = input.suggestedModuleId ?? null;
@@ -1293,7 +1342,12 @@ export function createPlatformModule(
           name: "core.notification.list",
           permissions: ["core.notification.read"],
           tags: ["core"],
-          input: z.object({ unreadOnly: z.boolean().optional(), limit: z.number().int().min(1).max(200).optional() }).default({}),
+          input: z
+            .object({
+              unreadOnly: z.boolean().optional(),
+              limit: z.number().int().min(1).max(200).optional(),
+            })
+            .default({}),
           output: z.object({
             notifications: z.array(
               z.object({
@@ -1427,7 +1481,11 @@ export function createPlatformModule(
           name: "core.email.send",
           permissions: ["core.email.send"],
           tags: ["core"],
-          minAutonomyForAuto: "guarded_auto",
+          // F8 — external side effect (leaves the platform). Standing rules bind
+          // to the `to` target, and auto-execution requires full autonomy.
+          riskClass: "external",
+          externalTargetField: "to",
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({
             to: z.string().email(),
             subject: z.string().min(1),
@@ -1454,7 +1512,10 @@ export function createPlatformModule(
           name: "core.email.enqueue_template",
           permissions: ["core.email.send"],
           tags: ["core"],
-          minAutonomyForAuto: "guarded_auto",
+          // F8 — external side effect (leaves the platform); target-bound rules.
+          riskClass: "external",
+          externalTargetField: "to",
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({
             to: z.string().email(),
             template: emailTemplateSchema,
@@ -1484,7 +1545,10 @@ export function createPlatformModule(
           permissions: ["core.email.send"],
           tags: ["core"],
           input: z
-            .object({ status: z.string().optional(), limit: z.number().int().min(1).max(200).optional() })
+            .object({
+              status: z.string().optional(),
+              limit: z.number().int().min(1).max(200).optional(),
+            })
             .default({}),
           output: z.object({ emails: z.array(emailOutputSchema) }),
           handler: async (input, ctx) => {
@@ -1597,7 +1661,10 @@ export function createPlatformModule(
           description: "Restore a successful backup for this organization",
           permissions: ["core.backup.manage"],
           tags: ["core"],
-          minAutonomyForAuto: "guarded_auto",
+          // F8 — destructive restore is exec-class and must never auto-run below
+          // full autonomy, regardless of org settings.
+          riskClass: "exec",
+          minAutonomyForAuto: "full_autonomous",
           input: z.object({ backupId: z.string().uuid() }),
           output: z.object({
             organizationId: z.string(),
@@ -1618,7 +1685,8 @@ export function createPlatformModule(
               .limit(1);
             if (!row || !row.storageKey) throw new NotFoundError("Backup");
             const store = createObjectStore();
-            const result = await restoreFromStore(db, store, row.storageKey);
+            // F14 — the manifest must belong to the caller's org.
+            const result = await restoreFromStore(db, store, row.storageKey, ctx.actor.organizationId);
             return {
               organizationId: result.organizationId,
               restoredTables: result.restoredTables,
@@ -1635,7 +1703,10 @@ export function createPlatformModule(
           permissions: ["core.backup.read"],
           tags: ["core"],
           input: z
-            .object({ status: z.string().optional(), limit: z.number().int().min(1).max(200).optional() })
+            .object({
+              status: z.string().optional(),
+              limit: z.number().int().min(1).max(200).optional(),
+            })
             .default({}),
           output: z.object({ backups: z.array(backupOutputSchema) }),
           handler: async (input, ctx) => {
@@ -1669,6 +1740,78 @@ export function createPlatformModule(
         }),
       );
 
+      // ─── Dead-letter outbox (ARCH-9/REL-2) ────────────────────────────
+
+      queries.register(
+        defineQuery({
+          name: "core.outbox.listDead",
+          description: "List dead-lettered outbox events for this organization",
+          permissions: ["core.outbox.read"],
+          tags: ["core"],
+          input: z
+            .object({
+              limit: z.number().int().min(1).max(200).optional(),
+              includeReplayed: z.boolean().optional(),
+            })
+            .default({}),
+          output: z.object({
+            events: z.array(
+              z.object({
+                id: z.string(),
+                type: z.string(),
+                occurredAt: z.string(),
+                lastError: z.string().nullable(),
+                errorCode: z.string().nullable(),
+                attempts: z.number(),
+                deadLetteredAt: z.string(),
+                replayedAt: z.string().nullable(),
+              }),
+            ),
+          }),
+          handler: async (input, ctx) => {
+            const rows = await listDeadLetterEvents(
+              db,
+              ctx.actor.organizationId,
+              input.limit ?? 100,
+            );
+            return {
+              events: rows
+                .filter((r) => input.includeReplayed || r.replayedAt === null)
+                .map((r) => ({
+                  id: r.id,
+                  type: r.type,
+                  occurredAt: r.occurredAt.toISOString(),
+                  lastError: r.lastError,
+                  errorCode: r.errorCode,
+                  attempts: r.attempts,
+                  deadLetteredAt: r.deadLetteredAt.toISOString(),
+                  replayedAt: r.replayedAt ? r.replayedAt.toISOString() : null,
+                })),
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.outbox.replay",
+          description: "Re-queue dead-lettered outbox events for delivery",
+          permissions: ["core.outbox.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ eventIds: z.array(z.string().uuid()).min(1).max(100) }),
+          output: z.object({ replayed: z.number() }),
+          handler: async (input, ctx) => {
+            const replayed = await replayDeadLetterEvents(
+              db,
+              ctx.actor.organizationId,
+              input.eventIds,
+            );
+            return { replayed };
+          },
+        }),
+      );
+
       // ─── Settings & Preferences ────────────────────────────────────────
 
       const orgSettingsOutputSchema = z.object({
@@ -1691,16 +1834,7 @@ export function createPlatformModule(
       const userPreferencesOutputSchema = z.object({
         preferences: z.object({
           theme: z.enum(["light", "dark", "system"]),
-          accent: z.enum([
-            "maroon",
-            "teal",
-            "blue",
-            "violet",
-            "rose",
-            "amber",
-            "forest",
-            "slate",
-          ]),
+          accent: z.enum(["maroon", "teal", "blue", "violet", "rose", "amber", "forest", "slate"]),
           timezone: z.string().optional(),
           locale: z.string().optional(),
           notifications: z.object({
@@ -1929,6 +2063,63 @@ export function createPlatformModule(
 
       queries.register(
         defineQuery({
+          name: "core.audit.list",
+          description: "List the org's audit trail (permissioned — F16)",
+          permissions: ["core.rbac.read"],
+          tags: ["core"],
+          input: z
+            .object({
+              limit: z.number().int().min(1).max(500).default(100),
+              action: z.string().optional(),
+              success: z.boolean().optional(),
+            })
+            .default({}),
+          output: z.object({
+            items: z.array(
+              z.object({
+                id: z.string(),
+                at: z.string(),
+                action: z.string(),
+                actorKind: z.string(),
+                actorUserId: z.string(),
+                success: z.boolean(),
+                errorCode: z.string().nullable(),
+                errorMessage: z.string().nullable(),
+              }),
+            ),
+          }),
+          handler: async (input, ctx) => {
+            const where = and(
+              eq(schema.auditLog.organizationId, ctx.actor.organizationId),
+              input.action ? eq(schema.auditLog.action, input.action) : undefined,
+              input.success !== undefined
+                ? eq(schema.auditLog.success, input.success)
+                : undefined,
+            );
+            const rows = await db
+              .select()
+              .from(schema.auditLog)
+              .where(where)
+              .orderBy(desc(schema.auditLog.at))
+              .limit(input.limit);
+            return {
+              items: rows.map((e) => ({
+                id: e.id,
+                at: e.at.toISOString(),
+                action: e.action,
+                actorKind: e.actorKind,
+                actorUserId: e.actorUserId,
+                success: e.success,
+                errorCode: e.errorCode,
+                errorMessage: e.errorMessage,
+              })),
+            };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
           name: "core.workflow.list",
           description: "List persisted workflows for the organization",
           permissions: ["core.workflow.read"],
@@ -1977,8 +2168,6 @@ export function createPlatformModule(
           },
         }),
       );
-
-
     },
   };
 }
@@ -2000,45 +2189,99 @@ export function createScheduleProcessor(db: Db) {
      * (status → "failed", spec §2.2) and the rest of the batch still delivers —
      * a failure never silently drops the whole batch's notifications.
      */
+    /**
+     * Fire due reminders into in-app notifications. The UPDATE … RETURNING claim
+     * is atomic (concurrent workers can't double-fire), but delivery is isolated
+     * per row: a single notification failure is recorded on THAT reminder
+     * (status → "failed", spec §2.2) and the rest of the batch still delivers —
+     * a failure never silently drops the whole batch's notifications.
+     */
     async processDueReminders(): Promise<number> {
+      const rows = await this.claimDueReminders();
+      let delivered = 0;
+      for (const r of rows) {
+        delivered += (await this.deliverReminder(r)) ? 1 : 0;
+      }
+      return delivered;
+    },
+
+    /** Claim ALL currently-due reminders (poll-mode batch claim). */
+    async claimDueReminders(): Promise<(typeof schema.reminders.$inferSelect)[]> {
       const now = new Date();
-      const rows = await db
+      return db
         .update(schema.reminders)
         .set({ status: "fired", firedAt: now })
         .where(and(eq(schema.reminders.status, "scheduled"), lte(schema.reminders.fireAt, now)))
         .returning();
-      let delivered = 0;
-      for (const r of rows) {
-        try {
-          await notifyUser(db, {
-            organizationId: r.organizationId,
-            userId: r.userId,
-            kind: "reminder",
-            title: r.title,
-            body: r.body ?? undefined,
-            href: r.href ?? undefined,
-            resourceType: "reminder",
-            resourceId: r.id,
-          });
-          delivered += 1;
-        } catch (err) {
-          // Record the failure on this reminder instead of aborting the batch.
-          await db
-            .update(schema.reminders)
-            .set({ status: "failed" })
-            .where(eq(schema.reminders.id, r.id));
-          console.error(
-            JSON.stringify({
-              service: "chaste-worker",
-              action: "reminder_failed",
-              reminderId: r.id,
-              userId: r.userId,
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          );
+    },
+
+    /** Non-claiming scan of due reminders — BullMQ enqueue pass. */
+    async listDueReminders(now = new Date()): Promise<(typeof schema.reminders.$inferSelect)[]> {
+      return db
+        .select()
+        .from(schema.reminders)
+        .where(and(eq(schema.reminders.status, "scheduled"), lte(schema.reminders.fireAt, now)));
+    },
+
+    /** Atomic per-id claim used by the BullMQ job handler (single-fire). */
+    async claimReminderById(id: string) {
+      const [row] = await db
+        .update(schema.reminders)
+        .set({ status: "fired", firedAt: new Date() })
+        .where(and(eq(schema.reminders.id, id), eq(schema.reminders.status, "scheduled")))
+        .returning();
+      return row ?? null;
+    },
+
+    /** Deliver one claimed reminder's in-app notification. Returns true on success. */
+    async deliverReminder(r: typeof schema.reminders.$inferSelect): Promise<boolean> {
+      try {
+        await notifyUser(db, {
+          organizationId: r.organizationId,
+          userId: r.userId,
+          kind: "reminder",
+          title: r.title,
+          body: r.body ?? undefined,
+          href: r.href ?? undefined,
+          resourceType: "reminder",
+          resourceId: r.id,
+        });
+        // F24 — `channel: email|both` must actually leave the platform: enqueue
+        // an outbound email row (the worker's email processor sends it). A
+        // reminder that only ever existed as a stored flag was a false promise.
+        if (r.channel === "email" || r.channel === "both") {
+          const [user] = await db
+            .select({ email: schema.users.email })
+            .from(schema.users)
+            .where(eq(schema.users.id, r.userId))
+            .limit(1);
+          if (user?.email) {
+            await db.insert(schema.emailOutbox).values({
+              organizationId: r.organizationId,
+              to: user.email,
+              subject: `Reminder: ${r.title}`,
+              body: [r.body ?? r.title, r.href ?? ""].filter(Boolean).join("\n\n"),
+            });
+          }
         }
+        return true;
+      } catch (err) {
+        // Record the failure on this reminder instead of aborting the batch.
+        await db
+          .update(schema.reminders)
+          .set({ status: "failed" })
+          .where(eq(schema.reminders.id, r.id));
+        console.error(
+          JSON.stringify({
+            service: "chaste-worker",
+            action: "reminder_failed",
+            reminderId: r.id,
+            userId: r.userId,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        return false;
       }
-      return delivered;
     },
 
     async claimDueFollowUps(): Promise<(typeof schema.followUps.$inferSelect)[]> {
@@ -2048,6 +2291,24 @@ export function createScheduleProcessor(db: Db) {
         .set({ status: "running" })
         .where(and(eq(schema.followUps.status, "scheduled"), lte(schema.followUps.fireAt, now)))
         .returning();
+    },
+
+    /** Non-claiming scan of due follow-ups — BullMQ enqueue pass. */
+    async listDueFollowUps(now = new Date()): Promise<(typeof schema.followUps.$inferSelect)[]> {
+      return db
+        .select()
+        .from(schema.followUps)
+        .where(and(eq(schema.followUps.status, "scheduled"), lte(schema.followUps.fireAt, now)));
+    },
+
+    /** Atomic per-id claim used by the BullMQ job handler (single-fire). */
+    async claimFollowUpById(id: string) {
+      const [row] = await db
+        .update(schema.followUps)
+        .set({ status: "running" })
+        .where(and(eq(schema.followUps.id, id), eq(schema.followUps.status, "scheduled")))
+        .returning();
+      return row ?? null;
     },
   };
 }
@@ -2073,7 +2334,9 @@ export function createEmailProcessor(db: Db, adapter: EmailAdapter = createEmail
         await db
           .update(schema.emailOutbox)
           .set({ status: "queued", provider: null, error: null })
-          .where(and(eq(schema.emailOutbox.status, "sending"), lt(schema.emailOutbox.createdAt, cutoff)));
+          .where(
+            and(eq(schema.emailOutbox.status, "sending"), lt(schema.emailOutbox.createdAt, cutoff)),
+          );
       }
       const queued = await db
         .select()
@@ -2084,14 +2347,28 @@ export function createEmailProcessor(db: Db, adapter: EmailAdapter = createEmail
       await db
         .update(schema.emailOutbox)
         .set({ status: "sending" })
-        .where(inArray(schema.emailOutbox.id, queued.map((r) => r.id)));
+        .where(
+          inArray(
+            schema.emailOutbox.id,
+            queued.map((r) => r.id),
+          ),
+        );
       let sent = 0;
       for (const row of queued) {
         try {
-          const { messageId } = await adapter.send({ to: row.to, subject: row.subject, body: row.body });
+          const { messageId } = await adapter.send({
+            to: row.to,
+            subject: row.subject,
+            body: row.body,
+          });
           await db
             .update(schema.emailOutbox)
-            .set({ status: "sent", provider: adapter.id, providerMessageId: messageId, sentAt: new Date() })
+            .set({
+              status: "sent",
+              provider: adapter.id,
+              providerMessageId: messageId,
+              sentAt: new Date(),
+            })
             .where(eq(schema.emailOutbox.id, row.id));
           sent += 1;
         } catch (err) {

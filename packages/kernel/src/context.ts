@@ -1,6 +1,6 @@
 import type { AutonomyLevel } from "./autonomy.js";
 
-export type ActorKind = "user" | "system" | "ai_assisted";
+export type ActorKind = "user" | "system" | "ai_assisted" | "api_key";
 
 export interface Actor {
   kind: ActorKind;
@@ -8,6 +8,11 @@ export interface Actor {
   organizationId: string;
   /** Present when AI is assisting a user — does not elevate permissions. */
   aiRunId?: string;
+  /**
+   * Identifier of the API-key principal when `kind === "api_key"`. Lets audit
+   * attribute a request to a machine credential, not just its creator.
+   */
+  clientId?: string;
   displayName?: string;
   permissions: ReadonlySet<string>;
 }

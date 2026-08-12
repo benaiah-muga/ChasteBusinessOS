@@ -64,6 +64,7 @@ export class PostgresSkillStore implements SkillStore {
           summary: record.summary,
           instructions: record.instructions,
           files: record.files ?? [],
+          refinements: record.refinements ?? [],
           enabled: record.enabled,
           updatedAt: now,
         })
@@ -84,6 +85,7 @@ export class PostgresSkillStore implements SkillStore {
         summary: record.summary,
         instructions: record.instructions,
         files: record.files ?? [],
+        refinements: record.refinements ?? [],
         enabled: record.enabled,
         createdAt: now,
         updatedAt: now,
@@ -122,6 +124,7 @@ export class PostgresSkillStore implements SkillStore {
     summary: string;
     instructions: string;
     files: unknown[] | null;
+    refinements: unknown[] | null;
     enabled: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -135,6 +138,7 @@ export class PostgresSkillStore implements SkillStore {
       summary: r.summary,
       instructions: r.instructions,
       files: (r.files ?? []) as SkillRecord["files"],
+      refinements: (r.refinements ?? []) as SkillRecord["refinements"],
       enabled: r.enabled,
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),

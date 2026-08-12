@@ -27,7 +27,7 @@ import {
   type QueryRegistry,
   type InboxStore,
 } from "@chaste/kernel";
-import type { SkillStore, WakeStore } from "@chaste/ai-core";
+import type { MemoryStore, SkillStore, WakeStore } from "@chaste/ai-core";
 import { createAccountingModule } from "@chaste/module-accounting";
 import { createCrmModule } from "@chaste/module-crm";
 import { createHrModule } from "@chaste/module-hr";
@@ -42,8 +42,9 @@ import { createSchedulingModule } from "@chaste/module-scheduling";
 import { PostgresInboxStore } from "./postgres-inbox-store.js";
 import { PostgresWakeStore } from "./postgres-wake-store.js";
 import { PostgresSkillStore } from "./postgres-skill-store.js";
+import { PostgresMemoryStore } from "./postgres-memory-store.js";
 
-export { PostgresInboxStore, PostgresWakeStore, PostgresSkillStore };
+export { PostgresInboxStore, PostgresWakeStore, PostgresSkillStore, PostgresMemoryStore };
 
 /**
  * The shared, durable runtime every host builds from. Host-specific concerns
@@ -58,6 +59,8 @@ export interface Runtime {
   inbox: InboxStore;
   wakes: WakeStore;
   skills: SkillStore;
+  /** AI memory (passive recall + explicit memory tools) over `org_memories`. */
+  memory: MemoryStore;
   audit: PostgresAuditWriter;
   outbox: PostgresOutboxWriter;
   sessionStore: DbSessionStore;
@@ -76,7 +79,12 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   await modules.register(createInventoryModule(db));
   await modules.register(createPurchasingModule(db));
   await modules.register(createHrModule(db));
-  await modules.register(createIdentityModule(db));
+  await modules.register(
+    // Defensive TTL read: hosts pass full configs, but tolerate partial ones.
+    createIdentityModule(db, {
+      authTokenTtlMs: (config.session?.tokenTtlSeconds ?? 90 * 24 * 60 * 60) * 1000,
+    }),
+  );
   await modules.register(createManufacturingModule(db));
   await modules.register(createMasterDataModule(db));
   await modules.register(createMessagingModule(db));
@@ -92,6 +100,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   const inbox = new PostgresInboxStore(db);
   const wakes = new PostgresWakeStore(db);
   const skills = new PostgresSkillStore(db);
+  const memoryStore = new DbMemoryStore(db);
 
   return {
     config,
@@ -105,7 +114,8 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
     audit: new PostgresAuditWriter(db),
     outbox: new PostgresOutboxWriter(db),
     sessionStore: new DbSessionStore(db),
-    memoryStore: new DbMemoryStore(db),
+    memoryStore,
+    memory: new PostgresMemoryStore(memoryStore),
   };
 }
 

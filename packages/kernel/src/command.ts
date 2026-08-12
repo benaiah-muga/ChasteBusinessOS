@@ -3,6 +3,7 @@ import type { AuditWriter } from "./audit.js";
 import type { RequestContext } from "./context.js";
 import { actorHasPermission } from "./context.js";
 import { NotFoundError, PermissionError, ValidationError } from "./errors.js";
+import { redactForAudit } from "./redact.js";
 import type { OutboxWriter } from "./events.js";
 import type { RiskClass } from "./risk.js";
 
@@ -31,8 +32,10 @@ export interface CommandMeta {
   externalTargetField?: string;
 }
 
-export interface CommandDefinition<TIn extends z.ZodType, TOut extends z.ZodType>
-  extends CommandMeta {
+export interface CommandDefinition<
+  TIn extends z.ZodType,
+  TOut extends z.ZodType,
+> extends CommandMeta {
   input: TIn;
   output: TOut;
   handler: (
@@ -60,11 +63,8 @@ export interface CommandHelpers {
   transaction?: <T>(fn: (tx: CommandHelpers) => Promise<T>) => Promise<T>;
 }
 
-
 export interface CommandRegistry {
-  register<TIn extends z.ZodType, TOut extends z.ZodType>(
-    def: CommandDefinition<TIn, TOut>,
-  ): void;
+  register<TIn extends z.ZodType, TOut extends z.ZodType>(def: CommandDefinition<TIn, TOut>): void;
   get(name: string): CommandDefinition<z.ZodType, z.ZodType> | undefined;
   list(): CommandMeta[];
 }
@@ -84,7 +84,15 @@ export function createCommandRegistry(): CommandRegistry {
     },
     list() {
       return [...map.values()].map(
-        ({ name, description, permissions, tags, minAutonomyForAuto, riskClass, externalTargetField }) => ({
+        ({
+          name,
+          description,
+          permissions,
+          tags,
+          minAutonomyForAuto,
+          riskClass,
+          externalTargetField,
+        }) => ({
           name,
           description,
           permissions,
@@ -135,7 +143,7 @@ export async function executeCommand<T = unknown>(
         action: name,
         success: false,
         requestId: ctx.requestId,
-        inputSummary: rawInput,
+        inputSummary: redactForAudit(rawInput),
         errorCode: "PERMISSION_DENIED",
         errorMessage: `Missing permission: ${permission}`,
       });
@@ -155,7 +163,7 @@ export async function executeCommand<T = unknown>(
       action: name,
       success: false,
       requestId: ctx.requestId,
-      inputSummary: rawInput,
+      inputSummary: redactForAudit(rawInput),
       errorCode: "VALIDATION_ERROR",
       errorMessage: parsed.error.message,
     });
@@ -185,7 +193,7 @@ export async function executeCommand<T = unknown>(
         action: name,
         success: true,
         requestId: ctx.requestId,
-        inputSummary: parsed.data,
+        inputSummary: redactForAudit(parsed.data),
       });
 
       return out.data as T;
@@ -202,7 +210,10 @@ export async function executeCommand<T = unknown>(
     // failure is always recorded even though any partial business writes were
     // undone by the rollback.
     const message = err instanceof Error ? err.message : String(err);
-    const code = err instanceof Error && "code" in err ? String((err as { code: string }).code) : "HANDLER_ERROR";
+    const code =
+      err instanceof Error && "code" in err
+        ? String((err as { code: string }).code)
+        : "HANDLER_ERROR";
     await helpers.audit.write({
       id: crypto.randomUUID(),
       at: ctx.now().toISOString(),
@@ -213,7 +224,7 @@ export async function executeCommand<T = unknown>(
       action: name,
       success: false,
       requestId: ctx.requestId,
-      inputSummary: parsed.data,
+      inputSummary: redactForAudit(parsed.data),
       errorCode: code,
       errorMessage: message,
     });

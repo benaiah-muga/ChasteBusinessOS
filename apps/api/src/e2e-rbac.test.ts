@@ -52,26 +52,61 @@ interface TestCompany {
 let company: TestCompany;
 
 const ADMIN_PERMISSIONS = [
-  "core.modules.read", "core.modules.manage", "core.rbac.read",
-  "core.user.manage", "core.user.read", "core.role.manage", "core.role.assign",
-  "core.autonomy.manage", "core.marketplace.read",
-  "core.settings.read", "core.settings.manage",
-  "crm.customer.create", "crm.customer.read",
-  "acc.account.manage", "acc.account.read", "acc.journal.post", "acc.invoice.manage", "acc.invoice.read",
-  "inv.warehouse.manage", "inv.product.manage", "inv.stock.move", "inv.stock.read",
-  "pur.vendor.manage", "pur.po.manage", "pur.po.read",
-  "hr.employee.manage", "hr.employee.read", "hr.payroll.run", "hr.payroll.read",
-  "mfg.bom.manage", "mfg.wo.manage", "mfg.wo.read",
+  "core.modules.read",
+  "core.modules.manage",
+  "core.rbac.read",
+  "core.user.manage",
+  "core.user.read",
+  "core.role.manage",
+  "core.role.assign",
+  "core.autonomy.manage",
+  "core.marketplace.read",
+  "core.settings.read",
+  "core.settings.manage",
+  "crm.customer.create",
+  "crm.customer.read",
+  "acc.account.manage",
+  "acc.account.read",
+  "acc.journal.post",
+  "acc.invoice.manage",
+  "acc.invoice.read",
+  "inv.warehouse.manage",
+  "inv.product.manage",
+  "inv.stock.move",
+  "inv.stock.read",
+  "pur.vendor.manage",
+  "pur.po.manage",
+  "pur.po.read",
+  "hr.employee.manage",
+  "hr.employee.read",
+  "hr.payroll.run",
+  "hr.payroll.read",
+  "mfg.bom.manage",
+  "mfg.wo.manage",
+  "mfg.wo.read",
 ];
 
 const OPERATOR_PERMISSIONS = [
-  "core.modules.read", "core.rbac.read", "core.marketplace.read", "core.user.read",
-  "crm.customer.create", "crm.customer.read",
-  "acc.account.read", "acc.invoice.read",
-  "inv.stock.read", "inv.stock.move", "inv.product.manage", "inv.warehouse.manage",
-  "pur.vendor.manage", "pur.po.manage", "pur.po.read",
-  "hr.employee.read", "hr.payroll.read",
-  "mfg.bom.manage", "mfg.wo.manage", "mfg.wo.read",
+  "core.modules.read",
+  "core.rbac.read",
+  "core.marketplace.read",
+  "core.user.read",
+  "crm.customer.create",
+  "crm.customer.read",
+  "acc.account.read",
+  "acc.invoice.read",
+  "inv.stock.read",
+  "inv.stock.move",
+  "inv.product.manage",
+  "inv.warehouse.manage",
+  "pur.vendor.manage",
+  "pur.po.manage",
+  "pur.po.read",
+  "hr.employee.read",
+  "hr.payroll.read",
+  "mfg.bom.manage",
+  "mfg.wo.manage",
+  "mfg.wo.read",
 ];
 
 function ctxFor(user: TestUser, orgId: string) {
@@ -87,7 +122,10 @@ function ctxFor(user: TestUser, orgId: string) {
 }
 
 async function cmd(user: TestUser, orgId: string, name: string, input: unknown) {
-  const result = await executeCommand(commands, name, input, ctxFor(user, orgId), { audit, outbox });
+  const result = await executeCommand(commands, name, input, ctxFor(user, orgId), {
+    audit,
+    outbox,
+  });
   return result.data;
 }
 
@@ -128,27 +166,36 @@ describe.skipIf(!hasDb)("RBAC E2E", () => {
     createIdentityModule(db).register({ commands, queries });
 
     // Create test org
-    const [org] = await db.insert(schema.organizations).values({
-      name: "RBAC Test Co",
-      autonomy: "confirm",
-      region: "local",
-    }).returning();
+    const [org] = await db
+      .insert(schema.organizations)
+      .values({
+        name: "RBAC Test Co",
+        autonomy: "confirm",
+        region: "local",
+      })
+      .returning();
 
     // Admin user
     const adminToken = crypto.randomUUID();
-    const [adminRow] = await db.insert(schema.users).values({
-      organizationId: org!.id,
-      email: "admin@rbac-test.com",
-      displayName: "Admin User",
-      authToken: adminToken,
-    }).returning();
+    const [adminRow] = await db
+      .insert(schema.users)
+      .values({
+        organizationId: org!.id,
+        email: "admin@rbac-test.com",
+        displayName: "Admin User",
+        authToken: adminToken,
+      })
+      .returning();
 
-    const [adminRole] = await db.insert(schema.roles).values({
-      organizationId: org!.id,
-      key: "admin",
-      name: "Administrator",
-      isSystem: true,
-    }).returning();
+    const [adminRole] = await db
+      .insert(schema.roles)
+      .values({
+        organizationId: org!.id,
+        key: "admin",
+        name: "Administrator",
+        isSystem: true,
+      })
+      .returning();
 
     for (const perm of ADMIN_PERMISSIONS) {
       await db.insert(schema.rolePermissions).values({ roleId: adminRole!.id, permission: perm });
@@ -157,19 +204,25 @@ describe.skipIf(!hasDb)("RBAC E2E", () => {
 
     // Operator user
     const opToken = crypto.randomUUID();
-    const [opRow] = await db.insert(schema.users).values({
-      organizationId: org!.id,
-      email: "operator@rbac-test.com",
-      displayName: "Operator User",
-      authToken: opToken,
-    }).returning();
+    const [opRow] = await db
+      .insert(schema.users)
+      .values({
+        organizationId: org!.id,
+        email: "operator@rbac-test.com",
+        displayName: "Operator User",
+        authToken: opToken,
+      })
+      .returning();
 
-    const [opRole] = await db.insert(schema.roles).values({
-      organizationId: org!.id,
-      key: "operator",
-      name: "Operator",
-      isSystem: true,
-    }).returning();
+    const [opRole] = await db
+      .insert(schema.roles)
+      .values({
+        organizationId: org!.id,
+        key: "operator",
+        name: "Operator",
+        isSystem: true,
+      })
+      .returning();
 
     for (const perm of OPERATOR_PERMISSIONS) {
       await db.insert(schema.rolePermissions).values({ roleId: opRole!.id, permission: perm });
@@ -515,6 +568,55 @@ describe.skipIf(!hasDb)("RBAC E2E", () => {
       expect(adminRole.permissions).toContain("core.user.manage");
       expect(adminRole.permissions).toContain("core.role.manage");
       expect(adminRole.permissions).not.toContain("core.rbac.manage");
+    });
+  });
+
+  // ─── F13 — role permissions are catalog-validated ────────────────────
+
+  describe("F13 role permission validation", () => {
+    it("rejects wildcard permissions on role create", async () => {
+      const e = await cmdFails(company.adminUser, company.orgId, "core.role.create", {
+        key: "wildcard-role",
+        name: "Wildcard",
+        permissions: ["*"],
+      });
+      expect(e.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("rejects un-catalogued permissions on role create", async () => {
+      const e = await cmdFails(company.adminUser, company.orgId, "core.role.create", {
+        key: "ghost-role",
+        name: "Ghost",
+        permissions: ["does.not.exist"],
+      });
+      expect(e.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("rejects un-catalogued permissions on role update", async () => {
+      const [role] = await db
+        .insert(schema.roles)
+        .values({
+          organizationId: company.orgId,
+          key: `f13-${Date.now()}`,
+          name: "F13 Role",
+          isSystem: false,
+        })
+        .returning();
+      expect(role).toBeDefined();
+      const e = await cmdFails(company.adminUser, company.orgId, "core.role.update", {
+        roleId: role!.id,
+        permissions: ["*"],
+      });
+      expect(e.code).toBe("VALIDATION_ERROR");
+    });
+
+    it("allows only catalogued permissions", async () => {
+      const created = await cmd(company.adminUser, company.orgId, "core.role.create", {
+        key: `f13-ok-${Date.now()}`,
+        name: "F13 OK",
+        permissions: ["crm.customer.read", "core.user.read"],
+      });
+      expect(created.id).toBeTypeOf("string");
     });
   });
 });

@@ -30,6 +30,9 @@ FROM base AS api
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=api-build /out/api ./
+# F10 — run as non-root (node:22-slim ships the `node` user).
+RUN chown -R node:node /app
+USER node
 EXPOSE 3001
 CMD ["node", "dist/index.js"]
 
@@ -45,6 +48,9 @@ FROM base AS web
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=web-build /out/web ./
+# F10 — non-root; Next writes .next/cache, so /app must be owned by node.
+RUN chown -R node:node /app
+USER node
 EXPOSE 3000
 CMD ["node_modules/.bin/next", "start", "-p", "3000"]
 
@@ -57,6 +63,9 @@ FROM base AS worker
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=worker-build /out/worker ./
+# F10 — non-root.
+RUN chown -R node:node /app
+USER node
 CMD ["node", "dist/index.js"]
 
 # ── Migrations (one-shot job) ─────────────────────────────────────────────
@@ -68,4 +77,7 @@ FROM base AS migrate
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=migrate-build /out/db ./
+# F10 — non-root (read-only job).
+RUN chown -R node:node /app
+USER node
 CMD ["node", "dist/migrate.js"]

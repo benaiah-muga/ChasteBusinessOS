@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   executeDynamicWorkflow,
+  evaluateCondition,
   lookupPath,
   normalizeFieldNames,
   resolveInput,
@@ -333,6 +334,121 @@ describe("executeDynamicWorkflow", () => {
     expect(result.success).toBe(true);
     expect(result.stepResults[0]?.status).toBe("failed");
     expect(result.stepResults[1]?.status).toBe("completed");
+  });
+});
+
+describe("evaluateCondition (F2 — safe predicate DSL, no new Function)", () => {
+  it("evaluates comparisons, logical ops, paths, strings, and grouping", () => {
+    const ctx = { input: { status: "paid", total: 250 } } as Record<string, unknown>;
+    expect(evaluateCondition('input.status == "paid"', ctx)).toBe(true);
+    expect(evaluateCondition("input.total > 200", ctx)).toBe(true);
+    expect(evaluateCondition('input.status == "paid" && input.total > 200', ctx)).toBe(true);
+    expect(evaluateCondition('input.status != "pending" || input.total < 10', ctx)).toBe(true);
+    expect(evaluateCondition('!(input.status == "pending")', ctx)).toBe(true);
+    expect(evaluateCondition("(input.total + 50) >= 300", ctx)).toBe(true);
+    expect(evaluateCondition('input.status == "pending"', ctx)).toBe(false);
+    expect(evaluateCondition("input.total < 200", ctx)).toBe(false);
+  });
+
+  it("treats missing / undefined fields as false branches", () => {
+    const ctx = { input: { status: "paid" } } as Record<string, unknown>;
+    expect(evaluateCondition("missing_field == 1", ctx)).toBe(false);
+    expect(evaluateCondition('input.does.not.exist == "x"', ctx)).toBe(false);
+    expect(evaluateCondition("input.nonexistent", ctx)).toBe(false);
+  });
+
+  it("F2 — the audit's RCE payload evaluates to false and never executes", () => {
+    const ctx = { input: {} } as Record<string, unknown>;
+    const exploit =
+      "process.mainModule.require('child_process').execSync('touch /tmp/chaste-pwned').toString() && true";
+    expect(evaluateCondition(exploit, ctx)).toBe(false);
+    const { existsSync } = require("node:fs") as typeof import("node:fs");
+    expect(existsSync("/tmp/chaste-pwned")).toBe(false);
+  });
+
+  it("resolves bare keys against merged context and `state`/`context` bindings", () => {
+    const ctx = { total: 99, input: {} } as Record<string, unknown>;
+    expect(evaluateCondition("total > 50", ctx)).toBe(true);
+    expect(evaluateCondition("state.total > 50", ctx)).toBe(true);
+    expect(evaluateCondition("context.total > 50", ctx)).toBe(true);
+  });
+
+  it("blocks code-y tokens and garbage", () => {
+    const ctx = { input: {} } as Record<string, unknown>;
+    expect(evaluateCondition("function () { return true }", ctx)).toBe(false);
+    expect(evaluateCondition("1; process.exit()", ctx)).toBe(false);
+    expect(evaluateCondition("return true", ctx)).toBe(false);
+    expect(evaluateCondition("x => x", ctx)).toBe(false);
+  });
+
+  it("enforces a max condition length", () => {
+    const ctx = {} as Record<string, unknown>;
+    expect(evaluateCondition("1 == 1 && " + "x".repeat(2000), ctx)).toBe(false);
+  });
+});
+
+describe("condition steps in workflows (F2)", () => {
+  it("routes on a true condition and never runs hostile code", async () => {
+    const registry = registerCommands();
+    const def: WorkflowDefinition = {
+      id: "wf-cond-1",
+      name: "Conditional",
+      description: "safe conditions",
+      trigger: "manual",
+      createdBy: "user",
+      createdAt: new Date().toISOString(),
+      steps: [
+        { id: "c1", type: "condition", condition: "input.approve == true" },
+        {
+          id: "ok",
+          type: "command",
+          command: "crm.customer.create",
+          input: { name: "Conditioned" },
+        },
+      ],
+    };
+    const result = await executeDynamicWorkflow(
+      def,
+      { approve: true },
+      { registry, requestCtx: makeCtx(), helpers: helpers() },
+    );
+    expect(result.success).toBe(true);
+    expect(result.stepResults[0]?.output).toMatchObject({ conditionResult: true });
+  });
+
+  it("a stored hostile condition yields conditionResult: false, no code execution", async () => {
+    const registry = registerCommands();
+    const def: WorkflowDefinition = {
+      id: "wf-cond-2",
+      name: "Malicious condition",
+      description: "must not execute",
+      trigger: "manual",
+      createdBy: "ai",
+      createdAt: new Date().toISOString(),
+      steps: [
+        {
+          id: "c-exploit",
+          type: "condition",
+          condition:
+            "process.mainModule.require('child_process').execSync('touch /tmp/chaste-wf-pwned').toString() && true",
+        },
+        {
+          id: "ok",
+          type: "command",
+          command: "crm.customer.create",
+          input: { name: "Still Safe" },
+        },
+      ],
+    };
+    const result = await executeDynamicWorkflow(
+      def,
+      {},
+      { registry, requestCtx: makeCtx(), helpers: helpers() },
+    );
+    expect(result.success).toBe(true);
+    expect(result.stepResults[0]?.output).toMatchObject({ conditionResult: false });
+    const { existsSync } = require("node:fs") as typeof import("node:fs");
+    expect(existsSync("/tmp/chaste-wf-pwned")).toBe(false);
   });
 });
 

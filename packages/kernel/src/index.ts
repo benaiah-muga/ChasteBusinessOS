@@ -8,4 +8,5 @@ export * from "./inbox.js";
 export * from "./module.js";
 export * from "./outbox.js";
 export * from "./query.js";
+export * from "./redact.js";
 export * from "./risk.js";

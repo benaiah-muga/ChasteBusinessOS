@@ -144,4 +144,55 @@ describe.skipIf(!hasDb)("Runtime shared stores E2E", () => {
     const disabled = await api.skills.get("quote-review", { organizationId: orgId });
     expect(disabled?.enabled).toBe(false);
   });
+
+  it("round-trips a skill refinement history across hosts (evidence + snapshots)", async () => {
+    const refinement = {
+      id: "ref-1",
+      trigger: "Turn 12: verify the trial balance",
+      before: { summary: "Old summary" },
+      after: { summary: "New summary" },
+      createdAt: new Date().toISOString(),
+    };
+    await api.skills.upsert({
+      name: "acc.cycle-close",
+      scope: "organization",
+      organizationId: orgId,
+      title: "Cycle Close",
+      summary: "Monthly accounting close procedure",
+      instructions: "Run all accruals, then reconcile.",
+      refinements: [refinement],
+      enabled: true,
+    });
+
+    // The worker host reads the same durable history (no dual-write).
+    const viaWorker = await worker.skills.get("acc.cycle-close", { organizationId: orgId });
+    expect(viaWorker?.refinements).toHaveLength(1);
+    expect(viaWorker?.refinements![0]!.id).toBe("ref-1");
+    expect(viaWorker?.refinements![0]!.trigger).toContain("trial balance");
+    expect(viaWorker?.refinements![0]!.before).toEqual({ summary: "Old summary" });
+    expect(viaWorker?.refinements![0]!.after).toEqual({ summary: "New summary" });
+
+    // Persisting with a rewritten history alongside an edit survives round-trip.
+    const reversal = {
+      id: "ref-2",
+      trigger: "Reverted refinement ref-1",
+      before: { summary: "New summary" },
+      after: { summary: "Reveal" },
+      reversalRefinementId: "ref-1",
+      createdAt: new Date().toISOString(),
+    };
+    await worker.skills.upsert({
+      name: "acc.cycle-close",
+      scope: "organization",
+      organizationId: orgId,
+      title: "Cycle Close",
+      summary: "Reveal",
+      instructions: "Run all accruals, then reconcile.",
+      refinements: [refinement, reversal],
+      enabled: true,
+    });
+    const viaApi = await api.skills.get("acc.cycle-close", { organizationId: orgId });
+    expect(viaApi?.refinements).toHaveLength(2);
+    expect(viaApi?.refinements![1]!.reversalRefinementId).toBe("ref-1");
+  });
 });

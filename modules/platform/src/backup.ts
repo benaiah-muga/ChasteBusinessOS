@@ -1,6 +1,14 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import type { Db } from "@chaste/db";
 import { schema } from "@chaste/db";
+import { ValidationError } from "@chaste/kernel";
 import { and, eq, getTableColumns, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -20,7 +28,10 @@ export function getBackupKey(): Buffer {
 }
 
 function keyId(): string {
-  return createHash("sha256").update(process.env.CHASTE_BACKUP_KEY ?? "").digest("hex").slice(0, 8);
+  return createHash("sha256")
+    .update(process.env.CHASTE_BACKUP_KEY ?? "")
+    .digest("hex")
+    .slice(0, 8);
 }
 
 export const encryptedBlobSchema = z.object({
@@ -56,7 +67,9 @@ export function decryptBackup(blob: EncryptedBlob): string {
   }
   const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(blob.nonce, "hex"));
   decipher.setAuthTag(Buffer.from(blob.tag, "hex"));
-  return Buffer.concat([decipher.update(Buffer.from(blob.ct, "hex")), decipher.final()]).toString("utf8");
+  return Buffer.concat([decipher.update(Buffer.from(blob.ct, "hex")), decipher.final()]).toString(
+    "utf8",
+  );
 }
 
 /* ───────────────────────── Snapshot / manifest ────────────────────────── */
@@ -121,12 +134,32 @@ const DIRECT_TABLES = {
  */
 const JOIN_TABLES = {
   userRoles: { table: schema.userRoles, parent: schema.users, fk: schema.userRoles.userId },
-  rolePermissions: { table: schema.rolePermissions, parent: schema.roles, fk: schema.rolePermissions.roleId },
-  userBranchAccess: { table: schema.userBranchAccess, parent: schema.users, fk: schema.userBranchAccess.userId },
-  chatMessages: { table: schema.chatMessages, parent: schema.chatSessions, fk: schema.chatMessages.sessionId },
-  msgThreadMembers: { table: schema.msgThreadMembers, parent: schema.msgThreads, fk: schema.msgThreadMembers.threadId },
+  rolePermissions: {
+    table: schema.rolePermissions,
+    parent: schema.roles,
+    fk: schema.rolePermissions.roleId,
+  },
+  userBranchAccess: {
+    table: schema.userBranchAccess,
+    parent: schema.users,
+    fk: schema.userBranchAccess.userId,
+  },
+  chatMessages: {
+    table: schema.chatMessages,
+    parent: schema.chatSessions,
+    fk: schema.chatMessages.sessionId,
+  },
+  msgThreadMembers: {
+    table: schema.msgThreadMembers,
+    parent: schema.msgThreads,
+    fk: schema.msgThreadMembers.threadId,
+  },
   msgReads: { table: schema.msgReads, parent: schema.msgThreads, fk: schema.msgReads.threadId },
-  accJournalLines: { table: schema.accJournalLines, parent: schema.accJournalEntries, fk: schema.accJournalLines.entryId },
+  accJournalLines: {
+    table: schema.accJournalLines,
+    parent: schema.accJournalEntries,
+    fk: schema.accJournalLines.entryId,
+  },
   mfgBomLines: { table: schema.mfgBomLines, parent: schema.mfgBoms, fk: schema.mfgBomLines.bomId },
 } as const;
 
@@ -188,7 +221,10 @@ type SnapshotResult = Record<string, Record<string, unknown>[]>;
  * and `auditLog` tables are intentionally excluded: outbox events would replay
  * side effects on restore, and the audit log is append-only by design.
  */
-export async function snapshotOrganization(db: Db, organizationId: string): Promise<SnapshotResult> {
+export async function snapshotOrganization(
+  db: Db,
+  organizationId: string,
+): Promise<SnapshotResult> {
   const tables: SnapshotResult = {};
 
   const [orgRow] = await db
@@ -209,14 +245,20 @@ export async function snapshotOrganization(db: Db, organizationId: string): Prom
   }
 
   for (const [name, { table, parent, fk }] of Object.entries(JOIN_TABLES)) {
-    const parentRows = await db.select({ id: parent.id }).from(parent).where(eq(parent.organizationId, organizationId));
+    const parentRows = await db
+      .select({ id: parent.id })
+      .from(parent)
+      .where(eq(parent.organizationId, organizationId));
     const parentIds = parentRows.map((r) => r.id);
     if (parentIds.length === 0) {
       tables[name] = [];
       continue;
     }
     const shape = await existing.selectShape(table);
-    const rows = await db.select(shape as never).from(table as never).where(inArray(fk as any, parentIds));
+    const rows = await db
+      .select(shape as never)
+      .from(table as never)
+      .where(inArray(fk as any, parentIds));
     tables[name] = rows as unknown as Record<string, unknown>[];
   }
 
@@ -261,7 +303,11 @@ class ColumnResolver {
 }
 
 /** Build a versioned, checksum-able manifest for an org. */
-export function buildManifest(organizationId: string, tables: SnapshotResult, exportedAt = new Date().toISOString()): BackupManifest {
+export function buildManifest(
+  organizationId: string,
+  tables: SnapshotResult,
+  exportedAt = new Date().toISOString(),
+): BackupManifest {
   return { schema: "chaste-backup.v1", exportedAt, organizationId, tables };
 }
 
@@ -336,7 +382,9 @@ export function createS3Store(): ObjectStore {
   const endpoint = process.env.CHASTE_S3_ENDPOINT;
 
   if (!bucket || !accessKeyId || !secretAccessKey) {
-    throw new Error("CHASTE_S3_BUCKET / CHASTE_S3_ACCESS_KEY_ID / CHASTE_S3_SECRET_ACCESS_KEY are required");
+    throw new Error(
+      "CHASTE_S3_BUCKET / CHASTE_S3_ACCESS_KEY_ID / CHASTE_S3_SECRET_ACCESS_KEY are required",
+    );
   }
 
   const baseUrl = endpoint ?? `https://${bucket}.s3.${region}.amazonaws.com`;
@@ -346,11 +394,23 @@ export function createS3Store(): ObjectStore {
     async put(key, data) {
       const body = Buffer.from(data, "utf8");
       const url = new URL(`${baseUrl}/${encodePath(key)}`);
-      await s3Request("PUT", url, body, { bucket, region, accessKeyId, secretAccessKey, sessionToken });
+      await s3Request("PUT", url, body, {
+        bucket,
+        region,
+        accessKeyId,
+        secretAccessKey,
+        sessionToken,
+      });
     },
     async get(key) {
       const url = new URL(`${baseUrl}/${encodePath(key)}`);
-      const res = await s3Request("GET", url, undefined, { bucket, region, accessKeyId, secretAccessKey, sessionToken });
+      const res = await s3Request("GET", url, undefined, {
+        bucket,
+        region,
+        accessKeyId,
+        secretAccessKey,
+        sessionToken,
+      });
       return res.text();
     },
   };
@@ -376,10 +436,16 @@ async function s3Request(
 ): Promise<Response> {
   const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
   const dateStamp = amzDate.slice(0, 8);
-  const payloadHash = createHash("sha256").update(body ?? Buffer.from("")).digest("hex");
+  const payloadHash = createHash("sha256")
+    .update(body ?? Buffer.from(""))
+    .digest("hex");
 
   const signedHeaders = ["host"];
-  let extraHeaders: Record<string, string> = { host: url.host, "x-amz-date": amzDate, "x-amz-content-sha256": payloadHash };
+  let extraHeaders: Record<string, string> = {
+    host: url.host,
+    "x-amz-date": amzDate,
+    "x-amz-content-sha256": payloadHash,
+  };
   if (auth.sessionToken) {
     extraHeaders["x-amz-security-token"] = auth.sessionToken;
     signedHeaders.push("x-amz-security-token");
@@ -407,7 +473,13 @@ async function s3Request(
     createHash("sha256").update(canonicalRequest).digest("hex"),
   ].join("\n");
 
-  const signingKey = hmacChain(`AWS4${auth.secretAccessKey}`, dateStamp, auth.region, "s3", "aws4_request");
+  const signingKey = hmacChain(
+    `AWS4${auth.secretAccessKey}`,
+    dateStamp,
+    auth.region,
+    "s3",
+    "aws4_request",
+  );
   const signature = createHmac("sha256", signingKey).update(stringToSign).digest("hex");
 
   const headers: Record<string, string> = {
@@ -418,13 +490,18 @@ async function s3Request(
 
   const res = await fetch(url, { method, headers, body });
   if (!res.ok) {
-    throw new Error(`S3 ${method} ${url.pathname} failed: ${res.status} ${(await res.text()).slice(0, 300)}`);
+    throw new Error(
+      `S3 ${method} ${url.pathname} failed: ${res.status} ${(await res.text()).slice(0, 300)}`,
+    );
   }
   return res;
 }
 
 function hmacChain(key: Buffer | string, ...parts: string[]): Buffer {
-  return parts.reduce<Buffer>((k, p) => createHmac("sha256", k).update(p).digest(), Buffer.from(key));
+  return parts.reduce<Buffer>(
+    (k, p) => createHmac("sha256", k).update(p).digest(),
+    Buffer.from(key),
+  );
 }
 
 /** Env-driven store factory, mirroring `createEmailAdapter`. */
@@ -434,7 +511,10 @@ export function createObjectStore(): ObjectStore {
   return createNullStore();
 }
 
-export function objectStoreStatus(): { provider: "s3" | "local" | "memory" | "none"; encryptionConfigured: boolean } {
+export function objectStoreStatus(): {
+  provider: "s3" | "local" | "memory" | "none";
+  encryptionConfigured: boolean;
+} {
   let provider: "s3" | "local" | "memory" | "none" = "none";
   if (process.env.CHASTE_S3_BUCKET) provider = "s3";
   else if (process.env.CHASTE_BACKUP_DIR) provider = "local";
@@ -469,7 +549,12 @@ export function createBackupProcessor(db: Db, store: ObjectStore = createObjectS
       await db
         .update(schema.backups)
         .set({ status: "running" })
-        .where(inArray(schema.backups.id, queued.map((r) => r.id)));
+        .where(
+          inArray(
+            schema.backups.id,
+            queued.map((r) => r.id),
+          ),
+        );
 
       let done = 0;
       for (const job of queued) {
@@ -491,7 +576,11 @@ export function createBackupProcessor(db: Db, store: ObjectStore = createObjectS
         } catch (err) {
           await db
             .update(schema.backups)
-            .set({ status: "failed", provider: store.id, error: err instanceof Error ? err.message : String(err) })
+            .set({
+              status: "failed",
+              provider: store.id,
+              error: err instanceof Error ? err.message : String(err),
+            })
             .where(eq(schema.backups.id, job.id));
         }
       }
@@ -518,7 +607,10 @@ export async function runBackupJob(
 
 /* ───────────────────────── Restore ───────────────────────────────────── */
 
-export async function fetchAndDecrypt(store: ObjectStore, storageKey: string): Promise<BackupManifest> {
+export async function fetchAndDecrypt(
+  store: ObjectStore,
+  storageKey: string,
+): Promise<BackupManifest> {
   const raw = await store.get(storageKey);
   const blob = encryptedBlobSchema.parse(JSON.parse(raw));
   const plain = decryptBackup(blob);
@@ -574,8 +666,18 @@ export async function applyManifest(
   return { restoredTables, rowCount };
 }
 
-export async function restoreFromStore(db: Db, store: ObjectStore, storageKey: string) {
+export async function restoreFromStore(
+  db: Db,
+  store: ObjectStore,
+  storageKey: string,
+  expectedOrgId?: string,
+) {
   const manifest = await fetchAndDecrypt(store, storageKey);
+  // F14 — if the caller expects a specific org, refuse to restore a backup
+  // that belongs to a different organization (cross-tenant data import).
+  if (expectedOrgId && manifest.organizationId !== expectedOrgId) {
+    throw new ValidationError("Backup belongs to a different organization");
+  }
   const result = await applyManifest(db, manifest);
   return { organizationId: manifest.organizationId, ...result };
 }

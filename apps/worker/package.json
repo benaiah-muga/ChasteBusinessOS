@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
@@ -26,7 +26,9 @@
     "@chaste/module-platform": "workspace:*",
     "@chaste/module-purchasing": "workspace:*",
     "@chaste/runtime": "workspace:*",
-    "drizzle-orm": "^0.38.3"
+    "bullmq": "^5.34.0",
+    "drizzle-orm": "^0.38.3",
+    "ioredis": "^5.4.1"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

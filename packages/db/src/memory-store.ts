@@ -3,7 +3,7 @@
  * Supports tiered storage (short_term_chat, workflow_session,
  * long_term_org, permanent_business_pointer) with TTL and scoping.
  */
-import { eq, and, ilike, isNull, sql } from "drizzle-orm";
+import { eq, and, ilike, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { orgMemories } from "./schema.js";
 
@@ -120,7 +120,7 @@ export class DbMemoryStore {
           sql`(${orgMemories.expiresAt} IS NULL OR ${orgMemories.expiresAt} > NOW())`,
         ),
       )
-      .orderBy(orgMemories.createdAt)
+      .orderBy(sql`${orgMemories.createdAt} DESC`)
       .limit(limit);
 
     return rows.map((r) => this.toRecord(r));
@@ -143,7 +143,7 @@ export class DbMemoryStore {
       .select()
       .from(orgMemories)
       .where(and(...conditions))
-      .orderBy(orgMemories.createdAt)
+      .orderBy(sql`${orgMemories.createdAt} DESC`)
       .limit(limit);
 
     return rows.map((r) => this.toRecord(r));
@@ -162,7 +162,7 @@ export class DbMemoryStore {
           sql`(${orgMemories.expiresAt} IS NULL OR ${orgMemories.expiresAt} > NOW())`,
         ),
       )
-      .orderBy(orgMemories.createdAt)
+      .orderBy(sql`${orgMemories.createdAt} DESC`)
       .limit(limit);
 
     return rows.map((r) => this.toRecord(r));
@@ -187,7 +187,7 @@ export class DbMemoryStore {
       .delete(orgMemories)
       .where(
         and(
-          isNull(orgMemories.expiresAt),
+          isNotNull(orgMemories.expiresAt),
           sql`${orgMemories.expiresAt} < NOW()`,
         ),
       )

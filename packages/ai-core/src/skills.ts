@@ -19,6 +19,13 @@
  * - **Authoring loop**: `saveSkill` installs an agent-authored procedure as an
  *   org-scoped skill but routes through the standard approval card — the same
  *   Inbox contract as for any other external action (no self-grant rule).
+ * - **Continual-Harness refine loop**: `refineSkill` applies the *smallest*
+ *   evidence-backed edit to an existing skill (summary/instructions) based on
+ *   what the trajectory showed, parks it behind the same approval card, and —
+ *   once approved — records the before/after snapshot + trigger so the edit is
+ *   reviewable and revertible by ID. Mirrors Prime Agent's `/refine`: minimal
+ *   edit, evidence-backed, immutable base; here the immutable base is the
+ *   approval gate rather than an un-editable system prompt.
  *
  * In ChasteBusinessOS these map onto VISION §5.2 customization-memory: the
  * "store how the hard customization was done" primitive becomes an
@@ -41,6 +48,8 @@ export interface SkillRecord {
   instructions: string;
   /** Optional bundled files (paths + excerpts), per OpenWorker `save_skill`. */
   files?: SkillFile[];
+  /** Optional Continual-Harness refinement history (evidence + before/after). */
+  refinements?: SkillRefinement[];
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -51,6 +60,141 @@ export interface SkillFile {
   path: string;
   /** Truncated excerpt (≤ ~2000 chars). */
   excerpt: string;
+}
+
+/**
+ * A single Continual-Harness refinement of a skill. Durable + inspectable: the
+ * `before`/`after` snapshots make any applied edit revertible by ID, and the
+ * `trigger` records the evidence (trajectory/audit snippet) that motivated it.
+ */
+export interface SkillRefinement {
+  id: string;
+  /** Evidence-backed trigger: what the trajectory/audit showed that motivated the edit. */
+  trigger: string;
+  /** Optional human note about the expected outcome. */
+  note?: string;
+  before: { summary?: string; instructions?: string };
+  after: { summary?: string; instructions?: string };
+  /** When later known: whether the edit produced the expected outcome. */
+  outcome?: string;
+  /** Set when this entry *reverts* another refinement; the other entry's id. */
+  reversalRefinementId?: string;
+  createdAt: string;
+}
+
+/** Proposed minimal edit to an existing skill (only the fields that change). */
+export interface SkillRefineInput {
+  name: string;
+  summary?: string;
+  instructions?: string;
+  /** Evidence for the edit — the trajectory/audit snippet that triggered the proposal. */
+  trigger: string;
+  note?: string;
+}
+
+/**
+ * Pure builder for a skill refinement. The *smallest evidence-backed edit* rule
+ * from Continual Harness: only fields that actually differ are proposed, and a
+ * no-op (nothing changed) is rejected rather than burning an approval card.
+ */
+export function buildSkillRefinement(
+  existing: SkillRecord,
+  input: SkillRefineInput,
+  opts: { now?: () => Date } = {},
+): { ok: true; refinement: SkillRefinement; skill: SkillRecord } | { ok: false; reason: string } {
+  const before: SkillRefinement["before"] = {};
+  const after: SkillRefinement["after"] = {};
+  if (input.summary != null && input.summary !== existing.summary) {
+    before.summary = existing.summary;
+    after.summary = input.summary;
+  }
+  if (input.instructions != null && input.instructions !== existing.instructions) {
+    before.instructions = existing.instructions;
+    after.instructions = input.instructions;
+  }
+  const reason = refinementValidationError(existing.name, input);
+  if (reason) return { ok: false, reason };
+  if (Object.keys(after).length === 0) {
+    return {
+      ok: false,
+      reason: "Refinement is a no-op: neither summary nor instructions differ from the current skill.",
+    };
+  }
+  const refinement: SkillRefinement = {
+    id: crypto.randomUUID(),
+    trigger: input.trigger,
+    note: input.note,
+    before,
+    after,
+    createdAt: (opts.now?.() ?? new Date()).toISOString(),
+  };
+  return {
+    ok: true,
+    refinement,
+    skill: {
+      ...existing,
+      summary: after.summary ?? existing.summary,
+      instructions: after.instructions ?? existing.instructions,
+      refinements: [...(existing.refinements ?? []), refinement],
+      updatedAt: (opts.now?.() ?? new Date()).toISOString(),
+    },
+  };
+}
+
+function refinementValidationError(name: string, input: { trigger: string }): string | null {
+  if (!name?.trim()) return "Refinement requires a valid skill name.";
+  if (!input.trigger?.trim()) return "Refinement requires `trigger` evidence (non-empty).";
+  return null;
+}
+
+/**
+ * Pure builder for reverting a previously-applied refinement. Reapplies the
+ * target's `before` snapshot for the fields it changed, producing a *new*
+ * refinement entry chained via `reversalRefinementId` (itself reversible, so
+ * re-reverting is a plain forward edit again). A no-op (skill already at the
+ * pre-refinement state) is rejected.
+ */
+export function buildSkillRevert(
+  existing: SkillRecord,
+  target: SkillRefinement,
+  opts: { now?: () => Date } = {},
+): { ok: true; refinement: SkillRefinement; skill: SkillRecord } | { ok: false; reason: string } {
+  const before: SkillRefinement["before"] = {};
+  const after: SkillRefinement["after"] = {};
+  for (const field of ["summary", "instructions"] as const) {
+    const prior = target.before[field];
+    if (prior === undefined) continue;
+    if (existing[field] !== prior) {
+      before[field] = existing[field];
+      after[field] = prior;
+    }
+  }
+  if (Object.keys(after).length === 0) {
+    return {
+      ok: false,
+      reason: "Revert is a no-op: the skill already reflects the pre-refinement state.",
+    };
+  }
+  const refinement: SkillRefinement = {
+    id: crypto.randomUUID(),
+    trigger: `Reverted refinement "${target.id}"`,
+    note: target.note,
+    before,
+    after,
+    reversalRefinementId: target.id,
+    createdAt: (opts.now?.() ?? new Date()).toISOString(),
+  };
+  return {
+    ok: true,
+    refinement,
+    skill: {
+      ...existing,
+      summary: after.summary ?? existing.summary,
+      instructions: after.instructions ?? existing.instructions,
+      refinements: [...(existing.refinements ?? []), refinement],
+      updatedAt: (opts.now?.() ?? new Date()).toISOString(),
+    },
+  };
 }
 
 export interface SkillStore {
@@ -187,6 +331,25 @@ export interface SkillTools {
     instructions: string;
     files?: SkillFile[];
   }) => Promise<{ ok: true; requiresApproval: true; skill: SkillRecord }>;
+  /**
+   * Continual-Harness refine: propose the smallest evidence-backed edit to an
+   * existing skill. No state is mutated here — the proposal parks behind the
+   * standard Inbox approval and is applied only after human resolution. The
+   * returned `refinement` carries the before/after snapshot + trigger.
+   */
+  refineSkill: (input: SkillRefineInput) => Promise<
+    | { ok: true; requiresApproval: true; skill: SkillRecord; refinement: SkillRefinement }
+    | { ok: false; reason: string }
+  >;
+  /**
+   * Revert a previously-applied refinement by id. Reapplies the entry's `before`
+   * snapshot as a new, chained refinement, approved through the same Inbox card.
+   * No state is mutated here; the reversal parks until human resolution.
+   */
+  revertSkillRefinement: (input: { name: string; refinementId: string; note?: string }) => Promise<
+    | { ok: true; requiresApproval: true; skill: SkillRecord; refinement: SkillRefinement }
+    | { ok: false; reason: string }
+  >;
 }
 
 export function skillTools(
@@ -217,6 +380,44 @@ export function skillTools(
         enabled: false, // disabled until the approval resolves
       });
       return { ok: true as const, requiresApproval: true as const, skill: record };
+    },
+    async refineSkill(input) {
+      const existing = await store.get(input.name, filter);
+      if (!existing) {
+        return { ok: false as const, reason: `Cannot refine unknown skill "${input.name}".` };
+      }
+      const proposal = buildSkillRefinement(existing, input);
+      if (!proposal.ok) return proposal;
+      return {
+        ok: true as const,
+        requiresApproval: true as const,
+        skill: proposal.skill,
+        refinement: proposal.refinement,
+      };
+    },
+    async revertSkillRefinement(input) {
+      if (!input.refinementId?.trim()) {
+        return { ok: false as const, reason: "Revert requires a refinement id." };
+      }
+      const existing = await store.get(input.name, filter);
+      if (!existing) {
+        return { ok: false as const, reason: `Cannot revert on unknown skill "${input.name}".` };
+      }
+      const target = (existing.refinements ?? []).find((r) => r.id === input.refinementId);
+      if (!target) {
+        return {
+          ok: false as const,
+          reason: `No refinement "${input.refinementId}" found on skill "${input.name}".`,
+        };
+      }
+      const proposal = buildSkillRevert(existing, { ...target, note: input.note ?? target.note });
+      if (!proposal.ok) return proposal;
+      return {
+        ok: true as const,
+        requiresApproval: true as const,
+        skill: proposal.skill,
+        refinement: proposal.refinement,
+      };
     },
   };
 }

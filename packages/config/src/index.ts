@@ -14,7 +14,14 @@ export const autonomyLevelSchema = z.enum([
   "full_autonomous",
 ]);
 
-export const aiProviderSchema = z.enum(["none", "openai", "openai_compatible", "ollama", "nvidia_nim"]);
+export const aiProviderSchema = z.enum([
+  "none",
+  "openai",
+  "openai_compatible",
+  "ollama",
+  "nvidia_nim",
+  "auto",
+]);
 
 export const appConfigSchema = z.object({
   nodeEnv: z.enum(["development", "test", "production"]).default("development"),
@@ -69,6 +76,11 @@ export const appConfigSchema = z.object({
     nvidiaApiKey: z.string().optional(),
     /** Nvidia NIM base URL override */
     nvidiaBaseUrl: z.string().url().optional(),
+    /**
+     * Prefer this detected coding agent when provider is "auto". Ignored if
+     * the agent isn't installed/authenticated (falls back to registry order).
+     */
+    codingAgentPrefer: z.string().nullable().default(null),
     /** R2 — where new approvals surface by default for attended sessions. */
     defaultInboxVisibility: z.enum(["inline", "inbox"]).default("inline"),
   }),
@@ -88,7 +100,33 @@ export const appConfigSchema = z.object({
     /** HMAC secret for signed session tokens (dev default only). */
     secret: z.string().min(16).default("dev-only-change-me-32chars!!"),
     /** Auth token TTL in seconds (Bearer sessions). */
-    tokenTtlSeconds: z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
+    tokenTtlSeconds: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(60 * 60 * 24 * 30),
+  }),
+
+  /**
+   * F1 remediation — HTTP auth posture.
+   *
+   * `allowAnonymousAdmin` keeps the legacy "no token ⇒ bootstrap admin"
+   * fallback for local development only. It defaults to ON for
+   * development/test and is HARD-REJECTED in production (fail closed), so a
+   * deployed instance can never ship the auth bypass.
+   */
+  auth: z.object({
+    allowAnonymousAdmin: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+    /**
+     * Optional static credential minted for the bootstrap admin on first boot
+     * (stored hashed at rest via `hashAuthToken`). Without a boot credential
+     * and without the anonymous fallback, no one could authenticate at all —
+     * this closes that chicken-and-egg gap for production installs.
+     */
+    bootstrapAdminToken: z.string().min(16).optional(),
   }),
 });
 
@@ -130,8 +168,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       baseUrl: env.CHASTE_AI_BASE_URL,
       nvidiaApiKey: env.NVIDIA_API_KEY,
       nvidiaBaseUrl: env.NVIDIA_BASE_URL,
-      defaultInboxVisibility:
-        env.CHASTE_DEFAULT_INBOX_VISIBILITY === "inbox" ? "inbox" : "inline",
+      codingAgentPrefer: env.CHASTE_AI_PREFER_CODING_AGENT ?? null,
+      defaultInboxVisibility: env.CHASTE_DEFAULT_INBOX_VISIBILITY === "inbox" ? "inbox" : "inline",
     },
     observability: {
       // Prefer CHASTE_OBSERVABILITY_ENABLED; keep MASTRA_* as temporary aliases.
@@ -143,6 +181,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     session: {
       secret: env.CHASTE_SESSION_SECRET,
       tokenTtlSeconds: env.CHASTE_SESSION_TOKEN_TTL,
+    },
+    auth: {
+      // The anonymous-admin fallback is a dev convenience only; production
+      // must fail closed (enforced below).
+      allowAnonymousAdmin:
+        env.CHASTE_ALLOW_ANON_ADMIN ?? (env.NODE_ENV === "production" ? "false" : "true"),
+      bootstrapAdminToken: env.CHASTE_ADMIN_TOKEN,
     },
   };
 
@@ -156,7 +201,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (parsed.data.session.secret === "dev-only-change-me-32chars!!") {
       throw new ConfigError("CHASTE_SESSION_SECRET must be set in production");
     }
-    if (parsed.data.allowFullAutonomous && !parsed.data.ai.apiKey && parsed.data.ai.provider !== "ollama") {
+    // F1 fail-closed: the anonymous bootstrap-admin fallback must never ship.
+    if (parsed.data.auth.allowAnonymousAdmin) {
+      throw new ConfigError("CHASTE_ALLOW_ANON_ADMIN must be false in production");
+    }
+    if (
+      parsed.data.allowFullAutonomous &&
+      !parsed.data.ai.apiKey &&
+      parsed.data.ai.provider !== "ollama" &&
+      parsed.data.ai.provider !== "auto"
+    ) {
       // allow but warn via log level — full auto without LLM is still rule-based
     }
   }
@@ -174,7 +228,12 @@ export function publicConfigView(cfg: AppConfig) {
     allowFullAutonomous: cfg.allowFullAutonomous,
     aiProvider: cfg.ai.provider,
     aiModel: cfg.ai.model,
-    aiConfigured: Boolean(cfg.ai.apiKey) || cfg.ai.provider === "ollama" || Boolean(cfg.ai.nvidiaApiKey),
+    aiConfigured:
+      Boolean(cfg.ai.apiKey) ||
+      cfg.ai.provider === "ollama" ||
+      Boolean(cfg.ai.nvidiaApiKey) ||
+      cfg.ai.provider === "auto",
+    preferredCodingAgent: cfg.ai.codingAgentPrefer,
     bootstrapEnabled: cfg.bootstrap.enabled,
     observabilityEnabled: cfg.observability.enabled,
     nvidiaConfigured: Boolean(cfg.ai.nvidiaApiKey),

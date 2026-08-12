@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getApiBaseUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 export function CreateProductForm() {
   const [sku, setSku] = useState(`SKU-${Date.now().toString().slice(-5)}`);
@@ -14,16 +14,11 @@ export function CreateProductForm() {
     setMsg(null);
     setBusy(true);
     try {
-      const res = await fetch(`${getApiBaseUrl()}/api/v1/inventory/products`, {
+      // F20 — apiFetch attaches the Bearer token (execute as the user, not admin).
+      const body = (await apiFetch("/api/v1/inventory/products", {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({ sku, name }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { message?: string; sku?: string };
-      if (!res.ok) {
-        setMsg(body.message ?? "Failed to create product");
-        return;
-      }
+      })) as { sku?: string };
       setMsg(`Created ${body.sku ?? sku}`);
       window.location.reload();
     } catch (err) {

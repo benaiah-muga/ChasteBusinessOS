@@ -1,27 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiError } from "@chaste/api-client";
 import {
   Bell,
   Bot,
   Boxes,
   BriefcaseBusiness,
-  Building2,
   CalendarDays,
   Check,
   ChevronDown,
   CircleDollarSign,
-  ClipboardList,
-  Database,
   Factory,
-  GitBranch,
-  HeartPulse,
   Home,
-  Inbox,
-  KeyRound,
-  Lightbulb,
+  LogOut,
   Menu,
   MessageSquare,
   Mail,
@@ -38,13 +32,18 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { ChatWidget } from "@/components/ChatWidget";
-import { getApiClient } from "@/lib/api";
+import { getApiClient, setStoredAuthToken } from "@/lib/api";
 import { BranchSwitcher } from "@/components/BranchSwitcher";
-import { filterNavByInstalled, type ModuleNavItem } from "@/lib/module-registry";
+import {
+  filterNavByInstalled,
+  NAV_SECTION_LABELS,
+  type ModuleNavItem,
+} from "@/lib/module-registry";
 
 type StoredTheme = "light" | "dark" | "system";
 type AppliedTheme = "light" | "dark";
 type Accent = "maroon" | "teal" | "blue" | "violet" | "rose" | "amber" | "forest" | "slate";
+type NavGroup = ModuleNavItem["group"];
 
 const ACCENTS: { value: Accent; label: string; swatch: string }[] = [
   { value: "maroon", label: "Deep Maroon", swatch: "#7a1f2b" },
@@ -64,28 +63,22 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   "/reminders": Bell,
   "/messaging": MessageSquare,
   "/email": Mail,
-  "/notifications": Inbox,
   "/directory": Users,
-  "/gaps": Lightbulb,
-  "/branches": GitBranch,
   "/crm": Users,
   "/accounting": CircleDollarSign,
   "/inventory": Package,
   "/purchasing": ShoppingCart,
   "/hr": BriefcaseBusiness,
   "/manufacturing": Factory,
-  "/rbac": KeyRound,
-  "/marketplace": Boxes,
-  "/audit": ClipboardList,
-  "/data": Database,
+  "/extensions": Boxes,
   "/settings": Settings,
 };
 
-const GROUP_LABELS: Record<ModuleNavItem["group"], string> = {
-  workspace: "Workspace",
-  business: "Business",
-  system: "System",
-};
+const SECTION_ORDER: NonNullable<ModuleNavItem["section"]>[] = [
+  "communicate",
+  "people",
+  "platform",
+];
 
 const AUTONOMY_LABELS: Record<string, string> = {
   recommend: "Assist",
@@ -104,10 +97,13 @@ function appliedThemeFromStored(stored: StoredTheme | null): AppliedTheme {
 
 export function AppShell({ children, subtitle }: { children: React.ReactNode; subtitle?: string }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [storedTheme, setStoredTheme] = useState<StoredTheme>("system");
   const [accent, setAccent] = useState<Accent>("maroon");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [accentOpen, setAccentOpen] = useState(false);
+  /** Icon-rail breakpoint: show every group so destinations stay reachable. */
+  const [railNav, setRailNav] = useState(false);
   const [health, setHealth] = useState<"checking" | "online" | "offline">("checking");
   const [enabledModules, setEnabledModules] = useState<{ moduleId: string; enabled: boolean }[] | null>(
     null,
@@ -187,7 +183,20 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
         await api.health();
         if (cancelled) return;
         setHealth("online");
-        api.session().then(setSession).catch(() => null);
+        api
+          .session()
+          .then((s) => {
+            if (!cancelled) setSession(s);
+          })
+          .catch((e) => {
+            if (cancelled) return;
+            // Unauthenticated or expired token: send the operator to /login.
+            if (e instanceof ApiError && e.status === 401) {
+              router.replace("/login");
+              return;
+            }
+            setSession(null);
+          });
         api
           .listModules()
           .then((mods) => {
@@ -207,7 +216,7 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!accentOpen) return;
@@ -219,6 +228,14 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [accentOpen]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1180px) and (min-width: 761px)");
+    const sync = () => setRailNav(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   const navItems = useMemo(() => {
     // Until modules load, show full business nav to avoid flicker; then filter
@@ -233,38 +250,83 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
     return filterNavByInstalled(enabledModules);
   }, [enabledModules]);
 
-  const navGroups = useMemo(() => {
-    const groups: { label: string; items: { href: string; label: string; icon: LucideIcon }[] }[] = [];
-    for (const group of ["workspace", "business", "system"] as const) {
-      const items = navItems
-        .filter((n) => n.group === group)
-        .map((n) => ({
-          href: n.href,
-          label: n.label,
-          icon: NAV_ICONS[n.href] ?? Boxes,
-        }));
-      if (items.length) groups.push({ label: GROUP_LABELS[group], items });
-    }
-    return groups;
-  }, [navItems]);
-
   const currentPage = useMemo(() => {
-    for (const group of navGroups) {
-      const found = group.items.find((item) => item.href === pathname);
-      if (found) return found.label;
-    }
-    return "Dashboard";
-  }, [pathname, navGroups]);
+    const found = navItems.find((item) => item.href === pathname);
+    return found?.label ?? "Dashboard";
+  }, [pathname, navItems]);
 
-  const cycleTheme = useCallback(() => {
-    setStoredTheme((cur) => (cur === "system" ? "light" : cur === "light" ? "dark" : "system"));
+  const buildSections = useCallback(
+    (group: NavGroup, showSectionLabels: boolean) => {
+      const items = navItems.filter((n) => n.group === group && !n.pinned);
+      const sections: {
+        key: string;
+        label: string | null;
+        items: { href: string; label: string; icon: LucideIcon }[];
+      }[] = [];
+
+      const unsectioned = items.filter((n) => !n.section);
+      if (unsectioned.length) {
+        sections.push({
+          key: `${group}-main`,
+          label: null,
+          items: unsectioned.map((n) => ({
+            href: n.href,
+            label: n.label,
+            icon: NAV_ICONS[n.href] ?? Boxes,
+          })),
+        });
+      }
+
+      for (const section of SECTION_ORDER) {
+        const sectionItems = items.filter((n) => n.section === section);
+        if (!sectionItems.length) continue;
+        sections.push({
+          key: `${group}-${section}`,
+          label: showSectionLabels ? NAV_SECTION_LABELS[section] : null,
+          items: sectionItems.map((n) => ({
+            href: n.href,
+            label: n.label,
+            icon: NAV_ICONS[n.href] ?? Boxes,
+          })),
+        });
+      }
+
+      return sections;
+    },
+    [navItems],
+  );
+
+  const fullNavSections = useMemo(() => {
+    return (["workspace", "business", "system"] as const).flatMap((group) =>
+      buildSections(group, true),
+    );
+  }, [buildSections]);
+
+  const railNavSections = useMemo(() => {
+    return (["workspace", "business", "system"] as const).flatMap((group) =>
+      buildSections(group, false),
+    );
+  }, [buildSections]);
+
+const cycleTheme = useCallback(() => {
+    setStoredTheme((cur) => (cur === "system" ? "light" : cur === "dark" ? "light" : "system"));
   }, []);
+
+  const signOut = useCallback(async () => {
+    setStoredAuthToken(null);
+    router.replace("/login");
+  }, [router]);
 
   const themeTitle =
     storedTheme === "system" ? "System theme" : storedTheme === "dark" ? "Dark theme" : "Light theme";
   const ThemeIcon = storedTheme === "system" ? SunMoon : storedTheme === "dark" ? Moon : Sun;
 
-  function SidebarContent() {
+  const statusLabel = health === "online" ? "Online" : health === "offline" ? "Offline" : "Connecting";
+  const statusClass =
+    health === "online" ? "online" : health === "offline" ? "offline" : "checking";
+
+  function SidebarContent({ mode }: { mode: "full" | "rail" }) {
+    const sections = mode === "rail" ? railNavSections : fullNavSections;
     return (
       <>
         <div className="side-brand">
@@ -277,10 +339,10 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
           </div>
         </div>
         <nav className="side-nav" aria-label="Primary navigation">
-          {navGroups.map((group) => (
-            <section key={group.label} className="nav-section">
-              <div className="nav-section-label">{group.label}</div>
-              {group.items.map((item) => {
+          {sections.map((section) => (
+            <section key={section.key} className="nav-section">
+              {section.label ? <div className="nav-section-label">{section.label}</div> : null}
+              {section.items.map((item) => {
                 const Icon = item.icon;
                 const active = pathname === item.href;
                 return (
@@ -289,6 +351,7 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
                     className={active ? "nav-link active" : "nav-link"}
                     href={item.href}
                     onClick={() => setDrawerOpen(false)}
+                    title={item.label}
                   >
                     <Icon size={18} />
                     <span>{item.label}</span>
@@ -298,12 +361,32 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
             </section>
           ))}
         </nav>
+        {navItems.filter((n) => n.pinned).length > 0 ? (
+          <div className="side-footer">
+            {navItems
+              .filter((n) => n.pinned)
+              .map((item) => {
+                const Icon = NAV_ICONS[item.href] ?? Settings;
+                const active = pathname === item.href;
+                return (
+                  <Link
+                    key={item.href}
+                    className={active ? "nav-link active" : "nav-link"}
+                    href={item.href}
+                    onClick={() => setDrawerOpen(false)}
+                    title={item.label}
+                  >
+                    <Icon size={18} />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+          </div>
+        ) : null}
       </>
     );
   }
 
-  const statusLabel =
-    health === "online" ? "System online" : health === "offline" ? "Service offline" : "Connecting";
   const autonomyLabel = session?.autonomy
     ? (AUTONOMY_LABELS[session.autonomy] ?? session.autonomy)
     : "Standard";
@@ -312,7 +395,7 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
     <>
       <div className="app-frame">
         <aside className="sidebar">
-          <SidebarContent />
+          <SidebarContent mode={railNav ? "rail" : "full"} />
         </aside>
         <div className="mobile-drawer-shell" data-open={drawerOpen ? "true" : "false"}>
           <button className="drawer-scrim" aria-label="Close navigation" onClick={() => setDrawerOpen(false)} />
@@ -320,7 +403,7 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
             <button className="icon-btn drawer-close" type="button" onClick={() => setDrawerOpen(false)}>
               <X size={18} />
             </button>
-            <SidebarContent />
+            <SidebarContent mode="full" />
           </aside>
         </div>
         <main className="workspace">
@@ -329,14 +412,21 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
               <Menu size={19} />
             </button>
             <div className="page-title-block">
-              <div className="eyebrow">
-                <HeartPulse size={14} />
-                <span>{statusLabel}</span>
-              </div>
+              <span className={`online-status is-${statusClass}`} title={statusLabel}>
+                {statusLabel}
+              </span>
               <h1 className="page-title">{currentPage}</h1>
               {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}
             </div>
             <div className="topbar-actions">
+              <Link
+                href="/notifications"
+                className="icon-btn topbar-bell"
+                aria-label="Notifications"
+                title="Notifications"
+              >
+                <Bell size={15} />
+              </Link>
               <BranchSwitcher
                 canRead={session?.permissions?.includes("core.branch.read") ?? false}
                 orgName={session?.orgName}
@@ -355,6 +445,16 @@ export function AppShell({ children, subtitle }: { children: React.ReactNode; su
                 title={themeTitle}
               >
                 <ThemeIcon size={15} />
+              </button>
+              <button
+                className="icon-btn tip"
+                type="button"
+                data-tip="Sign out"
+                onClick={signOut}
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <LogOut size={15} />
               </button>
               <div className="accent-select-wrap" ref={accentRef}>
                 <button
