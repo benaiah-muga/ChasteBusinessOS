@@ -22,6 +22,8 @@ import {
 import { createDb, runMigrations, schema, type Db, cleanupTestData, hashAuthToken, resolveUserByToken } from "@chaste/db";
 import { eq } from "drizzle-orm";
 import { createEmailProcessor, createPlatformModule, createScheduleProcessor } from "@chaste/module-platform";
+import { createSchedulingModule } from "@chaste/module-scheduling";
+import { createIdentityModule } from "@chaste/module-identity";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const DB_URL = process.env.DATABASE_URL!;
@@ -206,6 +208,15 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
       regions: ["local"],
     });
     platform.register({ commands, queries });
+
+    // ARCH-3 — scheduling lives in its own module; register it so the bus is
+    // identical to production (createRuntime) for this test host.
+    const scheduling = createSchedulingModule(db);
+    scheduling.register({ commands, queries });
+
+    // ARCH-3 — identity (rbac/roles/users) likewise extracted from platform.
+    const identity = createIdentityModule(db);
+    identity.register({ commands, queries });
 
     // Seed marketplace listings so install validation has a catalog to check.
     await db.insert(schema.marketplaceListings).values({

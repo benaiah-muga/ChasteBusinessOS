@@ -26,12 +26,14 @@
     "@chaste/module-accounting": "workspace:*",
     "@chaste/module-crm": "workspace:*",
     "@chaste/module-hr": "workspace:*",
+    "@chaste/module-identity": "workspace:*",
     "@chaste/module-inventory": "workspace:*",
     "@chaste/module-manufacturing": "workspace:*",
     "@chaste/module-master-data": "workspace:*",
     "@chaste/module-messaging": "workspace:*",
     "@chaste/module-platform": "workspace:*",
     "@chaste/module-purchasing": "workspace:*",
+    "@chaste/module-scheduling": "workspace:*",
     "drizzle-orm": "^0.38.3"
   },
   "devDependencies": {
