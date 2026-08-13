@@ -6,12 +6,19 @@ import {
   ClipboardList,
   Workflow,
   XCircle,
+  Sparkles,
+  Zap,
+  Users,
+  Package,
+  TrendingUp,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { CustomersPanel } from "@/components/CustomersPanel";
 import { DashboardCharts } from "@/components/dashboard/DashboardCharts";
 import { QuickActionButton } from "@/components/QuickActionButton";
 import { getApiClient } from "@/lib/api";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 const api = getApiClient();
 
@@ -136,72 +143,97 @@ export default function HomePage() {
   return (
     <AppShell subtitle="Your operational command center.">
       {error ? (
-        <div className="card part-error">
-          Cannot reach API. Start it with <span className="mono">pnpm --filter @chaste/api dev</span>.{" "}
+        <div className="bg-[var(--danger-soft)] border border-[var(--danger-muted)] text-[var(--danger-primary)] rounded-lg p-4 mb-6">
+          <strong>Cannot reach API.</strong> Start it with{" "}
+          <code className="bg-black/10 px-2 py-0.5 rounded text-sm font-mono">pnpm --filter @chaste/api dev</code>.{" "}
           {error}
         </div>
       ) : null}
 
       <div className="dashboard-grid">
         <div className="dashboard-main">
-          <section className="hero-console with-strip">
-            <h2>Run your business from one governed surface.</h2>
-            <p>Forms, quick actions, and the agent all work through the same validated workspace.</p>
-            <div className="console-strip">
-              <div className="console-cell">
-                <span>Operator</span>
-                <strong>{session?.displayName ?? "Offline"}</strong>
-              </div>
-              <div className="console-cell">
-                <span>Workspace</span>
-                <strong>{session?.orgName ?? "Local workspace"}</strong>
-              </div>
-              <div className="console-cell">
-                <span>Autonomy</span>
-                <strong>{session?.autonomy ?? "standard"}</strong>
-              </div>
-              <div className="console-cell">
-                <span>System</span>
-                <strong>{health?.version ? `v${health.version}` : "offline"}</strong>
+          {/* Hero Section */}
+          <section className="mb-8">
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-primary-hover)] p-8 text-white shadow-xl">
+              <div className="absolute top-0 right-0 -mt-8 -mr-8 h-48 w-48 rounded-full bg-white/10 blur-3xl" />
+              <div className="absolute bottom-0 left-0 -mb-8 -ml-8 h-48 w-48 rounded-full bg-white/10 blur-3xl" />
+              
+              <div className="relative z-10">
+                <div className="flex items-center gap-2 mb-4">
+                  <Sparkles size={20} className="text-white/80" />
+                  <span className="text-sm font-medium text-white/80">Welcome back</span>
+                </div>
+                
+                <h2 className="text-2xl md:text-3xl font-bold mb-3">
+                  Run your business from one governed surface.
+                </h2>
+                <p className="text-white/80 max-w-2xl mb-6">
+                  Forms, quick actions, and the agent all work through the same validated workspace.
+                </p>
+                
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
+                    <div className="text-xs text-white/70 mb-1">Operator</div>
+                    <div className="font-semibold truncate">{session?.displayName ?? "Offline"}</div>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
+                    <div className="text-xs text-white/70 mb-1">Workspace</div>
+                    <div className="font-semibold truncate">{session?.orgName ?? "Local workspace"}</div>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
+                    <div className="text-xs text-white/70 mb-1">Autonomy</div>
+                    <div className="font-semibold truncate">{session?.autonomy ?? "standard"}</div>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
+                    <div className="text-xs text-white/70 mb-1">System</div>
+                    <div className="font-semibold truncate">{health?.version ? `v${health.version}` : "offline"}</div>
+                  </div>
+                </div>
               </div>
             </div>
           </section>
 
-          <section className="card">
-            <div className="section-head">
-              <div>
-                <h2>Quick actions</h2>
-                <p className="muted">
-                  Prompts open in the assistant and run within the current autonomy level.
-                </p>
-              </div>
-            </div>
-            <div className="quick-grid">
-              <QuickActionButton
-                icon="customer"
-                title="Create customer"
-                subtitle="CRM account record"
-                prompt="Create customer Acme Ltd in Nairobi with email ops@acme.example"
-              />
-              <QuickActionButton
-                icon="invoice"
-                title="Create invoice"
-                subtitle="Draft accounting invoice"
-                prompt="Create invoice INV-1001 for 2500 USD"
-              />
-              <QuickActionButton
-                icon="payroll"
-                title="Prepare payroll"
-                subtitle="Current employee base pay"
-                prompt="Prepare payroll for July 2026"
-              />
-              <QuickActionButton
-                icon="vendor"
-                title="Create vendor"
-                subtitle="Purchasing supplier"
-                prompt="Create vendor Northline Supplies with email finance@northline.example"
-              />
-            </div>
+          {/* Quick Actions */}
+          <section className="mb-8">
+            <Card>
+              <CardHeader>
+                <div>
+                  <CardTitle>Quick actions</CardTitle>
+                  <CardDescription>
+                    Prompts open in the assistant and run within the current autonomy level.
+                  </CardDescription>
+                </div>
+                <Badge variant="accent" dot>AI Powered</Badge>
+              </CardHeader>
+              <CardContent>
+                <div className="quick-grid">
+                  <QuickActionButton
+                    icon="customer"
+                    title="Create customer"
+                    subtitle="CRM account record"
+                    prompt="Create customer Acme Ltd in Nairobi with email ops@acme.example"
+                  />
+                  <QuickActionButton
+                    icon="invoice"
+                    title="Create invoice"
+                    subtitle="Draft accounting invoice"
+                    prompt="Create invoice INV-1001 for 2500 USD"
+                  />
+                  <QuickActionButton
+                    icon="payroll"
+                    title="Prepare payroll"
+                    subtitle="Current employee base pay"
+                    prompt="Prepare payroll for July 2026"
+                  />
+                  <QuickActionButton
+                    icon="vendor"
+                    title="Create vendor"
+                    subtitle="Purchasing supplier"
+                    prompt="Create vendor Northline Supplies with email finance@northline.example"
+                  />
+                </div>
+              </CardContent>
+            </Card>
           </section>
 
           <DashboardCharts
@@ -213,85 +245,99 @@ export default function HomePage() {
           <CustomersPanel initialCustomers={customers} compact />
         </div>
 
-        <div className="dashboard-main">
-          <section className="card">
-            <div className="section-head">
-              <h2>System status</h2>
-              <span className="badge accent">{health?.version ?? "dev"}</span>
-            </div>
-            <div className="metric-row">
-              <div className="metric-card">
-                <span>Registered modules</span>
-                <strong>{moduleCount}</strong>
+        {/* Sidebar */}
+        <div className="dashboard-sidebar space-y-6">
+          {/* System Status */}
+          <Card>
+            <CardHeader>
+              <CardTitle>System status</CardTitle>
+              <Badge variant="success" dot>{health?.version ?? "dev"}</Badge>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center p-3 rounded-lg bg-[var(--bg-subtle)]">
+                  <div className="text-2xl font-bold text-[var(--text-primary)]">{moduleCount}</div>
+                  <div className="text-xs text-[var(--text-secondary)] mt-1">Modules</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-[var(--bg-subtle)]">
+                  <div className="text-2xl font-bold text-[var(--text-primary)]">{installedCount}</div>
+                  <div className="text-xs text-[var(--text-secondary)] mt-1">Enabled</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-[var(--bg-subtle)]">
+                  <div className="text-2xl font-bold text-[var(--text-primary)]">{customers.length}</div>
+                  <div className="text-xs text-[var(--text-secondary)] mt-1">Customers</div>
+                </div>
               </div>
-              <div className="metric-card">
-                <span>Enabled modules</span>
-                <strong>{installedCount}</strong>
-              </div>
-              <div className="metric-card">
-                <span>Customers</span>
-                <strong>{customers.length}</strong>
-              </div>
-            </div>
-          </section>
+            </CardContent>
+          </Card>
 
-          <section className="card">
-            <div className="section-head">
-              <div>
-                <h2>Active workflows</h2>
-                <p className="muted">Registered multi-step processes you can run.</p>
+          {/* Active Workflows */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Workflow size={18} className="text-[var(--text-tertiary)]" />
+                <CardTitle>Active workflows</CardTitle>
               </div>
-              <Workflow size={18} />
-            </div>
-            <div className="timeline">
-              {workflows.length === 0 ? (
-                <p className="empty-state">No workflows registered yet.</p>
-              ) : (
-                workflows.slice(0, 5).map((workflow) => (
-                  <div key={workflow.id} className="timeline-item">
-                    <div className="timeline-dot">
-                      <Workflow size={15} />
-                    </div>
-                    <div>
-                      <p>{workflow.name}</p>
-                      <time>
-                        {workflow.stepCount} steps · {workflow.createdBy}
-                      </time>
-                    </div>
+            </CardHeader>
+            <CardContent>
+              <div className="timeline">
+                {workflows.length === 0 ? (
+                  <div className="text-center py-8 text-[var(--text-tertiary)]">
+                    <Workflow size={32} className="mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No workflows registered yet.</p>
                   </div>
-                ))
-              )}
-            </div>
-          </section>
+                ) : (
+                  workflows.slice(0, 5).map((workflow) => (
+                    <div key={workflow.id} className="timeline-item">
+                      <div className="timeline-dot">
+                        <Workflow size={15} />
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm">{workflow.name}</p>
+                        <time className="text-xs text-[var(--text-tertiary)]">
+                          {workflow.stepCount} steps · {workflow.createdBy}
+                        </time>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
-          <section className="card">
-            <div className="section-head">
-              <div>
-                <h2>Recent activity</h2>
-                <p className="muted">The latest actions recorded across this workspace.</p>
+          {/* Recent Activity */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <ClipboardList size={18} className="text-[var(--text-tertiary)]" />
+                <CardTitle>Recent activity</CardTitle>
               </div>
-              <ClipboardList size={18} />
-            </div>
-            <div className="timeline">
-              {audit.length === 0 ? (
-                <p className="empty-state">No audit events yet.</p>
-              ) : (
-                audit.slice(0, 8).map((event) => (
-                  <div key={event.id} className="timeline-item">
-                    <div className={event.success ? "timeline-dot" : "timeline-dot failed"}>
-                      {event.success ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
-                    </div>
-                    <div>
-                      <p>{humanizeAction(event.action)}</p>
-                      <time>
-                        {relativeTime(event.at)} · {event.actorKind}
-                      </time>
-                    </div>
+            </CardHeader>
+            <CardContent>
+              <div className="timeline">
+                {audit.length === 0 ? (
+                  <div className="text-center py-8 text-[var(--text-tertiary)]">
+                    <ClipboardList size={32} className="mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No audit events yet.</p>
                   </div>
-                ))
-              )}
-            </div>
-          </section>
+                ) : (
+                  audit.slice(0, 8).map((event) => (
+                    <div key={event.id} className="timeline-item">
+                      <div className={event.success ? "timeline-dot" : "timeline-dot failed"}>
+                        {event.success ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm">{humanizeAction(event.action)}</p>
+                        <time className="text-xs text-[var(--text-tertiary)]">
+                          {relativeTime(event.at)} · {event.actorKind}
+                        </time>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </AppShell>

@@ -1,14 +1,61 @@
-node_modules
-dist
-.next
-.turbo
-coverage
+```
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Environment variables
 .env
 .env.local
+.env.*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
 *.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.python-version
+
+# Temporary files
+*.tmp
+*.temp
 .DS_Store
-*.tsbuildinfo
-drizzle/meta
-.vscode/*
-!.vscode/extensions.json
-.research
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# MyPy
+.mypy_cache/
+
+# PyTest
+.pytest_cache/
+
+# Node.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS generated files
+ehthumbs.db
+Icon?
+```
