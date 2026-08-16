@@ -21,8 +21,8 @@ export interface PlanApprovalContext {
   organizationId: string;
   /** The actor whose execution the plan's grants authorize. */
   userId: string;
-  /** User id of the approver who may approve the plan. */
-  approverUserId: string;
+  /** User id of the approver who may approve the plan; absent → fail closed. */
+  approverUserId?: string;
   /** Default grant lifetime in ms when policy implies no explicit expiry. */
   grantTtlMs?: number;
   /** Human-attention queue used to surface medium/high-risk plans. */
@@ -64,6 +64,14 @@ export async function requestPlanApproval(
   // Low-risk plans execute internally without surfacing (doc §Planning).
   if (!planRequiresApproval(plan)) {
     return { approved: true, via: "low_risk", grantIds: [] };
+  }
+
+  if (!ctx.approverUserId) {
+    return {
+      approved: false,
+      via: "no_decision_surface",
+      reason: "No approver configured for plan approval",
+    };
   }
 
   if (!ctx.inbox) {

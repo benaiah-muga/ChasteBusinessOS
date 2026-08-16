@@ -34,6 +34,7 @@
     "@chaste/module-platform": "workspace:*",
     "@chaste/module-purchasing": "workspace:*",
     "@chaste/module-scheduling": "workspace:*",
+    "@chaste/module-workflow-tasks": "workspace:*",
     "drizzle-orm": "^0.38.3"
   },
   "devDependencies": {

@@ -42,6 +42,7 @@ import { createMessagingModule } from "@chaste/module-messaging";
 import { createPlatformModule } from "@chaste/module-platform";
 import { createPurchasingModule } from "@chaste/module-purchasing";
 import { createSchedulingModule } from "@chaste/module-scheduling";
+import { createWorkflowTasksModule } from "@chaste/module-workflow-tasks";
 import { PostgresInboxStore } from "./postgres-inbox-store.js";
 import { PostgresWakeStore } from "./postgres-wake-store.js";
 import { PostgresSkillStore } from "./postgres-skill-store.js";
@@ -100,6 +101,19 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   const queries = createQueryRegistry();
   const modules = createModuleRegistry(commands, queries);
 
+  // ARCH-4 — durable, process-shared stores over the existing tables. Built
+  // before module registration so modules that layer command surfaces over
+  // these stores receive them (workflow-tasks).
+  const inbox = new PostgresInboxStore(db);
+  const wakes = new PostgresWakeStore(db);
+  const skills = new PostgresSkillStore(db);
+  const memoryStore = new DbMemoryStore(db);
+  const sessionLog = new PostgresSessionLog(db);
+  const contextBundles = new PostgresContextBundleStore(db);
+  const approvalGrants = new PostgresApprovalGrantStore(db);
+  const activities = new PostgresActivityStore(db);
+  const tasks = new PostgresTaskStore(db);
+
   // Domain modules first (dependency order); platform depends on the registry
   // for `core.modules.list` and its permission list.
   await modules.register(createCrmModule(db));
@@ -118,22 +132,17 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   await modules.register(createMessagingModule(db));
   await modules.register(createSchedulingModule(db));
   await modules.register(
+    createWorkflowTasksModule({
+      activities,
+      tasks,
+    }),
+  );
+  await modules.register(
     createPlatformModule(db, modules, {
       allowFullAutonomous: config.allowFullAutonomous,
       regions: config.regions,
     }),
   );
-
-  // ARCH-4 — durable, process-shared stores over the existing tables.
-  const inbox = new PostgresInboxStore(db);
-  const wakes = new PostgresWakeStore(db);
-  const skills = new PostgresSkillStore(db);
-  const memoryStore = new DbMemoryStore(db);
-  const sessionLog = new PostgresSessionLog(db);
-  const contextBundles = new PostgresContextBundleStore(db);
-  const approvalGrants = new PostgresApprovalGrantStore(db);
-  const activities = new PostgresActivityStore(db);
-  const tasks = new PostgresTaskStore(db);
 
   return {
     config,

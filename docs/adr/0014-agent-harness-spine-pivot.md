@@ -278,6 +278,35 @@ missing approver fail closed.
 The HTTP/chat host layer that serves inbox decisions to the harness and the
 workflow *instance* engine remain later tranches.
 
+## Update (2026-08-16): Tranche 7 — `activities.*` + `workflow.tasks.*` command surface
+
+The seventh tranche completes build-sequence item 7 by layering the
+user-facing command/query surface over the durable stores (tranche 5). Humans
+and agents exercise the *same* bus contract (`activities.*`,
+`workflow.tasks.*`) — AI/manual parity by construction, with audit flowing
+through the command bus.
+
+- `modules/workflow-tasks` (`@chaste/module-workflow-tasks`) — a new module
+  `createWorkflowTasksModule({ activities, tasks })` owning no storage: it
+  layers Zod-validated (`.strict()`) boundaries over the kernel
+  `ActivityStore`/`TaskStore` interfaces.
+  - Commands: `activities.create` / `activities.complete` / `activities.cancel`;
+    `workflow.tasks.create` / `workflow.tasks.complete` (dependency-enforced) /
+    `workflow.tasks.block` (records the reason).
+  - Queries: `activities.list` / `activities.overdue`;
+    `workflow.tasks.workQueue` (ready pending tasks) / `workflow.tasks.list`.
+  - Permissions: `activities.read` / `activities.write` /
+    `workflow.tasks.read` / `workflow.tasks.write`, declared in the manifest.
+- `packages/runtime` — `createRuntime` now builds the durable Postgres stores
+  *before* module registration and injects them into the workflow-tasks
+  module, so the same stores serve the module and the harness.
+
+Acceptance (`modules/workflow-tasks/src/workflow-tasks.test.ts`): manifest
+permissions/capabilities, create/list/complete/cancel round-trips, overdue
+derivation, dependency-enforced completion, work-queue ordering, blocked-task
+reasons, strict input rejection, permission denial, and bus reachability with
+envelope provenance.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

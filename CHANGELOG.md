@@ -199,6 +199,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     conditions, boundary validation + missing-approver fail closed).
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **(Activities + workflow tasks) command surface — the seventh harness
+  tranche**, `modules/workflow-tasks` (`@chaste/module-workflow-tasks`),
+  completing build-sequence item 7 of the research doc. Humans and agents
+  exercise the same bus contract over the durable stores, so AI/manual parity
+  holds by construction.
+  - `createWorkflowTasksModule({ activities, tasks })` layers strict
+    (`z.object(...).strict()`) Zod boundaries over the kernel
+    `ActivityStore`/`TaskStore` interfaces — the module owns no storage.
+  - Commands: `activities.create` / `activities.complete` / `activities.cancel`;
+    `workflow.tasks.create` / `workflow.tasks.complete`
+    (dependency-enforced via `taskBlockers`) / `workflow.tasks.block` (records
+    the reason). Queries: `activities.list` / `activities.overdue`;
+    `workflow.tasks.workQueue` (ready pending tasks) / `workflow.tasks.list`.
+  - Permissions `activities.read` / `activities.write` /
+    `workflow.tasks.read` / `workflow.tasks.write` declared in the manifest.
+  - `packages/runtime` builds the durable Postgres stores *before* module
+    registration and injects them into the module, so the same stores serve
+    the module and the harness.
+  - Tests: `workflow-tasks.test.ts` — manifest, CRUD round-trips, overdue
+    derivation, dependency-enforced completion, work-queue ordering, blocked
+    reasons, strict input rejection, permission denial, and bus reachability
+    with envelope provenance.
+  - Docs: ADR 0014 tranche-7 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +
