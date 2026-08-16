@@ -25,6 +25,7 @@ export const AGENT_SESSION_EVENT_TYPES = [
   "plan/proposed",
   "tool/schema-presented",
   "tool/call",
+  "tool/result",
   "policy/decision",
   "approval/requested",
   "approval/granted",

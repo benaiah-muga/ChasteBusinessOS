@@ -64,6 +64,62 @@ policy engine / relationship graph / decision log, harness adapters
 (DeepSeek/Claude Code/opencode/Codex), durable workflow engine semantics,
 onboarding/migration data plane, and verifiable analytics.
 
+## Update (2026-08-16): Tranche 2 — tool and capability registry
+
+The second tranche implements the doc's §Tool and Capability Registry,
+§Tool Surface Optimization, and the §Agent Tool Wrapper Template in
+`packages/ai-core/src/tools/`. Design intent follows the doc verbatim:
+**agent tools are thin consumers of the same command/query bus** — no tool
+implements business logic and no tool may hide a write outside the bus. The
+existing orchestrator's ad-hoc `AgentToolCall`/`executeAgentTool` switch is
+deliberately *not* mirrored; this registry is the doc-shaped replacement.
+
+- `tools/types.ts` — `BusinessToolDefinition` (`name`, `description`, `kind`
+  (`command`/`query`), `command`, optional `risk` override, `exposeWhen`
+  permissions, strict `input`/`output` Zod contracts, idempotency, approval
+  class, read/write access, latency/cost, examples, `renderResult`,
+  `renderHuman`), `ToolContext` (actor + both bus registries + helpers +
+  trajectory sink + approval resolver + policy hook), and the typed
+  `ToolOutcome` union (`ok` / `denied` / `validation` / `approval_required` /
+  `error`).
+- `tools/registry.ts` — `createToolRegistry` + `defineBusinessTool` (the doc's
+  wrapper template). `listForActor` hides every tool whose `exposeWhen`
+  permissions the actor does not hold, so tools are kept out of model context
+  unless the actor/task can use them.
+- `tools/execute.ts` — `executeBusinessTool` implements the doc's execution
+  pipeline in order: log `tool/call` → validate args (same Zod contract the
+  bus validates) → authorize visibility/execution → classify risk (derived from
+  the wrapped command's `CommandMeta`, or the tool's own override) → require
+  approval if policy says so → dispatch through `dispatchCommand` /
+  `executeQuery` under the actor's own (never elevated) permission set → record
+  `policy/decision` + `command/query/dispatched` + `command/query/result` →
+  normalize to the canonical output → render a concise model-facing result →
+  log `tool/result`. Approval-required outcomes are returned as `approval_required`
+  (an approval *request*), never as failures; `approval/granted` carries the
+  durable grant id into the envelope. `defaultToolPolicy` allows `read` /
+  `write_local` under the actor's own authority and requires a durable grant
+  for `exec` / `external`.
+- `tools/schema.ts` — `zodToSchemaText`: deterministic, model-facing summary of
+  a Zod contract (strict input / canonical output). Boundary validation still
+  uses the real Zod schema, so the text can never widen the contract.
+- `tools/describe.ts` — `describeTool` / `describeToolSet` render the tool
+  surface (description, schema, risk, approval class, access, idempotency,
+  latency/cost, examples) with a `catalog: true` capability-directory one-liner
+  mode for staged exposure (doc Stage 0–4).
+- Trajectory vocabulary gains `tool/result` (already had `tool/call`,
+  `policy/decision`, `approval/*`, `command/query/dispatched|result`).
+
+Acceptance criteria from the doc are covered by `tools/tools.test.ts` (21
+tests): the tool does not implement business logic (it only dispatches), call
+arguments are logged before dispatch, the command/query result is logged after,
+approval-required calls render as approval requests rather than failures, and
+tools are hidden from model context unless the actor can use them.
+
+The orchestrator wiring that *uses* this registry (building the model-facing
+tool list from `listForActor` + `describeToolSet`, calling
+`executeBusinessTool` on parsed tool calls, surfacing `approval_required`
+outcomes as inbox items) is a later tranche and is not part of this ADR update.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

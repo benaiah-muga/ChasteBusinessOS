@@ -56,6 +56,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     order, fail-closed overflow, unauthorized redaction, explainability).
   - Docs: ADR 0014 `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **Tool and capability registry (ADR 0014 update, research doc §Tool and
+  Capability Registry, §Tool Surface Optimization, §Agent Tool Wrapper
+  Template) — the second harness tranche** in `packages/ai-core/src/tools/`.
+  Agent tools are thin consumers of the same command/query bus: no tool
+  implements business logic and no tool may hide a write outside the bus.
+  - **`BusinessToolDefinition` + `defineBusinessTool`** — the doc's wrapper
+    template: `name`, short `description`, `kind` (`command`/`query`), the bus
+    `command` name, optional `risk` override (defaults to the wrapped
+    command's `CommandMeta` risk class), `exposeWhen` permission gates, strict
+    `input`/`output` Zod contracts (the same ones the bus validates), and
+    tool-surface metadata (idempotency, approval class, read/write access,
+    expected latency/cost, good/bad examples, `renderResult`, `renderHuman`).
+  - **Execution pipeline (`executeBusinessTool`)** — implements the doc's
+    order verbatim: log `tool/call` → validate args → authorize visibility and
+    execution → classify risk → require approval if policy says so → dispatch
+    through `dispatchCommand`/`executeQuery` under the actor's own (never
+    elevated) permissions → record `policy/decision` and
+    `command/query/dispatched|result` → normalize to the canonical output →
+    render a concise model-facing result → log `tool/result`. Approval-required
+    calls are returned as `approval_required` (approval *requests*, never
+    failures), and granted approvals carry the durable `approvalGrantId` into
+    the envelope. `defaultToolPolicy` allows `read`/`write_local` under the
+    actor's own authority and requires a durable grant for `exec`/`external`.
+  - **`createToolRegistry`** — registers tools and `listForActor` hides every
+    tool the actor cannot use, so tools stay out of model context unless the
+    actor/task can use them.
+  - **Tool surface (`describeTool` / `describeToolSet`)** — deterministic,
+    model-facing rendering of each tool's metadata with a `catalog: true`
+    capability-directory one-liner mode for staged tool exposure (doc Stage
+    0–4); `zodToSchemaText` produces a stable summary of strict input and
+    canonical output schemas (boundary validation still uses the real Zod
+    schemas).
+  - **Trajectory** — the `AgentSessionEvent` vocabulary gains `tool/result`
+    alongside the existing `tool/call` / `policy/decision` / `approval/*` /
+    `command/query/dispatched|result` events.
+  - **Tests** — `tools/tools.test.ts` (21 tests) covering the doc's
+    acceptance criteria: tools carry no business logic, call args are logged
+    before dispatch, results logged after, approval-required renders as an
+    approval request not a failure, denied/validation/error outcomes are
+    typed, risk derives from command metadata, and tool visibility respects
+    the actor's permissions.
+  - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +
