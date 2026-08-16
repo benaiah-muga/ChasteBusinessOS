@@ -120,6 +120,51 @@ tool list from `listForActor` + `describeToolSet`, calling
 `executeBusinessTool` on parsed tool calls, surfacing `approval_required`
 outcomes as inbox items) is a later tranche and is not part of this ADR update.
 
+## Update (2026-08-16): Tranche 3 — durable approval grants
+
+The third tranche implements the doc's §Human Collaboration rule that
+**human approval is a durable grant, not a chat message the model may
+reinterpret**. The `ApprovalGrant` type from tranche 1 had no store; this
+tranche adds the store, the matcher, the durable schema, and the bridge that
+turns the tool registry's `approval_required` outcomes into grants the
+envelope can cite as `approvalGrantId`.
+
+- `packages/kernel/src/approvals.ts` — `ApprovalGrantRecord` (the envelope's
+  `ApprovalGrant` plus `organizationId`, `grantedToUserId`, `status`, revoke
+  bookkeeping), `ApprovalGrantStore` interface, `InMemoryApprovalGrantStore`,
+  and the pure `grantCovers` matcher (org + actor + scope + expiry + revoked).
+  A grant declares who granted, what exact command/resource, which actor it
+  authorizes, when it expires, the thresholds/conditions recorded at grant
+  time, the policy basis, and the evidence shown. `conditions` are recorded
+  for audit/explanation; evaluating thresholds (e.g. amount ceilings) is the
+  policy engine's job in a later tranche.
+- `packages/db` + `packages/runtime` — `approval_grants` table (Drizzle +
+  idempotent SQL) and `PostgresApprovalGrantStore`, wired into `createRuntime`
+  as `runtime.approvalGrants`, so grants survive restarts and are shared
+  across hosts.
+- `packages/ai-core/src/tools/approvals.ts` —
+  `grantStoreApprovalResolver` bridges the tool pipeline's approval requests
+  to durable grants: it surfaces an approval item in the `InboxStore` (when
+  wired), awaits the human decision, and on `allow`/`always` mints a durable
+  grant (scope = the exact command, TTL, conditions from `policyContext`,
+  `policyBasis` = the policy that demanded approval, `evidenceShown`). Without
+  a decision surface it returns not-granted, so the call stays an approval
+  *request*. `grantCoveredToolPolicy` checks the store before the default risk
+  policy, so a durable grant auto-allows subsequent identical calls until it
+  expires or is revoked — the trajectory's `policy/decision` cites `grant:<id>`.
+- Tool pipeline: `ApprovalRequest` now carries `policyBasis` and `evidenceRefs`,
+  and the command envelope's `policyContext` records the policy that produced
+  the decision, so audit and trajectory cite the grant/policy basis.
+
+Acceptance (kernel `approvals.test.ts` + ai-core `tools/approvals.test.ts`):
+grants are durable and match exactly (org/actor/scope/expiry/revocation),
+approval-required calls become durable grants when the human approves, stay
+approval requests (never failures) when denied, and a covering grant
+auto-allows without re-asking.
+
+The policy engine / relationship graph / decision log and the orchestrator
+wiring that *serves* inbox decisions to this resolver remain later tranches.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

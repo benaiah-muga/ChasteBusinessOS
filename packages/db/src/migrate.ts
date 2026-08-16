@@ -949,6 +949,32 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
 );
 CREATE INDEX IF NOT EXISTS wf_run_org_idx ON workflow_runs(organization_id);
 CREATE INDEX IF NOT EXISTS wf_run_wf_idx ON workflow_runs(workflow_id);
+
+-- ADR 0014 tranche 3 -- durable approval grants (research doc §Human
+-- Collaboration). Mirrors the Drizzle schema above; the grant is a durable
+-- fact referenced by envelope approval_grant_id, never a chat message.
+CREATE TABLE IF NOT EXISTS approval_grants (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  granted_by uuid NOT NULL,
+  granted_to_user_id uuid NOT NULL,
+  granted_at timestamptz NOT NULL DEFAULT now(),
+  scope_command_type text,
+  scope_resource_type text,
+  scope_resource_id text,
+  expires_at timestamptz,
+  conditions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  policy_basis text,
+  evidence_shown jsonb NOT NULL DEFAULT '[]'::jsonb,
+  status text NOT NULL DEFAULT 'active',
+  revoked_at timestamptz,
+  revoked_by uuid,
+  revoke_reason text
+);
+CREATE INDEX IF NOT EXISTS approval_grants_org_idx ON approval_grants(organization_id);
+CREATE INDEX IF NOT EXISTS approval_grants_active_scope_idx
+  ON approval_grants(organization_id, status, scope_command_type);
+CREATE INDEX IF NOT EXISTS approval_grants_user_idx ON approval_grants(organization_id, granted_to_user_id);
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {

@@ -180,6 +180,8 @@ export async function executeBusinessTool<T = unknown>(
       args: parsed.data,
       reason: ctx.reason,
       policyContext: ctx.policyContext ?? {},
+      policyBasis: decision.policy,
+      evidenceRefs: ctx.evidenceRefs,
     };
     await logEvent(ctx, "approval/requested", approvalRequest);
 
@@ -256,9 +258,9 @@ export async function executeBusinessTool<T = unknown>(
           evidenceRefs: ctx.evidenceRefs,
           correlationId: ctx.correlationId,
           causationId: ctx.causationId,
-          approvalGrantId,
-          policyContext: ctx.policyContext ?? {},
-          idempotencyKey: ctx.idempotencyKey,
+approvalGrantId,
+        policyContext: { ...ctx.policyContext, policy: decision.policy },
+        idempotencyKey: ctx.idempotencyKey,
         },
         { now: ctx.now },
       );

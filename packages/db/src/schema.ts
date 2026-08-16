@@ -1133,3 +1133,41 @@ export const contextSections = pgTable(
   },
   (t) => [index("context_sections_bundle_idx").on(t.bundleId)],
 );
+
+/**
+ * ADR 0014 tranche 3 — durable approval grants (research doc §Human
+ * Collaboration). A grant is a durable fact — who approved, what exact action,
+ * which actor it authorizes, expiry, conditions, policy basis, and evidence
+ * shown — not a chat message. Envelope `approvalGrantId` references it; the
+ * tool pipeline checks `approval_grants` before re-asking.
+ */
+export const approvalGrants = pgTable(
+  "approval_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    /** User id of the approver (who granted). */
+    grantedBy: uuid("granted_by").notNull(),
+    /** User id of the actor whose call the grant authorizes. */
+    grantedToUserId: uuid("granted_to_user_id").notNull(),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+    scopeCommandType: text("scope_command_type"),
+    scopeResourceType: text("scope_resource_type"),
+    scopeResourceId: text("scope_resource_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** Human-readable thresholds/conditions recorded at grant time. */
+    conditions: jsonb("conditions").$type<string[]>().notNull().default([]),
+    policyBasis: text("policy_basis"),
+    /** Evidence shown to the approver at grant time. */
+    evidenceShown: jsonb("evidence_shown").$type<unknown[]>().notNull().default([]),
+    status: text("status").notNull().default("active"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedBy: uuid("revoked_by"),
+    revokeReason: text("revoke_reason"),
+  },
+  (t) => [
+    index("approval_grants_org_idx").on(t.organizationId),
+    index("approval_grants_active_scope_idx").on(t.organizationId, t.status, t.scopeCommandType),
+    index("approval_grants_user_idx").on(t.organizationId, t.grantedToUserId),
+  ],
+);

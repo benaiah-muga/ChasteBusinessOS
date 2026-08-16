@@ -3,3 +3,4 @@ export * from "./schema.js";
 export * from "./registry.js";
 export * from "./execute.js";
 export * from "./describe.js";
+export * from "./approvals.js";

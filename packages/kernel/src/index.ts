@@ -1,4 +1,5 @@
 export * from "./autonomy.js";
+export * from "./approvals.js";
 export * from "./audit.js";
 export * from "./command.js";
 export * from "./context.js";

@@ -104,6 +104,10 @@ export interface ApprovalRequest {
   args: unknown;
   reason?: string;
   policyContext: PolicyContext;
+  /** Policy that demanded the approval (recorded as the grant's basis). */
+  policyBasis?: string;
+  /** Evidence shown at approval time (recorded on the durable grant). */
+  evidenceRefs?: EvidenceRef[];
 }
 
 export interface ApprovalResolution {

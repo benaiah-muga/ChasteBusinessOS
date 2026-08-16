@@ -99,6 +99,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the actor's permissions.
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **Durable approval grants (ADR 0014 update, research doc §Human
+  Collaboration) — the third harness tranche**. Human approval is a durable
+  grant — who granted, what exact action, which actor it authorizes, expiry,
+  conditions, policy basis, evidence shown — never a chat message the model may
+  reinterpret.
+  - **`@chaste/kernel` `approvals.ts`** — `ApprovalGrantRecord` (envelope
+    `ApprovalGrant` + `organizationId`, `grantedToUserId`, `status`, revoke
+    bookkeeping), `ApprovalGrantStore` interface, `InMemoryApprovalGrantStore`,
+    and the pure `grantCovers` matcher (org + actor + scope + expiry + revoked).
+  - **`@chaste/db` + `@chaste/runtime`** — `approval_grants` table (Drizzle +
+    idempotent SQL) and `PostgresApprovalGrantStore`, wired into
+    `createRuntime` as `runtime.approvalGrants` so grants survive restarts and
+    are shared across API + worker hosts.
+  - **`@chaste/ai-core` `tools/approvals.ts`** — `grantStoreApprovalResolver`
+    surfaces an inbox approval item (when wired), awaits the human decision,
+    and on `allow`/`always` mints a durable grant whose id becomes the tool
+    call's `approvalGrantId`; without a decision surface the call stays an
+    approval *request*, never a failure. `grantCoveredToolPolicy` checks the
+    store before the default risk policy, so a durable grant auto-allows
+    subsequent identical calls until expiry/revocation; the trajectory's
+    `policy/decision` cites `grant:<id>`.
+  - **Tool pipeline** — `ApprovalRequest` now carries `policyBasis` and
+    `evidenceRefs`; the command envelope's `policyContext` records the policy
+    that produced the decision so audit and trajectory cite the grant/policy.
+  - **Tests** — kernel `approvals.test.ts` (scope/actor/org/expiry/revocation
+    matching, create/get/list/revoke/check) and ai-core `tools/approvals.test.ts`
+    (approval → durable grant, denied → approval request, grant-covered
+    auto-allow, per-actor isolation).
+  - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +

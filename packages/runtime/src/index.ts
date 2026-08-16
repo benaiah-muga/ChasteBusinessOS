@@ -26,6 +26,7 @@ import {
   type ModuleRegistry,
   type QueryRegistry,
   type InboxStore,
+  type ApprovalGrantStore,
 } from "@chaste/kernel";
 import type { MemoryStore, SkillStore, SessionLog, WakeStore } from "@chaste/ai-core";
 import { createAccountingModule } from "@chaste/module-accounting";
@@ -45,6 +46,7 @@ import { PostgresSkillStore } from "./postgres-skill-store.js";
 import { PostgresMemoryStore } from "./postgres-memory-store.js";
 import { PostgresSessionLog } from "./postgres-session-log.js";
 import { PostgresContextBundleStore } from "./postgres-context-bundle-store.js";
+import { PostgresApprovalGrantStore } from "./postgres-approval-grant-store.js";
 
 export {
   PostgresInboxStore,
@@ -53,6 +55,7 @@ export {
   PostgresMemoryStore,
   PostgresSessionLog,
   PostgresContextBundleStore,
+  PostgresApprovalGrantStore,
 };
 
 /**
@@ -74,6 +77,8 @@ export interface Runtime {
   sessionLog: SessionLog;
   /** ADR 0014 — versioned context bundles over `context_bundles`. */
   contextBundles: PostgresContextBundleStore;
+  /** ADR 0014 — durable approval grants over `approval_grants`. */
+  approvalGrants: ApprovalGrantStore;
   audit: PostgresAuditWriter;
   outbox: PostgresOutboxWriter;
   sessionStore: DbSessionStore;
@@ -116,6 +121,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   const memoryStore = new DbMemoryStore(db);
   const sessionLog = new PostgresSessionLog(db);
   const contextBundles = new PostgresContextBundleStore(db);
+  const approvalGrants = new PostgresApprovalGrantStore(db);
 
   return {
     config,
@@ -133,6 +139,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
     memory: new PostgresMemoryStore(memoryStore),
     sessionLog,
     contextBundles,
+    approvalGrants,
   };
 }
 
