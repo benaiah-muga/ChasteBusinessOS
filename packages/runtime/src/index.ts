@@ -27,6 +27,8 @@ import {
   type QueryRegistry,
   type InboxStore,
   type ApprovalGrantStore,
+  type ActivityStore,
+  type TaskStore,
 } from "@chaste/kernel";
 import type { MemoryStore, SkillStore, SessionLog, WakeStore } from "@chaste/ai-core";
 import { createAccountingModule } from "@chaste/module-accounting";
@@ -47,6 +49,8 @@ import { PostgresMemoryStore } from "./postgres-memory-store.js";
 import { PostgresSessionLog } from "./postgres-session-log.js";
 import { PostgresContextBundleStore } from "./postgres-context-bundle-store.js";
 import { PostgresApprovalGrantStore } from "./postgres-approval-grant-store.js";
+import { PostgresActivityStore } from "./postgres-activity-store.js";
+import { PostgresTaskStore } from "./postgres-task-store.js";
 
 export {
   PostgresInboxStore,
@@ -56,6 +60,8 @@ export {
   PostgresSessionLog,
   PostgresContextBundleStore,
   PostgresApprovalGrantStore,
+  PostgresActivityStore,
+  PostgresTaskStore,
 };
 
 /**
@@ -79,6 +85,10 @@ export interface Runtime {
   contextBundles: PostgresContextBundleStore;
   /** ADR 0014 — durable approval grants over `approval_grants`. */
   approvalGrants: ApprovalGrantStore;
+  /** ADR 0014 — durable activities over `activities`. */
+  activities: ActivityStore;
+  /** ADR 0014 — durable workflow tasks over `workflow_tasks`. */
+  tasks: TaskStore;
   audit: PostgresAuditWriter;
   outbox: PostgresOutboxWriter;
   sessionStore: DbSessionStore;
@@ -122,6 +132,8 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   const sessionLog = new PostgresSessionLog(db);
   const contextBundles = new PostgresContextBundleStore(db);
   const approvalGrants = new PostgresApprovalGrantStore(db);
+  const activities = new PostgresActivityStore(db);
+  const tasks = new PostgresTaskStore(db);
 
   return {
     config,
@@ -140,6 +152,8 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
     sessionLog,
     contextBundles,
     approvalGrants,
+    activities,
+    tasks,
   };
 }
 

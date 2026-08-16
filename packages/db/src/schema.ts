@@ -1171,3 +1171,69 @@ export const approvalGrants = pgTable(
     index("approval_grants_user_idx").on(t.organizationId, t.grantedToUserId),
   ],
 );
+
+/**
+ * ADR 0014 tranche 5 — durable activities (research doc §Proactive
+ * Scheduling, Reminders, and Activities Module, build item 7). Backing table
+ * for `ActivityStore`; the scheduling module layers `activities.*` /
+ * `core.reminder.*` commands on top.
+ */
+export const activities = pgTable(
+  "activities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    kind: text("kind").notNull(), // reminder | follow_up | review | task | notification
+    title: text("title").notNull(),
+    body: text("body"),
+    assigneeUserId: uuid("assignee_user_id"),
+    createdByUserId: uuid("created_by_user_id").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    timezone: text("timezone"),
+    recurrence: jsonb("recurrence").$type<unknown | null>(),
+    linkResourceType: text("link_resource_type"),
+    linkResourceId: text("link_resource_id"),
+    status: text("status").notNull().default("scheduled"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("activities_due_idx").on(t.organizationId, t.status, t.dueAt),
+    index("activities_assignee_idx").on(t.organizationId, t.assigneeUserId),
+    index("activities_kind_idx").on(t.organizationId, t.kind),
+  ],
+);
+
+/**
+ * ADR 0014 tranche 5 — task foundations (research doc §Workflow, Approvals,
+ * and Tasks Module, build item 7). Backing table for `TaskStore`; workflow
+ * instance/timeline/queue queries layer on top.
+ */
+export const workflowTasks = pgTable(
+  "workflow_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    workflowId: uuid("workflow_id"),
+    title: text("title").notNull(),
+    description: text("description"),
+    assigneeUserId: uuid("assignee_user_id"),
+    createdByUserId: uuid("created_by_user_id").notNull(),
+    status: text("status").notNull().default("pending"),
+    priority: text("priority").notNull().default("normal"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    dependsOn: jsonb("depends_on").$type<string[]>().notNull().default([]),
+    blockedReason: text("blocked_reason"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("workflow_tasks_org_idx").on(t.organizationId),
+    index("workflow_tasks_workflow_idx").on(t.workflowId),
+    index("workflow_tasks_assignee_status_idx").on(t.organizationId, t.assigneeUserId, t.status),
+  ],
+);

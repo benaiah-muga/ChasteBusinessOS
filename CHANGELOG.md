@@ -153,6 +153,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     auto-run, approval → grants, rejection → no grants, fail-closed, grant
     covers approved command for the granted actor only).
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+- **Activities + task foundations (ADR 0014 update, research doc
+  §Proactive Scheduling / §Workflow, build item 7) — the fifth harness
+  tranche** in `@chaste/kernel` + `@chaste/db` + `@chaste/runtime`, following
+  the durable-store pattern (model + in-memory store in kernel, Postgres store
+  in runtime).
+  - **`@chaste/kernel` `activities.ts`** — `Activity` (kind, assignee,
+    createdBy, dueAt, timezone, recurrence, business-record link),
+    `RecurrenceRule` with pure UTC `nextOccurrence` (daily/weekly/monthly +
+    weekday narrowing + pinned time), `isOverdue` (derived, never stored),
+    `ActivityStore` + `InMemoryActivityStore` with once-only complete/cancel,
+    agenda ordering, and `overdue`.
+  - **`@chaste/kernel` `tasks.ts`** — workflow/task foundations: `Task`
+    (status, priority, dueAt, `dependsOn` dependency graph, blocker reason),
+    pure `taskBlockers` / `canTransition` / `readyTasks` (work queue = pending
+    tasks with no blockers, due-date then priority order), and `TaskStore` +
+    `InMemoryTaskStore` with dependency-enforcing transitions.
+  - **`@chaste/db` + `@chaste/runtime`** — `activities` and `workflow_tasks`
+    tables (Drizzle + idempotent SQL), `PostgresActivityStore` and
+    `PostgresTaskStore` wired into `createRuntime` as `runtime.activities` /
+    `runtime.tasks`. Task transitions reuse the kernel's pure `canTransition`.
+  - **Tests** — kernel `activities.test.ts` + `tasks.test.ts` (recurrence,
+    overdue derivation, once-only transitions, dependency blocking, blocker
+    reasons, work-queue ordering).
+  - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,

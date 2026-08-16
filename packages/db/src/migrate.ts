@@ -975,6 +975,56 @@ CREATE INDEX IF NOT EXISTS approval_grants_org_idx ON approval_grants(organizati
 CREATE INDEX IF NOT EXISTS approval_grants_active_scope_idx
   ON approval_grants(organization_id, status, scope_command_type);
 CREATE INDEX IF NOT EXISTS approval_grants_user_idx ON approval_grants(organization_id, granted_to_user_id);
+
+-- ADR 0014 tranche 5 -- durable activities (research doc §Proactive
+-- Scheduling, Reminders, and Activities Module). Mirrors the Drizzle schema.
+CREATE TABLE IF NOT EXISTS activities (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  kind text NOT NULL,
+  title text NOT NULL,
+  body text,
+  assignee_user_id uuid,
+  created_by_user_id uuid NOT NULL,
+  due_at timestamptz NOT NULL,
+  timezone text,
+  recurrence jsonb,
+  link_resource_type text,
+  link_resource_id text,
+  status text NOT NULL DEFAULT 'scheduled',
+  completed_at timestamptz,
+  cancelled_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS activities_due_idx ON activities(organization_id, status, due_at);
+CREATE INDEX IF NOT EXISTS activities_assignee_idx ON activities(organization_id, assignee_user_id);
+CREATE INDEX IF NOT EXISTS activities_kind_idx ON activities(organization_id, kind);
+
+-- ADR 0014 tranche 5 -- task foundations (research doc §Workflow, Approvals,
+-- and Tasks Module). Mirrors the Drizzle schema.
+CREATE TABLE IF NOT EXISTS workflow_tasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  workflow_id uuid,
+  title text NOT NULL,
+  description text,
+  assignee_user_id uuid,
+  created_by_user_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  priority text NOT NULL DEFAULT 'normal',
+  due_at timestamptz,
+  depends_on jsonb NOT NULL DEFAULT '[]'::jsonb,
+  blocked_reason text,
+  completed_at timestamptz,
+  cancelled_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS workflow_tasks_org_idx ON workflow_tasks(organization_id);
+CREATE INDEX IF NOT EXISTS workflow_tasks_workflow_idx ON workflow_tasks(workflow_id);
+CREATE INDEX IF NOT EXISTS workflow_tasks_assignee_status_idx
+  ON workflow_tasks(organization_id, assignee_user_id, status);
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {

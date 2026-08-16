@@ -204,6 +204,40 @@ and the minted grant covers the approved command for the granted actor only.
 Plan *revision* (editing a rejected plan) and orchestrator execution of plan
 steps through the bus remain later tranches.
 
+## Update (2026-08-16): Tranche 5 — activities + task foundations
+
+The fifth tranche completes the first half of build-sequence item 7 (durable
+activities + workflow/task foundations) in the kernel + runtime, following the
+tranche-3 store pattern (model + in-memory store in kernel, Postgres store in
+`@chaste/runtime`).
+
+- `packages/kernel/src/activities.ts` — `Activity` (kind, assignee, createdBy,
+  dueAt, timezone, recurrence, link to a business record), `RecurrenceRule`,
+  the pure `nextOccurrence` (UTC daily/weekly/monthly with optional weekday
+  narrowing and pinned trigger time) and `isOverdue` (derived, never stored),
+  `ActivityStore` + `InMemoryActivityStore` (create/get/complete/cancel/list,
+  agenda ordering, `overdue`).
+- `packages/kernel/src/tasks.ts` — workflow/task foundations: `Task` (status,
+  priority, dueAt, `dependsOn` task-id graph, blocker reason), pure
+  `taskBlockers` / `canTransition` / `readyTasks` (work queue = pending tasks
+  with no blockers, ordered by due date then priority), and `TaskStore` +
+  `InMemoryTaskStore` with dependency-enforcing `transition`.
+- `packages/db` + `packages/runtime` — `activities` and `workflow_tasks`
+  tables (Drizzle + idempotent SQL) and `PostgresActivityStore` /
+  `PostgresTaskStore`, wired into `createRuntime` as `runtime.activities` and
+  `runtime.tasks`. Task transitions re-read the graph and reuse the kernel's
+  pure `canTransition`, so readiness/blocking cannot drift between stores.
+
+Acceptance (kernel `activities.test.ts` + `tasks.test.ts`): recurrence is
+deterministic, overdue is derived from the clock, activities complete/cancel
+once, tasks refuse to start/complete while a dependency is open, blocker
+reasons are recorded, and the work queue reports exactly the ready pending
+tasks in due/priority order.
+
+The `activities.*` / `workflow.*` command surface (scheduling + workflow
+modules layering commands over these stores) and workflow *instances* remain
+later tranches.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.
