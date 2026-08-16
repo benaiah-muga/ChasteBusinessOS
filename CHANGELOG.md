@@ -177,6 +177,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     overdue derivation, once-only transitions, dependency blocking, blocker
     reasons, work-queue ordering).
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+- **Harness orchestrator wiring (ADR 0014 update, research doc §Agent
+  Harness) — the sixth harness tranche** in `packages/ai-core/src/harness/`.
+  Connects the tool registry, durable grants, typed plans, and trajectory into
+  a runnable whole — additively, leaving the existing ad-hoc orchestrator
+  untouched.
+  - **`createHarness`** — `toolSurface(actor)` (model-facing tool list +
+    schemas from `listForActor` + `describeToolSet`), `call(params)` (executes
+    a tool through `executeBusinessTool` with `grantCoveredToolPolicy` +
+    `grantStoreApprovalResolver`; no grants/inbox/approver → approval calls
+    fail closed as requests), and `runPlan(params)` (validates the plan,
+    gates on `requestPlanApproval`, topologically orders steps, runs each
+    through the bus, skips dependents of failed steps, honors stop
+    conditions, attaches `evidence/attached` per `expectedEvidence`).
+  - **`tools/execute.ts`** — an `allow` from `grant:<id>` now cites the
+    durable grant as the envelope's `approvalGrantId`, so a plan-approved
+    step's audit and handler trace the exact grant that authorized it.
+  - **Tests** — `harness/harness.test.ts` (permission-filtered tool surfaces,
+    read dispatch with trajectory, fail-closed approvals, plan grants covering
+    external steps, dependency ordering + dep-failure skipping, stop
+    conditions, boundary validation + missing-approver fail closed).
+  - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,

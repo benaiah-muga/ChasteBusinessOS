@@ -238,6 +238,46 @@ The `activities.*` / `workflow.*` command surface (scheduling + workflow
 modules layering commands over these stores) and workflow *instances* remain
 later tranches.
 
+## Update (2026-08-16): Tranche 6 — harness orchestrator wiring
+
+The sixth tranche connects the four harness layers (tool registry, durable
+approval grants, typed plans, trajectory) into a runnable whole — additively,
+without touching the existing ad-hoc orchestrator path (the pivot stays
+non-breaking).
+
+- `packages/ai-core/src/harness/` — `createHarness` (doc §Agent Harness):
+  - **`toolSurface(actor)`** — the model-facing tool surface built from
+    `listForActor` + `describeToolSet`: only tools the actor may see and use,
+    full schemas + examples.
+  - **`call(params)`** — executes one tool call through `executeBusinessTool`
+    under the actor's own permissions. Policy is `grantCoveredToolPolicy` (a
+    durable grant auto-allows; otherwise the default risk policy), and
+    approval-required outcomes go through `grantStoreApprovalResolver` into
+    the inbox. No grants/inbox/approver → approval-required calls stay
+    approval *requests* (fail closed, never silent execution).
+  - **`runPlan(params)`** — validates the plan at the boundary, gates on
+    `requestPlanApproval` (low-risk auto-run; medium/high surfaces as an inbox
+    `plan` item and mints durable per-step grants), orders steps by dependency
+    (`topoSort`; cycles/missing deps rejected), runs each step through the
+    bus, skips dependents of failed steps, honors `stopConditions`, and
+    attaches `evidence/attached` events for each step's `expectedEvidence`.
+- `packages/ai-core/src/tools/execute.ts` — an `allow` decision whose policy
+  is `grant:<id>` (from `grantCoveredToolPolicy`) now cites the durable grant
+  as the envelope's `approvalGrantId`, so audit and the command handler trace
+  exactly which approval authorized the call — a step runs "under the plan
+  grant" and proves it.
+
+Acceptance (ai-core `harness/harness.test.ts`): tool surfaces are filtered by
+actor permissions, read tools dispatch through the bus with full trajectory,
+approval-required calls fail closed without a decision surface and mint
+durable grants (then auto-allow) when approved, plan grants cover external
+steps (envelope cites the grant id), dependency order and dep-failure
+skipping hold, stop conditions halt the run, and boundary validation +
+missing approver fail closed.
+
+The HTTP/chat host layer that serves inbox decisions to the harness and the
+workflow *instance* engine remain later tranches.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

@@ -155,7 +155,10 @@ export async function executeBusinessTool<T = unknown>(
 
   // 4. Classify risk.
   // 5. Require approval if policy says so. Approval-required outcomes are
-  //    rendered as approval *requests*, never as failures.
+  //    rendered as approval *requests*, never as failures. An `allow` granted
+  //    by a durable grant (`policy: "grant:<id>"`, set by
+  //    `grantCoveredToolPolicy`) cites the grant as the envelope's
+  //    `approvalGrantId` so audit and the handler can trace the authority.
   const policy = ctx.policy ?? ((r) => defaultToolPolicy(r));
   const decision = await policy({ tool, args: parsed.data, riskClass, commandType, isQuery: tool.kind === "query" });
   policyDecisions.push(decision);
@@ -172,6 +175,9 @@ export async function executeBusinessTool<T = unknown>(
   }
 
   let approvalGrantId: string | undefined;
+  if (decision.kind === "allow" && decision.policy.startsWith("grant:")) {
+    approvalGrantId = decision.policy.slice("grant:".length);
+  }
   if (decision.kind === "approval_required") {
     const approvalRequest: ApprovalRequest = {
       tool: tool.name,
