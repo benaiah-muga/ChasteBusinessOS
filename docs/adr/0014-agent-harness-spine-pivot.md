@@ -165,6 +165,45 @@ auto-allows without re-asking.
 The policy engine / relationship graph / decision log and the orchestrator
 wiring that *serves* inbox decisions to this resolver remain later tranches.
 
+## Update (2026-08-16): Tranche 4 — typed agent plans (planning layer)
+
+The fourth tranche implements the doc's §Planning layer. A plan is a typed,
+inspectable, revisable artifact — `AgentPlan` — that connects intent →
+approval → execution, and it is validated by Zod at every boundary so the
+model can propose a plan but never invent a shape the kernel rejects.
+
+- `packages/ai-core/src/planning/types.ts` — `AgentPlan`
+  (`objective`, `assumptions`, `steps`, `requiredApprovals`, `risks`,
+  `evidenceNeeded`, `stopConditions`), `PlanStep` (`command`, `args`,
+  `riskClass`, `requiredApproval`, `dependsOn`, `expectedEvidence`),
+  `ApprovalNeed`, `PlanRisk`, `EvidenceNeed`.
+- `packages/ai-core/src/planning/schema.ts` — Zod contracts
+  (`agentPlanSchema`, `validatePlan`) enforcing `.strict()` shapes at the chat
+  UI parts, harness, and inbox-card boundaries.
+- `packages/ai-core/src/planning/plan.ts` — pure analysis: `planRisk` maps the
+  tool registry's risk tiers onto plan risk levels (aligned with
+  `defaultToolPolicy`: `read`→low, `write_local`→medium, `exec`/`external`→high),
+  `planRequiresApproval` (low-risk plans run internally; anything else is shown
+  before execution), `summarizePlan` (model-facing), `renderPlan` (approval card).
+- `packages/ai-core/src/planning/approve.ts` — `requestPlanApproval`: logs
+  `plan/proposed`, auto-runs low-risk plans, surfaces medium/high-risk plans as
+  an inbox `plan` item (editable/rejectable per the doc's UX rule), and on
+  approval mints a durable grant per `requiredApproval` — scoped to the
+  command/resource, TTL'd, `policyBasis: "plan-approval"`, conditioned on the
+  approval's reason and plan id — so `grantCoveredToolPolicy` auto-allows the
+  matching steps without re-asking. Rejection logs `approval/rejected` and mints
+  nothing; absent a decision surface the plan fails closed
+  (`no_decision_surface`). All of it lands on the session trajectory.
+
+Acceptance (ai-core `planning/planning.test.ts`): risk classification matches
+the tool registry's approval semantics, low-risk plans auto-run with no inbox
+item or grant, medium/high-risk plans surface and mint exactly the requested
+grants on approval, rejection mints nothing, no decision surface fails closed,
+and the minted grant covers the approved command for the granted actor only.
+
+Plan *revision* (editing a rejected plan) and orchestrator execution of plan
+steps through the bus remain later tranches.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

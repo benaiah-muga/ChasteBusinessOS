@@ -128,6 +128,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (approval → durable grant, denied → approval request, grant-covered
     auto-allow, per-actor isolation).
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+- **Typed agent plans (ADR 0014 update, research doc §Planning) — the fourth
+  harness tranche** in `packages/ai-core/src/planning/`. A plan is a typed,
+  inspectable, revisable artifact connecting intent → approval → execution,
+  validated by Zod at every boundary.
+  - **`planning/types.ts`** — `AgentPlan` (`objective`, `assumptions`, `steps`,
+    `requiredApprovals`, `risks`, `evidenceNeeded`, `stopConditions`),
+    `PlanStep`, `ApprovalNeed`, `PlanRisk`, `EvidenceNeed`.
+  - **`planning/schema.ts`** — `.strict()` Zod contracts (`agentPlanSchema`,
+    `validatePlan`) so the model can propose a plan but never invent a shape
+    the kernel rejects.
+  - **`planning/plan.ts`** — pure analysis: `planRisk` maps risk tiers onto
+    plan risk levels aligned with the tool policy (`read`→low,
+    `write_local`→medium, `exec`/`external`→high), `planRequiresApproval`,
+    `summarizePlan` (model-facing), `renderPlan` (approval card).
+  - **`planning/approve.ts`** — `requestPlanApproval`: logs `plan/proposed`,
+    auto-runs low-risk plans, surfaces medium/high-risk plans as an inbox
+    `plan` item (editable/rejectable), and on approval mints one durable grant
+    per `requiredApproval` (command/resource-scoped, TTL, `policyBasis:
+    "plan-approval"`, conditioned on the reason + plan id) so
+    `grantCoveredToolPolicy` auto-allows the matching steps. Rejection mints
+    nothing and logs `approval/rejected`; no decision surface fails closed.
+  - **Tests** — `planning/planning.test.ts` (risk classification, low-risk
+    auto-run, approval → grants, rejection → no grants, fail-closed, grant
+    covers approved command for the granted actor only).
+  - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
