@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent harness spine (ADR 0014, research doc
+  `2026-08-15-future-architecture-ai-native-business-os`) — the first tranche
+  of the pivot from "ERP with a chatbot" to "trustworthy business execution
+  harness". Additive: nothing existing was removed; the command bus, outbox,
+  audit, RBAC, and modules keep working unchanged.
+  - **Command envelope (`@chaste/kernel` `envelope.ts`)** — `CommandEnvelope`
+    with `commandId`, `idempotencyKey`, `tenantId`, `actor`, `origin`
+    (`human | agent | workflow | integration | scheduled`), `requestedAt`,
+    `commandType`, `payload`, `reason`, `evidenceRefs`, `correlationId`,
+    `causationId`, `approvalGrantId`, and `policyContext`, plus
+    `ApprovalGrant`, `PolicyDecision`, `createCommandEnvelope`, and
+    `dispatchCommand`. `dispatchCommand` funnels through the same
+    `executeCommand` path as every human caller, so an agent origin is never
+    elevated — AI/manual parity by construction. Envelope provenance now flows
+    into `RequestContext` and every `AuditEntry`, and is persisted by
+    `PostgresAuditWriter` (`audit_log.origin` / `reason` / `evidence_refs` /
+    `approval_grant_id` / `policy_context` / `idempotency_key` /
+    `correlation_id` / `causation_id`, with an `audit_log_origin_idx` index).
+  - **Append-only agent trajectory log (`@chaste/ai-core` `trajectory/`)** —
+    `AgentSessionEvent` union over the doc's `session/start` … `session/end`
+    vocabulary, `SessionLog` interface + `InMemorySessionLog`, and
+    `reconstructModelRequest`, which replays the stream into the
+    model-visible request (system sections, messages, tool schemas, evidence,
+    memory reads, policy decisions) and verifies the hard reconstruction
+    invariant (`complete`/`gaps`), with `summarizeModelRequest` for
+    human/audit-facing summaries.
+  - **Context engine (`@chaste/ai-core` `context-engine/`)** — `ContextBundle`,
+    tiered `ContextSection`s (tiers 0–5), `TokenBudget` with the doc's reserve
+    policy (ordinary vs document/report vs tool-heavy) and allocation order,
+    admission rules (source + purpose + token estimate + authorization proof;
+    unauthorized sections are redacted, never admitted), fail-closed
+    `overflow` when required context cannot fit, and `explainContext` so the
+    engine can say why a section was included, summarized, or omitted.
+  - **Durable persistence (`@chaste/db`, `@chaste/runtime`)** — new
+    `agent_session_events` (append-only, identity `seq`) and
+    `context_bundles`/`context_sections` tables (Drizzle + idempotent SQL
+    migration), with `PostgresSessionLog` and `PostgresContextBundleStore`
+    wired into `createRuntime` as `runtime.sessionLog` /
+    `runtime.contextBundles`.
+  - **Tests** — kernel `envelope.test.ts` (envelope defaults, provenance
+    recorded in audit, agent origin not elevated), ai-core
+    `trajectory/session-log.test.ts` (append-only ordering, org-scoped session
+    listing, complete + incomplete reconstruction), and
+    `context-engine/context-engine.test.ts` (budget reserves, allocation
+    order, fail-closed overflow, unauthorized redaction, explainability).
+  - Docs: ADR 0014 `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +

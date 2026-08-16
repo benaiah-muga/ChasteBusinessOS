@@ -22,6 +22,14 @@ export class PostgresAuditWriter implements AuditWriter {
       inputSummary: entry.inputSummary as object | undefined,
       errorCode: entry.errorCode,
       errorMessage: entry.errorMessage,
+      origin: entry.origin,
+      reason: entry.reason,
+      evidenceRefs: entry.evidenceRefs as object[] | undefined,
+      approvalGrantId: entry.approvalGrantId,
+      policyContext: entry.policyContext as Record<string, unknown> | undefined,
+      idempotencyKey: entry.idempotencyKey,
+      correlationId: entry.correlationId,
+      causationId: entry.causationId,
     });
   }
 
@@ -86,7 +94,12 @@ export class PostgresOutboxWriter implements OutboxWriter {
       await tx
         .update(schema.outboxEvents)
         .set({ claimedAt: new Date() })
-        .where(inArray(schema.outboxEvents.id, rows.map((r) => r.id)));
+        .where(
+          inArray(
+            schema.outboxEvents.id,
+            rows.map((r) => r.id),
+          ),
+        );
       return rows;
     });
   }
@@ -182,12 +195,21 @@ export async function replayDeadLetterEvents(
       .update(schema.deadLetterEvents)
       .set({ replayedAt: new Date() })
       .where(
-        and(eq(schema.deadLetterEvents.organizationId, organizationId), inArray(schema.deadLetterEvents.id, deadIds)),
+        and(
+          eq(schema.deadLetterEvents.organizationId, organizationId),
+          inArray(schema.deadLetterEvents.id, deadIds),
+        ),
       );
     for (const d of dead) {
       await tx
         .update(schema.outboxEvents)
-        .set({ attempts: 0, lastError: null, claimedAt: null, nextAttemptAt: new Date(), deadLetteredAt: null })
+        .set({
+          attempts: 0,
+          lastError: null,
+          claimedAt: null,
+          nextAttemptAt: new Date(),
+          deadLetteredAt: null,
+        })
         .where(eq(schema.outboxEvents.id, d.id));
     }
     return dead.length;
@@ -206,7 +228,10 @@ export async function usersWithPermission(db: Db, organizationId: string, permis
     .innerJoin(schema.userRoles, eq(schema.rolePermissions.roleId, schema.userRoles.roleId))
     .innerJoin(schema.users, eq(schema.userRoles.userId, schema.users.id))
     .where(
-      and(eq(schema.roles.organizationId, organizationId), eq(schema.rolePermissions.permission, permission)),
+      and(
+        eq(schema.roles.organizationId, organizationId),
+        eq(schema.rolePermissions.permission, permission),
+      ),
     );
 }
 

@@ -27,7 +27,7 @@ import {
   type QueryRegistry,
   type InboxStore,
 } from "@chaste/kernel";
-import type { MemoryStore, SkillStore, WakeStore } from "@chaste/ai-core";
+import type { MemoryStore, SkillStore, SessionLog, WakeStore } from "@chaste/ai-core";
 import { createAccountingModule } from "@chaste/module-accounting";
 import { createCrmModule } from "@chaste/module-crm";
 import { createHrModule } from "@chaste/module-hr";
@@ -43,8 +43,17 @@ import { PostgresInboxStore } from "./postgres-inbox-store.js";
 import { PostgresWakeStore } from "./postgres-wake-store.js";
 import { PostgresSkillStore } from "./postgres-skill-store.js";
 import { PostgresMemoryStore } from "./postgres-memory-store.js";
+import { PostgresSessionLog } from "./postgres-session-log.js";
+import { PostgresContextBundleStore } from "./postgres-context-bundle-store.js";
 
-export { PostgresInboxStore, PostgresWakeStore, PostgresSkillStore, PostgresMemoryStore };
+export {
+  PostgresInboxStore,
+  PostgresWakeStore,
+  PostgresSkillStore,
+  PostgresMemoryStore,
+  PostgresSessionLog,
+  PostgresContextBundleStore,
+};
 
 /**
  * The shared, durable runtime every host builds from. Host-specific concerns
@@ -61,6 +70,10 @@ export interface Runtime {
   skills: SkillStore;
   /** AI memory (passive recall + explicit memory tools) over `org_memories`. */
   memory: MemoryStore;
+  /** ADR 0014 — append-only agent trajectory log over `agent_session_events`. */
+  sessionLog: SessionLog;
+  /** ADR 0014 — versioned context bundles over `context_bundles`. */
+  contextBundles: PostgresContextBundleStore;
   audit: PostgresAuditWriter;
   outbox: PostgresOutboxWriter;
   sessionStore: DbSessionStore;
@@ -101,6 +114,8 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   const wakes = new PostgresWakeStore(db);
   const skills = new PostgresSkillStore(db);
   const memoryStore = new DbMemoryStore(db);
+  const sessionLog = new PostgresSessionLog(db);
+  const contextBundles = new PostgresContextBundleStore(db);
 
   return {
     config,
@@ -116,6 +131,8 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
     sessionStore: new DbSessionStore(db),
     memoryStore,
     memory: new PostgresMemoryStore(memoryStore),
+    sessionLog,
+    contextBundles,
   };
 }
 

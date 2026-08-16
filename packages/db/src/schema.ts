@@ -131,8 +131,20 @@ export const auditLog = pgTable(
     inputSummary: jsonb("input_summary"),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
+    /** ADR 0014 — command-envelope provenance (AI/manual parity). */
+    origin: text("origin"),
+    reason: text("reason"),
+    evidenceRefs: jsonb("evidence_refs").$type<unknown[]>(),
+    approvalGrantId: text("approval_grant_id"),
+    policyContext: jsonb("policy_context").$type<Record<string, unknown>>(),
+    idempotencyKey: text("idempotency_key"),
+    correlationId: text("correlation_id"),
+    causationId: text("causation_id"),
   },
-  (t) => [index("audit_log_org_idx").on(t.organizationId)],
+  (t) => [
+    index("audit_log_org_idx").on(t.organizationId),
+    index("audit_log_origin_idx").on(t.origin),
+  ],
 );
 
 export const outboxEvents = pgTable(
@@ -1057,4 +1069,67 @@ export const workflowRuns = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (t) => [index("wf_run_org_idx").on(t.organizationId), index("wf_run_wf_idx").on(t.workflowId)],
+);
+
+/* ─── ADR 0014 — agent trajectory + context engine ────────────────── */
+
+/**
+ * Append-only agent trajectory log. One row per AgentSessionEvent; `seq`
+ * preserves append order for faithful replay.
+ */
+export const agentSessionEvents = pgTable(
+  "agent_session_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id").notNull(),
+    organizationId: uuid("organization_id").notNull(),
+    seq: integer("seq").generatedAlwaysAsIdentity(),
+    type: text("type").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    payload: jsonb("payload").$type<unknown>().notNull().default({}),
+  },
+  (t) => [
+    index("agent_session_events_session_idx").on(t.sessionId, t.seq),
+    index("agent_session_events_org_type_idx").on(t.organizationId, t.type),
+  ],
+);
+
+/** Versioned context bundle backing the model-visible reconstruction invariant. */
+export const contextBundles = pgTable(
+  "context_bundles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id").notNull(),
+    organizationId: uuid("organization_id").notNull(),
+    turn: integer("turn").notNull().default(0),
+    modelRoute: text("model_route").notNull(),
+    tokenBudget: jsonb("token_budget").$type<unknown>().notNull().default({}),
+    evidence: jsonb("evidence").$type<unknown[]>().notNull().default([]),
+    redactions: jsonb("redactions").$type<unknown[]>().notNull().default([]),
+    omitted: jsonb("omitted").$type<unknown[]>().notNull().default([]),
+    summariesUsed: jsonb("summaries_used").$type<unknown[]>().notNull().default([]),
+    cacheKeys: jsonb("cache_keys").$type<unknown[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("context_bundles_session_idx").on(t.sessionId, t.turn)],
+);
+
+export const contextSections = pgTable(
+  "context_sections",
+  {
+    id: text("id").primaryKey(),
+    bundleId: uuid("bundle_id")
+      .notNull()
+      .references(() => contextBundles.id, { onDelete: "cascade" }),
+    sectionKey: text("section_key").notNull(),
+    tier: integer("tier").notNull(),
+    purpose: text("purpose").notNull(),
+    source: text("source").notNull(),
+    visibility: text("visibility").notNull().default("model"),
+    contentRef: text("content_ref"),
+    renderedText: text("rendered_text"),
+    tokenEstimate: integer("token_estimate").notNull().default(0),
+    required: boolean("required").notNull().default(false),
+  },
+  (t) => [index("context_sections_bundle_idx").on(t.bundleId)],
 );

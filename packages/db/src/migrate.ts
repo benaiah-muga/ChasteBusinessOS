@@ -90,6 +90,67 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS audit_log_org_idx ON audit_log(organization_id);
 
+-- ADR 0014 -- command-envelope provenance columns on audit_log.
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS origin text;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS reason text;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS evidence_refs jsonb;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS approval_grant_id text;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS policy_context jsonb;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS idempotency_key text;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS correlation_id text;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS causation_id text;
+CREATE INDEX IF NOT EXISTS audit_log_origin_idx ON audit_log(origin);
+
+-- ADR 0014 -- append-only agent trajectory log (research doc §Session and
+-- Trajectory Log). One row per AgentSessionEvent; seq preserves order.
+CREATE TABLE IF NOT EXISTS agent_session_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL,
+  organization_id uuid NOT NULL,
+  seq bigint GENERATED ALWAYS AS IDENTITY,
+  type text NOT NULL,
+  at timestamptz NOT NULL DEFAULT now(),
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS agent_session_events_session_idx
+  ON agent_session_events(session_id, seq);
+CREATE INDEX IF NOT EXISTS agent_session_events_org_type_idx
+  ON agent_session_events(organization_id, type);
+
+-- ADR 0014 -- versioned context bundles (research doc §Context Engine).
+-- The bundle references versioned artifacts (evidence) so a model request can
+-- be reconstructed; context_sections holds the per-section budget/source data.
+CREATE TABLE IF NOT EXISTS context_bundles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid NOT NULL,
+  organization_id uuid NOT NULL,
+  turn integer NOT NULL DEFAULT 0,
+  model_route text NOT NULL,
+  token_budget jsonb NOT NULL DEFAULT '{}'::jsonb,
+  evidence jsonb NOT NULL DEFAULT '[]'::jsonb,
+  redactions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  omitted jsonb NOT NULL DEFAULT '[]'::jsonb,
+  summaries_used jsonb NOT NULL DEFAULT '[]'::jsonb,
+  cache_keys jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS context_bundles_session_idx ON context_bundles(session_id, turn);
+
+CREATE TABLE IF NOT EXISTS context_sections (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bundle_id uuid NOT NULL REFERENCES context_bundles(id) ON DELETE CASCADE,
+  section_key text NOT NULL,
+  tier integer NOT NULL,
+  purpose text NOT NULL,
+  source text NOT NULL,
+  visibility text NOT NULL DEFAULT 'model',
+  content_ref text,
+  rendered_text text,
+  token_estimate integer NOT NULL DEFAULT 0,
+  required boolean NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS context_sections_bundle_idx ON context_sections(bundle_id);
+
 CREATE TABLE IF NOT EXISTS outbox_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   type text NOT NULL,

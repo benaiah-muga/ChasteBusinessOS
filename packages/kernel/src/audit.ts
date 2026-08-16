@@ -1,4 +1,4 @@
-import type { Actor } from "./context.js";
+import type { Actor, ActorOrigin, EvidenceRef, PolicyContext } from "./context.js";
 
 export interface AuditEntry {
   id: string;
@@ -15,6 +15,15 @@ export interface AuditEntry {
   inputSummary?: unknown;
   errorCode?: string;
   errorMessage?: string;
+  /** Envelope provenance (AI/manual parity): who reached the bus and why. */
+  origin?: ActorOrigin;
+  reason?: string;
+  evidenceRefs?: EvidenceRef[];
+  approvalGrantId?: string;
+  policyContext?: PolicyContext;
+  idempotencyKey?: string;
+  correlationId?: string;
+  causationId?: string;
 }
 
 export interface AuditWriter {

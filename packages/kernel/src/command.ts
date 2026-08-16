@@ -119,6 +119,20 @@ export interface ExecuteCommandResult<T> {
   requestId: string;
 }
 
+/** Envelope provenance recorded on every audit entry for AI/manual parity. */
+function auditProvenance(ctx: RequestContext) {
+  return {
+    origin: ctx.origin,
+    reason: ctx.reason,
+    evidenceRefs: ctx.evidenceRefs,
+    approvalGrantId: ctx.approvalGrantId,
+    policyContext: ctx.policyContext,
+    idempotencyKey: ctx.idempotencyKey,
+    correlationId: ctx.correlationId,
+    causationId: ctx.causationId,
+  };
+}
+
 export async function executeCommand<T = unknown>(
   registry: CommandRegistry,
   name: string,
@@ -146,6 +160,7 @@ export async function executeCommand<T = unknown>(
         inputSummary: redactForAudit(rawInput),
         errorCode: "PERMISSION_DENIED",
         errorMessage: `Missing permission: ${permission}`,
+        ...auditProvenance(ctx),
       });
       throw new PermissionError(permission);
     }
@@ -166,6 +181,7 @@ export async function executeCommand<T = unknown>(
       inputSummary: redactForAudit(rawInput),
       errorCode: "VALIDATION_ERROR",
       errorMessage: parsed.error.message,
+      ...auditProvenance(ctx),
     });
     throw new ValidationError(`Invalid input for ${name}`, parsed.error.flatten());
   }
@@ -194,6 +210,7 @@ export async function executeCommand<T = unknown>(
         success: true,
         requestId: ctx.requestId,
         inputSummary: redactForAudit(parsed.data),
+        ...auditProvenance(ctx),
       });
 
       return out.data as T;
@@ -227,6 +244,7 @@ export async function executeCommand<T = unknown>(
       inputSummary: redactForAudit(parsed.data),
       errorCode: code,
       errorMessage: message,
+      ...auditProvenance(ctx),
     });
     throw err;
   }
