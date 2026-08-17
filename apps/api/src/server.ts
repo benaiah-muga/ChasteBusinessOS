@@ -4,6 +4,10 @@ import {
   watchTriggerSchema,
   watchActionSchema,
   proactivePreferencesSchema,
+  harnessToolGrantSchema,
+  harnessMessageSchema,
+  harnessStartRequestSchema,
+  harnessRunFromTrajectory,
 } from "@chaste/ai-core";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyRequest } from "fastify";
@@ -919,6 +923,93 @@ export async function buildServer(appCtx?: AppContext) {
     const response = await session.handleMessage(JSON.stringify(message));
     if (response === null) return { ok: true };
     return JSON.parse(response) as unknown;
+  });
+
+  // ---- ADR 0014 external harness adapters (build item 16) ----------------
+
+  const harnessRunStartSchema = harnessStartRequestSchema
+    .omit({ tenantId: true })
+    .extend({ turn: harnessMessageSchema.optional() })
+    .strict();
+
+  server.get("/api/v1/harness-adapters", async () => {
+    const items = await Promise.all(
+      app.externalHarnesses.map(async (h) => ({
+        id: h.id,
+        kind: h.kind,
+        capabilities: await h.capabilities(),
+      })),
+    );
+    return { items };
+  });
+
+  /** Start a delegated external run. The run is bound to the authenticated
+   * actor, records `externalHarness/session-start` on a fresh Chaste
+   * trajectory, and optionally runs its first turn (tool calls mediated by the
+   * MCP gateway). */
+  server.post("/api/v1/harness-adapters/:kind/runs", async (req) => {
+    const auth = getAuth(req);
+    const { kind } = req.params as { kind: string };
+    const adapter = app.externalHarnesses.find((h) => h.id === kind || h.kind === kind);
+    if (!adapter) throw new NotFoundError(`Harness adapter ${kind}`);
+
+    const body = harnessRunStartSchema.parse(req.body ?? {});
+    const { turn, ...fields } = body;
+    const handle = await adapter.start({
+      actor: auth.actor,
+      tenantId: auth.actor.organizationId,
+      ...fields,
+    });
+    const afterTurn = turn ? await adapter.followup(handle, turn) : handle;
+    return {
+      runId: afterTurn.runId,
+      status: afterTurn.status,
+      usageVisibility: afterTurn.usageVisibility,
+      toolOutcomes: afterTurn.toolOutcomes,
+      summary: afterTurn.summary,
+    };
+  });
+
+  /** Resume a run by `runId` — the handle is rebuilt from the trajectory, not
+   * process memory. */
+  server.post("/api/v1/harness-adapters/:kind/runs/:runId/turns", async (req) => {
+    const auth = getAuth(req);
+    const { kind, runId } = req.params as { kind: string; runId: string };
+    const adapter = app.externalHarnesses.find((h) => h.id === kind || h.kind === kind);
+    if (!adapter) throw new NotFoundError(`Harness adapter ${kind}`);
+
+    const events = await app.sessionLog.list(runId);
+    const handle = harnessRunFromTrajectory(runId, events);
+    if (!handle) throw new NotFoundError(`Harness run ${runId}`);
+    if (handle.actor.organizationId !== auth.actor.organizationId) {
+      throw new NotFoundError(`Harness run ${runId}`);
+    }
+
+    const turn = harnessMessageSchema.parse(req.body ?? {});
+    const next = await adapter.followup(handle, turn);
+    return {
+      runId: next.runId,
+      status: next.status,
+      usageVisibility: next.usageVisibility,
+      toolOutcomes: next.toolOutcomes,
+      summary: next.summary,
+    };
+  });
+
+  /** Collect the run result (status, artifacts, model usage, trace ref). */
+  server.get("/api/v1/harness-adapters/:kind/runs/:runId", async (req) => {
+    const auth = getAuth(req);
+    const { kind, runId } = req.params as { kind: string; runId: string };
+    const adapter = app.externalHarnesses.find((h) => h.id === kind || h.kind === kind);
+    if (!adapter) throw new NotFoundError(`Harness adapter ${kind}`);
+
+    const events = await app.sessionLog.list(runId);
+    const handle = harnessRunFromTrajectory(runId, events);
+    if (!handle) throw new NotFoundError(`Harness run ${runId}`);
+    if (handle.actor.organizationId !== auth.actor.organizationId) {
+      throw new NotFoundError(`Harness run ${runId}`);
+    }
+    return adapter.collect(handle);
   });
 
   server.get("/api/v1/inbox", async (req) => {

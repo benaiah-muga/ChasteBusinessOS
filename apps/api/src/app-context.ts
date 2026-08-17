@@ -34,6 +34,9 @@ import {
   type ToolRegistry,
   createMcpGateway,
   type McpGateway,
+  createHarnessAdapters,
+  type HarnessAdapter,
+  type SessionLog,
 } from "@chaste/ai-core";
 import type { ChatMessage } from "@chaste/ui-schema";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
@@ -143,6 +146,12 @@ export interface AppContext {
   /** ADR 0014 — scoped MCP/integration gateway over the command/query bus. */
   tools: ToolRegistry;
   mcp: McpGateway;
+  /** ADR 0014 — the append-only agent trajectory (audit spine). */
+  sessionLog: SessionLog;
+  /** ADR 0014 — external harness adapters (Codex, Claude Code, opencode,
+   * DeepSeek Harness). Runs are bound to a Chaste actor, mediated by `mcp`,
+   * and recorded on the trajectory; external harnesses never bypass the bus. */
+  externalHarnesses: HarnessAdapter[];
   tracer: AiTracer;
   workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
 }
@@ -402,6 +411,12 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     serverInfo: { name: "chaste-business-os", version: "1.0.0" },
   });
 
+  // ADR 0014 — external harness adapters over the same gateway + trajectory.
+  // Bounded delegation only: tool calls are mediated by `mcp`, every run is
+  // recorded on the shared session log, and provider/model usage is captured
+  // when the harness exposes it.
+  const externalHarnesses = createHarnessAdapters({ mcp, log: sessionLog, now: () => new Date() });
+
   return {
     config,
     db,
@@ -426,6 +441,8 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     proactive,
     tools,
     mcp,
+    sessionLog,
+    externalHarnesses,
     tracer,
     workflowBuilder,
   };

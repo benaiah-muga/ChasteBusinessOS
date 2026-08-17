@@ -435,6 +435,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     method-not-found, hidden-tool rejection).
   - Docs: ADR 0014 tranche-14 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **External harness adapters — the fifteenth harness tranche** (build item 16):
+  bounded delegation to Codex, Claude Code, opencode, and DeepSeek Harness.
+  External harnesses are optional accelerators, never direct business
+  authorities: every run is bound to a Chaste actor, its tool calls are
+  mediated by the MCP gateway (revalidated, reauthorized, audited), its traces
+  attach as artifacts, and the Chaste trajectory on `runId` remains the audit
+  spine. Provider/model usage is recorded when the harness exposes it;
+  otherwise the run is marked `usageVisibility: "unknown"`.
+  - **`@chaste/ai-core` `external-harness/`** — the `HarnessAdapter` contract
+    (`start`/`followup`/`cancel`/`collect`/`capabilities`), the four declarative
+    definitions (Codex, Claude Code, opencode, DeepSeek Harness), and
+    `createHarnessAdapter`: runs record `externalHarness/*` events
+    (session-start, turn, tool-call, tool-result, artifact, session-end) on a
+    fresh Chaste trajectory, run tool calls through the MCP gateway, refuse
+    tools outside the run's `allowedTools`, and collect a result whose
+    `traceRef` is the Chaste trajectory id. `harnessRunFromTrajectory` rebuilds
+    a handle from the session stream for stateless resume by `runId`.
+  - **`apps/api`** — `app.externalHarnesses` (the four adapters over the shared
+    gateway + `sessionLog`); `GET /api/v1/harness-adapters`;
+    `POST /api/v1/harness-adapters/:kind/runs` (start + optional first turn);
+    `POST /api/v1/harness-adapters/:kind/runs/:runId/turns` (resume);
+    `GET /api/v1/harness-adapters/:kind/runs/:runId` (collect).
+  - Tests: ai-core `external-harness/adapter.test.ts` (13); `apps/api/src/e2e-harness-adapters.test.ts`
+    over HTTP (capabilities list, run + mediated tool call on the trajectory,
+    usage visibility, resume-by-runId + collect, allowedTools gate).
+  - Docs: ADR 0014 tranche-15 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +

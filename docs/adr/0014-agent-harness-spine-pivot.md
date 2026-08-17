@@ -627,6 +627,61 @@ notification → no response, parse/invalid-params/method-not-found/ping);
 `apps/api/src/e2e-mcp.test.ts` over HTTP — initialize, scoped tools/list,
 tools/call through the bus with an explainable result, ping, method-not-found,
 and hidden-tool rejection.
+
+## Update (2026-08-17): Tranche 15 — External harness adapters (build item 16)
+
+The final harness-tranche delivers the `HarnessAdapter` contract from the
+research doc's "Harness Adapter Contract" plus the four supported external
+harnesses (Codex, Claude Code, opencode, DeepSeek Harness). External harnesses
+are optional accelerators, never direct business authorities:
+
+> External harnesses receive scoped MCP/business tools mediated by Chaste. Any
+> proposed command is revalidated, reauthorized, and audited in Chaste.
+> External traces attach as artifacts but the Chaste trajectory remains the
+> audit spine. Provider/model usage inside a harness is recorded when the
+> harness exposes it; otherwise the task is marked with incomplete downstream
+> usage visibility.
+
+- `packages/ai-core/src/external-harness/types.ts` — the contract
+  (`HarnessAdapter`: `start`/`followup`/`cancel`/`collect`/`capabilities`;
+  `HarnessRunHandle` is fully reconstructable from the trajectory), with zod
+  schemas at the boundary (`harnessStartRequestSchema`, `harnessMessageSchema`).
+- `packages/ai-core/src/external-harness/definitions.ts` — the four declarative
+  definitions with the doc's integration approaches and security notes.
+- `packages/ai-core/src/external-harness/adapter.ts` — `createHarnessAdapter`:
+  a run starts on a fresh Chaste trajectory session (`runId`) and records
+  `externalHarness/session-start` with its objective, `allowedTools`,
+  `forbiddenDataClasses`, budget, deadline, and audit correlation id. Every
+  `followup` records `externalHarness/turn` (with provider/model/usage and
+  `usageVisibility: recorded | unknown`), runs tool calls through the MCP
+  gateway (revalidated/reauthorized/audited; nothing bypasses the bus) as
+  `externalHarness/tool-call` + `externalHarness/tool-result`, attaches traces
+  as `externalHarness/artifact` events, and `externalHarness/session-end` on
+  completion/cancel. An adapter-level `allowedTools` gate refuses anything
+  outside the run's grant before the gateway is consulted. `collect` returns a
+  `HarnessRunResult` whose `traceRef` is the Chaste trajectory id.
+  `harnessRunFromTrajectory` rebuilds a handle from the session stream so a
+  stateless host resumes a run by `runId` alone.
+- Six new trajectory event types: `externalHarness/session-start`,
+  `externalHarness/turn`, `externalHarness/tool-call`,
+  `externalHarness/tool-result`, `externalHarness/artifact`,
+  `externalHarness/session-end`.
+- `apps/api` — `app.externalHarnesses` (the four adapters over the shared
+  gateway + `sessionLog`, now exposed on `AppContext`);
+  `GET /api/v1/harness-adapters` (capabilities console);
+  `POST /api/v1/harness-adapters/:kind/runs` (start + optional first turn);
+  `POST /api/v1/harness-adapters/:kind/runs/:runId/turns` (resume from the
+  trajectory); `GET /api/v1/harness-adapters/:kind/runs/:runId` (collect).
+  Runs are bound to the authenticated actor and org-scoped.
+
+Acceptance: `packages/ai-core/src/external-harness/adapter.test.ts`
+(session-start recording, provider/model → recorded vs usage-unknown,
+mediated tool call through the bus, allowedTools gate refuses + dispatches
+nothing, artifact attachment, endSession/cancel, collect traceRef,
+stateless reconstruction, capabilities, the four definitions);
+`apps/api/src/e2e-harness-adapters.test.ts` over HTTP — four adapters listed,
+run + mediated tool call on the trajectory, usage visibility, resume-by-runId
++ collect, and the allowedTools gate.
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

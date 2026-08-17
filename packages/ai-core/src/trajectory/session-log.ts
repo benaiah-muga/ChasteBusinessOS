@@ -41,6 +41,12 @@ export const AGENT_SESSION_EVENT_TYPES = [
   "session/forked",
   "session/resumed",
   "session/end",
+  "externalHarness/session-start",
+  "externalHarness/turn",
+  "externalHarness/tool-call",
+  "externalHarness/tool-result",
+  "externalHarness/artifact",
+  "externalHarness/session-end",
 ] as const;
 
 export type AgentSessionEventType = (typeof AGENT_SESSION_EVENT_TYPES)[number];
