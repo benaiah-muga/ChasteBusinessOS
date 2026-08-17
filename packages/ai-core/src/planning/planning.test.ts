@@ -246,7 +246,11 @@ describe("requestPlanApproval", () => {
     expect(await grants.list("org-1")).toHaveLength(1);
 
     const events = await trajectory.list("sess-1");
-    expect(events.map((e) => e.type)).toEqual(["plan/proposed", "approval/granted"]);
+    expect(events.map((e) => e.type)).toEqual([
+      "plan/proposed",
+      "approval/requested",
+      "approval/granted",
+    ]);
   });
 
   it("does not mint grants when the plan is rejected", async () => {
@@ -263,7 +267,11 @@ describe("requestPlanApproval", () => {
     expect(result).toEqual({ approved: false, via: "rejected", reason: "rejected" });
     expect(await grants.list("org-1")).toHaveLength(0);
     const events = await trajectory.list("sess-1");
-    expect(events.map((e) => e.type)).toEqual(["plan/proposed", "approval/rejected"]);
+    expect(events.map((e) => e.type)).toEqual([
+      "plan/proposed",
+      "approval/requested",
+      "approval/rejected",
+    ]);
   });
 
   it("fails closed when no decision surface is wired", async () => {

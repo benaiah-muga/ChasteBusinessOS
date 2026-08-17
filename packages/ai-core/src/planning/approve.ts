@@ -14,6 +14,16 @@ import type { AgentPlan } from "./types.js";
  * re-asking. Low-risk plans execute internally without surfacing. Everything
  * is recorded on the session trajectory (`plan/proposed`, `approval/requested`,
  * `approval/granted`, `approval/rejected`).
+ *
+ * Two entry points:
+ * - `requestPlanApproval` — blocking: awaits the human's resolution on the
+ *   inbox item, then mints grants on "approved". Used by the in-process
+ *   harness `runPlan`.
+ * - `proposePlanApproval` — non-blocking: surfaces the plan and returns the
+ *   inbox item id immediately (`via: "awaiting"`). The host's decision surface
+ *   later calls `grantPlanApprovals` (on approval) or records the rejection,
+ *   so a plan can be submitted, decided elsewhere, and then executed — the
+ *   durable resume flow the doc wants over HTTP.
  */
 
 export interface PlanApprovalContext {
@@ -35,7 +45,12 @@ export interface PlanApprovalContext {
 
 export type PlanApprovalResult =
   | { approved: true; via: "low_risk" | "human"; grantIds: string[] }
-  | { approved: false; via: "rejected" | "no_decision_surface"; reason: string };
+  | {
+      approved: false;
+      via: "rejected" | "no_decision_surface" | "awaiting";
+      itemId?: string;
+      reason: string;
+    };
 
 async function logEvent(
   ctx: PlanApprovalContext,
@@ -48,7 +63,51 @@ async function logEvent(
   );
 }
 
-export async function requestPlanApproval(
+/**
+ * Mint one durable grant per plan `requiredApproval` on the actor's behalf
+ * (recording `approval/granted` on the trajectory). Reused by the blocking
+ * flow and by the host's decision surface after a "approved" resolution.
+ */
+export async function grantPlanApprovals(
+  plan: AgentPlan,
+  ctx: PlanApprovalContext,
+): Promise<string[]> {
+  const grantIds: string[] = [];
+  if (!ctx.grants || !ctx.approverUserId) return grantIds;
+  const now = ctx.now?.() ?? new Date();
+  const ttlMs = ctx.grantTtlMs ?? 60 * 60 * 1000;
+  for (const need of plan.requiredApprovals) {
+    const grant = await ctx.grants.create({
+      organizationId: ctx.organizationId,
+      grantedBy: ctx.approverUserId,
+      grantedToUserId: ctx.userId,
+      scope: {
+        commandType: need.commandType,
+        resourceType: need.resourceType,
+        resourceId: need.resourceId,
+      },
+      expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
+      conditions: [need.reason, `plan:${plan.id}`],
+      policyBasis: "plan-approval",
+    });
+    grantIds.push(grant.id);
+    await logEvent(ctx, "approval/granted", {
+      approvalGrantId: grant.id,
+      planId: plan.id,
+      commandType: need.commandType,
+      resourceType: need.resourceType,
+      resourceId: need.resourceId,
+    });
+  }
+  return grantIds;
+}
+
+/**
+ * Surface a plan for approval without blocking. Low-risk plans approve
+ * internally (`via: "low_risk"`); medium/high-risk plans become a `plan` inbox
+ * item and return `via: "awaiting"` with the item id.
+ */
+export async function proposePlanApproval(
   plan: AgentPlan,
   ctx: PlanApprovalContext,
 ): Promise<PlanApprovalResult> {
@@ -90,41 +149,39 @@ export async function requestPlanApproval(
     body: renderPlan(plan),
     data: { planId: plan.id, stepCount: plan.steps.length },
   });
+  await logEvent(ctx, "approval/requested", {
+    planId: plan.id,
+    inboxItemId: item.id,
+  });
 
-  const resolution = await ctx.inbox.wait(item.id);
+  return {
+    approved: false,
+    via: "awaiting",
+    itemId: item.id,
+    reason: `Awaiting approval: ${plan.objective}`,
+  };
+}
+
+/**
+ * Blocking plan approval: surface the plan (low risk → auto-approve), wait for
+ * the human's resolution on the inbox item, and mint durable grants when the
+ * plan is approved.
+ */
+export async function requestPlanApproval(
+  plan: AgentPlan,
+  ctx: PlanApprovalContext,
+): Promise<PlanApprovalResult> {
+  const proposed = await proposePlanApproval(plan, ctx);
+  if (proposed.approved || proposed.via !== "awaiting" || !proposed.itemId || !ctx.inbox) {
+    return proposed;
+  }
+
+  const resolution = await ctx.inbox.wait(proposed.itemId);
   if (resolution !== "approved") {
     await logEvent(ctx, "approval/rejected", { planId: plan.id, reason: resolution });
     return { approved: false, via: "rejected", reason: resolution };
   }
 
-  const grantIds: string[] = [];
-  if (ctx.grants) {
-    const now = ctx.now?.() ?? new Date();
-    const ttlMs = ctx.grantTtlMs ?? 60 * 60 * 1000;
-    for (const need of plan.requiredApprovals) {
-      const grant = await ctx.grants.create({
-        organizationId: ctx.organizationId,
-        grantedBy: ctx.approverUserId,
-        grantedToUserId: ctx.userId,
-        scope: {
-          commandType: need.commandType,
-          resourceType: need.resourceType,
-          resourceId: need.resourceId,
-        },
-        expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
-        conditions: [need.reason, `plan:${plan.id}`],
-        policyBasis: "plan-approval",
-      });
-      grantIds.push(grant.id);
-      await logEvent(ctx, "approval/granted", {
-        approvalGrantId: grant.id,
-        planId: plan.id,
-        commandType: need.commandType,
-        resourceType: need.resourceType,
-        resourceId: need.resourceId,
-      });
-    }
-  }
-
+  const grantIds = await grantPlanApprovals(plan, ctx);
   return { approved: true, via: "human", grantIds };
 }

@@ -1,4 +1,5 @@
 import { FULL_AUTONOMOUS_WARNING, ChasteError, NotFoundError, type Actor } from "@chaste/kernel";
+import { agentPlanSchema } from "@chaste/ai-core";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyRequest } from "fastify";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -752,6 +753,58 @@ export async function buildServer(appCtx?: AppContext) {
       })
       .parse(req.body ?? {});
     return runChat(app, body, getAuth(req));
+  });
+
+  // ─── Native harness host (ADR 0014 tranche 8 — build item 9) ───────────
+  // The host runs the harness over the command/query bus and serves inbox
+  // plan/approval decisions through durable grants. AI and humans dispatch
+  // through the same contracts; approval-required plans surface an inbox item
+  // that any HTTP client (chat, console, mobile) can decide.
+
+  server.post("/api/v1/ai/plans", async (req) => {
+    const auth = getAuth(req);
+    const body = z
+      .object({
+        sessionId: z.string().optional(),
+        plan: agentPlanSchema,
+        reason: z.string().optional(),
+      })
+      .parse(req.body ?? {});
+    return app.harnessHost.submitPlan({
+      sessionId: body.sessionId ?? crypto.randomUUID(),
+      organizationId: auth.actor.organizationId,
+      actor: auth.actor,
+      plan: body.plan,
+      correlationId: req.id,
+      origin: "agent",
+      reason: body.reason,
+      approverUserId: auth.sessionUser.id,
+    });
+  });
+
+  server.get("/api/v1/inbox", async (req) => {
+    const auth = getAuth(req);
+    const items = await app.harnessHost.pendingItems({
+      organizationId: auth.actor.organizationId,
+      userId: auth.sessionUser.id,
+    });
+    return { items };
+  });
+
+  server.post("/api/v1/inbox/:id/decide", async (req) => {
+    const auth = getAuth(req);
+    const { id } = req.params as { id: string };
+    const body = z.object({ resolution: z.string().min(1) }).parse(req.body ?? {});
+    const result = await app.harnessHost.decide({
+      itemId: id,
+      organizationId: auth.actor.organizationId,
+      userId: auth.sessionUser.id,
+      resolution: body.resolution,
+    });
+    if (!result.resolved) {
+      throw new NotFoundError(`Inbox item ${id}`);
+    }
+    return result;
   });
 
   // ─── Workflow endpoints (ARCH-5 — persisted via the command/query bus) ──

@@ -307,6 +307,53 @@ derivation, dependency-enforced completion, work-queue ordering, blocked-task
 reasons, strict input rejection, permission denial, and bus reachability with
 envelope provenance.
 
+## Update (2026-08-17): Tranche 8 — host layer (harness over HTTP/chat)
+
+The eighth tranche completes build-sequence item 9's foundation: the
+host-facing layer that *runs the native harness* and serves inbox decisions,
+instead of the ad-hoc orchestrator. It is additive — `/api/v1/ai/chat` and the
+legacy orchestrator are untouched.
+
+- `tools/from-bus.ts` — the generic command/query → tool adapter
+  (`buildToolsFromBus`). Every registered command and query becomes a tool
+  whose `command` is the bus name, whose `exposeWhen` is the command's own
+  permission strings, and whose input/output are the same Zod contracts the bus
+  validates. No tool implements business logic; risk is never invented — with
+  no override the pipeline derives it from the wrapped command's metadata via
+  `classify`. This is what actually populates the tool registry in production.
+- `harness/host.ts` — `createHarnessHost` wires the harness to a runtime's
+  durable stores (grants, inbox, trajectory) and exposes:
+  - `runPlan` (blocking, waits on the inbox),
+  - `submitPlan` (non-blocking: low-risk plans execute immediately; gated plans
+    surface an inbox `plan` item and are stored for later execution),
+  - `decide` (a human's resolution: approving a stored plan mints its durable
+    grants via `grantPlanApprovals` and executes the steps; rejecting records
+    the rejection; other item kinds resolve generically),
+  - `pendingItems` / `pendingPlans` (what awaits human attention),
+  - `harnessFor(approverUserId)` (a per-approver harness).
+- `planning/approve.ts` — additive split: `proposePlanApproval` surfaces a plan
+  without blocking (`via: "awaiting"` + item id), `grantPlanApprovals` mints the
+  durable grants, and `requestPlanApproval` reuses both for the blocking flow.
+  The proposal now also records an `approval/requested` trajectory event.
+- `harness/tool-context.ts` + `harness/run-plan-steps.ts` — extracted from the
+  harness so the host executes plan steps under identical authority (the same
+  grants/policy/trajectory) after resolving an approval externally.
+- `apps/api` — new routes on `app.harnessHost` (built once in
+  `createAppContext` with the Postgres grant store, inbox, and trajectory):
+  `POST /api/v1/ai/plans`, `GET /api/v1/inbox`, `POST /api/v1/inbox/:id/decide`.
+
+Acceptance: `tools/from-bus.test.ts` (one tool per bus entry, bus-aligned
+contracts/permissions/risk, include filter); `harness/host.test.ts` (permission
+filtered tool surfaces, immediate low-risk execution, submit → decide →
+execute with durable grants, rejection without execution, caller-ownership
+checks on decide, blocking runPlan wait/resolve, generic item resolution);
+`apps/api/src/e2e-harness.test.ts` (inbox serving, low-risk plan execution,
+boundary rejection of malformed plans, and the full gated-plan submit → inbox →
+decide → execute round-trip over HTTP).
+
+Pending plans are held in a process-local map keyed by inbox item id; a durable
+plan store (build item 10) will replace it without changing the host contract.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

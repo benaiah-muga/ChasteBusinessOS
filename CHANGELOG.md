@@ -223,6 +223,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     with envelope provenance.
   - Docs: ADR 0014 tranche-7 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **Host layer (harness over HTTP/chat) — the eighth harness tranche**,
+  laying the build-item-9 foundation: the surface that *runs the native
+  harness* and serves inbox plan/approval decisions through durable grants.
+  Additive — `/api/v1/ai/chat` and the legacy orchestrator are untouched.
+  - **Bus→tool adapter (`@chaste/ai-core` `tools/from-bus.ts`)** — every
+    registered command and query becomes a tool wrapping the same bus contract
+    (`command` = bus name, `exposeWhen` = the command's permission strings,
+    input/output = the same Zod schemas). No tool implements business logic and
+    risk is never invented — it derives from the wrapped command's metadata.
+    This is what populates the tool registry in production.
+  - **`harness/host.ts` — `createHarnessHost`** — wires the harness to durable
+    stores and exposes `runPlan` (blocking), `submitPlan` (non-blocking:
+    low-risk plans execute immediately; gated plans surface an inbox `plan`
+    item and are stored), `decide` (a human's resolution: approval mints the
+    plan's durable grants and executes its steps; rejection records the
+    rejection; other item kinds resolve generically), `pendingItems` /
+    `pendingPlans`, and `harnessFor(approverUserId)`.
+  - **`planning/approve.ts` split** — `proposePlanApproval` surfaces a plan
+    without blocking (`via: "awaiting"`), `grantPlanApprovals` mints the durable
+    grants, and `requestPlanApproval` reuses both. Proposals now record an
+    `approval/requested` trajectory event.
+  - **Harness extraction** — `harness/tool-context.ts` +
+    `harness/run-plan-steps.ts` let the host execute plan steps under identical
+    authority (same grants/policy/trajectory) after an external approval.
+  - **API routes (`apps/api`)** — `POST /api/v1/ai/plans`, `GET /api/v1/inbox`,
+    `POST /api/v1/inbox/:id/decide`, backed by `app.harnessHost` (built once in
+    `createAppContext` from the Postgres grant store, inbox, and trajectory).
+  - Tests: `tools/from-bus.test.ts`, `harness/host.test.ts` (submit→decide→
+    execute with durable grants, rejection, ownership checks, blocking
+    wait/resolve), and `apps/api/src/e2e-harness.test.ts` (the full gated-plan
+    submit → inbox → decide → execute round-trip over HTTP).
+  - Docs: ADR 0014 tranche-8 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +

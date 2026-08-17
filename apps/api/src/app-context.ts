@@ -19,6 +19,8 @@ import {
   type CompactionSummarizer,
   type CompletionRequest,
   type MemoryStore,
+  createHarnessHost,
+  type HarnessHost,
 } from "@chaste/ai-core";
 import type { ChatMessage } from "@chaste/ui-schema";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
@@ -100,6 +102,9 @@ export interface AppContext {
   wakes: WakeStore;
   /** R7 — org/platform AI skill catalog (progressive disclosure). */
   skills: SkillStore;
+  /** ADR 0014 — the host layer: runs the native harness over the bus and
+   * serves inbox plan/approval decisions through durable grants. */
+  harnessHost: HarnessHost;
   /** R6 — compaction summarizer over the configured provider. */
   compaction?: { summarizer: CompactionSummarizer };
   explanations: AiExplanation[];
@@ -236,7 +241,19 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     sessionStore,
     memoryStore,
     memory,
+    approvalGrants,
+    sessionLog,
   } = runtime;
+
+  const harnessHost = createHarnessHost({
+    commands,
+    queries,
+    helpers: createCommandHelpers({ audit, outbox, db }),
+    grants: approvalGrants,
+    inbox,
+    trajectory: sessionLog,
+    now: () => new Date(),
+  });
 
   const provider = createAiProvider(config.ai);
 
@@ -311,6 +328,7 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     inbox,
     wakes,
     skills,
+    harnessHost,
     compaction,
     explanations: [],
     sessionUser,
