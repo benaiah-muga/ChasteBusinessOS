@@ -383,6 +383,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     tick, preferences).
   - Docs: ADR 0014 tranche-12 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **Evaluation harness, replay/fork, and scenario regression suite — the
+  thirteenth harness tranche** (build item 14): the append-only trajectory
+  becomes a verification surface. A session log replays into the exact
+  model-visible request every time (hard invariant), forks a stream up to a
+  boundary into a fresh identity with `session/forked` + `session/resumed`
+  markers, and regression scenarios drive a real harness with the replay and
+  fork guarantees attached to every verdict.
+  - **`@chaste/ai-core` `eval/`** — `replay.ts` (`replaySession`,
+    `assertReplayInvariant` fail-closed, `summarizeTrace`), `fork.ts`
+    (`forkSession` with boundary validation, copies events under a new
+    identity, appends `session/forked` + `session/resumed`), `scenario.ts`
+    (`Scenario`, `createScenarioContext`, `runScenario` auto-attaching replay
+    + fork, `runScenarioSuite` → `SuiteReport`).
+  - **`@chaste/ai-core` `eval/scenarios/`** — golden scenarios over a real
+    kernel bus/tools/grants/decision surface with the harness pointed at the
+    scenario's own session log: `harness/unauthorized-tool-refusal` (tool
+    hidden + direct call denied under `tool-exposeWhen`, nothing dispatched)
+    and `harness/external-step-approval` (external step surfaced, approved,
+    and executed only under the durable grant minted from that approval).
+  - Tests: ai-core `replay-fork.test.ts` (reconstruction, determinism, gap
+    reporting, fail-closed invariant, fork copy/markers/isolation/boundaries)
+    and `scenario.test.ts` (verdict carries replay + fork, failing checks fail
+    the scenario, golden suite passes, incomplete scenario fails);
+    `packages/runtime/src/replay-fork.e2e.test.ts` — a trajectory recorded on
+    one host replays identically on a second independent host, and a fork
+    survives a fresh store instance.
+  - Docs: ADR 0014 tranche-13 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +

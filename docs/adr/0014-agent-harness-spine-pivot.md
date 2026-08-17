@@ -546,6 +546,44 @@ the occurrence cursor advances, quiet hours suppress while recording, and the
 plan handoff carries `requiredApproval`; `apps/api/src/e2e-proactive.test.ts`
 exercises the HTTP surface (CRUD, pause/resume, dry-run suggestions, tick
 deliveries, preferences edit).
+
+## Update (2026-08-17): Tranche 13 — evaluation harness, replay/fork, scenario regression suite (build item 14)
+
+The thirteenth tranche implements build item 14 — the first-class
+eval/replay/fork surface the doc says is "core platform, not later QA". It
+turns the append-only trajectory from an audit artifact into a verification
+surface:
+
+- **Replay** (`packages/ai-core/src/eval/replay.ts`) — `replaySession` reloads
+  a session's stream and rebuilds the model-visible request through the
+  deterministic reconstruction invariant; `assertReplayInvariant` fails closed
+  on any gap. Same log, same request, every time — the "replay tests" the doc
+  lists (same session log reconstructs same model-visible request).
+- **Fork** (`packages/ai-core/src/eval/fork.ts`) — `forkSession` copies a
+  stream up to a 1-based boundary into a fresh session id and appends
+  `session/forked` + `session/resumed` markers, so a trajectory can be forked
+  *before* a decision and re-run against another model/policy version.
+- **Evaluation harness** (`packages/ai-core/src/eval/scenario.ts`) — a
+  `Scenario` is a self-contained regression driver over a real harness and an
+  isolated session; `runScenario` attaches the replay invariant and a fork to
+  every verdict, and `runScenarioSuite` produces a `SuiteReport`. A suite run
+  is simultaneously a policy-regression run and a replay/fork guarantee.
+- **Golden scenarios** (`packages/ai-core/src/eval/scenarios/`) — a real
+  kernel bus + tool registry + durable grants + decision surface, with the
+  harness's trajectory pointed at the scenario's own session log:
+  `harness/unauthorized-tool-refusal` (a tool hidden from the surface and a
+  direct call denied under `tool-exposeWhen`, nothing dispatched) and
+  `harness/external-step-approval` (an external step surfaced, approved, run
+  only under the durable grant minted from that approval).
+
+Acceptance: `replay-fork.test.ts` (reconstruction, determinism, gap reporting,
+fail-closed invariant, fork copying + markers + identical replay + isolation +
+boundary rejection); `scenario.test.ts` (scenario verdict carries replay +
+fork, failing checks fail the scenario, the golden suite passes and a
+deliberately-incomplete scenario fails); `packages/runtime/src/replay-fork.e2e.test.ts`
+against local Postgres — a trajectory recorded through one runtime replays
+identically through a second independent runtime, and a fork survives a fresh
+store instance.
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

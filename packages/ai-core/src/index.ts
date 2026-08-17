@@ -19,3 +19,4 @@ export * from "./planning/index.js";
 export * from "./harness/index.js";
 export * from "./model-router.js";
 export * from "./proactive/index.js";
+export * from "./eval/index.js";
