@@ -886,6 +886,41 @@ export async function buildServer(appCtx?: AppContext) {
     return { deliveries, at: at.toISOString() };
   });
 
+  // ---- ADR 0014 MCP/integration plane ------------------------------------
+
+  const mcpMessageSchema = z
+    .object({
+      jsonrpc: z.literal("2.0"),
+      id: z.union([z.number(), z.string(), z.null()]).optional(),
+      method: z.string(),
+      params: z.unknown().optional(),
+    })
+    .strict();
+
+  /** Streamable-HTTP-lite MCP endpoint. One JSON-RPC message per request; the
+   * client keeps a session id in `x-chaste-session` for trajectory continuity
+   * (defaults to a fresh session). Tools are scoped to the authenticated
+   * actor; every call is revalidated, reauthorized, and audited on the
+   * session log through the same pipeline the native harness uses. */
+  server.post("/api/v1/mcp", async (req) => {
+    const auth = getAuth(req);
+    const message = mcpMessageSchema.parse(req.body ?? {});
+    const header = req.headers["x-chaste-session"];
+    const sessionId =
+      typeof header === "string" && z.string().uuid().safeParse(header).success
+        ? header
+        : crypto.randomUUID();
+
+    const session = app.mcp.createSession({
+      sessionId,
+      organizationId: auth.actor.organizationId,
+      actor: auth.actor,
+    });
+    const response = await session.handleMessage(JSON.stringify(message));
+    if (response === null) return { ok: true };
+    return JSON.parse(response) as unknown;
+  });
+
   server.get("/api/v1/inbox", async (req) => {
     const auth = getAuth(req);
     const items = await app.harnessHost.pendingItems({

@@ -4,7 +4,7 @@ export * from "./observability.js";
 export * from "./orchestrator.js";
 export * from "./providers.js";
 export * from "./workflows/index.js";
-export * from "./mcp/server.js";
+export * from "./mcp/index.js";
 export * from "./evals/index.js";
 export * from "./suggestions.js";
 export * from "./guardrails/index.js";

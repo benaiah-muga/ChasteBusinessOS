@@ -411,6 +411,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     survives a fresh store instance.
   - Docs: ADR 0014 tranche-13 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **MCP/integration plane — the fourteenth harness tranche** (build item 15):
+  the `mcp-gateway` exposes Chaste capabilities to external harnesses (Codex,
+  Claude Code, opencode, DeepSeek Harness, MCP clients) as scoped tools
+  mediated by Chaste. External harnesses never touch the database: every
+  `tools/call` is revalidated, reauthorized, and audited on the shared session
+  log through the same pipeline the native harness uses.
+  - **`@chaste/ai-core` `mcp/`** — `protocol.ts` (dependency-free JSON-RPC 2.0:
+    `initialize`/`tools/list`/`tools/call`/`ping`, MCP error codes,
+    `McpError`), `zod-json-schema.ts` (deterministic Zod → JSON Schema for
+    `inputSchema`), `gateway.ts` (`createMcpGateway` + `createSession`:
+    actor-scoped tools/list, tools/call through the full execution pipeline,
+    explainable `isError` payloads, trajectory recording),
+    `stdio.ts` (newline-delimited JSON-RPC stdio transport),
+    `server.ts` (`createChasteMCPServer` from the command/query bus).
+  - **`apps/api`** — `app.tools` + `app.mcp`; `POST /api/v1/mcp` with a
+    per-request session (uuid `x-chaste-session` header for continuity) and
+    tools scoped to the authenticated actor.
+  - Tests: ai-core `mcp/gateway.test.ts` (initialize, scoping, read-tool call,
+    hidden-tool rejection, approval-required vs grant-covered external calls,
+    validation errors, trajectory recording, protocol edges); `apps/api/src/e2e-mcp.test.ts`
+    over HTTP (initialize, scoped tools/list, bus-mediated tools/call, ping,
+    method-not-found, hidden-tool rejection).
+  - Docs: ADR 0014 tranche-14 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +

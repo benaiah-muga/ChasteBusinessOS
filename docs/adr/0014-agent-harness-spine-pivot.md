@@ -584,6 +584,49 @@ deliberately-incomplete scenario fails); `packages/runtime/src/replay-fork.e2e.t
 against local Postgres — a trajectory recorded through one runtime replays
 identically through a second independent runtime, and a fork survives a fresh
 store instance.
+
+## Update (2026-08-17): Tranche 14 — MCP/integration plane (build item 15)
+
+The fourteenth tranche implements the `mcp-gateway` from the research doc's
+integration layout, turning the existing tool stub into a real, dependency-free
+MCP server. The doc's security rules are the design:
+
+> External harnesses receive scoped MCP/business tools mediated by Chaste.
+> Any proposed command is revalidated, reauthorized, and audited in Chaste.
+> External traces attach as artifacts but the Chaste trajectory remains the
+> audit spine.
+
+- `packages/ai-core/src/mcp/protocol.ts` — JSON-RPC 2.0 over the wire with zod
+  validation at the boundary: `initialize`, `tools/list`, `tools/call`, `ping`,
+  the MCP error codes (including `-32002` tool-not-found and `-32003`
+  execution error), and `McpError`.
+- `packages/ai-core/src/mcp/zod-json-schema.ts` — deterministic Zod → JSON
+  Schema (draft-07 subset) projection for `inputSchema`; presentation only —
+  the pipeline still validates arguments against the real Zod contract.
+- `packages/ai-core/src/mcp/gateway.ts` — `createMcpGateway` + `createSession`
+  (bind an actor/org/session once). `tools/list` returns only the tools the
+  actor may *see* (`exposeWhen`), so a hidden tool is indistinguishable from a
+  nonexistent one. `tools/call` runs through the exact execution pipeline the
+  native harness uses — permission-filtered bus dispatch, durable-grant
+  auto-allow, inbox-backed approval for risky actions, trajectory events, and
+  audit. Denied/validation/approval-required/errored calls return an
+  explainable `isError` text payload, never a silent success.
+- `packages/ai-core/src/mcp/stdio.ts` — the MCP stdio transport
+  (newline-delimited JSON-RPC): `handleMcpLine` + `createStdioMcpServer`.
+- `apps/api` — `app.tools` (bus → scoped tools via `buildToolsFromBus`) and
+  `app.mcp`; `POST /api/v1/mcp` binds a per-request session (uuid header for
+  trajectory continuity), scopes tools to the authenticated actor, and executes
+  calls through the shared pipeline on `runtime.sessionLog`.
+
+Acceptance: `packages/ai-core/src/mcp/gateway.test.ts` (initialize,
+actor-scoped tools/list with JSON-Schema input contracts, read-tool call,
+hidden tool → tool-not-found, external call without a grant → explainable
+approval-required with nothing dispatched, external call under a durable grant
+→ executes under the grant id, validation-error results, trajectory recording,
+notification → no response, parse/invalid-params/method-not-found/ping);
+`apps/api/src/e2e-mcp.test.ts` over HTTP — initialize, scoped tools/list,
+tools/call through the bus with an explainable result, ping, method-not-found,
+and hidden-tool rejection.
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

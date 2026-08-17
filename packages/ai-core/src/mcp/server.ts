@@ -1,34 +1,35 @@
-import type { CommandRegistry, QueryRegistry } from "@chaste/kernel";
+import type {
+  ApprovalGrantStore,
+  CommandHelpers,
+  CommandRegistry,
+  InboxStore,
+  QueryRegistry,
+} from "@chaste/kernel";
+import type { SessionLog } from "../trajectory/index.js";
+import { buildToolsFromBus } from "../tools/index.js";
+import { createMcpGateway } from "./gateway.js";
+import type { McpGateway } from "./gateway.js";
 
-export interface McpToolDefinition {
-  name: string;
-  description: string;
-  inputSchema?: Record<string, unknown>;
-}
-
+/**
+ * Convenience builder: expose the whole command/query bus as scoped MCP tools
+ * behind the gateway. Every bus entry becomes a tool whose `exposeWhen` is the
+ * command/query's own permission strings, so `tools/list` is automatically
+ * scoped to the bound actor and every call is revalidated, reauthorized, and
+ * audited through the same pipeline the native harness uses.
+ */
 export function createChasteMCPServer(
   commandRegistry: CommandRegistry,
   queryRegistry: QueryRegistry,
-) {
-  const commands = commandRegistry.list();
-  const queries = queryRegistry.list();
-
-  const toolDefinitions: McpToolDefinition[] = [
-    ...commands.map((cmd) => ({
-      name: cmd.name,
-      description: cmd.description ?? cmd.name,
-    })),
-    ...queries.map((q) => ({
-      name: q.name,
-      description: q.description ?? q.name,
-    })),
-  ];
-
-  return {
-    name: "chaste-business-os",
-    version: "1.0.0",
-    description:
-      "ChasteBusinessOS MCP Server — exposes business operations as MCP tools for AI agents and external clients.",
-    tools: toolDefinitions,
-  };
+  opts: {
+    helpers: CommandHelpers;
+    grants?: ApprovalGrantStore;
+    inbox?: InboxStore;
+    approverUserId?: string;
+    trajectory?: SessionLog;
+    now?: () => Date;
+    serverInfo?: { name: string; version: string };
+  },
+): McpGateway {
+  const registry = buildToolsFromBus({ commands: commandRegistry, queries: queryRegistry });
+  return createMcpGateway({ registry, commands: commandRegistry, queries: queryRegistry, ...opts });
 }

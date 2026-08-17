@@ -30,6 +30,10 @@ import {
   type WatchRuleStore,
   type ProactivePreferencesStore,
   type ProactiveDeliveryStore,
+  buildToolsFromBus,
+  type ToolRegistry,
+  createMcpGateway,
+  type McpGateway,
 } from "@chaste/ai-core";
 import type { ChatMessage } from "@chaste/ui-schema";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
@@ -136,6 +140,9 @@ export interface AppContext {
   usage: UsageLedger;
   /** ADR 0014 — proactive coordinator (watch rules, prefs, delivery ledger). */
   proactive: ProactiveSurface;
+  /** ADR 0014 — scoped MCP/integration gateway over the command/query bus. */
+  tools: ToolRegistry;
+  mcp: McpGateway;
   tracer: AiTracer;
   workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
 }
@@ -379,6 +386,22 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
         }
       : undefined;
 
+  // ADR 0014 — MCP/integration plane: every bus command/query becomes a
+  // scoped tool whose exposeWhen is the bus's own permission strings. External
+  // harnesses call tools mediated by Chaste — revalidated, reauthorized, and
+  // audited on the shared trajectory; nothing ever bypasses the bus.
+  const tools = buildToolsFromBus({ commands, queries });
+  const mcp = createMcpGateway({
+    registry: tools,
+    commands,
+    queries,
+    helpers: createCommandHelpers({ audit, outbox, db }),
+    grants: approvalGrants,
+    trajectory: sessionLog,
+    now: () => new Date(),
+    serverInfo: { name: "chaste-business-os", version: "1.0.0" },
+  });
+
   return {
     config,
     db,
@@ -401,6 +424,8 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     modelRouter,
     usage: runtime.usage,
     proactive,
+    tools,
+    mcp,
     tracer,
     workflowBuilder,
   };
