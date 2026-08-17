@@ -56,6 +56,14 @@ export interface WorkflowExecuteOptions {
   approvedStepIds?: string[];
   /** Max retries for steps with onError: "retry". */
   maxRetries?: number;
+  /** Steps already completed in a prior run; skipped without re-executing. */
+  skipStepIds?: string[];
+  /** Prior run context (step outputs) to resolve inputs on resume. */
+  baseContext?: Record<string, unknown>;
+  /** External run id to persist across resume calls (default: fresh uuid). */
+  runId?: string;
+  /** Per-step checkpoint called after each step result (durable instances). */
+  checkpoint?: (result: StepResult) => Promise<void>;
 }
 
 /**
@@ -89,19 +97,29 @@ export async function executeDynamicWorkflow(
   ctx: WorkflowExecutionContext,
   options: WorkflowExecuteOptions = {},
 ): Promise<WorkflowRunResult> {
-  const runId = crypto.randomUUID();
+  const runId = options.runId ?? crypto.randomUUID();
   const stepResults: StepResult[] = [];
   /** Run input stays under `input`; step outputs under their step ids — no flat merge pollution. */
   const context: Record<string, unknown> = {
     input: { ...input },
     ...input,
+    ...(options.baseContext ?? {}),
   };
   const approved = new Set(options.approvedStepIds ?? []);
+  const skip = new Set(options.skipStepIds ?? []);
   const maxRetries = options.maxRetries ?? 2;
 
   for (const stepDef of def.steps) {
+    if (skip.has(stepDef.id)) {
+      const resumed: StepResult = { stepId: stepDef.id, status: "completed" };
+      stepResults.push(resumed);
+      if (options.checkpoint) await options.checkpoint(resumed);
+      continue;
+    }
+
     const result = await executeStep(stepDef, context, ctx, runId, approved, maxRetries);
     stepResults.push(result);
+    if (options.checkpoint) await options.checkpoint(result);
 
     if (result.status === "failed" && stepDef.onError !== "continue") {
       return {

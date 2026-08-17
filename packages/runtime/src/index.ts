@@ -29,6 +29,7 @@ import {
   type ApprovalGrantStore,
   type ActivityStore,
   type TaskStore,
+  type WorkflowInstanceStore,
 } from "@chaste/kernel";
 import type { MemoryStore, SkillStore, SessionLog, WakeStore } from "@chaste/ai-core";
 import { createAccountingModule } from "@chaste/module-accounting";
@@ -43,6 +44,7 @@ import { createPlatformModule } from "@chaste/module-platform";
 import { createPurchasingModule } from "@chaste/module-purchasing";
 import { createSchedulingModule } from "@chaste/module-scheduling";
 import { createWorkflowTasksModule } from "@chaste/module-workflow-tasks";
+import { createWorkflowInstancesModule } from "@chaste/module-workflow-instances";
 import { PostgresInboxStore } from "./postgres-inbox-store.js";
 import { PostgresWakeStore } from "./postgres-wake-store.js";
 import { PostgresSkillStore } from "./postgres-skill-store.js";
@@ -52,6 +54,7 @@ import { PostgresContextBundleStore } from "./postgres-context-bundle-store.js";
 import { PostgresApprovalGrantStore } from "./postgres-approval-grant-store.js";
 import { PostgresActivityStore } from "./postgres-activity-store.js";
 import { PostgresTaskStore } from "./postgres-task-store.js";
+import { PostgresWorkflowInstanceStore } from "./postgres-workflow-instance-store.js";
 
 export {
   PostgresInboxStore,
@@ -63,6 +66,7 @@ export {
   PostgresApprovalGrantStore,
   PostgresActivityStore,
   PostgresTaskStore,
+  PostgresWorkflowInstanceStore,
 };
 
 /**
@@ -90,6 +94,8 @@ export interface Runtime {
   activities: ActivityStore;
   /** ADR 0014 — durable workflow tasks over `workflow_tasks`. */
   tasks: TaskStore;
+  /** ADR 0014 — durable workflow instances over `workflow_runs`. */
+  workflowInstances: WorkflowInstanceStore;
   audit: PostgresAuditWriter;
   outbox: PostgresOutboxWriter;
   sessionStore: DbSessionStore;
@@ -113,6 +119,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   const approvalGrants = new PostgresApprovalGrantStore(db);
   const activities = new PostgresActivityStore(db);
   const tasks = new PostgresTaskStore(db);
+  const workflowInstances = new PostgresWorkflowInstanceStore(db);
 
   // Domain modules first (dependency order); platform depends on the registry
   // for `core.modules.list` and its permission list.
@@ -135,6 +142,11 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
     createWorkflowTasksModule({
       activities,
       tasks,
+    }),
+  );
+  await modules.register(
+    createWorkflowInstancesModule({
+      instances: workflowInstances,
     }),
   );
   await modules.register(
@@ -163,6 +175,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
     approvalGrants,
     activities,
     tasks,
+    workflowInstances,
   };
 }
 

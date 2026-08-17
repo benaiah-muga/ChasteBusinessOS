@@ -354,6 +354,54 @@ decide → execute round-trip over HTTP).
 Pending plans are held in a process-local map keyed by inbox item id; a durable
 plan store (build item 10) will replace it without changing the host contract.
 
+## Update (2026-08-17): Tranche 9 — durable workflow instances (build item 10)
+
+The ninth tranche delivers build item 10's durable workflow-instance store and
+its bus surface, so workflow runs are resumable across crashes and hosts. It is
+additive: the engine's existing one-shot resume (`approvedStepIds`) and the
+direct `executeWorkflowRun` path are untouched.
+
+- `packages/kernel/src/workflow-instances.ts` — the durable state model and a
+  store interface: `WorkflowInstance` (status, context, per-step results, error,
+  timestamps) mutated only through pure helpers (`newWorkflowInstance`,
+  `applyStepResult`, `finalizeInstance`, `completedStepIds`), so the state
+  machine is testable without a store. `WorkflowInstanceStore` is implemented
+  in-memory in the kernel and over `workflow_runs` in the runtime.
+- `packages/ai-core/src/workflows/engine.ts` — additive `WorkflowExecuteOptions`:
+  `skipStepIds` (steps completed in a prior run are skipped without re-executing,
+  and their outputs come from `baseContext`), `baseContext` (the stored instance
+  context merged under the run input), `runId` (an external id that persists
+  across resume calls), and `checkpoint` (a per-step hook the instance module
+  uses to persist each step result).
+- `modules/workflow-instances` — the `workflow.instance.*` command/query surface
+  over a `WorkflowInstanceStore` (permissions `workflow.instance.read`/`.write`):
+  - `workflow.instance.start` — loads the definition through `core.workflow.get`,
+    creates a running instance, and runs the engine with `runId = instance.id`;
+  - `workflow.instance.advance` — resumes from the checkpoint with
+    `skipStepIds = completedStepIds(instance)` and the stored context, passing
+    newly approved gate ids;
+  - `workflow.instance.cancel` — terminal cancel for running/pending instances;
+  - `workflow.instance.get` / `workflow.instance.list` — org-scoped reads.
+  All orchestration flows through the command bus, so AI/manual parity, audit,
+  and permissions hold by construction. No new HTTP routes: the generic command
+  route already reaches the module.
+- `packages/db` — `workflow_runs` gains `created_by_user_id` and `updated_at`
+  (ADD COLUMN IF NOT EXISTS migration; the table existed but was never written).
+- `packages/runtime` — `PostgresWorkflowInstanceStore` over `workflow_runs`
+  (upsert per checkpoint), wired as `runtime.workflowInstances` and registered
+  in `createRuntime`.
+
+Acceptance: kernel `workflow-instances.test.ts` (state machine + in-memory
+store, incl. defensive-copy on save); engine tests for checkpoint/`runId` and
+resume via `skipStepIds` + `baseContext` (a prior-run output resolves a later
+step's input without re-running the command); module contract tests
+(`workflow-instances.test.ts`: run-to-completion, approval-gate park + resume,
+terminated-instance rejection, cancel, org scoping, strict validation);
+`packages/runtime/src/workflow-instances.e2e.test.ts` against local Postgres —
+a definition persisted via runtime A starts and checkpoints into `workflow_runs`,
+the worker host observes it, and a gated instance parks at `pending_approval`
+and completes after a cross-host `advance` without re-running steps.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

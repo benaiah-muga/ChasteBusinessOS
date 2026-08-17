@@ -14,3 +14,4 @@ export * from "./outbox.js";
 export * from "./query.js";
 export * from "./redact.js";
 export * from "./risk.js";
+export * from "./workflow-instances.js";

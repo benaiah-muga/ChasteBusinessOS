@@ -455,6 +455,25 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
+  modules/workflow-instances:
+    dependencies:
+      '@chaste/ai-core':
+        specifier: workspace:*
+        version: link:../../packages/ai-core
+      '@chaste/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
   modules/workflow-tasks:
     dependencies:
       '@chaste/kernel':
@@ -613,6 +632,9 @@ importers:
       '@chaste/module-scheduling':
         specifier: workspace:*
         version: link:../../modules/scheduling
+      '@chaste/module-workflow-instances':
+        specifier: workspace:*
+        version: link:../../modules/workflow-instances
       '@chaste/module-workflow-tasks':
         specifier: workspace:*
         version: link:../../modules/workflow-tasks

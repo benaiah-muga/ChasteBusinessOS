@@ -949,6 +949,10 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
 );
 CREATE INDEX IF NOT EXISTS wf_run_org_idx ON workflow_runs(organization_id);
 CREATE INDEX IF NOT EXISTS wf_run_wf_idx ON workflow_runs(workflow_id);
+-- ADR 0014 tranche 9 -- durable workflow instances checkpoint per step; these
+-- columns track the run's owner and last checkpoint time for resume/resumption.
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS created_by_user_id uuid;
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
 -- ADR 0014 tranche 3 -- durable approval grants (research doc §Human
 -- Collaboration). Mirrors the Drizzle schema above; the grant is a durable

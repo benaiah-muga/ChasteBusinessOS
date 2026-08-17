@@ -256,6 +256,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     submit → inbox → decide → execute round-trip over HTTP).
   - Docs: ADR 0014 tranche-8 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **Durable workflow instances (build item 10) — the ninth harness tranche**,
+  the durable, resumable run state for workflows (`@chaste/kernel`
+  `workflow-instances.ts`), executed over the bus through
+  `modules/workflow-instances` (`@chaste/module-workflow-instances`).
+  Additive — the engine's one-shot resume and the legacy direct-run path are
+  untouched.
+  - **Kernel state model + store interface** — `WorkflowInstance` (status,
+    context, per-step results, error, timestamps) mutated only through pure
+    helpers (`newWorkflowInstance`, `applyStepResult`, `finalizeInstance`,
+    `completedStepIds`), with an `InMemoryWorkflowInstanceStore` and a
+    `WorkflowInstanceStore` interface.
+  - **Additive engine options (`@chaste/ai-core` `workflows/engine.ts`)** —
+    `skipStepIds` (prior-run steps skipped without re-executing), `baseContext`
+    (stored context resolves later steps' inputs), `runId` (persists across
+    resume calls), `checkpoint` (per-step persistence hook).
+  - **`workflow.instance.*` bus surface** — `start` (runs the definition from
+    `core.workflow.get` with `runId = instance.id`), `advance` (resumes from the
+    checkpoint, accepting newly approved gate ids), `cancel`, and org-scoped
+    `get`/`list`. Permissions `workflow.instance.read` / `workflow.instance.write`
+    declared in the manifest; everything flows through the command/query bus so
+    AI/manual parity, audit, and permissions hold by construction.
+  - **`@chaste/db` + `@chaste/runtime`** — `workflow_runs` gains
+    `created_by_user_id` + `updated_at` (ADD COLUMN IF NOT EXISTS migration);
+    `PostgresWorkflowInstanceStore` upserts each checkpoint; wired as
+    `runtime.workflowInstances` and registered in `createRuntime`.
+  - Tests: kernel `workflow-instances.test.ts`, engine resume/checkpoint tests,
+    module contract tests (run-to-completion, approval-gate park + resume,
+    terminated rejection, cancel, org scoping, strict validation), and
+    `packages/runtime/src/workflow-instances.e2e.test.ts` (definition started
+    via one host checkpoints into `workflow_runs`; a second host resumes a
+    gated instance to completion without re-running steps).
+  - Docs: ADR 0014 tranche-9 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +

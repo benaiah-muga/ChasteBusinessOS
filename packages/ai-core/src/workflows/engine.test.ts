@@ -335,6 +335,96 @@ describe("executeDynamicWorkflow", () => {
     expect(result.stepResults[0]?.status).toBe("failed");
     expect(result.stepResults[1]?.status).toBe("completed");
   });
+
+  it("checkpoints every step and honors an external run id", async () => {
+    const registry = registerCommands();
+    const def: WorkflowDefinition = {
+      id: "wf-checkpoint",
+      name: "Checkpoint",
+      description: "checkpointed",
+      trigger: "manual",
+      createdBy: "user",
+      createdAt: new Date().toISOString(),
+      steps: [
+        { id: "step1", type: "command", command: "crm.customer.create", input: { name: "Acme" } },
+        { id: "step2", type: "command", command: "acc.invoice.create", input: { number: "INV-1", total: 10 } },
+      ],
+    };
+    const seen: Array<{ stepId: string; status: string }> = [];
+    const result = await executeDynamicWorkflow(
+      def,
+      {},
+      { registry, requestCtx: makeCtx(), helpers: helpers() },
+      {
+        runId: "run-checkpoint",
+        checkpoint: async (s) => {
+          seen.push({ stepId: s.stepId, status: s.status });
+        },
+      },
+    );
+    expect(result.runId).toBe("run-checkpoint");
+    expect(seen.map((s) => s.stepId)).toEqual(["step1", "step2"]);
+    expect(seen.every((s) => s.status === "completed")).toBe(true);
+  });
+
+  it("resumes with skipStepIds + baseContext without re-executing steps", async () => {
+    const registry = registerCommands();
+    let customerCreates = 0;
+    const counting = createCommandRegistry();
+    counting.register(
+      defineCommand({
+        name: "crm.customer.create",
+        permissions: ["crm.customer.create"],
+        input: z.object({ name: z.string().min(1) }),
+        output: z.object({ id: z.string(), name: z.string() }),
+        handler: async (input) => {
+          customerCreates += 1;
+          return { id: "cust-1", name: input.name };
+        },
+      }),
+    );
+    counting.register(
+      defineCommand({
+        name: "acc.invoice.create",
+        permissions: ["acc.invoice.create"],
+        input: z.object({ number: z.string(), total: z.number(), customerId: z.string().optional() }),
+        output: z.object({ id: z.string(), customerId: z.string().optional() }),
+        handler: async (input) => ({ id: "inv-1", customerId: input.customerId }),
+      }),
+    );
+    const def: WorkflowDefinition = {
+      id: "wf-resume",
+      name: "Resume",
+      description: "resumable",
+      trigger: "manual",
+      createdBy: "user",
+      createdAt: new Date().toISOString(),
+      steps: [
+        { id: "step1", type: "command", command: "crm.customer.create", input: { name: "Acme" } },
+        {
+          id: "step2",
+          type: "command",
+          command: "acc.invoice.create",
+          input: { number: "INV-1", total: 10, customerId: "${step1.id}" },
+        },
+      ],
+    };
+
+    // A prior run completed step1; step2 depends on its output.
+    const resumed = await executeDynamicWorkflow(
+      def,
+      {},
+      { registry: counting, requestCtx: makeCtx(), helpers: helpers() },
+      {
+        skipStepIds: ["step1"],
+        baseContext: { step1: { id: "cust-1", name: "Acme" } },
+      },
+    );
+    expect(customerCreates).toBe(0);
+    expect(resumed.success).toBe(true);
+    expect(resumed.stepResults[0]?.status).toBe("completed");
+    expect(resumed.stepResults[1]?.output).toMatchObject({ id: "inv-1", customerId: "cust-1" });
+  });
 });
 
 describe("evaluateCondition (F2 — safe predicate DSL, no new Function)", () => {
