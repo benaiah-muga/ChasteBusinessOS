@@ -289,6 +289,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     gated instance to completion without re-running steps).
   - Docs: ADR 0014 tranche-9 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **Durable pending plans — the tenth harness tranche**, replacing the host
+  layer's last process-local state: a gated plan now persists to the shared
+  `harness_plans` table (keyed by inbox item id), so a plan submitted on the
+  API host is decidable on the worker host. Additive — the host falls back to
+  the in-memory map when no `planStore` is supplied.
+  - **`@chaste/ai-core` `harness/plan-store.ts`** — `PlanStore` interface
+    (`save`, `getByItemId`, `getByPlanId`, `listByOrg`, `listAll`, `remove`)
+    with `InMemoryPlanStore`; the stored record serializes the plan's
+    `Actor.permissions` Set to an array and rebuilds it on load, so a replayed
+    decision re-executes under the exact same authority.
+  - **`harness/host.ts`** — `createHarnessHost` accepts `planStore?`;
+    `submitPlan` persists the entry, `decide` loads it durably, `pendingPlans`
+    lists from the store (now async). `PendingPlanEntry` moved to `plan-store.ts`.
+  - **`@chaste/db` + `@chaste/runtime`** — new `harness_plans` table with
+    `pending`/`resolved` tombstone status; `PostgresPlanStore` wired as
+    `runtime.planStore` and passed into `createHarnessHost` by `apps/api`.
+  - Tests: `plan-store.test.ts` (serialization round-trip preserving
+    permissions/evidence/policy context, CRUD, defensive copies), `host.test.ts`
+    durable path (submit through one host, decide through another sharing the
+    store), and `packages/runtime/src/plan-store.e2e.test.ts` — submit on the
+    API host → `harness_plans` row → worker host decides → step executes under
+    the replayed actor authority (grant minted, activity created by the agent
+    user) → entry tombstoned; rejection tombstones without executing.
+  - Docs: ADR 0014 tranche-10 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +

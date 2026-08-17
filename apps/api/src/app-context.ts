@@ -252,6 +252,7 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     grants: approvalGrants,
     inbox,
     trajectory: sessionLog,
+    planStore: runtime.planStore,
     now: () => new Date(),
   });
 

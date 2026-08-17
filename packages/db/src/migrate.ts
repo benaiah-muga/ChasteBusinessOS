@@ -954,6 +954,24 @@ CREATE INDEX IF NOT EXISTS wf_run_wf_idx ON workflow_runs(workflow_id);
 ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS created_by_user_id uuid;
 ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
+-- ADR 0014 tranche 10 -- durable pending plans (research doc §Planning). A gated
+-- plan awaiting a human decision is stored keyed by its inbox item id so a plan
+-- submitted on one host is decidable on any other; resolved plans stay as
+-- tombstones for audit. Mirrors the Drizzle schema above.
+CREATE TABLE IF NOT EXISTS harness_plans (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id uuid NOT NULL UNIQUE,
+  organization_id uuid NOT NULL,
+  plan_id text NOT NULL,
+  record jsonb NOT NULL,
+  approver_user_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS harness_plan_org_idx ON harness_plans(organization_id);
+CREATE INDEX IF NOT EXISTS harness_plan_plan_idx ON harness_plans(plan_id);
+
 -- ADR 0014 tranche 3 -- durable approval grants (research doc §Human
 -- Collaboration). Mirrors the Drizzle schema above; the grant is a durable
 -- fact referenced by envelope approval_grant_id, never a chat message.

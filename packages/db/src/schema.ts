@@ -1073,6 +1073,31 @@ export const workflowRuns = pgTable(
   (t) => [index("wf_run_org_idx").on(t.organizationId), index("wf_run_wf_idx").on(t.workflowId)],
 );
 
+/**
+ * Durable pending plans (ADR 0014 tranche 10) — the stored form of a gated plan
+ * awaiting a human decision, keyed by its inbox item id. Resolved plans are
+ * kept as tombstones (`status = 'resolved'`) for auditability; only `pending`
+ * rows are listed as pending.
+ */
+export const harnessPlans = pgTable(
+  "harness_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    itemId: uuid("item_id").notNull().unique(),
+    organizationId: uuid("organization_id").notNull(),
+    planId: text("plan_id").notNull(),
+    record: jsonb("record").$type<unknown>().notNull(),
+    approverUserId: uuid("approver_user_id").notNull(),
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("harness_plan_org_idx").on(t.organizationId),
+    index("harness_plan_plan_idx").on(t.planId),
+  ],
+);
+
 /* ─── ADR 0014 — agent trajectory + context engine ────────────────── */
 
 /**

@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { InMemorySessionLog } from "../trajectory/index.js";
 import type { AgentPlan } from "../planning/index.js";
 import { createHarnessHost } from "./host.js";
+import { InMemoryPlanStore } from "./plan-store.js";
 
 const now = () => new Date("2026-08-16T10:00:00Z");
 
@@ -168,7 +169,7 @@ describe("harness host — submitPlan", () => {
     expect(result.status).toBe("executed");
     if (result.status === "executed") expect(result.result.ok).toBe(true);
     expect(drafts).toEqual(["x"]);
-    expect(host.pendingPlans()).toHaveLength(0);
+    expect(await host.pendingPlans()).toHaveLength(0);
   });
 
   it("rejects a plan that fails boundary validation", async () => {
@@ -185,7 +186,7 @@ describe("harness host — submitPlan", () => {
     expect(result.status).toBe("pending_approval");
     if (result.status !== "pending_approval") return;
 
-    expect(host.pendingPlans()).toHaveLength(1);
+    expect(await host.pendingPlans()).toHaveLength(1);
     const pending = await host.pendingItems({ organizationId: "o1", userId: approver });
     expect(pending).toHaveLength(1);
     expect(pending[0].kind).toBe("plan");
@@ -203,7 +204,7 @@ describe("harness host — submitPlan", () => {
     expect(commits).toHaveLength(1);
     expect(commits[0]).toEqual({ amount: 1, by: "u-agent" });
     expect(await grants.list("o1")).toHaveLength(1);
-    expect(host.pendingPlans()).toHaveLength(0);
+    expect(await host.pendingPlans()).toHaveLength(0);
   });
 
   it("rejects a stored plan without executing", async () => {
@@ -225,7 +226,52 @@ describe("harness host — submitPlan", () => {
     }
     expect(commits).toHaveLength(0);
     expect(await grants.list("o1")).toHaveLength(0);
-    expect(host.pendingPlans()).toHaveLength(0);
+    expect(await host.pendingPlans()).toHaveLength(0);
+  });
+
+  it("decides a plan submitted through another host sharing the plan store", async () => {
+    const sharedStore = new InMemoryPlanStore();
+    const submitter = createHarnessHost({
+      commands,
+      queries,
+      helpers: helpers(),
+      grants,
+      inbox,
+      trajectory,
+      planStore: sharedStore,
+      now,
+    });
+    const result = await submitter.submitPlan({ ...baseParams(), plan: planFor(), approverUserId: approver });
+    expect(result.status).toBe("pending_approval");
+    if (result.status !== "pending_approval") return;
+
+    // The pending entry lives in the shared store, not the submitting host.
+    expect((await sharedStore.listByOrg("o1")).length).toBe(1);
+    expect(await submitter.pendingPlans()).toHaveLength(1);
+
+    // A second, independent host (the "worker") decides it.
+    const decider = createHarnessHost({
+      commands,
+      queries,
+      helpers: helpers(),
+      grants,
+      inbox,
+      trajectory,
+      planStore: sharedStore,
+      now,
+    });
+    const decide = await decider.decide({
+      itemId: result.itemId,
+      organizationId: "o1",
+      userId: approver,
+      resolution: "approved",
+    });
+    expect(decide).toMatchObject({ resolved: true, kind: "plan" });
+    if (decide.resolved && decide.kind === "plan") {
+      expect(decide.result.ok).toBe(true);
+    }
+    expect(commits).toHaveLength(1);
+    expect((await sharedStore.listAll()).length).toBe(0);
   });
 
   it("refuses to decide an item that belongs to another caller", async () => {

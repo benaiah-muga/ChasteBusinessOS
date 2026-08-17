@@ -7,10 +7,8 @@ import type {
   InboxStore,
   QueryRegistry,
 } from "@chaste/kernel";
-import type { z } from "zod";
 import type { SessionLog } from "../trajectory/index.js";
 import { grantPlanApprovals, proposePlanApproval, validatePlan } from "../planning/index.js";
-import { agentPlanSchema } from "../planning/index.js";
 import { buildToolsFromBus } from "../tools/from-bus.js";
 import type { BusToolInfo } from "../tools/from-bus.js";
 import type { ToolOutcome, ToolRegistry } from "../tools/index.js";
@@ -23,6 +21,9 @@ import type {
   ToolCallParams,
   ToolSurface,
 } from "./types.js";
+import type { PlanStore, PendingPlanEntry } from "./plan-store.js";
+
+export type { PendingPlanEntry } from "./plan-store.js";
 
 /**
  * Host layer (research doc build item 9 — the surface that runs the harness):
@@ -47,12 +48,6 @@ import type {
  */
 
 /** Pending plan awaiting a human decision, keyed by its inbox item id. */
-export interface PendingPlanEntry {
-  plan: z.infer<typeof agentPlanSchema>;
-  itemId: string;
-  params: PlanRunParams;
-  approverUserId: string;
-}
 
 export interface HarnessHostOptions {
   commands: CommandRegistry;
@@ -64,6 +59,8 @@ export interface HarnessHostOptions {
   inbox?: InboxStore;
   /** Append-only session trajectory. */
   trajectory?: SessionLog;
+  /** Durable pending-plan store; falls back to a process-local map without it. */
+  planStore?: PlanStore;
   grantTtlMs?: number;
   now?: () => Date;
   /** Tool registry; defaults to one built from the command/query bus. */
@@ -100,7 +97,7 @@ export interface HarnessHost {
     resolution: string;
   }): Promise<DecideResult>;
   pendingItems(filter?: { organizationId?: string; userId?: string }): Promise<InboxItem[]>;
-  pendingPlans(): PendingPlanEntry[];
+  pendingPlans(): Promise<PendingPlanEntry[]>;
 }
 
 export function createHarnessHost(opts: HarnessHostOptions): HarnessHost {
@@ -113,6 +110,28 @@ export function createHarnessHost(opts: HarnessHostOptions): HarnessHost {
     });
 
   const pending = new Map<string, PendingPlanEntry>();
+
+  /** Persist a pending entry durably, or to the process-local map. */
+  function storePending(entry: PendingPlanEntry): Promise<void> {
+    return opts.planStore ? opts.planStore.save(entry) : (pending.set(entry.itemId, entry), Promise.resolve());
+  }
+
+  /** Look up a pending entry by inbox item id or plan id. */
+  async function loadPending(itemId: string, planId?: string): Promise<PendingPlanEntry | undefined> {
+    if (opts.planStore) {
+      return (
+        (await opts.planStore.getByItemId(itemId)) ??
+        (planId ? await opts.planStore.getByPlanId(planId) : undefined)
+      );
+    }
+    return pending.get(itemId) ?? [...pending.values()].find((e) => e.plan.id === planId);
+  }
+
+  /** Remove a resolved pending entry from wherever it lives. */
+  async function removePending(itemId: string): Promise<void> {
+    if (opts.planStore) await opts.planStore.remove(itemId);
+    else pending.delete(itemId);
+  }
 
   const buildToolContext = (approverUserId?: string) =>
     createToolContextFactory({
@@ -182,7 +201,7 @@ export function createHarnessHost(opts: HarnessHostOptions): HarnessHost {
       return { status: "executed", result };
     }
     if (approval.via === "awaiting" && approval.itemId) {
-      pending.set(approval.itemId, {
+      await storePending({
         plan,
         itemId: approval.itemId,
         params: { ...params, plan },
@@ -210,9 +229,7 @@ export function createHarnessHost(opts: HarnessHostOptions): HarnessHost {
       return { resolved: false, reason: "inbox item does not belong to this caller" };
     }
 
-    const entry =
-      pending.get(input.itemId) ??
-      [...pending.values()].find((e) => e.plan.id === item.data?.planId);
+    const entry = await loadPending(input.itemId, item.data?.planId as string | undefined);
 
     if (item.kind === "plan" && entry) {
       if (input.resolution === "approved") {
@@ -244,7 +261,7 @@ export function createHarnessHost(opts: HarnessHostOptions): HarnessHost {
           trajectory: opts.trajectory,
           now: opts.now,
         });
-        pending.delete(input.itemId);
+        await removePending(input.itemId);
         return {
           resolved: true,
           kind: "plan",
@@ -252,7 +269,7 @@ export function createHarnessHost(opts: HarnessHostOptions): HarnessHost {
         };
       }
       await opts.inbox!.resolve(item.id, input.resolution);
-      pending.delete(input.itemId);
+      await removePending(input.itemId);
       return {
         resolved: true,
         kind: "plan",
@@ -280,8 +297,8 @@ export function createHarnessHost(opts: HarnessHostOptions): HarnessHost {
     return filter?.userId ? items.filter((i) => i.userId === filter.userId) : items;
   }
 
-  function pendingPlans(): PendingPlanEntry[] {
-    return [...pending.values()];
+  async function pendingPlans(): Promise<PendingPlanEntry[]> {
+    return opts.planStore ? opts.planStore.listAll() : [...pending.values()];
   }
 
   return { harnessFor, toolSurface, call, runPlan, submitPlan, decide, pendingItems, pendingPlans };

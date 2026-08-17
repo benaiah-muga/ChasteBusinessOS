@@ -402,6 +402,45 @@ a definition persisted via runtime A starts and checkpoints into `workflow_runs`
 the worker host observes it, and a gated instance parks at `pending_approval`
 and completes after a cross-host `advance` without re-running steps.
 
+## Update (2026-08-17): Tranche 10 — durable pending plans
+
+The tenth tranche removes the last process-local state from the host layer: the
+gated-plan map that `submitPlan`/`decide` used (noted in tranche 8). A gated
+plan now persists to the shared `harness_plans` table keyed by its inbox item
+id, so a plan submitted on the API host is decidable on the worker host —
+without changing the host contract.
+
+- `packages/ai-core/src/harness/plan-store.ts` — `PlanStore` interface
+  (`save`, `getByItemId`, `getByPlanId`, `listByOrg`, `listAll`, `remove`) with
+  an `InMemoryPlanStore`. The stored `PendingPlanRecord` is the serializable
+  form of a `PendingPlanEntry`: the plan's `Actor.permissions` Set is normalized
+  to an array on the way in and rebuilt on the way out, so a replayed decision
+  re-executes under the exact same authority. `PendingPlanEntry` moved here from
+  `host.ts` (re-exported for compatibility).
+- `harness/host.ts` — `createHarnessHost` accepts `planStore?`; without one it
+  keeps the process-local map (tests, single-process hosts). With one,
+  `submitPlan` persists the entry, `decide` loads it durably, and `pendingPlans`
+  lists from the store. `pendingPlans()` is now async (was sync) — its only
+  callers are the host tests.
+- `packages/db` — new `harness_plans` table (item_id unique, org, plan_id,
+  record jsonb, approver, status `pending`/`resolved`, resolved_at). Resolved
+  plans are tombstones, not deletes, so decisions stay auditable; only `pending`
+  rows are listed.
+- `packages/runtime` — `PostgresPlanStore` (upsert on save, tombstone on
+  remove, zod-validated reads) wired as `runtime.planStore`.
+- `apps/api` — `createAppContext` passes `runtime.planStore` into
+  `createHarnessHost`.
+
+Acceptance: `plan-store.test.ts` (serialization round-trip preserving
+permissions/evidence/policy context, invalid-shape rejection, in-memory store
+CRUD + defensive copies); `host.test.ts` now covers the durable path — a plan
+submitted through one host with a shared `planStore` is decided by a second,
+independent host; `packages/runtime/src/plan-store.e2e.test.ts` against local
+Postgres — submit on the API host persists to `harness_plans`, the worker host
+decides it, the step executes under the replayed actor authority (grant minted,
+activity created by the agent user), and the entry is tombstoned; a rejected
+plan is tombstoned without executing.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.
