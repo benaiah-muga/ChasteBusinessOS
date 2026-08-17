@@ -11,4 +11,5 @@ coverage
 drizzle/meta
 .vscode/*
 !.vscode/extensions.json
-.researchdesign.md
+.research
+design.md
