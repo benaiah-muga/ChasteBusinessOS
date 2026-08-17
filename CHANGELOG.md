@@ -314,6 +314,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     user) → entry tombstoned; rejection tombstones without executing.
   - Docs: ADR 0014 tranche-10 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **Model router + cost controls — the eleventh harness tranche** (build item
+  13, cost-control half): the `ModelRouter` stage between the prompt envelope
+  and the LLM call selects a provider per task class and records token/cost
+  attribution. Every routed completion appends an append-only row to the
+  shared `model_usage` table; budget caps are enforced *before* dispatch by
+  summing recorded spend, so a cap configured on one host reflects spend
+  recorded on every host. Fail-closed: unroutable task classes and exhausted
+  budgets refuse the request.
+  - **`@chaste/ai-core` `model-router.ts`** — `TaskClass` (`rules`/`chat`/
+    `planning`/`report`, zod-validated), `UsageLedger` (`record`,
+    `spendForOrganization(since)`, `spendForSession`) + `InMemoryUsageLedger`,
+    `createModelRouter({ providers, config, budget, prices, ledger })`,
+    `estimateCostCents` (per-1M-token prices), `BudgetPolicy`,
+    `ModelRouteError`, `BudgetLimitError`. Recording is unconditional;
+    `budget.enabled` gates only the cap check.
+  - **Workflow builder** — optional `router` + `routerTaskClass` (default
+    `planning`); with a per-request context, `generateWorkflowFromNL` routes
+    the planning completion instead of calling the provider directly.
+  - **`@chaste/config`** — `ai.routerRoutes` (task class → provider id) and
+    `ai.cost` (enabled, org-monthly + session caps, per-provider prices).
+  - **`@chaste/db` + `@chaste/runtime`** — new `model_usage` table;
+    `PostgresUsageLedger` (insert-once, never update/delete) wired as
+    `runtime.usage`.
+  - **`apps/api`** — `app.modelRouter` built over the traced provider +
+    `runtime.usage`; `buildWorkflow` routes planning completions with the
+    caller's org/session context; `GET /api/v1/ai/usage` reports org monthly
+    spend from the durable ledger.
+  - Tests: `model-router.test.ts` (per-class routing, fail-closed routing,
+    org/session caps, cost estimation, ledger sums), workflow-builder routed
+    path via `buildWorkflow`, `packages/runtime/src/model-usage.e2e.test.ts`
+    (host A records → host B enforces the same cap → restarted ledger still
+    sees spend → recording happens with no cap configured), and `apps/api`
+    `e2e-workflow.test.ts` asserting the usage route.
+  - Docs: ADR 0014 tranche-11 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +

@@ -1047,6 +1047,27 @@ CREATE INDEX IF NOT EXISTS workflow_tasks_org_idx ON workflow_tasks(organization
 CREATE INDEX IF NOT EXISTS workflow_tasks_workflow_idx ON workflow_tasks(workflow_id);
 CREATE INDEX IF NOT EXISTS workflow_tasks_assignee_status_idx
   ON workflow_tasks(organization_id, assignee_user_id, status);
+
+-- ADR 0014 tranche 11 -- model usage ledger (research doc §Harness Runtime:
+-- "token and cost attribution per section, tool result, skill, and model
+-- route"). Append-only; one row per routed LLM completion with estimated cost
+-- in cents. Mirrors the Drizzle schema above; written by the runtime
+-- PostgresUsageLedger, shared across hosts so budget caps are global.
+CREATE TABLE IF NOT EXISTS model_usage (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  session_id uuid NOT NULL,
+  task_class text NOT NULL,
+  provider_id text NOT NULL,
+  model text NOT NULL,
+  prompt_tokens integer NOT NULL DEFAULT 0,
+  completion_tokens integer NOT NULL DEFAULT 0,
+  total_tokens integer NOT NULL DEFAULT 0,
+  estimated_cost_cents integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS model_usage_org_created_idx ON model_usage(organization_id, created_at);
+CREATE INDEX IF NOT EXISTS model_usage_session_idx ON model_usage(session_id);
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {

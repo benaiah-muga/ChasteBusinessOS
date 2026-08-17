@@ -104,4 +104,15 @@ describe.skipIf(!hasDb)("ARCH-5 workflow persistence", () => {
     expect(revived.id).toBe(persistedId);
     expect(revived.name).toBe(wf.name);
   }, 60_000);
+
+  it("reports org-scoped AI usage spend from the durable ledger", async () => {
+    const res = (await fetch(`${base}/api/v1/ai/usage`).then((r) => r.json())) as {
+      organizationId: string;
+      spendCents: number;
+      periodStart: string;
+    };
+    expect(typeof res.organizationId).toBe("string");
+    expect(res.spendCents).toBe(0);
+    expect(typeof res.periodStart).toBe("string");
+  }, 30_000);
 });

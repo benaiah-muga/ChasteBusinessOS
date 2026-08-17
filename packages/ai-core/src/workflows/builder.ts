@@ -1,16 +1,22 @@
 import type { CommandRegistry } from "@chaste/kernel";
 import type { AiProvider } from "../providers.js";
+import type { ModelRouter, RouterCallContext, TaskClass } from "../model-router.js";
 import type { WorkflowDefinition, WorkflowStepDef } from "./engine.js";
 import { normalizeFieldNames } from "./engine.js";
 
 export interface WorkflowBuilderConfig {
   commandRegistry: CommandRegistry;
   aiProvider: AiProvider;
+  /** Optional model router; planning completions route through it with ctx. */
+  router?: ModelRouter;
+  routerTaskClass?: TaskClass;
 }
 
 export interface WorkflowBuilderAgent {
   aiProvider: AiProvider;
   systemPrompt: string;
+  router?: ModelRouter;
+  routerTaskClass: TaskClass;
 }
 
 const COMMAND_FIELD_HINTS: Record<string, string> = {
@@ -88,17 +94,24 @@ export function createWorkflowBuilderAgent(cfg: WorkflowBuilderConfig): Workflow
   return {
     aiProvider: cfg.aiProvider,
     systemPrompt: BUILDER_SYSTEM_PROMPT + "\n\nAVAILABLE COMMANDS:\n" + commandList,
+    router: cfg.router,
+    routerTaskClass: cfg.routerTaskClass ?? "planning",
   };
 }
 
 export async function generateWorkflowFromNL(
   agent: WorkflowBuilderAgent,
   request: string,
+  ctx?: RouterCallContext,
 ): Promise<WorkflowDefinition | null> {
-  const result = await agent.aiProvider.complete({
+  const req = {
     system: agent.systemPrompt,
     user: `Create a workflow for this request: "${request}"`,
-  });
+  };
+  const result =
+    agent.router && ctx
+      ? await agent.router.complete(agent.routerTaskClass, req, ctx)
+      : await agent.aiProvider.complete(req);
 
   const text = result.text;
 

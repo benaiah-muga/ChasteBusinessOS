@@ -17,3 +17,4 @@ export * from "./context-engine/index.js";
 export * from "./tools/index.js";
 export * from "./planning/index.js";
 export * from "./harness/index.js";
+export * from "./model-router.js";

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const taskClassSchema = z.enum(["rules", "chat", "planning", "report"]);
+
 /**
  * Platform configuration.
  *
@@ -83,6 +85,34 @@ export const appConfigSchema = z.object({
     codingAgentPrefer: z.string().nullable().default(null),
     /** R2 — where new approvals surface by default for attended sessions. */
     defaultInboxVisibility: z.enum(["inline", "inbox"]).default("inline"),
+    /**
+     * Model router: task class → provider id. Routable task classes are
+     * "rules", "chat", "planning", "report". Unrouted classes fall back to the
+     * configured provider above. Costs are only recorded when `cost.enabled`.
+     */
+    routerRoutes: z.record(taskClassSchema, z.string()).optional(),
+    /**
+     * Cost controls. `enabled` hard-refuses routed completions once
+     * cumulative estimated spend (in cents) reaches a cap; recording happens
+     * unconditionally so spend is always auditable. Prices are per-1M-tokens
+     * in cents keyed by provider id; missing prices estimate 0 cost.
+     */
+    cost: z
+      .object({
+        enabled: z.boolean().default(false),
+        organizationMonthlyCents: z.number().int().nonnegative().optional(),
+        sessionCents: z.number().int().nonnegative().optional(),
+        prices: z
+          .record(
+            z.string(),
+            z.object({
+              promptCents: z.number().nonnegative().optional(),
+              completionCents: z.number().nonnegative().optional(),
+            }),
+          )
+          .optional(),
+      })
+      .default({ enabled: false }),
   }),
 
   /** Optional LLM tracing (Langfuse). Independent of any agent framework. */

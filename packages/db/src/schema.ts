@@ -1264,3 +1264,31 @@ export const workflowTasks = pgTable(
     index("workflow_tasks_assignee_status_idx").on(t.organizationId, t.assigneeUserId, t.status),
   ],
 );
+
+/**
+ * ADR 0014 tranche 11 — model usage ledger (research doc §Harness Runtime:
+ * "token and cost attribution per section, tool result, skill, and model
+ * route"). Append-only; one row per routed LLM completion, with the estimated
+ * cost in cents for budget enforcement. Written by the runtime
+ * `PostgresUsageLedger`, shared across hosts so caps are global.
+ */
+export const modelUsage = pgTable(
+  "model_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    sessionId: uuid("session_id").notNull(),
+    taskClass: text("task_class").notNull(),
+    providerId: text("provider_id").notNull(),
+    model: text("model").notNull(),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    estimatedCostCents: integer("estimated_cost_cents").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("model_usage_org_created_idx").on(t.organizationId, t.createdAt),
+    index("model_usage_session_idx").on(t.sessionId),
+  ],
+);

@@ -782,6 +782,14 @@ export async function buildServer(appCtx?: AppContext) {
     });
   });
 
+    /** ADR 0014 — org-scoped AI usage summary from the durable model ledger. */
+  server.get("/api/v1/ai/usage", async (req) => {
+    const auth = getAuth(req);
+    const since = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    const spendCents = await app.usage.spendForOrganization(auth.actor.organizationId, since);
+    return { organizationId: auth.actor.organizationId, spendCents, periodStart: since.toISOString() };
+  });
+
   server.get("/api/v1/inbox", async (req) => {
     const auth = getAuth(req);
     const items = await app.harnessHost.pendingItems({

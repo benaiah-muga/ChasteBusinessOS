@@ -441,6 +441,57 @@ decides it, the step executes under the replayed actor authority (grant minted,
 activity created by the agent user), and the entry is tombstoned; a rejected
 plan is tombstoned without executing.
 
+## Update (2026-08-17): Tranche 11 — model router + cost controls
+
+The eleventh tranche implements the `ModelRouter` from the research doc's
+harness runtime diagram — the stage between the prompt envelope and the LLM
+call that selects a provider per task class and records token/cost attribution.
+This is the cost-control half of build item 13; the proactive-coordinator half
+remains out of scope.
+
+Every routed completion appends an append-only usage row (org, session, task
+class, provider, model, token counts, estimated cost in cents) to the shared
+`model_usage` table. Budget caps are enforced *before* dispatch by summing the
+recorded spend — so a cap configured on one host reflects spend recorded on
+every host. Enforcement is deliberately fail-closed: an unroutable task class
+or an exhausted budget refuses the request.
+
+- `packages/ai-core/src/model-router.ts` — `TaskClass` (`rules`/`chat`/
+  `planning`/`report`, zod-validated), `UsageLedger` interface
+  (`record`, `spendForOrganization(since)`, `spendForSession`) with an
+  `InMemoryUsageLedger`, `createModelRouter({ providers, config, budget,
+  prices, ledger })` returning `{ route, complete }`, `estimateCostCents`
+  (per-1M-token prices), `BudgetPolicy`, and `ModelRouteError`/
+  `BudgetLimitError`. `complete` routes → budget-check → dispatch →
+  record; `budget.enabled` gates only the cap check (recording is
+  unconditional so spend stays auditable).
+- `packages/ai-core/src/workflows/builder.ts` — `WorkflowBuilderAgent` accepts
+  an optional `router` + `routerTaskClass` (default `planning`); with a
+  per-request `RouterCallContext`, `generateWorkflowFromNL` routes the planning
+  completion instead of calling `aiProvider` directly.
+- `packages/config` — `ai.routerRoutes` (task class → provider id, defaults to
+  the configured provider) and `ai.cost` (enabled, organizationMonthlyCents,
+  sessionCents, per-provider prices in cents per 1M tokens).
+- `packages/db` — new `model_usage` table (org, session, task_class, provider,
+  model, token counts, estimated_cost_cents, created_at) with org/date and
+  session indexes; `cleanupTestData` now truncates the durable AI tables.
+- `packages/runtime` — `PostgresUsageLedger` (insert-once, never update/delete)
+  wired as `runtime.usage`.
+- `apps/api` — `createAppContext` builds `app.modelRouter` over the traced
+  provider + `runtime.usage`; `buildWorkflow` passes the caller's org/session
+  as the routing context; `GET /api/v1/ai/usage` returns the org's monthly
+  spend from the durable ledger.
+
+Acceptance: `model-router.test.ts` (routing per task class, fail-closed on
+unroutable/unregistered routes, org-monthly and session caps enforced from the
+ledger, cost estimation from prices, in-memory ledger sums); the workflow
+builder's routed path (planning) is exercised end-to-end via `buildWorkflow`;
+`packages/runtime/src/model-usage.e2e.test.ts` against local Postgres — a
+completion routed on host A records spend the shared table, host B enforces the
+same cap and refuses the next completion, a restarted ledger still sees the
+spend, and recording happens even when no cap is configured; `apps/api`
+`e2e-workflow.test.ts` asserts `GET /api/v1/ai/usage` reports the org spend.
+
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

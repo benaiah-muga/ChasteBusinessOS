@@ -31,7 +31,7 @@ import {
   type TaskStore,
   type WorkflowInstanceStore,
 } from "@chaste/kernel";
-import type { MemoryStore, PlanStore, SkillStore, SessionLog, WakeStore } from "@chaste/ai-core";
+import type { MemoryStore, PlanStore, SkillStore, SessionLog, UsageLedger, WakeStore } from "@chaste/ai-core";
 import { createAccountingModule } from "@chaste/module-accounting";
 import { createCrmModule } from "@chaste/module-crm";
 import { createHrModule } from "@chaste/module-hr";
@@ -56,6 +56,7 @@ import { PostgresActivityStore } from "./postgres-activity-store.js";
 import { PostgresTaskStore } from "./postgres-task-store.js";
 import { PostgresWorkflowInstanceStore } from "./postgres-workflow-instance-store.js";
 import { PostgresPlanStore } from "./postgres-plan-store.js";
+import { PostgresUsageLedger } from "./postgres-usage-ledger.js";
 
 export {
   PostgresInboxStore,
@@ -69,6 +70,7 @@ export {
   PostgresTaskStore,
   PostgresWorkflowInstanceStore,
   PostgresPlanStore,
+  PostgresUsageLedger,
 };
 
 /**
@@ -100,6 +102,8 @@ export interface Runtime {
   workflowInstances: WorkflowInstanceStore;
   /** ADR 0014 — durable pending plans over `harness_plans`. */
   planStore: PlanStore;
+  /** ADR 0014 — durable model usage ledger over `model_usage`. */
+  usage: UsageLedger;
   audit: PostgresAuditWriter;
   outbox: PostgresOutboxWriter;
   sessionStore: DbSessionStore;
@@ -125,6 +129,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   const tasks = new PostgresTaskStore(db);
   const workflowInstances = new PostgresWorkflowInstanceStore(db);
   const planStore = new PostgresPlanStore(db);
+  const usage = new PostgresUsageLedger(db);
 
   // Domain modules first (dependency order); platform depends on the registry
   // for `core.modules.list` and its permission list.
@@ -182,6 +187,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
     tasks,
     workflowInstances,
     planStore,
+    usage,
   };
 }
 

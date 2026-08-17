@@ -21,6 +21,10 @@ import {
   type MemoryStore,
   createHarnessHost,
   type HarnessHost,
+  createModelRouter,
+  type ModelRouter,
+  type RouterCallContext,
+  type UsageLedger,
 } from "@chaste/ai-core";
 import type { ChatMessage } from "@chaste/ui-schema";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
@@ -110,6 +114,12 @@ export interface AppContext {
   explanations: AiExplanation[];
   sessionUser: SessionUser;
   provider: AiProvider;
+  /** ADR 0014 — model router: task-class routing + durable usage/cost ledger.
+   * Completions that carry org/session context route through this to record
+   * spend and enforce budget caps. */
+  modelRouter: ModelRouter;
+  /** ADR 0014 — the durable model usage ledger (spend queries for `/ai/usage`). */
+  usage: UsageLedger;
   tracer: AiTracer;
   workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
 }
@@ -271,12 +281,33 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     ? new TracedProvider(provider, tracer)
     : provider;
 
+  // ADR 0014 — model router with durable usage/cost ledger. Every routed
+  // completion records estimated spend into `model_usage` (shared across
+  // hosts) and is hard-refused once a configured budget cap is reached.
+  const modelRouter = createModelRouter({
+    providers: { main: tracedProvider },
+    config: {
+      routes: config.ai.routerRoutes,
+      defaultRoute: "main",
+    },
+    budget: {
+      enabled: config.ai.cost.enabled,
+      organizationMonthlyCents: config.ai.cost.organizationMonthlyCents,
+      sessionCents: config.ai.cost.sessionCents,
+    },
+    prices: config.ai.cost.prices,
+    ledger: runtime.usage,
+    now: () => new Date(),
+  });
+
   // Workflow builder uses AiProvider.complete() (rules + structured LLM)
   let workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null = null;
   if (provider.id !== "none") {
     workflowBuilder = createWorkflowBuilderAgent({
       commandRegistry: commands,
       aiProvider: provider,
+      router: modelRouter,
+      routerTaskClass: "planning",
     });
   }
 
@@ -334,6 +365,8 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     explanations: [],
     sessionUser,
     provider: tracedProvider,
+    modelRouter,
+    usage: runtime.usage,
     tracer,
     workflowBuilder,
   };
@@ -839,7 +872,11 @@ export async function buildWorkflow(
   }
 
   try {
-    const workflow = await generateWorkflowFromNL(app.workflowBuilder, request);
+    const ctx: RouterCallContext = {
+      organizationId: auth.actor.organizationId,
+      sessionId: auth.sessionUser.id,
+    };
+    const workflow = await generateWorkflowFromNL(app.workflowBuilder, request, ctx);
     if (!workflow) {
       return {
         workflow: null,
