@@ -492,6 +492,60 @@ same cap and refuses the next completion, a restarted ledger still sees the
 spend, and recording happens even when no cap is configured; `apps/api`
 `e2e-workflow.test.ts` asserts `GET /api/v1/ai/usage` reports the org spend.
 
+## Update (2026-08-17): Tranche 12 — proactive coordinator (build item 13, part 2)
+
+The twelfth tranche implements the `proactive-coordinator` component from the
+research doc's agent directory, satisfying the Proactive Agent Acceptance
+Criteria. It builds on the durable wakes, activities, and (from tranche 11) the
+routing/cost spine, and is deliberately authority-safe: the coordinator never
+executes a command. It produces suggestions with explicit trigger evidence,
+proposed action, expected impact, and a `requiredApproval` flag, and hands the
+host a structured plan to gate through approval when the action exceeds the
+owner's authority. Natural-language schedules are parsed into exact
+who/what/when/condition/action objects *before* confirmation.
+
+- `packages/ai-core/src/proactive/types.ts` — shared zod contracts
+  (`actionModeSchema` notify < suggest < draft < request_approval,
+  `quietHoursSchema`, `recurrenceRuleSchema`) kept dependency-free so the
+  parser and rules share one model without a circular import.
+- `packages/ai-core/src/proactive/schedule-parser.ts` — deterministic
+  `parseScheduleText` → confirmable `ScheduleSpec` (who/what/when incl.
+  recurrence + timezone/condition/action, quiet hours, escalation) and a
+  human-readable `confirmSchedule`. No LLM — stable and explainable.
+- `packages/ai-core/src/proactive/watch-rules.ts` — `WatchRule` model
+  (schedule or event trigger; authority-ladder action with recipients and
+  intent), `WatchRuleStore` + `InMemoryWatchRuleStore`, and `nextFireTime`
+  sharing kernel-activity recurrence semantics.
+- `packages/ai-core/src/proactive/coordinator.ts` — `ProactivePreferences`
+  (quiet hours, daily cap, channels), `ProactiveSuggestion` envelope,
+  `ProactiveDelivery` ledger, pure `deliveryGate`/`inQuietHours`,
+  `createProactiveCoordinator` with `collect` (due watch rules + wakes +
+  overdue activities), `deliver` (gate + record), `deliverDue`, and
+  `buildProactivePlan` (the authority-safe handoff).
+- `packages/db` — `watch_rules`, `proactive_preferences`,
+  `proactive_deliveries` (unique (org, dedupe_key) → exactly-once firing
+  across hosts); cleanup truncates them.
+- `packages/runtime` — `PostgresWatchRuleStore`, `PostgresProactivePreferencesStore`,
+  `PostgresProactiveDeliveryStore` (in `postgres-proactive.ts`) wired as
+  `runtime.watchRules` / `runtime.proactivePreferences` /
+  `runtime.proactiveDeliveries`.
+- `apps/api` — `app.proactive` surface (coordinator + stores);
+  `/api/v1/proactive/rules` (CRUD + pause), `/api/v1/proactive/preferences`
+  (read/edit), `/api/v1/proactive/suggestions?now=` (dry-run, records
+  nothing), `/api/v1/proactive/tick` (collect + gate + record).
+
+Acceptance: `packages/ai-core/src/proactive/coordinator.test.ts` (schedule
+parsing incl. who/what/condition/quiet hours/escalation/action; rule-store org
+scoping; next-fire times; delivery gate + overnight quiet hours; collect/
+advance/duplicate; request-approval rules surfaced as `requiredApproval` plans
+that never execute; wakes + overdue activities collected; quiet hours + daily
+cap suppress while recording for audit); `packages/runtime/src/proactive.e2e.test.ts`
+against local Postgres — a rule created on the API host is honored by a
+coordinator on the worker host, the delivery persists with a unique dedupe key,
+the occurrence cursor advances, quiet hours suppress while recording, and the
+plan handoff carries `requiredApproval`; `apps/api/src/e2e-proactive.test.ts`
+exercises the HTTP surface (CRUD, pause/resume, dry-run suggestions, tick
+deliveries, preferences edit).
 ## Design rules carried forward
 
 - Additive only: existing command/query bus callers keep working.

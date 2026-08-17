@@ -1292,3 +1292,68 @@ export const modelUsage = pgTable(
     index("model_usage_session_idx").on(t.sessionId),
   ],
 );
+
+/**
+ * ADR 0014 tranche 12 — proactive coordinator (research doc §Proactive Agent
+ * Acceptance Criteria). Three tables:
+ *  - `watch_rules` — durable, user-owned "when X fires, the agent may do Y at
+ *    authority level Z" rules (notify < suggest < draft < request_approval).
+ *  - `proactive_preferences` — per-org fatigue controls (quiet hours, daily
+ *    cap, channels).
+ *  - `proactive_deliveries` — append-only ledger of what was suggested/delivered
+ *    (or held by the gate), keyed by a dedupe key so a firing is never
+ *    delivered twice.
+ */
+export const watchRules = pgTable(
+  "watch_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    name: text("name").notNull(),
+    trigger: jsonb("trigger").$type<unknown>().notNull(),
+    action: jsonb("action").$type<unknown>().notNull(),
+    condition: text("condition"),
+    enabled: boolean("enabled").notNull().default(true),
+    priority: text("priority").notNull().default("normal"),
+    createdByUserId: uuid("created_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("watch_rules_org_idx").on(t.organizationId)],
+);
+
+export const proactivePreferences = pgTable(
+  "proactive_preferences",
+  {
+    organizationId: uuid("organization_id").primaryKey(),
+    quietHours: jsonb("quiet_hours").$type<unknown>(),
+    maxSuggestionsPerDay: integer("max_suggestions_per_day").notNull().default(10),
+    channels: jsonb("channels").$type<string[]>().notNull().default([]),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
+export const proactiveDeliveries = pgTable(
+  "proactive_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    kind: text("kind").notNull(),
+    sourceId: text("source_id").notNull(),
+    occurrenceKey: text("occurrence_key").notNull(),
+    triggerEvidence: text("trigger_evidence").notNull(),
+    proposedAction: text("proposed_action").notNull(),
+    expectedImpact: text("expected_impact").notNull(),
+    requiredApproval: boolean("required_approval").notNull().default(false),
+    priority: text("priority").notNull().default("normal"),
+    targetUserIds: jsonb("target_user_ids").$type<string[]>().notNull().default([]),
+    suppressed: boolean("suppressed").notNull().default(false),
+    suppressionReason: text("suppression_reason"),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("proactive_deliveries_dedupe_org_idx").on(t.organizationId, t.dedupeKey),
+    index("proactive_deliveries_org_at_idx").on(t.organizationId, t.deliveredAt),
+  ],
+);

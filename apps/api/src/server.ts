@@ -1,5 +1,10 @@
 import { FULL_AUTONOMOUS_WARNING, ChasteError, NotFoundError, type Actor } from "@chaste/kernel";
-import { agentPlanSchema } from "@chaste/ai-core";
+import {
+  agentPlanSchema,
+  watchTriggerSchema,
+  watchActionSchema,
+  proactivePreferencesSchema,
+} from "@chaste/ai-core";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyRequest } from "fastify";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -788,6 +793,97 @@ export async function buildServer(appCtx?: AppContext) {
     const since = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
     const spendCents = await app.usage.spendForOrganization(auth.actor.organizationId, since);
     return { organizationId: auth.actor.organizationId, spendCents, periodStart: since.toISOString() };
+  });
+
+  // ---- ADR 0014 proactive coordinator surface -----------------------------
+
+  const createWatchRuleBody = z.object({
+    name: z.string().min(1),
+    trigger: watchTriggerSchema,
+    action: watchActionSchema,
+    condition: z.string().optional(),
+    priority: z.enum(["low", "normal", "high"]).default("normal"),
+    enabled: z.boolean().default(true),
+  });
+
+  const updateWatchRuleBody = createWatchRuleBody.partial().strict();
+
+  server.get("/api/v1/proactive/rules", async (req) => {
+    const auth = getAuth(req);
+    const items = await app.proactive.watchRules.listByOrg(auth.actor.organizationId);
+    return { items };
+  });
+
+  server.post("/api/v1/proactive/rules", async (req) => {
+    const auth = getAuth(req);
+    const body = createWatchRuleBody.parse(req.body ?? {});
+    const rule = await app.proactive.watchRules.create({
+      organizationId: auth.actor.organizationId,
+      createdByUserId: auth.sessionUser.id,
+      ...body,
+    });
+    return rule;
+  });
+
+  server.patch("/api/v1/proactive/rules/:id", async (req) => {
+    const auth = getAuth(req);
+    const { id } = req.params as { id: string };
+    const body = updateWatchRuleBody.parse(req.body ?? {});
+    const rule = await app.proactive.watchRules.update(auth.actor.organizationId, id, body);
+    if (!rule) throw new NotFoundError(`Watch rule ${id}`);
+    return rule;
+  });
+
+  server.delete("/api/v1/proactive/rules/:id", async (req) => {
+    const auth = getAuth(req);
+    const { id } = req.params as { id: string };
+    const removed = await app.proactive.watchRules.remove(auth.actor.organizationId, id);
+    if (!removed) throw new NotFoundError(`Watch rule ${id}`);
+    return { removed: true };
+  });
+
+  server.get("/api/v1/proactive/preferences", async (req) => {
+    const auth = getAuth(req);
+    return app.proactive.preferences.get(auth.actor.organizationId);
+  });
+
+  server.put("/api/v1/proactive/preferences", async (req) => {
+    const auth = getAuth(req);
+    const body = z
+      .object({
+        quietHours: proactivePreferencesSchema.shape.quietHours,
+        maxSuggestionsPerDay: proactivePreferencesSchema.shape.maxSuggestionsPerDay,
+        channels: proactivePreferencesSchema.shape.channels,
+      })
+      .partial()
+      .strict()
+      .parse(req.body ?? {});
+    const current = await app.proactive.preferences.get(auth.actor.organizationId);
+    const prefs = await app.proactive.preferences.set({
+      organizationId: auth.actor.organizationId,
+      quietHours: body.quietHours ?? current.quietHours,
+      maxSuggestionsPerDay: body.maxSuggestionsPerDay ?? current.maxSuggestionsPerDay,
+      channels: body.channels ?? current.channels,
+    });
+    return prefs;
+  });
+
+  /** Dry-run: what would be suggested right now (nothing is recorded). */
+  server.get("/api/v1/proactive/suggestions", async (req) => {
+    const auth = getAuth(req);
+    const { now } = req.query as { now?: string };
+    const at = now ? new Date(now) : new Date();
+    const suggestions = await app.proactive.coordinator.collect(auth.actor.organizationId, at);
+    return { suggestions, at: at.toISOString() };
+  });
+
+  /** The tick: collect + gate + record everything due for the org. */
+  server.post("/api/v1/proactive/tick", async (req) => {
+    const auth = getAuth(req);
+    const body = z.object({ now: z.string().optional() }).parse(req.body ?? {});
+    const at = body.now ? new Date(body.now) : new Date();
+    const deliveries = await app.proactive.coordinator.deliverDue(auth.actor.organizationId, at);
+    return { deliveries, at: at.toISOString() };
   });
 
   server.get("/api/v1/inbox", async (req) => {

@@ -31,7 +31,17 @@ import {
   type TaskStore,
   type WorkflowInstanceStore,
 } from "@chaste/kernel";
-import type { MemoryStore, PlanStore, SkillStore, SessionLog, UsageLedger, WakeStore } from "@chaste/ai-core";
+import type {
+  MemoryStore,
+  PlanStore,
+  ProactiveDeliveryStore,
+  ProactivePreferencesStore,
+  SkillStore,
+  SessionLog,
+  UsageLedger,
+  WakeStore,
+  WatchRuleStore,
+} from "@chaste/ai-core";
 import { createAccountingModule } from "@chaste/module-accounting";
 import { createCrmModule } from "@chaste/module-crm";
 import { createHrModule } from "@chaste/module-hr";
@@ -57,6 +67,11 @@ import { PostgresTaskStore } from "./postgres-task-store.js";
 import { PostgresWorkflowInstanceStore } from "./postgres-workflow-instance-store.js";
 import { PostgresPlanStore } from "./postgres-plan-store.js";
 import { PostgresUsageLedger } from "./postgres-usage-ledger.js";
+import {
+  PostgresWatchRuleStore,
+  PostgresProactivePreferencesStore,
+  PostgresProactiveDeliveryStore,
+} from "./postgres-proactive.js";
 
 export {
   PostgresInboxStore,
@@ -71,6 +86,9 @@ export {
   PostgresWorkflowInstanceStore,
   PostgresPlanStore,
   PostgresUsageLedger,
+  PostgresWatchRuleStore,
+  PostgresProactivePreferencesStore,
+  PostgresProactiveDeliveryStore,
 };
 
 /**
@@ -104,6 +122,12 @@ export interface Runtime {
   planStore: PlanStore;
   /** ADR 0014 — durable model usage ledger over `model_usage`. */
   usage: UsageLedger;
+  /** ADR 0014 — durable watch rules over `watch_rules`. */
+  watchRules: WatchRuleStore;
+  /** ADR 0014 — durable proactive preferences over `proactive_preferences`. */
+  proactivePreferences: ProactivePreferencesStore;
+  /** ADR 0014 — durable proactive delivery ledger over `proactive_deliveries`. */
+  proactiveDeliveries: ProactiveDeliveryStore;
   audit: PostgresAuditWriter;
   outbox: PostgresOutboxWriter;
   sessionStore: DbSessionStore;
@@ -130,6 +154,9 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
   const workflowInstances = new PostgresWorkflowInstanceStore(db);
   const planStore = new PostgresPlanStore(db);
   const usage = new PostgresUsageLedger(db);
+  const watchRules = new PostgresWatchRuleStore(db);
+  const proactivePreferences = new PostgresProactivePreferencesStore(db);
+  const proactiveDeliveries = new PostgresProactiveDeliveryStore(db);
 
   // Domain modules first (dependency order); platform depends on the registry
   // for `core.modules.list` and its permission list.
@@ -188,6 +215,9 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
     workflowInstances,
     planStore,
     usage,
+    watchRules,
+    proactivePreferences,
+    proactiveDeliveries,
   };
 }
 

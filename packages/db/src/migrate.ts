@@ -1068,6 +1068,55 @@ CREATE TABLE IF NOT EXISTS model_usage (
 );
 CREATE INDEX IF NOT EXISTS model_usage_org_created_idx ON model_usage(organization_id, created_at);
 CREATE INDEX IF NOT EXISTS model_usage_session_idx ON model_usage(session_id);
+
+-- ADR 0014 tranche 12 -- proactive coordinator (research doc §Proactive Agent
+-- Acceptance Criteria). Mirrors the Drizzle schema above: durable watch rules,
+-- per-org fatigue preferences, and the append-only delivery ledger keyed by a
+-- dedupe key so a firing is never delivered twice.
+CREATE TABLE IF NOT EXISTS watch_rules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  name text NOT NULL,
+  trigger jsonb NOT NULL,
+  action jsonb NOT NULL,
+  condition text,
+  enabled boolean NOT NULL DEFAULT true,
+  priority text NOT NULL DEFAULT 'normal',
+  created_by_user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS watch_rules_org_idx ON watch_rules(organization_id);
+
+CREATE TABLE IF NOT EXISTS proactive_preferences (
+  organization_id uuid PRIMARY KEY,
+  quiet_hours jsonb,
+  max_suggestions_per_day integer NOT NULL DEFAULT 10,
+  channels jsonb NOT NULL DEFAULT '[]',
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS proactive_deliveries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  dedupe_key text NOT NULL,
+  kind text NOT NULL,
+  source_id text NOT NULL,
+  occurrence_key text NOT NULL,
+  trigger_evidence text NOT NULL,
+  proposed_action text NOT NULL,
+  expected_impact text NOT NULL,
+  required_approval boolean NOT NULL DEFAULT false,
+  priority text NOT NULL DEFAULT 'normal',
+  target_user_ids jsonb NOT NULL DEFAULT '[]',
+  suppressed boolean NOT NULL DEFAULT false,
+  suppression_reason text,
+  delivered_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS proactive_deliveries_dedupe_org_idx
+  ON proactive_deliveries(organization_id, dedupe_key);
+CREATE INDEX IF NOT EXISTS proactive_deliveries_org_at_idx
+  ON proactive_deliveries(organization_id, delivered_at);
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {

@@ -25,6 +25,11 @@ import {
   type ModelRouter,
   type RouterCallContext,
   type UsageLedger,
+  createProactiveCoordinator,
+  type ProactiveCoordinator,
+  type WatchRuleStore,
+  type ProactivePreferencesStore,
+  type ProactiveDeliveryStore,
 } from "@chaste/ai-core";
 import type { ChatMessage } from "@chaste/ui-schema";
 import { loadConfig, publicConfigView, type AppConfig } from "@chaste/config";
@@ -88,6 +93,15 @@ export interface RequestAuth {
   actor: Actor;
 }
 
+/** ADR 0014 — the proactive surface a host builds from the durable runtime
+ * stores: the coordinator plus the stores it reads/writes. */
+export interface ProactiveSurface {
+  coordinator: ProactiveCoordinator;
+  watchRules: WatchRuleStore;
+  preferences: ProactivePreferencesStore;
+  deliveries: ProactiveDeliveryStore;
+}
+
 export interface AppContext {
   config: AppConfig;
   db: Db;
@@ -120,6 +134,8 @@ export interface AppContext {
   modelRouter: ModelRouter;
   /** ADR 0014 — the durable model usage ledger (spend queries for `/ai/usage`). */
   usage: UsageLedger;
+  /** ADR 0014 — proactive coordinator (watch rules, prefs, delivery ledger). */
+  proactive: ProactiveSurface;
   tracer: AiTracer;
   workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null;
 }
@@ -300,6 +316,23 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     now: () => new Date(),
   });
 
+  // ADR 0014 — proactive coordinator over the durable stores. Never executes
+  // commands itself: it produces authority-safe suggestions for the host to
+  // deliver or gate through approval.
+  const proactive: ProactiveSurface = {
+    coordinator: createProactiveCoordinator({
+      watchRules: runtime.watchRules,
+      wakes: runtime.wakes,
+      activities: runtime.activities,
+      preferences: runtime.proactivePreferences,
+      deliveries: runtime.proactiveDeliveries,
+      now: () => new Date(),
+    }),
+    watchRules: runtime.watchRules,
+    preferences: runtime.proactivePreferences,
+    deliveries: runtime.proactiveDeliveries,
+  };
+
   // Workflow builder uses AiProvider.complete() (rules + structured LLM)
   let workflowBuilder: ReturnType<typeof createWorkflowBuilderAgent> | null = null;
   if (provider.id !== "none") {
@@ -367,6 +400,7 @@ export async function createAppContext(env: NodeJS.ProcessEnv = process.env): Pr
     provider: tracedProvider,
     modelRouter,
     usage: runtime.usage,
+    proactive,
     tracer,
     workflowBuilder,
   };

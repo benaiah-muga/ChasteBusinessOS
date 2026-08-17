@@ -349,6 +349,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `e2e-workflow.test.ts` asserting the usage route.
   - Docs: ADR 0014 tranche-11 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
+- **Proactive coordinator — the twelfth harness tranche** (build item 13,
+  part 2): natural-language schedules parse into exact
+  who/what/when/condition/action objects *before* confirmation; watch rules
+  (notify < suggest < draft < request_approval) fire durably with trigger
+  evidence, proposed action, expected impact, and an explicit
+  `requiredApproval` flag; quiet hours, a daily cap, and occurrence
+  deduplication manage fatigue; and the coordinator never executes a command —
+  it hands the host an authority-safe plan to gate through approval.
+  - **`@chaste/ai-core` `proactive/`** — `schedule-parser.ts` (deterministic
+    `parseScheduleText` → `ScheduleSpec` + `confirmSchedule`), `watch-rules.ts`
+    (`WatchRule` + `WatchRuleStore` + `nextFireTime`, sharing kernel-activity
+    recurrence), `coordinator.ts` (`ProactivePreferences` quiet hours / daily
+    cap / channels, `ProactiveSuggestion` envelope, pure `deliveryGate` +
+    `inQuietHours`, `collect`/`deliver`/`deliverDue`/`buildProactivePlan`),
+    and dependency-free `types.ts` for the shared zod contracts.
+  - **`@chaste/db` + `@chaste/runtime`** — `watch_rules`,
+    `proactive_preferences`, and `proactive_deliveries` (unique
+    (org, dedupe_key) → exactly-once firing across hosts); Postgres stores
+    wired as `runtime.watchRules` / `runtime.proactivePreferences` /
+    `runtime.proactiveDeliveries`.
+  - **`apps/api`** — `app.proactive` surface; `/api/v1/proactive/rules` (CRUD
+    + pause/resume), `/api/v1/proactive/preferences` (read/edit),
+    `/api/v1/proactive/suggestions?now=` (dry-run, records nothing), and
+    `/api/v1/proactive/tick` (collect + gate + record).
+  - Tests: ai-core `proactive/coordinator.test.ts` (parsing, store scoping,
+    next-fire times, gate + quiet hours, collect/advance/duplicate,
+    approval-safety, wakes + overdue activities, cap/quiet-hours suppression);
+    `packages/runtime/src/proactive.e2e.test.ts` (rule on the API host honored
+    by a worker coordinator, durable delivery with unique dedupe key,
+    cursor advance, quiet-hours suppression, approval-safe plan handoff);
+    `apps/api/src/e2e-proactive.test.ts` (HTTP CRUD, pause/resume, dry-run,
+    tick, preferences).
+  - Docs: ADR 0014 tranche-12 update `docs/adr/0014-agent-harness-spine-pivot.md`.
+
 - **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +
