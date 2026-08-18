@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Frontend chat consumption of the AI chat API (`apps/web`, `packages/ui-schema`,
+  `packages/api-client`).** Verified end-to-end through the real browser UI
+  (`agent-browser` driving `http://localhost:3000` against the live API):
+  - `ChatWidget` now renders the `progress` part (live narration for auto-executed
+    plans/single commands) instead of dumping raw JSON, and renders the dormant
+    `form`, `button_group`, and `inbox_prompt` parts as readable summaries
+    (chat only carries message/confirm/cancel today, so they are deliberately
+    non-interactive until a submit path lands).
+  - `explanation` now surfaces `plannedCommand`/`plannedInput` ("Planned: ...") for
+    explainability, alongside the existing policy-used line.
+  - Unknown/forward-compatible parts render as a collapsible "Unsupported part"
+    disclosure instead of a raw JSON `<pre>` dump in the log.
+  - UI-driven NL flows verified: token login → sign out → re-login; read/table
+    answers; write → `confirm_action` card → Confirm → executed result table;
+    natural-key gate (re-asking to create Kampala Flour Mills yields no
+    confirm card, "already on file"); clarify when input is ambiguous.
+- **Generative UI research + verdict (`docs/research/2026-08-19-generative-ui-assessment.md`).**
+  The 13-part UiPart registry is runtime generative UI in its safest form (closed,
+  Zod-validated component registry, "tools are components"); free-form LLM-authored
+  React is not adopted (OWASP LLM01 / malicious AI-generated code, auditability,
+  driver-verifiability). Recommended next steps: wire `form`/`button_group`/
+  `inbox_prompt` to governed submit paths rather than a new framework.
+
 - **Deterministic analytics / replenishment / data-quality / dashboard intents
   (`@chaste/ai-core` `orchestrator.ts`, research doc §Analytics, §Inventory,
   §Onboarding).** All 18 research-doc NL requests now behave correctly over
@@ -785,6 +808,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Web app never hydrated under dev CSP (`apps/web/next.config.mjs`)** — the
+  `script-src` policy lacked `'unsafe-eval'`, which blocked Next dev's
+  `eval-source-map` chunks from executing, so React never mounted: every click
+  (login submit, assistant orb, theme toggle) was inert while SSR HTML rendered
+  normally. `'unsafe-eval'` is now added to `script-src` **only** in development;
+  the production policy stays strict. Verified by React fiber markers + full
+  login/chat flows in the browser.
 - **Stale chat confirm cards** — approving/answering one confirmation no longer leaves
   a second duplicate card visible in the composer.
 

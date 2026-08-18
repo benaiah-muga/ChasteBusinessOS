@@ -1390,6 +1390,82 @@ textarea:focus {
   margin: 8px 0 0;
 }
 
+.part-progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-top: 6px;
+}
+
+.part-form,
+.part-inbox,
+.part-raw {
+  margin-top: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: var(--surface);
+  font-size: 0.86rem;
+}
+
+.part-form ul {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.part-form li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.part-form .suggestion-row,
+.part-inbox .suggestion-row {
+  margin-top: 6px;
+}
+
+.part-inbox {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 8px;
+}
+
+.part-inbox p {
+  margin: 6px 0 0;
+}
+
+.part-raw summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.part-raw pre {
+  margin: 8px 0 0;
+  overflow: auto;
+}
+
+.chip-secondary,
+.chip-danger,
+.chip-primary {
+  cursor: default;
+}
+
+.chip-primary {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+.chip-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+
 .part-confirm {
   display: grid;
   grid-template-columns: 34px 1fr;

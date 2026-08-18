@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   Clock3,
+  Inbox,
   Info,
   Maximize2,
   MessageSquareText,
@@ -59,6 +60,14 @@ function PartView({
           {part.rulesApplied.length ? (
             <div className="muted" style={{ fontSize: "0.78rem" }}>
               Policy used: {part.rulesApplied.join(", ")}
+            </div>
+          ) : null}
+          {part.plannedCommand ? (
+            <div className="muted" style={{ fontSize: "0.78rem", marginTop: "4px" }}>
+              Planned: {part.plannedCommand.replace(/\./g, " · ")}
+              {part.plannedInput != null
+                ? ` ${JSON.stringify(part.plannedInput).slice(0, 200)}`
+                : ""}
             </div>
           ) : null}
         </details>
@@ -187,6 +196,62 @@ function PartView({
           ))}
         </div>
       );
+    case "progress":
+      return (
+        <div className="part-progress" role="status" aria-label="In progress">
+          <Clock3 size={14} />
+          <span>{part.text}</span>
+        </div>
+      );
+    case "form":
+      // The chat surface can only carry message/confirm/cancel today; a form
+      // part is rendered as a readable summary rather than an inert fake form.
+      return (
+        <div className="part-form">
+          {part.title ? <strong>{part.title}</strong> : null}
+          <ul>
+            {part.fields.map((field) => (
+              <li key={field.name}>
+                <span>{field.label}{field.required ? " *" : ""}</span>
+                <small className="muted">{field.fieldType}</small>
+              </li>
+            ))}
+          </ul>
+          <small className="muted">Fill in the details and re-ask, or use the workspace forms.</small>
+        </div>
+      );
+    case "button_group":
+      return (
+        <div className="suggestion-row" aria-label={part.buttons.map((b) => b.label).join(", ")}>
+          {part.buttons.map((button) => (
+            <span key={button.id} className={`chip chip-${button.variant}`}>
+              {button.label}
+            </span>
+          ))}
+        </div>
+      );
+    case "inbox_prompt":
+      return (
+        <div className="part-inbox">
+          <Inbox size={15} />
+          <div>
+            <strong>{part.title}</strong>
+            {part.body ? <p className="muted">{part.body}</p> : null}
+            {part.options?.length ? (
+              <div className="suggestion-row">
+                {part.options.map((option) => (
+                  <span key={option} className="chip">
+                    {option}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {!part.options?.length && part.allowText ? (
+              <small className="muted">Reply in chat to answer.</small>
+            ) : null}
+          </div>
+        </div>
+      );
     case "error":
       return (
         <div className="part-error">
@@ -195,10 +260,13 @@ function PartView({
         </div>
       );
     default:
+      // Unknown/forward-compatible part: surface the type name with the raw
+      // payload tucked behind a disclosure instead of dumping JSON in the log.
       return (
-        <pre className="mono part-raw">
-          {JSON.stringify(part, null, 2)}
-        </pre>
+        <details className="part-raw">
+          <summary className="muted">Unsupported part: {(part as { type?: string }).type}</summary>
+          <pre className="mono">{JSON.stringify(part, null, 2)}</pre>
+        </details>
       );
   }
 }
