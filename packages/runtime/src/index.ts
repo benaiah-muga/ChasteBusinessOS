@@ -190,6 +190,7 @@ export async function createRuntime(config: AppConfig, db: Db): Promise<Runtime>
     createPlatformModule(db, modules, {
       allowFullAutonomous: config.allowFullAutonomous,
       regions: config.regions,
+      watchRules,
     }),
   );
 

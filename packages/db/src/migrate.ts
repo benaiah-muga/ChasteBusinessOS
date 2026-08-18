@@ -1117,6 +1117,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS proactive_deliveries_dedupe_org_idx
   ON proactive_deliveries(organization_id, dedupe_key);
 CREATE INDEX IF NOT EXISTS proactive_deliveries_org_at_idx
   ON proactive_deliveries(organization_id, delivered_at);
+
+-- Deterministic data-quality / import transform rules + saved dashboards
+-- (NL intents: "treat blank tax IDs as unknown", "split full name into first
+-- and last name", "these two supplier columns are the same supplier",
+-- "turn this into a dashboard"). Rules describe how imported data should be
+-- interpreted; they never mutate source data.
+CREATE TABLE IF NOT EXISTS import_rules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  scope text NOT NULL,
+  rule_type text NOT NULL,
+  field text NOT NULL,
+  config jsonb NOT NULL DEFAULT '{}',
+  description text,
+  enabled boolean NOT NULL DEFAULT true,
+  created_by_user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS import_rules_org_idx ON import_rules(organization_id);
+
+CREATE TABLE IF NOT EXISTS dashboards (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid NOT NULL,
+  name text NOT NULL,
+  description text,
+  widget_spec jsonb NOT NULL DEFAULT '[]',
+  created_by_user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS dashboards_org_idx ON dashboards(organization_id);
 `;
 
 export async function runMigrations(databaseUrl?: string): Promise<void> {

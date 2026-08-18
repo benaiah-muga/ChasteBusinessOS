@@ -19,5 +19,7 @@ export function toExplanationPart(exp: AiExplanation): ExplanationPart {
     reasons: exp.reasons,
     rulesApplied: exp.rulesApplied,
     dataUsed: exp.dataUsed,
+    ...(exp.plannedCommand != null ? { plannedCommand: exp.plannedCommand } : {}),
+    ...(exp.plannedInput != null ? { plannedInput: exp.plannedInput } : {}),
   };
 }

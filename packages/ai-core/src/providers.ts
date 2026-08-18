@@ -21,12 +21,44 @@ export interface CompletionRequest {
   /** Multi-turn conversation history. When provided, takes precedence over `user`. */
   messages?: ChatMessage[];
   temperature?: number;
+  /**
+   * Native tool-calling surface (OpenAI-style `tools`). Ignored by providers
+   * that do not declare `toolCalling`; the caller must fall back to the text
+   * loop for those.
+   */
+  tools?: ToolDefinition[];
+  /**
+   * Prior tool turns fed back to the model: the assistant's tool calls plus
+   * the per-call results. Rendered as OpenAI `tool_calls`/`tool` messages.
+   */
+  toolHistory?: ToolHistoryEntry[];
 }
+
+/** Native tool definition sent to the provider (JSON Schema parameters). */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+/** One function call chosen by the model. */
+export interface ProviderToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+/** A prior tool-calling turn + its results, fed back to the provider. */
+export type ToolHistoryEntry =
+  | { role: "assistant"; content?: string; toolCalls: ProviderToolCall[] }
+  | { role: "tool"; toolCallId: string; content: string };
 
 export interface CompletionResult {
   text: string;
   provider: string;
   model: string;
+  /** Native tool calls chosen by the model (only when `tools` were offered). */
+  toolCalls?: ProviderToolCall[];
   usage?: {
     promptTokens?: number;
     completionTokens?: number;
@@ -36,14 +68,21 @@ export interface CompletionResult {
 
 export interface AiProvider {
   readonly id: string;
+  /**
+   * Whether the provider supports native tool calling (`tools` + `toolCalls`).
+   * When absent/false, tool users must fall back to the text JSON loop.
+   */
+  readonly toolCalling?: boolean;
   complete(req: CompletionRequest): Promise<CompletionResult>;
 }
 
 /**
  * Hard wall on single-turn completions (chat clarification, workflow builder).
  * Remote NIM models can stall; without this the workspace hangs indefinitely.
+ * Overridable per deployment (e.g. slower large MoE models need more headroom):
+ *   CHASTE_AI_TIMEOUT_MS
  */
-const AI_TIMEOUT_MS = 30_000;
+const AI_TIMEOUT_MS = Number(process.env.CHASTE_AI_TIMEOUT_MS ?? 30_000);
 
 export class NoneProvider implements AiProvider {
   readonly id = "none";
@@ -59,6 +98,7 @@ export class NoneProvider implements AiProvider {
 /** OpenAI or OpenAI-compatible HTTP API (including some local gateways). */
 export class OpenAiCompatibleProvider implements AiProvider {
   readonly id: string;
+  readonly toolCalling = true;
   constructor(
     private readonly apiKey: string,
     private readonly model: string,
@@ -84,7 +124,21 @@ export class OpenAiCompatibleProvider implements AiProvider {
           model: this.model,
           temperature: req.temperature ?? 0,
           messages: apiMessages,
-          max_tokens: 1024,
+          max_tokens: req.tools && req.tools.length > 0 ? 4096 : 1024,
+          ...(req.tools && req.tools.length > 0
+            ? {
+                tools: req.tools.map((t) => ({
+                  type: "function",
+                  function: { name: t.name, description: t.description, parameters: t.parameters },
+                })),
+                tool_choice: "auto",
+              }
+            : {}),
+          // Nemotron 3 on NIM 500s on tool requests unless thinking + non-empty
+          // content are forced via chat-template kwargs.
+          ...(this.model.includes("nemotron")
+            ? { chat_template_kwargs: { enable_thinking: true, force_nonempty_content: true } }
+            : {}),
         }),
         signal: controller.signal,
       });
@@ -101,11 +155,38 @@ export class OpenAiCompatibleProvider implements AiProvider {
       throw new Error(`AI provider error ${res.status}: ${body.slice(0, 200)}`);
     }
     const json = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
+      choices?: {
+        message?: {
+          content?: string;
+          tool_calls?: Array<{
+            id?: string;
+            function?: { name?: string; arguments?: string };
+          }>;
+        };
+      }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     };
+    const message = json.choices?.[0]?.message;
+    const toolCalls = (message?.tool_calls ?? [])
+      .filter((tc) => tc.function?.name)
+      .map((tc) => {
+        let args: Record<string, unknown> = {};
+        if (tc.function?.arguments) {
+          try {
+            args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+          } catch {
+            args = {};
+          }
+        }
+        return {
+          id: tc.id ?? crypto.randomUUID(),
+          name: tc.function!.name!,
+          arguments: args,
+        };
+      });
     return {
-      text: json.choices?.[0]?.message?.content ?? "",
+      text: message?.content ?? "",
+      ...(toolCalls.length > 0 ? { toolCalls } : {}),
       provider: this.id,
       model: this.model,
       usage: json.usage
@@ -240,8 +321,18 @@ export class AnthropicMessagesProvider implements AiProvider {
  * When `messages` (history) is provided, converts them and prepends system.
  * Falls back to single-turn system + user.
  */
-function buildApiMessages(req: CompletionRequest): { role: string; content: string }[] {
-  const msgs: { role: string; content: string }[] = [];
+function buildApiMessages(req: CompletionRequest): {
+  role: string;
+  content: string;
+  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+  tool_call_id?: string;
+}[] {
+  const msgs: {
+    role: string;
+    content: string;
+    tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+    tool_call_id?: string;
+  }[] = [];
 
   // System prompt always first
   msgs.push({ role: "system", content: req.system });
@@ -263,6 +354,23 @@ function buildApiMessages(req: CompletionRequest): { role: string; content: stri
   } else if (req.user) {
     // Single-turn shortcut
     msgs.push({ role: "user", content: req.user });
+  }
+
+  // Prior tool turns: assistant tool_calls + per-call tool results.
+  for (const entry of req.toolHistory ?? []) {
+    if (entry.role === "assistant") {
+      msgs.push({
+        role: "assistant",
+        content: entry.content ?? "",
+        tool_calls: entry.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+        })),
+      });
+    } else {
+      msgs.push({ role: "tool", tool_call_id: entry.toolCallId, content: entry.content });
+    }
   }
 
   return msgs;

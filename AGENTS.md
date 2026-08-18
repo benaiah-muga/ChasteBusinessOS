@@ -50,13 +50,21 @@ If you add a module or command:
 - Audit coverage via command bus
 - Contract test for the command
 - API route only if intentionally public; prefer generic command/query routes when possible
+- Every `*.create` has a natural key (name/sku/code/email) returned by its
+  `*.list` query, plus a `NaturalKeyRule` in `packages/ai-core/src/tools/natural-key.ts`
+  (guards the agent loop against redundant creates) with a unit test
+- New domain gets a `platform.<domain>` skill def in
+  `packages/ai-core/src/skills/platform-skills.ts` (keywords + check-then-write
+  instructions) with a routing test
+- Commands/queries carry a domain `description` (it is the model's main steer
+  in the tool loop)
 
 ## Skills
 
 Use repo skills under `skills/` when relevant:
 
-- `skills/module-author` -- new modules
-- `skills/command-safety` -- commands & permissions
+- `skills/module-author` -- new modules (incl. AI harness integration)
+- `skills/command-safety` -- commands & permissions (incl. natural-key gate)
 - `skills/pr-hygiene` -- PR completeness
 
 ## Style

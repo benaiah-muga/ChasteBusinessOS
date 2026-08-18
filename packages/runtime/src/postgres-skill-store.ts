@@ -8,6 +8,7 @@
 import { and, eq, isNull, or } from "drizzle-orm";
 import { schema, type Db } from "@chaste/db";
 const { aiSkills } = schema;
+import { platformSkillRecords } from "@chaste/ai-core";
 import type { SkillRecord, SkillStore } from "@chaste/ai-core";
 
 export class PostgresSkillStore implements SkillStore {
@@ -32,7 +33,15 @@ export class PostgresSkillStore implements SkillStore {
           filter.enabledOnly ? eq(aiSkills.enabled, true) : undefined,
         ),
       );
-    return rows.map((r) => this.toRecord(r)).sort((a, b) => a.name.localeCompare(b.name));
+    const dbRows = rows.map((r) => this.toRecord(r));
+    // Read-only platform skills are code-as-source-of-truth (always enabled);
+    // an org-scoped override in the DB with the same name shadows the bundled one.
+    const bundled = platformSkillRecords().filter(
+      (s) => !dbRows.some((r) => r.name === s.name && r.scope === "platform"),
+    );
+    return [...dbRows, ...bundled]
+      .filter((s) => !filter.enabledOnly || s.enabled)
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async get(

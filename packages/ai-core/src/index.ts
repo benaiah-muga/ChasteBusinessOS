@@ -12,6 +12,7 @@ export * from "./selfwake.js";
 export * from "./channels.js";
 export * from "./compaction.js";
 export * from "./skills.js";
+export * from "./skills/platform-skills.js";
 export * from "./trajectory/index.js";
 export * from "./context-engine/index.js";
 export * from "./tools/index.js";

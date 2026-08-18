@@ -4,6 +4,7 @@ import {
   type CommandRegistry,
   type QueryRegistry,
   type RequestContext,
+  createRequestContext,
   executeCommand,
   executeQuery,
   type CommandHelpers,
@@ -23,14 +24,26 @@ import {
   planMayAutoExecute,
   MODE_CONTEXT,
   type AutoExecMeta,
+  type Actor,
 } from "@chaste/kernel";
 import type { ChatMessage, UiPart } from "@chaste/ui-schema";
 import type { AiExplanation } from "./explanation.js";
 import { toExplanationPart } from "./explanation.js";
-import type { AiProvider } from "./providers.js";
+import type { AiProvider, ProviderToolCall, ToolDefinition, ToolHistoryEntry } from "./providers.js";
 import { generateSuggestions } from "./suggestions.js";
 import { normalizeFieldNames, resolveInput } from "./workflows/engine.js";
 import { looksLikePromptInjection, shouldCheckInjection } from "./guardrails/index.js";
+import {
+  buildToolsFromBus,
+  executeBusinessTool,
+  toolNameForBusName,
+  type ToolContext,
+  type ToolOutcome,
+  type ToolRegistry,
+} from "./tools/index.js";
+import { zodToJsonSchema } from "./mcp/zod-json-schema.js";
+import { dedupeCreateSteps, findExistingForCreate, naturalKeyRuleFor } from "./tools/natural-key.js";
+import { domainDoctrineText } from "./skills/platform-skills.js";
 import {
   applyToOutbound,
   buildState,
@@ -820,6 +833,422 @@ async function answerScheduleQuestion(
 }
 
 /**
+ * Deterministic analytics / data-availability questions (research doc
+ * §Analytics + §Inventory). Runs before the LLM so common questions are
+ * answered from verifiable org data through the same read-query bus a human
+ * uses, instead of an LLM-picked object dump or an invented write.
+ *
+ * Recognizes: margin trend ("why did margins fall this month?", "compare to
+ * last quarter"), sales grouped by branch/location ("show this by branch",
+ * "show monthly sales by branch"), and monthly sales summaries. Extended for
+ * company operations: purchase orders, stock levels (optionally at one
+ * warehouse), the customer list, outstanding/overdue receivables, and the
+ * monthly expense trend — all answered from the same read-query bus. The
+ * planner returns a structured plan only — execution stays in the read bus.
+ */
+type DataQuestionPlan =
+  | { kind: "margin"; input: { months?: number }; summary: string; lead: string }
+  | { kind: "salesByLocation"; input: { location?: string }; summary: string; lead: string }
+  | { kind: "monthlySales"; input: { months?: number }; summary: string; lead: string }
+  | { kind: "replenishment"; input: {}; summary: string; lead: string }
+  | { kind: "purchaseOrders"; input: {}; summary: string; lead: string }
+  | { kind: "stockLevels"; input: { warehouseRef?: string }; summary: string; lead: string }
+  | { kind: "customers"; input: {}; summary: string; lead: string }
+  | { kind: "receivables"; input: {}; summary: string; lead: string }
+  | { kind: "expenses"; input: { months?: number }; summary: string; lead: string };
+
+function dataQuestionQuery(p: DataQuestionPlan): string {
+  switch (p.kind) {
+    case "margin":
+    case "expenses":
+      return "core.analytics.marginTrend";
+    case "salesByLocation":
+      return "core.analytics.salesByLocation";
+    case "monthlySales":
+      return "core.analytics.salesSummary";
+    case "replenishment":
+      return "core.replenishment.propose";
+    case "purchaseOrders":
+      return "pur.po.list";
+    case "stockLevels":
+      return "inv.stock.list";
+    case "customers":
+      return "crm.customer.list";
+    case "receivables":
+      return "acc.invoice.list";
+  }
+}
+
+/** Deterministic classification of analytics/replenishment questions. */
+export function planDataQuestion(text: string): DataQuestionPlan | null {
+  const t = text.toLowerCase();
+
+  // Replenishment/stockout-risk first: the explicit domain verb wins over the
+  // generic "inventory is low" phrasing (which would otherwise read as a
+  // margin question).
+  if (
+    /\b(?:replenish|replenishment|reorder|stockout\s+risk|restock)\b/.test(t) ||
+    (/\binventory\b/.test(t) && /\b(?:low|getting low|running low)\b/.test(t))
+  ) {
+    return {
+      kind: "replenishment",
+      input: {},
+      summary: "Replenishment proposals (stock below reorder level)",
+      lead: "Here's what needs restocking (stock below reorder level, with suggested order quantities):",
+    };
+  }
+
+  // Outstanding / overdue receivables — "who owes us money".
+  if (
+    /\b(?:who owes us|overdue invoices?|outstanding invoices?|money (?:owed|due) to us|receivables?|aged receivables)\b/.test(t)
+  ) {
+    return {
+      kind: "receivables",
+      input: {},
+      summary: "Outstanding customer receivables",
+      lead: "Here are the invoices we're still owed (over 14 days = overdue):",
+    };
+  }
+
+  // Expense trend — "how much did we spend …".
+  if (
+    (/\b(?:spend|spent|expenses?|costs?)\b/.test(t) ||
+      (/\bexpense\b/.test(t) && /\b(?:trend|month|compare)\b/.test(t))) &&
+    /\b(?:how much|total|this month|last month|compare|trend|month|year|quarter)\b/.test(t)
+  ) {
+    return {
+      kind: "expenses",
+      input: /\bquarter\b/.test(t) ? { months: 3 } : /\b(?:this month|last month)\b/.test(t) ? { months: 2 } : {},
+      summary: "Monthly expense trend",
+      lead: "Here's the monthly expense trend (expenses from posted journal entries):",
+    };
+  }
+
+  // Purchase orders — "show our purchase orders". Only READ phrasing qualifies;
+  // "raise a purchase order for…" is a write intent and must not be shadowed.
+  if (
+    (/\b(?:show|list|view|display|get|what are)\b/.test(t) && /\bpurchase orders?\b/.test(t)) ||
+    /\b(?:our|all|open|recent)\s+purchase orders?\b/.test(t) ||
+    /^purchase orders?$/i.test(t)
+  ) {
+    return {
+      kind: "purchaseOrders",
+      input: {},
+      summary: "Purchase orders",
+      lead: "Here are the purchase orders on file:",
+    };
+  }
+
+  // Stock levels — optionally scoped to one warehouse ("at Ntinda"). A dashboard
+  // creation message ("create a dashboard for our stock levels…") is a WRITE
+  // intent; the descriptive "stock levels" phrase must not trigger a read.
+  if (/\b(?:stock levels?|inventory levels?|stock on hand|on-hand|current stock|stock at)\b/.test(t) && !/\bdashboard\b/.test(t)) {
+    const wh = t.match(/\bat\s+(?:the\s+)?([a-z][a-z\s-]+)$/);
+    return {
+      kind: "stockLevels",
+      input: wh?.[1] ? { warehouseRef: wh[1].trim() } : {},
+      summary: wh?.[1] ? `Stock levels at ${wh[1].trim()}` : "Stock levels",
+      lead: wh?.[1]
+        ? `Here's the current stock at ${wh[1].trim()}:`
+        : "Here's the current stock on hand across all warehouses:",
+    };
+  }
+
+  // Customer list — "list our customers" / "list all our customers".
+  if (/^(?:list|show|view|display)\s+(?:(?:all|our|the)\s+)*customers$/.test(t)) {
+    return {
+      kind: "customers",
+      input: {},
+      summary: "Customer list",
+      lead: "Here are your customers:",
+    };
+  }
+
+  // Sales at a named location — "show sales for the Jinja branch". Must come
+  // before the generic "… by branch/location" grouping so a named branch
+  // renders only that location's slice.
+  const salesAt = t.match(/sales\s+(?:for|at|in)\s+(?:the\s+)?([a-z][a-z\s-]+?)(?:\s+branch)?$/);
+  if (salesAt?.[1] && !/\bby\b/.test(salesAt[1])) {
+    return {
+      kind: "salesByLocation",
+      input: { location: salesAt[1].trim() },
+      summary: `Sales at ${salesAt[1].trim()}`,
+      lead: `Here's sales at ${salesAt[1].trim()}:`,
+    };
+  }
+
+  // "… by branch/location" — group the org's sales by customer location.
+  if (
+    /\b(?:by branch|branch breakdown|by location|by city|per branch|by store)\b/.test(t) ||
+    /^show\s+this\s+by\s+branch/.test(t)
+  ) {
+    return {
+      kind: "salesByLocation",
+      input: {},
+      summary: "Sales grouped by location",
+      lead: "Here's sales grouped by location:",
+    };
+  }
+
+  // Margin trend / quarter comparison.
+  if (
+    (/\b(?:margin|margins|profit|profitability)\b/.test(t) &&
+      /\b(?:why|fall|drop|decline|decrease|down|compare|trend|change|this month|last month|month)\b/.test(t)) ||
+    (/\bcompare\b/.test(t) && /\bquarter\b/.test(t)) ||
+    /^compare\s+to\s+last\s+quarter/.test(t)
+  ) {
+    const months =
+      /\bquarter\b/.test(t) ? 3 : /\b(?:this month|last month)\b/.test(t) ? 2 : undefined;
+    return {
+      kind: "margin",
+      input: months ? { months } : {},
+      summary:
+        /\bquarter\b/.test(t)
+          ? "Margin trend vs last quarter"
+          : /\b(?:this month|last month)\b/.test(t)
+            ? "Margin, this month vs last month"
+            : "Monthly margin trend",
+      lead:
+        /\bquarter\b/.test(t)
+          ? "Here's the margin trend for the last quarter (revenue − expenses from posted journal entries):"
+          : /\b(?:this month|last month)\b/.test(t)
+            ? "Here's margin for this month vs last month (revenue − expenses from posted journal entries):"
+            : "Here's the monthly margin trend (revenue − expenses from posted journal entries):",
+    };
+  }
+
+  // Monthly sales summary.
+  if (/\b(?:monthly sales|sales by month|sales trend|sales this month|sales over time)\b/.test(t)) {
+    return {
+      kind: "monthlySales",
+      input: {},
+      summary: "Monthly sales summary",
+      lead: "Here's the monthly sales summary (from issued, non-draft invoices):",
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Render a data question from org data. Each query runs through the same
+ * read-query bus (permission + zod + request context) and the answer includes a
+ * verifiable "how this was calculated" narrative, never a raw object dump.
+ */
+async function answerDataQuestion(
+  deps: OrchestratorDeps,
+  ctx: RequestContext,
+  plan: DataQuestionPlan,
+): Promise<{ parts: UiPart[]; explanation: AiExplanation }> {
+  const query = dataQuestionQuery(plan);
+  let rows: Record<string, unknown>[] = [];
+  let currency = "UGX";
+  try {
+    const res = await executeQuery(deps.queries, query, plan.input, ctx);
+    const data = res.data as Record<string, unknown>;
+    currency = String(data.currency ?? "UGX");
+    if (plan.kind === "replenishment") {
+      rows = (data.items as Record<string, unknown>[]) ?? [];
+    } else if (plan.kind === "salesByLocation") {
+      rows = (data.byLocation as Record<string, unknown>[]) ?? [];
+      if (plan.input.location) {
+        const loc = plan.input.location.toLowerCase();
+        rows = rows.filter((r) => String(r.location ?? "").toLowerCase().includes(loc));
+      }
+    } else if (plan.kind === "margin" || plan.kind === "expenses" || plan.kind === "monthlySales") {
+      rows = (data.monthly as Record<string, unknown>[]) ?? [];
+      if (plan.kind === "expenses") {
+        rows = rows.map((r) => ({ month: r.month, expenses: r.expenses, margin: r.margin }));
+      }
+    } else if (plan.kind === "purchaseOrders") {
+      const vendors = (data.vendors as { id: string; name: string }[]) ?? [];
+      const orders = (data.orders as { number: string; vendorId: string; status: string; total: string }[]) ?? [];
+      const vMap = new Map(vendors.map((v) => [v.id, v.name]));
+      rows = orders.map((o) => ({
+        number: o.number,
+        vendor: vMap.get(o.vendorId) ?? "",
+        status: o.status,
+        total: o.total,
+      }));
+    } else if (plan.kind === "stockLevels") {
+      const warehouses = (data.warehouses as { id: string; code: string; name: string }[]) ?? [];
+      const products = (data.products as { id: string; sku: string; name: string }[]) ?? [];
+      const levels = (data.levels as { warehouseId: string; productId: string; quantity: number }[]) ?? [];
+      let scope = warehouses;
+      if (plan.input.warehouseRef) {
+        const ref = plan.input.warehouseRef.toLowerCase();
+        scope = warehouses.filter((w) => `${w.name} ${w.code}`.toLowerCase().includes(ref));
+      }
+      const scopeIds = new Set(scope.map((w) => w.id));
+      const whName = new Map(warehouses.map((w) => [w.id, w.name]));
+      const pMap = new Map(products.map((p) => [p.id, p]));
+      rows = levels
+        .filter((l) => scopeIds.has(l.warehouseId))
+        .map((l) => {
+          const p = pMap.get(l.productId);
+          return {
+            sku: p?.sku ?? "",
+            name: p?.name ?? "",
+            warehouse: whName.get(l.warehouseId) ?? "",
+            quantity: l.quantity,
+          };
+        })
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    } else if (plan.kind === "customers") {
+      rows = (data.items as Record<string, unknown>[]) ?? [];
+    } else if (plan.kind === "receivables") {
+      const items = (data.items as Record<string, unknown>[]) ?? [];
+      let customers: { id: string; name: string }[] = [];
+      try {
+        const c = await executeQuery(deps.queries, "crm.customer.list", {}, ctx);
+        customers = ((c.data as { items?: { id: string; name: string }[] }).items ?? []) as { id: string; name: string }[];
+      } catch {
+        // customer names are a nicety; a failed lookup doesn't fail the read
+      }
+      const cMap = new Map(customers.map((c) => [c.id, c.name]));
+      const DAY = 86_400_000;
+      const now = Date.now();
+      rows = items
+        .filter((i) => String(i.status ?? "") !== "paid")
+        .map((i) => {
+          const ageDays = Math.floor((now - new Date(String(i.createdAt)).getTime()) / DAY);
+          return {
+            number: i.number,
+            customer: cMap.get(String(i.customerId ?? "")) ?? "",
+            amount: i.total,
+            status: i.status,
+            ageDays,
+          };
+        })
+        .sort((a, b) => Number(b.ageDays) - Number(a.ageDays));
+    }
+  } catch (err) {
+    return {
+      parts: [
+        { type: "text", text: `I couldn't read that: ${(err as Error).message}` },
+      ],
+      explanation: {
+        runId: crypto.randomUUID(),
+        summary: `Read failed: ${query}`,
+        reasons: [(err as Error).message],
+        rulesApplied: ["read_via_query_bus", "zod_validation_on_execute", "permission_check_on_execute"],
+        dataUsed: ["user message", "query catalog"],
+        autonomy: "recommend",
+        plannedCommand: query,
+      },
+    };
+  }
+
+  const columns =
+    plan.kind === "replenishment"
+      ? [
+          { key: "sku", label: "SKU" },
+          { key: "name", label: "Product" },
+          { key: "warehouse", label: "Warehouse" },
+          { key: "quantity", label: "On hand" },
+          { key: "reorderLevel", label: "Reorder level" },
+          { key: "suggestedQty", label: "Suggested qty" },
+        ]
+      : plan.kind === "salesByLocation"
+        ? [
+            { key: "location", label: "Location" },
+            { key: "total", label: `Total (${currency})` },
+            { key: "invoiceCount", label: "Invoices" },
+          ]
+        : plan.kind === "purchaseOrders"
+          ? [
+              { key: "number", label: "PO #" },
+              { key: "vendor", label: "Vendor" },
+              { key: "status", label: "Status" },
+              { key: "total", label: `Total (${currency})` },
+            ]
+          : plan.kind === "stockLevels"
+            ? [
+                { key: "sku", label: "SKU" },
+                { key: "name", label: "Product" },
+                { key: "warehouse", label: "Warehouse" },
+                { key: "quantity", label: "On hand" },
+              ]
+            : plan.kind === "customers"
+              ? [
+                  { key: "name", label: "Customer" },
+                  { key: "city", label: "City" },
+                  { key: "email", label: "Email" },
+                  { key: "status", label: "Status" },
+                ]
+              : plan.kind === "receivables"
+                ? [
+                    { key: "number", label: "Invoice" },
+                    { key: "customer", label: "Customer" },
+                    { key: "amount", label: `Amount (${currency})` },
+                    { key: "status", label: "Status" },
+                    { key: "ageDays", label: "Age (days)" },
+                  ]
+                : plan.kind === "expenses"
+                  ? [
+                      { key: "month", label: "Month" },
+                      { key: "expenses", label: `Expenses (${currency})` },
+                      { key: "margin", label: `Margin (${currency})` },
+                    ]
+                  : [
+                      { key: "month", label: "Month" },
+                      { key: "revenue", label: `Revenue (${currency})` },
+                      { key: "expenses", label: `Expenses (${currency})` },
+                      { key: "margin", label: `Margin (${currency})` },
+                      { key: "total", label: `Total (${currency})` },
+                      { key: "invoiceCount", label: "Invoices" },
+                    ];
+
+  const parts: UiPart[] = [
+    {
+      type: "text",
+      text: rows.length === 0 ? `Nothing found — no data for ${plan.summary.toLowerCase()}.` : plan.lead,
+    },
+  ];
+  if (rows.length > 0) {
+    parts.push({ type: "table", columns, rows });
+  }
+
+  if (plan.kind === "margin" && rows.length > 0) {
+    const current = rows[rows.length - 1]!;
+    const prior = rows[rows.length - 2];
+    if (prior && typeof current.margin === "number" && typeof prior.margin === "number") {
+      const delta = current.margin - prior.margin;
+      const direction = delta < 0 ? "fell" : delta > 0 ? "rose" : "held steady";
+      parts.push({
+        type: "text",
+        text: `Margin ${direction} by ${currency} ${Math.abs(delta).toLocaleString()} month over month (${prior.month} → ${current.month}).`,
+      });
+    }
+  }
+  if (plan.kind === "replenishment" && rows.length === 0) {
+    parts.push({ type: "text", text: "All stock is at or above its reorder level." });
+  }
+  if (plan.kind === "stockLevels" && rows.length === 0) {
+    parts.push({
+      type: "text",
+      text: plan.input.warehouseRef
+        ? `No stock records found at ${plan.input.warehouseRef}.`
+        : "No stock records found.",
+    });
+  }
+  if (plan.kind === "receivables" && rows.length === 0) {
+    parts.push({ type: "text", text: "No outstanding invoices — everyone is paid up." });
+  }
+
+  const explanation: AiExplanation = {
+    runId: crypto.randomUUID(),
+    summary: plan.summary,
+    reasons: ["Answered from org data via the read-query bus", "How it was calculated: deterministic query on posted records"],
+    rulesApplied: ["ai_manual_parity", "read_via_query_bus", "zod_validation_on_execute", "permission_check_on_execute"],
+    dataUsed: ["user message", "query catalog"],
+    autonomy: "recommend",
+    plannedCommand: query,
+  };
+  return { parts, explanation };
+}
+
+/**
  * Deterministic datetime phrase extraction for "remind me …" / "follow up …".
  *
  * Understands a small, reliable set of phrases: "in N minutes/hours/days",
@@ -979,6 +1408,18 @@ function planSingleSegment(text: string): PlannedAction | null {
   // Politeness/interjections never change intent.
   const trimmed = normalizeRequestPhrasing(text);
 
+  // Recurring/standing markers ("every friday", "each morning", "monthly",
+  // "on the 25th of each month") must NOT be collapsed into a one-shot
+  // reminder/follow-up — the clock parser below would grab a stray "at 4pm"
+  // and drop the recurrence. Defer those to the watch-rule planner.
+  if (
+    /(?:\b(every|monthly|weekly|daily)\b|each\s+(?:morning|afternoon|evening|day|night|month|week)|on\s+the\s+\d{1,2}(?:st|nd|rd|th)?\s+of\s+each\s+month)/i.test(
+      trimmed,
+    )
+  ) {
+    return null;
+  }
+
   // Reminders & follow-ups (spec: scheduling-and-comms §3). Deterministic
   // datetime phrases map to an ISO fireAt; anything else falls through to a
   // natural clarification ("when should I…") instead of an examples dump.
@@ -1047,18 +1488,21 @@ function planSingleSegment(text: string): PlannedAction | null {
     };
   }
 
-  // Invoice — (create|add|make|raise|generate|issue) [a|an] (invoice|bill) <ref> [for <amt> [CUR]].
+  // Invoice — (create|add|make|raise|generate|issue) [a|an] (invoice|bill) <ref>
+  // [for <amt> [CUR]] [to <customer>]. Amounts may use thousands separators.
   m = trimmed.match(
-    /^(?:create|add|make|raise|generate|issue)\s+(?:an\s+|a\s+)?(?:invoice|bill)\s+(?!for\b)(\S+)(?:\s+for\s+([\d.]+))?(?:\s+([A-Z]{3}))?$/i,
+    /^(?:create|add|make|raise|generate|issue)\s+(?:an\s+|a\s+)?(?:invoice|bill)\s+(?!for\b)(\S+)(?:\s+for\s+([\d.,]+))?(?:\s+([A-Z]{3}))?(?:\s+(?:to|for)\s+([A-Za-z][A-Za-z\s.-]+))?$/i,
   );
   if (m?.[1]) {
+    const input: Record<string, unknown> = {
+      number: m[1],
+      total: m[2] ? Number(m[2].replace(/,/g, "")) : 0,
+      currency: m[3] ?? "USD",
+    };
+    if (m[4]?.trim()) input.customerRef = m[4].trim();
     return {
       command: "acc.invoice.create",
-      input: {
-        number: m[1],
-        total: m[2] ? Number(m[2]) : 0,
-        currency: m[3] ?? "USD",
-      },
+      input,
       summary: `Create invoice ${m[1]}`,
       specialist: "accounting",
     };
@@ -1073,6 +1517,90 @@ function planSingleSegment(text: string): PlannedAction | null {
       input: { name: m[1].trim() },
       summary: `Create vendor ${m[1].trim()}`,
       specialist: "purchasing",
+    };
+  }
+
+  // Purchase order — (create|raise|place) [a] purchase order [for <qty> <unit>
+  // of] <product> (from|with) <vendor>. Entity names resolve to ids at write
+  // time through the read-query bus; the PO number is generated deterministically
+  // from the existing order count (never invented).
+  m = trimmed.match(
+    /^(?:create|raise|make|place|prepare|open)\s+(?:a\s+|an\s+|the\s+)?purchase order\s+(?:for\s+)?(.+?)\s+(?:from|with)\s+([A-Za-z][A-Za-z\s.-]+)$/i,
+  );
+  if (m?.[1] && m?.[2]) {
+    const desc = m[1].trim();
+    const vendorRef = m[2].trim();
+    const qtyMatch = desc.match(
+      /^(\d+(?:,\d+)?)\s+(?:bags?|boxes?|kg|litres?|trays?|loaves?|pcs?|cartons?|units?|cases?|packs?)?\s*(?:of\s+)?(.+)$/i,
+    );
+    const productRef = qtyMatch?.[2] ?? desc;
+    const qty = qtyMatch?.[1] ? Number(qtyMatch[1].replace(/,/g, "")) : undefined;
+    return {
+      command: "pur.po.create",
+      input: { vendorRef, productRef, qty, generateNumber: true },
+      summary: `Purchase order: ${qty ? `${qty} × ` : ""}${productRef} from ${vendorRef}`,
+      specialist: "purchasing",
+    };
+  }
+
+  // Receive goods — (receive|add|restock) <qty> [<unit>] [of] <product>
+  // (at|to|into) [the] <warehouse> → +qty stock adjustment.
+  m = trimmed.match(
+    /^(?:receive|add|restock)\s+(\d+(?:,\d+)?)\s+(?:bags?|boxes?|kg|litres?|trays?|loaves?|pcs?|cartons?|units?|cases?|packs?)?\s*(?:of\s+)?(.+?)\s+(?:at|to|into)\s+(?:the\s+)?(.+)$/i,
+  );
+  if (m?.[1] && m?.[2] && m?.[3]) {
+    return {
+      command: "inv.stock.adjust",
+      input: {
+        productRef: m[2].trim(),
+        warehouseRef: m[3].trim().replace(/^the\s+/i, "").replace(/\s+warehouse$/i, ""),
+        quantityDelta: Number(m[1].replace(/,/g, "")),
+        reason: "Goods received",
+      },
+      summary: `Receive ${m[1]} × ${m[2].trim()} at ${m[3].trim()}`,
+      specialist: "inventory",
+    };
+  }
+
+  // Stock adjustment — adjust stock of <product> at <warehouse> <up|down> by
+  // <qty> for <reason> (e.g. spoilage/damage).
+  m = trimmed.match(
+    /^adjust(?: the)? stock of\s+(.+?)\s+(?:at|in)\s+(?:the\s+)?(.+?)\s+(up|down)\s+by\s+(\d+(?:,\d+)?)\s+(?:for|because of|due to)\s+(.+)$/i,
+  );
+  if (m?.[1] && m?.[2] && m?.[4] && m?.[5]) {
+    const sign = m[3]!.toLowerCase() === "down" ? -1 : 1;
+    return {
+      command: "inv.stock.adjust",
+      input: {
+        productRef: m[1].trim(),
+        warehouseRef: m[2].trim(),
+        quantityDelta: sign * Number(m[4].replace(/,/g, "")),
+        reason: m[5].trim(),
+      },
+      summary: `Adjust ${m[1].trim()} at ${m[2].trim()} ${m[3]!.toLowerCase()} by ${m[4]}`,
+      specialist: "inventory",
+    };
+  }
+
+  // Journal entry — (post|record) [a] journal entry <ref> [for <memo>]:
+  // debit <account> <amount>, credit <account> <amount>. The two lines must
+  // balance; accounts resolve by name at write time.
+  m = trimmed.match(
+    /^(?:post|record|create)\s+(?:a\s+|an\s+)?journal entry\s+([A-Za-z0-9-]+)(?:\s+for\s+(.+?))?\s*:?\s*debit\s+(.+?)\s+([\d.,]+)\s*(?:,|\s+and)?\s*credit\s+(.+?)\s+([\d.,]+)$/i,
+  );
+  if (m?.[1] && m?.[3] && m?.[4] && m?.[5] && m?.[6]) {
+    return {
+      command: "acc.journal.post",
+      input: {
+        reference: m[1],
+        memo: m[2]?.trim(),
+        debitAccountRef: m[3].trim(),
+        debitAmount: Number(m[4].replace(/,/g, "")),
+        creditAccountRef: m[5].trim(),
+        creditAmount: Number(m[6].replace(/,/g, "")),
+      },
+      summary: `Post journal entry ${m[1]}`,
+      specialist: "accounting",
     };
   }
 
@@ -1100,12 +1628,519 @@ function planSingleSegment(text: string): PlannedAction | null {
     };
   }
 
+  // Branch — "open|create|set up|start [a] [new] branch [in|at|called] <place>".
+  // The `code` is derived deterministically (first 4 alphanumerics, uppercased)
+  // so the AI never has to invent a required field the manual UI owns.
+  m = trimmed.match(
+    /^(?:open|create|set up|start|add)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?branch\s+(?:in\s+|at\s+|called\s+|named\s+)?(.+)$/i,
+  );
+  if (m?.[1]) {
+    const place = m[1].trim();
+    const letters = place.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+    const code = (letters.slice(0, 4) || "BRCH").padEnd(4, "X");
+    const name = `${place[0]!.toUpperCase()}${place.slice(1)} Branch`;
+    return {
+      command: "core.branch.create",
+      input: { name, code },
+      summary: `Open a new branch in ${place}`,
+      specialist: "core",
+    };
+  }
+
+  // Data-quality / import-transform rules (research doc §Onboarding NL repair).
+  // These create a durable, inspectable rule through the command bus — never an
+  // LLM-invented field update on live records.
+  m = trimmed.match(/^treat\s+blank\s+(.+?)\s+as\s+unknown$/i);
+  if (m?.[1]) {
+    const field = m[1].trim();
+    return {
+      command: "core.importRule.create",
+      input: {
+        scope: "customer",
+        ruleType: "blank_as_unknown",
+        field,
+        description: `Treat blank ${field} values as unknown during import`,
+      },
+      summary: `Import rule: treat blank ${field} as unknown`,
+      specialist: "core",
+    };
+  }
+  m = trimmed.match(/^split\s+(.+?)\s+into\s+(.+)$/i);
+  if (m?.[1] && m?.[2]) {
+    const source = m[1].trim();
+    const parts = m[2].split(/,\s*|\s+and\s+/i).map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      return {
+        command: "core.importRule.create",
+        input: {
+          scope: "customer",
+          ruleType: "split_field",
+          field: source,
+          config: { into: parts },
+          description: `Split ${source} into ${parts.join(", ")} during import`,
+        },
+        summary: `Import rule: split ${source} into ${parts.join(", ")}`,
+        specialist: "core",
+      };
+    }
+  }
+  m = trimmed.match(/^these\s+two\s+(.+?)\s+columns\s+are\s+the\s+same\s+(.+)$/i);
+  if (m?.[1] && m?.[2]) {
+    const scope = m[2].trim().toLowerCase();
+    const resolvedScope = scope === "supplier" || scope === "customer" ? scope : "supplier";
+    return {
+      command: "core.importRule.create",
+      input: {
+        scope: resolvedScope,
+        ruleType: "dedupe_column",
+        field: resolvedScope,
+        config: { merge: true },
+        description: `Treat the two ${resolvedScope} columns as the same ${resolvedScope} during import`,
+      },
+      summary: `Import rule: the two ${resolvedScope} columns are the same ${resolvedScope}`,
+      specialist: "core",
+    };
+  }
+
+  // Dashboard/report deictic — "turn this into a dashboard". Without an earlier
+  // analysis to preserve, the default is the org's monthly sales summary (the
+  // same widget the manual analytics surface offers), so the action is
+  // deterministic and verifiable rather than an LLM guess. A named subject
+  // ("create a dashboard for our stock levels at Ntinda") becomes a real
+  // dashboard with a matching query widget.
+  m =
+    trimmed.match(/^(?:turn|save|publish)\s+this\s+into\s+a\s+dashboard$/i) ??
+    trimmed.match(/^(?:create|save|make|build|set up)\s+(?:a\s+|an\s+)?dashboard(?:\s+(?:for|of|showing)\s+(.+))?$/i);
+  if (m) {
+    const subject = m[1]?.trim();
+    if (subject) {
+      const clean = subject.replace(/^our\s+/i, "").trim();
+      const name = `${clean[0]!.toUpperCase()}${clean.slice(1)}`;
+      const isStock = /\bstock|inventory|on\s+hand\b/i.test(subject);
+      return {
+        command: "core.dashboard.create",
+        input: {
+          name,
+          description: `${name} saved from chat`,
+          widgets: [
+            {
+              query: isStock ? "inv.stock.list" : "core.analytics.salesSummary",
+              title: name,
+              config: {},
+            },
+          ],
+        },
+        summary: `Save a dashboard: ${name}`,
+        specialist: "core",
+      };
+    }
+    return {
+      command: "core.dashboard.create",
+      input: {
+        name: "Monthly sales",
+        description: "Monthly sales summary saved from chat",
+        widgets: [
+          { query: "core.analytics.salesSummary", title: "Monthly sales", config: {} },
+        ],
+      },
+      summary: "Save a monthly sales dashboard",
+      specialist: "core",
+    };
+  }
+
+  return null;
+}
+
+/* ─── Proactive / standing-rule intents (ADR 0014 watch rules) ─────────── */
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+const TIME_OF_DAY: Record<string, string> = {
+  morning: "09:00",
+  afternoon: "15:00",
+  evening: "18:00",
+  night: "20:00",
+  noon: "12:00",
+  midday: "12:00",
+  midnight: "00:00",
+};
+
+interface ParsedRecurrence {
+  freq: "daily" | "weekly" | "monthly";
+  interval?: number;
+  daysOfWeek?: number[];
+  at?: string;
+}
+
+function buildRecurrence(word: string, at?: string): ParsedRecurrence | null {
+  const lower = word.toLowerCase();
+  if (lower in TIME_OF_DAY) return { freq: "daily", at: at ?? TIME_OF_DAY[lower] };
+  if (lower === "day" || lower === "daily" || lower === "today")
+    return { freq: "daily", at: at ?? "09:00" };
+  if (lower === "week" || lower === "weekly") return { freq: "weekly", at: at ?? "09:00" };
+  if (lower === "month" || lower === "monthly") return { freq: "monthly", at: at ?? "09:00" };
+  const idx = WEEKDAY_INDEX[lower];
+  if (idx != null) return { freq: "weekly", daysOfWeek: [idx], at: at ?? "09:00" };
+  return null;
+}
+
+/** Split "every <freq> [at <T>] <rest>" into a recurrence + the remaining clause. */
+function splitRecurrenceRest(phrase: string): {
+  recurrence: ParsedRecurrence | null;
+  remainder: string;
+} {
+  const match = phrase.match(/^(\w+)(?:\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?/i);
+  if (!match) return { recurrence: null, remainder: phrase };
+  let at: string | undefined;
+  if (match[2]) {
+    let h = Number(match[2]);
+    const min = Number(match[3] ?? 0);
+    const suffix = (match[4] ?? "").toLowerCase();
+    if (suffix === "pm" && h < 12) h += 12;
+    if (suffix === "am" && h === 12) h = 0;
+    if (h <= 23 && min <= 59) at = `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+  }
+  const recurrence = buildRecurrence(match[1]!, at);
+  if (!recurrence) return { recurrence: null, remainder: phrase };
+  const remainder = phrase
+    .slice(match[0].length)
+    .trim()
+    .replace(/^(?:to|that i)\s+/i, "")
+    .trim();
+  return { recurrence, remainder };
+}
+
+const RECIPIENT_GROUPS: Record<string, string> = {
+  "branch managers": "branch_manager",
+  "branch manager": "branch_manager",
+  "the branch managers": "branch_manager",
+  "the branch manager": "branch_manager",
+  "ops manager": "ops_manager",
+  "the ops manager": "ops_manager",
+  "operations manager": "ops_manager",
+  "the operations manager": "ops_manager",
+  "the ops team": "ops_manager",
+  "the finance team": "finance",
+  "finance team": "finance",
+  "the sales team": "sales",
+  "sales team": "sales",
+};
+
+/** Recipient labels a watch rule may carry; resolved to user ids by the command. */
+function parseRecipients(text: string): string[] | null {
+  const lower = text.trim().toLowerCase();
+  if (lower === "me" || lower === "myself") return ["me"];
+  if (/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/.test(text.trim())) return [text.trim()];
+  if (lower === "finance" || lower === "sales") return [lower];
+  for (const [label, role] of Object.entries(RECIPIENT_GROUPS)) {
+    if (lower.startsWith(label)) return [role];
+  }
+  return null;
+}
+
+/** Strip the recipient phrase off the front of a clause. */
+function stripRecipientPrefix(clause: string, recipients: string[]): string {
+  const [first] = recipients;
+  const lower = clause.trim().toLowerCase();
+  if (lower === "me" || lower === "myself") return "";
+  for (const [label] of Object.entries(RECIPIENT_GROUPS)) {
+    if (lower.startsWith(label)) {
+      return clause.trim().slice(label.length).trim().replace(/^(?:to|that|and)\s+/i, "").trim();
+    }
+  }
+  if (first && /^[\w.+-]+@/.test(first)) {
+    return clause.replace(/^[^@\s]+@[^\s]+\s+/i, "").trim();
+  }
+  return clause.trim();
+}
+
+/** Map a natural-language condition to the worker's mini condition DSL. */
+function mapConditionToDsl(condition: string): string {
+  const c = condition.trim();
+  let m = c.match(
+    /(?:invoices?|bills?|purchase orders?|pos?)\s+(?:over|above|exceeding|greater than|gt|exceed)\s+([\d.,]+(?:\s*(?:million|thousand))?)/i,
+  );
+  if (m) return `po.total gt ${scaleNumber(m[1]!)}`;
+  m = c.match(
+    /(?:invoices?|bills?)\s+(?:that are|which are|are|that)\s*(?:overdue|past due)(?:\s+by)?\s*(?:>|more than)?\s*(\d+)\s*days?/i,
+  );
+  if (m) return `invoice.overdue gt ${m[1]!}`;
+  m = c.match(
+    /(?:stock|stockout|inventory)\s+(?:of|level of)?\s*([A-Za-z0-9-]{2,})\s+(?:drops?|falls?|is|goes|sits)\s+(?:below|under|beneath|less than)\s+(\d+)/i,
+  );
+  if (m) return `stock.product.${m[1]!.toUpperCase()} below ${m[2]!}`;
+  return c;
+}
+
+/** "5 million" → "5000000"; "12,000" → "12000". */
+function scaleNumber(raw: string): string {
+  const m = raw.match(/^([\d.,]+)\s*(million|thousand)?/i);
+  if (!m) return raw;
+  const num = Number(m[1]!.replace(/[.,]/g, ""));
+  const word = m[2]?.toLowerCase();
+  const mult = word === "million" ? 1_000_000 : word === "thousand" ? 1_000 : 1;
+  return String(num * mult);
+}
+
+interface WatchRulePlanOpts {
+  name: string;
+  mode: "notify" | "draft" | "request_approval";
+  recipients: string[];
+  intent: string;
+  recurrence?: ParsedRecurrence;
+  condition?: string;
+  timezone?: string;
+}
+
+function watchRulePlan(o: WatchRulePlanOpts): PlannedAction {
+  const recurrence = o.recurrence ?? { freq: "daily" as const, at: "09:00" };
+  const input: Record<string, unknown> = {
+    name: o.name.slice(0, 160),
+    trigger: { kind: "schedule", recurrence, timezone: o.timezone ?? "UTC" },
+    action: { mode: o.mode, intent: o.intent, recipients: o.recipients },
+  };
+  if (o.condition) input.condition = o.condition;
+  return {
+    command: "core.watchRule.create",
+    input,
+    summary: `Set up watch rule: ${o.name}`,
+    specialist: "core",
+  };
+}
+
+/**
+ * Deterministic planner for recurring / conditional standing rules. Returns a
+ * `core.watchRule.create` plan for "every <freq>…", "if <cond>, ask me before…",
+ * "draft … for approval", "on the <N>th of each month…", and deictic "send/schedule
+ * this every <freq>". `timezone` is the org timezone (local "at" is normalized to
+ * UTC by the command's trigger handling).
+ */
+function planWatchRuleSegment(text: string, timezone?: string): PlannedAction | null {
+  const trimmed = normalizeRequestPhrasing(text);
+  let m: RegExpMatchArray | null;
+
+  // Conditional, verb-first: "if <cond>[,] ask me before <intent>"
+  m = trimmed.match(/^(?:if|when)\s+(.+?)\s*[,;]\s*(?:then\s+)?(.+)$/i);
+  if (m?.[1] && m?.[2]) {
+    const condition = mapConditionToDsl(m[1]);
+    const clause = m[2].trim();
+    let cm = clause.match(/^ask\s+me(?:\s+before|\s+first)?\s+(.+)$/i);
+    if (cm?.[1]) {
+      const intent = cm[1].replace(/^to\s+/i, "").trim();
+      return watchRulePlan({
+        name: `Approval gate: ${intent}`,
+        condition,
+        mode: "request_approval",
+        recipients: ["me"],
+        intent,
+        timezone,
+      });
+    }
+    cm = clause.match(/^draft\s+(.+?)\s+for\s+(?:approval|a\s+reminder)/i);
+    if (cm?.[1]) {
+      const intent = cm[1].trim();
+      return watchRulePlan({
+        name: `Draft: ${intent}`,
+        condition,
+        mode: "draft",
+        recipients: ["me"],
+        intent,
+        timezone,
+      });
+    }
+    cm = clause.match(/^(?:notify|tell|ping|remind|message)\s+(.+)$/i);
+    if (cm?.[1]) {
+      const recips = parseRecipients(cm[1]);
+      if (recips) {
+        const intent = stripRecipientPrefix(cm[1], recips) || "send the recurring reminder";
+        return watchRulePlan({
+          name: `Rule: ${intent}`,
+          condition,
+          mode: "notify",
+          recipients: recips,
+          intent,
+          timezone,
+        });
+      }
+    }
+    return watchRulePlan({
+      name: `Rule: ${clause}`,
+      condition,
+      mode: "notify",
+      recipients: ["me"],
+      intent: clause,
+      timezone,
+    });
+  }
+
+  // Follow-up + draft: "follow up with <subject>, draft for approval"
+  m = trimmed.match(/^(?:follow\s+up\s+with\s+.+?)\s*[,;]\s*draft\s+for\s+approval$/i);
+  if (m) {
+    const subject = trimmed.replace(/\s*[,;]\s*draft\s+for\s+approval$/i, "");
+    return watchRulePlan({
+      name: `Draft approval follow-up`,
+      condition: mapConditionToDsl(subject),
+      mode: "draft",
+      recipients: ["me"],
+      intent: `${subject}, draft for approval`,
+      timezone,
+    });
+  }
+
+  // Recurring, verb-first: "remind <who> every <freq> [at T] [to] <intent>"
+  m = trimmed.match(/^(?:remind|tell|notify|ping|message)\s+(.+?)\s+every\s+(.+)$/i);
+  if (m?.[1] && m?.[2]) {
+    const recips = parseRecipients(m[1]);
+    if (recips) {
+      const { recurrence, remainder } = splitRecurrenceRest(m[2]);
+      if (recurrence) {
+        const intent = remainder || "send the recurring reminder";
+        return watchRulePlan({
+          name: `Reminder: ${intent}`,
+          mode: "notify",
+          recipients: recips,
+          intent,
+          recurrence,
+          timezone,
+        });
+      }
+    }
+  }
+
+  // Recurring, freq-first: "every <freq>[,] <verb> <who> <intent>"
+  m = trimmed.match(/^every\s+(.+?)\s*[,;]\s+(?:remind|tell|notify|ping|message|send)\s+(.+)$/i);
+  if (m?.[1] && m?.[2]) {
+    const { recurrence } = splitRecurrenceRest(m[1]);
+    if (recurrence) {
+      const recips = parseRecipients(m[2]);
+      if (recips) {
+        const intent = stripRecipientPrefix(m[2], recips) || "send the recurring reminder";
+        return watchRulePlan({
+          name: `Reminder: ${intent}`,
+          mode: "notify",
+          recipients: recips,
+          intent,
+          recurrence,
+          timezone,
+        });
+      }
+      return watchRulePlan({
+        name: `Reminder: ${m[2]}`,
+        mode: "notify",
+        recipients: ["me"],
+        intent: m[2],
+        recurrence,
+        timezone,
+      });
+    }
+  }
+
+  // Deictic: "send|schedule|set up this every <freq>"
+  m = trimmed.match(/^(?:send|schedule|email|set up)\s+this\s+every\s+(.+)$/i);
+  if (m?.[1]) {
+    const { recurrence } = splitRecurrenceRest(m[1]);
+    if (recurrence) {
+      return watchRulePlan({
+        name: "Recurring report",
+        mode: "notify",
+        recipients: ["me"],
+        intent: "send the recurring report/reminder",
+        recurrence,
+        timezone,
+      });
+    }
+  }
+
+  // Deictic: "make it <freq>" / "make it <freq>, …" — convert the current
+  // conversation topic into a recurring standing rule.
+  m = trimmed.match(/^make\s+it\s+(.+)$/i);
+  if (m?.[1]) {
+    const { recurrence, remainder } = splitRecurrenceRest(m[1]);
+    if (recurrence) {
+      return watchRulePlan({
+        name: "Recurring report",
+        mode: "notify",
+        recipients: ["me"],
+        intent: remainder || "make this a recurring report/reminder",
+        recurrence,
+        timezone,
+      });
+    }
+  }
+
+  // Day-of-month: "on the <N>(th|st) of each month[,] <action>" / "schedule <x> for the <N>…"
+  m = trimmed.match(
+    /^(?:on\s+the\s+(\d{1,2})(?:st|nd|rd|th)?\s+of\s+each\s+month\s*[,;]?\s*(.*)|schedule\s+(.+?)\s+for\s+the\s+(\d{1,2})(?:st|nd|rd|th)?\b)/i,
+  );
+  if (m) {
+    let intent: string;
+    let rest = "";
+    if (m[3]) {
+      const subject = m[3].trim();
+      rest = trimmed
+        .slice(m[0].length)
+        .replace(/^[\s,;]+/, "")
+        .replace(/^and\s+/i, "")
+        .trim();
+      // The subject stands alone; the trailing clause ("ping Finance if …")
+      // is re-attached once via clauseSuffix below, so the rule name/intent
+      // never repeats the same clause twice.
+      intent = subject;
+    } else {
+      intent = (m[2] ?? "").trim();
+    }
+    intent = intent.replace(/^(?:to|and)\s+/i, "").trim() || "monthly reminder";
+
+    // Extract the trailing "… if <condition>" FIRST — the recipient clause
+    // below can consume the whole rest ("ping Finance if not approved by 3pm"),
+    // which previously dropped the standing condition entirely. Unknown
+    // conditions still fire with a note; the exact semantic stays human-visible
+    // in the rule's `condition` text and intent.
+    let condition: string | undefined;
+    let ifTail = "";
+    const ifM = rest.match(/\s*if\s+(.+)$/i);
+    if (ifM?.[1]) {
+      condition = mapConditionToDsl(ifM[1]);
+      ifTail = ifM[0].trim();
+    }
+    // "…, ping|notify|tell <who>" → recipients (e.g. "ping Finance").
+    let recipients: string[] = ["me"];
+    const restNoCond = rest.replace(/\s*if\s+(.+)$/i, "").trim();
+    const pingM = restNoCond.match(/^(?:ping|notify|tell|message)\s+(.+)$/i);
+    if (pingM?.[1]) {
+      const recips = parseRecipients(pingM[1].trim());
+      if (recips) recipients = recips;
+    }
+    // Keep the full human clause in the intent so the notification reads well
+    // ("payroll approval — ping Finance if not approved by 3pm"), not just the subject.
+    // `restNoCond` (not `rest`) feeds the suffix so the "if …" tail is not repeated.
+    const clauseSuffix = [restNoCond, ifTail].filter(Boolean).join(" ");
+    if (clauseSuffix) intent = `${intent} — ${clauseSuffix}`;
+
+    return watchRulePlan({
+      name: `Monthly: ${intent}`,
+      mode: "notify",
+      recipients,
+      intent,
+      condition,
+      recurrence: { freq: "monthly", at: "09:00" },
+      timezone,
+    });
+  }
+
   return null;
 }
 
 /**
  * Natural clarification for recognized-but-incomplete requests. Returns the
- * pending clarification the orchestrator parks when a deterministic intent is
  * clear but a required field/time is missing — the assistant asks a focused,
  * natural question instead of dumping examples. The probe template carries an
  * `{answer}` placeholder so the user's reply can be merged on the next turn.
@@ -1243,16 +2278,16 @@ export function planFromText(text: string): PlannedAction | null {
 }
 
 /** Parse one or more sequential intents from a compound natural-language request. */
-export function planManyFromText(text: string): PlannedAction[] {
+export function planManyFromText(text: string, timezone?: string): PlannedAction[] {
   const segments = splitCompoundRequest(text);
   const plans: PlannedAction[] = [];
   for (const segment of segments) {
-    const plan = planSingleSegment(segment);
+    const plan = planSingleSegment(segment) ?? planWatchRuleSegment(segment, timezone);
     if (plan) plans.push(plan);
   }
   // Fall back: try whole string if compound split produced nothing useful
   if (plans.length === 0) {
-    const single = planSingleSegment(text.trim());
+    const single = planSingleSegment(text.trim()) ?? planWatchRuleSegment(text.trim(), timezone);
     if (single) plans.push(single);
   }
   return wireSequentialPlanInputs(plans);
@@ -1343,6 +2378,117 @@ export function resolvePlanStepInput(
 
   void stepIndex;
   return resolved;
+}
+
+/** Best-effort entity match by name: exact (case-insensitive) wins, then a
+ * substring match in either direction (e.g. "Jinja" → "Jinja Bakery Store"). */
+function bestEntityMatch<T extends { name: string }>(items: T[], ref: string): T | undefined {
+  const r = ref.toLowerCase().trim();
+  const exact = items.find((i) => i.name.toLowerCase() === r);
+  if (exact) return exact;
+  return items.find((i) => {
+    const n = i.name.toLowerCase();
+    return n.includes(r) || r.includes(n);
+  });
+}
+
+/**
+ * Operational-command hydration: turn natural-language entity references
+ * (`vendorRef`, `productRef`, `warehouseRef`, `customerRef`, account refs) into
+ * real ids by running the SAME read-query bus a human uses (permission + zod +
+ * request context). The AI therefore never invents ids; an unknown name becomes
+ * a clear error message, not a hallucinated write. Also generates a deterministic
+ * PO number from the existing order count.
+ */
+async function hydrateEntityRefs(
+  deps: OrchestratorDeps,
+  ctx: RequestContext,
+  input: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = { ...input };
+
+  if (typeof out.vendorRef === "string") {
+    const res = await executeQuery(deps.queries, "pur.po.list", {}, ctx);
+    const vendors = ((res.data as { vendors?: { id: string; name: string }[] }).vendors ?? []) as {
+      id: string;
+      name: string;
+    }[];
+    const v = bestEntityMatch(vendors, out.vendorRef);
+    if (!v) throw new Error(`Vendor "${out.vendorRef}" not found`);
+    out.vendorId = v.id;
+    delete out.vendorRef;
+  }
+
+  if (typeof out.customerRef === "string") {
+    const res = await executeQuery(deps.queries, "crm.customer.list", {}, ctx);
+    const items = ((res.data as { items?: { id: string; name: string }[] }).items ?? []) as {
+      id: string;
+      name: string;
+    }[];
+    const c = bestEntityMatch(items, out.customerRef);
+    if (!c) throw new Error(`Customer "${out.customerRef}" not found`);
+    out.customerId = c.id;
+    delete out.customerRef;
+  }
+
+  if (typeof out.productRef === "string") {
+    const res = await executeQuery(deps.queries, "inv.stock.list", {}, ctx);
+    const products = ((res.data as { products?: { id: string; sku: string; name: string }[] }).products ?? []) as {
+      id: string;
+      sku: string;
+      name: string;
+    }[];
+    const p = bestEntityMatch(products, out.productRef);
+    if (!p) throw new Error(`Product "${out.productRef}" not found`);
+    out.productId = p.id;
+    delete out.productRef;
+  }
+
+  if (typeof out.warehouseRef === "string") {
+    const res = await executeQuery(deps.queries, "inv.stock.list", {}, ctx);
+    const warehouses = ((res.data as { warehouses?: { id: string; code: string; name: string }[] })
+      .warehouses ?? []) as { id: string; code: string; name: string }[];
+    const w = bestEntityMatch(warehouses, out.warehouseRef);
+    if (!w) throw new Error(`Warehouse "${out.warehouseRef}" not found`);
+    out.warehouseId = w.id;
+    delete out.warehouseRef;
+  }
+
+  if (typeof out.debitAccountRef === "string" || typeof out.creditAccountRef === "string") {
+    const res = await executeQuery(deps.queries, "acc.account.list", {}, ctx);
+    const accounts = ((res.data as { items?: { id: string; code: string; name: string }[] }).items ?? []) as {
+      id: string;
+      code: string;
+      name: string;
+    }[];
+    const lines: { accountId: string; debit: number; credit: number }[] = [];
+    if (typeof out.debitAccountRef === "string") {
+      const a = bestEntityMatch(accounts, out.debitAccountRef);
+      if (!a) throw new Error(`Account "${out.debitAccountRef}" not found`);
+      lines.push({ accountId: a.id, debit: Number(out.debitAmount ?? 0), credit: 0 });
+    }
+    if (typeof out.creditAccountRef === "string") {
+      const a = bestEntityMatch(accounts, out.creditAccountRef);
+      if (!a) throw new Error(`Account "${out.creditAccountRef}" not found`);
+      lines.push({ accountId: a.id, debit: 0, credit: Number(out.creditAmount ?? 0) });
+    }
+    out.lines = lines;
+    if (out.memo == null) out.memo = out.reference;
+    delete out.debitAccountRef;
+    delete out.creditAccountRef;
+    delete out.debitAmount;
+    delete out.creditAmount;
+  }
+
+  // Deterministic PO numbering from the existing order count (never invented).
+  if (out.generateNumber === true && typeof out.vendorId === "string") {
+    const res = await executeQuery(deps.queries, "pur.po.list", {}, ctx);
+    const orders = ((res.data as { orders?: { number: string }[] }).orders ?? []) as { number: string }[];
+    out.number = `PO-${new Date().getUTCFullYear()}-${String(orders.length + 1).padStart(4, "0")}`;
+    delete out.generateNumber;
+  }
+
+  return out;
 }
 
 async function executePlanSteps(
@@ -1697,6 +2843,448 @@ interface ParsedLlmResponse {
   clarify?: string[];
   plan?: { command: string; input?: Record<string, unknown>; description?: string }[];
   toolCall?: AgentToolCall;
+  /** Direct prose answer (after the model called read tools, or no action). */
+  answer?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Business-tool agent loop (native function calling)
+//
+// The same loop that drives agent tools (skills/wake/memory) is extended to
+// the *business* tool surface: every command and query on the bus becomes a
+// native function-calling tool, filtered by the actor's permissions. Reads
+// dispatch immediately; writes dispatch immediately only when the configured
+// autonomy would auto-run them (`commandMayAutoExecute`), otherwise they are
+// PARKED as `PendingPlanStep`s and surface as a confirm card exactly like a
+// deterministic plan. Nothing bypasses the bus: every call goes through
+// `executeBusinessTool` under the actor's own (never elevated) permissions
+// with zod validation and recorded policy decisions.
+// ---------------------------------------------------------------------------
+
+/** Iteration cap for the native function-calling loop (discovery → calls → terminal). */
+const BUSINESS_TOOL_MAX_ITERATIONS = 10;
+
+/** The per-turn agent context a tool needs beyond the session. */
+export interface AgentLoopContext {
+  organizationId: string;
+  userId: string;
+  branchId?: string;
+  actor: Actor;
+  correlationId?: string;
+  causationId?: string;
+}
+
+/** Native tool definitions for the small hand-authored agent tools. */
+function agentToolDefinitions(deps: OrchestratorDeps): ToolDefinition[] {
+  const defs: ToolDefinition[] = [];
+  const str = { type: "string" } as const;
+  if (deps.skills) {
+    defs.push(
+      {
+        name: "loadSkill",
+        description: "Load a skill's instructions into the conversation for reference.",
+        parameters: { type: "object", properties: { name: str }, required: ["name"] },
+      },
+      {
+        name: "saveSkill",
+        description: "Draft a new skill; it stays disabled until a human approves it.",
+        parameters: {
+          type: "object",
+          properties: { name: str, title: str, summary: str, instructions: str },
+          required: ["name", "title", "summary", "instructions"],
+        },
+      },
+      {
+        name: "refineSkill",
+        description: "Propose an evidence-backed change to a live skill for human approval.",
+        parameters: {
+          type: "object",
+          properties: { name: str, summary: str, instructions: str, trigger: str, note: str },
+          required: ["name", "trigger"],
+        },
+      },
+      {
+        name: "revertSkillRefinement",
+        description: "Propose reverting a prior skill refinement for human approval.",
+        parameters: {
+          type: "object",
+          properties: { name: str, refinementId: str, note: str },
+          required: ["name", "refinementId"],
+        },
+      },
+    );
+  }
+  if (deps.wake) {
+    defs.push(
+      {
+        name: "sleepFor",
+        description: "Suspend this session and resume after a delay.",
+        parameters: {
+          type: "object",
+          properties: { seconds: { type: "number" }, note: str },
+          required: ["seconds"],
+        },
+      },
+      {
+        name: "sleepUntil",
+        description: "Suspend this session and resume at an ISO timestamp.",
+        parameters: {
+          type: "object",
+          properties: { isoTimestamp: str, note: str },
+          required: ["isoTimestamp"],
+        },
+      },
+      {
+        name: "wakeOnJob",
+        description: "Resume this session when a job completes.",
+        parameters: {
+          type: "object",
+          properties: { jobId: str, note: str },
+          required: ["jobId"],
+        },
+      },
+      {
+        name: "wakeOnEvent",
+        description: "Resume this session when an event fires.",
+        parameters: {
+          type: "object",
+          properties: { eventKey: str, note: str },
+          required: ["eventKey"],
+        },
+      },
+    );
+  }
+  if (deps.memory) {
+    defs.push(
+      {
+        name: "memory_search",
+        description: "Search learned org context.",
+        parameters: {
+          type: "object",
+          properties: { query: str, limit: { type: "number" } },
+          required: ["query"],
+        },
+      },
+      {
+        name: "memory_store",
+        description: "Store a fact in org memory.",
+        parameters: {
+          type: "object",
+          properties: { content: str, kind: str, key: str },
+          required: ["content"],
+        },
+      },
+    );
+  }
+  return defs;
+}
+
+/** Native tool definitions for every command/query the actor may use. */
+function businessToolDefinitions(deps: OrchestratorDeps, actor: Actor): ToolDefinition[] {
+  const registry = buildToolsFromBus({ commands: deps.commands, queries: deps.queries });
+  return registry.listForActor(actor).map((tool) => {
+    const rule = tool.kind === "command" ? naturalKeyRuleFor(tool.command) : undefined;
+    const hints: string[] = [tool.kind === "query" ? "read-only" : "write"];
+    if (rule) {
+      hints.push(`skips if the ${rule.entity.toLowerCase()} already exists (checked via ${rule.checkQuery})`);
+    }
+    return {
+      name: tool.name,
+      description: `${tool.description} (bus: ${tool.command}; ${hints.join("; ")})`,
+      parameters: zodToJsonSchema(tool.input),
+    };
+  });
+}
+
+/** Outcome of executing one tool call inside the business loop. */
+interface AgentToolExecution {
+  message: string;
+  /** Set when a write was parked for human confirmation instead of executing. */
+  parkedWrite?: PendingPlanStep;
+  /** Set when a write dispatched successfully (to guard against re-proposal). */
+  executedWrite?: string;
+  inboxItemId?: string;
+}
+
+async function executeBusinessAgentTool(
+  deps: OrchestratorDeps,
+  session: ChatSessionState,
+  ctx: AgentLoopContext,
+  registry: ToolRegistry,
+  call: ProviderToolCall,
+): Promise<AgentToolExecution> {
+  const tool = registry.get(call.name);
+  if (!tool) {
+    // Native tool-calling names may differ from the internal agent tool names
+    // (e.g. `memory_search` → `memory.search`) because OpenAI function names
+    // forbid dots.
+    const agentName =
+      call.name === "memory_search" ? "memory.search" :
+      call.name === "memory_store" ? "memory.store" :
+      call.name;
+    const agentResult = await executeAgentTool(deps, session, ctx, {
+      name: agentName,
+      args: call.arguments,
+    });
+    return { message: agentResult.message, inboxItemId: agentResult.inboxItemId };
+  }
+
+  // Natural-key existence gate (research doc §Preventing superfluous writes):
+  // before any create write dispatches (or parks), check whether the target
+  // already exists via the same read-query bus a human uses. If it does, the
+  // write is a no-op — skip it and tell the model to reuse the existing record.
+  if (tool.kind === "command") {
+    const reqCtx = createRequestContext({
+      actor: ctx.actor,
+      origin: "agent",
+      reason: `Existence check for ${tool.command}`,
+      correlationId: ctx.correlationId ?? crypto.randomUUID(),
+      causationId: ctx.causationId,
+    });
+    const existing = await findExistingForCreate(tool.command, call.arguments, deps.queries, reqCtx);
+    if (existing) {
+      return {
+        message: `${tool.command} skipped: ${existing.entity} "${existing.label}" already exists as ${existing.id} — using the existing record. Do not propose or call ${tool.command} for it again.`,
+      };
+    }
+  }
+
+  const now = new Date();
+  const toolCtx: ToolContext = {
+    sessionId: session.id,
+    organizationId: ctx.organizationId,
+    actor: ctx.actor,
+    origin: "agent",
+    correlationId: ctx.correlationId ?? crypto.randomUUID(),
+    causationId: ctx.causationId,
+    reason: `AI agent tool call ${tool.name} (${tool.command})`,
+    commands: deps.commands,
+    queries: deps.queries,
+    helpers: deps.helpers,
+    now: () => now,
+    policy: async ({ isQuery, riskClass, tool: t }) => {
+      if (isQuery) {
+        return {
+          kind: "allow",
+          policy: "agent-tool-loop",
+          reason: "Read tools dispatch under the actor's own authority",
+          evaluatedAt: new Date().toISOString(),
+          context: {},
+        };
+      }
+      if (deps.autonomy === "full_autonomous" && deps.allowFullAutonomous === false) {
+        return {
+          kind: "deny",
+          policy: "autonomy-disabled",
+          reason: "Full autonomous mode is not enabled on this platform",
+          evaluatedAt: new Date().toISOString(),
+          context: {},
+        };
+      }
+      if (riskClass === "exec" || riskClass === "external") {
+        return {
+          kind: "approval_required",
+          policy: "agent-tool-loop",
+          reason: `${riskClass} risk requires human confirmation before dispatch`,
+          evaluatedAt: new Date().toISOString(),
+          context: {},
+        };
+      }
+      const meta = deps.commands.get(t.command);
+      if (commandMayAutoExecute(deps.autonomy, meta)) {
+        return {
+          kind: "allow",
+          policy: "agent-tool-loop",
+          reason: "Write allowed under configured autonomy",
+          evaluatedAt: new Date().toISOString(),
+          context: {},
+        };
+      }
+      return {
+        kind: "approval_required",
+        policy: "agent-tool-loop",
+        reason: "Write parked for human confirmation under configured autonomy",
+        evaluatedAt: new Date().toISOString(),
+        context: {},
+      };
+    },
+  };
+
+  const outcome: ToolOutcome = await executeBusinessTool(tool, call.arguments, toolCtx);
+
+  if (outcome.ok) {
+    const structured = JSON.stringify(outcome.result.structured);
+    return {
+      message: `${tool.name} → ${outcome.result.summary}\n${structured.slice(0, 1000)}`,
+      ...(tool.kind !== "query" ? { executedWrite: tool.command } : {}),
+    };
+  }
+  if (outcome.kind === "approval_required") {
+    return {
+      message: `The write \`${tool.command}\` was parked for your confirmation and was NOT executed. Complete the rest of the request; the parked action will be shown to the user for approval.`,
+      parkedWrite: {
+        command: tool.command,
+        input: call.arguments,
+        description: `Execute ${tool.command}`,
+      },
+    };
+  }
+  if (outcome.kind === "validation") {
+    return {
+      message: `Validation failed for ${tool.name}: ${outcome.issues
+        .map((i) => `${i.path}: ${i.message}`)
+        .join("; ")}`,
+    };
+  }
+  return {
+    message: `${tool.name} failed: ${outcome.kind === "denied" ? outcome.reason : outcome.message}`,
+  };
+}
+
+/**
+ * Bounded native-function-calling loop over the permission-filtered business
+ * tool surface. The model calls read tools to discover data (resolving names →
+ * ids), calls write tools that either dispatch (autonomy allows) or park as
+ * confirm cards, then returns a terminal JSON response or a prose answer.
+ * Providers without native tool calling fall back to {@link runAgentToolLoop}.
+ */
+async function runBusinessToolLoop(
+  deps: OrchestratorDeps,
+  session: ChatSessionState,
+  ctx: AgentLoopContext,
+  system: string,
+  messages: ChatMessage[],
+): Promise<{
+  parsed: ParsedLlmResponse | null;
+  inboxItemId?: string;
+  parkedWrites: PendingPlanStep[];
+  executedWrites: string[];
+}> {
+  if (!deps.provider || deps.provider.id === "none" || deps.provider.toolCalling !== true) {
+    const { parsed, inboxItemId } = await runAgentToolLoop(deps, session, ctx, system, messages);
+    return { parsed, inboxItemId, parkedWrites: [], executedWrites: [] };
+  }
+  const provider = deps.provider;
+
+  const registry = buildToolsFromBus({ commands: deps.commands, queries: deps.queries });
+  const tools: ToolDefinition[] = [
+    ...businessToolDefinitions(deps, ctx.actor),
+    ...agentToolDefinitions(deps),
+  ];
+  const toolHistory: ToolHistoryEntry[] = [];
+  const parkedWrites: PendingPlanStep[] = [];
+  const executedWrites: string[] = [];
+  const seenCalls = new Set<string>();
+  const gathered: Array<{ name: string; content: string }> = [];
+  let inboxItemId: string | undefined;
+
+  // Terminal fallback when the model never produces a final answer: parked
+  // writes surface as a confirm plan; otherwise one last completion asks the
+  // model to answer from the data it already gathered, falling back to a
+  // concise rendered summary instead of a null response.
+  const finalize = async (): Promise<ParsedLlmResponse | null> => {
+    if (parkedWrites.length > 0) return {};
+    if (gathered.length === 0) return null;
+    try {
+      const narration = await provider.complete({
+        system,
+        messages: [
+          ...messages,
+          {
+            id: crypto.randomUUID(),
+            role: "user",
+            parts: [
+              {
+                type: "text",
+                text: "Now answer the user's original request in plain prose using ONLY the data gathered above. Do not call any more tools.",
+              },
+            ],
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        tools,
+        toolHistory,
+      });
+      const t = (narration.text ?? "").trim();
+      if (t && !/^\{[\s\S]*\}$/.test(t)) return { answer: t.slice(0, 1200) };
+    } catch {
+      // fall through to the rendered summary
+    }
+    const useful = gathered.filter(
+      (g) =>
+        g.content.trim().length > 0 &&
+        !/^(no matching|business partner not found)/i.test(g.content.trim()),
+    );
+    if (useful.length === 0) return null;
+    const preview = useful
+      .slice(-3)
+      .map((g) => `— ${g.name}: ${g.content.slice(0, 700)}`)
+      .join("\n");
+    return {
+      answer: `I gathered the following from the business bus:\n${preview}\n\nI couldn't finish the analysis within my step budget — ask a more specific question if you want an exact figure.`,
+    };
+  };
+
+  for (let iteration = 0; iteration < BUSINESS_TOOL_MAX_ITERATIONS; iteration++) {
+    const completion = await provider.complete({
+      system,
+      messages,
+      tools,
+      toolHistory,
+    });
+    const calls = completion.toolCalls ?? [];
+
+    if (calls.length === 0) {
+      const jsonMatch = completion.text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]) as ParsedLlmResponse;
+          return { parsed, inboxItemId, parkedWrites, executedWrites };
+        } catch {
+          // fall through to prose handling
+        }
+      }
+      const prose = completion.text.trim();
+      if (prose) return { parsed: { answer: prose }, inboxItemId, parkedWrites, executedWrites };
+      return { parsed: await finalize(), inboxItemId, parkedWrites, executedWrites };
+    }
+
+    const results: Array<{ role: "tool"; toolCallId: string; content: string }> = [];
+    let duplicateHit = false;
+    for (const call of calls) {
+      const key = `${call.name}:${JSON.stringify(call.arguments ?? {})}`;
+      if (seenCalls.has(key)) duplicateHit = true;
+      seenCalls.add(key);
+      const execution = await executeBusinessAgentTool(deps, session, ctx, registry, call);
+      if (execution.parkedWrite) parkedWrites.push(execution.parkedWrite);
+      if (execution.executedWrite && !executedWrites.includes(execution.executedWrite)) {
+        executedWrites.push(execution.executedWrite);
+      }
+      if (execution.inboxItemId) inboxItemId = execution.inboxItemId;
+      gathered.push({ name: call.name, content: execution.message });
+      results.push({ role: "tool", toolCallId: call.id, content: execution.message });
+    }
+    // BudgetThinker re-injection: remind the model how many tool rounds remain
+    // so it wraps up instead of looping (research doc §Loop engineering).
+    const remainingRounds = BUSINESS_TOOL_MAX_ITERATIONS - iteration - 1;
+    if (results.length > 0) {
+      const last = results[results.length - 1]!;
+      results[results.length - 1] = {
+        ...last,
+        content: `${last.content}\n[loop budget: ${iteration + 1}/${BUSINESS_TOOL_MAX_ITERATIONS} tool rounds used, ${remainingRounds} remaining — wrap up and answer]`,
+      };
+    }
+    toolHistory.push({ role: "assistant", content: "", toolCalls: calls });
+    toolHistory.push(...results);
+
+    if (duplicateHit) {
+      console.info(`[agent-loop] terminated: duplicate tool call repeated at round ${iteration + 1}`);
+      return { parsed: await finalize(), inboxItemId, parkedWrites, executedWrites };
+    }
+  }
+
+  console.info(`[agent-loop] terminated: step budget exhausted after ${BUSINESS_TOOL_MAX_ITERATIONS} rounds`);
+  return { parsed: await finalize(), inboxItemId, parkedWrites, executedWrites };
 }
 
 /** Render the result of one or more read queries as an assistant answer. */
@@ -2220,7 +3808,17 @@ async function writeSkillAudit(
   session.messages.push(msg("user", [{ type: "text", text: input.userText }]));
 
   const catalog = deps.commands.list();
-  const rulePlans = planManyFromText(ruleText);
+  // ADR 0014 — recurring/standing-rule intents carry the org timezone so local
+  // "at <T>" phrases fire at the right wall-clock time (command normalizes to UTC).
+  let orgTimezone: string | undefined;
+  try {
+    const settingsRes = await executeQuery(deps.queries, "core.settings.get", {}, input.ctx);
+    const settings = (settingsRes.data as { settings?: { timezone?: string } }).settings;
+    if (settings?.timezone) orgTimezone = settings.timezone;
+  } catch {
+    orgTimezone = undefined;
+  }
+  const rulePlans = planManyFromText(ruleText, orgTimezone);
   let planned: PlannedAction | null = rulePlans.length === 1 ? rulePlans[0]! : null;
   let multiPlan: PlannedAction[] | null = rulePlans.length > 1 ? rulePlans : null;
 
@@ -2233,6 +3831,21 @@ async function writeSkillAudit(
     const { parts, explanation } = await answerScheduleQuestion(deps, input.ctx, schedulePlan);
     session.messages.push(msg("assistant", [...parts, toExplanationPart(explanation)]));
     return { session, explanation };
+  }
+
+  // R11 — deterministic analytics/replenishment reads (margin trend, sales by
+  // location, monthly sales, stockout-risk proposals). Answered from verifiable
+  // org data through the read-query bus, never from an LLM object dump. When a
+  // write intent shares the message (e.g. "show monthly sales by branch and
+  // schedule this every Monday"), the read is answered first and the write
+  // continues into the confirmation flow below.
+  const dataPlan = planDataQuestion(ruleText);
+  if (dataPlan) {
+    const { parts, explanation } = await answerDataQuestion(deps, input.ctx, dataPlan);
+    session.messages.push(msg("assistant", [...parts, toExplanationPart(explanation)]));
+    if (rulePlans.length === 0) {
+      return { session, explanation };
+    }
   }
 
   // R9 — read-only mode gate. In discuss/plan mode the orchestrator can still
@@ -2294,26 +3907,39 @@ async function writeSkillAudit(
   if (!planned && !multiPlan && deps.provider && deps.provider.id !== "none") {
     const agentTools = agentToolList(deps);
     const queryCatalog = deps.queries ? deps.queries.list() : [];
+    const nativeTools = deps.provider.toolCalling === true;
     const system =
       `You are a business assistant. WRITE actions: {"command":"<name>","input":{...}} using only: ${catalog.map((c) => c.name).join(", ")}.\n` +
       `READ questions (answering from data): {"query":"<name>","input":{...}} using only: ${queryCatalog.map((q) => q.name).join(", ")}.\n` +
       `For multiple sequential write actions: {"plan":[{"command":"...","input":{...},"description":"..."},{"command":"...","input":{...}}]}\n` +
       `If ambiguous or missing required info: {"clarify":["question1","question2"]}\n` +
       `Do not copy field values from the [Learned context] block into a new plan; if a required field is absent from the request, reply {"clarify":[...]} instead.\n` +
+      `Never invent field values or field names. Every field in "input" must exist in that command's schema and every required field must be provided from the user's request or a prior plan step — inventing a field (e.g. "taxId", "location", "journalID") causes a validation failure and a bad user experience. When a required field is unknown, reply {"clarify":[...]} with natural, business-language questions — never expose internal field names like "fireAt" or "title".\n` +
+      `For recurring or standing requests ("every Monday", "each morning at 8am", "on the 25th of each month", "if <condition>, ask me before …", "draft … for approval", "send this every <day>"), prefer the command core.watchRule.create with a schedule trigger; its action.mode may be "notify", "draft", or "request_approval" and its action.recipients may be "me", an email, or a role key like "branch_manager".\n` +
+      `Prefer answering data questions with a READ query from the query catalog over inventing a write command.\n` +
+      (nativeTools
+        ? `You have function-calling tools available that wrap the SAME business bus (one tool per command/query, permission-filtered). Discover data by CALLING the read tools (e.g. list customers, list products, list accounts) — use the real ids they return in any write you propose. NEVER invent an id or a name-to-id mapping. When the user asks you to PERFORM an action, call the write tool whose name matches the requested action (e.g. raising/creating an invoice → the invoice-create tool, creating a purchase order → the PO-create tool, adding a vendor → the vendor-create tool), and do not invent extra write steps for things the user did not ask for (the system parks write calls for approval — that is expected and safe), then answer normally. Avoid long search loops: if a targeted search returns nothing, do ONE broader listing; if that is still empty, answer from what you know or ask one focused clarifying question. When you have enough data, STOP calling tools and reply with a short plain-text answer. Do not call the same search tool repeatedly with slight variations.\n`
+        : "") +
       (agentTools
         ? `Before planning, you may call an agent tool to pull in context or schedule follow-ups.\nAvailable agent tools: ${agentTools}.\nTo call one, reply {"toolCall":{"name":"loadSkill","args":{"name":"..."}}} — you will receive the result and should then continue planning.\n`
         : "") +
-      `Reply JSON only. Never invent field values — use null for unknown required fields. For a read question with no explicit date, default to today's range.`;
+      `Reply JSON only. Never invent field values — use null for unknown required fields. For a read question with no explicit date, default to today's range. When you answered a data question by calling read tools, reply with a short plain-text answer instead of JSON.` +
+      domainDoctrineText(input.userText);
 
     let parsed: ParsedLlmResponse | null = null;
+    let parkedWrites: PendingPlanStep[] = [];
+    let executedWrites: string[] = [];
+    const loopCtx: AgentLoopContext = {
+      organizationId: input.ctx.actor.organizationId,
+      userId: input.ctx.actor.userId,
+      branchId: session.activeBranchId,
+      actor: input.ctx.actor,
+      correlationId: input.ctx.correlationId,
+      causationId: input.ctx.causationId,
+    };
     try {
-      ({ parsed, inboxItemId: pendingInboxItemId } = await runAgentToolLoop(
-        deps,
-        session,
-        { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },
-        system,
-        outboundMessages,
-      ));
+      ({ parsed, inboxItemId: pendingInboxItemId, parkedWrites, executedWrites } =
+        await runBusinessToolLoop(deps, session, loopCtx, system, outboundMessages));
     } catch (err) {
       if (isContextOverflow(err)) {
         // free context with an honest no-LLM trim, then retry exactly once
@@ -2323,18 +3949,16 @@ async function writeSkillAudit(
         if (trimmed) session = { ...session, compactionState: trimmed };
         outboundMessages = applyToOutbound(session.messages, session.compactionState ?? null);
         try {
-          ({ parsed, inboxItemId: pendingInboxItemId } = await runAgentToolLoop(
-            deps,
-            session,
-            { organizationId: input.ctx.actor.organizationId, userId: input.ctx.actor.userId },
-            system,
-            outboundMessages,
-          ));
+          ({ parsed, inboxItemId: pendingInboxItemId, parkedWrites, executedWrites } =
+            await runBusinessToolLoop(deps, session, loopCtx, system, outboundMessages));
         } catch {
           parsed = null;
         }
       } else {
         parsed = null;
+        if (err instanceof Error) {
+          console.error("[llm-assist] error", err.message.slice(0, 500));
+        }
       }
     }
 
@@ -2360,41 +3984,137 @@ async function writeSkillAudit(
         });
         return { session, explanation: undefined, inboxItemId: pendingInboxItemId };
       }
-      if (parsed.plan && parsed.plan.length > 0) {
-        const steps = wireSequentialPlanInputs(
-          parsed.plan
-            .filter((s) => s.command && catalog.some((c) => c.name === s.command))
-            .map((s) => ({
-              command: s.command!,
-              input: normalizeFieldNames(s.input ?? {}),
-              summary: s.description ?? `Execute ${s.command}`,
-              specialist: catalog.find((c) => c.name === s.command)?.tags?.[0],
-            })),
-        );
-        if (steps.length > 1) {
-          multiPlan = steps;
-        } else if (steps.length === 1) {
-          planned = steps[0]!;
+
+      // Agentic writes parked by the tool loop take precedence over any final
+      // `command`/`plan`/`query` JSON (the model's write tool calls ARE its
+      // chosen action). They surface through the same confirm/auto gate as a
+      // deterministic plan; references are hydrated before the card renders.
+      if (parkedWrites.length > 0) {
+        const steps: PlannedAction[] = [];
+        for (const parked of parkedWrites) {
+          let parkedInput = (parked.input ?? {}) as Record<string, unknown>;
+          try {
+            parkedInput = await hydrateEntityRefs(deps, input.ctx, parkedInput);
+          } catch (err) {
+            session.messages.push(
+              msg("assistant", [
+                {
+                  type: "error" as const,
+                  message: (err as Error).message,
+                  code: "ENTITY_NOT_FOUND",
+                },
+                {
+                  type: "text" as const,
+                  text: "I couldn't match that name to an existing record. Try the exact name from your data.",
+                },
+              ]),
+            );
+            return { session, inboxItemId: pendingInboxItemId };
+          }
+          steps.push({
+            command: parked.command,
+            input: parkedInput,
+            summary: parked.description ?? `Execute ${parked.command}`,
+            specialist: catalog.find((c) => c.name === parked.command)?.tags?.[0],
+          });
+        }
+        // Drop parked creates whose target already exists (safety net for the
+        // loop-time gate — a confirm card must never propose a redundant create).
+        const deduped = await dedupeCreateSteps(deps.queries, input.ctx, steps);
+        if (deduped.length > 1) {
+          multiPlan = deduped;
+        } else if (deduped.length === 1) {
+          planned = deduped[0]!;
+        }
+      } else {
+        // Anything the loop already dispatched through the bus must not be
+        // re-proposed as a terminal command/plan (double-write guard).
+        const notExecuted = (command: string) => !executedWrites.includes(command);
+        if (parsed.plan && parsed.plan.length > 0) {
+          const steps = await dedupeCreateSteps(
+            deps.queries,
+            input.ctx,
+            wireSequentialPlanInputs(
+              parsed.plan
+                .filter((s) => s.command && notExecuted(s.command) && catalog.some((c) => c.name === s.command))
+                .map((s) => ({
+                  command: s.command!,
+                  input: normalizeFieldNames(s.input ?? {}),
+                  summary: s.description ?? `Execute ${s.command}`,
+                  specialist: catalog.find((c) => c.name === s.command)?.tags?.[0],
+                })),
+            ),
+          );
+          if (steps.length > 1) {
+            multiPlan = steps;
+          } else if (steps.length === 1) {
+            planned = steps[0]!;
+          }
+        }
+        if (
+          !planned &&
+          !multiPlan &&
+          parsed.command &&
+          notExecuted(parsed.command) &&
+          catalog.some((c) => c.name === parsed.command)
+        ) {
+          const existing = await findExistingForCreate(
+            parsed.command,
+            normalizeFieldNames(parsed.input ?? {}),
+            deps.queries,
+            input.ctx,
+          );
+          if (!existing) {
+            planned = {
+              command: parsed.command,
+              input: parsed.input ?? {},
+              summary: `LLM-planned ${parsed.command}`,
+              specialist: catalog.find((c) => c.name === parsed.command)?.tags?.[0],
+            };
+          }
+        }
+        if (
+          !planned &&
+          !multiPlan &&
+          !parsed.command &&
+          !parsed.plan &&
+          !parsed.clarify &&
+          parsed.query &&
+          deps.queries?.list().some((q) => q.name === parsed.query)
+        ) {
+          llmQuery = { name: parsed.query, input: normalizeFieldNames(parsed.input ?? {}) };
         }
       }
-      if (!planned && !multiPlan && parsed.command && catalog.some((c) => c.name === parsed.command)) {
-        planned = {
-          command: parsed.command,
-          input: parsed.input ?? {},
-          summary: `LLM-planned ${parsed.command}`,
-          specialist: catalog.find((c) => c.name === parsed.command)?.tags?.[0],
-        };
-      }
+
+      // Agentic read answers: the model called read tools and narrated a
+      // result. Rendered as a plain answer with the tool-loop explanation.
       if (
         !planned &&
         !multiPlan &&
+        !llmQuery &&
         !parsed.command &&
         !parsed.plan &&
         !parsed.clarify &&
-        parsed.query &&
-        deps.queries?.list().some((q) => q.name === parsed.query)
+        !parsed.query &&
+        parsed.answer &&
+        parkedWrites.length === 0
       ) {
-        llmQuery = { name: parsed.query, input: normalizeFieldNames(parsed.input ?? {}) };
+        const explanation: AiExplanation = {
+          runId: crypto.randomUUID(),
+          summary: "Answered via agent tool loop",
+          reasons: ["The model called read tools on the business bus to answer"],
+          rulesApplied: ["ai_manual_parity", "read_via_query_bus", "permission_check_on_execute"],
+          dataUsed: ["user message", "business tool surface", `provider:${deps.provider?.id ?? "none"}`],
+          autonomy: "recommend",
+          plannedCommand: undefined,
+        };
+        session.messages.push(
+          msg("assistant", [
+            { type: "text", text: parsed.answer },
+            toExplanationPart(explanation),
+          ]),
+        );
+        return { session, explanation, inboxItemId: pendingInboxItemId };
       }
     }
   }
@@ -2717,6 +4437,35 @@ async function writeSkillAudit(
       ]),
     );
     return { session };
+  }
+
+  // Operational commands reference org entities by name (vendor/product/
+  // warehouse/customer/account). Resolve names → ids through the read-query bus
+  // before the write gates so the AI never invents a foreign key; an unknown
+  // name becomes a clear, non-destructive message instead of a bad write.
+  if (planned.input && typeof planned.input === "object") {
+    try {
+      planned.input = await hydrateEntityRefs(
+        deps,
+        input.ctx,
+        planned.input as Record<string, unknown>,
+      );
+    } catch (err) {
+      session.messages.push(
+        msg("assistant", [
+          {
+            type: "error",
+            message: (err as Error).message,
+            code: "ENTITY_NOT_FOUND",
+          },
+          {
+            type: "text",
+            text: "I couldn't match that name to an existing record. Try the exact name from your data.",
+          },
+        ]),
+      );
+      return { session };
+    }
   }
 
   // R1 — the effective gate respects the command's declared `minAutonomyForAuto`

@@ -1357,3 +1357,48 @@ export const proactiveDeliveries = pgTable(
     index("proactive_deliveries_org_at_idx").on(t.organizationId, t.deliveredAt),
   ],
 );
+
+/**
+ * Deterministic data-quality / import transform rules (analytics + migration
+ * intents): how to interpret fields during CSV/legacy imports. Created through
+ * the command bus (`core.importRule.*`) by both humans and the agent; nothing
+ * mutates source data — rules only describe how the target should be read.
+ */
+export const importRules = pgTable(
+  "import_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    /** Which master-data surface the rule applies to during import. */
+    scope: text("scope").notNull(), // "customer" | "supplier" | "product" | "employee"
+    /** blank_as_unknown | split_field | dedupe_column */
+    ruleType: text("rule_type").notNull(),
+    /** Target field the rule applies to (canonical name, e.g. tax_id / full_name). */
+    field: text("field").notNull(),
+    /** Rule-specific structured config (e.g. {into:["first","last"]}). */
+    config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
+    description: text("description"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdByUserId: uuid("created_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("import_rules_org_idx").on(t.organizationId)],
+);
+
+/** Persisted saved reports/dashboards the agent (or a human) turns a read into. */
+export const dashboards = pgTable(
+  "dashboards",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** Array of {query,title,config} widgets — each maps to a query in the catalog. */
+    widgetSpec: jsonb("widget_spec").$type<unknown[]>().notNull().default([]),
+    createdByUserId: uuid("created_by_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("dashboards_org_idx").on(t.organizationId)],
+);

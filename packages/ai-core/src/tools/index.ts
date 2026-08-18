@@ -5,3 +5,4 @@ export * from "./execute.js";
 export * from "./describe.js";
 export * from "./approvals.js";
 export * from "./from-bus.js";
+export * from "./natural-key.js";

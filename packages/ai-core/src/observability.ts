@@ -162,12 +162,14 @@ export function createTracer(config: {
 /** Wraps an AiProvider to trace all completions. */
 export class TracedProvider implements AiProvider {
   readonly id: string;
+  readonly toolCalling: boolean;
 
   constructor(
     private readonly inner: AiProvider,
     private readonly tracer: AiTracer,
   ) {
     this.id = inner.id;
+    this.toolCalling = inner.toolCalling === true;
   }
 
   async complete(

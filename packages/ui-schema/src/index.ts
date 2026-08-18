@@ -13,6 +13,9 @@ export const explanationPartSchema = z.object({
   reasons: z.array(z.string()).default([]),
   rulesApplied: z.array(z.string()).default([]),
   dataUsed: z.array(z.string()).default([]),
+  /** The exact command/query that ran (or was proposed) — makes reads verifiable. */
+  plannedCommand: z.string().optional(),
+  plannedInput: z.unknown().optional(),
 });
 
 export const formFieldSchema = z.object({

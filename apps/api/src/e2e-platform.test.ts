@@ -24,6 +24,7 @@ import { eq } from "drizzle-orm";
 import { createEmailProcessor, createPlatformModule, createScheduleProcessor } from "@chaste/module-platform";
 import { createSchedulingModule } from "@chaste/module-scheduling";
 import { createIdentityModule } from "@chaste/module-identity";
+import { PostgresWatchRuleStore } from "@chaste/runtime";
 
 const hasDb = Boolean(process.env.DATABASE_URL);
 const DB_URL = process.env.DATABASE_URL!;
@@ -62,6 +63,7 @@ const ADMIN_PERMISSIONS = [
   "core.reminder.write", "core.followup.write",
   "core.calendar.read", "core.calendar.write",
   "core.email.send", "core.marketplace.publish",
+  "core.watchRule.read", "core.watchRule.manage",
 ];
 
 const OPERATOR_PERMISSIONS = [
@@ -206,6 +208,7 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
     const platform = createPlatformModule(db, modules, {
       allowFullAutonomous: true,
       regions: ["local"],
+      watchRules: new PostgresWatchRuleStore(db),
     });
     platform.register({ commands, queries });
 
@@ -402,6 +405,83 @@ describe.skipIf(!hasDb)("Platform module E2E", () => {
         branchId: hqBranchA,
         active: true,
       });
+    });
+  });
+
+  // ─── Watch rules (ADR 0014 proactive surface) ─────────────────────────
+
+  describe("core.watchRule.create / list / update / delete", () => {
+    it("creates a watch rule, resolving 'me' and role-group recipients", async () => {
+      // A branch_manager-role user so the group resolves to a real member.
+      const [role] = await db
+        .insert(schema.roles)
+        .values({ organizationId: orgA.orgId, key: "branch_manager", name: "Branch Manager", isSystem: false })
+        .returning();
+      const [mgr] = await db
+        .insert(schema.users)
+        .values({ organizationId: orgA.orgId, email: "mgr@test.com", displayName: "Branch Mgr" })
+        .returning();
+      await db.insert(schema.userRoles).values({ userId: mgr!.id, roleId: role!.id });
+
+      const created = await cmd(orgA.adminUser, orgA.orgId, "core.watchRule.create", {
+        name: "Stockout alert",
+        trigger: {
+          kind: "schedule",
+          recurrence: { freq: "daily", at: "08:00" },
+          timezone: "Africa/Kampala",
+        },
+        action: { mode: "notify", intent: "Tell branch managers which products are at risk of stockout", recipients: ["me", "branch_manager"] },
+      });
+      expect(created.name).toBe("Stockout alert");
+      expect(created.resolvedRecipients).toEqual(
+        expect.arrayContaining([orgA.adminUser.id, mgr!.id]),
+      );
+      // "08:00" local (UTC+3) normalizes to 05:00 UTC so the coordinator fires on time.
+      expect(created.trigger.recurrence.at).toBe("05:00");
+      expect(created.enabled).toBe(true);
+    });
+
+    it("lists only this org's watch rules", async () => {
+      const { rules } = await qry(orgA.adminUser, orgA.orgId, "core.watchRule.list");
+      expect(rules.length).toBeGreaterThanOrEqual(1);
+      const other = await qry(orgB.adminUser, orgB.orgId, "core.watchRule.list");
+      expect(other.rules.length).toBe(0);
+    });
+
+    it("throws for a known role group with no active users, preserves unknown tokens", async () => {
+      // A role that exists in the org but has no active members is a real mistake.
+      await db
+        .insert(schema.roles)
+        .values({ organizationId: orgA.orgId, key: "ops_manager", name: "Ops Manager", isSystem: false })
+        .returning();
+      const e = await cmdFails(orgA.adminUser, orgA.orgId, "core.watchRule.create", {
+        name: "Empty group",
+        trigger: { kind: "schedule", recurrence: { freq: "daily" } },
+        action: { mode: "notify", intent: "x", recipients: ["ops_manager"] },
+      });
+      expect(e.message).toContain("No active users found for recipient group");
+
+      // Unknown tokens (legacy/external ids like "buyer-1") are kept as-is.
+      const kept = await cmd(orgA.adminUser, orgA.orgId, "core.watchRule.create", {
+        name: "Legacy recipient",
+        trigger: { kind: "schedule", recurrence: { freq: "daily" } },
+        action: { mode: "notify", intent: "x", recipients: ["buyer-1"] },
+      });
+      expect(kept.resolvedRecipients).toContain("buyer-1");
+    });
+
+    it("updates and deletes a watch rule", async () => {
+      const { rules } = await qry(orgA.adminUser, orgA.orgId, "core.watchRule.list");
+      const rule = rules[0];
+      const updated = await cmd(orgA.adminUser, orgA.orgId, "core.watchRule.update", {
+        ruleId: rule.id,
+        enabled: false,
+      });
+      expect(updated.enabled).toBe(false);
+      const removed = await cmd(orgA.adminUser, orgA.orgId, "core.watchRule.delete", {
+        ruleId: rule.id,
+      });
+      expect(removed.ok).toBe(true);
     });
   });
 

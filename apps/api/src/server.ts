@@ -814,35 +814,53 @@ export async function buildServer(appCtx?: AppContext) {
 
   server.get("/api/v1/proactive/rules", async (req) => {
     const auth = getAuth(req);
-    const items = await app.proactive.watchRules.listByOrg(auth.actor.organizationId);
-    return { items };
+    const result = await runQueryAsAuth(
+      app,
+      "core.watchRule.list",
+      {},
+      auth,
+      req.id,
+    );
+    return { items: (result.data as { rules: unknown[] }).rules };
   });
 
   server.post("/api/v1/proactive/rules", async (req) => {
     const auth = getAuth(req);
     const body = createWatchRuleBody.parse(req.body ?? {});
-    const rule = await app.proactive.watchRules.create({
-      organizationId: auth.actor.organizationId,
-      createdByUserId: auth.sessionUser.id,
-      ...body,
-    });
-    return rule;
+    const result = await runCommandAsAuth(
+      app,
+      "core.watchRule.create",
+      body,
+      auth,
+      req.id,
+    );
+    return result.data;
   });
 
   server.patch("/api/v1/proactive/rules/:id", async (req) => {
     const auth = getAuth(req);
     const { id } = req.params as { id: string };
     const body = updateWatchRuleBody.parse(req.body ?? {});
-    const rule = await app.proactive.watchRules.update(auth.actor.organizationId, id, body);
-    if (!rule) throw new NotFoundError(`Watch rule ${id}`);
-    return rule;
+    const result = await runCommandAsAuth(
+      app,
+      "core.watchRule.update",
+      { ...body, ruleId: id },
+      auth,
+      req.id,
+    );
+    return result.data;
   });
 
   server.delete("/api/v1/proactive/rules/:id", async (req) => {
     const auth = getAuth(req);
     const { id } = req.params as { id: string };
-    const removed = await app.proactive.watchRules.remove(auth.actor.organizationId, id);
-    if (!removed) throw new NotFoundError(`Watch rule ${id}`);
+    await runCommandAsAuth(
+      app,
+      "core.watchRule.delete",
+      { ruleId: id },
+      auth,
+      req.id,
+    );
     return { removed: true };
   });
 

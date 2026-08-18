@@ -9,6 +9,176 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Deterministic analytics / replenishment / data-quality / dashboard intents
+  (`@chaste/ai-core` `orchestrator.ts`, research doc §Analytics, §Inventory,
+  §Onboarding).** All 18 research-doc NL requests now behave correctly over
+  `POST /api/v1/ai/chat` (verified end-to-end by `apps/api/src/nl-driver.ts`,
+  a dynamic HTTP driver that sends each request through the same command/query
+  bus a human uses and approves parked `confirm_action`s):
+  - `planDataQuestion` + `answerDataQuestion` — margin trend ("why did margins
+    fall this month?", "compare to last quarter"), sales grouped by location
+    ("show this by branch", "show monthly sales by branch"), and stockout-risk
+    proposals ("inventory is getting low; handle replenishment") are answered
+    deterministically from the read-query bus (no LLM object dumps).
+  - `planSingleSegment` gains deterministic parsers for import/data-quality
+    rules (`core.importRule.create`: "treat blank tax IDs as unknown",
+    "split full name into first and last name", "these two supplier columns are
+    the same supplier") and the deictic dashboard save ("turn this into a
+    dashboard" → `core.dashboard.create` with a deterministic default widget).
+  - Compound read+schedule requests ("show monthly sales by branch and
+    schedule this every Monday") now answer the read and still park the
+    recurring watch-rule confirmation in the same turn.
+- **`explanation` parts carry `plannedCommand`/`plannedInput`
+  (`@chaste/ui-schema`, `@chaste/ai-core` `explanation.ts`)** so clients and
+  evaluators can verify exactly which command/query ran (explainability).
+- **Deterministic company-operations intents (`@chaste/ai-core`
+  `orchestrator.ts`).** A second end-to-end NL suite — `apps/api/src/nl-driver-ops.ts`,
+  15 requests across procurement, inventory, sales, invoicing, accounting,
+  finance, and reporting — now resolves correctly over `POST /api/v1/ai/chat`
+  (15/15, exit code 0). Each write's real effect is re-checked through the
+  query bus, not just card presence:
+  - **Operational writes with name→id resolution** — `pur.po.create`
+    ("raise a purchase order for 60 bags of Wheat Flour from Kampala Flour
+    Mills", deterministic `PO-YYYY-NNNN` numbering), `inv.stock.adjust`
+    (goods-receive `+N`, spoilage `−N`), `acc.journal.post` ("debit Expenses
+    800,000 and credit Cash 800,000" — balanced lines), and
+    `acc.invoice.create` with a resolved customer ("to Ntinda Supermarket",
+    comma-separated amounts). New `hydrateEntityRefs` resolves vendor/product/
+    warehouse/customer/account names to ids through the same read-query bus a
+    human uses, so the AI never invents a foreign key — an unknown name yields
+    a clear `ENTITY_NOT_FOUND` message instead of a bad write.
+  - **Operational reads** — purchase orders, stock levels (optionally scoped
+    to one warehouse), the customer list, outstanding/overdue receivables, and
+    the monthly expense trend, plus location-filtered sales ("sales for the
+    Jinja branch") and this-month-vs-last-month margin comparison. All answered
+    from the read-query bus with a verifiable `plannedCommand`.
+  - **Dashboard with a named subject** — "create a dashboard for our stock
+    levels at Ntinda" → `core.dashboard.create` with an `inv.stock.list`
+    widget and a real name.
+  - **Read/write disambiguation** — read intents no longer shadow write
+    messages ("raise a purchase order…" stays a write; "create a dashboard for
+    our stock levels…" stays a dashboard create).
+- **`nl-driver-ops.ts` verifies data, not just intents** — after approving a
+  parked `confirm_action`, the driver re-queries the bus and asserts the actual
+  state change (stock quantities, PO count/vendor, resolved invoice customer,
+  expense total, dashboard record), so a "passing" write is proven in the
+  database, not just in the chat log.
+- **Native business-tool agent loop (`@chaste/ai-core` `providers.ts`,
+  `orchestrator.ts`).** For providers with native function calling, the LLM now
+  discovers and calls the permission-filtered business bus directly as OpenAI
+  `tools` — one tool per command/query (143 bus registrations across 13
+  modules, rendered via the existing `buildToolsFromBus`/`listForActor`
+  surface), with the same Zod schemas, permissions, and request context as a
+  human, so AI/manual parity is preserved:
+  - `CompletionRequest.tools/toolHistory` + `CompletionResult.toolCalls` and
+    the `AiProvider.toolCalling` capability flag; `OpenAiCompatibleProvider`
+    sends `{type:"function",function:{...}}` tools with `tool_choice:"auto"`,
+    parses `message.tool_calls`, feeds results back as `tool` messages, and
+    raises `max_tokens` to 4096 when tools are present (muse-glimmer-30b emits
+    `reasoning_content` + tool calls). `TracedProvider` forwards the capability.
+  - `runBusinessToolLoop` (cap 10) — the model chains read tools to resolve
+    names → ids, then calls a write tool. Write calls dispatch only when
+    `commandMayAutoExecute(deps.autonomy, meta)` permits (guarded_auto +
+    `minAutonomyForAuto`); otherwise they park as `PendingPlanStep` confirm
+    cards (single → `confirm_action`, multiple → multi-step plan) hydrated via
+    `hydrateEntityRefs`, exactly like a deterministic plan. `full_autonomous`
+    writes are denied unless `allowFullAutonomous` is on.
+  - Read-then-narrate answers and a final "narrate pass": when the model stops
+    calling tools it may answer in prose from the data it gathered; a
+    duplicate-call or budget-exhaustion guard asks the model to answer from
+    gathered data (falling back to a rendered summary) instead of returning a
+    null response. A double-write guard filters writes the loop already
+    dispatched from any terminal `command`/`plan` JSON.
+  - Agent tools (`memory.search`/`memory.store`, `loadSkill`, `wakeOnJob`,
+    `wakeOnEvent`) are offered under OpenAI-valid names (`memory_search` …) and
+    routed back to the internal dotted names. Text-only providers keep the
+    JSON `{"toolCall":…}` agent loop unchanged.
+  - Unit coverage: `providers.test.ts` (tool serialization/parsing/history,
+    capability flag) and `orchestrator-tools.test.ts` (read→answer chain,
+    parked single/multi writes, guarded_auto auto-execute + double-write guard,
+    full_autonomous deny, duplicate-break, budget-exhaustion synthesis, and the
+    text-only fallback). **425 tests green; `pnpm lint`/`typecheck` 43/43.**
+  - Verified live on NVIDIA NIM: `meta/muse-glimmer-30b` (default; native
+    tool-calling works; 10–90 s/request at this tool-set size). Laguna
+    `poolside/laguna-xs-2.1` was trialed and dropped — it exceeded the 30 s
+    completion timeout on the 151-tool surface and skipped write proposals.
+  - New driver `apps/api/src/nl-driver-agent.ts` exercises the loop end-to-end
+    with novel cross-department requests (read questions answered from org
+    data, write requests parking plans) — evaluated behaviorally (PASS/WARN/FAIL),
+    soft outcomes (model clarifying, parking a related-but-different write)
+    count as warnings, not exit failures.
+  - **Provider ergonomics (`@chaste/ai-core` `providers.ts`)** — the OpenAI
+    completion timeout is now configurable (`CHASTE_AI_TIMEOUT_MS`, default
+    30 s), and Nemotron-3 models (`nvidia/nemotron-3-ultra-550b-a55b`) get the
+    `chat_template_kwargs` they need for tool calling on NIM (they 500 without
+    it). Verified against both `meta/muse-glimmer-30b` and
+    `nvidia/nemotron-3-ultra-550b-a55b`; see
+    `docs/research/2026-08-18-loop-engineering-skills-write-reliability.md`.
+- **Write-reliability hardening (research doc
+  `2026-08-18-loop-engineering-skills-write-reliability.md`, §Preventing
+  superfluous writes).** Prevents the agent from proposing redundant creates
+  and steers tool selection by domain:
+  - **Natural-key existence gate (`@chaste/ai-core`
+    `tools/natural-key.ts`)** — before any `*_create` write dispatches (or
+    parks), the actor's own read-query bus is consulted for the natural key
+    (vendor/customer/bpartner by name, product by `sku`, account by `code`,
+    branch by `code`). If the record already exists the write is skipped and
+    the model is told the existing id — a best-effort guard that never blocks
+    a legitimate write when the read fails or no rule matches.
+  - **Plan dedup at confirmation** — parked and terminal-plan create steps
+    whose natural key already resolves are dropped from the confirm card, so a
+    user never sees a redundant create.
+  - **Platform domain skills (`@chaste/ai-core`
+    `skills/platform-skills.ts`, `@chaste/runtime` `PostgresSkillStore`)** —
+    eight read-only platform-scoped skills (purchasing, sales, inventory,
+    accounting, crm, hr, manufacturing, operations) bundle the check-then-write
+    doctrine per domain; the skill catalog and `loadSkill` now see them, and a
+    deterministic keyword router injects the matched domain's doctrine into the
+    tool-loop system prompt before any tool call.
+  - **Loop quality (`orchestrator.ts` `runBusinessToolLoop`)** —
+    BudgetThinker-style remaining-budget re-injection on every tool round, and
+    structured termination-cause logging (`[agent-loop] terminated: …`) so cap
+    vs duplicate-break exits are distinguishable.
+  - **Richer tool descriptions** — native tool defs now annotate read-only
+    vs write and, for guarded creates, "skips if the <entity> already exists
+    (checked via <query>)".
+  - `nl-driver-agent.ts` gains a write-redundancy case (`a5`: "Add Kampala
+    Flour Mills as a vendor …" — already exists) asserting no
+    `pur.vendor.create` reaches the confirm card. Live on muse: **5/5 passing**
+    (a5 answers "Kampala Flour Mills is already in the purchasing vendor list"),
+    with the deterministic suites unchanged (18/18, 15/15).
+- **Authoring doctrine encoded (`AGENTS.md`, `skills/module-author`,
+  `skills/command-safety`, `skills/pr-hygiene`, `docs/module-development.md`)** —
+  the rules for adding modules/commands/tools now require the harness
+  integration: a natural key + `NaturalKeyRule` per `*.create` (with the
+  `*.list` query returning it), a `platform.<domain>` skill def + routing test
+  for new domains, and domain `description`s on commands/queries, so new
+  functionality is reliably and efficiently exercised by the agent loop.
+
+### Fixed
+
+- **Platform module dead-code relocation (`modules/platform/src/index.ts`)** —
+  the analytics / import-rule / dashboard registrations had drifted into
+  `createScheduleProcessor` after `return row ?? null;`, so they referenced
+  out-of-scope `commands`/`queries` and were unreachable; moved into the
+  `register({ commands, queries })` callback. Watch rules, dashboards, import
+  rules, and replenishment reads now execute through the same bus as humans.
+- **Margin-trend sign bug (`core.analytics.marginTrend`)** — expense accounts
+  were summed with a negative sign (`-debit`), inflating margin; revenue uses
+  credits and expenses use debits, so `margin = revenue − expenses` is now
+  correct. Also converted the `since` window to an ISO string for
+  `postgres.js` (raw `Date` interpolation crashed the query).
+- **Day-of-month watch-rule name duplication ("Schedule payroll approval for
+  the 25th, and ping Finance if not approved by 3pm")** — the intent no longer
+  repeats the trailing "ping Finance if not approved by 3pm" clause twice;
+  the rule name reads "Monthly: payroll approval — ping Finance if not
+  approved by 3pm".
+- **Chat surfaces only respond to the running build** — the API resolves
+  `@chaste/ai-core` / `@chaste/module-platform` via their `dist/`, so source
+  edits require a rebuild (`pnpm --filter @chaste/ai-core build`, etc.) before
+  restart; the NL driver run that previously appeared green for #14 was an
+  artifact of the old process still owning :3001.
+
 - **Agent harness spine (ADR 0014, research doc
   `2026-08-15-future-architecture-ai-native-business-os`) — the first tranche
   of the pivot from "ERP with a chatbot" to "trustworthy business execution

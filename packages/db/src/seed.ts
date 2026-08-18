@@ -149,6 +149,27 @@ export const PERMISSION_CATALOG: { permission: string; module: string; descripti
   { permission: "mfg.bom.manage", module: "manufacturing", description: "Manage BOMs" },
   { permission: "mfg.wo.manage", module: "manufacturing", description: "Manage work orders" },
   { permission: "mfg.wo.read", module: "manufacturing", description: "Read work orders" },
+  {
+    permission: "acc.invoice.create",
+    module: "accounting",
+    description: "Create invoices (legacy single-verb alias)",
+  },
+  { permission: "core.backup.manage", module: "core", description: "Create and restore backups" },
+  { permission: "core.backup.read", module: "core", description: "Read backups" },
+  { permission: "core.watchRule.manage", module: "core", description: "Create, update, and delete watch rules" },
+  { permission: "core.watchRule.read", module: "core", description: "List watch rules" },
+  { permission: "activities.write", module: "workflow", description: "Create, complete, and cancel activities" },
+  { permission: "activities.read", module: "workflow", description: "Read activities" },
+  { permission: "workflow.tasks.write", module: "workflow", description: "Manage workflow tasks" },
+  { permission: "workflow.tasks.read", module: "workflow", description: "Read workflow tasks" },
+  { permission: "workflow.instance.write", module: "workflow", description: "Manage workflow instances" },
+  { permission: "workflow.instance.read", module: "workflow", description: "Read workflow instances" },
+  { permission: "core.analytics.read", module: "core", description: "Read verifiable analytics queries (sales/margin summaries)" },
+  { permission: "core.replenishment.read", module: "core", description: "Read stockout-risk and replenishment proposals" },
+  { permission: "core.importRule.manage", module: "core", description: "Create, update, and delete data-quality/import transform rules" },
+  { permission: "core.importRule.read", module: "core", description: "List data-quality/import transform rules" },
+  { permission: "core.dashboard.manage", module: "core", description: "Create, update, and delete saved dashboards" },
+  { permission: "core.dashboard.read", module: "core", description: "List saved dashboards" },
 ];
 
 const ALL_PERMS = PERMISSION_CATALOG.map((p) => p.permission);

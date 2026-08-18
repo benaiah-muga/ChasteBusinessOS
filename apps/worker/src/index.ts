@@ -20,6 +20,7 @@ import { createFollowUpHarness } from "./harness.js";
 import { registerBuzzMirror } from "./buzz.js";
 import { drainOnce, type OutboxEventRow } from "./drain.js";
 import { createScheduleDriver } from "./scheduler.js";
+import { createProactiveProcessor } from "./proactive.js";
 
 /**
  * Notify operators (holders of `core.outbox.manage`) that an event hit the
@@ -63,6 +64,7 @@ async function main() {
   const email = createEmailProcessor(db);
   const backups = createBackupProcessor(db);
   const followUps = await createFollowUpHarness(cfg, db);
+  const proactive = createProactiveProcessor(db);
   const driver = await createScheduleDriver({
     db,
     redisUrl: cfg.redisUrl,
@@ -97,6 +99,29 @@ async function main() {
         JSON.stringify({
           service: "chaste-worker",
           action: "schedule_error",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+
+    // ADR 0014 — collect due watch-rule suggestions, gate, and deliver
+    // notifications. Never executes request_approval/draft intents itself.
+    try {
+      const result = await proactive.tick();
+      if (result.delivered > 0) {
+        console.log(
+          JSON.stringify({
+            service: "chaste-worker",
+            action: "proactive_delivered",
+            ...result,
+          }),
+        );
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          service: "chaste-worker",
+          action: "proactive_error",
           error: err instanceof Error ? err.message : String(err),
         }),
       );

@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { runMigrations } from "@chaste/db";
+import { createDb, runMigrations, schema } from "@chaste/db";
 import { buildServer } from "./server.js";
 import type { AppContext } from "./app-context.js";
 
@@ -29,6 +29,15 @@ describe.skipIf(!hasDb)("Proactive coordinator HTTP surface", () => {
 
   beforeAll(async () => {
     await runMigrations(process.env.DATABASE_URL!);
+    // Scoped cleanup keeps the suite idempotent without disturbing the
+    // bootstrap session user that the server's fallback auth relies on.
+    const db = createDb(process.env.DATABASE_URL!);
+    await db.delete(schema.proactiveDeliveries);
+    await db.delete(schema.watchRules);
+    await db.delete(schema.proactivePreferences);
+    await db.delete(schema.notifications);
+    await db.$client.end({ timeout: 5 });
+
     const built = await buildServer();
     server = built.server;
     app = built.app;

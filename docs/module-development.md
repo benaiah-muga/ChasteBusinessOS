@@ -15,6 +15,8 @@ organization through the marketplace.
 7. **AI tools = commands/queries** -- declare capability tags for specialist routing; do not invent a parallel tool API.
 8. **Tests** -- contract tests for every command and query.
 9. **Portable by default** -- a module must be packable and shareable with another org/instance without private monorepo coupling. See [specs/portable-modules.md](./specs/portable-modules.md).
+10. **Creates are natural-key idempotent by convention** -- every `*.create` command has a uniquely-identifying natural key (`name`, `sku`, `code`, `email`) surfaced by the module's `*.list` query, and a matching `NaturalKeyRule` in `packages/ai-core/src/tools/natural-key.ts`. The AI harness existence gate then skips redundant creates instead of duplicating records (see "AI harness integration" below).
+11. **New domains ship a platform skill** -- add a `platform.<domain>` def in `packages/ai-core/src/skills/platform-skills.ts` so the agent loop routes the domain's check-then-write doctrine into its prompt.
 
 ### Portability checklist
 
@@ -27,6 +29,82 @@ organization through the marketplace.
 | Share paths | Marketplace publish, `.chaste-module.tgz` pack, or monorepo path for dev |
 
 **Standard platform features** (branches, RBAC, settings, notifications) are customized without code. Self-dev / coding agents only for out-of-scope capabilities ([specs/self-development.md](./specs/self-development.md)).
+
+## AI harness integration (agent tool loop)
+
+Every registered command and query automatically becomes a native function
+tool in the agent loop (`packages/ai-core/src/tools/from-bus.ts` → exposed under
+the actor's own permissions). No separate AI API. Three integration duties make
+a module's tools **efficient** (model picks the right one) and **reliable**
+(model never proposes a duplicate or an invented id):
+
+### 1. Existence gate (no redundant creates)
+
+`packages/ai-core/src/tools/natural-key.ts` maps each guarded `*.create` to a
+`checkQuery` and `keyField`. Before the write dispatches (or parks), the gate
+runs the actor's own `*.list` query, matches the natural key, and if the record
+exists it **skips the write** and returns "already exists as <id>". It is
+best-effort: if the read fails (no permission) or no rule matches, the write
+proceeds normally — the gate never blocks a legitimate write.
+
+To guard a new create:
+
+```ts
+// packages/ai-core/src/tools/natural-key.ts — add to NATURAL_KEY_RULES
+{
+  command: "example.item.create",          // bus command name
+  checkQuery: "example.item.list",         // must return id + natural key
+  keyField: "code",                        // name | sku | code | email
+  pick: (data) => {
+    const items = ((data as { items?: { id: string; code: string }[] }).items ?? []);
+    return items.map((i) => ({ id: i.id, label: i.code }));
+  },
+  entity: "Item",
+}
+```
+
+Contract: the `*.list` query returns `id` + the natural-key field, and the read
+permission is granted wherever the create is (otherwise the gate silently
+no-ops). Add a unit test in `tools/natural-key.test.ts`.
+
+### 2. Platform domain skills (tool selection steering)
+
+`packages/ai-core/src/skills/platform-skills.ts` holds one doctrine block per
+domain (`platform.purchasing`, `platform.inventory`, …). A deterministic
+keyword router matches the user's request and injects the matched blocks into
+the agent loop's system prompt before any tool call. Each new module should add
+one:
+
+```ts
+{
+  name: "platform.example",
+  title: "Example domain — items and codes",
+  summary: "Resolve items via example.item.list; never re-create an existing code.",
+  keywords: ["item", "items", "code"],
+  instructions:
+    "Domain: example (example.*).\n" +
+    "- Discover items with example.item.list; resolve code → id before any write.\n" +
+    "- example.item.create: only for a code that does NOT already exist; the gate skips duplicates and reports the existing id.\n" +
+    "- Answer read questions from example.item.list with real org data.",
+}
+```
+
+The defs are also visible to the skill catalog and `loadSkill` (they merge into
+`PostgresSkillStore` as read-only platform skills). Add a routing test in
+`skills/platform-skills.test.ts`.
+
+### 3. Descriptions (what the model reads)
+
+The tool surface auto-annotates each tool as `(bus: <name>; read-only|write;
+skips if the <entity> already exists …)`. Set a real `description` on every
+`defineCommand` / `defineQuery` — with 143 tools in the prompt, the description
+is the primary steer. Commands that require approval still show the same card
+as a human confirm: the agent never bypasses `minAutonomyForAuto`.
+
+Verify end to end with `apps/api/src/nl-driver-agent.ts` (add a case for your
+module): a read request must answer from the `*.list` query, a write must park
+the right command, and a create for an already-existing record must NOT reach
+the confirm card.
 
 ## End-to-end module lifecycle (Odoo-like)
 
@@ -183,7 +261,10 @@ Shared primitives (`apps/web/src/components/ui/`):
 Backend depth checklist (per entity):
 
 - `*.create`, `*.update`, `*.delete` (soft), `*.setStatus` commands
-- `*.list` (with search/filter), `*.get` (detail) queries
+- `*.list` (with search/filter), `*.get` (detail) queries — the list returns `id` + natural key
+- `NaturalKeyRule` in `packages/ai-core/src/tools/natural-key.ts` for each create
+- `platform.<domain>` skill + routing test in `packages/ai-core/src/skills/platform-skills.ts`
+- Domain `description` on every command/query
 - Outbox events for every write
 - Activity/interaction log table + `*.interaction.log` command + `*.interaction.list` query
 - Permission strings in `PERMISSION_CATALOG` seed
@@ -202,6 +283,11 @@ Backend depth checklist (per entity):
 - [ ] `@chaste/api-client` methods (if public)
 - [ ] Web route + workspace UI + nav registry entry
 - [ ] Install shows the app; uninstall hides it from nav
+- [ ] Every `*.create` has a natural key + `NaturalKeyRule` + test
+- [ ] `platform.<domain>` skill + routing test
+- [ ] Domain descriptions set on commands/queries
+- [ ] Agentic path verified via `nl-driver-agent.ts` (read answers, write parks,
+      redundant create not proposed)
 
 ## Forbidden patterns
 

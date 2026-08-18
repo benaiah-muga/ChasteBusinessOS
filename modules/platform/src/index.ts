@@ -22,7 +22,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "@chaste/kernel";
-import { and, desc, eq, ilike, inArray, isNull, lt, lte, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   createEmailAdapter,
@@ -121,10 +121,163 @@ async function notifyUser(
   });
 }
 
+/** Minimal structural contract for the proactive watch-rule store. */
+interface WatchRuleRecord {
+  id: string;
+  organizationId: string;
+  name: string;
+  trigger:
+    | { kind: "schedule"; recurrence: { freq: "daily" | "weekly" | "monthly"; interval?: number; daysOfWeek?: number[]; at?: string }; timezone: string }
+    | { kind: "event"; eventKey: string };
+  action: { mode: "notify" | "suggest" | "draft" | "request_approval"; intent: string; recipients: string[] };
+  condition?: string;
+  enabled: boolean;
+  priority: "low" | "normal" | "high";
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface WatchRuleStoreLike {
+  create(
+    rule: Omit<WatchRuleRecord, "id" | "createdAt" | "updatedAt"> & { id?: string; createdAt?: string },
+  ): Promise<WatchRuleRecord>;
+  update(
+    organizationId: string,
+    id: string,
+    patch: Partial<Pick<WatchRuleRecord, "name" | "trigger" | "action" | "condition" | "priority" | "enabled">>,
+  ): Promise<WatchRuleRecord | undefined>;
+  remove(organizationId: string, id: string): Promise<boolean>;
+  get(organizationId: string, id: string): Promise<WatchRuleRecord | undefined>;
+  listByOrg(organizationId: string): Promise<WatchRuleRecord[]>;
+}
+
+const watchRuleTriggerSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("schedule"),
+    recurrence: z.object({
+      freq: z.enum(["daily", "weekly", "monthly"]),
+      interval: z.number().int().positive().optional(),
+      daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
+      at: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+    }),
+    timezone: z.string().min(1).default("UTC"),
+  }),
+  z.object({ kind: z.literal("event"), eventKey: z.string().min(1) }),
+]);
+const watchRuleActionSchema = z.object({
+  mode: z.enum(["notify", "suggest", "draft", "request_approval"]),
+  intent: z.string().min(1),
+  recipients: z.array(z.string().min(1)).min(1),
+});
+const watchRuleOutputSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  name: z.string(),
+  trigger: watchRuleTriggerSchema,
+  action: watchRuleActionSchema,
+  condition: z.string().optional(),
+  enabled: z.boolean(),
+  priority: z.enum(["low", "normal", "high"]),
+  resolvedRecipients: z.array(z.string()),
+  createdByUserId: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+/** Recipient tokens accepted by core.watchRule.*: "me", an email, a role key, or a user id.
+ * Resolves what it can; keeps unknown tokens (legacy/external recipient ids) as-is so
+ * creating a rule never hard-fails on a group the org hasn't populated yet. The only
+ * hard error is a *known* role key whose group has no active users — that is a
+ * genuine "nobody to notify" mistake worth surfacing. */
+async function resolveWatchRuleRecipients(
+  db: Db,
+  orgId: string,
+  actorUserId: string,
+  recipients: string[],
+): Promise<string[]> {
+  const ids: string[] = [];
+  for (const raw of recipients) {
+    const token = raw.trim();
+    if (token.toLowerCase() === "me") {
+      ids.push(actorUserId);
+      continue;
+    }
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
+      ids.push(token);
+      continue;
+    }
+    if (token.includes("@")) {
+      const [user] = await db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(
+          and(eq(schema.users.organizationId, orgId), eq(schema.users.email, token.toLowerCase())),
+        )
+        .limit(1);
+      ids.push(user?.id ?? token.toLowerCase());
+      continue;
+    }
+    const key = token.toLowerCase();
+    const roleRows = await db
+      .select({ id: schema.roles.id })
+      .from(schema.roles)
+      .where(and(eq(schema.roles.organizationId, orgId), eq(schema.roles.key, key)));
+    if (roleRows.length > 0) {
+      const roleUsers = await db
+        .select({ userId: schema.userRoles.userId })
+        .from(schema.userRoles)
+        .innerJoin(schema.users, eq(schema.users.id, schema.userRoles.userId))
+        .where(
+          and(
+            inArray(schema.userRoles.roleId, roleRows.map((r) => r.id)),
+            eq(schema.users.isActive, true),
+          ),
+        );
+      if (roleUsers.length === 0) {
+        throw new ValidationError(`No active users found for recipient group: ${token}`, {
+          recipients,
+        });
+      }
+      ids.push(...roleUsers.map((r) => r.userId));
+      continue;
+    }
+    // Unknown token — preserve as-is (legacy id / future external channel).
+    ids.push(token);
+  }
+  return [...new Set(ids)];
+}
+
+/** Offset minutes east of UTC for a named IANA timezone at `date`. */
+function tzOffsetMinutes(timeZone: string, date: Date): number {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    timeZoneName: "longOffset",
+    hour12: false,
+  });
+  const name = fmt.formatToParts(date).find((p) => p.type === "timeZoneName")?.value ?? "";
+  const m = name.match(/GMT([+-])(\d{2})(?::?(\d{2}))?/);
+  if (!m) return 0;
+  const sign = m[1] === "-" ? -1 : 1;
+  return sign * (Number(m[2]) * 60 + Number(m[3] ?? 0));
+}
+
+/** Convert a local HH:MM `at` into UTC HH:MM for a named timezone. */
+function localAtToUtc(at: string, timeZone: string): string {
+  if (!timeZone || timeZone === "UTC") return at;
+  const [hh, mm] = at.split(":").map((n) => Number(n));
+  const total = (hh! * 60 + mm! - tzOffsetMinutes(timeZone, new Date()) + 24 * 60) % (24 * 60);  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 export function createPlatformModule(
   db: Db,
   modules: ModuleRegistry,
-  opts: { allowFullAutonomous: boolean; regions: string[] },
+  opts: {
+    allowFullAutonomous: boolean;
+    regions: string[];
+    /** Durable watch-rule store (ADR 0014). Optional so headless/unit callers stay happy. */
+    watchRules?: WatchRuleStoreLike;
+  },
 ): BusinessModule {
   return {
     manifest: {
@@ -162,6 +315,14 @@ export function createPlatformModule(
         "core.workflow.read",
         "core.workflow.manage",
         "core.workflow.run",
+        "core.watchRule.read",
+        "core.watchRule.manage",
+        "core.analytics.read",
+        "core.replenishment.read",
+        "core.importRule.manage",
+        "core.importRule.read",
+        "core.dashboard.manage",
+        "core.dashboard.read",
       ],
       capabilities: ["core.rbac", "core.marketplace", "core.autonomy", "core.bpartners"],
       specialist: {
@@ -975,6 +1136,180 @@ export function createPlatformModule(
                 ),
               );
             return { userId: input.userId, branchId: input.branchId, ok: true as const };
+          },
+        }),
+      );
+
+      // ─── Watch rules (ADR 0014 proactive surface) ────────────────────
+      // Durable "if X then Y" rules over the proactive coordinator. `recipients`
+      // accept "me", an email, a role key, or a user id — resolved here so the
+      // AI and a human both go through one auditable command.
+
+      queries.register(
+        defineQuery({
+          name: "core.watchRule.list",
+          permissions: ["core.watchRule.read"],
+          tags: ["core"],
+          input: z.object({ enabled: z.boolean().optional() }),
+          output: z.object({ rules: z.array(watchRuleOutputSchema) }),
+          handler: async (input, ctx) => {
+            const store = opts.watchRules;
+            if (!store) throw new NotFoundError("Watch rules are not enabled on this host");
+            const rules = await store.listByOrg(ctx.actor.organizationId);
+            return {
+              rules: (input.enabled == null ? rules : rules.filter((r) => r.enabled === input.enabled)).map(
+                (r) => ({ ...r, resolvedRecipients: r.action.recipients }),
+              ),
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.watchRule.create",
+          permissions: ["core.watchRule.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            name: z.string().min(1).max(160),
+            trigger: watchRuleTriggerSchema,
+            action: watchRuleActionSchema,
+            condition: z.string().optional(),
+            enabled: z.boolean().optional(),
+            priority: z.enum(["low", "normal", "high"]).optional(),
+          }),
+          output: watchRuleOutputSchema,
+          handler: async (input, ctx) => {
+            const store = opts.watchRules;
+            if (!store) throw new NotFoundError("Watch rules are not enabled on this host");
+            const orgId = ctx.actor.organizationId;
+            const resolvedRecipients = await resolveWatchRuleRecipients(
+              db,
+              orgId,
+              ctx.actor.userId,
+              input.action.recipients,
+            );
+            const trigger =
+              input.trigger.kind === "schedule"
+                ? {
+                    kind: "schedule" as const,
+                    recurrence: {
+                      ...input.trigger.recurrence,
+                      at: input.trigger.recurrence.at
+                        ? localAtToUtc(input.trigger.recurrence.at, input.trigger.timezone)
+                        : undefined,
+                    },
+                    timezone: input.trigger.timezone,
+                  }
+                : input.trigger;
+            const rule = await store.create({
+              organizationId: orgId,
+              name: input.name,
+              trigger,
+              action: { ...input.action, recipients: resolvedRecipients },
+              condition: input.condition,
+              enabled: input.enabled ?? true,
+              priority: input.priority ?? "normal",
+              createdByUserId: ctx.actor.userId,
+            });
+            await notifyUser(db, {
+              organizationId: orgId,
+              userId: ctx.actor.userId,
+              kind: "system",
+              title: `Watch rule created: ${rule.name}`,
+              body: `Rule "${rule.name}" is active and will be evaluated on its schedule.`,
+              resourceType: "watch_rule",
+              resourceId: rule.id,
+            });
+            return { ...rule, resolvedRecipients };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.watchRule.update",
+          permissions: ["core.watchRule.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            ruleId: z.string().uuid(),
+            name: z.string().min(1).max(160).optional(),
+            trigger: watchRuleTriggerSchema.optional(),
+            action: watchRuleActionSchema.optional(),
+            condition: z.string().optional(),
+            enabled: z.boolean().optional(),
+            priority: z.enum(["low", "normal", "high"]).optional(),
+          }),
+          output: watchRuleOutputSchema,
+          handler: async (input, ctx) => {
+            const store = opts.watchRules;
+            if (!store) throw new NotFoundError("Watch rules are not enabled on this host");
+            const orgId = ctx.actor.organizationId;
+            const patch: {
+              name?: string;
+              trigger?: WatchRuleRecord["trigger"];
+              action?: WatchRuleRecord["action"];
+              condition?: string;
+              enabled?: boolean;
+              priority?: "low" | "normal" | "high";
+            } = {};
+            if (input.name != null) patch.name = input.name;
+            if (input.condition != null) patch.condition = input.condition;
+            if (input.enabled != null) patch.enabled = input.enabled;
+            if (input.priority != null) patch.priority = input.priority;
+            if (input.trigger) {
+              patch.trigger =
+                input.trigger.kind === "schedule"
+                  ? {
+                      kind: "schedule" as const,
+                      recurrence: {
+                        ...input.trigger.recurrence,
+                        at: input.trigger.recurrence.at
+                          ? localAtToUtc(input.trigger.recurrence.at, input.trigger.timezone)
+                          : undefined,
+                      },
+                      timezone: input.trigger.timezone,
+                    }
+                  : input.trigger;
+            }
+            if (input.action) {
+              patch.action = {
+                ...input.action,
+                recipients: await resolveWatchRuleRecipients(
+                  db,
+                  orgId,
+                  ctx.actor.userId,
+                  input.action.recipients,
+                ),
+              };
+            }
+            const updated = await store.update(orgId, input.ruleId, patch);
+            if (!updated) {
+              throw new NotFoundError("Watch rule");
+            }
+            return { ...updated, resolvedRecipients: updated.action.recipients };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.watchRule.delete",
+          permissions: ["core.watchRule.manage"],
+          tags: ["core"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ ruleId: z.string().uuid() }),
+          output: z.object({ ok: z.literal(true), ruleId: z.string() }),
+          handler: async (input, ctx) => {
+            const store = opts.watchRules;
+            if (!store) throw new NotFoundError("Watch rules are not enabled on this host");
+            const removed = await store.remove(ctx.actor.organizationId, input.ruleId);
+            if (!removed) {
+              throw new NotFoundError("Watch rule");
+            }
+            return { ok: true as const, ruleId: input.ruleId };
           },
         }),
       );
@@ -2168,6 +2503,478 @@ export function createPlatformModule(
           },
         }),
       );
+
+      // ─── Verifiable analytics reads (research doc §Analytics Acceptance
+      // Criteria — no invented numbers: every figure is an aggregation of
+      // ledger/invoice rows the caller can drill into) ──────────────────────
+
+      const monthLabel = (iso: string) => iso.slice(0, 7);
+
+      queries.register(
+        defineQuery({
+          name: "core.analytics.salesSummary",
+          description: "Invoice totals grouped by month (verifiable from acc_invoices)",
+          permissions: ["core.analytics.read"],
+          tags: ["core", "analytics"],
+          input: z.object({ months: z.number().int().min(1).max(60).optional() }).default({}),
+          output: z.object({
+            currency: z.string(),
+            monthly: z.array(
+              z.object({ month: z.string(), total: z.number(), invoiceCount: z.number() }),
+            ),
+          }),
+          handler: async (input, ctx) => {
+            const months = input.months ?? 12;
+            const since = new Date();
+            since.setUTCDate(1);
+            since.setUTCMonth(since.getUTCMonth() - (months - 1));
+            // postgres.js needs an ISO string, not a Date, inside raw sql templates.
+            const sinceIso = since.toISOString();
+            const rows = await db
+              .select({
+                month: sql<string>`to_char(${schema.accInvoices.issuedAt}, 'YYYY-MM')`,
+                total: sql<number>`coalesce(sum(${schema.accInvoices.total}),0)::float8`,
+                invoiceCount: sql<number>`count(*)::int`,
+              })
+              .from(schema.accInvoices)
+              .where(
+                and(
+                  eq(schema.accInvoices.organizationId, ctx.actor.organizationId),
+                  sql`${schema.accInvoices.issuedAt} >= ${sinceIso}`,
+                  sql`${schema.accInvoices.status} <> 'draft'`,
+                ),
+              )
+              .groupBy(sql`1`)
+              .orderBy(sql`1`);
+            return {
+              currency: "UGX",
+              monthly: rows.map((r) => ({
+                month: monthLabel(r.month),
+                total: Number(r.total),
+                invoiceCount: r.invoiceCount,
+              })),
+            };
+          },
+        }),
+      );
+
+
+      queries.register(
+        defineQuery({
+          name: "core.analytics.marginTrend",
+          description:
+            "Monthly revenue, expenses, and margin from posted journal entries (verifiable from acc_journal_lines)",
+          permissions: ["core.analytics.read"],
+          tags: ["core", "analytics"],
+          input: z.object({ months: z.number().int().min(1).max(60).optional() }).default({}),
+          output: z.object({
+            currency: z.string(),
+            monthly: z.array(
+              z.object({
+                month: z.string(),
+                revenue: z.number(),
+                expenses: z.number(),
+                margin: z.number(),
+              }),
+            ),
+          }),
+          handler: async (input, ctx) => {
+            const months = input.months ?? 6;
+            const since = new Date();
+            since.setUTCDate(1);
+            since.setUTCMonth(since.getUTCMonth() - (months - 1));
+            const sinceIso = since.toISOString();
+            const rows = await db
+              .select({
+                month: sql<string>`to_char(${schema.accJournalEntries.entryDate}, 'YYYY-MM')`,
+                type: schema.accAccounts.type,
+                // Revenue accounts carry credits, expense accounts carry debits;
+                // the sign must be consistent (both positive) so margin =
+                // revenue − expenses is computed correctly below.
+                amount: sql<number>`coalesce(sum(case when ${schema.accAccounts.type} = 'expense' then ${schema.accJournalLines.debit} else ${schema.accJournalLines.credit} end),0)::float8`,
+              })
+              .from(schema.accJournalLines)
+              .innerJoin(
+                schema.accJournalEntries,
+                eq(schema.accJournalEntries.id, schema.accJournalLines.entryId),
+              )
+              .innerJoin(
+                schema.accAccounts,
+                eq(schema.accAccounts.id, schema.accJournalLines.accountId),
+              )
+              .where(
+                and(
+                  eq(schema.accJournalEntries.organizationId, ctx.actor.organizationId),
+                  eq(schema.accJournalEntries.status, "posted"),
+                  sql`${schema.accJournalEntries.entryDate} >= ${sinceIso}`,
+                ),
+              )
+              .groupBy(sql`1`, schema.accAccounts.type)
+              .orderBy(sql`1`);
+            const byMonth = new Map<string, { revenue: number; expenses: number }>();
+            for (const r of rows) {
+              const m = monthLabel(r.month);
+              const cur = byMonth.get(m) ?? { revenue: 0, expenses: 0 };
+              if (r.type === "revenue") cur.revenue += Number(r.amount);
+              if (r.type === "expense") cur.expenses += Number(r.amount);
+              byMonth.set(m, cur);
+            }
+            return {
+              currency: "UGX",
+              monthly: [...byMonth.entries()]
+                .sort((a, b) => a[0].localeCompare(b[0]))
+                .map(([month, v]) => ({
+                  month,
+                  revenue: v.revenue,
+                  expenses: v.expenses,
+                  margin: v.revenue - v.expenses,
+                })),
+            };
+          },
+        }),
+      );
+
+
+      queries.register(
+        defineQuery({
+          name: "core.analytics.salesByLocation",
+          description: "Invoice totals grouped by the customer's city (customer location, not branch)",
+          permissions: ["core.analytics.read"],
+          tags: ["core", "analytics"],
+          input: z.object({}).default({}),
+          output: z.object({
+            currency: z.string(),
+            byLocation: z.array(
+              z.object({ location: z.string().nullable(), total: z.number(), invoiceCount: z.number() }),
+            ),
+          }),
+          handler: async (_i, ctx) => {
+            const rows = await db
+              .select({
+                location: schema.businessPartners.city,
+                total: sql<number>`coalesce(sum(${schema.accInvoices.total}),0)::float8`,
+                invoiceCount: sql<number>`count(*)::int`,
+              })
+              .from(schema.accInvoices)
+              .leftJoin(
+                schema.businessPartners,
+                eq(schema.businessPartners.id, schema.accInvoices.customerId),
+              )
+              .where(
+                and(
+                  eq(schema.accInvoices.organizationId, ctx.actor.organizationId),
+                  sql`${schema.accInvoices.status} <> 'draft'`,
+                ),
+              )
+              .groupBy(schema.businessPartners.city)
+              .orderBy(sql`2 desc`);
+            return {
+              currency: "UGX",
+              byLocation: rows.map((r) => ({
+                location: r.location,
+                total: Number(r.total),
+                invoiceCount: r.invoiceCount,
+              })),
+            };
+          },
+        }),
+      );
+
+
+      queries.register(
+        defineQuery({
+          name: "core.replenishment.propose",
+          description: "Stock below reorder level with suggested order quantities (verifiable from inv_stock_levels)",
+          permissions: ["core.replenishment.read"],
+          tags: ["core", "inventory"],
+          input: z.object({}).default({}),
+          output: z.object({
+            items: z.array(
+              z.object({
+                sku: z.string(),
+                name: z.string(),
+                warehouse: z.string(),
+                quantity: z.number(),
+                reorderLevel: z.number(),
+                suggestedQty: z.number(),
+              }),
+            ),
+            summary: z.string(),
+          }),
+          handler: async (_i, ctx) => {
+            const rows = await db
+              .select({
+                sku: schema.invProducts.sku,
+                name: schema.invProducts.name,
+                warehouse: schema.invWarehouses.code,
+                quantity: schema.invStockLevels.quantity,
+                reorderLevel: schema.invProducts.reorderLevel,
+              })
+              .from(schema.invStockLevels)
+              .innerJoin(
+                schema.invProducts,
+                eq(schema.invProducts.id, schema.invStockLevels.productId),
+              )
+              .innerJoin(
+                schema.invWarehouses,
+                eq(schema.invWarehouses.id, schema.invStockLevels.warehouseId),
+              )
+              .where(
+                and(
+                  eq(schema.invStockLevels.organizationId, ctx.actor.organizationId),
+                  sql`${schema.invStockLevels.quantity} < ${schema.invProducts.reorderLevel}`,
+                ),
+              )
+              .orderBy(schema.invWarehouses.code, schema.invProducts.sku);
+            const items = rows.map((r) => ({
+              sku: r.sku,
+              name: r.name,
+              warehouse: r.warehouse,
+              quantity: r.quantity,
+              reorderLevel: r.reorderLevel,
+              suggestedQty: Math.max(r.reorderLevel - r.quantity, 1),
+            }));
+            return {
+              items,
+              summary: `${items.length} item(s) below reorder level. Suggested qty brings stock back to the reorder level; pick a supplier to create the purchase order.`,
+            };
+          },
+        }),
+      );
+
+
+      // ─── Data-quality / import transform rules (research doc §Onboarding) ──
+
+      const importRuleScopeSchema = z.enum(["customer", "supplier", "product", "employee"]);
+      const importRuleTypeSchema = z.enum(["blank_as_unknown", "split_field", "dedupe_column"]);
+      const importRuleOutputSchema = z.object({
+        id: z.string(),
+        organizationId: z.string(),
+        scope: importRuleScopeSchema,
+        ruleType: importRuleTypeSchema,
+        field: z.string(),
+        config: z.record(z.unknown()),
+        description: z.string().nullable(),
+        enabled: z.boolean(),
+        createdByUserId: z.string(),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+      });
+
+      function mapImportRule(row: typeof schema.importRules.$inferSelect) {
+        return {
+          id: row.id,
+          organizationId: row.organizationId,
+          scope: row.scope as "customer" | "supplier" | "product" | "employee",
+          ruleType: row.ruleType as "blank_as_unknown" | "split_field" | "dedupe_column",
+          field: row.field,
+          config: row.config,
+          description: row.description,
+          enabled: row.enabled,
+          createdByUserId: row.createdByUserId,
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        };
+      }
+
+      commands.register(
+        defineCommand({
+          name: "core.importRule.create",
+          description: "Record a deterministic data-quality/import transform rule",
+          permissions: ["core.importRule.manage"],
+          tags: ["core", "onboarding"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            scope: importRuleScopeSchema,
+            ruleType: importRuleTypeSchema,
+            field: z.string().min(1).max(120),
+            config: z.record(z.unknown()).default({}),
+            description: z.string().max(500).optional(),
+          }),
+          output: importRuleOutputSchema,
+          handler: async (input, ctx) => {
+            const [row] = await db
+              .insert(schema.importRules)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                scope: input.scope,
+                ruleType: input.ruleType,
+                field: input.field.toLowerCase().trim(),
+                config: input.config,
+                description: input.description ?? null,
+                createdByUserId: ctx.actor.userId,
+              })
+              .returning();
+            return mapImportRule(row!);
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.importRule.list",
+          description: "List this org's data-quality/import transform rules",
+          permissions: ["core.importRule.read"],
+          tags: ["core", "onboarding"],
+          input: z.object({ scope: importRuleScopeSchema.optional() }).default({}),
+          output: z.object({ rules: z.array(importRuleOutputSchema) }),
+          handler: async (input, ctx) => {
+            const where =
+              input.scope != null
+                ? and(
+                    eq(schema.importRules.organizationId, ctx.actor.organizationId),
+                    eq(schema.importRules.scope, input.scope),
+                  )
+                : eq(schema.importRules.organizationId, ctx.actor.organizationId);
+            const rows = await db
+              .select()
+              .from(schema.importRules)
+              .where(where)
+              .orderBy(desc(schema.importRules.createdAt));
+            return { rules: rows.map(mapImportRule) };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.importRule.delete",
+          description: "Delete a data-quality/import transform rule",
+          permissions: ["core.importRule.manage"],
+          tags: ["core", "onboarding"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ ruleId: z.string().uuid() }),
+          output: z.object({ ok: z.literal(true), ruleId: z.string() }),
+          handler: async (input, ctx) => {
+            const removed = await db
+              .delete(schema.importRules)
+              .where(
+                and(
+                  eq(schema.importRules.id, input.ruleId),
+                  eq(schema.importRules.organizationId, ctx.actor.organizationId),
+                ),
+              )
+              .returning({ id: schema.importRules.id });
+            if (removed.length === 0) throw new NotFoundError("Import rule");
+            return { ok: true as const, ruleId: input.ruleId };
+          },
+        }),
+      );
+
+
+      // ─── Saved dashboards / reports (deictic "turn this into a dashboard") ─
+
+      const dashboardOutputSchema = z.object({
+        id: z.string(),
+        organizationId: z.string(),
+        name: z.string(),
+        description: z.string().nullable(),
+        widgets: z.array(z.record(z.unknown())),
+        createdByUserId: z.string(),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+      });
+
+      commands.register(
+        defineCommand({
+          name: "core.dashboard.create",
+          description: "Save a dashboard/report from a list of catalog queries",
+          permissions: ["core.dashboard.manage"],
+          tags: ["core", "analytics"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({
+            name: z.string().min(1).max(160),
+            description: z.string().max(500).optional(),
+            widgets: z
+              .array(
+                z.object({
+                  query: z.string().min(1),
+                  title: z.string().min(1),
+                  config: z.record(z.unknown()).optional(),
+                }),
+              )
+              .min(1),
+          }),
+          output: dashboardOutputSchema,
+          handler: async (input, ctx) => {
+            const [row] = await db
+              .insert(schema.dashboards)
+              .values({
+                organizationId: ctx.actor.organizationId,
+                name: input.name,
+                description: input.description ?? null,
+                widgetSpec: input.widgets,
+                createdByUserId: ctx.actor.userId,
+              })
+              .returning();
+            return {
+              id: row!.id,
+              organizationId: row!.organizationId,
+              name: row!.name,
+              description: row!.description,
+              widgets: row!.widgetSpec as Record<string, unknown>[],
+              createdByUserId: row!.createdByUserId,
+              createdAt: row!.createdAt.toISOString(),
+              updatedAt: row!.updatedAt.toISOString(),
+            };
+          },
+        }),
+      );
+
+      queries.register(
+        defineQuery({
+          name: "core.dashboard.list",
+          description: "List saved dashboards/reports",
+          permissions: ["core.dashboard.read"],
+          tags: ["core", "analytics"],
+          input: z.object({}).default({}),
+          output: z.object({ dashboards: z.array(dashboardOutputSchema) }),
+          handler: async (_i, ctx) => {
+            const rows = await db
+              .select()
+              .from(schema.dashboards)
+              .where(eq(schema.dashboards.organizationId, ctx.actor.organizationId))
+              .orderBy(desc(schema.dashboards.createdAt));
+            return {
+              dashboards: rows.map((r) => ({
+                id: r.id,
+                organizationId: r.organizationId,
+                name: r.name,
+                description: r.description,
+                widgets: r.widgetSpec as Record<string, unknown>[],
+                createdByUserId: r.createdByUserId,
+                createdAt: r.createdAt.toISOString(),
+                updatedAt: r.updatedAt.toISOString(),
+              })),
+            };
+          },
+        }),
+      );
+
+      commands.register(
+        defineCommand({
+          name: "core.dashboard.delete",
+          description: "Delete a saved dashboard/report",
+          permissions: ["core.dashboard.manage"],
+          tags: ["core", "analytics"],
+          minAutonomyForAuto: "guarded_auto",
+          input: z.object({ dashboardId: z.string().uuid() }),
+          output: z.object({ ok: z.literal(true), dashboardId: z.string() }),
+          handler: async (input, ctx) => {
+            const removed = await db
+              .delete(schema.dashboards)
+              .where(
+                and(
+                  eq(schema.dashboards.id, input.dashboardId),
+                  eq(schema.dashboards.organizationId, ctx.actor.organizationId),
+                ),
+              )
+              .returning({ id: schema.dashboards.id });
+            if (removed.length === 0) throw new NotFoundError("Dashboard");
+            return { ok: true as const, dashboardId: input.dashboardId };
+          },
+        }),
+      );
     },
   };
 }
@@ -2182,13 +2989,6 @@ export function createPlatformModule(
  */
 export function createScheduleProcessor(db: Db) {
   return {
-    /**
-     * Fire due reminders into in-app notifications. The UPDATE … RETURNING claim
-     * is atomic (concurrent workers can't double-fire), but delivery is isolated
-     * per row: a single notification failure is recorded on THAT reminder
-     * (status → "failed", spec §2.2) and the rest of the batch still delivers —
-     * a failure never silently drops the whole batch's notifications.
-     */
     /**
      * Fire due reminders into in-app notifications. The UPDATE … RETURNING claim
      * is atomic (concurrent workers can't double-fire), but delivery is isolated
@@ -2309,6 +3109,8 @@ export function createScheduleProcessor(db: Db) {
         .where(and(eq(schema.followUps.id, id), eq(schema.followUps.status, "scheduled")))
         .returning();
       return row ?? null;
+
+
     },
   };
 }

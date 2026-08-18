@@ -17,6 +17,7 @@ export async function cleanupTestData(db: Db): Promise<void> {
       pending_approvals, ai_wakes, ai_skills, channel_session_bindings,
       harness_plans, model_usage, workflow_runs,
       watch_rules, proactive_preferences, proactive_deliveries,
+      import_rules, dashboards,
       business_partners,
       crm_customers, crm_contacts, crm_interactions,
       inv_stock_moves, inv_stock_levels, inv_warehouses, inv_products,
