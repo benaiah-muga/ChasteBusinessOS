@@ -44,7 +44,7 @@ function PartView({
       return <p className="part-text">{part.text}</p>;
     case "explanation":
       return (
-        <details className="part-explain" open>
+        <details className="part-explain">
           <summary>
             <Info size={15} />
             Why this is allowed

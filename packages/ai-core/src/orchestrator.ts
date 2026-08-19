@@ -3142,6 +3142,45 @@ async function executeBusinessAgentTool(
 }
 
 /**
+ * Render a gathered tool result as compact, readable bullets when possible:
+ * extract array-shaped records (warehouses, products, invoices, …) and label
+ * each row by its most human key (name/code/sku/email). Returns null when the
+ * content is not JSON-shaped, so callers can fall back to the raw preview.
+ */
+function summarizeGathered(content: string): string | null {
+  const stripped = content.replace(/^(ok|error)\s*:?\s*/i, "").trim();
+  if (!stripped.startsWith("{")) return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(stripped) as unknown;
+  } catch {
+    return null;
+  }
+  const rows: Record<string, unknown>[] = [];
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (typeof item === "object" && item !== null) rows.push(item as Record<string, unknown>);
+      }
+    } else if (v && typeof v === "object") {
+      for (const value of Object.values(v as Record<string, unknown>)) walk(value);
+    }
+  };
+  walk(data);
+  if (rows.length === 0) return null;
+  const LABEL_KEYS = ["name", "productName", "vendorName", "customerName", "itemName", "title", "code", "sku", "email"];
+  const labelOf = (row: Record<string, unknown>): string => {
+    const key = LABEL_KEYS.find((k) => typeof row[k] === "string" && (row[k] as string).trim());
+    const id = typeof row.id === "string" ? row.id.slice(0, 8) : undefined;
+    if (key) return id ? `${String(row[key])} (${id})` : String(row[key]);
+    return id ? `Item ${id}` : JSON.stringify(row).slice(0, 80);
+  };
+  const shown = rows.slice(0, 8).map((row) => `• ${labelOf(row)}`);
+  if (rows.length > 8) shown.push(`… and ${rows.length - 8} more`);
+  return shown.join("\n");
+}
+
+/**
  * Bounded native-function-calling loop over the permission-filtered business
  * tool surface. The model calls read tools to discover data (resolving names →
  * ids), calls write tools that either dispatch (autonomy allows) or park as
@@ -3218,10 +3257,13 @@ async function runBusinessToolLoop(
     if (useful.length === 0) return null;
     const preview = useful
       .slice(-3)
-      .map((g) => `— ${g.name}: ${g.content.slice(0, 700)}`)
+      .map((g) => {
+        const summary = summarizeGathered(g.content);
+        return summary ? `— ${g.name}:\n${summary}` : `— ${g.name}: ${g.content.slice(0, 700)}`;
+      })
       .join("\n");
     return {
-      answer: `I gathered the following from the business bus:\n${preview}\n\nI couldn't finish the analysis within my step budget — ask a more specific question if you want an exact figure.`,
+      answer: `Here's what I found from the business bus:\n${preview}\n\nI couldn't finish a full analysis within my step budget — ask a follow-up if you want an exact figure.`,
     };
   };
 

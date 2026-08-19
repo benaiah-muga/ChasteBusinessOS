@@ -177,6 +177,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `*.list` query returning it), a `platform.<domain>` skill def + routing test
   for new domains, and domain `description`s on commands/queries, so new
   functionality is reliably and efficiently exercised by the agent loop.
+- **Chat UX refinements.** The `explanation` part in `ChatWidget` now renders
+  collapsed by default ("Why this is allowed") so the confirm card shows only
+  what the user needs; `@chaste/ai-core` summarizes gathered read-tool results
+  into readable bullets (`summarizeGathered`, label key + 8-char id, capped at
+  8 rows) instead of the raw JSON dump when the terminal narration fails, with
+  the message "Here's what I found from the business bus: …".
 
 ### Fixed
 
