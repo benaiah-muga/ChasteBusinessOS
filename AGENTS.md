@@ -1,75 +1,32 @@
-# AGENTS.md -- Rules for AI coding agents
+# ChasteBusinessOS
 
-You are contributing to **ChasteBusinessOS**, an AI-native Business Operating
-System. Optimize for **reliability, loose coupling, and auditability** -- not
-clever shortcuts.
+Agentic ERP. Every human action is also an AI-agent action through the same
+capability pipeline — governed, auditable, reversible.
 
-## Non-negotiable product invariants
+Read `ARCHITECTURE.md` first, then `ROADMAP.md`.
 
-1. **AI/manual parity** -- AI executes only through the same command/query bus as humans.
-2. **No elevated AI privileges** -- never bypass permissions, validation, or audit.
-3. **Frontend is an API client** -- `apps/web` must not import kernel, db, or modules.
-4. **Zod validates intent and payloads** at boundaries (HTTP, commands, chat UI parts).
-5. **Events after commit** -- use transactional outbox; do not dual-write carelessly.
-6. **Explainability** -- AI-assisted paths record why/what/rules when you touch that layer.
+## Quick start
 
-## Where to put code
-
-| Change | Location |
-|---|---|
-| HTTP endpoints | `apps/api` |
-| UI / chat rendering | `apps/web` (via API + `@chaste/ui-schema`) |
-| Commands, authz, audit, module loader | `packages/kernel` |
-| Schema & migrations | `packages/db` (+ module schemas) |
-| AI orchestration | `packages/ai-core` (invoked by api/worker only) |
-| Business features | `modules/<name>` |
-| Shared request/response types for clients | `packages/api-client` |
-
-## Forbidden patterns
-
-- Importing `@chaste/kernel` or `@chaste/db` from `apps/web`
-- Direct SQL/table access from AI tool handlers
-- Cross-module private table joins
-- Secrets in source, fixtures, or logs
-- “Temporary” bypasses of permission checks
-- Inventing analytics numbers without a verifiable query path
-
-## Required checks before you finish
-
-```bash
-pnpm lint
-pnpm typecheck
-pnpm test
+```sh
+pnpm install
+cp .env.example .env        # fill NVIDIA_API_KEY + BETTER_AUTH_SECRET
+docker start chaste-pgvector
+turbo db:migrate            # from packages/db
+pnpm dev                    # apps/web on :3000
 ```
 
-If you add a module or command:
+## Conventions
 
-- Manifest updated
-- Zod input/output schemas
-- Permission string(s)
-- Audit coverage via command bus
-- Contract test for the command
-- API route only if intentionally public; prefer generic command/query routes when possible
-- Every `*.create` has a natural key (name/sku/code/email) returned by its
-  `*.list` query, plus a `NaturalKeyRule` in `packages/ai-core/src/tools/natural-key.ts`
-  (guards the agent loop against redundant creates) with a unit test
-- New domain gets a `platform.<domain>` skill def in
-  `packages/ai-core/src/skills/platform-skills.ts` (keywords + check-then-write
-  instructions) with a routing test
-- Commands/queries carry a domain `description` (it is the model's main steer
-  in the tool loop)
+- TypeScript strict everywhere; Zod for all boundaries.
+- All state changes go through kernel capabilities (`packages/kernel`).
+- Money = integer minor units; posted financial documents are immutable.
+- Append-only event ledger; hash-chained audit entries.
+- Never commit secrets. `.env` is gitignored.
 
-## Skills
+## For coding agents
 
-Use repo skills under `skills/` when relevant:
-
-- `skills/module-author` -- new modules (incl. AI harness integration)
-- `skills/command-safety` -- commands & permissions (incl. natural-key gate)
-- `skills/pr-hygiene` -- PR completeness
-
-## Style
-
-- TypeScript strict; prefer explicit types at public boundaries.
-- Small, reviewable diffs.
-- Prefer extending existing patterns over new frameworks.
-- Document architectural choices in `docs/adr/` when non-obvious.
+- Run `pnpm typecheck && pnpm test` before declaring work done.
+- Domain math lives in `packages/erp-core` as pure functions — keep IO out.
+- New capabilities must declare: risk class, permission ref, inverse (if state-changing),
+  zod schemas, and a natural-language `intent` (it gets embedded for retrieval).
+- Do not add comments explaining obvious code; explain *why*, not *what*.
