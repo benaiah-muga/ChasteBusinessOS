@@ -52,7 +52,7 @@ export class OpenAiCompatAdapter implements ModelAdapter {
         model: this.model,
         messages: mapped,
         // biome-ignore lint/suspicious/noExplicitAny: standard OpenAI tool schema
-        tools: tools as any,
+        tools: tools as OpenAI.Chat.Completions.ChatCompletionTool[],
         temperature: this.temperature,
         max_tokens: 4096,
         stream: true,
@@ -62,22 +62,21 @@ export class OpenAiCompatAdapter implements ModelAdapter {
     );
 
     let content = "";
-    // biome-ignore lint/suspicious/noExplicitAny: NIM-specific reasoning field
-    let reasoning = "";
     const pending = new Map<number, PendingToolCall>();
     let usage: { input: number; output: number } | undefined;
 
     for await (const chunk of stream) {
-      // biome-ignore lint/suspicious/noExplicitAny: NIM-specific usage fields
+      // NIM surfaces usage on stream chunks; the SDK type omits it.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const raw: any = chunk;
       if (raw.usage) {
         usage = { input: raw.usage.prompt_tokens ?? 0, output: raw.usage.completion_tokens ?? 0 };
       }
       const delta = chunk.choices[0]?.delta;
       if (!delta) continue;
-      // biome-ignore lint/suspicious/noExplicitAny: NIM-specific reasoning deltas
+      // NIM reasoning models stream a nonstandard reasoning_content delta.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const d: any = delta;
-      if (d.reasoning_content) reasoning += d.reasoning_content;
       if (d.content) {
         content += d.content;
         opts.onDelta?.(d.content);

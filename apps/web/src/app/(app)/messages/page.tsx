@@ -51,7 +51,7 @@ export default function MessagesPage() {
     const body = draft.trim();
     setDraft("");
     try {
-      const res = await fetch(`/api/conversations/${activeId}/messages`, {
+      await fetch(`/api/conversations/${activeId}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ body }),

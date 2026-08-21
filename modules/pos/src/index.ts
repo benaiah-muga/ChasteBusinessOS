@@ -11,10 +11,11 @@ import {
   posSessions,
 } from "@chaste/db";
 import { assertBalanced } from "@chaste/erp-core";
+import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 export interface ModuleDeps {
-  db: import("@chaste/db").Database["db"];
+  db: Database["db"];
 }
 
 type Tx = Parameters<Parameters<ModuleDeps["db"]["transaction"]>[0]>[0];

@@ -25,7 +25,7 @@ const createCustomer = defineCapability({
   permission: "crm.write",
   input: z.object({ name: z.string().min(1) }),
   output: z.object({ customerId: z.string() }),
-  execute: async (_ctx, input) => ({ customerId: `cus_${Math.random().toString(36).slice(2, 8)}` }),
+  execute: async () => ({ customerId: `cus_${Math.random().toString(36).slice(2, 8)}` }),
 });
 
 async function main() {

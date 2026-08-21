@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
-  accounts,
   getDb,
   invoices,
   journalEntries,
@@ -102,8 +101,6 @@ export async function POST(req: Request) {
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = (await req.json()) as { action?: string; entryId?: string; year?: number; month?: number; billNumber?: number; amountMinor?: number };
-  const db = getDb().db;
-  const registry = buildRegistrySafe();
   const executor = buildExecutorSafe();
 
   const humanCtx = actorCtx(resolved);

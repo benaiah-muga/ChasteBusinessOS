@@ -21,10 +21,11 @@ import {
   isPeriodOpen,
   type AccountBalance,
 } from "@chaste/erp-core";
+import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 export interface ModuleDeps {
-  db: import("@chaste/db").Database["db"];
+  db: Database["db"];
 }
 
 const lineSchema = z.object({
@@ -49,6 +50,10 @@ const createInvoice = (deps: ModuleDeps) =>
     module: "accounting",
     risk: "write",
     permission: "accounting.write",
+    inverse: {
+      capabilityId: "accounting.reverseEntry",
+      buildInput: (_input, output) => ({ entryId: (output as { entryId?: string }).entryId ?? "" }),
+    },
     input: z.object({
       customerId: z.string(),
       memo: z.string().optional(),
@@ -348,7 +353,6 @@ async function accountBalances(deps: ModuleDeps, orgId: string): Promise<Account
   return rows.map((r) => ({ ...r, type: r.type as AccountBalance["type"], debitMinor: Number(r.debitMinor), creditMinor: Number(r.creditMinor) }));
 }
 
-let moduleDb: ModuleDeps["db"];
 
 const incomeStatement = (deps: ModuleDeps) =>
   defineCapability({
@@ -496,7 +500,6 @@ const reopenPeriod = (deps: ModuleDeps) =>
   });
 
 export function registerAccountingCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
-  moduleDb = deps.db;
   registry.register(createInvoice(deps));
   registry.register(recordPayment(deps));
   registry.register(reverseEntry(deps));

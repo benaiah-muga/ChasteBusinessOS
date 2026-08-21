@@ -1,10 +1,11 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { conversations, conversationMembers, messages } from "@chaste/db";
+import { conversations, messages } from "@chaste/db";
+import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 export interface ModuleDeps {
-  db: import("@chaste/db").Database["db"];
+  db: Database["db"];
 }
 
 const sendMessage = (deps: ModuleDeps) =>

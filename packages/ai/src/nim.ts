@@ -42,7 +42,8 @@ export async function chat(
     temperature: opts.temperature ?? 0.2,
     max_tokens: opts.maxTokens ?? 4096,
   });
-  // biome-ignore lint/suspicious/noExplicitAny: NIM reasoning models put text here
+  // NIM reasoning models return content in a nonstandard field.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const m: any = res.choices[0]?.message;
   return m?.content || m?.reasoning_content || "";
 }
@@ -62,7 +63,8 @@ export async function embed(
       ? { input_type: opts.inputType ?? "passage", truncate: "END" }
       : {}),
   };
-  // biome-ignore lint/suspicious/noExplicitAny: NIM-specific params not in SDK types
+  // NIM requires provider-specific params absent from the SDK's types.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const res = await client.embeddings.create(body as any);
   return res.data.map((d) => d.embedding as number[]);
 }

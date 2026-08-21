@@ -1,4 +1,5 @@
 export * from "./capability";
+export * from "./conformance";
 export * from "./registry";
 export * from "./policy";
 export * from "./ledger";

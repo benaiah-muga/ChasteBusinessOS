@@ -1,10 +1,11 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { customers, deals } from "@chaste/db";
+import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 export interface ModuleDeps {
-  db: import("@chaste/db").Database["db"];
+  db: Database["db"];
 }
 
 export const DEAL_STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"] as const;
@@ -125,10 +126,6 @@ const moveDealStage = (deps: ModuleDeps) =>
     module: "crm",
     risk: "write",
     permission: "crm.write",
-    inverse: {
-      capabilityId: "crm.moveDealStage",
-      buildInput: (input) => ({ dealId: (input as { dealId: string }).dealId, stage: "previous" as never }),
-    },
     input: z.object({
       dealId: z.string(),
       stage: z.enum(DEAL_STAGES),

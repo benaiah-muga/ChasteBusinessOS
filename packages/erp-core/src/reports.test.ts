@@ -6,7 +6,7 @@ import { computeBalanceSheet, computeIncomeStatement } from "./reports";
 const SEED = 20260822;
 const opts = { seed: SEED, numRuns: 300 };
 
-const TYPES: AccountType[] = ["asset", "liability", "equity", "income", "expense"];
+
 
 /** Generates arbitrary balanced ledgers: every entry debits one account and credits another equally. */
 function balancedLedger() {
@@ -80,13 +80,12 @@ describe("financial reports (property-based)", () => {
           maxLength: 10,
         }),
         (rows) => {
-          let revenue = 0;
           let expense = 0;
           const balances: AccountBalance[] = rows.map((r, i) => {
-            revenue += r.incomeAmt;
+
             expense += r.expenseAmt;
             const out: AccountBalance[] = [
-              { code: `I${i}`, name: "inc", type: "income", debitMinor: r.incomeAmt ? 0 : 0, creditMinor: r.incomeAmt },
+              { code: `I${i}`, name: "inc", type: "income", debitMinor: 0, creditMinor: r.incomeAmt },
               { code: `X${i}`, name: "exp", type: "expense", debitMinor: r.expenseAmt, creditMinor: 0 },
             ];
             return out[0]!;

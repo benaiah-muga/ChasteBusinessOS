@@ -11,10 +11,11 @@ import {
   vendors,
 } from "@chaste/db";
 import { assertBalanced, computeAging, computeInvoiceTotals } from "@chaste/erp-core";
+import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 export interface ModuleDeps {
-  db: import("@chaste/db").Database["db"];
+  db: Database["db"];
 }
 
 type Tx = Parameters<Parameters<ModuleDeps["db"]["transaction"]>[0]>[0];
@@ -86,6 +87,10 @@ const createBill = (deps: ModuleDeps) =>
     module: "purchasing",
     risk: "write",
     permission: "purchasing.write",
+    inverse: {
+      capabilityId: "accounting.reverseEntry",
+      buildInput: (_input, output) => ({ entryId: (output as { entryId?: string }).entryId ?? "" }),
+    },
     input: z.object({
       vendorId: z.string(),
       vendorRef: z.string().optional(),

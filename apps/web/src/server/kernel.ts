@@ -35,6 +35,17 @@ export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   registerMessagingCapabilities(registry, { db });
   registerPurchasingCapabilities(registry, { db });
   registerPosCapabilities(registry, { db });
+
+  // Boot-time ecosystem check: broken inverses are fatal, missing inverses
+  // are surfaced debt. Never discover these at runtime.
+  const issues = registry.validateAll();
+  for (const issue of issues) {
+    const tag = issue.level === "error" ? "[conformance-error]" : "[conformance-warning]";
+    console.warn(`${tag} ${issue.capabilityId}: ${issue.rule} — ${issue.message}`);
+  }
+  if (issues.some((i) => i.level === "error")) {
+    throw new Error("capability registry failed conformance; refusing to boot");
+  }
   return registry;
 }
 
