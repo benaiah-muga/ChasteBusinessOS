@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main, architectural-pivot2]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: chaste
+          POSTGRES_PASSWORD: chaste_dev
+          POSTGRES_DB: chaste_os_v2
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U chaste"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      BETTER_AUTH_SECRET: ci-only-not-a-real-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Migrate database
+        run: pnpm --filter @chaste/db db:migrate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build web app
+        run: pnpm --filter web build
+
+      # Live proofs need the NVIDIA key; run when present so PRs from forks
+      # still pass without it.
+      - name: Demo proofs
+        if: ${{ env.NVIDIA_API_KEY != '' }}
+        run: |
+          pnpm demo:slice
+          pnpm demo:m4
+          pnpm demo:m5

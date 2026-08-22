@@ -17,6 +17,7 @@ export function ChatConsole() {
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [creator, setCreator] = useState(false);
   const sessionId = useRef<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -39,7 +40,7 @@ export function ChatConsole() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text, sessionId: sessionId.current }),
+        body: JSON.stringify({ message: text, sessionId: sessionId.current, mode: creator ? "creator" : "assist" }),
       });
 
       if (!res.body) throw new Error("no stream");
@@ -131,7 +132,11 @@ export function ChatConsole() {
           </div>
         ))}
       </div>
-      <form onSubmit={send} className="flex gap-3 border-t border-neutral-200 p-4">
+      <form onSubmit={send} className="flex items-center gap-3 border-t border-neutral-200 p-4">
+        <label className="flex shrink-0 items-center gap-1.5 text-xs text-neutral-500" title="Let the agent propose changes to the platform itself">
+          <input type="checkbox" checked={creator} onChange={(e) => setCreator(e.target.checked)} />
+          Creator
+        </label>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}

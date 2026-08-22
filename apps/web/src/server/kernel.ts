@@ -27,6 +27,9 @@ import { registerCrmCapabilities } from "@chaste/module-crm";
 import { registerMessagingCapabilities } from "@chaste/module-messaging";
 import { registerPurchasingCapabilities } from "@chaste/module-purchasing";
 import { registerPosCapabilities } from "@chaste/module-pos";
+import { registerIamCapabilities } from "@chaste/module-iam";
+import { registerInventoryCapabilities } from "@chaste/module-inventory";
+import { registerCreatorCapabilities } from "@chaste/module-creator";
 
 export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   const registry = new CapabilityRegistry();
@@ -35,6 +38,9 @@ export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   registerMessagingCapabilities(registry, { db });
   registerPurchasingCapabilities(registry, { db });
   registerPosCapabilities(registry, { db });
+  registerIamCapabilities(registry, { db });
+  registerInventoryCapabilities(registry, { db });
+  registerCreatorCapabilities(registry, { db });
 
   // Boot-time ecosystem check: broken inverses are fatal, missing inverses
   // are surfaced debt. Never discover these at runtime.
@@ -154,6 +160,8 @@ export function buildExecutor(db: Database["db"], registry: CapabilityRegistry):
 
 // ── actor resolution ────────────────────────────────────────────────────
 
+export { hasPermission as hasPermissionFor } from "@chaste/kernel";
+
 export interface ResolvedUser {
   userId: string;
   email: string;
@@ -194,6 +202,22 @@ export async function resolveActorFromAuth(
   }
 
   return { userId: domainUser.id, email: authEmail, name: authName, orgId: membership?.orgId ?? null, permissions };
+}
+
+/** Permissions for one user in one org (multi-membership support). */
+export async function resolveForOrg(
+  userId: string,
+  orgId: string,
+  db: Database["db"],
+): Promise<ResolvedUser> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) throw new Error("user not found");
+  const perms = await db
+    .select({ key: rolePermissions.permissionKey })
+    .from(userRoles)
+    .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoles.roleId))
+    .where(and(eq(userRoles.userId, userId), eq(userRoles.orgId, orgId)));
+  return { userId, email: user.email, name: user.name, orgId, permissions: new Set(perms.map((p) => p.key)) };
 }
 
 export function actorFromResolved(resolved: ResolvedUser, opts: { asAgent?: boolean; sessionId?: string } = {}): ActionContext | null {

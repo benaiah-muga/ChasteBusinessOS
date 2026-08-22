@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS "vector";
+
 CREATE TABLE "agent_sessions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"org_id" uuid NOT NULL,

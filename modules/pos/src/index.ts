@@ -4,11 +4,13 @@ import {
   accounts,
   customers,
   invoices,
+  items,
   journalEntries,
   journalLines,
   payments,
   periods,
   posSessions,
+  stockMovements,
 } from "@chaste/db";
 import { assertBalanced } from "@chaste/erp-core";
 import type { Database } from "@chaste/db";
@@ -91,6 +93,7 @@ const saleLineSchema = z.object({
   quantity: z.number().int().positive().describe("thousandths of a unit; 1000 = one unit"),
   unitPriceMinor: z.number().int().nonnegative(),
   taxMinor: z.number().int().nonnegative().default(0),
+  sku: z.string().optional().describe("stocked item to decrement; omit for services"),
 });
 
 /**
@@ -132,6 +135,26 @@ const completeSale = (deps: ModuleDeps) =>
           .limit(1);
         if (!session) throw new Error("session not found");
         if (session.status !== "open") throw new Error("session is closed");
+
+        // Resolve stocked lines first so oversell fails before any posting.
+        const stockLines: { itemId: string; sku: string; quantity: number }[] = [];
+        for (const l of input.lines) {
+          if (!l.sku) continue;
+          const [item] = await tx
+            .select()
+            .from(items)
+            .where(and(eq(items.orgId, ctx.actor.orgId), eq(items.sku, l.sku)))
+            .limit(1);
+          if (!item) throw new Error(`no stocked item with SKU ${l.sku}`);
+          const [mov] = await tx
+            .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
+            .from(stockMovements)
+            .where(and(eq(stockMovements.orgId, ctx.actor.orgId), eq(stockMovements.itemId, item.id)));
+          if (Number(mov?.total ?? 0) < l.quantity) {
+            throw new Error(`insufficient stock for ${l.sku}: ${Number(mov?.total ?? 0)} thousandths on hand`);
+          }
+          stockLines.push({ itemId: item.id, sku: l.sku, quantity: l.quantity });
+        }
 
         let subtotal = 0;
         let tax = 0;
@@ -200,6 +223,21 @@ const completeSale = (deps: ModuleDeps) =>
           method: input.method === "card" ? "card" : "cash",
           entryId: entry!.id,
         });
+
+        // Stock leaves the ledger in the same transaction as the money.
+        for (const sl of stockLines) {
+          await tx.insert(stockMovements).values({
+            orgId: ctx.actor.orgId,
+            itemId: sl.itemId,
+            quantityDelta: -sl.quantity,
+            reason: "sale",
+            refType: "invoice",
+            refId: inv!.id,
+            note: `POS sale #${invoiceNumber}`,
+            actorType: ctx.actor.type,
+            actorId: ctx.actor.id,
+          });
+        }
 
         // Card sales never touch the drawer; cash sales do.
         if (input.method === "cash") {

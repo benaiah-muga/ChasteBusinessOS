@@ -43,6 +43,34 @@
       "when": 1787353828403,
       "tag": "0005_great_forge",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787357873254,
+      "tag": "0006_deep_mac_gargan",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787358777035,
+      "tag": "0007_lumpy_malice",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787359181174,
+      "tag": "0008_safe_black_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787359838844,
+      "tag": "0009_jazzy_colonel_america",
+      "breakpoints": true
     }
   ]
 }
