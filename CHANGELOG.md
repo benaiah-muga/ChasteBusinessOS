@@ -11,6 +11,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Fixed
+- Fresh databases failed to migrate: the pgvector extension was never enabled,
+  so the `memories.embedding` column (`vector(1024)`) errored with
+  `type "vector" does not exist` (CI and new local setups). The initial
+  migration now runs `CREATE EXTENSION IF NOT EXISTS "vector"`.
+
 ## [0.2.0] — 2026-08-22
 
 The v2 capability-kernel rewrite of the entire platform, replacing the
