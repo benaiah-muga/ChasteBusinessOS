@@ -18,6 +18,7 @@ the next number; superseded ones get a Status update, never deletion.
 | 0010 | Three-way matching on vendor bills | accepted |
 | 0012 | Creator Mode proposals are governed artifacts | accepted |
 | 0013 | Document ingestion: deterministic coding, model-assisted extraction | accepted |
+| 0014 | Payroll posts as one gated ledger entry | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down — if you made one of those calls, write the ADR.

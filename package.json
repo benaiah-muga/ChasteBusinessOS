@@ -14,6 +14,7 @@
     "demo:m2": "tsx scripts/demo-m2.ts",
     "demo:m3": "tsx scripts/demo-m3.ts",
     "demo:m4": "tsx scripts/demo-m4.ts",
+    "demo:m4b": "tsx scripts/demo-m4b.ts",
     "demo:m5": "tsx scripts/demo-m5.ts",
     "demo:m6": "tsx scripts/demo-m6.ts"
   },

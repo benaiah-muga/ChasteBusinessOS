@@ -62,6 +62,9 @@ importers:
       '@chaste/module-documents':
         specifier: workspace:*
         version: link:../../modules/documents
+      '@chaste/module-hr':
+        specifier: workspace:*
+        version: link:../../modules/hr
       '@chaste/module-iam':
         specifier: workspace:*
         version: link:../../modules/iam
@@ -165,6 +168,24 @@ importers:
       '@chaste/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@chaste/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@chaste/erp-core':
+        specifier: workspace:*
+        version: link:../../packages/erp-core
+      '@chaste/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      drizzle-orm:
+        specifier: ^0.44.5
+        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
+      zod:
+        specifier: ^4.1.5
+        version: 4.4.3
+
+  modules/hr:
+    dependencies:
       '@chaste/db':
         specifier: workspace:*
         version: link:../../packages/db

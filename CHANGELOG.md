@@ -12,6 +12,15 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **HR & payroll (M4)**: employees with monthly salary/tax/leave
+  entitlement, leave requests with manager approval (approved *unpaid* leave
+  prorates pay by calendar-day overlap), and monthly payroll runs that post
+  as **one balanced journal entry** — DR salary expense, CR cash (net),
+  CR Payroll Liabilities (withheld tax). Execution is money-class gated
+  (`moneyThresholdMinor: 0`) with a tamper check: the caller must echo the
+  drafted net total or the run refuses. Executed runs reverse via the ledger.
+  Pure payroll math in `erp-core` with property tests. New `/hr` console page
+  and `pnpm demo:m4b`. See ADR 0014.
 - **Document ingestion (M3 complete)**: upload a bill/receipt image or paste
   text; uploads are OCR'd to markdown via nemotron-parse (`MODEL_OCR`) and
   indexed into org memory as `doc_chunk`. Expense-coding suggestions come

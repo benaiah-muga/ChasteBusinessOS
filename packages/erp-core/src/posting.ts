@@ -46,6 +46,7 @@ export const DEFAULT_CHART_OF_ACCOUNTS: { code: string; name: string; type: Acco
   { code: "1200", name: "Inventory", type: "asset" },
   { code: "2000", name: "Accounts Payable", type: "liability" },
   { code: "2100", name: "Sales Tax Payable", type: "liability" },
+  { code: "2200", name: "Payroll Liabilities", type: "liability" },
   { code: "3000", name: "Owner's Equity", type: "equity" },
   { code: "3100", name: "Retained Earnings", type: "equity" },
   { code: "4000", name: "Sales Revenue", type: "income" },
