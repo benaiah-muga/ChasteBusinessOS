@@ -738,6 +738,102 @@ export const documentSuggestions = pgTable(
   (t) => [index("doc_suggestion_doc_idx").on(t.documentId, t.status)],
 );
 
+// ── HR (employees, leave, payroll) ──────────────────────────────────────
+
+export const employees = pgTable(
+  "employees",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    email: text("email"),
+    title: text("title"),
+    monthlySalaryMinor: integer("monthly_salary_minor").notNull(),
+    /** Annual paid-leave entitlement in days; accrues monthly. */
+    annualLeaveDays: integer("annual_leave_days").notNull().default(21),
+    taxRateBps: integer("tax_rate_bps").notNull().default(1000),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    hiredAt: timestamp("hired_at", { withTimezone: true }).notNull().defaultNow(),
+    deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
+  },
+  (t) => [index("employee_org_idx").on(t.orgId)],
+);
+
+export const leaveRequests = pgTable(
+  "leave_requests",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("annual"), // annual | sick | unpaid
+    startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+    endDate: timestamp("end_date", { withTimezone: true }).notNull(),
+    calendarDays: integer("calendar_days").notNull(),
+    status: text("status").notNull().default("pending"), // pending | approved | rejected | cancelled
+    requestedByActorType: text("requested_by_actor_type").notNull(),
+    requestedByActorId: uuid("requested_by_actor_id"),
+    decidedByUserId: uuid("decided_by_user_id").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("leave_org_status_idx").on(t.orgId, t.status), index("leave_employee_idx").on(t.employeeId)],
+);
+
+/**
+ * A payroll run drafts payslips for a month; executing it posts one balanced
+ * journal entry (DR salary expense / CR cash) and is money-class gated.
+ */
+export const payrollRuns = pgTable(
+  "payroll_runs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    month: integer("month").notNull(), // 1-12
+    status: text("status").notNull().default("draft"), // draft | executed | voided
+    totalGrossMinor: integer("total_gross_minor").notNull().default(0),
+    totalTaxMinor: integer("total_tax_minor").notNull().default(0),
+    totalNetMinor: integer("total_net_minor").notNull().default(0),
+    headcount: integer("headcount").notNull().default(0),
+    entryId: uuid("entry_id"),
+    executedByActorType: text("executed_by_actor_type"),
+    executedByActorId: uuid("executed_by_actor_id"),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("payroll_run_org_period_idx").on(t.orgId, t.year, t.month)],
+);
+
+export const payslips = pgTable(
+  "payslips",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => payrollRuns.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "restrict" }),
+    grossMinor: integer("gross_minor").notNull(),
+    taxMinor: integer("tax_minor").notNull().default(0),
+    netMinor: integer("net_minor").notNull(),
+    workedFractionThousandths: integer("worked_fraction_thousandths").notNull().default(1000),
+  },
+  (t) => [index("payslip_run_idx").on(t.runId)],
+);
+
 // ── better-auth managed tables ──────────────────────────────────────────
 
 export const authUser = pgTable("auth_user", {

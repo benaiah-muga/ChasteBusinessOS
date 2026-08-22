@@ -12,7 +12,17 @@
   "dependencies": {
     "@chaste/ai": "workspace:*",
     "@chaste/db": "workspace:*",
+    "@chaste/erp-core": "workspace:*",
     "@chaste/kernel": "workspace:*",
+    "@chaste/module-accounting": "workspace:*",
+    "@chaste/module-creator": "workspace:*",
+    "@chaste/module-crm": "workspace:*",
+    "@chaste/module-hr": "workspace:*",
+    "@chaste/module-iam": "workspace:*",
+    "@chaste/module-inventory": "workspace:*",
+    "@chaste/module-messaging": "workspace:*",
+    "@chaste/module-pos": "workspace:*",
+    "@chaste/module-purchasing": "workspace:*",
     "better-auth": "^1.7.1",
     "drizzle-orm": "^0.44.5",
     "next": "^15.5.4",
@@ -28,7 +38,8 @@
     "@chaste/module-iam": "workspace:*",
     "@chaste/module-inventory": "workspace:*",
     "@chaste/module-creator": "workspace:*",
-    "@chaste/module-documents": "workspace:*"
+    "@chaste/module-documents": "workspace:*",
+    "@chaste/module-hr": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.13",

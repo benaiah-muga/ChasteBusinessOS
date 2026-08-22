@@ -59,7 +59,9 @@
       (`erp-core`, property-tested) → vendor bill through the governed path
 
 ## M4 — HR + Inventory/Manufacturing lite (weeks 12–18)
-- Employees, leave, simple payroll run (XState workflow, gated)
+- [x] Employees, leave, simple payroll run (gated): draft → approve → one
+      balanced entry (DR expense / CR cash / CR withholding), prorated by
+      approved unpaid leave; tamper-checked totals (ADR 0014)
 - Stock ledger (same append-only discipline as GL), reorder points, BOM-lite
 
 ## M3.5 — Agent transparency
