@@ -30,6 +30,7 @@ import { registerPosCapabilities } from "@chaste/module-pos";
 import { registerIamCapabilities } from "@chaste/module-iam";
 import { registerInventoryCapabilities } from "@chaste/module-inventory";
 import { registerCreatorCapabilities } from "@chaste/module-creator";
+import { registerDocumentCapabilities } from "@chaste/module-documents";
 
 export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   const registry = new CapabilityRegistry();
@@ -41,6 +42,7 @@ export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   registerIamCapabilities(registry, { db });
   registerInventoryCapabilities(registry, { db });
   registerCreatorCapabilities(registry, { db });
+  registerDocumentCapabilities(registry, { db });
 
   // Boot-time ecosystem check: broken inverses are fatal, missing inverses
   // are surfaced debt. Never discover these at runtime.

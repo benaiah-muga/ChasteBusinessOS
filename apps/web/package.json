@@ -27,7 +27,8 @@
     "@chaste/module-pos": "workspace:*",
     "@chaste/module-iam": "workspace:*",
     "@chaste/module-inventory": "workspace:*",
-    "@chaste/module-creator": "workspace:*"
+    "@chaste/module-creator": "workspace:*",
+    "@chaste/module-documents": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.13",

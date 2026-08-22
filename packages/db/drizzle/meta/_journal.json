@@ -71,6 +71,13 @@
       "when": 1787359838844,
       "tag": "0009_jazzy_colonel_america",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787380149923,
+      "tag": "0010_faulty_eddie_brock",
+      "breakpoints": true
     }
   ]
 }

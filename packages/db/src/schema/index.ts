@@ -683,6 +683,61 @@ export const messages = pgTable(
   (t) => [index("message_conversation_idx").on(t.conversationId, t.createdAt)],
 );
 
+// ── Document ingestion (OCR → coding suggestions → bills) ──────────────
+
+/**
+ * An ingested business document (vendor bill, receipt, statement). Raw bytes
+ * stay in the row until parsing; parsed markdown is what memory and the
+ * coding suggester read. Append-only discipline applies to status flow:
+ * received → parsed → failed; corrections re-parse rather than mutate text.
+ */
+export const documents = pgTable(
+  "documents",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    sourceType: text("source_type").notNull(), // upload | text
+    mimeType: text("mime_type"),
+    sizeBytes: integer("size_bytes"),
+    contentBase64: text("content_base64"), // uploads only; ≤5MB enforced at boundary
+    rawText: text("raw_text"), // pasted text; also used as fallback when OCR unavailable
+    parsedMarkdown: text("parsed_markdown"),
+    parseError: text("parse_error"),
+    status: text("status").notNull().default("received"), // received | parsed | failed
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("document_org_status_idx").on(t.orgId, t.status)],
+);
+
+/** Suggested expense coding for a document line; humans accept or dismiss. */
+export const documentSuggestions = pgTable(
+  "document_suggestions",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    quantityThousandths: integer("quantity_thousandths").notNull().default(1000),
+    unitPriceMinor: integer("unit_price_minor").notNull().default(0),
+    suggestedAccountCode: text("suggested_account_code").notNull(),
+    matchScore: integer("match_score").notNull().default(0),
+    matchedOn: jsonb("matched_on").notNull().default([]),
+    status: text("status").notNull().default("open"), // open | accepted | dismissed
+    createdAt: createdAt(),
+  },
+  (t) => [index("doc_suggestion_doc_idx").on(t.documentId, t.status)],
+);
+
 // ── better-auth managed tables ──────────────────────────────────────────
 
 export const authUser = pgTable("auth_user", {

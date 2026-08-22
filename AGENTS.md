@@ -30,7 +30,7 @@ pnpm dev                    # apps/web on :3000
 pnpm typecheck && pnpm lint && pnpm test
 ```
 
-Live behavior proofs: `pnpm demo:slice`, `demo:m2`, `demo:m4`, `demo:m5`.
+Live behavior proofs: `pnpm demo:slice`, `demo:m2`, `demo:m3`, `demo:m4`, `demo:m5`.
 A change that breaks a demo is not done.
 
 ## For coding agents
