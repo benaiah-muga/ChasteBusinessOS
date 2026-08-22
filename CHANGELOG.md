@@ -11,6 +11,17 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+- **Document ingestion (M3 complete)**: upload a bill/receipt image or paste
+  text; uploads are OCR'd to markdown via nemotron-parse (`MODEL_OCR`) and
+  indexed into org memory as `doc_chunk`. Expense-coding suggestions come
+  from a pure deterministic matcher in `erp-core` (property-tested,
+  works offline) with optional model-assisted line extraction — the LLM
+  never picks account codes. Suggestions flow into vendor bills through the
+  existing governed `purchasing.createBill`; deletion is destructive-gated.
+  New `/documents` console page, `documents.*` capabilities, and an offline
+  proof at `pnpm demo:m3` (see ADR 0013).
+
 ### Fixed
 - Fresh databases failed to migrate: the pgvector extension was never enabled,
   so the `memories.embedding` column (`vector(1024)`) errored with

@@ -54,7 +54,9 @@
 ## M3 — CRM + Purchasing + POS-lite (weeks 8–12)
 - Contacts/deals pipeline; vendor & purchase orders (3-way match)
 - POS session model with cash-drawer reconciliation
-- Document ingestion (OCR via nemotron-parse) → embeddings → auto-coding suggestions
+- [x] Document ingestion: upload/paste → OCR (nemotron-parse) or text parse
+      → doc_chunk org memory → deterministic expense-coding suggestions
+      (`erp-core`, property-tested) → vendor bill through the governed path
 
 ## M4 — HR + Inventory/Manufacturing lite (weeks 12–18)
 - Employees, leave, simple payroll run (XState workflow, gated)
