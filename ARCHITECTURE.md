@@ -1,216 +1,210 @@
-# ChasteBusinessOS Architecture
+# ChasteBusinessOS — Architecture Blueprint
 
-## Goals
+> An agentic ERP where every human action can also be done by an AI agent — safely,
+> auditably, and under human authority. The business owner describes their business in
+> plain language; the system configures and operates as much as possible on their behalf.
 
-- Modular installable business capabilities
-- AI as an **operational harness** over the same services as the UI
-- High transactional integrity and complete audit trails
-- **Loose coupling**: clients consume HTTP APIs; domain logic stays server-side
-- Honest capability gaps → tickets → optional self-development pipeline
-- Human-like semantic memory without token-burning tool spam
-- Multi-branch org model and time/attention services (schedule, notify, email)
+---
 
-## System context
+## 1. Core Thesis
+
+DeepSeek popularized **Agent = Model + Harness**. We extend it to business software:
 
 ```
-┌──────────────┐     HTTPS/JSON      ┌─────────────────────────────┐
-│  apps/web    │ ──────────────────▶ │  apps/api  (Fastify)        │
-│  (Next.js)   │ ◀────────────────── │  auth · routes · AI chat    │
-└──────────────┘   DTOs only         └──────────────┬──────────────┘
-                                                    │
-                     in-process                      │ loads
-                     (not exposed to web)            ▼
-                                      ┌─────────────────────────────┐
-                                      │  packages/kernel            │
-                                      │  command/query bus · authz  │
-                                      │  audit · module registry    │
-                                      └──────────────┬──────────────┘
-                                                     │
-          ┌──────────────────┬───────────────────────┼──────────────────┐
-          ▼                  ▼                       ▼                  ▼
-   packages/db         modules/*              packages/ai-core    apps/worker
-   PostgreSQL          crm, platform, …       harness orchestrator  outbox · jobs
-   + pgvector                                 memory · workflows    schedule · notify
+ERP = Domain Model + Business Harness
 ```
 
-## Boundary rules
+- The **Domain Model** is deterministic double-entry accounting, inventory math,
+  payroll rules — code that must never hallucinate.
+- The **Business Harness** is everything that lets an AI (or human) act inside the
+  domain model safely: capabilities, permissions, approvals, effect-tracking, audit,
+  memory, and the loop.
 
-| Package / app | May depend on |
+The model proposes; **the harness disposes**. An LLM never writes a journal entry —
+it calls a capability whose execution goes through validation, permission checks,
+policy thresholds, and an append-only audit trail. This is why enterprises can trust it.
+
+### Lessons adopted from DeepSeek Harness / Cordis
+
+| Their idea | Our adaptation |
 |---|---|
-| `apps/web` | `@chaste/api-client`, `@chaste/ui-schema` only (plus React/Next) |
-| `apps/api` | kernel, db, ai-core, ui-schema, modules |
-| `apps/worker` | kernel, db, ai-core, modules |
-| `modules/*` | kernel, db (own schemas), ui-schema (optional) |
-| `packages/ai-core` | kernel, ui-schema (not Next.js) |
-| `packages/api-client` | zod + shared DTO types only (no db) |
+| "Everything is a plugin" (Cordis kernel) | Every ERP feature surface — tools, workflows, UI panels, report types — registers as a **Capability** in a typed registry. No hardcoded agent logic in modules. |
+| **Temporal composability** — revertible effects | Every state-changing action carries a declared **inverse** (compensating action). Postings reverse via reversal entries; nothing is ever mutated destructively without an undo path. |
+| **Spatial composability** — reactive coeffects | Capabilities declare dependencies (`requires`, `provides`, `invalidates`). Changing a customer's credit terms invalidates dependent open quotes reactively. |
+| Append-only session log / Trajectory view | One **Event Ledger**: append-only, replayable, forkable record of everything the agent saw, decided, and did. Doubles as the enterprise audit log. |
+| Running modes (Standard / PTC / Minimal / Creative) | **Assist**, **Autopilot** (policy-bounded autonomy), **Creator** (self-development, gated), each mode just re-composes capabilities. |
+| KV-cache-friendly context engineering | Stable system prefix → org profile → module docs → task suffix. Cache hit rate is a first-class metric. |
+| Honest about gaps | Missing capability ⇒ auto-filed **Ticket + build path**, never a hallucinated command. |
 
-**Invariant:** the browser never holds DB credentials or imports command handlers.
+---
 
-## Command layer (single mutation surface)
+## 2. The Capability Kernel
 
-All business writes go through **commands**:
+The heart of the system. A `Capability` is the atomic unit — one thing an agent or
+human can do:
 
 ```ts
-defineCommand({
-  name: "crm.customer.create",
-  input: CustomerCreateInput,
-  output: Customer,
-  permissions: ["crm.customer.create"],
-  handler: async (input, ctx) => { /* … */ },
-});
+interface Capability<I, O> {
+  id: string                      // "accounting.postJournalEntry"
+  title: string                   // human + LLM readable
+  intent: string                  // natural-language description (embedded → vector)
+  input: Schema<I>                // zod
+  output: Schema<O>
+  risk: RiskClass                 // read | write | money | identity | destructive | secret
+  requiresPermission: PermissionRef
+  approval?: Policy               // when human sign-off is forced
+  inverse?: CapabilityId          // temporal composability: how to undo
+  execute(ctx: ActionContext, input: I): Promise<Result<O>>
+}
 ```
 
-- Manual UI → `POST /api/v1/commands/:name`
-- AI tools → same `executeCommand` path
-- Both receive the same permission checks, Zod validation, audit entries, and outbox events
+Every action — by human UI click or agent tool-call — funnels through the same
+`Capability.execute`. There is exactly **one** execution path, so there is exactly one
+place to enforce security, one place to audit, and the AI can do *everything* the human
+can because they share the same contract.
 
-Queries are analogous: `GET/POST /api/v1/queries/:name`.
-
-## Modules
-
-Each module provides:
-
-- `module.manifest.ts` -- id, version, deps, permissions, capabilities
-- Commands & queries
-- Optional schema/migrations (namespaced tables)
-- Optional specialist **profile metadata** (tool tags, prompts) -- not a private runtime
-
-Modules must not couple to the web app. If a module needs UI, it exposes API contracts;
-the web discovers capabilities via API and renders generic or registered views.
-
-## AI operational harness
-
-The AI layer is a **harness**, not a privileged co-process:
+### Governance pipeline (per action)
 
 ```
-User NL / proactive trigger
-        │
-        ▼
-┌─────────────────── ai-core harness ───────────────────┐
-│  Memory recall (passive cosine + optional side-agent) │
-│  General agent (proactive, clarification, routing)    │
-│  Domain specialists (CRM, Accounting, …) as profiles  │
-│  Capability classifier → execute | partial | gap      │
-│  Autonomy gate (recommend / confirm / guarded / full) │
-│  Workflow engine (multi-step durable runs)            │
-│  Customization agent → gap ticket / coding pipeline   │
-└───────────────────────────┬───────────────────────────┘
-                            │ tools only
-                            ▼
-                   kernel command / query bus
-                            │
-                            ▼
-                   modules + SoR tables + audit
+intent → resolve capability → validate input → check actor permissions
+      → policy evaluation (risk class × amount thresholds × role)
+      → [auto | require approval] → execute → record in Event Ledger
+      → publish domain events → (reactions: projections, notifications, embeddings)
 ```
 
-1. User message (or scheduled/proactive event) → orchestrator (`packages/ai-core`)
-2. Passive memory injection + optional explicit memory tools
-3. Intent + tool plan (tools = installed module commands/queries + platform services)
-4. Autonomy gate (recommend / confirm / guarded / full)
-5. On execute: kernel command bus
-6. Explanation record + validated generative UI parts (`@chaste/ui-schema`)
-7. On missing capability: Capability Gap Ticket (+ optional self-dev handoff)
+Risk classes and defaults (org-configurable):
 
-Domain specialists improve routing and reasoning via allowlists and prompts. They do **not** own private write paths. Security-sensitive domains (RBAC, secrets, break-glass) force higher gates.
+- `read` — autonomous
+- `write` — autonomous below policy thresholds
+- `money` — approval required above configurable amount (e.g. > $500)
+- `identity` — role assignment, permission grants → **always** human-approved
+- `destructive` — deletion, period closing → always approved, always reversible-first
+- `secret` — credential handling → never visible to models, only references
 
-**ADR:** [0006 custom AI orchestration](./docs/adr/0006-custom-ai-orchestration.md), [0007 harness memory & self-dev](./docs/adr/0007-harness-memory-and-self-dev.md).
+Approvals are themselves first-class workflow objects: proposed action rendered as
+human-readable diff, approve/reject with comment, expiry, delegated authority.
 
-## Memory
+---
 
-Inspired by jcode-style agent harnesses: automatic semantic recall, extraction side-agent, consolidation, plus explicit tools when the agent chooses.
+## 3. The Agent Loop
 
-| Kind | Store | Notes |
-|---|---|---|
-| Short-term chat | `chat_sessions` / messages | Per conversation; each turn embeddable |
-| Semantic memory graph | memory nodes + edges + pgvector | Cosine top-k; optional side-agent verify |
-| Session search (RAG) | session embeddings / FTS | Traditional prior-session retrieval |
-| Workflow | checkpoints / run state | Durable multi-step |
-| Customization lessons | tagged long-term memories | How hard customizations were done |
-| Permanent business | SoR tables via commands | Never “notes only” |
+ReAct-style single-agent loop with subagent fan-out for heavy work:
 
-**Passive path (every turn):** embed turn → cosine against memory graph → optional memory side-agent relevance check → inject into context (budgeted).
+1. Assemble context (cache-ordered): identity+policy prefix → org profile → active
+   module docs → retrieved memories → task.
+2. Model selects capability calls (typed, schema-constrained).
+3. Harness executes through governance pipeline.
+4. Observations appended to trajectory; loop until done or blocked.
+5. Blocked ≠ hallucinated: unknown capability ⇒ ticket creation + honest reply.
 
-**Active path:** explicit tools `memory.search`, `memory.store`, `session.search`.
+Three tiers of memory (context-rot aware):
+- **Working** — current trajectory window
+- **Session** — summarized mid-term state, persisted per conversation
+- **Org memory** — pgvector-backed semantic store: business description, SOPs,
+  preferences, past decisions ("we always give returning customers 2% discount")
 
-**Ambient consolidation:** periodically reorganize, detect staleness/conflicts, merge duplicates (worker job).
+Embeddings: NVIDIA NIM `nvidia/nv-embedqa-e5-v5` (free tier). Retrieval = vector
+similarity + pg_trgm keyword fallback, tenant-scoped with row-level filtering.
 
-**Extraction triggers:** semantic drift, K turns since last extract, session end, successful multi-step plan, closed gap ticket.
+---
 
-Detail: [docs/specs/memory-system.md](./docs/specs/memory-system.md).
+## 4. Creator Mode (self-development)
 
-## Capability gaps & self-development
+Users with `platform.creator` permission switch modes; the agent then builds features
+*for the platform itself*, but strictly inside a sandboxed workspace:
 
-```
-Request → capability catalog
-            │
-            ├─ available → commands / config / workflows
-            ├─ partial  → do possible + explain remainder
-            └─ absent   → CapabilityGapTicket
-                              │
-                              ├─ local: detect coding agent → sandbox build/test
-                              └─ cloud: recommend shared marketplace vs private extension
-                              │
-                              ▼
-                     extension package / module
-                              │
-                              ▼
-                     marketplace / registry (+ memory of how)
-```
+- Works on a git branch in a dev container; runs tests/linters itself.
+- Produces a **Change Proposal**: diff + generated test evidence + risk assessment.
+- Human merges; deployment is CI-gated. The agent never touches production runtime.
+- New capabilities authored this way register through the same kernel contracts —
+  the platform eats its own dog food.
 
-**Hard rules:**
+This mirrors dsh's Creative Mode but adds the enterprise missing piece: proposals are
+governed artifacts, not live patches.
 
-- No elevated AI privileges while coding or operating.
-- Production self-dev only through defined surfaces (module packages, config, approved paths).
-- Tests + conventions (AGENTS.md, skills) required before enable.
-- Prefer general capabilities over tenant-named forks.
+---
 
-Detail: [docs/specs/self-development.md](./docs/specs/self-development.md), [docs/specs/agent-harness.md](./docs/specs/agent-harness.md).
+## 5. Coding-Agent Federation
 
-## Multi-branch
+Chaste detects installed coding agents (`opencode`, `codex`, `claude`, `kilocode`,
+`aider`, …) by scanning PATH + known config dirs, and exposes them as delegatable
+capabilities ("dispatch this implementation task to opencode"). Providers configured
+via API key (NVIDIA today; any OpenAI-compatible endpoint tomorrow) sit beside these.
+One abstraction: **ModelRef** = { provider: nim | openai-compat | local-cli }.
 
-```
-Organization
-  └── Branch[]
-  └── UserBranchAccess
-  └── documents / stock / employees often carry branchId
-Session: activeBranchId (nullable = all allowed for HQ roles)
-```
-
-UI: global branch switcher + list of allowed branches. AI plans and queries respect active branch context unless user asks for cross-branch (and is permitted).
-
-## Scheduling, calendar, reminders, notifications, email
-
-Platform **time & attention** services (worker-backed):
-
-| Concern | Mechanism |
+Model routing (all via NVIDIA NIM unless overridden):
+| Role | Model |
 |---|---|
-| Schedule / calendar | Commands + calendar entities; NL → structured times |
-| Reminders / NL follow-up | Durable jobs; re-enter harness as proactive turns |
-| In-app notify + sound/ring | Notification outbox → web push / client ring policy |
-| Email | Provider adapter (SMTP/API); templates; digests |
+| Primary agent | `moonshotai/kimi-k2.6` (agentic, tool-use strong) |
+| Fast loop / drafts | `meta/muse-glimmer-30b` |
+| Heavy reasoning fallback | `nvidia/nemotron-3-ultra-550b-a55b` |
+| Embeddings | `nvidia/nv-embedqa-e5-v5` |
+| Guardrails | `nvidia/llama-3.1-nemoguard-8b-content-safety` |
 
-All mutations via commands; delivery via worker/outbox. Spec: [docs/specs/scheduling-and-comms.md](./docs/specs/scheduling-and-comms.md).
+---
 
-## Events
+## 6. Technology Decisions
 
-Transactional **outbox** in PostgreSQL. After commit, `apps/worker` publishes/dispatches (notifications, webhooks, schedule fires, memory consolidation jobs). Consistency beats autonomous fan-out.
+| Layer | Choice | Why |
+|---|---|---|
+| Repo | Turborepo + pnpm workspaces | parallel builds, shared versioning, clean package boundaries |
+| Language | TypeScript (strict) end-to-end | one type system from DB to UI; agents generate typed code |
+| Web | Next.js 15 (App Router, RSC) | server components for dense ERP grids; streaming agent UIs |
+| API | tRPC v11 + server actions | end-to-end types without REST ceremony |
+| DB | PostgreSQL 16 + Drizzle ORM | relational integrity is non-negotiable for accounting; SQL-native migrations |
+| Vectors | pgvector | no extra infra; joins with transactional data; HNSW indexes |
+| Auth | better-auth (multi-org) | TS-first, org/team plugins, passkeys ready |
+| UI | Tailwind v4 + shadcn/ui + TanStack Query/Table | speed, accessibility, ERP-grade data grids |
+| Validation | Zod 4 | shared schemas across kernel/UI/LLM function-calling |
+| State machine | XState for long-running workflows (approvals, payroll runs) | inspectable, resumable processes |
+| Jobs | pg-boss (Postgres-backed queues) | no Redis dependency initially; transactions + queue consistency |
+| Observability | OpenTelemetry traces + structured pino logs; trajectory ledger in DB | trace every agent decision to its source data |
+| Testing | Vitest (unit) + Playwright (e2e); property-based tests for ledger invariants | double-entry balance is a property, not a test case |
 
-## Tech stack (v1)
+Monorepo layout:
 
-- TypeScript + Node.js LTS
-- pnpm + Turborepo
-- Fastify API
-- Next.js web (API client)
-- PostgreSQL + Drizzle + pgvector
-- Redis + BullMQ (jobs) as scale path
-- Zod everywhere at boundaries
-- Vitest
-- Optional local coding agents for self-dev (OpenCode, Codex, Claude Code, …)
+```
+apps/
+  web/            Next.js app (ERP console + agent chat + approvals inbox)
+packages/
+  kernel/         capability registry, governance pipeline, event ledger, agent loop
+  db/             drizzle schema + migrations (all modules)
+  ai/             provider adapters (NIM, openai-compat), model router, embeddings
+  auth/           better-auth config, org/RBAC
+  erp-core/       pure domain logic: posting rules, tax, inventory math (no IO)
+  ui/             shared component library
+modules/          ERP modules (each exports capabilities + UI + schema slices)
+  accounting/ finance/ hr/ manufacturing/ pos/ purchasing/ crm/
+tooling/          eslint, tsconfig presets
+```
 
-## Extensibility
+Domain rule: `erp-core` is pure functions; `modules/*` may touch DB via `db`;
+only `kernel` executes capabilities; only humans approve `identity/destructive`.
 
-New domain ≈ new module package + migrations + commands + (optional) specialist profile.
-No kernel fork required for normal features. No web redeploy required for pure API-only
-module additions beyond registering the module on the server (UI can be progressive).
+---
 
-Self-dev and marketplace extensions follow the same module contracts so AI and humans stay on one bus.
+## 7. Data & Integrity Principles
+
+1. **Append-only financial truth.** Journal entries post immutably; corrections are
+   reversal entries. No UPDATE on posted documents, enforced by triggers + grants.
+2. **Multi-tenant by row.** Every table carries `org_id`; RLS policies as defense-in-depth.
+3. **Money as integer minor units.** Currency-aware, never floats.
+4. **Ledger invariants as DB constraints.** A posting that unbalances its entry cannot
+   be written at all — the agent literally cannot corrupt books if it wanted to.
+5. **Event Ledger is sacred.** Hash-chained entries (pgcrypto) so audits detect tampering.
+
+## 8. UX Principles
+
+- **Conversation is a first-class UI**, not a sidebar bolt-on: ask anything, see the
+  receipts (every answer links to its evidence rows).
+- Progressive disclosure: beginners see a friendly home ("Describe your business"),
+  power users get keyboard-driven tables. Same underlying capabilities.
+- Approvals feel like reviewing a PR: clear before/after, one-key approve/reject.
+- The assistant is proactive but polite: surfaces anomalies ("3 unpaid invoices >30d")
+  and offers actions, never acts beyond policy silently.
+
+## 9. Non-Goals (v1)
+
+- Multi-currency consolidation, statutory localization packs (design hooks now).
+- Offline/desktop app (Tauri later).
+- Training/fine-tuning models (prompt/context/harness engineering first).

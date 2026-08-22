@@ -1,11 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src",
-    "composite": true
+    "noEmit": true,
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*"],
-  "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../kernel" }, { "path": "../config" }]
+  "include": [
+    "src",
+    "drizzle.config.ts"
+  ]
 }

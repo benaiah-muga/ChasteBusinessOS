@@ -1,29 +1,36 @@
 {
-  "name": "@chaste/web",
+  "name": "web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start -p 3000",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@chaste/api-client": "workspace:*",
-    "@chaste/ui-schema": "workspace:*",
-    "lucide-react": "^1.25.0",
-    "next": "^15.1.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "recharts": "^3.10.0"
+    "@chaste/ai": "workspace:*",
+    "@chaste/db": "workspace:*",
+    "@chaste/kernel": "workspace:*",
+    "better-auth": "^1.7.1",
+    "drizzle-orm": "^0.44.5",
+    "next": "^15.5.4",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^4.1.5",
+    "@chaste/module-accounting": "workspace:*",
+    "@chaste/module-crm": "workspace:*",
+    "@chaste/erp-core": "workspace:*",
+    "@chaste/module-messaging": "workspace:*",
+    "@chaste/module-purchasing": "workspace:*",
+    "@chaste/module-pos": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "@types/react": "^19.0.1",
-    "@types/react-dom": "^19.0.2",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.9.3"
   }
 }

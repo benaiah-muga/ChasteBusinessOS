@@ -1,242 +1,95 @@
-<div align="center">
-
 # ChasteBusinessOS
 
-**An AI-native Business Operating System for SMBs — modular, open source, built for trust.**
+An ERP where the AI can do everything you can do, through the same doors you use.
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](#)
-[![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-
-> **AI is how you operate the business.** Manual UIs remain available.  
-> **AI never bypasses business rules.**  
-> Every action — AI or human — flows through the same validated command bus, permission checks, and audit trail.
-
-[Docs](#documentation) · [Vision](VISION.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](docs/product-architecture-next.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
-
-</div>
+`erp` `ai-agents` `accounting` `double-entry` `human-in-the-loop` `audit-trail` `postgresql` `pgvector` `nextjs` `typescript` `turborepo` `drizzle-orm` `pos` `crm` `open-source`
 
 ---
 
-## What is this?
+I've watched companies spend six months implementing ERPs and another year learning to hate them. The software is fine. The problem is that someone has to sit there and click through every screen. ChasteBusinessOS flips that. You describe your business in plain language, an agent sets up your chart of accounts and starts working, and every action it takes passes through the exact same checks yours do. It cannot spend money without hitting the same $500 threshold you would. It cannot grant itself a role. When it meets something it can't do, it files a ticket instead of making something up.
 
-ChasteBusinessOS is an open-source operating system for running a business — **not an ERP with a chatbot bolted on**. Operate through natural language or traditional screens. Either way, every mutation runs through the **same native bus**: human clicks and AI requests share identical validation, permission checks, and audit records (see [AI/manual parity](AGENTS.md#non-negotiable-product-invariants)).
+That last part matters more than it sounds. The failure mode for AI business software is confident nonsense. A model invents a field, posts a made-up entry, and nobody notices until tax season. We designed so the model physically can't do that. It calls capabilities. Capabilities validate input against schemas, check permissions, consult policy, execute, and write to a hash-chained ledger. If a step fails, nothing happens and the agent has to explain why.
 
-The goal is **trustworthy automation**: AI that plans, clarifies, and suggests — without elevated privileges or hidden write paths.
+## The one rule
 
-Six business modules plus a platform layer are installable as packages. No kernel fork required to add a domain.
+There is exactly one way to change state in this system, and humans and agents share it.
 
-| Module            | Capabilities                                              | AI specialist       |
-| ----------------- | --------------------------------------------------------- | ------------------- |
-| **CRM**           | Customers and relationship data                           | CRM Agent           |
-| **Accounting**    | Chart of accounts, journals, invoices                     | Accounting Agent    |
-| **Inventory**     | Warehouses, products, stock movements                     | Inventory Agent     |
-| **Purchasing**    | Vendors and purchase orders                               | Purchasing Agent    |
-| **Manufacturing** | Bills of materials and work orders                        | Manufacturing Agent |
-| **HR**            | Employees and payroll preparation                         | HR Agent            |
-| **Platform**      | RBAC, module installs, marketplace, org settings, autonomy | System Agent        |
+```
+intent → resolve capability → validate input → check permissions
+      → policy evaluation → [execute | request approval]
+      → append to ledger → notify
+```
 
----
+When you click "pay invoice" in the UI, that button calls the executor. When you type "pay the Acme invoice" in chat, the model calls the same executor with the same capability ID. One path means one place for security review, and automatic parity between what you can do and what your AI co-worker can do.
 
-## Key features
+Capabilities carry their own metadata. Risk class (`read`, `write`, `money`, `identity`, `destructive`), permission reference, zod schemas, and an inverse action so corrections are possible. The registry validates all of this when the server boots. If a module declares an inverse pointing at something that doesn't exist, boot fails. Broken plugins have killed enough ecosystems; we check instead.
 
-- **Single command bus** — humans and AI execute the same commands with identical authz and audit coverage
-- **Agent harness** — models operate the business through the same tools as humans (no elevated privileges)
-- **Installable modules** — Odoo-inspired modularity; enable only what your organization needs
-- **Conversation intelligence** — multi-turn memory, clarifying questions, multi-step plans, proactive suggestions
-- **Domain specialists** — scoped AI agents (CRM, Accounting, Inventory, …) over module tool registries
-- **Configurable autonomy** — `recommend → confirm → guarded_auto → full_autonomous`
-- **HTTP-first clients** — the web app talks REST only; no kernel or DB imports in the browser
-- **Explainable AI** — every assisted path can record *what* happened, *why*, and *which rules* applied
-- **Transactional outbox** — domain events publish after commit; no dual-write races
-- **Built-in messaging, email, and encrypted backups** — with Docker deployment
+## What actually runs today
 
----
+This isn't a whitepaper. All of this works and each item below is proven by a demo script you can run.
+
+**Books that hold themselves together.** Double-entry core as pure functions, with property-based tests generating hundreds of random balanced ledgers and asserting the balance sheet still balances. Those tests earned their keep early: they caught zero-total invoices producing empty postings, and a sign error that negated revenue. Journal entries are immutable. Corrections happen through mirror reversals that reference the original. Close a period and posting into it fails, even if the agent really wants to.
+
+**Money that asks permission.** Payments above your org's threshold sit in an approvals inbox rendered like a pull request, with the full payload and a reason. The default threshold is $500 and each org sets its own. Approve executes under your authority; reject writes the refusal to the ledger. Identity changes and destructive operations always gate, regardless of policy. An agent once tried to close an accounting period on its own. The gate held, and that story is now a test.
+
+**Sales end to end.** Customers, invoicing with automatic receivable postings, AR aging buckets, payments with overpayment protection. On the buy side, vendors, bills with per-line expense coding, AP aging, threshold-gated bill payments. P&L and balance sheet compute from live balances, and if the equation ever stops holding, the UI shows a red UNBALANCED badge rather than pretending.
+
+**A register that counts honestly.** Open a drawer with a float, ring cash and card sales where each sale posts atomically, then count the drawer at close. Card sales bypass the drawer. Cash sales don't. If counted cash differs from expected, the variance gets flagged in orange and stays flagged. A NULL column bug here briefly made cash sales invisible to reconciliation; live verification caught it, which is why we verify live.
+
+**A pipeline you can drag.** Deals across six stages with weighted forecasting. Lead values at 10%, negotiation at 70%. The forecast number is honest about being a guess.
+
+**An agent with receipts.** Chat streams tokens as they arrive and shows chips for each capability call. Every conversation replays event by event afterwards: what the user asked, what tools ran, what came back. Team channels can include the agent, which reads the thread and answers in context, audited like everything else.
 
 ## Quick start
 
-You have two options: **Docker** (recommended, minimal setup) or **running from source**.
-
-### Option 1 — Docker (recommended)
-
-```bash
+```sh
 git clone https://github.com/benaiah-muga/ChasteBusinessOS.git
 cd ChasteBusinessOS
-
-# Generate secrets
-export CHASTE_SESSION_SECRET="$(openssl rand -hex 24)"
-export CHASTE_BACKUP_KEY="$(openssl rand -hex 32)"
-
-# Build and start everything (Postgres + Redis included)
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
-- Web app → <http://localhost:3000>
-- API health → <http://localhost:3001/health>
-- The default admin is seeded on first boot (see logs / `CHASTE_ADMIN_*`).
-
-### Option 2 — From source
-
-**Prerequisites:** [Node.js](https://nodejs.org) 22+, [pnpm](https://pnpm.io) 9+, [PostgreSQL](https://www.postgresql.org) 16+. Redis is optional.
-
-```bash
-git clone https://github.com/benaiah-muga/ChasteBusinessOS.git
-cd ChasteBusinessOS
-
 pnpm install
-cp .env.example .env            # then edit DATABASE_URL
-createdb chaste                 # if needed
-pnpm db:migrate                # apply schema
-pnpm dev                       # API + web in parallel
+cp .env.example .env        # add NVIDIA_API_KEY and BETTER_AUTH_SECRET
+docker run -d --name chaste-pgvector -e POSTGRES_PASSWORD=chaste_dev \
+  -e POSTGRES_USER=chaste -e POSTGRES_DB=chaste_os_v2 \
+  -p 5433:5432 pgvector/pgvector:pg16
+pnpm --filter @chaste/db db:migrate
+pnpm dev                    # http://localhost:3000
 ```
 
-| Service | URL |
-| ------- | --- |
-| **Web app** | <http://localhost:3000> |
-| **API** | <http://localhost:3001> |
-| **Health** | <http://localhost:3001/health> |
+Sign up, describe your business in two sentences, and the workspace builds itself: ten standard accounts seeded, your description embedded into org memory, owner role granted to you.
 
-On first run with `CHASTE_BOOTSTRAP=true`, the API seeds a default organization and admin user.
+Then try the proofs:
 
-> Want **messaging**, **email**, or **backups** working in a few minutes? See [Docs → Features](#documentation).
-
----
-
-## Screenshots
-
-> Screenshots coming soon.
-
----
-
-## Architecture
-
-```
-┌─────────────┐      HTTP / JSON       ┌──────────────────────────────┐
-│  apps/web   │ ──────────────────────▶│             apps/api          │
-│  Next.js UI │                        │   Fastify · auth · command    │
-│ (API client │                        │   /query dispatch · chat      │
-│  only)      │                        └──────────────┬───────────────┘
-└─────────────┘                                       │ command bus
-                                               ┌──────▼──────┐
-                                               │ apps/worker │  outbox,
-                                               └──────┬──────┘  email, backup
-                                                      │
-                                         ┌────────────▼─────────────┐
-                                         │ PostgreSQL + pgvector * * │
-                                         └──────────────────────────┘
+```sh
+pnpm demo:slice   # customer → invoice → gated payment → approval → trial balance
+pnpm demo:m4      # vendor bill → gated payment → P&L and balance sheet prove out
+pnpm demo:m5      # register session → sales → drawer variance flagged
 ```
 
-**Monorepo layout**
+If a demo fails, that's a bug worth knowing about. These scripts are the spec.
+
+## Models
+
+Routing goes through NVIDIA NIM's OpenAI-compatible endpoint by default, and any OpenAI-compatible provider drops in via env config. Kimi K3 handles primary agent duty because it passed our tool-calling probes cleanly. DeepSeek V4 Flash covers fast loops. Embeddings come from nv-embedqa-e5-v5 at 1024 dimensions. The kernel never talks to a vendor SDK directly; adapters translate, and tool names get sanitized because some providers reject dots. Swap models without touching governance code.
+
+## Repo layout
 
 ```
-apps/
-  api/            Fastify HTTP API: auth, routes, chat, command/query dispatch
-  web/            Next.js UI (API client only; no kernel/db imports)
-  worker/         Outbox processor and background jobs (email, backups)
-
-packages/
-  kernel/         Command/query bus, authz, audit, module registry
-  db/             Drizzle schema, migrations, settings schemas
-  ai-core/        Orchestrator, workflows, providers, memory, guardrails
-  api-client/     Typed HTTP client and DTOs for frontends
-  ui-schema/      Generative chat UI part schemas (Zod)
-  config/         Typed environment configuration
-
-modules/
-  crm/            Customer relationship management
-  accounting/     Ledger, journals, invoices
-  inventory/      Warehouses, products, stock
-  purchasing/     Vendors, purchase orders
-  manufacturing/  BOMs, work orders
-  hr/             Employees, payroll prep
-  platform/       RBAC, settings, marketplace, autonomy
-  messaging/      Internal messaging
+packages/kernel      capability contract, registry, policy engine, ledger, loop
+packages/erp-core    pure domain math, property-tested, zero IO
+packages/db          drizzle schema: orgs, RBAC, ledger, sessions, vectors
+packages/ai          NIM adapter, embeddings, coding-agent detection
+modules/             accounting, crm, purchasing, messaging, pos
+apps/web             Next.js console: chat, accounting, pipeline, POS,
+                     messages, approvals inbox, ledger viewer, session replay
+docs/adr/            nine decision records explaining the why
+scripts/             demo proofs, runnable specifications
 ```
 
-## Tech stack
+## Honest limits
 
-| Layer         | Technology                                    | Role                                                                 |
-| ------------- | --------------------------------------------- | -------------------------------------------------------------------- |
-| Orchestrator  | `@chaste/ai-core`                             | Intent resolution, autonomy gates, confirm/cancel flows              |
-| Command bus   | `@chaste/kernel`                              | Authz, audit, module registry                                        |
-| Database      | PostgreSQL + pgvector                         | Persistence and long-term memory                                     |
-| Schema        | Drizzle ORM + Zod                             | Typed, validated boundaries                                          |
-| Providers     | OpenAI, OpenAI-compatible, Ollama, Nvidia NIM | Config-driven via `CHASTE_AI_PROVIDER` (or `none` for rules-only)    |
-| Email         | SMTP (nodemailer) / Resend                    | Config-driven outbound email                                         |
-| Backups       | AES-256-GCM + S3 / local store                | Encrypted snapshot + restore                                         |
-| Observability | Langfuse (optional)                           | Trace LLM calls when keys are configured                             |
-| Deploy        | Docker (multi-target build)                   | `migrate` · `api` · `web` · `worker` images                         |
+Multi-currency consolidation doesn't exist yet. Neither does payroll, formal year-end close, or email notifications, though the webhook seam for those already runs. Creator Mode, where permitted users have the agent build features onto the platform itself behind sandboxed proposals, is designed and sketched in the roadmap but not built. Single-org per user for now. Postgres 14 lacks pgvector support without extra work, hence the Docker container.
 
-Set `CHASTE_AI_PROVIDER=none` for deterministic, rule-based planning with no external LLM — useful for zero-cost local evaluation.
-
----
-
-## Development
-
-```bash
-pnpm lint          # TypeScript strict lint across the monorepo
-pnpm typecheck     # TypeScript strict type checks
-pnpm test          # Unit and integration tests
-pnpm e2e           # Full API + Postgres end-to-end verification
-pnpm build         # Compile all packages and apps
-```
-
-> Run `pnpm test` with a local PostgreSQL available. See [docs/configuration.md](docs/configuration.md) for environment setup.
-
----
-## Deployment
-
-Four container images (`migrate`, `api`, `web`, `worker`) are produced from a single [Dockerfile](Dockerfile) build targets (see [docs/deploy](docs/deploy/)):
-
-| Target  | Runs                     |
-| ------- | ------------------------ |
-| `migrate` | one-off schema migrations |
-| `api`     | HTTP API (`:3001`)       |
-| `web`     | Next.js UI (`:3000`)     |
-| `worker`  | outbox, email, backups   |
-
-Per-provider guides: **AWS** · **GCP** · **Azure** · **Fly.io** · **Render** · **Railway** · **Supabase/Neon**.
-
-```bash
-# Example: build one target
-docker build --target api -t chaste/api:0.1.0 .
-```
-
-Public images are published to **GHCR** (`ghcr.io/benaiah-muga/chastebusinessos`, tag per image: `api-`, `web-`, `worker-`, `migrate-`). See [docs/deploy/README.md](docs/deploy/README.md).
-
----
-
-## Design constraints
-
-1. `apps/web` → HTTP → `apps/api` only
-2. Mutations → kernel commands (Zod + permissions + audit)
-3. AI tools wrap commands; never raw SQL
-4. Domain specialists are tool/profile scopes, not private backends
-5. Events publish via transactional outbox after commit
-
----
-
-## Documentation
-
-| Doc | Purpose |
-| --- | ------- |
-| [configuration.md](docs/configuration.md) | Environment variables, AI providers, autonomy |
-| [module-development.md](docs/module-development.md) | Authoring a new business module |
-| [ai-autonomy-and-safety.md](docs/ai-autonomy-and-safety.md) | Autonomy levels and safety model |
-| [deploy/](docs/deploy/) | Deployment guides + Docker usage |
-| [specs/](docs/specs/) | Feature specifications (messaging, backup, AI, …) |
-| [adr/](docs/adr/) | Architecture decision records |
-| [AGENTS.md](AGENTS.md) | Rules for AI coding agents |
-
-## Roadmap
-
-See [docs/product-architecture-next.md](docs/product-architecture-next.md) for the full roadmap — semantic memory, capability-gap self-development, and marketplace extensions.
+We'd rather ship this paragraph than pretend those features exist.
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the checks in [AGENTS.md](AGENTS.md).
-
-## License
-
-Distributed under the [Apache License 2.0](LICENSE). See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
+Read `AGENTS.md` even if you're human. It holds the conventions, the verification gate of typecheck, lint, tests and a demo, and the rules for authoring new capabilities. Significant decisions get an ADR in `docs/adr/`. Behavioral changes get a `CHANGELOG.md` entry. Both stay because future contributors, human or not, deserve to know why things are the way they are.

@@ -1,11 +1,2 @@
-export * from "./client.js";
-export * as schema from "./schema.js";
-export * from "./adapters.js";
-export * from "./auth.js";
-export { runMigrations } from "./migrate.js";
-export * from "./memory-store.js";
-export * from "./session-store.js";
-export * from "./seed.js";
-export * from "./settings-schemas.js";
-export { createCommandHelpers } from "./command-helpers.js";
-export { cleanupTestData, findUserByEmail, findWarehouseByName, findFirstWarehouse, findUserById, findUsersByOrg } from "./test-helpers.js";
+export * from "./client";
+export * from "./schema/index";

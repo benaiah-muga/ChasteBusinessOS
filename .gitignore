@@ -1,14 +1,20 @@
-node_modules
-dist
-.next
-.turbo
-coverage
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build
+.next/
+dist/
+.turbo/
+tsconfig.tsbuildinfo
+
+# env — never commit secrets (the NVIDIA key below was shared in chat; ROTATE it)
 .env
-.env.local
+.env.*
+!.env.example
+
+# misc
 *.log
 .DS_Store
-*.tsbuildinfo
-drizzle/meta
-.vscode/*
-!.vscode/extensions.json
-.research
+coverage/
+playwright-report/

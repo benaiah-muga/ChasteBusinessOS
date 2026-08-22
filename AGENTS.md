@@ -1,67 +1,51 @@
-# AGENTS.md -- Rules for AI coding agents
+# ChasteBusinessOS
 
-You are contributing to **ChasteBusinessOS**, an AI-native Business Operating
-System. Optimize for **reliability, loose coupling, and auditability** -- not
-clever shortcuts.
+Agentic ERP. Every human action is also an AI-agent action through the same
+capability pipeline — governed, auditable, reversible.
 
-## Non-negotiable product invariants
+Read `ARCHITECTURE.md` first, then `ROADMAP.md`. Design decisions live in
+`docs/adr/`; user-facing changes are recorded in `CHANGELOG.md`.
 
-1. **AI/manual parity** -- AI executes only through the same command/query bus as humans.
-2. **No elevated AI privileges** -- never bypass permissions, validation, or audit.
-3. **Frontend is an API client** -- `apps/web` must not import kernel, db, or modules.
-4. **Zod validates intent and payloads** at boundaries (HTTP, commands, chat UI parts).
-5. **Events after commit** -- use transactional outbox; do not dual-write carelessly.
-6. **Explainability** -- AI-assisted paths record why/what/rules when you touch that layer.
+## Quick start
 
-## Where to put code
-
-| Change | Location |
-|---|---|
-| HTTP endpoints | `apps/api` |
-| UI / chat rendering | `apps/web` (via API + `@chaste/ui-schema`) |
-| Commands, authz, audit, module loader | `packages/kernel` |
-| Schema & migrations | `packages/db` (+ module schemas) |
-| AI orchestration | `packages/ai-core` (invoked by api/worker only) |
-| Business features | `modules/<name>` |
-| Shared request/response types for clients | `packages/api-client` |
-
-## Forbidden patterns
-
-- Importing `@chaste/kernel` or `@chaste/db` from `apps/web`
-- Direct SQL/table access from AI tool handlers
-- Cross-module private table joins
-- Secrets in source, fixtures, or logs
-- “Temporary” bypasses of permission checks
-- Inventing analytics numbers without a verifiable query path
-
-## Required checks before you finish
-
-```bash
-pnpm lint
-pnpm typecheck
-pnpm test
+```sh
+pnpm install
+cp .env.example .env        # fill NVIDIA_API_KEY + BETTER_AUTH_SECRET
+docker start chaste-pgvector
+turbo db:migrate            # from packages/db
+pnpm dev                    # apps/web on :3000
 ```
 
-If you add a module or command:
+## Conventions
 
-- Manifest updated
-- Zod input/output schemas
-- Permission string(s)
-- Audit coverage via command bus
-- Contract test for the command
-- API route only if intentionally public; prefer generic command/query routes when possible
+- TypeScript strict everywhere; Zod for all boundaries.
+- All state changes go through kernel capabilities (`packages/kernel`).
+- Money = integer minor units; posted financial documents are immutable.
+- Append-only event ledger; hash-chained audit entries.
+- Never commit secrets. `.env` is gitignored.
 
-## Skills
+## Verification gate — run before declaring any work done
 
-Use repo skills under `skills/` when relevant:
+```sh
+pnpm typecheck && pnpm lint && pnpm test
+```
 
-- `skills/module-author` -- new modules
-- `skills/command-safety` -- commands & permissions
-- `skills/pr-hygiene` -- PR completeness
+Live behavior proofs: `pnpm demo:slice`, `demo:m2`, `demo:m4`, `demo:m5`.
+A change that breaks a demo is not done.
 
-## Style
+## For coding agents
 
-- TypeScript strict; prefer explicit types at public boundaries.
-- Small, reviewable diffs.
-- Prefer extending existing patterns over new frameworks.
-- Document architectural choices in `docs/adr/` when non-obvious.
+- New capabilities must pass conformance (`assertWellFormedCapability`):
+  valid `module.action` id, intent ≥ 20 chars (it gets embedded), and an
+  inverse declared for state changes unless you can justify the warning.
+  The registry self-validates at boot — broken inverses refuse to boot.
+- Domain math lives in `packages/erp-core` as pure functions — keep IO out,
+  and add property tests for financial invariants.
+- No `any` without an adjacent eslint-disable comment explaining *why* the
+  hole is unavoidable. `pnpm lint` fails on unexplained ones.
+- Significant design decisions get an ADR (`docs/adr/`, next number, never
+  delete old ones). If you argued for a choice that others will live with,
+  write it down.
+- Update `CHANGELOG.md` under `[Unreleased]` for every user-visible or
+  behavioral change — Added/Changed/Fixed/Removed.
+- Do not add comments explaining obvious code; explain *why*, not *what*.

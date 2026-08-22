@@ -1,31 +1,29 @@
 {
-  "name": "chaste-businessos",
+  "name": "chaste-business-os",
   "private": true,
-  "version": "0.1.0",
-  "description": "AI-native Business Operating System for SMBs",
-  "license": "Apache-2.0",
-  "packageManager": "pnpm@9.15.0",
-  "engines": {
-    "node": ">=22"
-  },
+  "packageManager": "pnpm@11.9.0",
   "scripts": {
-    "dev": "turbo run dev --parallel",
-    "build": "turbo run build",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test --concurrency=1",
-    "db:generate": "pnpm --filter @chaste/db generate",
-    "db:migrate": "tsx --env-file=.env packages/db/src/migrate.ts",
-    "e2e": "pnpm --filter @chaste/api e2e",
-    "format": "prettier --write \"**/*.{ts,tsx,md,json,yml}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,md,json,yml}\""
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "eslint .",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "demo": "tsx scripts/demo-agent.ts",
+    "demo:slice": "tsx scripts/demo-slice.ts",
+    "format": "prettier --write .",
+    "demo:m2": "tsx scripts/demo-m2.ts",
+    "demo:m4": "tsx scripts/demo-m4.ts",
+    "demo:m5": "tsx scripts/demo-m5.ts"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "prettier": "^3.4.2",
-    "tsx": "^4.19.2",
-    "turbo": "^2.3.3",
-    "typescript": "^7.0.2",
-    "vitest": "^2.1.8"
+    "@eslint/js": "^9.35.0",
+    "@types/node": "^24.3.0",
+    "eslint": "^9.35.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.6",
+    "turbo": "^2.5.8",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.43.0",
+    "vitest": "^3.2.4"
   }
 }
