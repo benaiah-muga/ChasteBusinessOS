@@ -4,11 +4,20 @@
 
 **The agentic ERP. Describe your business, and an AI co-worker runs it under your authority.**
 
+[![Release](https://img.shields.io/github/v/release/benaiah-muga/ChasteBusinessOS?label=release&sort=semver)](https://github.com/benaiah-muga/ChasteBusinessOS/releases)
 [![CI](https://github.com/benaiah-muga/ChasteBusinessOS/actions/workflows/ci.yml/badge.svg)](https://github.com/benaiah-muga/ChasteBusinessOS/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v0.3.0-green.svg)](CHANGELOG.md)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](tsconfig.base.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6.svg)](tsconfig.base.json)
+[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](ROADMAP.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+[![Vision](https://img.shields.io/badge/Vision-📖-8A2BE2)](VISION.md)
+[![Architecture](https://img.shields.io/badge/Architecture-📐-blue)](ARCHITECTURE.md)
+[![Roadmap](https://img.shields.io/badge/Roadmap-🗺️-green)](ROADMAP.md)
+[![Contributing](https://img.shields.io/badge/Contributing-🤝-orange)](CONTRIBUTING.md)
+[![Code of Conduct](https://img.shields.io/badge/Code_of_Conduct-🛡️-red)](CODE_OF_CONDUCT.md)
+[![Security](https://img.shields.io/badge/Security-🔒-black)](SECURITY.md)
+[![Changelog](https://img.shields.io/badge/Changelog-📜-yellow)](CHANGELOG.md)
 
 [Features](#features) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Demos](#demo-proofs) · [Docs](#documentation) · [Contributing](#contributing) · [License](#license)
 
@@ -81,6 +90,7 @@ pnpm demo:m5      # register session → sales → drawer variance flagged
 
 ## Documentation
 
+- [Vision](VISION.md) — what we're building and what we won't compromise
 - [Architecture](ARCHITECTURE.md) — capability kernel, governance pipeline, memory tiers
 - [Roadmap](ROADMAP.md) — milestones and standing principles
 - [ADRs](docs/adr/) — why things are the way they are
