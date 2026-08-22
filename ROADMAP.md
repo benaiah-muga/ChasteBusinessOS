@@ -10,7 +10,8 @@
 - [x] `packages/ai`: NIM adapter (chat streaming, embeddings), model router,
       coding-agent detector
 - [ ] better-auth wired into web app with first-org bootstrap flow
-- [ ] CI: typecheck, lint, test on every PR
+- [x] CI: GitHub Actions runs migrations, typecheck, lint, unit tests,
+      web build, and demo proofs (when NVIDIA secret present)
 
 ## M1 — Trust spine (weeks 2–4)
 - [x] Approval inbox UI (approve → execute under human authority; reject with audit)
@@ -23,7 +24,8 @@
       create customer → invoice → GL posting → payment gated by policy →
       human approval → payment posted → trial balance proves books balance
 - [ ] Notification hooks beyond console (email/webhook)
-- [ ] CI: typecheck, lint, test on every PR
+- [x] CI: GitHub Actions runs migrations, typecheck, lint, unit tests,
+      web build, and demo proofs (when NVIDIA secret present)
 
 ## M2 — Accounting module GA (weeks 4–8)
 - [x] Double-entry core in `erp-core` + property-based invariant tests

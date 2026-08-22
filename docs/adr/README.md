@@ -14,6 +14,9 @@ the next number; superseded ones get a Status update, never deletion.
 | 0007 | Single execution path through the kernel | accepted |
 | 0008 | pgvector for org memory | accepted |
 | 0011 | Capability conformance validated at boot | accepted |
+| 0009 | Append-only stock ledger, GL deferred | accepted |
+| 0010 | Three-way matching on vendor bills | accepted |
+| 0012 | Creator Mode proposals are governed artifacts | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down — if you made one of those calls, write the ADR.

@@ -7,6 +7,34 @@ milestones and breaking changes call them out explicitly.
 ## [Unreleased]
 
 ### Added
+- **Teams & RBAC**: invitations with token acceptance, multi-membership with
+  per-session active-org cookie, role editor UI driven by the live permission
+  catalog, identity-class gating on every authority change, and an approvals
+  inbox filtered by what each member may actually decide.
+- **Inventory**: append-only stock ledger (`recordStockMovement` shared
+  writer), items with SKUs and reorder points, stock report with reorder
+  alerts; POS sales decrement stock in the same transaction and refuse to
+  oversell.
+- **Purchasing depth**: purchase orders with lines linked to stocked items,
+  goods receipts that feed both order status and stock, and classic three-way
+  matching (order ↔ receipts ↔ bill) with quantity, cumulative-billing, and
+  ±2% price-tolerance checks.
+- **Creator Mode**: `platform.creator` permission gates a chat mode where the
+  agent files platform-change proposals (diff, test evidence, risk assessment)
+  as governed artifacts; humans approve or reject on `/proposals`; nothing
+  merges automatically.
+- GitHub Actions CI: migrations, typecheck, lint, unit tests, web build, and
+  demo proofs when an NVIDIA key secret is present.
+
+### Fixed
+- Migrations path broke under directories containing spaces
+  (`new URL().pathname` URL-encodes); now uses `fileURLToPath`.
+- Moving-average inventory cost stored as a rounded integer compounded
+  rounding error; value is stored exactly and average cost derived.
+
+## [0.3.0] — 2026-08-22
+
+### Added
 - Capability conformance system: `assertWellFormedCapability` rejects
   malformed capabilities at registration; `registry.validateAll()` runs at
   boot (missing inverse targets are fatal, missing inverses are warnings).

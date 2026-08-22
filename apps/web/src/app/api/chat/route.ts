@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { desc, eq } from "drizzle-orm";
 import { agentSessions, getDb, organizations, sessionEvents, tickets } from "@chaste/db";
-import { runAgentLoop, type TicketSink } from "@chaste/kernel";
+import { hasPermission, runAgentLoop, type TicketSink } from "@chaste/kernel";
+
+const hasPermissionFor = hasPermission;
 import { OpenAiCompatAdapter, MODELS } from "@chaste/ai";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
@@ -12,6 +14,7 @@ export const maxDuration = 120;
 const bodySchema = z.object({
   message: z.string().min(1).max(8000),
   sessionId: z.string().uuid().optional(),
+  mode: z.enum(["assist", "creator"]).default("assist"),
 });
 
 const systemPromptFor = (orgName: string) => `You are the ChasteBusinessOS assistant for "${orgName}".
@@ -21,6 +24,12 @@ You operate an ERP through registered capabilities. Rules:
 - If a tool returns pendingApproval: true, tell the user approval is required and it's waiting in the Approvals inbox.
 - If no capability fits, say so honestly and call file_ticket.
 - Never invent capabilities, accounts, or numbers.`;
+const creatorAddendum = `
+
+Creator Mode is active. You may propose changes to this platform itself via
+creator.submitProposal. A proposal must contain: what changes and why, a real
+unified diff, how you verified it, and an honest risk assessment including who
+could be affected. You cannot merge anything yourself; say so plainly.`;
 
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
@@ -82,6 +91,13 @@ export async function POST(req: Request) {
     async start(controller) {
       const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       try {
+        // Creator Mode is permission-gated at the session level too.
+        const wantsCreator = body.data.mode === "creator";
+        if (wantsCreator && !hasPermissionFor(ctx.actor, "platform.creator")) {
+          send({ type: "error", error: "your role does not include platform.creator" });
+          controller.close();
+          return;
+        }
         const result = await runAgentLoop(
           model,
           registry,
@@ -89,7 +105,8 @@ export async function POST(req: Request) {
           ctx,
           {
             sessionId,
-            systemPrompt: systemPromptFor(org?.name ?? "your organization"),
+            systemPrompt:
+              systemPromptFor(org?.name ?? "your organization") + (wantsCreator ? creatorAddendum : ""),
             userGoal: body.data!.message,
             maxSteps: 8,
             onDelta: (text) => send({ type: "delta", text }),

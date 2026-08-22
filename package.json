@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "demo:m2": "tsx scripts/demo-m2.ts",
     "demo:m4": "tsx scripts/demo-m4.ts",
-    "demo:m5": "tsx scripts/demo-m5.ts"
+    "demo:m5": "tsx scripts/demo-m5.ts",
+    "demo:m6": "tsx scripts/demo-m6.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
@@ -25,5 +26,8 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.43.0",
     "vitest": "^3.2.4"
-  }
+  },
+  "version": "0.3.0",
+  "description": "The agentic ERP: describe your business, and an AI co-worker runs it under your authority",
+  "license": "Apache-2.0"
 }

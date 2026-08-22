@@ -420,8 +420,9 @@ export const vendorBillLines = pgTable(
     quantity: integer("quantity").notNull(), // thousandths of a unit
     unitPriceMinor: integer("unit_price_minor").notNull(),
     expenseAccountCode: text("expense_account_code").notNull().default("6000"), // COA code
+    poLineId: uuid("po_line_id"),
   },
-  (t) => [index("vendor_bill_line_bill_idx").on(t.billId)],
+  (t) => [index("vendor_bill_line_bill_idx").on(t.billId), index("vendor_bill_line_poline_idx").on(t.poLineId)],
 );
 
 export const vendorPayments = pgTable(
@@ -443,6 +444,56 @@ export const vendorPayments = pgTable(
 );
 
 // ── POS (point of sale) ─────────────────────────────────────────────────
+
+// ── Creator Mode (self-development proposals) ───────────────────────────
+
+export const creatorProposals = pgTable(
+  "creator_proposals",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    /** Unified diff of the proposed change. */
+    diffText: text("diff_text").notNull(),
+    testEvidence: text("test_evidence"),
+    riskAssessment: text("risk_assessment"),
+    status: text("status").notNull().default("in_review"), // in_review | approved | rejected | merged
+    sessionId: uuid("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    proposedByActorType: text("proposed_by_actor_type").notNull(),
+    proposedByActorId: uuid("proposed_by_actor_id"),
+    reviewedByUserId: uuid("reviewed_by_user_id").references(() => users.id),
+    reviewComment: text("review_comment"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("creator_proposal_org_status_idx").on(t.orgId, t.status)],
+);
+
+// ── Teams: invitations & multi-membership ───────────────────────────────
+
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    roleId: uuid("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    status: text("status").notNull().default("pending"), // pending | accepted | revoked | expired
+    invitedByUserId: uuid("invited_by_user_id").references(() => users.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("invitation_org_status_idx").on(t.orgId, t.status)],
+);
 
 export const posSessions = pgTable(
   "pos_sessions",
@@ -482,6 +533,87 @@ export const deals = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("deal_org_stage_idx").on(t.orgId, t.stage)],
+);
+
+// ── Inventory (append-only stock ledger) ────────────────────────────────
+
+export const items = pgTable(
+  "items",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sku: text("sku").notNull(),
+    name: text("name").notNull(),
+    unitLabel: text("unit_label").notNull().default("unit"),
+    /** Thousandths of a unit; 0 disables reorder alerts. */
+    reorderPointThousandths: integer("reorder_point_thousandths").notNull().default(0),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("item_org_sku_idx").on(t.orgId, t.sku)],
+);
+
+/** Every quantity change has a reason and an actor. On-hand is the derived sum. */
+export const stockMovements = pgTable(
+  "stock_movements",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "restrict" }),
+    quantityDelta: integer("quantity_delta").notNull(), // signed thousandths
+    reason: text("reason").notNull(), // purchase | sale | adjustment | production
+    note: text("note"),
+    refType: text("ref_type"), // e.g. "po_line", "pos_sale", "invoice"
+    refId: uuid("ref_id"),
+    unitCostMinor: integer("unit_cost_minor"),
+    actorType: text("actor_type").notNull(),
+    actorId: uuid("actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("stock_movement_org_item_idx").on(t.orgId, t.itemId), index("stock_movement_ref_idx").on(t.refType, t.refId)],
+);
+
+// ── Purchase orders ─────────────────────────────────────────────────────
+
+export const purchaseOrders = pgTable(
+  "purchase_orders",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    vendorId: uuid("vendor_id")
+      .notNull()
+      .references(() => vendors.id, { onDelete: "restrict" }),
+    number: integer("number").notNull(),
+    status: text("status").notNull().default("ordered"), // ordered | partial | received | closed | void
+    memo: text("memo"),
+    orderedAt: timestamp("ordered_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("po_org_number_idx").on(t.orgId, t.number)],
+);
+
+export const poLines = pgTable(
+  "po_lines",
+  {
+    id: id(),
+    poId: uuid("po_id")
+      .notNull()
+      .references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    quantity: integer("quantity").notNull(), // thousandths
+    unitPriceMinor: integer("unit_price_minor").notNull(),
+    itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+  },
+  (t) => [index("po_line_po_idx").on(t.poId)],
 );
 
 // ── Periods (soft close; posting into a closed period is rejected) ─────
