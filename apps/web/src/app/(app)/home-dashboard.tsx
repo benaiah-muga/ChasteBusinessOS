@@ -141,9 +141,9 @@ export function HomeDashboard({ orgName }: { orgName: string }) {
 
 function DashboardBody({ data, attentionCount }: { data: DashboardPayload; attentionCount: number }) {
   return (
-    <div className="mt-8">
+    <div className="mt-5">
       {/* The pulse: open composition, no card walls */}
-      <section aria-label="Financial pulse" className="grid gap-10 lg:grid-cols-[1.6fr_1fr]">
+      <section aria-label="Financial pulse" className="grid gap-8 lg:grid-cols-[1.6fr_1fr]">
         <FinancialPulse data={data} />
         <NeedsYouQueue data={data} count={attentionCount} />
       </section>
@@ -151,7 +151,7 @@ function DashboardBody({ data, attentionCount }: { data: DashboardPayload; atten
       {/* What is moving */}
       <section
         aria-label="Working capital and operations"
-        className="mt-10 grid gap-x-10 gap-y-8 border-t border-stone-200 pt-6 md:grid-cols-3"
+        className="mt-8 grid gap-x-8 gap-y-6 border-t border-stone-200 pt-5 md:grid-cols-3"
       >
         <div>
           <p className="figure-label mb-3">Working capital</p>
@@ -281,8 +281,8 @@ function TrendChart({ data }: { data: DashboardPayload["trend"] }) {
   if (data.length === 0) return null;
   const max = Math.max(1, ...data.flatMap((d) => [d.incomeMinor, d.expenseMinor]));
   return (
-    <div className="mt-6">
-      <div className="flex h-32 items-end gap-3 border-b border-stone-200 pb-px">
+    <div className="mt-5">
+      <div className="flex h-28 items-end gap-3 border-b border-stone-200 pb-px">
         {data.map((d) => (
           <div key={d.month} className="flex h-full flex-1 items-end justify-center">
             <div
@@ -330,7 +330,7 @@ function FunnelBar({ stages }: { stages: DashboardPayload["pipeline"]["stages"] 
     lost: "bg-red-300",
   };
   return (
-    <div className="mt-4">
+    <div className="mt-3">
       <div className="flex h-2.5 overflow-hidden rounded-full">
         {stages.map(
           (s) =>
@@ -481,7 +481,7 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
 
 function ActivityFeed({ activity }: { activity: DashboardPayload["activity"] }) {
   return (
-    <section aria-label="Recent ledger activity" className="mt-10 border-t border-stone-200 pt-6 pb-24 lg:pb-6">
+    <section aria-label="Recent ledger activity" className="mt-8 border-t border-stone-200 pt-5 pb-20 lg:pb-4">
       <div className="flex items-baseline justify-between gap-3">
         <p className="figure-label">Ledger · recent</p>
         <Link href="/ledger" className="text-[13px] font-medium text-maroon-800 hover:underline">

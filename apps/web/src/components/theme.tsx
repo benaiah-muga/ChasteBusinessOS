@@ -82,7 +82,6 @@ export function ThemeMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Change theme"
-        title="Theme"
         className="rail-btn"
       >
         <span className="flex items-center">
@@ -94,6 +93,9 @@ export function ThemeMenu() {
             }}
           />
           <IconChevronDown className="absolute right-1 bottom-1 size-2.5 text-stone-400" />
+        </span>
+        <span aria-hidden="true" className="rail-tip">
+          Theme
         </span>
       </button>
       {open && (

@@ -12,6 +12,28 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **Console tabs** (follow-up to ADR 0030): the co-worker panel now has a
+  proper identity header (avatar, live status, mode) with three icon tabs —
+  **New** conversation (`chatStore.reset()`, session id cleared, history
+  preserved in the log), **History** (past agent sessions from
+  `/api/sessions` with status dots and relative times, linking to the full
+  trajectory log), and **Preferences** (creator mode, dock behavior picker,
+  fresh start). The composer footer trades the inline switch for send/newline
+  hints and a creator chip.
+- **Pinned apps**: pin up to five favorites from the launcher (hover tack) or
+  Settings; pins appear on the workspace rail under a hairline divider.
+- **Settings application** (`/settings`, system app in the catalog + rail):
+  appearance (four palette cards), pinned-app manager, and workspace facts
+  linking to Team & roles and the session log.
+- **Rail affordances**: every rail icon now shows a styled hover/focus
+  tooltip (with keyboard hints where they exist), and the active interface is
+  marked by an accent notch on the rail edge plus the tinted state.
+
+### Changed
+- **Density pass**: dashboard vertical rhythm tightened (~30% less air
+  between the pulse, working-capital, operations, and ledger sections; chart
+  height reduced); launcher grid and header tightened.
+
 - **OS navigation model** (ADR 0030): the five-group ERP sidebar is replaced by
   a slim workspace rail (Home, Apps ⌘G, Search ⌘K, Approvals, notifications,
   AI co-worker toggle, theme menu, account popover with org switcher) and a

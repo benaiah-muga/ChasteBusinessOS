@@ -130,6 +130,12 @@ async function send(textRaw?: string) {
   }
 }
 
+function reset() {
+  abortRef?.abort();
+  sessionId = undefined;
+  patch({ messages: [GREETING], busy: false });
+}
+
 export const chatStore = {
   subscribe(listener: () => void) {
     listeners.add(listener);
@@ -139,6 +145,8 @@ export const chatStore = {
   send,
   stop: () => abortRef?.abort(),
   setCreator: (v: boolean) => patch({ creator: v }),
+  /** Start a fresh conversation; the old one remains in the session log. */
+  reset,
 };
 
 export function useChat(): ChatState {

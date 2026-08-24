@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { appsForOrg, tileStyle, type AppInfo } from "./_shell/apps";
-import { IconSearch } from "@/components/icons";
+import { appPins, usePinnedApps } from "./_shell/pins";
+import { IconPinTack, IconSearch } from "@/components/icons";
+import { cn } from "@/lib/format";
 
 const RECENTS_KEY = "chaste-recent-apps";
 
@@ -45,6 +47,7 @@ export function AppsLauncher({
   const gridRef = useRef<HTMLDivElement>(null);
 
   const apps = useMemo(() => appsForOrg(enabledModules), [enabledModules]);
+  const pinnedIds = usePinnedApps();
 
   const groups = useMemo(() => {
     if (!open) return [] as { label: string; items: AppInfo[] }[];
@@ -124,7 +127,7 @@ export function AppsLauncher({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search your applications…"
             aria-label="Search applications"
-            className="h-13 flex-1 bg-transparent text-[15px] outline-none placeholder:text-stone-400"
+            className="h-12 flex-1 bg-transparent text-[15px] outline-none placeholder:text-stone-400"
           />
           <kbd className="kbd">esc</kbd>
         </div>
@@ -133,42 +136,64 @@ export function AppsLauncher({
           ref={gridRef}
           role="listbox"
           aria-label="Applications"
-          className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4"
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3"
         >
           {flat.length === 0 && (
             <p className="px-3 py-10 text-center text-sm text-stone-400">No application matches “{query}”.</p>
           )}
           {groups.map((group) => (
             <div key={group.label}>
-              <p className="figure-label mb-2 px-1">{group.label}</p>
+              <p className="figure-label mb-1.5 mt-1 px-1">{group.label}</p>
               <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-4">
                 {group.items.map((app) => {
                   index += 1;
                   const isActive = index === active;
                   const TileIcon = app.icon;
+                  const isPinned = pinnedIds.includes(app.id);
                   return (
-                    <Link
-                      key={app.id}
-                      href={app.href}
-                      role="option"
-                      aria-selected={isActive}
-                      data-active={isActive}
-                      onMouseEnter={() => setActive(index)}
-                      onClick={() => recordAppVisit(app.href)}
-                      className="app-tile"
-                    >
-                      <span
-                        aria-hidden="true"
-                        style={tileStyle(app.hue)}
-                        className={`flex size-12 items-center justify-center rounded-[12px] transition-transform duration-150${isActive ? " scale-[1.04]" : ""}`}
+                    <div key={app.id} className="group/tile relative">
+                      <Link
+                        href={app.href}
+                        role="option"
+                        aria-selected={isActive}
+                        data-active={isActive}
+                        onMouseEnter={() => setActive(index)}
+                        onClick={() => recordAppVisit(app.href)}
+                        className="app-tile"
                       >
-                        <TileIcon className="size-6" />
-                      </span>
-                      <span className="w-full">
-                        <span className="block text-sm font-medium text-stone-900">{app.name}</span>
-                        <span className="block truncate text-xs text-stone-500">{app.tagline}</span>
-                      </span>
-                    </Link>
+                        <span
+                          aria-hidden="true"
+                          style={tileStyle(app.hue)}
+                          className={`flex size-11 items-center justify-center rounded-[11px] transition-transform duration-150${isActive ? " scale-[1.04]" : ""}`}
+                        >
+                          <TileIcon className="size-5.5" />
+                        </span>
+                        <span className="w-full">
+                          <span className="block text-sm font-medium text-stone-900">{app.name}</span>
+                          <span className="block truncate text-xs text-stone-500">{app.tagline}</span>
+                        </span>
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          appPins.toggle(app.id);
+                        }}
+                        disabled={!isPinned && pinnedIds.length >= 5}
+                        aria-pressed={isPinned}
+                        aria-label={isPinned ? `Unpin ${app.name}` : `Pin ${app.name} to the rail`}
+                        title={isPinned ? `Unpin ${app.name}` : `Pin ${app.name} to the rail`}
+                        className={cn(
+                          "absolute top-1.5 right-1.5 flex size-6 cursor-pointer items-center justify-center rounded-md transition-all duration-150",
+                          isPinned
+                            ? "text-maroon-700 opacity-100"
+                            : "text-stone-300 opacity-0 group-hover/tile:opacity-100 hover:bg-stone-100 hover:text-stone-600 disabled:pointer-events-none",
+                        )}
+                      >
+                        <IconPinTack className="size-3.5" strokeWidth={isPinned ? 2.4 : 1.75} />
+                      </button>
+                    </div>
                   );
                 })}
               </div>

@@ -310,6 +310,52 @@
   .rail-btn[data-active="true"] {
     @apply bg-maroon-50 text-maroon-800;
   }
+  /* Active-interface notch: a quiet accent tick on the rail's edge. */
+  .rail-btn[aria-current="page"]::before,
+  .rail-btn[data-active="true"]::before {
+    content: "";
+    position: absolute;
+    left: -10px;
+    top: 50%;
+    height: 1.15rem;
+    width: 3px;
+    transform: translateY(-50%);
+    border-radius: 9999px;
+    background: var(--color-maroon-700);
+  }
+
+  /* Rail tooltip: appears to the right after a short beat, keyboard too. */
+  .rail-tip {
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 50%;
+    z-index: 60;
+    pointer-events: none;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateY(-50%) translateX(-3px);
+    transition:
+      opacity 120ms ease 300ms,
+      transform 120ms ease 300ms;
+    background: var(--color-stone-900);
+    color: var(--color-stone-50);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+    padding: 5px 8px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+  }
+  .rail-tip kbd {
+    color: var(--color-stone-400);
+  }
+  .rail-btn:hover .rail-tip,
+  .rail-btn:focus-visible .rail-tip,
+  .group:hover .rail-tip,
+  .group:focus-visible .rail-tip {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
 
   /* ---------- App tabs ---------- */
   .tab {

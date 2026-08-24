@@ -6,7 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/client";
 import { EnabledModulesProvider } from "./_shell/module-context";
 import { resolveEnabledModules } from "./_shell/modules";
-import { appByHref } from "./_shell/apps";
+import { resolveApp, tileStyle } from "./_shell/apps";
+import { usePinnedApps } from "./_shell/pins";
 import { CommandPalette } from "./command-palette";
 import { NotificationsBell } from "./notifications-bell";
 import { ChatWidget } from "./chat-widget";
@@ -17,6 +18,7 @@ import {
   IconInbox,
   IconLogOut,
   IconSearch,
+  IconSettings,
   IconSparkle,
 } from "@/components/icons";
 import { Avatar } from "@/components/ui";
@@ -67,7 +69,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
   }, []);
 
   useEffect(() => {
-    const app = appByHref(pathname);
+    const app = resolveApp(pathname);
     if (app && app.href !== "/") recordAppVisit(app.href);
   }, [pathname]);
 
@@ -81,30 +83,33 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
   }, [accountOpen]);
 
   const enabled = resolveEnabledModules(enabledModules);
-  const currentApp = appByHref(pathname);
+  const currentApp = resolveApp(pathname);
 
   async function signOut() {
     await authClient.signOut();
     window.location.href = "/login";
   }
 
-  function railButton(
-    label: string,
-    icon: ReactNode,
-    onClick: () => void,
-    opts?: { active?: boolean; badge?: number },
-  ) {
+  function railButton(label: string, icon: ReactNode, onClick: () => void, opts?: { active?: boolean; badge?: number; hint?: string }) {
     return (
       <button
         type="button"
         onClick={onClick}
-        title={label}
         aria-label={label}
         aria-current={opts?.active ? "page" : undefined}
         data-active={opts?.active ? "true" : undefined}
         className="rail-btn"
       >
         {icon}
+        <span aria-hidden="true" className="rail-tip">
+          {label}
+          {opts?.hint && (
+            <>
+              {" · "}
+              <kbd>{opts.hint}</kbd>
+            </>
+          )}
+        </span>
         {!!opts?.badge && opts.badge > 0 && (
           <span className="absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full bg-maroon-700 px-1 text-[9px] leading-4 font-bold text-white">
             {opts.badge > 9 ? "9+" : opts.badge}
@@ -114,29 +119,70 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
     );
   }
 
+  const pinned = usePinnedApps()
+    .map((id) => resolveApp(id))
+    .filter((a): a is NonNullable<typeof a> => !!a);
+
   const rail = (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-14 flex-col items-center gap-1 border-r border-stone-200 bg-white py-3 lg:flex">
       <Link
         href="/"
         aria-label={`Home · ${orgName || "Chaste"}`}
-        title={orgName ? `${orgName} — home` : "Home"}
         aria-current={pathname === "/" ? "page" : undefined}
-        className="mb-2 flex size-9 cursor-pointer items-center justify-center rounded-lg bg-maroon-950 text-[15px] font-bold text-white shadow-xs transition-transform duration-150 hover:scale-105"
+        className="rail-btn group mb-2 bg-maroon-950 text-[15px] font-bold text-white shadow-xs transition-transform duration-150 hover:scale-105 hover:bg-maroon-900 hover:text-white"
       >
         C
+        <span aria-hidden="true" className="rail-tip">
+          Home{orgName ? ` · ${orgName}` : ""}
+        </span>
       </Link>
 
-      {railButton("Apps · ⌘G", <IconGrid className="size-5" />, () => setLauncherOpen((v) => !v), {
+      {railButton("Apps", <IconGrid className="size-5" />, () => setLauncherOpen((v) => !v), {
         active: launcherOpen,
+        hint: "⌘G",
       })}
-      {railButton("Search · ⌘K", <IconSearch className="size-5" />, () => setPaletteOpen(true))}
+      {railButton("Search", <IconSearch className="size-5" />, () => setPaletteOpen(true), { hint: "⌘K" })}
       {railButton("Approvals", <IconInbox className="size-5" />, () => router.push("/approvals"), {
         active: pathname === "/approvals",
         badge: pendingApprovals,
       })}
 
+      {/* Pinned favorites — the user's daily drivers, one click away */}
+      {pinned.length > 0 && (
+        <div className="mt-2 flex flex-col items-center gap-1">
+          <span aria-hidden="true" className="mb-1 h-px w-6 bg-stone-200" />
+          {pinned.map((app) => {
+            const active = pathname === app.href;
+            return (
+              <Link
+                key={app.id}
+                href={app.href}
+                aria-label={app.name}
+                aria-current={active ? "page" : undefined}
+                data-active={active ? "true" : undefined}
+                className="rail-btn"
+              >
+                <span
+                  aria-hidden="true"
+                  style={tileStyle(app.hue)}
+                  className="flex size-6 items-center justify-center rounded-md"
+                >
+                  <app.icon className="size-3.5" />
+                </span>
+                <span aria-hidden="true" className="rail-tip">
+                  {app.name}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
       <div className="mt-auto flex flex-col items-center gap-1">
         <NotificationsBell align="left" />
+        {railButton("Settings", <IconSettings className="size-5" />, () => router.push("/settings"), {
+          active: pathname === "/settings",
+        })}
         <button
           type="button"
           onClick={() => {
@@ -145,12 +191,14 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
               chatDock.set(dockMode === "pinned" || dockMode === "open" ? "bubble" : "pinned");
             });
           }}
-          title="Your AI co-worker"
-          aria-label="Toggle your AI co-worker"
+          aria-label="Your AI co-worker"
           data-active={chatPinned ? "true" : undefined}
           className="rail-btn"
         >
           <IconSparkle className="size-5" />
+          <span aria-hidden="true" className="rail-tip">
+            AI co-worker
+          </span>
         </button>
         <ThemeMenu />
 
@@ -161,9 +209,12 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
             aria-haspopup="menu"
             aria-expanded={accountOpen}
             aria-label="Account"
-            className="flex cursor-pointer rounded-full ring-2 ring-transparent transition-shadow duration-150 hover:ring-stone-300"
+            className="group flex cursor-pointer rounded-full ring-2 ring-transparent transition-shadow duration-150 hover:ring-stone-300"
           >
             <Avatar name={user.name} />
+            <span aria-hidden="true" className="rail-tip">
+              {user.name || "Account"}
+            </span>
           </button>
           {accountOpen && (
             <div

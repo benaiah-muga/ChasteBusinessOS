@@ -16,6 +16,7 @@ import {
   IconListTree,
   IconMessage,
   IconPullRequest,
+  IconSettings,
   IconShieldCheck,
   IconTrendingUp,
   IconTruck,
@@ -56,6 +57,7 @@ export const APPS: AppInfo[] = [
   { id: "ledger", name: "Ledger", tagline: "The append-only event trail", href: "/ledger", icon: IconHash, hue: 0, system: true },
   { id: "sessions", name: "Agent sessions", tagline: "What your co-worker did", href: "/sessions", icon: IconListTree, hue: 0, system: true },
   { id: "team", name: "Team & roles", tagline: "People and permissions", href: "/team", icon: IconUsers, hue: 0, system: true },
+  { id: "settings", name: "Settings", tagline: "Appearance, pins, workspace", href: "/settings", icon: IconSettings, hue: 0, system: true },
 ];
 
 /** Marketplace is reachable from Creator; keep one entry per surface. */
