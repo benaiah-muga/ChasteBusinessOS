@@ -40,6 +40,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/messages", label: "Messages", icon: IconMessage, moduleId: "messaging" },
       { href: "/support", label: "Customer care", icon: IconInbox, moduleId: "support" },
       { href: "/approvals", label: "Approvals", icon: IconInbox, badgeKey: "approvals" },
+      { href: "/analytics", label: "Analytics", icon: IconListTree, moduleId: "analytics" },
     ],
   },
   {
@@ -54,7 +55,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Grow",
     items: [
-      { href: "/crm", label: "Pipeline", icon: IconTrendingUp, moduleId: "crm" },
+      { href: "/crm", label: "CRM", icon: IconTrendingUp, moduleId: "crm" },
       { href: "/documents", label: "Documents", icon: IconFileText, moduleId: "documents" },
     ],
   },

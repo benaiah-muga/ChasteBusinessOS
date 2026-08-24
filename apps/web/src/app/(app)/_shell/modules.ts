@@ -17,11 +17,12 @@ export interface ModuleInfo {
 
 export const MODULE_CATALOG: ModuleInfo[] = [
   { id: "accounting", label: "Accounting", description: "Ledger, invoicing, bills, payments, reports", href: "/accounting" },
+  { id: "analytics", label: "Analytics", description: "Governed datasets, charts, downloadable reports", href: "/analytics" },
   { id: "pos", label: "Point of sale", description: "Register sessions and instant sales", href: "/pos" },
   { id: "inventory", label: "Inventory", description: "Stock ledger, valuation, counting, reorder alerts", href: "/inventory" },
   { id: "manufacturing", label: "Manufacturing", description: "BOMs, work orders, production runs, traceability", href: "/manufacturing" },
   { id: "purchasing", label: "Purchasing", description: "Vendors, purchase orders, receipts, bills, AP aging", href: "/purchasing" },
-  { id: "crm", label: "Pipeline", description: "Customers and deal pipeline", href: "/crm" },
+  { id: "crm", label: "CRM", description: "Customers and deal pipeline", href: "/crm" },
   { id: "documents", label: "Documents", description: "Ingestion, OCR, coding suggestions, org memory", href: "/documents" },
   { id: "hr", label: "HR & Payroll", description: "Employees, leave, payroll runs", href: "/hr" },
   { id: "messaging", label: "Messages", description: "Internal channels and DMs with agent participation", href: "/messages" },

@@ -26,6 +26,7 @@ import {
 } from "@chaste/db";
 import { getDb } from "@chaste/db";
 import { registerAccountingCapabilities } from "@chaste/module-accounting";
+import { registerAnalyticsCapabilities } from "@chaste/module-analytics";
 import { registerCrmCapabilities } from "@chaste/module-crm";
 import { registerMessagingCapabilities } from "@chaste/module-messaging";
 import { registerPurchasingCapabilities } from "@chaste/module-purchasing";
@@ -57,6 +58,7 @@ export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   const registry = new CapabilityRegistry();
   registerCrmCapabilities(registry, { db });
   registerAccountingCapabilities(registry, { db });
+  registerAnalyticsCapabilities(registry, { db });
   registerMessagingCapabilities(registry, { db });
   registerPurchasingCapabilities(registry, { db });
   registerPosCapabilities(registry, { db });

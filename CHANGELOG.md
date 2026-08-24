@@ -12,6 +12,27 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **Governed analytics module** (ADR 0029, `@chaste/module-analytics`):
+  five read-only dataset extractors (`analytics.pipelineByStage`,
+  `revenueByMonth`, `invoiceAging`, `salesByCustomer`, `stockLevels`), each
+  gated by its source module's read permission and org-scoped; a declarative
+  Arquero frame-op layer (filter/sort/top/pick/groupBy/pctOfTotal, Zod-validated,
+  no code execution); and `analytics.renderReport`, which composes extracts
+  into narrative text, ECharts server-rendered SVG charts, and exact tables in
+  one downloadable self-contained HTML document (print-to-PDF ready). Manual
+  surface: `/analytics` page with dataset previews and per-section chart
+  pickers. Agent surface: the chat co-worker can call the same extractors and
+  report renderer as governed tools. Every organization now carries an
+  optional `dataRegion` tag (migration `0022_real_shape.sql`) that is stamped
+  onto all analytics outputs; cross-org analytics is impossible by
+  construction because actors are org-bound.
+- **Full CRM surface**: the module formerly shown as "Pipeline" is now "CRM"
+  with two tabs. New Customers tab (list, create via `crm.createCustomer`,
+  soft-deactivate via `crm.deactivateCustomer`) alongside the existing deal
+  pipeline; deals can be linked to customers at creation and show the linked
+  customer on cards. Customer writes go through the governed capability path.
+  `crm.createDeal` now refuses customer ids from other organizations (a
+  tenancy gap found by the new tests).
 - **Next.js 16.3 agent tooling** (ADR 0027): the repo now points every AI
   coding agent at Next.js's version-matched bundled docs — the official
   managed `nextjs-agent-rules` block in `AGENTS.md` (byte-identical to what
@@ -48,6 +69,12 @@ The full v1 changelog is preserved at the bottom of this file.
   provision a schema. The stray policy statements were removed; existing
   databases are unaffected (Drizzle applies pending migrations by timestamp,
   not content hash).
+- **Migration tooling integrity**: migration `0021_rename_shadow_timestamps`
+  had been hand-written without its Drizzle snapshot, which silently broke
+  all future `drizzle-kit generate` runs; the missing `meta/0021_snapshot.json`
+  was reconstructed. The same drift meant the live schema was missing the
+  rebuilt `fx_rate_org_pair_idx` (now including `effective_at`); migration
+  `0022_real_shape.sql` applies it.
 
 ### Changed
 - **Next.js 15.5 → 16.3.2** in `apps/web`: Turbopack is now the default for

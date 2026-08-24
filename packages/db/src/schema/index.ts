@@ -31,6 +31,14 @@ export const organizations = pgTable("organizations", {
    * job queue alike.
    */
   enabledModules: jsonb("enabled_modules"),
+  /**
+   * Data jurisdiction tag for this org's records (e.g. "eu", "us", "ke").
+   * NULL means unspecified. Analytics outputs carry it so every number shown
+   * to humans or agents states where the underlying data is domiciled;
+   * cross-org rollups are impossible by construction because actors are
+   * bound to one org (RLS + executor scoping).
+   */
+  dataRegion: text("data_region"),
   baseCurrency: text("base_currency").notNull().default("USD"),
   fiscalYearStart: integer("fiscal_year_start_month").notNull().default(1),
   profileDescription: text("profile_description"),

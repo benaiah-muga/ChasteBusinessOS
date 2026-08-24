@@ -155,6 +155,13 @@
       "when": 1787572277353,
       "tag": "0021_rename_shadow_timestamps",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1787586405534,
+      "tag": "0022_real_shape",
+      "breakpoints": true
     }
   ]
 }

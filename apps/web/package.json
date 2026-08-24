@@ -16,6 +16,7 @@
     "@chaste/erp-core": "workspace:*",
     "@chaste/kernel": "workspace:*",
     "@chaste/module-accounting": "workspace:*",
+    "@chaste/module-analytics": "workspace:*",
     "@chaste/module-creator": "workspace:*",
     "@chaste/module-crm": "workspace:*",
     "@chaste/module-documents": "workspace:*",
