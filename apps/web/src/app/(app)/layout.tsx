@@ -36,9 +36,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     return cap ? hasPermissionFor({ permissions: resolved.permissions }, cap.permission) : false;
   }).length;
 
+  const activeOrg = orgs.find((o) => o.id === resolved.orgId);
+
   return (
     <AppShell
       user={{ name: resolved.name ?? "", email: resolved.email }}
+      orgName={activeOrg?.name ?? ""}
       pendingApprovals={pendingApprovals}
       enabledModules={resolved.enabledModules ?? null}
       orgSwitcher={orgs.length > 1 ? <OrgSwitcher orgs={orgs} activeId={resolved.orgId} /> : undefined}

@@ -15,13 +15,19 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#5e2934",
+  themeColor: "#38000a",
 };
+
+// Apply the persisted theme before first paint so there is no flash.
+const themeInit = `try{var t=localStorage.getItem("chaste-theme");if(t&&t!=="chaste")document.documentElement.dataset.theme=t}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen font-sans text-stone-900 antialiased">{children}</body>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+      </head>
+      <body className="min-h-screen bg-canvas font-sans text-stone-900 antialiased">{children}</body>
     </html>
   );
 }

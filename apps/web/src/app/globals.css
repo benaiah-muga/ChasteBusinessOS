@@ -1,26 +1,136 @@
 @import "tailwindcss";
 
+/*
+ * Chaste Business OS — design tokens.
+ *
+ * Every surface in the product draws its character from exactly two scales:
+ *   stone-*  → the neutral ramp (paper, ink, hairlines)
+ *   maroon-* → the accent ramp (the one color the product owns)
+ *
+ * Themes re-declare these two ramps on html[data-theme], so the entire app —
+ * including pages still written with raw utility classes — re-skins instantly
+ * and consistently. Semantic colors (emerald/red/amber) stay fixed: states
+ * must mean the same thing in every theme.
+ */
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
 
-  /* Brand, dark maroon (Chaste) */
-  --color-maroon-50: #faf5f5;
-  --color-maroon-100: #f4e8e8;
-  --color-maroon-200: #e9d0d2;
-  --color-maroon-300: #d8abb0;
-  --color-maroon-400: #c07f88;
-  --color-maroon-500: #a45a66;
-  --color-maroon-600: #8a414f;
-  --color-maroon-700: #73323f;
-  --color-maroon-800: #5e2934;
-  --color-maroon-900: #451e26;
-  --color-maroon-950: #2c1218;
+  /* Theme: Chaste (default). Brick red #9B1313 · burgundy #38000A on warm paper. */
+  --color-stone-50: #faf9f8;
+  --color-stone-100: #f4f2f0;
+  --color-stone-200: #e7e4e0;
+  --color-stone-300: #d5d0ca;
+  --color-stone-400: #ada69d;
+  --color-stone-500: #837b71;
+  --color-stone-600: #665e55;
+  --color-stone-700: #524b43;
+  --color-stone-800: #423c36;
+  --color-stone-900: #36312c;
+  --color-stone-950: #211d1a;
 
-  /* Semantic surfaces, warm neutrals pair with maroon */
+  --color-maroon-50: #fbf3f2;
+  --color-maroon-100: #f6e3e1;
+  --color-maroon-200: #eec6c1;
+  --color-maroon-300: #e09d95;
+  --color-maroon-400: #cd6a61;
+  --color-maroon-500: #b53c34;
+  --color-maroon-600: #9b1313;
+  --color-maroon-700: #821110;
+  --color-maroon-800: #5d0d10;
+  --color-maroon-900: #43000b;
+  --color-maroon-950: #38000a;
+
   --color-canvas: #faf9f8;
+}
+
+/* Theme: Graphite. Ink-blue accent on cool slate neutrals. Quiet, technical. */
+[data-theme="graphite"] {
+  --color-stone-50: #f8f9fa;
+  --color-stone-100: #f1f3f5;
+  --color-stone-200: #e4e7eb;
+  --color-stone-300: #ced3da;
+  --color-stone-400: #a6adb8;
+  --color-stone-500: #7d8590;
+  --color-stone-600: #606974;
+  --color-stone-700: #4c545e;
+  --color-stone-800: #3d444d;
+  --color-stone-900: #323841;
+  --color-stone-950: #1e2228;
+
+  --color-maroon-50: #f2f6fa;
+  --color-maroon-100: #e4edf5;
+  --color-maroon-200: #c2d9ea;
+  --color-maroon-300: #90bcd8;
+  --color-maroon-400: #5696bf;
+  --color-maroon-500: #33729e;
+  --color-maroon-600: #265a80;
+  --color-maroon-700: #214967;
+  --color-maroon-800: #1c3b53;
+  --color-maroon-900: #183245;
+  --color-maroon-950: #12222f;
+
+  --color-canvas: #f8f9fb;
+}
+
+/* Theme: Verdant. Deep forest accent on sage-tinted neutrals. Grounded, organic. */
+[data-theme="verdant"] {
+  --color-stone-50: #f8faf7;
+  --color-stone-100: #f1f4ee;
+  --color-stone-200: #e3e8df;
+  --color-stone-300: #cdd5c8;
+  --color-stone-400: #a4ae9f;
+  --color-stone-500: #7c8676;
+  --color-stone-600: #5f685a;
+  --color-stone-700: #4b5347;
+  --color-stone-800: #3d443a;
+  --color-stone-900: #32382e;
+  --color-stone-950: #1e231c;
+
+  --color-maroon-50: #f0f7f1;
+  --color-maroon-100: #deecdf;
+  --color-maroon-200: #bdd6c1;
+  --color-maroon-300: #8cba94;
+  --color-maroon-400: #549761;
+  --color-maroon-500: #357a44;
+  --color-maroon-600: #276135;
+  --color-maroon-700: #22502d;
+  --color-maroon-800: #1d4126;
+  --color-maroon-900: #193721;
+  --color-maroon-950: #102417;
+
+  --color-canvas: #f8faf6;
+}
+
+/* Theme: Meridian. Burnished bronze accent on warm sand neutrals. Ledger heritage. */
+[data-theme="meridian"] {
+  --color-stone-50: #faf9f5;
+  --color-stone-100: #f3f1e9;
+  --color-stone-200: #e7e3d6;
+  --color-stone-300: #d5cebc;
+  --color-stone-400: #aca38c;
+  --color-stone-500: #847a63;
+  --color-stone-600: #675e4a;
+  --color-stone-700: #524b3b;
+  --color-stone-800: #433d30;
+  --color-stone-900: #373228;
+  --color-stone-950: #221e18;
+
+  --color-maroon-50: #faf6ec;
+  --color-maroon-100: #f3ead6;
+  --color-maroon-200: #e7d3ac;
+  --color-maroon-300: #d5b577;
+  --color-maroon-400: #c09243;
+  --color-maroon-500: #a67a28;
+  --color-maroon-600: #87621e;
+  --color-maroon-700: #6f501e;
+  --color-maroon-800: #5c411f;
+  --color-maroon-900: #4d371e;
+  --color-maroon-950: #2f2112;
+
+  --color-canvas: #fbf9f4;
 }
 
 @layer base {
@@ -56,6 +166,14 @@
 }
 
 @layer components {
+  /* ---------- Typography figures ---------- */
+  .figure-label {
+    @apply text-[11px] font-semibold tracking-[0.08em] text-stone-400 uppercase;
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
   /* ---------- Buttons ---------- */
   .btn {
     @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors duration-150 select-none disabled:pointer-events-none disabled:opacity-45;
@@ -182,6 +300,39 @@
   }
   .drawer-panel {
     animation: drawer-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* ---------- OS rail (the slim left edge of the workspace) ---------- */
+  .rail-btn {
+    @apply relative inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-stone-500 transition-all duration-150 hover:bg-stone-200/70 hover:text-stone-900 disabled:pointer-events-none disabled:opacity-40;
+  }
+  .rail-btn[aria-current="page"],
+  .rail-btn[data-active="true"] {
+    @apply bg-maroon-50 text-maroon-800;
+  }
+
+  /* ---------- App tabs ---------- */
+  .tab {
+    @apply relative -mb-px inline-flex cursor-pointer items-center gap-1.5 border-b-2 border-transparent px-1 pb-2.5 text-sm whitespace-nowrap text-stone-500 transition-colors duration-100 hover:text-stone-900;
+  }
+  .tab[aria-selected="true"] {
+    @apply border-maroon-600 font-medium text-stone-900;
+  }
+
+  /* ---------- Apps launcher tile ---------- */
+  .app-tile {
+    @apply flex cursor-pointer flex-col items-start gap-3 rounded-xl border border-transparent p-3 text-left transition-all duration-150 hover:border-stone-200 hover:bg-white focus-visible:border-maroon-400 active:scale-[0.98];
+  }
+
+  /* Ledger ruling: the fine horizontal hairlines of an accounts book. */
+  .ledger-rules {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent,
+      transparent 31px,
+      var(--rule-color, rgba(255, 255, 255, 0.07)) 31px,
+      var(--rule-color, rgba(255, 255, 255, 0.07)) 32px
+    );
   }
 }
 

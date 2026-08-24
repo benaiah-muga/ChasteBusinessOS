@@ -19,7 +19,7 @@ interface NotificationRow {
  * notifications table that every governed event (approvals, escalations)
  * mirrors into via the NotificationSink.
  */
-export function NotificationsBell() {
+export function NotificationsBell({ align = "right" }: { align?: "left" | "right" }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<NotificationRow[] | null>(null);
   const [unread, setUnread] = useState(0);
@@ -83,7 +83,12 @@ export function NotificationsBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-80 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg">
+        <div
+          className={cn(
+            "absolute z-40 mt-2 w-80 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg",
+            align === "right" ? "right-0" : "left-0",
+          )}
+        >
           <p className="border-b border-stone-100 px-4 py-2.5 text-xs font-semibold tracking-wide text-stone-500 uppercase">
             Notifications
           </p>

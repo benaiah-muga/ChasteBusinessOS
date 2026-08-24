@@ -12,6 +12,52 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **OS navigation model** (ADR 0030): the five-group ERP sidebar is replaced by
+  a slim workspace rail (Home, Apps ⌘G, Search ⌘K, Approvals, notifications,
+  AI co-worker toggle, theme menu, account popover with org switcher) and a
+  full-screen **Apps Launcher** — every business module as an independent
+  application tile with type-to-filter, keyboard grid navigation, and a Recent
+  apps group. The ⌘K palette now draws from the same application catalog and
+  gains theme-switch commands. Mobile collapses the rail into a top bar with
+  the launcher one tap away.
+- **Application frames and tabs** (`_shell/app-frame.tsx`): applications open
+  at an Overview with breadcrumb, contextual actions, and operation tabs.
+  Accounting is the first app on the new frame — Overview | Journal |
+  Receivables | Payables | Reports | Periods — preserving every existing
+  capability (bill payment, mirror reversals, period/year-end close, cash
+  basis, P&L, balance sheet) in its new home.
+- **Four designed color themes**: Chaste (brick `#9B1313` / burgundy
+  `#38000A`, default), Graphite (ink & steel), Verdant (forest & sage), and
+  Meridian (bronze & sand). All neutrals route through the `stone-*` scale and
+  all accents through the `maroon-*` scale (Tailwind v4 token architecture),
+  so switching themes re-skins the entire product — including legacy pages —
+  with semantic state colors untouched. Persisted per user, applied before
+  first paint, switchable from the rail or the command palette.
+- **Command-center dashboard**: asymmetric composition replacing the generic
+  KPI-card grid — financial pulse (net income, revenue/expenses/cash,
+  six-month income-vs-expense bars), a "Needs you" triage queue (severity
+  dots, every item ending in a verb), working-capital figures, pipeline shape,
+  operations signals, and the event ledger as an actor-colored timeline.
+- **Redesigned authentication and onboarding**: the split-screen login keeps
+  its concept but drops the AI-slop gradient blobs for a ledger-ruled burgundy
+  panel with numbered Governed/Auditable/Reversible proof points; onboarding
+  carries the monogram identity.
+
+### Changed
+- The AI co-worker dock is reachable from the rail on desktop (toggle between
+  pinned dock and quiet bubble); its visual language follows the theme tokens.
+- Main content width widened to `max-w-7xl` to give applications room; the
+  dashboard self-limits to `max-w-6xl` for reading rhythm.
+
+### Removed
+- `_shell/nav.ts` (the sidebar navigation tree) — superseded by the
+  application catalog in `_shell/apps.ts`; nothing imports it.
+
+### Fixed
+- Accounting's year-end close now lives behind its own confirmation dialog in
+  the Periods tab (previously inline next to a cash-basis summary).
+
+### Added
 - **Governed analytics module** (ADR 0029, `@chaste/module-analytics`):
   five read-only dataset extractors (`analytics.pipelineByStage`,
   `revenueByMonth`, `invoiceAging`, `salesByCustomer`, `stockLevels`), each
