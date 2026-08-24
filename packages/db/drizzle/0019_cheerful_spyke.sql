@@ -117,9 +117,6 @@ CREATE INDEX "time_entry_org_employee_idx" ON "time_entries" USING btree ("org_i
 ALTER TABLE "quotes" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "tenant_isolation" ON "quotes";
 CREATE POLICY "tenant_isolation" ON "quotes" USING ("org_id" = NULLIF(current_setting('app.org_id', true), '')::uuid) WITH CHECK ("org_id" = NULLIF(current_setting('app.org_id', true), '')::uuid);
-ALTER TABLE "quote_lines" ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "tenant_isolation" ON "quote_lines";
-CREATE POLICY "tenant_isolation" ON "quote_lines" USING ("org_id" = NULLIF(current_setting('app.org_id', true), '')::uuid) WITH CHECK ("org_id" = NULLIF(current_setting('app.org_id', true), '')::uuid);
 ALTER TABLE "recurring_invoices" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "tenant_isolation" ON "recurring_invoices";
 CREATE POLICY "tenant_isolation" ON "recurring_invoices" USING ("org_id" = NULLIF(current_setting('app.org_id', true), '')::uuid) WITH CHECK ("org_id" = NULLIF(current_setting('app.org_id', true), '')::uuid);

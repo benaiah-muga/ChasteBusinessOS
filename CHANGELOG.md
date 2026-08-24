@@ -40,6 +40,15 @@ The full v1 changelog is preserved at the bottom of this file.
   Every agent (Cline, Codex, Cursor, Gemini CLI, …) picks them up from a
   fresh clone; AGENTS.md documents when to drive which.
 
+### Fixed
+- **Fresh-install migration chain repaired**: migration `0019_cheerful_spyke`
+  enabled RLS on `quote_lines` with a policy referencing an `org_id` column
+  that table does not have (it is intentionally parent-scoped through its
+  quote), so every fresh database failed mid-migration and CI could not
+  provision a schema. The stray policy statements were removed; existing
+  databases are unaffected (Drizzle applies pending migrations by timestamp,
+  not content hash).
+
 ### Changed
 - **Next.js 15.5 → 16.3.2** in `apps/web`: Turbopack is now the default for
   `next dev` and `next build`; App Router runs React canary (19.2 features).
