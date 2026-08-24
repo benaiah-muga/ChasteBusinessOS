@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { and, asc, eq } from "drizzle-orm";
 import { agentSessions, getDb, sessionEvents } from "@chaste/db";
+import { hasPermission } from "@chaste/kernel";
 import { getResolvedUser } from "@/server/session";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** Full trajectory replay: every event in the session, in order. */
+/**
+ * Full trajectory replay: every event in the session, in order. Tool results
+ * can carry data the viewer's own role would never authorize (payroll runs,
+ * approvals payloads), so replay is limited to the session's owner; org
+ * admins may audit their people's sessions.
+ */
 export async function GET(_req: Request, { params }: Params) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -18,6 +24,13 @@ export async function GET(_req: Request, { params }: Params) {
     .where(and(eq(agentSessions.id, id), eq(agentSessions.orgId, resolved.orgId)))
     .limit(1);
   if (!session) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  const isOwner = session.userId === resolved.userId;
+  const isAdmin = hasPermission({ permissions: resolved.permissions }, "iam.admin");
+  if (!isOwner && !isAdmin) {
+    // Existence of a colleague's session is not disclosed either way.
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   const events = await db
     .select()

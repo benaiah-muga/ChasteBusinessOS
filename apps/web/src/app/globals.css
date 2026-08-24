@@ -1,1 +1,203 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* Brand, dark maroon (Chaste) */
+  --color-maroon-50: #faf5f5;
+  --color-maroon-100: #f4e8e8;
+  --color-maroon-200: #e9d0d2;
+  --color-maroon-300: #d8abb0;
+  --color-maroon-400: #c07f88;
+  --color-maroon-500: #a45a66;
+  --color-maroon-600: #8a414f;
+  --color-maroon-700: #73323f;
+  --color-maroon-800: #5e2934;
+  --color-maroon-900: #451e26;
+  --color-maroon-950: #2c1218;
+
+  /* Semantic surfaces, warm neutrals pair with maroon */
+  --color-canvas: #faf9f8;
+}
+
+@layer base {
+  html {
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-stone-900);
+  }
+
+  ::selection {
+    background-color: var(--color-maroon-200);
+    color: var(--color-maroon-950);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-maroon-600);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* ---------- Buttons ---------- */
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors duration-150 select-none disabled:pointer-events-none disabled:opacity-45;
+  }
+  .btn-md {
+    @apply h-9 px-3.5;
+  }
+  .btn-sm {
+    @apply h-7.5 gap-1 px-2.5 text-xs;
+  }
+  .btn-lg {
+    @apply h-10 px-5;
+  }
+  .btn-primary {
+    @apply bg-maroon-700 text-white shadow-xs hover:bg-maroon-800 active:bg-maroon-900;
+  }
+  .btn-secondary {
+    @apply border border-stone-300 bg-white text-stone-800 shadow-xs hover:border-stone-400 hover:bg-stone-50 active:bg-stone-100;
+  }
+  .btn-ghost {
+    @apply text-stone-600 hover:bg-stone-200/60 hover:text-stone-900;
+  }
+  .btn-danger {
+    @apply bg-red-700 text-white shadow-xs hover:bg-red-800 active:bg-red-900;
+  }
+  .btn-danger-secondary {
+    @apply border border-red-200 bg-red-50 text-red-800 hover:border-red-300 hover:bg-red-100;
+  }
+
+  /* Compact square icon button */
+  .icon-btn {
+    @apply inline-flex size-7.5 cursor-pointer items-center justify-center rounded-md text-stone-500 transition-colors duration-150 hover:bg-stone-200/70 hover:text-stone-900 disabled:pointer-events-none disabled:opacity-40;
+  }
+
+  /* ---------- Forms ---------- */
+  .label {
+    @apply mb-1.5 block text-[13px] leading-none font-medium text-stone-700;
+  }
+  .input,
+  .select,
+  .textarea {
+    @apply w-full rounded-lg border border-stone-300 bg-white px-3 text-sm text-stone-900 shadow-xs transition-colors duration-150 outline-none placeholder:text-stone-400 focus:border-maroon-600 focus:ring-[3px] focus:ring-maroon-600/15 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400;
+  }
+  .input,
+  .select {
+    @apply h-9;
+  }
+  .textarea {
+    @apply py-2 leading-relaxed;
+  }
+
+  /* ---------- Surfaces ---------- */
+  .card {
+    @apply rounded-xl border border-stone-200 bg-white shadow-xs;
+  }
+  .card-pad {
+    @apply p-5;
+  }
+  .section-title {
+    @apply text-[13px] font-semibold tracking-wide text-stone-500;
+  }
+
+  /* ---------- Badges ---------- */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] leading-4 font-medium whitespace-nowrap;
+  }
+  .badge-neutral {
+    @apply bg-stone-100 text-stone-700;
+  }
+  .badge-maroon {
+    @apply bg-maroon-100 text-maroon-800;
+  }
+  .badge-green {
+    @apply bg-emerald-100 text-emerald-800;
+  }
+  .badge-amber {
+    @apply bg-amber-100 text-amber-900;
+  }
+  .badge-red {
+    @apply bg-red-100 text-red-800;
+  }
+  .badge-blue {
+    @apply bg-sky-100 text-sky-900;
+  }
+  .badge-violet {
+    @apply bg-violet-100 text-violet-800;
+  }
+
+  /* ---------- Tables ---------- */
+  .table-shell {
+    @apply overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-xs;
+  }
+  .data-table {
+    @apply w-full text-left text-sm;
+  }
+  .data-table thead th {
+    @apply border-b border-stone-200 bg-stone-50/70 px-4 py-2.5 text-[11px] font-semibold tracking-wider text-stone-500 uppercase;
+  }
+  .data-table tbody td {
+    @apply border-b border-stone-100 px-4 py-2.5 align-middle last:border-0;
+  }
+  .data-table tbody tr {
+    @apply transition-colors duration-100 last:border-0 hover:bg-stone-50/80;
+  }
+  .num {
+    @apply text-right tabular-nums;
+  }
+
+  /* ---------- Feedback ---------- */
+  .skeleton {
+    @apply animate-pulse rounded-md bg-stone-200/80;
+  }
+  .kbd {
+    @apply inline-flex h-5 min-w-5 items-center justify-center rounded border border-stone-300 bg-stone-50 px-1 font-sans text-[10px] font-medium text-stone-500;
+  }
+
+  /* ---------- Overlays ---------- */
+  .overlay-backdrop {
+    @apply fixed inset-0 z-40 bg-stone-950/40 backdrop-blur-[2px];
+    animation: overlay-in 150ms ease-out;
+  }
+  .overlay-panel {
+    animation: panel-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .drawer-panel {
+    animation: drawer-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}

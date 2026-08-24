@@ -58,7 +58,7 @@ async function main() {
   if (!parsed.ok) throw new Error(parsed.error ?? "parse failed");
   console.log(`✓ document ingested & parsed (${parsed.data?.chars} chars indexed into org memory)`);
 
-  // 2. Coding suggestions — explicit lines offline; model extraction when a key exists.
+  // 2. Coding suggestions, explicit lines offline; model extraction when a key exists.
   const hasKey = Boolean(process.env.NVIDIA_API_KEY);
   const suggestInput = hasKey
     ? { documentId }
@@ -95,7 +95,7 @@ async function main() {
   if (!bill.ok || !bill.data) throw new Error(bill.error ?? "bill failed");
   console.log(`✓ bill #${bill.data.billNumber} posted from suggestions: ${formatMinor(bill.data.totalMinor as number)} → DR expenses / CR AP`);
 
-  // 4. Paying it stays gated — ingestion does not lower anyone's authority.
+  // 4. Paying it stays gated, ingestion does not lower anyone's authority.
   const pay = await executor.execute("purchasing.payBill", agentCtx, {
     billNumber: bill.data.billNumber as number,
     amountMinor: bill.data.totalMinor as number,

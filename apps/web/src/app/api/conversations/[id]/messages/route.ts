@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, asc, eq } from "drizzle-orm";
 import {
+  conversationMembers,
   conversations,
   getDb,
   messages,
@@ -25,12 +26,34 @@ async function loadConversation(id: string, orgId: string) {
   return conv ?? null;
 }
 
+/**
+ * Org scope is not enough for conversations: DMs are membership-scoped, so a
+ * member must belong to the conversation to read or post. Without this check
+ * any colleague could read and write into private DMs.
+ */
+async function assertMembership(conversationId: string, userId: string): Promise<boolean> {
+  const [member] = await getDb()
+    .db.select({ userId: conversationMembers.userId })
+    .from(conversationMembers)
+    .where(
+      and(
+        eq(conversationMembers.conversationId, conversationId),
+        eq(conversationMembers.userId, userId),
+      ),
+    )
+    .limit(1);
+  return Boolean(member);
+}
+
 export async function GET(_req: Request, { params }: Params) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const conv = await loadConversation(id, resolved.orgId);
   if (!conv) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await assertMembership(id, resolved.userId))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   const rows = await getDb()
     .db.select(
@@ -51,6 +74,9 @@ export async function POST(req: Request, { params }: Params) {
   const { id } = await params;
   const conv = await loadConversation(id, resolved.orgId);
   if (!conv) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await assertMembership(id, resolved.userId))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   const parsed = sendSchema.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });

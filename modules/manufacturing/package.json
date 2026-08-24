@@ -1,0 +1,21 @@
+{
+  "name": "@chaste/module-manufacturing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@chaste/db": "workspace:*",
+    "@chaste/erp-core": "workspace:*",
+    "@chaste/kernel": "workspace:*",
+    "@chaste/module-inventory": "workspace:*",
+    "drizzle-orm": "^0.44.5",
+    "zod": "^4.1.5"
+  }
+}

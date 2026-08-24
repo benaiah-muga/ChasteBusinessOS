@@ -1,11 +1,11 @@
-# ADR 0005 — Money risk is threshold-governed, not blanket-capped
+# ADR 0005, Money risk is threshold-governed, not blanket-capped
 
 Date: 2026-08-22 · Status: accepted
 
 ## Context
 The org policy originally capped autonomy by risk rank
 (`maxRiskAutonomous: write`), which silently required approval for *every*
-money action — including an $11.50 coffee sale at POS. Found by live demo.
+money action, including an $11.50 coffee sale at POS. Found by live demo.
 
 ## Decision
 For `money`-class capabilities, the governing control is the **amount

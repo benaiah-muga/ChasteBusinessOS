@@ -9,11 +9,19 @@ import {
   userRoles,
 } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
+import { inviteAttemptLimit, requestIp } from "@/server/rate-limit";
 
 type Params = { params: Promise<{ token: string }> };
 
 /** Preview what accepting this invitation means. */
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
+  const limit = inviteAttemptLimit(requestIp(req));
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "too many requests" },
+      { status: 429, headers: { "retry-after": String(limit.retryAfterSec) } },
+    );
+  }
   const { token } = await params;
   const db = getDb().db;
   const [inv] = await db.select().from(invitations).where(eq(invitations.token, token)).limit(1);
@@ -35,7 +43,14 @@ export async function GET(_req: Request, { params }: Params) {
 }
 
 /** Accept: must be signed in as the invited email. Grants the role directly. */
-export async function POST(_req: Request, { params }: Params) {
+export async function POST(req: Request, { params }: Params) {
+  const limit = inviteAttemptLimit(requestIp(req));
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "too many requests" },
+      { status: 429, headers: { "retry-after": String(limit.retryAfterSec) } },
+    );
+  }
   const resolved = await getResolvedUser();
   if (!resolved) return NextResponse.json({ error: "sign in first" }, { status: 401 });
   const { token } = await params;
@@ -49,7 +64,9 @@ export async function POST(_req: Request, { params }: Params) {
     await db.update(invitations).set({ status: "expired" }).where(eq(invitations.id, inv.id));
     return NextResponse.json({ error: "invitation expired" }, { status: 410 });
   }
-  if (resolved.email.toLowerCase() !== inv.email) {
+  // Case-insensitive on both sides: invitations are stored lowercased, but
+  // the authenticated address keeps whatever case the IdP returned.
+  if (resolved.email.toLowerCase() !== inv.email.toLowerCase()) {
     return NextResponse.json({ error: `this invitation was sent to ${inv.email}` }, { status: 403 });
   }
 

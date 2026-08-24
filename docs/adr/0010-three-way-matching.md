@@ -1,4 +1,4 @@
-# ADR 0010 — Three-way matching on vendor bills
+# ADR 0010, Three-way matching on vendor bills
 
 Date: 2026-08-22 · Status: accepted
 
@@ -11,7 +11,7 @@ When a bill references a purchase order, every line is matched against the
 order line and received quantities (from the stock ledger) before posting:
 billed ≤ received, billed ≤ ordered (cumulative across bills via poLineId
 links on bill lines), and price within ±2% of the ordered price. Violations
-reject the whole bill with named violations; there is no override path yet —
+reject the whole bill with named violations; there is no override path yet,
 fix the receipt or renegotiate the bill.
 
 ## Consequences

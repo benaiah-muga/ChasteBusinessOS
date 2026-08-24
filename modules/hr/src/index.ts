@@ -1,18 +1,15 @@
 import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
-  accounts,
   employees,
-  journalEntries,
-  journalLines,
   leaveRequests,
   payrollRuns,
   payslips,
-  periods,
+  timeEntries,
   type Database,
 } from "@chaste/db";
+import { withOrgContext } from "@chaste/db";
 import {
-  assertBalanced,
   buildPayrollEntryLines,
   computePayslips,
   summarizeRun,
@@ -20,23 +17,14 @@ import {
   workedFractionThousandths,
 } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
+import { assertPeriodOpen, postEntry } from "@chaste/module-accounting/posting";
 
 export interface ModuleDeps {
   db: Database["db"];
 }
 
-type Tx = Parameters<Parameters<ModuleDeps["db"]["transaction"]>[0]>[0];
 
 const PAYROLL_ACCOUNTS = { expenseCode: "6000", cashCode: "1000", withholdingCode: "2200" };
-
-async function assertPeriodOpen(db: Tx | ModuleDeps["db"], orgId: string, year: number, month: number): Promise<void> {
-  const [closed] = await db
-    .select({ year: periods.year })
-    .from(periods)
-    .where(and(eq(periods.orgId, orgId), eq(periods.year, year), eq(periods.month, month)))
-    .limit(1);
-  if (closed) throw new Error(`period ${year}-${String(month).padStart(2, "0")} is closed`);
-}
 
 function calendarDaysBetween(start: Date, end: Date): number {
   const dayMs = 86_400_000;
@@ -121,21 +109,28 @@ const requestLeave = (deps: ModuleDeps) =>
     input: z.object({
       employeeId: z.string(),
       kind: z.enum(["annual", "sick", "unpaid"]).default("annual"),
-      startDate: z.coerce.date(),
-      endDate: z.coerce.date(),
+      // ISO strings, not z.date(): models emit strings, and date schemas
+      // cannot be presented as JSON Schema tool parameters.
+      startDate: z.string().describe("first day of leave as an ISO date (YYYY-MM-DD)"),
+      endDate: z.string().describe("last day of leave as an ISO date (YYYY-MM-DD)"),
     }),
     output: z.object({ requestId: z.string(), calendarDays: z.number() }),
     execute: async (ctx, input) => {
-      if (input.endDate.getTime() < input.startDate.getTime()) throw new Error("leave cannot end before it starts");
-      const calendarDays = calendarDaysBetween(input.startDate, input.endDate);
+      const startDate = new Date(input.startDate);
+      const endDate = new Date(input.endDate);
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+        throw new Error("leave dates must be valid ISO dates (YYYY-MM-DD)");
+      }
+      if (endDate.getTime() < startDate.getTime()) throw new Error("leave cannot end before it starts");
+      const calendarDays = calendarDaysBetween(startDate, endDate);
       const [row] = await deps.db
         .insert(leaveRequests)
         .values({
           orgId: ctx.actor.orgId,
           employeeId: input.employeeId,
           kind: input.kind,
-          startDate: input.startDate,
-          endDate: input.endDate,
+          startDate,
+          endDate,
           calendarDays,
           requestedByActorType: ctx.actor.type,
           requestedByActorId: ctx.actor.id,
@@ -235,7 +230,7 @@ const createPayrollRun = (deps: ModuleDeps) =>
       totalNetMinor: z.number(),
     }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [dupe] = await tx
           .select({ id: payrollRuns.id })
           .from(payrollRuns)
@@ -318,11 +313,14 @@ const executePayrollRun = (deps: ModuleDeps) =>
     id: "hr.executePayrollRun",
     title: "Execute payroll run",
     intent:
-      "Post an approved month's payroll to the general ledger as one balanced entry — salary expense debited, cash credited for net, withholding liability for tax",
+      "Post an approved month's payroll to the general ledger as one balanced entry, salary expense debited, cash credited for net, withholding liability for tax",
     module: "hr",
     risk: "money",
     permission: "hr.write",
     moneyThresholdMinor: 0,
+    // Caller-asserted total must match the drafted run (execution refuses
+    // mismatches), so it is the honest gating amount.
+    moneyAmount: (input) => input.expectedTotalNetMinor,
     inverse: {
       capabilityId: "accounting.reverseEntry",
       buildInput: (_input, output) => ({ entryId: (output as { entryId?: string }).entryId ?? "" }),
@@ -333,7 +331,7 @@ const executePayrollRun = (deps: ModuleDeps) =>
     }),
     output: z.object({ entryId: z.string(), totalGrossMinor: z.number(), totalNetMinor: z.number() }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [run] = await tx
           .select()
           .from(payrollRuns)
@@ -344,14 +342,9 @@ const executePayrollRun = (deps: ModuleDeps) =>
         if (input.expectedTotalNetMinor !== run.totalNetMinor) {
           throw new Error(`total mismatch: draft says ${run.totalNetMinor}, caller expected ${input.expectedTotalNetMinor}`);
         }
-        await assertPeriodOpen(tx, ctx.actor.orgId, run.year, run.month);
-
-        const coaRows = await tx.select({ code: accounts.code, id: accounts.id }).from(accounts).where(eq(accounts.orgId, ctx.actor.orgId));
-        const accountId = (code: string): string => {
-          const hit = coaRows.find((r) => r.code === code);
-          if (!hit) throw new Error(`account ${code} missing from chart of accounts`);
-          return hit.id;
-        };
+        // Mid-month date representing the run's payroll period; the shared
+        // guard rejects posting when that month has been sealed.
+        await assertPeriodOpen(tx, ctx.actor.orgId, new Date(Date.UTC(run.year, run.month - 1, 15)));
 
         const summary = {
           totalGrossMinor: run.totalGrossMinor,
@@ -359,42 +352,25 @@ const executePayrollRun = (deps: ModuleDeps) =>
           totalNetMinor: run.totalNetMinor,
           headcount: run.headcount,
         };
-        const lines = buildPayrollEntryLines(PAYROLL_ACCOUNTS, summary);
-        assertBalanced({ memo: `payroll ${run.year}-${String(run.month).padStart(2, "0")}`, lines });
-
-        const [entry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId: ctx.actor.orgId,
-            memo: `payroll ${run.year}-${String(run.month).padStart(2, "0")}`,
-            sourceType: "payroll_run",
-            sourceId: run.id,
-            postedByActorType: ctx.actor.type,
-            postedByActorId: ctx.actor.id,
-          })
-          .returning({ id: journalEntries.id });
-        if (!entry) throw new Error("entry insert failed");
-        await tx.insert(journalLines).values(
-          lines.map((l) => ({
-            entryId: entry.id,
-            accountId: accountId(l.accountCode),
-            debitMinor: l.debitMinor,
-            creditMinor: l.creditMinor,
-          })),
-        );
+        const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `payroll ${run.year}-${String(run.month).padStart(2, "0")}`,
+          sourceType: "payroll_run",
+          sourceId: run.id,
+          lines: buildPayrollEntryLines(PAYROLL_ACCOUNTS, summary),
+        });
 
         await tx
           .update(payrollRuns)
           .set({
             status: "executed",
-            entryId: entry.id,
+            entryId,
             executedByActorType: ctx.actor.type,
             executedByActorId: ctx.actor.id,
             executedAt: ctx.now,
           })
           .where(eq(payrollRuns.id, run.id));
 
-        return { entryId: entry.id, totalGrossMinor: run.totalGrossMinor, totalNetMinor: run.totalNetMinor };
+        return { entryId, totalGrossMinor: run.totalGrossMinor, totalNetMinor: run.totalNetMinor };
       });
     },
   });
@@ -468,7 +444,151 @@ const listEmployees = (deps: ModuleDeps) =>
     },
   });
 
+
+// ── Timesheets ──────────────────────────────────────────────────────────
+
+const MAX_MINUTES_PER_DAY = 24 * 60;
+
+const logTime = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.logTime",
+    title: "Log time entry",
+    intent:
+      "Record hours an employee worked on a specific date with a short note, submitted for supervisor approval before it counts anywhere",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({
+      employeeId: z.string().uuid(),
+      /** ISO strings, not z.date(): models emit strings, and date schemas are not JSON-serializable. */
+      workDate: z.string().describe("ISO date (YYYY-MM-DD)"),
+      minutes: z.number().int().positive().max(MAX_MINUTES_PER_DAY),
+      note: z.string().max(300).optional(),
+    }),
+    output: z.object({ entryId: z.string(), status: z.literal("submitted") }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [emp] = await tx
+          .select({ id: employees.id })
+          .from(employees)
+          .where(and(eq(employees.id, input.employeeId), eq(employees.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!emp) throw new Error("employee not found");
+        if (new Date(input.workDate).getTime() > ctx.now.getTime() + 86_400_000) {
+          throw new Error("cannot log time more than a day in the future");
+        }
+        const [row] = await tx
+          .insert(timeEntries)
+          .values({
+            orgId: ctx.actor.orgId,
+            employeeId: emp.id,
+            workDate: new Date(input.workDate),
+            minutes: input.minutes,
+            note: input.note ?? null,
+          })
+          .returning({ id: timeEntries.id });
+        return { entryId: row!.id, status: "submitted" as const };
+      });
+    },
+  });
+
+const decideTimeEntry = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.decideTimeEntry",
+    title: "Approve time entry",
+    intent:
+      "Approve or reject a submitted timesheet entry so only verified hours flow into reports",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({
+      entryId: z.string().uuid(),
+      decision: z.enum(["approved", "rejected"]),
+    }),
+    output: z.object({ entryId: z.string(), status: z.string() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const rows = await tx
+          .update(timeEntries)
+          .set({
+            status: input.decision,
+            decidedByActorType: ctx.actor.type,
+            decidedByActorId: ctx.actor.id,
+          })
+          .where(
+            and(
+              eq(timeEntries.id, input.entryId),
+              eq(timeEntries.orgId, ctx.actor.orgId),
+              eq(timeEntries.status, "submitted"),
+            ),
+          )
+          .returning({ id: timeEntries.id });
+        if (rows.length === 0) throw new Error("entry not found or already decided");
+        return { entryId: input.entryId, status: input.decision };
+      });
+    },
+  });
+
+const timeReport = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.timeReport",
+    title: "Time report",
+    intent:
+      "Summarize approved hours per employee over a date range for payroll review and client billing decisions",
+    module: "hr",
+    risk: "read",
+    permission: "hr.read",
+    input: z.object({
+      from: z.string().describe("range start, ISO date (YYYY-MM-DD)"),
+      to: z.string().describe("range end, ISO date (YYYY-MM-DD)"),
+      employeeId: z.string().uuid().optional(),
+    }),
+    output: z.object({
+      rows: z.array(
+        z.object({
+          employeeId: z.string(),
+          approvedMinutes: z.number(),
+          pendingMinutes: z.number(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (_tx) => {
+        void _tx;
+        const rows = await deps.db
+          .select({
+            employeeId: timeEntries.employeeId,
+            status: timeEntries.status,
+            minutes: sql<number>`coalesce(sum(${timeEntries.minutes}), 0)`,
+          })
+          .from(timeEntries)
+          .where(
+            and(
+              eq(timeEntries.orgId, ctx.actor.orgId),
+              gte(timeEntries.workDate, new Date(input.from)),
+              lte(timeEntries.workDate, new Date(input.to)),
+              input.employeeId ? eq(timeEntries.employeeId, input.employeeId) : undefined,
+            ),
+          )
+          .groupBy(timeEntries.employeeId, timeEntries.status);
+        const byEmp = new Map<string, { approvedMinutes: number; pendingMinutes: number }>();
+        for (const r of rows) {
+          const cur = byEmp.get(r.employeeId) ?? { approvedMinutes: 0, pendingMinutes: 0 };
+          if (r.status === "approved") cur.approvedMinutes += Number(r.minutes);
+          else if (r.status === "submitted") cur.pendingMinutes += Number(r.minutes);
+          byEmp.set(r.employeeId, cur);
+        }
+        return {
+          rows: [...byEmp.entries()].map(([employeeId, v]) => ({ employeeId, ...v })),
+        };
+      });
+    },
+  });
+
 export function registerHrCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
+  registry.register(logTime(deps));
+  registry.register(decideTimeEntry(deps));
+  registry.register(timeReport(deps));
   registry.register(hireEmployee(deps));
   registry.register(deactivateEmployee(deps));
   registry.register(requestLeave(deps));

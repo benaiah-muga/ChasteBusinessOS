@@ -39,7 +39,7 @@ describe("financial reports (property-based)", () => {
             X1: "expense",
           };
           const bal = new Map<string, number>(codes.map((c) => [c, 0]));
-          // opening entry: capital introduced (DR asset / CR equity) — keeps the equation intact
+          // opening entry: capital introduced (DR asset / CR equity), keeps the equation intact
           const capital = a0 * 100 + e0 * 100;
           bal.set("A1", (bal.get("A1") ?? 0) + capital);
           bal.set("E1", (bal.get("E1") ?? 0) - capital); // CR equity

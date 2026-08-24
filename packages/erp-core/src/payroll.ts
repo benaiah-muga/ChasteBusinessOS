@@ -1,6 +1,6 @@
 /**
  * Payroll math. Pure, deterministic, integer minor units throughout.
- * The run's invariant: net + tax = gross, always, for any input — verified
+ * The run's invariant: net + tax = gross, always, for any input, verified
  * by property tests before it ever reaches the ledger.
  */
 
@@ -58,7 +58,7 @@ export interface RunSummary {
   headcount: number;
 }
 
-/** Run totals are the exact sum of payslips — no independent recomputation. */
+/** Run totals are the exact sum of payslips, no independent recomputation. */
 export function summarizeRun(payslips: Payslip[]): RunSummary {
   let g = 0;
   let t = 0;

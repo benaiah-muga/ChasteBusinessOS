@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Badge, Button, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
+import { IconAlertTriangle, IconBot, IconChevronRight, IconListTree } from "@/components/icons";
+import { cn, timeAgo } from "@/lib/format";
+import { callApi } from "@/lib/api";
 
 interface SessionRow {
   id: string;
@@ -17,105 +21,172 @@ interface TrajectoryEvent {
   at: string;
 }
 
-const roleStyles: Record<string, string> = {
-  user: "bg-emerald-700 text-white",
-  assistant: "bg-neutral-100",
-  tool_call: "bg-indigo-50 border border-indigo-200",
-  tool_result: "bg-orange-50 border border-orange-200",
-  system: "bg-neutral-950 text-emerald-200 font-mono text-xs",
+const roleCard: Record<string, string> = {
+  user: "bg-maroon-50/70 border-maroon-100",
+  assistant: "bg-white border-stone-200",
+  tool_call: "bg-violet-50/70 border-violet-200",
+  tool_result: "bg-amber-50/60 border-amber-200",
+  system: "bg-stone-950 border-stone-900 text-stone-300 font-mono text-xs",
 };
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [events, setEvents] = useState<TrajectoryEvent[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [cache, setCache] = useState<{ totals?: { sessionsTracked: number; inputTokens: number; cachedInputTokens: number; cacheHitRatePct: number | null } } | null>(null);
+
+  const loadSessions = useCallback(async () => {
+    setLoadError(null);
+    const res = await callApi<{ sessions?: SessionRow[] }>("/api/sessions");
+    if (!res.ok) {
+      setLoadError(res.error?.title ?? "Couldn't load sessions");
+      setSessions([]);
+      return;
+    }
+    setSessions(res.data?.sessions ?? []);
+  }, []);
 
   useEffect(() => {
-    fetch("/api/sessions")
-      .then((r) => r.json())
-      .then((d) => setSessions(d.sessions ?? []));
-  }, []);
+    void loadSessions();
+    void callApi<typeof cache>("/api/metrics").then((r) => setCache(r.data ?? null));
+  }, [loadSessions]);
 
   useEffect(() => {
     if (!activeId) return;
     setEvents(null);
-    fetch(`/api/sessions/${activeId}`)
-      .then((r) => r.json())
-      .then((d) => setEvents(d.events ?? []));
+    callApi<{ events?: TrajectoryEvent[] }>(`/api/sessions/${activeId}`).then((res) =>
+      setEvents(res.data?.events ?? []),
+    );
   }, [activeId]);
+
+  if (loadError && sessions === null) {
+    return (
+      <div>
+        <PageHeader title="Agent sessions" />
+        <EmptyState icon={<IconAlertTriangle />} title={loadError} hint="Check your connection, then retry."
+          action={<Button tone="secondary" onClick={() => void loadSessions()}>Retry</Button>} />
+      </div>
+    );
+  }
+  if (sessions === null) return <LoadingPage />;
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight">Agent sessions</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        Every conversation with your AI co-worker, replayable event by event — what it saw, called,
-        and answered.
-      </p>
+      <PageHeader
+        title="Agent sessions"
+        description="Every conversation with your AI co-worker, replayable event by event, what it saw, called, and answered."
+      />
 
-      {!sessions?.length && (
-        <p className="rounded-xl border border-dashed border-neutral-300 px-6 py-10 text-center text-sm text-neutral-400">
-          No sessions yet. Talk to the agent in the Console.
-        </p>
+      {cache?.totals && (
+        <div className="mb-4 rounded-xl border border-stone-200 bg-white px-4 py-3 text-xs text-stone-600 shadow-xs">
+          <span className="font-medium text-stone-800">Context efficiency:</span>{" "}
+          {cache.totals.cacheHitRatePct === null
+            ? "no token usage recorded yet"
+            : `${cache.totals.cacheHitRatePct}% of prompt tokens served from provider cache`}
+          {" · "}
+          {(cache.totals.inputTokens / 1000).toFixed(1)}k input /{" "}
+          {(cache.totals.cachedInputTokens / 1000).toFixed(1)}k cached across{" "}
+          {cache.totals.sessionsTracked} session{cache.totals.sessionsTracked === 1 ? "" : "s"}
+        </div>
       )}
 
-      {sessions && sessions.length > 0 && (
-        <div className="grid grid-cols-[320px_1fr] gap-6">
-          <aside className="max-h-[75vh] space-y-2 overflow-y-auto rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
+      {sessions.length === 0 ? (
+        <EmptyState
+          icon={<IconBot />}
+          title="No sessions yet"
+          hint="Talk to your co-worker in the Console, every exchange is recorded here for replay and audit."
+        />
+      ) : (
+        <div className="grid h-[calc(100vh-240px)] min-h-[420px] gap-4 lg:grid-cols-[320px_1fr]">
+          <aside className="card min-h-0 overflow-y-auto p-2">
             {sessions.map((s) => (
               <button
                 key={s.id}
+                type="button"
+                aria-current={activeId === s.id ? "true" : undefined}
                 onClick={() => setActiveId(s.id)}
-                className={`block w-full rounded-lg px-3 py-2.5 text-left hover:bg-neutral-50 ${activeId === s.id ? "bg-emerald-50" : ""}`}
+                className={cn(
+                  "block w-full rounded-lg px-3 py-2.5 text-left transition-colors duration-75",
+                  activeId === s.id ? "bg-maroon-50" : "hover:bg-stone-50",
+                )}
               >
-                <p className="truncate text-sm font-medium">{s.title ?? "Untitled session"}</p>
-                <p className="mt-0.5 font-mono text-[10px] text-neutral-400">
-                  {new Date(s.createdAt).toLocaleString()} · {s.mode} · {s.status}
+                <p className={cn("truncate text-sm font-medium", activeId === s.id ? "text-maroon-900" : "text-stone-800")}>
+                  {s.title ?? "Untitled session"}
+                </p>
+                <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-stone-400">
+                  <span>{timeAgo(s.createdAt)}</span>·<Badge tone={s.mode === "creator" ? "violet" : "neutral"}>{s.mode}</Badge>
+                  <span>{s.status}</span>
                 </p>
               </button>
             ))}
           </aside>
 
-          <section className="max-h-[75vh] space-y-3 overflow-y-auto rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-            {events === null && activeId && <p className="text-sm text-neutral-400">Loading trajectory…</p>}
-            {!activeId && <p className="pt-10 text-center text-sm text-neutral-400">Select a session to replay it.</p>}
-            {events?.map((e) => {
-              const style = roleStyles[e.role] ?? "bg-neutral-100";
-              let body: React.ReactNode = null;
-              if (e.role === "user") body = (e.content as { text?: string }).text;
-              else if (e.role === "assistant") body = (e.content as { text?: string }).text;
-              else if (e.role === "tool_call") {
-                const c = e.content as { name?: string; args?: unknown };
-                body = (
-                  <>
-                    <span className="font-mono text-[11px] uppercase tracking-wide text-indigo-500">tool call</span>{" "}
-                    <span className="font-mono text-sm">{c.name}</span>
-                    <pre className="mt-1 max-h-32 overflow-auto rounded bg-white/60 p-2 text-[11px]">{JSON.stringify(c.args ?? {}, null, 1)}</pre>
-                  </>
-                );
-              } else if (e.role === "tool_result") {
-                const c = e.content as { name?: string; ok?: boolean; error?: string };
-                body = (
-                  <>
-                    <span className={`font-mono text-[11px] uppercase ${c.ok ? "text-emerald-600" : "text-red-600"}`}>
-                      {c.ok ? "ok" : "blocked"}
-                    </span>{" "}
-                    <span className="font-mono text-sm">{c.name}</span>
-                    {c.error && <span className="ml-2 text-xs text-red-700">{c.error}</span>}
-                  </>
-                );
-              } else body = JSON.stringify(e.content);
-              if (!body && e.role !== "assistant") return null;
-              return (
-                <div key={e.seq} className="flex flex-col items-start gap-1">
-                  <span className="font-mono text-[10px] text-neutral-300">
-                    #{e.seq} · {new Date(e.at).toLocaleTimeString()}
-                  </span>
-                  <div className={`max-w-full whitespace-pre-wrap rounded-xl px-4 py-2.5 text-sm leading-relaxed ${style}`}>
-                    {body}
+          <section className="card min-h-0 overflow-y-auto p-4 sm:p-5">
+            {!activeId && (
+              <div className="flex h-full items-center justify-center">
+                <EmptyState icon={<IconListTree />} title="Pick a session" hint="Select a session on the left to replay its full trajectory." />
+              </div>
+            )}
+            {events === null && activeId && <LoadingPage />}
+            {events?.length === 0 && (
+              <p className="pt-10 text-center text-sm text-stone-400">This session has no recorded events.</p>
+            )}
+            <div className="space-y-3">
+              {events?.map((e) => {
+                const content = e.content as { text?: string; name?: string; args?: unknown; ok?: boolean; error?: string };
+                let body: React.ReactNode = null;
+                if (e.role === "user") {
+                  body = <p className="text-sm leading-relaxed whitespace-pre-wrap text-stone-800">{content.text}</p>;
+                } else if (e.role === "assistant") {
+                  body = <p className="text-sm leading-relaxed whitespace-pre-wrap text-stone-800">{content.text}</p>;
+                } else if (e.role === "tool_call") {
+                  body = (
+                    <>
+                      <span className="mb-1 block font-mono text-[11px] font-semibold tracking-wide text-violet-600 uppercase">
+                        tool call · {content.name}
+                      </span>
+                      <details>
+                        <summary className="cursor-pointer text-xs text-violet-700 select-none hover:text-violet-900">
+                          arguments
+                        </summary>
+                        <pre className="mt-1 max-h-40 overflow-auto rounded-md bg-white/70 p-2 font-mono text-[11px] text-stone-700">
+                          {JSON.stringify(content.args ?? {}, null, 1)}
+                        </pre>
+                      </details>
+                    </>
+                  );
+                } else if (e.role === "tool_result") {
+                  body = (
+                    <>
+                      <span
+                        className={cn(
+                          "mr-2 inline-flex items-center gap-1 font-mono text-[11px] font-semibold tracking-wide uppercase",
+                          content.ok ? "text-emerald-700" : "text-red-700",
+                        )}
+                      >
+                        <IconChevronRight className="size-3" />
+                        {content.ok ? "ok" : "blocked"} · {content.name}
+                      </span>
+                      {content.error && <span className="text-xs text-red-800">{content.error}</span>}
+                    </>
+                  );
+                } else {
+                  body = <pre className="overflow-auto">{JSON.stringify(e.content)}</pre>;
+                }
+                if (!body && e.role !== "assistant") return null;
+                return (
+                  <div key={e.seq} className="flex flex-col items-start gap-1">
+                    <span className="font-mono text-[10px] text-stone-300">
+                      #{e.seq} · {new Date(e.at).toLocaleTimeString()}
+                    </span>
+                    <div className={cn("max-w-full rounded-xl border px-4 py-2.5", roleCard[e.role] ?? "bg-stone-50 border-stone-200")}>
+                      {body}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </section>
         </div>
       )}

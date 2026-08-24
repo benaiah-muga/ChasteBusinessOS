@@ -1,11 +1,7 @@
 import { and, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
-  accounts,
   items,
-  journalEntries,
-  journalLines,
-  periods,
   poLines,
   purchaseOrders,
   stockMovements,
@@ -14,44 +10,20 @@ import {
   vendorPayments,
   vendors,
 } from "@chaste/db";
+import { withOrgContext } from "@chaste/db";
 import {
-  assertBalanced,
   computeAging,
   computeInvoiceTotals,
   matchThreeWay,
 } from "@chaste/erp-core";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
+import { assertPeriodOpen, postEntry } from "@chaste/module-accounting/posting";
 
 export interface ModuleDeps {
   db: Database["db"];
 }
 
-type Tx = Parameters<Parameters<ModuleDeps["db"]["transaction"]>[0]>[0];
-
-async function assertPeriodOpen(db: Tx | ModuleDeps["db"], orgId: string, date: Date): Promise<void> {
-  const closed = await db.select({ year: periods.year, month: periods.month }).from(periods).where(eq(periods.orgId, orgId));
-  if (!isPeriodOpenLocal(closed, date)) {
-    throw new Error(`period ${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")} is closed`);
-  }
-}
-
-function isPeriodOpenLocal(closed: { year: number; month: number }[], date: Date): boolean {
-  const y = date.getUTCFullYear();
-  const m = date.getUTCMonth() + 1;
-  return !closed.some((p) => p.year === y && p.month === m);
-}
-
-async function coaMap(tx: Tx | ModuleDeps["db"], orgId: string): Promise<Map<string, string>> {
-  const rows = await tx.select({ code: accounts.code, id: accounts.id }).from(accounts).where(eq(accounts.orgId, orgId));
-  return new Map(rows.map((r) => [r.code, r.id]));
-}
-
-function accountIdOf(map: Map<string, string>, code: string): string {
-  const id = map.get(code);
-  if (!id) throw new Error(`account ${code} missing from chart of accounts`);
-  return id;
-}
 
 const createVendor = (deps: ModuleDeps) =>
   defineCapability({
@@ -116,7 +88,7 @@ const createBill = (deps: ModuleDeps) =>
     }),
     output: z.object({ billNumber: z.number(), totalMinor: z.number(), entryId: z.string() }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
 
         // Three-way match when the bill references an order: order ↔ receipts ↔ bill.
@@ -188,7 +160,6 @@ const createBill = (deps: ModuleDeps) =>
           poLineRowsForLink = new Map(rows.map((r, i) => [`${input.poNumber}:${i + 1}`, r.id]));
         }
 
-        const map = await coaMap(tx, ctx.actor.orgId);
         const glLines = [
           ...input.lines.map((l) => ({
             accountCode: l.expenseAccountCode,
@@ -197,26 +168,11 @@ const createBill = (deps: ModuleDeps) =>
           })),
           { accountCode: "2000", debitMinor: 0, creditMinor: totals.totalMinor },
         ].filter((l) => l.debitMinor !== 0 || l.creditMinor !== 0);
-        assertBalanced({ memo: `Vendor bill ${billNumber}`, lines: glLines });
-
-        const [entry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId: ctx.actor.orgId,
-            memo: `Vendor bill ${billNumber}${input.vendorRef ? ` (${input.vendorRef})` : ""}`,
-            sourceType: "vendor_bill",
-            postedByActorType: ctx.actor.type,
-            postedByActorId: ctx.actor.id,
-          })
-          .returning({ id: journalEntries.id });
-        await tx.insert(journalLines).values(
-          glLines.map((l) => ({
-            entryId: entry!.id,
-            accountId: accountIdOf(map, l.accountCode),
-            debitMinor: l.debitMinor,
-            creditMinor: l.creditMinor,
-          })),
-        );
+        const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `Vendor bill ${billNumber}${input.vendorRef ? ` (${input.vendorRef})` : ""}`,
+          sourceType: "vendor_bill",
+          lines: glLines,
+        });
 
         const [bill] = await tx
           .insert(vendorBills)
@@ -228,7 +184,7 @@ const createBill = (deps: ModuleDeps) =>
             status: "open",
             totalMinor: totals.totalMinor,
             memo: input.memo ?? null,
-            entryId: entry!.id,
+            entryId,
             billDate: ctx.now,
           })
           .returning({ id: vendorBills.id });
@@ -247,7 +203,7 @@ const createBill = (deps: ModuleDeps) =>
           })),
         );
 
-        return { billNumber, totalMinor: totals.totalMinor, entryId: entry!.id };
+        return { billNumber, totalMinor: totals.totalMinor, entryId };
       });
     },
   });
@@ -263,6 +219,7 @@ const payBill = (deps: ModuleDeps) =>
     risk: "money",
     permission: "purchasing.post",
     moneyThresholdMinor: 50_000,
+    moneyAmount: (input) => input.amountMinor,
     inverse: {
       capabilityId: "accounting.reverseEntry",
       buildInput: (_input, output) => ({ entryId: (output as { entryId: string }).entryId }),
@@ -274,7 +231,7 @@ const payBill = (deps: ModuleDeps) =>
     }),
     output: z.object({ paymentId: z.string(), entryId: z.string(), fullyPaid: z.boolean() }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const [bill] = await tx
           .select()
@@ -287,30 +244,15 @@ const payBill = (deps: ModuleDeps) =>
           throw new Error(`overpayment: outstanding is ${bill.totalMinor - bill.paidMinor}`);
         }
 
-        const map = await coaMap(tx, ctx.actor.orgId);
         const glLines = [
           { accountCode: "2000", debitMinor: input.amountMinor, creditMinor: 0 },
           { accountCode: "1000", debitMinor: 0, creditMinor: input.amountMinor },
         ];
-        assertBalanced({ memo: `Vendor payment ${bill.number}`, lines: glLines });
-        const [entry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId: ctx.actor.orgId,
-            memo: `Vendor payment for bill ${bill.number} (${input.method})`,
-            sourceType: "vendor_payment",
-            postedByActorType: ctx.actor.type,
-            postedByActorId: ctx.actor.id,
-          })
-          .returning({ id: journalEntries.id });
-        await tx.insert(journalLines).values(
-          glLines.map((l) => ({
-            entryId: entry!.id,
-            accountId: accountIdOf(map, l.accountCode),
-            debitMinor: l.debitMinor,
-            creditMinor: l.creditMinor,
-          })),
-        );
+        const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `Vendor payment for bill ${bill.number} (${input.method})`,
+          sourceType: "vendor_payment",
+          lines: glLines,
+        });
 
         const [pay] = await tx
           .insert(vendorPayments)
@@ -319,7 +261,7 @@ const payBill = (deps: ModuleDeps) =>
             billId: bill.id,
             amountMinor: input.amountMinor,
             method: input.method,
-            entryId: entry!.id,
+            entryId,
           })
           .returning({ id: vendorPayments.id });
 
@@ -329,7 +271,7 @@ const payBill = (deps: ModuleDeps) =>
           .set({ paidMinor, status: paidMinor >= bill.totalMinor ? "paid" : bill.status })
           .where(eq(vendorBills.id, bill.id));
 
-        return { paymentId: pay!.id, entryId: entry!.id, fullyPaid: paidMinor >= bill.totalMinor };
+        return { paymentId: pay!.id, entryId, fullyPaid: paidMinor >= bill.totalMinor };
       });
     },
   });
@@ -396,7 +338,7 @@ const createPO = (deps: ModuleDeps) =>
     }),
     output: z.object({ poNumber: z.number() }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [vendor] = await tx
           .select({ id: vendors.id })
           .from(vendors)
@@ -464,7 +406,7 @@ const receivePO = (deps: ModuleDeps) =>
     }),
     output: z.object({ received: z.boolean(), fullyReceived: z.boolean() }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [po] = await tx
           .select()
           .from(purchaseOrders)

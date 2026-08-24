@@ -22,7 +22,7 @@ storm or a single unreviewable bulk write?
 - **Integrity check at the gate**: `executePayrollRun` takes
   `expectedTotalNetMinor`, which must match the drafted total. This gives
   the policy engine an amount to threshold on (agents are always gated;
-  `moneyThresholdMinor: 0`) *and* makes "pay what was reviewed" explicit —
+  `moneyThresholdMinor: 0`) *and* makes "pay what was reviewed" explicit,
   a tampered caller payload refuses before touching the ledger.
 - **Leave reduces pay only when approved *and* unpaid**, by calendar-day
   overlap with the run's month, clamped to the month's length.
@@ -32,10 +32,10 @@ storm or a single unreviewable bulk write?
 
 ## Consequences
 
-- Approval is per-run, not per-person — a human signs off once on a reviewable
+- Approval is per-run, not per-person, a human signs off once on a reviewable
   total; the audit trail still carries every payslip.
 - Withholding sits in a visible liability account (2200) rather than vanishing
   into net; remitting it is a future bill-payment flow against that account.
 - Adding benefits, bonuses, or multiple pay components means extending
-  `PayslipLine` + the entry builder together — the invariant tests force them
+  `PayslipLine` + the entry builder together, the invariant tests force them
   to stay balanced.

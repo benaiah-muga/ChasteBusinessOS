@@ -1,9 +1,9 @@
-# ADR 0003 — Money is integer minor units; quantities are thousandths
+# ADR 0003, Money is integer minor units; quantities are thousandths
 
 Date: 2026-08-21 · Status: accepted
 
 ## Context
-Floating-point money causes silent rounding drift — unacceptable for books.
+Floating-point money causes silent rounding drift, unacceptable for books.
 
 ## Decision
 All monetary values are safe integers in minor units (`*_minor`). Quantities

@@ -188,11 +188,24 @@ async function main() {
     .limit(1);
   if (!open) throw new Error("no open register session");
 
-  await executor.execute("pos.completeSale", clerkCtx, {
+  const saleInput = {
     sessionId: open.id,
-    method: "cash",
+    method: "cash" as const,
     lines: [{ description: "Desk lamp", quantity: 15_000, unitPriceMinor: 5_000, sku: "LAMP-01" }],
-  });
+  };
+  let sale = await executor.execute("pos.completeSale", clerkCtx, saleInput);
+  if (!sale.ok && sale.pendingApproval) {
+    // $75 exceeds the org's 50000-minor autonomous threshold; the clerk
+    // approves their own gate through the inbox, same as section 1.
+    const gate = (
+      await db.select().from(approvals).where(and(eq(approvals.orgId, orgId), eq(approvals.status, "pending")))
+    ).at(-1);
+    if (!gate) throw new Error("sale was gated but no approval row exists");
+    sale = await executor.execute("pos.completeSale", clerkCtx, gate.payload, {
+      approvedApprovalId: gate.id,
+    });
+  }
+  if (!sale.ok) throw new Error(sale.error ?? "first POS sale failed");
   ok("POS sale of 15 lamps decremented stock in the same transaction");
 
   await mustFail(

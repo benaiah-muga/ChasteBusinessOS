@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDb } from "@chaste/db";
 import { runOnboarding } from "@/server/onboarding";
 import { getResolvedUser } from "@/server/session";
+import { checkRateLimit } from "@/server/rate-limit";
 
 const bodySchema = z.object({
   orgName: z.string().min(2).max(80),
@@ -13,6 +14,16 @@ export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   if (resolved.orgId) return NextResponse.json({ error: "already onboarded" }, { status: 409 });
+
+  // Onboarding seeds an org, chart of accounts, and embeddings; a burst from
+  // one account would multiply provider calls and rows.
+  const limit = checkRateLimit(`onboarding:${resolved.userId}`, { max: 5, windowMs: 10 * 60_000 });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "too many requests" },
+      { status: 429, headers: { "retry-after": String(limit.retryAfterSec) } },
+    );
+  }
 
   const body = bodySchema.safeParse(await req.json());
   if (!body.success) return NextResponse.json({ error: "invalid body", detail: body.error.issues }, { status: 400 });

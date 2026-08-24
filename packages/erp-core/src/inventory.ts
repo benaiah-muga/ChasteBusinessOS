@@ -68,6 +68,25 @@ export function needsReorder(quantityOnHand: number, reorderPoint: number): bool
   return reorderPoint > 0 && quantityOnHand <= reorderPoint;
 }
 
+/**
+ * Replays an ordered movement history into the current valuation state.
+ * The stock ledger is append-only, so on-hand value is always derivable;
+ * outward movements without stored cost leave proportionally from whatever
+ * value the replay has accumulated so far.
+ */
+export function replayValuation(history: readonly CostedMovement[]): ValuationState {
+  let state = EMPTY_VALUATION;
+  for (const m of history) {
+    const delta = m.quantityDelta;
+    if (delta > 0) {
+      state = applyMovement(state, { quantityDelta: delta, unitCostMinor: m.unitCostMinor });
+    } else if (delta < 0) {
+      state = applyMovement(state, { quantityDelta: delta });
+    }
+  }
+  return state;
+}
+
 // ── Three-way match ─────────────────────────────────────────────────────
 
 export interface MatchLineInput {

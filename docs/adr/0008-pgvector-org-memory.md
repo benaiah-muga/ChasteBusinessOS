@@ -1,4 +1,4 @@
-# ADR 0008 — pgvector for org memory; no separate vector database
+# ADR 0008, pgvector for org memory; no separate vector database
 
 Date: 2026-08-22 · Status: accepted
 

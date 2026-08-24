@@ -1,7 +1,7 @@
 # ChasteBusinessOS
 
 Agentic ERP. Every human action is also an AI-agent action through the same
-capability pipeline — governed, auditable, reversible.
+capability pipeline, governed, auditable, reversible.
 
 Read `ARCHITECTURE.md` first, then `ROADMAP.md`. Design decisions live in
 `docs/adr/`; user-facing changes are recorded in `CHANGELOG.md`.
@@ -24,7 +24,7 @@ pnpm dev                    # apps/web on :3000
 - Append-only event ledger; hash-chained audit entries.
 - Never commit secrets. `.env` is gitignored.
 
-## Verification gate — run before declaring any work done
+## Verification gate, run before declaring any work done
 
 ```sh
 pnpm typecheck && pnpm lint && pnpm test
@@ -38,8 +38,8 @@ A change that breaks a demo is not done.
 - New capabilities must pass conformance (`assertWellFormedCapability`):
   valid `module.action` id, intent ≥ 20 chars (it gets embedded), and an
   inverse declared for state changes unless you can justify the warning.
-  The registry self-validates at boot — broken inverses refuse to boot.
-- Domain math lives in `packages/erp-core` as pure functions — keep IO out,
+  The registry self-validates at boot, broken inverses refuse to boot.
+- Domain math lives in `packages/erp-core` as pure functions, keep IO out,
   and add property tests for financial invariants.
 - No `any` without an adjacent eslint-disable comment explaining *why* the
   hole is unavoidable. `pnpm lint` fails on unexplained ones.
@@ -47,5 +47,5 @@ A change that breaks a demo is not done.
   delete old ones). If you argued for a choice that others will live with,
   write it down.
 - Update `CHANGELOG.md` under `[Unreleased]` for every user-visible or
-  behavioral change — Added/Changed/Fixed/Removed.
+  behavioral change, Added/Changed/Fixed/Removed.
 - Do not add comments explaining obvious code; explain *why*, not *what*.

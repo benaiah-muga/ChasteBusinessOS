@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { desc, eq } from "drizzle-orm";
 import { conversations, conversationMembers, getDb, messages } from "@chaste/db";
+import { hasPermissionFor } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 
 export async function GET() {
@@ -43,8 +44,8 @@ const createSchema = z.object({
 
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
-  if (!resolved?.orgId || !resolved.permissions.has("messaging.write")) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!resolved?.orgId || !hasPermissionFor(resolved, "messaging.write")) {
+    return NextResponse.json({ error: "you lack authority over messaging" }, { status: 403 });
   }
   const body = createSchema.safeParse(await req.json());
   if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });

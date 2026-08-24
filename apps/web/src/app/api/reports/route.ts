@@ -12,7 +12,7 @@ export async function GET() {
   const registry = buildRegistry(getDb().db);
   const executor = buildExecutor(getDb().db, registry);
 
-  // Reports are read capabilities — the agent answers from these too.
+  // Reports are read capabilities, the agent answers from these too.
   const pnl = await executor.execute("accounting.incomeStatement", humanCtx, {});
   const bs = await executor.execute("accounting.balanceSheet", humanCtx, {});
   if (!pnl.ok || !bs.ok) {

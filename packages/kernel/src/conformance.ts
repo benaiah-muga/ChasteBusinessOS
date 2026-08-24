@@ -11,7 +11,7 @@ const ID_PATTERN = /^[a-z][a-z0-9]*\.[A-Za-z][A-Za-z0-9]*$/;
 
 /**
  * Structural contract every capability must satisfy before it may register.
- * Ecosystems die from silent non-activation (see dsh's plugin audit) — we
+ * Ecosystems die from silent non-activation (see dsh's plugin audit), we
  * validate at boot and in CI instead of discovering gaps at runtime.
  *
  * Errors reject registration. Warnings surface but do not block, so teams
@@ -33,7 +33,7 @@ export function assertWellFormedCapability(cap: Capability): ConformanceIssue[] 
   }
   if (!cap.title.trim()) err("title-required", "title must not be empty");
   if (cap.intent.trim().length < 20) {
-    err("intent-too-short", "intent must be at least 20 chars — it is embedded for agent retrieval");
+    err("intent-too-short", "intent must be at least 20 chars, it is embedded for agent retrieval");
   }
   if (!cap.permission.trim()) err("permission-required", "permission reference must not be empty");
 
@@ -52,6 +52,15 @@ export function assertWellFormedCapability(cap: Capability): ConformanceIssue[] 
     if (cap.inverse.capabilityId === cap.id) {
       err("inverse-self", "a capability cannot be its own inverse");
     }
+  }
+
+  // Money gating must be declared, not inferred from field names: a missing
+  // extractor would silently disable amount thresholds for agents.
+  if (cap.risk === "money" && !cap.moneyAmount) {
+    err(
+      "money-amount-required",
+      'risk "money" capabilities must declare moneyAmount(input); return null when the amount is unknowable up front',
+    );
   }
 
   return issues;

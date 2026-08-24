@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDb, documentSuggestions, documents, vendors } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
+import { enqueueCapabilityJob } from "@/server/jobs";
 
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
@@ -67,7 +68,8 @@ export async function POST(req: Request) {
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
-  const executor = buildExecutor(getDb().db, buildRegistry(getDb().db));
+  const db = getDb().db;
+  const executor = buildExecutor(db, buildRegistry(db));
   const body = (await req.json()) as {
     action?: string;
     title?: string;
@@ -75,6 +77,7 @@ export async function POST(req: Request) {
     fileBase64?: string;
     mimeType?: string;
     documentId?: string;
+    sync?: boolean;
     lines?: { description: string; quantityThousandths?: number; unitPriceMinor?: number }[];
   };
 
@@ -90,6 +93,22 @@ export async function POST(req: Request) {
     }
     case "parse": {
       if (!body.documentId) return NextResponse.json({ error: "documentId required" }, { status: 400 });
+      // OCR/embeddings are slow provider calls; queue by default so the
+      // request returns immediately and the worker does the governed work.
+      if (!body.sync) {
+        await enqueueCapabilityJob(db, {
+          orgId: ctx.actor.orgId,
+          type: "documents.parseDocument",
+          payload: { documentId: body.documentId },
+          createdByActorType: ctx.actor.type,
+          createdByActorId: ctx.actor.id,
+        });
+        await db
+          .update(documents)
+          .set({ status: "queued", parseError: null, updatedAt: new Date() })
+          .where(and(eq(documents.orgId, ctx.actor.orgId), eq(documents.id, body.documentId)));
+        return NextResponse.json({ ok: true, queued: true, documentId: body.documentId });
+      }
       const result = await executor.execute("documents.parseDocument", ctx, { documentId: body.documentId });
       return respond(result);
     }

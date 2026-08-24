@@ -1,4 +1,4 @@
-# ADR 0007 — One execution path: the capability kernel
+# ADR 0007, One execution path: the capability kernel
 
 Date: 2026-08-21 · Status: accepted
 
@@ -8,7 +8,7 @@ share identical plumbing. Parallel paths (UI writes + agent tools) drift
 and bypass governance.
 
 ## Decision
-Every state change — human click or LLM tool call — funnels through
+Every state change, human click or LLM tool call, funnels through
 `KernelExecutor.execute`: validate → authorize → policy gate → execute →
 audit. UI "actions" are API routes that call the executor with a human
 actor context. There is no second way to write domain state.

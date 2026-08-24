@@ -1,4 +1,4 @@
-# ADR 0009 — Append-only stock ledger, GL integration deferred
+# ADR 0009, Append-only stock ledger, GL integration deferred
 
 Date: 2026-08-22 · Status: accepted
 

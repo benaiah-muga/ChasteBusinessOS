@@ -1,7 +1,8 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { embed, extractBillLinesFromText, parseDocumentImage } from "@chaste/ai";
 import { accounts, documentSuggestions, documents, memories, type Database } from "@chaste/db";
+import { withOrgContext } from "@chaste/db";
 import { suggestExpenseAccount, type AccountType, type CoderAccount } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
@@ -137,7 +138,7 @@ const parseDocument = (deps: ModuleDeps) =>
         throw new Error(`parse failed: ${message}`);
       }
 
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         await tx
           .update(documents)
           .set({ parsedMarkdown: markdown, status: "parsed", parseError: null, updatedAt: new Date() })
@@ -192,7 +193,7 @@ const suggestCoding = (deps: ModuleDeps) =>
       let lines = input.lines;
       if (!lines) {
         const text = doc.parsedMarkdown ?? doc.rawText;
-        if (!text?.trim()) throw new Error("document has no parsed text yet — parse it first");
+        if (!text?.trim()) throw new Error("document has no parsed text yet, parse it first");
         lines = await extractBillLinesFromText(text);
       }
       if (lines.length === 0) throw new Error("no bill lines could be extracted from this document");
@@ -208,7 +209,7 @@ const suggestCoding = (deps: ModuleDeps) =>
         return { ...line, suggestedAccountCode: match.code, matchScore: match.score };
       });
 
-      await deps.db.transaction(async (tx) => {
+      await withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         await tx
           .delete(documentSuggestions)
           .where(and(eq(documentSuggestions.orgId, ctx.actor.orgId), eq(documentSuggestions.documentId, doc.id)));
@@ -235,6 +236,70 @@ const suggestCoding = (deps: ModuleDeps) =>
           matchScore: s.matchScore,
         })),
       };
+    },
+  });
+
+const searchMemory = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.searchMemory",
+    title: "Search org memory",
+    intent:
+      "Search the organization's remembered knowledge, ingested documents, policies, SOPs and business profile, to ground answers in real facts before claiming not to know",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({
+      query: z.string().min(2).max(500),
+      limit: z.number().int().min(1).max(10).default(5),
+    }),
+    output: z.object({
+      mode: z.enum(["semantic", "text"]),
+      results: z.array(
+        z.object({
+          kind: z.string(),
+          source: z.string().nullable(),
+          title: z.string().nullable(),
+          content: z.string(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      // Semantic first; degrade to plain-text matching when embeddings or the
+      // model key are unavailable, retrieval must never hard-fail.
+      try {
+        const [vec] = await embed([input.query], { inputType: "query" });
+        if (vec) {
+          const literal = JSON.stringify(vec);
+          const rows = await deps.db
+            .select({
+              kind: memories.kind,
+              source: memories.source,
+              content: memories.content,
+              title: sql<string | null>`${memories.metadata}->>'title'`,
+            })
+            .from(memories)
+            .where(and(eq(memories.orgId, ctx.actor.orgId), isNotNull(memories.embedding)))
+            .orderBy(sql`${memories.embedding} <=> ${literal}::vector`)
+            .limit(input.limit);
+          if (rows.length > 0) {
+            return { mode: "semantic" as const, results: rows };
+          }
+        }
+      } catch {
+        // fall through to text search
+      }
+      const needle = `%${input.query.replace(/[%_]/g, "").trim()}%`;
+      const rows = await deps.db
+        .select({
+          kind: memories.kind,
+          source: memories.source,
+          content: memories.content,
+          title: sql<string | null>`${memories.metadata}->>'title'`,
+        })
+        .from(memories)
+        .where(and(eq(memories.orgId, ctx.actor.orgId), ilike(memories.content, needle)))
+        .limit(input.limit);
+      return { mode: "text" as const, results: rows };
     },
   });
 
@@ -288,4 +353,5 @@ export function registerDocumentCapabilities(registry: CapabilityRegistry, deps:
   registry.register(parseDocument(deps));
   registry.register(suggestCoding(deps));
   registry.register(listDocuments(deps));
+  registry.register(searchMemory(deps));
 }

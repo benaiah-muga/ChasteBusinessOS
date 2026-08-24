@@ -1,11 +1,33 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { conversations, messages } from "@chaste/db";
+import { conversationMembers, conversations, messages } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 export interface ModuleDeps {
   db: Database["db"];
+}
+
+type Tx = Parameters<Parameters<ModuleDeps["db"]["transaction"]>[0]>[0];
+
+/**
+ * Org scope alone does not confer access: DMs are membership-scoped. Every
+ * read and write resolves the actor (human principal or the agent acting for
+ * one) against conversation_members first.
+ */
+async function isMember(tx: Tx | ModuleDeps["db"], conversationId: string, userId: string | null): Promise<boolean> {
+  if (!userId) return false;
+  const [member] = await tx
+    .select({ userId: conversationMembers.userId })
+    .from(conversationMembers)
+    .where(
+      and(
+        eq(conversationMembers.conversationId, conversationId),
+        eq(conversationMembers.userId, userId),
+      ),
+    )
+    .limit(1);
+  return Boolean(member);
 }
 
 const sendMessage = (deps: ModuleDeps) =>
@@ -29,6 +51,9 @@ const sendMessage = (deps: ModuleDeps) =>
         .where(and(eq(conversations.id, input.conversationId), eq(conversations.orgId, ctx.actor.orgId)))
         .limit(1);
       if (!conv) throw new Error("conversation not found");
+      if (!(await isMember(deps.db, conv.id, ctx.actor.id))) {
+        throw new Error("you are not a member of this conversation");
+      }
       const [row] = await deps.db
         .insert(messages)
         .values({
@@ -110,6 +135,15 @@ const readMessages = (deps: ModuleDeps) =>
       ),
     }),
     execute: async (ctx, input) => {
+      const [conv] = await deps.db
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(and(eq(conversations.id, input.conversationId), eq(conversations.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!conv) throw new Error("conversation not found");
+      if (!(await isMember(deps.db, conv.id, ctx.actor.id))) {
+        throw new Error("you are not a member of this conversation");
+      }
       const rows = await deps.db
         .select()
         .from(messages)

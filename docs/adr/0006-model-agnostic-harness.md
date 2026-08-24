@@ -1,4 +1,4 @@
-# ADR 0006 — Model-agnostic harness; NVIDIA NIM as default provider
+# ADR 0006, Model-agnostic harness; NVIDIA NIM as default provider
 
 Date: 2026-08-22 · Status: accepted
 
@@ -12,7 +12,7 @@ turns out). Providers adapt to it: `OpenAiCompatAdapter` targets NVIDIA NIM
 (`integrate.api.nvidia.com`) today; any OpenAI-compatible endpoint or local
 CLI agent fits the same seam. Model routing is env-configured
 (primary/fast/reasoning/embeddings). Tool names are sanitized
-(dots→underscores) because some providers reject them — mapping lives in
+(dots→underscores) because some providers reject them, mapping lives in
 the loop, invisible to capabilities.
 
 ## Consequences

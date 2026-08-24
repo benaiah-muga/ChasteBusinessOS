@@ -63,7 +63,7 @@ export interface BalanceSheet {
 /**
  * Balance sheet with the accounting equation enforced as output:
  * assets = liabilities + equity + current result.
- * `balanced: false` means the underlying ledger is corrupt — never ignore it.
+ * `balanced: false` means the underlying ledger is corrupt, never ignore it.
  */
 export function computeBalanceSheet(balances: AccountBalance[]): BalanceSheet {
   const sections: BalanceSheet["sections"] = { asset: [], liability: [], equity: [] };

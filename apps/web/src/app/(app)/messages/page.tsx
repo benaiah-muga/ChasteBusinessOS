@@ -1,6 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Badge, Button, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
+import { IconAlertTriangle, IconBot, IconChevronLeft, IconHash, IconPlus, IconSend, IconX } from "@/components/icons";
+import { cn, timeAgo } from "@/lib/format";
+import { callApi } from "@/lib/api";
+import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 
 interface Conversation {
   id: string;
@@ -17,24 +22,34 @@ interface Message {
 }
 
 export default function MessagesPage() {
+  const __enabled = useModuleEnabled("messaging");
   const [convs, setConvs] = useState<Conversation[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [newTitle, setNewTitle] = useState("");
-  const [newAgent, setNewAgent] = useState(false);
+  const [newAgent, setNewAgent] = useState(true);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+
+  const activeConv = convs?.find((c) => c.id === activeId) ?? null;
 
   const loadConvs = useCallback(async () => {
-    const res = await fetch("/api/conversations");
-    if (!res.ok) return;
-    const data = await res.json();
-    setConvs(data.conversations);
-    if (!activeId && data.conversations[0]) setActiveId(data.conversations[0].id);
-  }, [activeId]);
+    setLoadError(null);
+    const res = await callApi<{ conversations?: Conversation[] }>("/api/conversations");
+    if (!res.ok) {
+      setLoadError(res.error?.title ?? "Couldn't load conversations");
+      return;
+    }
+    const conversations = res.data?.conversations ?? [];
+    setConvs(conversations);
+    setActiveId((cur) => cur ?? conversations[0]?.id ?? null);
+  }, []);
 
   useEffect(() => {
-    loadConvs();
+    void loadConvs();
   }, [loadConvs]);
 
   useEffect(() => {
@@ -43,6 +58,10 @@ export default function MessagesPage() {
       .then((r) => r.json())
       .then((d) => setMsgs(d.messages ?? []));
   }, [activeId]);
+
+  useEffect(() => {
+    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
+  }, [msgs]);
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -56,9 +75,10 @@ export default function MessagesPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ body }),
       });
-      // refresh thread (includes the agent's reply if the conversation has one)
+      // Refresh the thread, includes the agent's reply when it participates.
       const refreshed = await fetch(`/api/conversations/${activeId}/messages`).then((r) => r.json());
       setMsgs(refreshed.messages ?? []);
+      void loadConvs();
     } finally {
       setSending(false);
     }
@@ -74,107 +94,206 @@ export default function MessagesPage() {
     });
     if (res.ok) {
       setNewTitle("");
-      setNewAgent(false);
+      setComposerOpen(false);
       const data = await res.json();
       await loadConvs();
       setActiveId(data.conversation.id);
     }
   }
 
+  if (convs === null) return <LoadingPage />;
+
+  if (!__enabled) return <ModuleDisabled label="Messages" />;
+
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight">Messages</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        Team channels and DMs. Conversations with the Chaste toggle let your AI co-worker read the
-        thread and act when colleagues ask.
-      </p>
+      <PageHeader
+        title="Messages"
+        description="Team channels and DMs. Conversations with Chaste enabled let your AI co-worker read the thread and act when colleagues ask."
+      />
 
-      <div className="grid grid-cols-[280px_1fr] gap-6">
-        <aside className="space-y-4">
-          <div className="rounded-xl border border-neutral-200 bg-white shadow-sm">
-            {convs === null && <p className="p-4 text-sm text-neutral-400">Loading…</p>}
-            {convs?.map((c) => (
+      {loadError && (
+        <EmptyState
+          icon={<IconAlertTriangle />}
+          title={loadError}
+          hint="Check your connection, then retry."
+          action={
+            <Button tone="secondary" onClick={() => void loadConvs()}>
+              Retry
+            </Button>
+          }
+        />
+      )}
+
+      <div className="grid h-[calc(100vh-240px)] min-h-[420px] gap-4 lg:grid-cols-[290px_1fr]">
+        {/* Conversation list */}
+        <aside
+          className={cn(
+            "card flex min-h-0 flex-col overflow-hidden p-0",
+            activeId && "hidden lg:flex",
+          )}
+        >
+          <div className="flex items-center justify-between border-b border-stone-100 px-4 py-2.5">
+            <h2 className="section-title">Conversations</h2>
+            <button
+              type="button"
+              aria-label="New conversation"
+              onClick={() => setComposerOpen((v) => !v)}
+              className="icon-btn size-6"
+            >
+              {composerOpen ? <IconX className="size-3.5" /> : <IconPlus className="size-4" />}
+            </button>
+          </div>
+
+          {composerOpen && (
+            <form onSubmit={createConv} className="space-y-2.5 border-b border-stone-100 bg-stone-50/60 p-3">
+              <input
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="Channel name…"
+                aria-label="New channel name"
+                className="input h-8 text-xs"
+              />
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-stone-600">
+                <input type="checkbox" checked={newAgent} onChange={(e) => setNewAgent(e.target.checked)} className="accent-maroon-700" />
+                Include Chaste (AI co-worker)
+              </label>
+              <Button type="submit" size="sm" className="w-full" disabled={!newTitle.trim()}>
+                Create
+              </Button>
+            </form>
+          )}
+
+          <div className="min-h-0 flex-1 overflow-y-auto" role="listbox" aria-label="Conversations">
+            {convs.length === 0 && <p className="p-4 text-sm text-stone-400">No conversations yet.</p>}
+            {convs.map((c) => (
               <button
                 key={c.id}
+                type="button"
+                role="option"
+                aria-selected={activeId === c.id}
                 onClick={() => setActiveId(c.id)}
-                className={`block w-full border-b border-neutral-100 px-4 py-3 text-left last:border-0 hover:bg-neutral-50 ${
-                  activeId === c.id ? "bg-emerald-50/60" : ""
-                }`}
+                className={cn(
+                  "block w-full border-b border-stone-50 px-4 py-3 text-left transition-colors duration-75",
+                  activeId === c.id ? "bg-maroon-50/70" : "hover:bg-stone-50",
+                )}
               >
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-neutral-400">{c.kind === "dm" ? "DM" : "#"}</span>
-                  <span className="truncate text-sm font-medium">{c.title}</span>
+                  {c.kind === "dm" ? (
+                    <IconBot className={cn("size-3.5 shrink-0", activeId === c.id ? "text-maroon-700" : "text-stone-400")} />
+                  ) : (
+                    <IconHash className={cn("size-3.5 shrink-0", activeId === c.id ? "text-maroon-700" : "text-stone-400")} />
+                  )}
+                  <span className="truncate text-sm font-medium text-stone-800">{c.title}</span>
                   {c.agentEnabled && (
-                    <span className="ml-auto rounded-full bg-indigo-100 px-1.5 py-0.5 font-mono text-[10px] text-indigo-700">
+                    <Badge tone="violet" className="ml-auto shrink-0">
                       chaste
-                    </span>
+                    </Badge>
                   )}
                 </div>
                 {c.lastMessage && (
-                  <p className="mt-0.5 truncate text-xs text-neutral-400">{c.lastMessage.body}</p>
+                  <p className="mt-1 truncate text-xs text-stone-400">{c.lastMessage.body}</p>
                 )}
               </button>
             ))}
           </div>
-
-          <form onSubmit={createConv} className="space-y-2 rounded-xl border border-dashed border-neutral-300 p-4">
-            <input
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="New channel name…"
-              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none"
-            />
-            <label className="flex items-center gap-2 text-xs text-neutral-600">
-              <input type="checkbox" checked={newAgent} onChange={(e) => setNewAgent(e.target.checked)} />
-              Include Chaste (AI co-worker)
-            </label>
-            <button
-              type="submit"
-              className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-            >
-              Create channel
-            </button>
-          </form>
         </aside>
 
-        <section className="flex h-[70vh] flex-col rounded-xl border border-neutral-200 bg-white shadow-sm">
-          <div className="flex-1 space-y-3 overflow-y-auto p-5">
-            {msgs.map((m) => (
-              <div key={m.id} className={`flex ${m.senderType === "human" ? "justify-start" : "justify-start"}`}>
-                <div>
-                  <p className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-neutral-400">
-                    {m.senderType === "agent" ? "Chaste · AI" : m.senderType}
-                    {" · "}
-                    {new Date(m.createdAt).toLocaleTimeString()}
-                  </p>
-                  <div
-                    className={`max-w-[85%] whitespace-pre-wrap rounded-xl px-3.5 py-2 text-sm ${
-                      m.senderType === "agent" ? "bg-indigo-50 text-indigo-950" : "bg-neutral-100"
-                    }`}
-                  >
-                    {m.body}
-                  </div>
-                </div>
+        {/* Thread */}
+        <section className={cn("card flex min-h-0 flex-col overflow-hidden p-0", !activeId && convs.length > 0 ? "hidden lg:flex" : "flex")}>
+          {activeConv ? (
+            <>
+              <header className="flex items-center gap-2 border-b border-stone-100 px-4 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveId(null)}
+                  aria-label="Back to conversations"
+                  className="icon-btn lg:hidden"
+                >
+                  <IconChevronLeft className="size-4" />
+                </button>
+                <h2 className="truncate text-sm font-semibold text-stone-800">
+                  {activeConv.kind === "dm" ? "" : "#"}
+                  {activeConv.title}
+                </h2>
+                {activeConv.agentEnabled && (
+                  <Badge tone="violet">
+                    <IconBot className="size-3" /> Chaste reads & acts here
+                  </Badge>
+                )}
+              </header>
+
+              <div ref={threadRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
+                {msgs.length === 0 && (
+                  <p className="pt-10 text-center text-sm text-stone-400">No messages yet, start the thread below.</p>
+                )}
+                {msgs.map((m) => {
+                  const isAgent = m.senderType === "agent";
+                  return (
+                    <div key={m.id} className="flex gap-2.5">
+                      {isAgent ? (
+                        <span
+                          aria-hidden="true"
+                          className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-md bg-violet-600 text-white [&_svg]:size-3"
+                        >
+                          <IconBot />
+                        </span>
+                      ) : (
+                        <span
+                          aria-hidden="true"
+                          className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-md bg-stone-300 text-[9px] font-bold text-stone-600 uppercase"
+                        >
+                          {m.senderType.slice(0, 2)}
+                        </span>
+                      )}
+                      <div className="min-w-0">
+                        <p className="mb-0.5 text-[11px] font-medium tracking-wide text-stone-400 uppercase">
+                          {isAgent ? "Chaste · AI" : m.senderType} · {timeAgo(m.createdAt)}
+                        </p>
+                        <div
+                          className={cn(
+                            "max-w-[85%] rounded-xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap",
+                            isAgent ? "bg-violet-50 text-violet-950" : "bg-stone-100 text-stone-800",
+                          )}
+                        >
+                          {m.body}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-            {msgs.length === 0 && <p className="pt-8 text-center text-sm text-neutral-400">No messages yet.</p>}
-          </div>
-          <form onSubmit={send} className="flex gap-2 border-t border-neutral-200 p-3">
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              disabled={!activeId}
-              placeholder={activeId ? "Write a message…" : "Select a conversation"}
-              className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={sending || !draft.trim()}
-              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-40"
-            >
-              Send
-            </button>
-          </form>
+
+              <form onSubmit={send} className="flex items-end gap-2 border-t border-stone-100 p-3">
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void send(e);
+                    }
+                  }}
+                  rows={1}
+                  aria-label={`Message ${activeConv.title}`}
+                  placeholder="Write a message…"
+                  className="textarea max-h-32 flex-1 resize-none py-2"
+                />
+                <button
+                  type="submit"
+                  disabled={sending || !draft.trim()}
+                  aria-label="Send message"
+                  className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-maroon-700 text-white transition-colors duration-150 hover:bg-maroon-800 disabled:pointer-events-none disabled:opacity-35"
+                >
+                  <IconSend className="size-4" />
+                </button>
+              </form>
+            </>
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-6 text-sm text-stone-400">
+              Select a conversation to read it.
+            </div>
+          )}
         </section>
       </div>
     </div>

@@ -39,7 +39,8 @@ It cannot spend above your approval threshold without sign-off. It cannot assign
 | **CRM** | Customers and deals pipeline with weighted forecasting |
 | **POS** | Register sessions, atomic cash/card sales, drawer counting with variance flagging |
 | **Purchasing** | Vendors, bills, purchase orders with goods receipts and three-way matching |
-| **Inventory** | Append-only stock ledger with moving-average cost, reorder alerts |
+| **Inventory** | Append-only stock ledger with moving-average valuation, reorder alerts, reservations, cycle counts, locations, lots |
+| **Manufacturing** | Multi-level BOMs with scrap allowances, work orders, production runs with full reversal, lot traceability |
 | **Messaging** | Team channels and DMs; the agent participates under its own authority |
 | **Creator Mode** | The agent proposes platform changes as governed artifacts; humans merge |
 
@@ -90,11 +91,11 @@ pnpm demo:m5      # register session → sales → drawer variance flagged
 
 ## Documentation
 
-- [Vision](VISION.md) — what we're building and what we won't compromise
-- [Architecture](ARCHITECTURE.md) — capability kernel, governance pipeline, memory tiers
-- [Roadmap](ROADMAP.md) — milestones and standing principles
-- [ADRs](docs/adr/) — why things are the way they are
-- [Changelog](CHANGELOG.md) — every behavioral change, per Keep a Changelog
+- [Vision](VISION.md), what we're building and what we won't compromise
+- [Architecture](ARCHITECTURE.md), capability kernel, governance pipeline, memory tiers
+- [Roadmap](ROADMAP.md), milestones and standing principles
+- [ADRs](docs/adr/), why things are the way they are
+- [Changelog](CHANGELOG.md), every behavioral change, per Keep a Changelog
 
 ## Contributing
 

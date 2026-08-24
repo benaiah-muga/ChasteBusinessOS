@@ -1,6 +1,6 @@
-# ChasteBusinessOS — Architecture Blueprint
+# ChasteBusinessOS, Architecture Blueprint
 
-> An agentic ERP where every human action can also be done by an AI agent — safely,
+> An agentic ERP where every human action can also be done by an AI agent, safely,
 > auditably, and under human authority. The business owner describes their business in
 > plain language; the system configures and operates as much as possible on their behalf.
 
@@ -15,12 +15,12 @@ ERP = Domain Model + Business Harness
 ```
 
 - The **Domain Model** is deterministic double-entry accounting, inventory math,
-  payroll rules — code that must never hallucinate.
+  payroll rules, code that must never hallucinate.
 - The **Business Harness** is everything that lets an AI (or human) act inside the
   domain model safely: capabilities, permissions, approvals, effect-tracking, audit,
   memory, and the loop.
 
-The model proposes; **the harness disposes**. An LLM never writes a journal entry —
+The model proposes; **the harness disposes**. An LLM never writes a journal entry,
 it calls a capability whose execution goes through validation, permission checks,
 policy thresholds, and an append-only audit trail. This is why enterprises can trust it.
 
@@ -28,9 +28,9 @@ policy thresholds, and an append-only audit trail. This is why enterprises can t
 
 | Their idea | Our adaptation |
 |---|---|
-| "Everything is a plugin" (Cordis kernel) | Every ERP feature surface — tools, workflows, UI panels, report types — registers as a **Capability** in a typed registry. No hardcoded agent logic in modules. |
-| **Temporal composability** — revertible effects | Every state-changing action carries a declared **inverse** (compensating action). Postings reverse via reversal entries; nothing is ever mutated destructively without an undo path. |
-| **Spatial composability** — reactive coeffects | Capabilities declare dependencies (`requires`, `provides`, `invalidates`). Changing a customer's credit terms invalidates dependent open quotes reactively. |
+| "Everything is a plugin" (Cordis kernel) | Every ERP feature surface, tools, workflows, UI panels, report types, registers as a **Capability** in a typed registry. No hardcoded agent logic in modules. |
+| **Temporal composability**, revertible effects | Every state-changing action carries a declared **inverse** (compensating action). Postings reverse via reversal entries; nothing is ever mutated destructively without an undo path. |
+| **Spatial composability**, reactive coeffects | Capabilities declare dependencies (`requires`, `provides`, `invalidates`). Changing a customer's credit terms invalidates dependent open quotes reactively. |
 | Append-only session log / Trajectory view | One **Event Ledger**: append-only, replayable, forkable record of everything the agent saw, decided, and did. Doubles as the enterprise audit log. |
 | Running modes (Standard / PTC / Minimal / Creative) | **Assist**, **Autopilot** (policy-bounded autonomy), **Creator** (self-development, gated), each mode just re-composes capabilities. |
 | KV-cache-friendly context engineering | Stable system prefix → org profile → module docs → task suffix. Cache hit rate is a first-class metric. |
@@ -40,7 +40,7 @@ policy thresholds, and an append-only audit trail. This is why enterprises can t
 
 ## 2. The Capability Kernel
 
-The heart of the system. A `Capability` is the atomic unit — one thing an agent or
+The heart of the system. A `Capability` is the atomic unit, one thing an agent or
 human can do:
 
 ```ts
@@ -58,7 +58,7 @@ interface Capability<I, O> {
 }
 ```
 
-Every action — by human UI click or agent tool-call — funnels through the same
+Every action, by human UI click or agent tool-call, funnels through the same
 `Capability.execute`. There is exactly **one** execution path, so there is exactly one
 place to enforce security, one place to audit, and the AI can do *everything* the human
 can because they share the same contract.
@@ -74,12 +74,12 @@ intent → resolve capability → validate input → check actor permissions
 
 Risk classes and defaults (org-configurable):
 
-- `read` — autonomous
-- `write` — autonomous below policy thresholds
-- `money` — approval required above configurable amount (e.g. > $500)
-- `identity` — role assignment, permission grants → **always** human-approved
-- `destructive` — deletion, period closing → always approved, always reversible-first
-- `secret` — credential handling → never visible to models, only references
+- `read`, autonomous
+- `write`, autonomous below policy thresholds
+- `money`, approval required above configurable amount (e.g. > $500)
+- `identity`, role assignment, permission grants → **always** human-approved
+- `destructive`, deletion, period closing → always approved, always reversible-first
+- `secret`, credential handling → never visible to models, only references
 
 Approvals are themselves first-class workflow objects: proposed action rendered as
 human-readable diff, approve/reject with comment, expiry, delegated authority.
@@ -98,9 +98,9 @@ ReAct-style single-agent loop with subagent fan-out for heavy work:
 5. Blocked ≠ hallucinated: unknown capability ⇒ ticket creation + honest reply.
 
 Three tiers of memory (context-rot aware):
-- **Working** — current trajectory window
-- **Session** — summarized mid-term state, persisted per conversation
-- **Org memory** — pgvector-backed semantic store: business description, SOPs,
+- **Working**, current trajectory window
+- **Session**, summarized mid-term state, persisted per conversation
+- **Org memory**, pgvector-backed semantic store: business description, SOPs,
   preferences, past decisions ("we always give returning customers 2% discount")
 
 Embeddings: NVIDIA NIM `nvidia/nv-embedqa-e5-v5` (free tier). Retrieval = vector
@@ -116,7 +116,7 @@ Users with `platform.creator` permission switch modes; the agent then builds fea
 - Works on a git branch in a dev container; runs tests/linters itself.
 - Produces a **Change Proposal**: diff + generated test evidence + risk assessment.
 - Human merges; deployment is CI-gated. The agent never touches production runtime.
-- New capabilities authored this way register through the same kernel contracts —
+- New capabilities authored this way register through the same kernel contracts,
   the platform eats its own dog food.
 
 This mirrors dsh's Creative Mode but adds the enterprise missing piece: proposals are
@@ -150,18 +150,17 @@ Model routing (all via NVIDIA NIM unless overridden):
 | Repo | Turborepo + pnpm workspaces | parallel builds, shared versioning, clean package boundaries |
 | Language | TypeScript (strict) end-to-end | one type system from DB to UI; agents generate typed code |
 | Web | Next.js 15 (App Router, RSC) | server components for dense ERP grids; streaming agent UIs |
-| API | tRPC v11 + server actions | end-to-end types without REST ceremony |
+| API | Next.js route handlers + Zod boundaries | thin adapters over the capability kernel; tRPC considered, not needed yet |
 | DB | PostgreSQL 16 + Drizzle ORM | relational integrity is non-negotiable for accounting; SQL-native migrations |
 | Vectors | pgvector | no extra infra; joins with transactional data; HNSW indexes |
 | Auth | better-auth (multi-org) | TS-first, org/team plugins, passkeys ready |
-| UI | Tailwind v4 + shadcn/ui + TanStack Query/Table | speed, accessibility, ERP-grade data grids |
+| UI | Tailwind v4 + shadcn/ui | speed, accessibility; shared `ui/` package is a future extraction, not built |
 | Validation | Zod 4 | shared schemas across kernel/UI/LLM function-calling |
-| State machine | XState for long-running workflows (approvals, payroll runs) | inspectable, resumable processes |
-| Jobs | pg-boss (Postgres-backed queues) | no Redis dependency initially; transactions + queue consistency |
-| Observability | OpenTelemetry traces + structured pino logs; trajectory ledger in DB | trace every agent decision to its source data |
-| Testing | Vitest (unit) + Playwright (e2e); property-based tests for ledger invariants | double-entry balance is a property, not a test case |
+| Jobs | none yet (synchronous in-request) | document ingestion/OCR will move to a Postgres-backed queue before GA |
+| Observability | console logging + event ledger in DB | structured pino logs and OpenTelemetry traces are planned, not wired |
+| Testing | Vitest (unit + DB integration); property-based tests for ledger invariants | double-entry balance is a property, not a test case; Playwright e2e planned |
 
-Monorepo layout:
+Monorepo layout (as actually built):
 
 ```
 apps/
@@ -169,13 +168,12 @@ apps/
 packages/
   kernel/         capability registry, governance pipeline, event ledger, agent loop
   db/             drizzle schema + migrations (all modules)
-  ai/             provider adapters (NIM, openai-compat), model router, embeddings
-  auth/           better-auth config, org/RBAC
+  ai/             provider adapters (NIM, openai-compat), embeddings
   erp-core/       pure domain logic: posting rules, tax, inventory math (no IO)
-  ui/             shared component library
-modules/          ERP modules (each exports capabilities + UI + schema slices)
-  accounting/ finance/ hr/ manufacturing/ pos/ purchasing/ crm/
-tooling/          eslint, tsconfig presets
+  plugin-kit/     signed plugin manifest format for marketplace capabilities
+modules/          ERP modules (each exports capabilities over @chaste/db)
+  accounting/ purchasing/ pos/ crm/ hr/ inventory/ manufacturing/ iam/
+  messaging/ documents/ creator/
 ```
 
 Domain rule: `erp-core` is pure functions; `modules/*` may touch DB via `db`;
@@ -190,7 +188,7 @@ only `kernel` executes capabilities; only humans approve `identity/destructive`.
 2. **Multi-tenant by row.** Every table carries `org_id`; RLS policies as defense-in-depth.
 3. **Money as integer minor units.** Currency-aware, never floats.
 4. **Ledger invariants as DB constraints.** A posting that unbalances its entry cannot
-   be written at all — the agent literally cannot corrupt books if it wanted to.
+   be written at all, the agent literally cannot corrupt books if it wanted to.
 5. **Event Ledger is sacred.** Hash-chained entries (pgcrypto) so audits detect tampering.
 
 ## 8. UX Principles

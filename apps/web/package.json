@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@chaste/ai": "workspace:*",
@@ -17,35 +18,31 @@
     "@chaste/module-accounting": "workspace:*",
     "@chaste/module-creator": "workspace:*",
     "@chaste/module-crm": "workspace:*",
+    "@chaste/module-documents": "workspace:*",
     "@chaste/module-hr": "workspace:*",
     "@chaste/module-iam": "workspace:*",
     "@chaste/module-inventory": "workspace:*",
+    "@chaste/module-manufacturing": "workspace:*",
     "@chaste/module-messaging": "workspace:*",
     "@chaste/module-pos": "workspace:*",
     "@chaste/module-purchasing": "workspace:*",
+    "@chaste/module-support": "workspace:*",
+    "@chaste/plugin-kit": "workspace:*",
     "better-auth": "^1.7.1",
     "drizzle-orm": "^0.44.5",
     "next": "^15.5.4",
+    "nodemailer": "^9.0.5",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "zod": "^4.1.5",
-    "@chaste/module-accounting": "workspace:*",
-    "@chaste/module-crm": "workspace:*",
-    "@chaste/erp-core": "workspace:*",
-    "@chaste/module-messaging": "workspace:*",
-    "@chaste/module-purchasing": "workspace:*",
-    "@chaste/module-pos": "workspace:*",
-    "@chaste/module-iam": "workspace:*",
-    "@chaste/module-inventory": "workspace:*",
-    "@chaste/module-creator": "workspace:*",
-    "@chaste/module-documents": "workspace:*",
-    "@chaste/module-hr": "workspace:*"
+    "zod": "^4.1.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.13",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "tailwindcss": "^4.1.13",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

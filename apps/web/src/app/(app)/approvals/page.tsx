@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  Button,
+  EmptyState,
+  LoadingPage,
+  ActionNotice,
+  type ActionNoticeState,
+  PageHeader,
+  RiskBadge,
+} from "@/components/ui";
+import { IconAlertTriangle, IconCircleCheck, IconInbox } from "@/components/icons";
+import { callApi, postApi } from "@/lib/api";
 
 interface Approval {
   id: string;
@@ -15,37 +27,42 @@ interface Approval {
 export default function ApprovalsPage() {
   const router = useRouter();
   const [approvals, setApprovals] = useState<Approval[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<ActionNoticeState | null>(null);
 
-  async function load() {
-    const res = await fetch("/api/approvals");
-    if (res.ok) {
-      const data = await res.json();
-      setApprovals(data.approvals);
+  const load = useCallback(async () => {
+    setLoadError(null);
+    const res = await callApi<{ approvals: Approval[] }>("/api/approvals");
+    if (!res.ok) {
+      setLoadError(res.error?.title ?? "Couldn't load approvals");
+      return;
     }
-  }
+    setApprovals(res.data!.approvals);
+  }, []);
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, [load]);
 
   async function decide(id: string, decision: "approve" | "reject") {
     setBusyId(id);
-    setNotice(null);
     try {
-      const res = await fetch(`/api/approvals?id=${id}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "failed");
-      setNotice(decision === "approve" ? "Approved and executed." : "Rejected.");
+      const res = await postApi<{ ok?: boolean }>(`/api/approvals?id=${id}`, { decision });
+      if (res.status === 422 && res.error) {
+        // Execution failed after approval, the gate held, the action didn't land.
+        setNotice({ tone: "error", error: res.error });
+      } else if (!res.ok) {
+        setNotice({ tone: "error", error: res.error! });
+      } else {
+        setNotice(
+          decision === "approve"
+            ? { tone: "success", text: "Approved and executed, the result is in the ledger." }
+            : { tone: "success", text: "Rejected. The action was not executed and the decision is on record." },
+        );
+      }
       await load();
       router.refresh();
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyId(null);
     }
@@ -53,60 +70,74 @@ export default function ApprovalsPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight">Approvals</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        Actions that need human authority — money above thresholds, identity changes, destructive
-        operations. Nothing executes until you decide.
-      </p>
+      <PageHeader
+        title="Approvals"
+        description="Actions that need human authority, money above thresholds, identity changes, destructive operations. Nothing executes until you decide."
+        actions={approvals && approvals.length > 0 ? <span className="text-sm font-medium text-stone-500">{approvals.length} waiting</span> : undefined}
+      />
 
-      {notice && <p className="mb-4 rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-800">{notice}</p>}
-
-      {approvals === null && <p className="text-sm text-neutral-400">Loading…</p>}
-      {approvals?.length === 0 && (
-        <p className="rounded-xl border border-dashed border-neutral-300 px-6 py-10 text-center text-sm text-neutral-400">
-          Inbox zero. The agent is within policy.
-        </p>
+      {notice && (
+        <ActionNotice state={notice.tone === "error" ? notice : { ...notice, text: <>{notice.text} <Link href="/ledger">View in the ledger</Link></> }} onDismiss={() => setNotice(null)} />
       )}
 
-      <div className="space-y-4">
-        {approvals?.map((a) => (
-          <div key={a.id} className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-            <div className="mb-3 flex items-center gap-3">
-              <span className={`rounded-full px-2.5 py-0.5 font-mono text-xs ${
-                a.riskClass === "money" ? "bg-amber-100 text-amber-800" :
-                a.riskClass === "identity" || a.riskClass === "destructive" ? "bg-red-100 text-red-800" :
-                "bg-neutral-100 text-neutral-700"
-              }`}>
-                {a.riskClass}
-              </span>
-              <span className="font-mono text-sm font-medium">{a.capabilityId}</span>
-              <span className="ml-auto font-mono text-xs text-neutral-400">
-                {new Date(a.createdAt).toLocaleString()}
-              </span>
-            </div>
-            <pre className="mb-2 max-h-48 overflow-auto rounded-lg bg-neutral-950 p-4 text-xs leading-relaxed text-emerald-200">
-              {JSON.stringify(a.payload, null, 2)}
-            </pre>
-            <p className="mb-4 text-xs text-neutral-500">{a.rationale}</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => decide(a.id, "approve")}
-                disabled={busyId === a.id}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-40"
-              >
-                Approve & execute
-              </button>
-              <button
-                onClick={() => decide(a.id, "reject")}
-                disabled={busyId === a.id}
-                className="rounded-lg border border-neutral-300 px-4 py-2 text-sm hover:bg-neutral-50 disabled:opacity-40"
-              >
-                Reject
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+      {loadError && !approvals ? (
+        <EmptyState
+          icon={<IconAlertTriangle />}
+          title={loadError}
+          hint="Check your connection, then retry."
+          action={
+            <Button tone="secondary" onClick={() => void load()}>
+              Retry
+            </Button>
+          }
+        />
+      ) : approvals === null ? (
+        <LoadingPage />
+      ) : approvals.length === 0 ? (
+        <EmptyState icon={<IconInbox />} title="Inbox zero" hint="The agent is within policy, nothing is waiting on your authority." />
+      ) : (
+        <div className="space-y-4">
+          {approvals.map((a) => (
+            <article key={a.id} className="card overflow-hidden p-0">
+              {/* Header strip */}
+              <header className="flex flex-wrap items-center gap-2.5 border-b border-stone-100 bg-stone-50/60 px-5 py-3">
+                <RiskBadge risk={a.riskClass} />
+                <span className="font-mono text-[13px] font-medium text-stone-800">{a.capabilityId}</span>
+                <time className="ml-auto text-xs whitespace-nowrap text-stone-400" dateTime={a.createdAt}>
+                  {new Date(a.createdAt).toLocaleString()}
+                </time>
+              </header>
+
+              <div className="p-5">
+                {a.rationale && (
+                  <blockquote className="mb-4 border-l-2 border-maroon-300 pl-3.5 text-sm leading-relaxed text-stone-600 italic">
+                    {a.rationale}
+                  </blockquote>
+                )}
+
+                <details open>
+                  <summary className="mb-2 cursor-pointer text-[11px] font-semibold tracking-wider text-stone-400 uppercase select-none hover:text-stone-600">
+                    Proposed action · evidence
+                  </summary>
+                  <pre className="max-h-56 overflow-auto rounded-lg bg-stone-950 p-4 font-mono text-xs leading-relaxed text-stone-200">
+                    {JSON.stringify(a.payload, null, 2)}
+                  </pre>
+                </details>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button loading={busyId === a.id} onClick={() => decide(a.id, "approve")}>
+                    <IconCircleCheck className="size-4" />
+                    Approve &amp; execute
+                  </Button>
+                  <Button tone="dangerSecondary" disabled={busyId === a.id} onClick={() => decide(a.id, "reject")}>
+                    Reject
+                  </Button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

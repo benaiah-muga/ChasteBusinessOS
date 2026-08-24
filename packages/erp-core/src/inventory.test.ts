@@ -6,8 +6,28 @@ import {
   matchThreeWay,
   needsReorder,
   onHand,
+  replayValuation,
   type CostedMovement,
 } from "./inventory";
+
+describe("replayValuation", () => {
+  it("rebuilds quantity and value from an append-only history", () => {
+    const state = replayValuation([
+      { quantityDelta: 10_000, unitCostMinor: 500 },
+      { quantityDelta: -4_000 },
+      { quantityDelta: 2_000, unitCostMinor: 700 },
+    ]);
+    expect(state.quantityOnHand).toBe(8_000);
+    // 10×500 = 5000; out 4 at avg 500 → −2000 → 3000; in 2×700 = +1400
+    expect(state.totalValueMinor).toBe(4_400);
+  });
+
+  it("refuses histories that would drive stock negative", () => {
+    expect(() =>
+      replayValuation([{ quantityDelta: 1_000, unitCostMinor: 100 }, { quantityDelta: -5_000 }]),
+    ).toThrow(/insufficient/);
+  });
+});
 
 const SEED = 20260822;
 const opts = { seed: SEED, numRuns: 300 };

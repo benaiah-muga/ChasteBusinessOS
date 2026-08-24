@@ -54,11 +54,13 @@ async function main() {
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth() + 1;
   const day = (n: number) => new Date(Date.UTC(y, m - 1, n));
+  // requestLeave takes ISO date strings (JSON-Schema-safe for tool use).
+  const isoDay = (n: number) => day(n).toISOString().slice(0, 10);
   const leaveReq = await executor.execute("hr.requestLeave", agentCtx, {
     employeeId: bob.data!.employeeId as string,
     kind: "unpaid",
-    startDate: day(1),
-    endDate: day(2),
+    startDate: isoDay(1),
+    endDate: isoDay(2),
   });
   if (!leaveReq.ok || !leaveReq.data) throw new Error(leaveReq.error ?? "leave failed");
   const decided = await executor.execute("hr.decideLeave", humanCtx, {
@@ -68,7 +70,7 @@ async function main() {
   if (!decided.ok) throw new Error(decided.error ?? "decide failed");
   console.log("✓ Bob's 2-day unpaid leave approved");
 
-  // Draft the run — proration should reduce only Bob.
+  // Draft the run, proration should reduce only Bob.
   const draft = await executor.execute("hr.createPayrollRun", agentCtx, { year: y, month: m });
   if (!draft.ok || !draft.data) throw new Error(draft.error ?? "draft failed");
   console.log(
@@ -87,7 +89,7 @@ async function main() {
   }
   console.log(`✓ proration correct: Alice ${formatMinor(aliceNetExpected)} + Bob ${formatMinor(bobNetExpected)} (2 days docked)`);
 
-  // A wrong expected total refuses to run — even by a human, even pre-approval.
+  // A wrong expected total refuses to run, even by a human, even pre-approval.
   const tampered = await executor.execute("hr.executePayrollRun", humanCtx, {
     runId: draft.data.runId as string,
     expectedTotalNetMinor: 1,

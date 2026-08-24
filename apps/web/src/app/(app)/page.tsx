@@ -1,14 +1,21 @@
-import { ChatConsole } from "./chat-console";
+import type { Metadata } from "next";
+import { eq } from "drizzle-orm";
+import { getDb, organizations } from "@chaste/db";
+import { getResolvedUser } from "@/server/session";
+import { HomeDashboard } from "./home-dashboard";
 
-export default function ConsolePage() {
-  return (
-    <div>
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight">Console</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        Work alongside your agent. Everything it does goes through the same governed path as you —
-        approvals land in the inbox, everything lands in the ledger.
-      </p>
-      <ChatConsole />
-    </div>
-  );
+export const metadata: Metadata = { title: "Home" };
+
+export default async function HomePage() {
+  const resolved = await getResolvedUser();
+  let orgName = "";
+  if (resolved?.orgId) {
+    const [org] = await getDb()
+      .db.select({ name: organizations.name })
+      .from(organizations)
+      .where(eq(organizations.id, resolved.orgId))
+      .limit(1);
+    orgName = org?.name ?? "";
+  }
+  return <HomeDashboard orgName={orgName} />;
 }

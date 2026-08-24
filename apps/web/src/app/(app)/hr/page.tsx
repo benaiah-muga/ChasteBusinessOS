@@ -1,6 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  CardTitle,
+  ConfirmDialog,
+  EmptyState,
+  LoadingPage,
+  ActionNotice,
+  type ActionNoticeState,
+  PageHeader,
+  StatCard,
+} from "@/components/ui";
+import { IconCalendar, IconInbox, IconUsers } from "@/components/icons";
+import { formatMoney, statusTone, toMinor } from "@/lib/format";
+import { useRouter } from "next/navigation";
+import { callApi, postApi } from "@/lib/api";
+import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 
 interface Employee {
   id: string;
@@ -33,53 +52,56 @@ interface Run {
   headcount: number;
 }
 
-const usd = (minor: number) => `$${(minor / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 export default function HrPage() {
+  const __enabled = useModuleEnabled("hr");
+  const router = useRouter();
   const [data, setData] = useState<{ employees: Employee[]; leave: LeaveRow[]; runs: Run[] } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<ActionNoticeState | null>(null);
 
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [salary, setSalary] = useState("");
   const now = new Date();
-  const [runYear, setRunYear] = useState(now.getFullYear());
-  const [runMonth, setRunMonth] = useState(now.getMonth() + 1);
+  const [runPeriod, setRunPeriod] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+  const [deactivateTarget, setDeactivateTarget] = useState<Employee | null>(null);
 
   const load = useCallback(async () => {
-    const d = await fetch("/api/hr").then((r) => r.json());
-    setData({ employees: d.employees ?? [], leave: d.leave ?? [], runs: d.runs ?? [] });
+    const res = await callApi<{ employees?: Employee[]; leave?: LeaveRow[]; runs?: Run[] }>("/api/hr");
+    setData({
+      employees: res.data?.employees ?? [],
+      leave: res.data?.leave ?? [],
+      runs: res.data?.runs ?? [],
+    });
+    if (!res.ok) setMessage({ tone: "error", error: res.error! });
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  async function action(payload: Record<string, unknown>, label: string) {
+  async function action(payload: Record<string, unknown>, label: string): Promise<boolean> {
     setBusy(true);
-    setMessage(null);
     try {
-      const res = await fetch("/api/hr", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (res.status === 202) setMessage(`${label}: needs approval — see Approvals.`);
-      else if (json.ok) setMessage(`${label}: done.`);
-      else setMessage(`${label} failed: ${json.error ?? "unknown error"}`);
+      const res = await postApi<{ ok?: boolean; error?: string }>("/api/hr", payload);
+      if (res.status === 202) setMessage({ tone: "pending", text: `${label}: needs approval, see Approvals.` });
+      else if (!res.ok) setMessage({ tone: "error", error: res.error! });
+      else setMessage({ tone: "success", text: `${label} done.` });
       await load();
-      return json.ok === true || res.status === 202;
+      return res.ok;
     } finally {
       setBusy(false);
+      router.refresh();
     }
   }
 
   async function hire() {
-    if (!name.trim() || !salary) return setMessage("Name and salary are required.");
+    if (!name.trim() || !salary) {
+      setMessage({ tone: "error", error: { title: "Missing details", hint: "Name and monthly salary are both required." } });
+      return;
+    }
     const ok = await action(
-      { action: "hireEmployee", name, title: title || undefined, monthlySalaryMinor: Math.round(parseFloat(salary) * 100) },
+      { action: "hireEmployee", name, title: title || undefined, monthlySalaryMinor: toMinor(salary) },
       "Hire",
     );
     if (ok) {
@@ -90,170 +112,206 @@ export default function HrPage() {
   }
 
   async function draftRun() {
-    const ok = await action({ action: "createPayrollRun", year: runYear, month: runMonth }, "Draft payroll");
-    if (ok) setMessage("Draft payroll ready — review the totals, then execute.");
+    const [y, m] = runPeriod.split("-").map(Number);
+    if (!y || !m) {
+      setMessage({ tone: "error", error: { title: "Pick a payroll period", hint: "Choose the month this run covers." } });
+      return;
+    }
+    const ok = await action({ action: "createPayrollRun", year: y, month: m }, "Draft payroll");
+    if (ok) setMessage({ tone: "info", text: "Draft payroll ready, review the totals, then execute." });
   }
 
-  const activeStaff = data?.employees.filter((e) => e.active) ?? [];
-  const pendingLeave = data?.leave.filter((l) => l.status === "pending") ?? [];
-  const draftRunRow = data?.runs.find((r) => r.status === "draft");
+  if (!data) return <LoadingPage />;
+
+  const activeStaff = data.employees.filter((e) => e.active);
+  const pendingLeave = data.leave.filter((l) => l.status === "pending");
+  const draftRunRow = data.runs.find((r) => r.status === "draft");
+  const executedRuns = data.runs.filter((r) => r.status !== "draft");
+  const lastExecuted = executedRuns[0];
+  const monthlyPayroll = activeStaff.reduce((s, e) => s + e.monthlySalaryMinor, 0);
+
+  if (!__enabled) return <ModuleDisabled label="HR & Payroll" />;
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight">HR &amp; Payroll</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        Employees, leave and gated payroll. Executing a run posts one balanced ledger entry — salary
-        expense debited, net cash credited, withholding held as a liability — always above a human
-        approval gate.
-      </p>
+      <PageHeader
+        title="HR & Payroll"
+        description="Employees, leave and gated payroll. Executing a run posts one balanced entry, salary expense debited, net cash credited, withholding held as a liability, always behind a human approval gate."
+      />
 
-      {message && (
-        <p className={`mb-4 rounded-lg border px-4 py-2 text-sm ${
-          message.includes("failed") ? "border-red-200 bg-red-50 text-red-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"
-        }`}>{message}</p>
-      )}
+      {message && <ActionNotice state={message} onDismiss={() => setMessage(null)} />}
+
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard label="Active staff" value={activeStaff.length} />
+        <StatCard label="Monthly payroll" value={formatMoney(monthlyPayroll)} />
+        <StatCard label="Pending leave" value={pendingLeave.length} tone={pendingLeave.length > 0 ? "warn" : "default"} />
+        <StatCard
+          label="Last run"
+          value={lastExecuted ? formatMoney(lastExecuted.totalNetMinor) : "-"}
+          sub={lastExecuted ? `net · ${lastExecuted.year}-${String(lastExecuted.month).padStart(2, "0")}` : undefined}
+          tone="accent"
+        />
+      </div>
 
       {/* Payroll */}
-      <div className="mb-6 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">Payroll</h2>
+      <Card className="mb-4">
+        <CardTitle right={draftRunRow ? <Badge tone="amber">draft</Badge> : undefined}>Payroll run</CardTitle>
         {draftRunRow ? (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm">
-              Draft for {draftRunRow.year}-{String(draftRunRow.month).padStart(2, "0")}:{" "}
-              <span className="font-mono">{draftRunRow.headcount}</span> people · gross{" "}
-              <span className="font-mono">{usd(draftRunRow.totalGrossMinor)}</span> · tax{" "}
-              <span className="font-mono">{usd(draftRunRow.totalTaxMinor)}</span> · net{" "}
-              <span className="font-mono font-semibold">{usd(draftRunRow.totalNetMinor)}</span>
+          <div>
+            <p className="text-sm text-stone-500">
+              Draft for <strong className="text-stone-800">{draftRunRow.year}-{String(draftRunRow.month).padStart(2, "0")}</strong>,
+              review the totals, then execute (an approval will be requested).
             </p>
-            <div className="flex gap-2">
-              <button
+            <dl className="mt-3 grid grid-cols-3 gap-3">
+              <StatCard label="Gross" value={formatMoney(draftRunRow.totalGrossMinor)} />
+              <StatCard label="Withholding" value={formatMoney(draftRunRow.totalTaxMinor)} />
+              <StatCard label="Net pay" value={formatMoney(draftRunRow.totalNetMinor)} sub={`${draftRunRow.headcount} people`} tone="accent" />
+            </dl>
+            <div className="mt-4 flex gap-2 border-t border-stone-100 pt-4">
+              <Button
+                loading={busy}
                 onClick={() =>
                   action(
-                    { action: "executePayrollRun", runId: draftRunRow.id, expectedTotalNetMinor: draftRunRow.totalNetMinor },
+                    {
+                      action: "executePayrollRun",
+                      runId: draftRunRow.id,
+                      expectedTotalNetMinor: draftRunRow.totalNetMinor,
+                    },
                     "Execute payroll",
                   )
                 }
-                disabled={busy}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
               >
-                Execute
-              </button>
-              <button
-                onClick={() => action({ action: "voidPayrollRun", runId: draftRunRow.id }, "Void draft")}
-                disabled={busy}
-                className="rounded border border-neutral-300 px-3 py-2 text-xs hover:border-red-500 hover:text-red-700 disabled:opacity-40"
-              >
+                Execute payroll…
+              </Button>
+              <Button tone="dangerSecondary" loading={busy} onClick={() => action({ action: "voidPayrollRun", runId: draftRunRow.id }, "Void draft")}>
                 Void draft
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-3">
-            <input
-              type="number"
-              value={runMonth}
-              min={1}
-              max={12}
-              onChange={(e) => setRunMonth(Number(e.target.value))}
-              className="w-20 rounded border border-neutral-300 px-2 py-1.5 text-sm"
-            />
-            <input
-              type="number"
-              value={runYear}
-              onChange={(e) => setRunYear(Number(e.target.value))}
-              className="w-24 rounded border border-neutral-300 px-2 py-1.5 text-sm"
-            />
-            <button
-              onClick={draftRun}
-              disabled={busy || activeStaff.length === 0}
-              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-            >
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-44">
+              <label htmlFor="period" className="label">
+                Period
+              </label>
+              <input
+                id="period"
+                type="month"
+                value={runPeriod}
+                onChange={(e) => setRunPeriod(e.target.value)}
+                className="input"
+              />
+            </div>
+            <Button onClick={draftRun} loading={busy} disabled={activeStaff.length === 0}>
+              <IconCalendar className="size-3.5" />
               Draft payroll
-            </button>
-            {activeStaff.length === 0 && <span className="text-xs text-neutral-400">hire someone first</span>}
+            </Button>
+            {activeStaff.length === 0 && <p className="pb-2 text-xs text-stone-400">Hire someone first.</p>}
           </div>
         )}
 
-        {data && data.runs.length > 0 && (
-          <table className="mt-4 w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 font-mono text-xs uppercase text-neutral-500">
+        {executedRuns.length > 0 && (
+          <table className="data-table mt-5 border-t border-stone-100">
+            <thead>
               <tr>
-                <th className="py-2">Period</th>
-                <th className="py-2">Status</th>
-                <th className="py-2">Headcount</th>
-                <th className="py-2">Gross</th>
-                <th className="py-2">Net</th>
+                <th>Period</th>
+                <th>Status</th>
+                <th className="text-right">Headcount</th>
+                <th className="text-right">Gross</th>
+                <th className="text-right">Net</th>
               </tr>
             </thead>
             <tbody>
-              {data.runs.map((r) => (
-                <tr key={r.id} className="border-b border-neutral-100 last:border-0">
-                  <td className="py-2 font-mono text-xs">{r.year}-{String(r.month).padStart(2, "0")}</td>
-                  <td className="py-2">
-                    <span className={`rounded-full px-2 py-0.5 font-mono text-xs ${
-                      r.status === "executed" ? "bg-emerald-100 text-emerald-800"
-                      : r.status === "voided" ? "bg-red-100 text-red-800"
-                      : "bg-amber-100 text-amber-800"}`}>
-                      {r.status}
-                    </span>
+              {executedRuns.map((r) => (
+                <tr key={r.id}>
+                  <td className="font-mono text-xs">
+                    {r.year}-{String(r.month).padStart(2, "0")}
                   </td>
-                  <td className="py-2">{r.headcount}</td>
-                  <td className="py-2 font-mono text-xs">{usd(r.totalGrossMinor)}</td>
-                  <td className="py-2 font-mono text-xs">{usd(r.totalNetMinor)}</td>
+                  <td>
+                    <Badge tone={statusTone(r.status)}>{r.status}</Badge>
+                  </td>
+                  <td className="num">{r.headcount}</td>
+                  <td className="num">{formatMoney(r.totalGrossMinor)}</td>
+                  <td className="num font-medium">{formatMoney(r.totalNetMinor)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </div>
+      </Card>
 
       {/* Hiring */}
-      <div className="mb-6 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">Hire</h2>
-        <div className="grid gap-3 sm:grid-cols-[2fr_2fr_1fr_auto] sm:items-end">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name"
-            className="rounded border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none" />
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (optional)"
-            className="rounded border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none" />
-          <input value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="Monthly $"
-            inputMode="decimal"
-            className="rounded border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none" />
-          <button onClick={hire} disabled={busy}
-            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">
+      <Card className="mb-4">
+        <CardTitle>Hire</CardTitle>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void hire();
+          }}
+          className="grid gap-3 sm:grid-cols-[1.2fr_1fr_0.7fr_auto] sm:items-end"
+        >
+          <div>
+            <label htmlFor="hire-name" className="label">
+              Full name
+            </label>
+            <input id="hire-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ada Lovelace" className="input" />
+          </div>
+          <div>
+            <label htmlFor="hire-title" className="label">
+              Title <span className="font-normal text-stone-400">(optional)</span>
+            </label>
+            <input id="hire-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Designer" className="input" />
+          </div>
+          <div>
+            <label htmlFor="hire-salary" className="label">
+              Monthly salary
+            </label>
+            <input
+              id="hire-salary"
+              value={salary}
+              onChange={(e) => setSalary(e.target.value)}
+              inputMode="decimal"
+              placeholder="$"
+              className="input"
+            />
+          </div>
+          <Button type="submit" loading={busy}>
             Hire
-          </button>
-        </div>
-      </div>
+          </Button>
+        </form>
+      </Card>
 
-      {/* Staff table */}
-      {data && data.employees.length > 0 && (
-        <div className="mb-6 overflow-x-auto rounded-xl border border-neutral-200 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 bg-neutral-50 font-mono text-xs uppercase tracking-wide text-neutral-500">
+      {/* Staff */}
+      {data.employees.length > 0 ? (
+        <div className="table-shell mb-4">
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Monthly</th>
-                <th className="px-4 py-3">Tax</th>
-                <th className="px-4 py-3"></th>
+                <th>Name</th>
+                <th>Title</th>
+                <th className="text-right">Monthly</th>
+                <th className="text-right">Tax rate</th>
+                <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {data.employees.map((e) => (
-                <tr key={e.id} className="border-b border-neutral-100 last:border-0 hover:bg-neutral-50">
-                  <td className={`px-4 py-2.5 font-medium ${e.active ? "" : "text-neutral-400 line-through"}`}>{e.name}</td>
-                  <td className="px-4 py-2.5 text-neutral-600">{e.title ?? "—"}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{usd(e.monthlySalaryMinor)}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{(e.taxRateBps / 100).toFixed(1)}%</td>
-                  <td className="px-4 py-2.5 text-right">
+                <tr key={e.id}>
+                  <td>
+                    <span className="flex items-center gap-2.5">
+                      <Avatar name={e.name} className="size-7" />
+                      <span className={!e.active ? "text-stone-400 line-through" : "font-medium text-stone-800"}>{e.name}</span>
+                      {!e.active && <Badge>inactive</Badge>}
+                    </span>
+                  </td>
+                  <td className="text-stone-600">{e.title ?? "-"}</td>
+                  <td className="num">{formatMoney(e.monthlySalaryMinor)}</td>
+                  <td className="num">{(e.taxRateBps / 100).toFixed(1)}%</td>
+                  <td className="text-right">
                     {e.active && (
-                      <button
-                        onClick={() => action({ action: "deactivateEmployee", employeeId: e.id }, "Deactivate")}
-                        disabled={busy}
-                        className="text-xs text-red-700 underline underline-offset-2 disabled:opacity-40"
-                      >
-                        deactivate
-                      </button>
+                      <Button tone="ghost" size="sm" className="hover:bg-red-50 hover:text-red-700" onClick={() => setDeactivateTarget(e)}>
+                        Deactivate
+                      </Button>
                     )}
                   </td>
                 </tr>
@@ -261,12 +319,14 @@ export default function HrPage() {
             </tbody>
           </table>
         </div>
+      ) : (
+        <EmptyState icon={<IconUsers />} title="No employees yet" hint="Add your first hire above to unlock payroll runs." />
       )}
 
       {/* Leave */}
       {activeStaff.length > 0 && (
-        <div className="mb-6 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">Request leave</h2>
+        <Card>
+          <CardTitle>Leave</CardTitle>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -282,52 +342,97 @@ export default function HrPage() {
                 "Leave request",
               );
             }}
-            className="flex flex-wrap items-end gap-3"
+            className="grid gap-3 sm:grid-cols-[1.3fr_1fr_1fr_1fr_auto] sm:items-end"
           >
-            <select name="employeeId" className="rounded border border-neutral-300 px-2 py-2 text-sm">
-              {activeStaff.map((e) => (
-                <option key={e.id} value={e.id}>{e.name}</option>
-              ))}
-            </select>
-            <select name="kind" defaultValue="annual" className="rounded border border-neutral-300 px-2 py-2 text-sm">
-              <option value="annual">annual (paid)</option>
-              <option value="sick">sick (paid)</option>
-              <option value="unpaid">unpaid (reduces pay)</option>
-            </select>
-            <input type="date" name="startDate" required className="rounded border border-neutral-300 px-2 py-2 text-sm" />
-            <input type="date" name="endDate" required className="rounded border border-neutral-300 px-2 py-2 text-sm" />
-            <button type="submit" disabled={busy}
-              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50">
+            <div>
+              <label htmlFor="leave-employee" className="label">
+                Employee
+              </label>
+              <select id="leave-employee" name="employeeId" className="select">
+                {activeStaff.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="leave-kind" className="label">
+                Type
+              </label>
+              <select id="leave-kind" name="kind" defaultValue="annual" className="select">
+                <option value="annual">Annual · paid</option>
+                <option value="sick">Sick · paid</option>
+                <option value="unpaid">Unpaid · reduces pay</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="leave-start" className="label">
+                From
+              </label>
+              <input id="leave-start" type="date" name="startDate" required className="input" />
+            </div>
+            <div>
+              <label htmlFor="leave-end" className="label">
+                To
+              </label>
+              <input id="leave-end" type="date" name="endDate" required className="input" />
+            </div>
+            <Button type="submit" loading={busy}>
               File request
-            </button>
+            </Button>
           </form>
 
           {pendingLeave.length > 0 && (
-            <div className="mt-4 space-y-2">
+            <ul className="mt-5 space-y-2 border-t border-stone-100 pt-4">
               {pendingLeave.map((l) => (
-                <div key={l.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-4 py-2 text-sm">
-                  <span>
-                    <strong>{l.employeeName}</strong> · {l.kind} · {l.calendarDays} day{l.calendarDays === 1 ? "" : "s"} ·{" "}
-                    {new Date(l.startDate).toLocaleDateString()} → {new Date(l.endDate).toLocaleDateString()}
+                <li key={l.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-sm">
+                  <span className="text-stone-700">
+                    <strong className="text-stone-900">{l.employeeName}</strong> · {l.kind} ·{" "}
+                    {l.calendarDays} day{l.calendarDays === 1 ? "" : "s"} ·{" "}
+                    <span className="whitespace-nowrap">
+                      {new Date(l.startDate).toLocaleDateString()} → {new Date(l.endDate).toLocaleDateString()}
+                    </span>
                   </span>
                   <span className="flex gap-2">
-                    <button onClick={() => action({ action: "decideLeave", requestId: l.id, approve: true }, "Approve leave")}
-                      disabled={busy}
-                      className="rounded bg-emerald-700 px-3 py-1 text-xs text-white hover:bg-emerald-800 disabled:opacity-50">
-                      approve
-                    </button>
-                    <button onClick={() => action({ action: "decideLeave", requestId: l.id, approve: false }, "Reject leave")}
-                      disabled={busy}
-                      className="rounded border border-neutral-300 px-3 py-1 text-xs hover:border-red-500 hover:text-red-700 disabled:opacity-40">
-                      reject
-                    </button>
+                    <Button size="sm" loading={busy} onClick={() => action({ action: "decideLeave", requestId: l.id, approve: true }, "Approve leave")}>
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      tone="secondary"
+                      loading={busy}
+                      onClick={() => action({ action: "decideLeave", requestId: l.id, approve: false }, "Reject leave")}
+                    >
+                      Reject
+                    </Button>
                   </span>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
-        </div>
+          {pendingLeave.length === 0 && (
+            <p className="mt-4 flex items-center gap-2 border-t border-stone-100 pt-4 text-sm text-stone-400">
+              <IconInbox className="size-4" />
+              No pending leave requests.
+            </p>
+          )}
+        </Card>
       )}
+
+      <ConfirmDialog
+        open={deactivateTarget !== null}
+        onClose={() => setDeactivateTarget(null)}
+        onConfirm={async () => {
+          if (!deactivateTarget) return;
+          await action({ action: "deactivateEmployee", employeeId: deactivateTarget.id }, "Deactivate");
+          setDeactivateTarget(null);
+        }}
+        title={`Deactivate ${deactivateTarget?.name ?? ""}?`}
+        body="They stop appearing in new payroll drafts and can't be assigned leave. History is preserved."
+        confirmLabel="Deactivate"
+        busy={busy}
+      />
     </div>
   );
 }

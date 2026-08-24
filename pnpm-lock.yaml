@@ -71,6 +71,9 @@ importers:
       '@chaste/module-inventory':
         specifier: workspace:*
         version: link:../../modules/inventory
+      '@chaste/module-manufacturing':
+        specifier: workspace:*
+        version: link:../../modules/manufacturing
       '@chaste/module-messaging':
         specifier: workspace:*
         version: link:../../modules/messaging
@@ -80,6 +83,12 @@ importers:
       '@chaste/module-purchasing':
         specifier: workspace:*
         version: link:../../modules/purchasing
+      '@chaste/module-support':
+        specifier: workspace:*
+        version: link:../../modules/support
+      '@chaste/plugin-kit':
+        specifier: workspace:*
+        version: link:../../packages/plugin-kit
       better-auth:
         specifier: ^1.7.1
         version: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.44.7(kysely@0.29.5)(postgres@3.4.9))(next@15.5.23(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@3.2.7(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12))
@@ -89,6 +98,9 @@ importers:
       next:
         specifier: ^15.5.4
         version: 15.5.23(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      nodemailer:
+        specifier: ^9.0.5
+        version: 9.0.5
       react:
         specifier: ^19.1.1
         version: 19.2.8
@@ -102,6 +114,9 @@ importers:
       '@tailwindcss/postcss':
         specifier: ^4.1.13
         version: 4.3.3
+      '@types/nodemailer':
+        specifier: ^8.0.1
+        version: 8.0.1
       '@types/react':
         specifier: ^19.1.12
         version: 19.2.18
@@ -114,6 +129,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)
 
   modules/accounting:
     dependencies:
@@ -141,6 +159,9 @@ importers:
       '@chaste/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@chaste/plugin-kit':
+        specifier: workspace:*
+        version: link:../../packages/plugin-kit
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
@@ -195,6 +216,9 @@ importers:
       '@chaste/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@chaste/module-accounting':
+        specifier: workspace:*
+        version: link:../accounting
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
@@ -235,6 +259,27 @@ importers:
         specifier: ^4.1.5
         version: 4.4.3
 
+  modules/manufacturing:
+    dependencies:
+      '@chaste/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@chaste/erp-core':
+        specifier: workspace:*
+        version: link:../../packages/erp-core
+      '@chaste/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@chaste/module-inventory':
+        specifier: workspace:*
+        version: link:../inventory
+      drizzle-orm:
+        specifier: ^0.44.5
+        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
+      zod:
+        specifier: ^4.1.5
+        version: 4.4.3
+
   modules/messaging:
     dependencies:
       '@chaste/db':
@@ -261,6 +306,9 @@ importers:
       '@chaste/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@chaste/module-accounting':
+        specifier: workspace:*
+        version: link:../accounting
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
@@ -276,6 +324,27 @@ importers:
       '@chaste/erp-core':
         specifier: workspace:*
         version: link:../../packages/erp-core
+      '@chaste/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@chaste/module-accounting':
+        specifier: workspace:*
+        version: link:../accounting
+      drizzle-orm:
+        specifier: ^0.44.5
+        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
+      zod:
+        specifier: ^4.1.5
+        version: 4.4.3
+
+  modules/support:
+    dependencies:
+      '@chaste/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
+      '@chaste/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@chaste/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
@@ -323,6 +392,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)
 
   packages/erp-core:
     devDependencies:
@@ -337,6 +409,19 @@ importers:
         version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)
 
   packages/kernel:
+    dependencies:
+      zod:
+        specifier: ^4.1.5
+        version: 4.4.3
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)
+
+  packages/plugin-kit:
     dependencies:
       zod:
         specifier: ^4.1.5
@@ -1477,6 +1562,9 @@ packages:
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
 
+  '@types/nodemailer@8.0.1':
+    resolution: {integrity: sha512-PxpaInm8V1JQDd4j0ds5HfvWQk8JupS1C0Picb96QJsrrRDjBH+DlK7L4ZdNSqNULhiZRQHc40nLVShaGxXAMw==}
+
   '@types/react-dom@19.2.4':
     resolution: {integrity: sha512-Bsc+QHgp+P/F02XDzNCY9jnZNCUuLki36KT7VKrTXXLdHf+vHMNZnW1rVu5DNW/rCK+fya3DATySbLM4yhtKUw==}
     peerDependencies:
@@ -2176,6 +2264,10 @@ packages:
         optional: true
       sass:
         optional: true
+
+  nodemailer@9.0.5:
+    resolution: {integrity: sha512-wvjiKvjczmsN7U/8006JOdXubgBk2XFAbioDMbT+sM7cPs0QrhJTa6KBRX7P5REGGkDcLUz/EarWidb8G8C1jQ==}
+    engines: {node: '>=6.0.0'}
 
   openai@5.23.2:
     resolution: {integrity: sha512-MQBzmTulj+MM5O8SKEk/gL8a7s5mktS9zUtAkU257WjvobGc9nKcBuVwjyEEcb9SI8a8Y2G/mzn3vm9n1Jlleg==}
@@ -3205,6 +3297,10 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
+  '@types/nodemailer@8.0.1':
+    dependencies:
+      '@types/node': 24.13.3
+
   '@types/react-dom@19.2.4(@types/react@19.2.18)':
     dependencies:
       '@types/react': 19.2.18
@@ -3844,6 +3940,8 @@ snapshots:
     transitivePeerDependencies:
       - '@babel/core'
       - babel-plugin-macros
+
+  nodemailer@9.0.5: {}
 
   openai@5.23.2: {}
 
