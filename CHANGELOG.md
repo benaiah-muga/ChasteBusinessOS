@@ -12,6 +12,39 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **Next.js 16.3 agent tooling** (ADR 0027): the repo now points every AI
+  coding agent at Next.js's version-matched bundled docs — the official
+  managed `nextjs-agent-rules` block in `AGENTS.md` (byte-identical to what
+  `next dev` upserts, with project guidance preserved outside the markers),
+  a committed `.mcp.json` wiring `next-devtools-mcp` to the dev server's
+  built-in `/_next/mcp` endpoint (errors, logs, routes, compilation checks,
+  server-action lookup), and `CLAUDE.md` (`@AGENTS.md`). `AGENTS.md` also
+  documents the `agent-browser` CLI for structured DOM/console/Web Vitals
+  access and the official Skills (`next-dev-loop`,
+  `next-cache-components-adoption`, `next-cache-components-optimizer`,
+  `next-partial-prefetching-adoption`); UI edits should be verified at
+  runtime via the dev-server MCP before the normal verification gate.
+- **Cache Components adoption, incremental pass** (ADR 0028):
+  `cacheComponents: true` is on and validated by `next build`. The two
+  `force-dynamic` API route configs were removed (dynamic-by-default now);
+  the codemod opted out exactly three server segments (`root layout`,
+  `(app)` layout, home page) with TODO-marked `instant = false`; no sync-IO
+  blockers existed outside client components. `/portal/[token]` was fully
+  converted to the Suspense params pattern and now ships as a Partial
+  Prerender; `/login` and `/onboarding` are now fully static. Backlog:
+  remove the three opt-outs one feature at a time via the adoption skill's
+  inner loop.
+- **Official Next.js Skills committed** at `.agents/skills/`:
+  `next-dev-loop`, `next-cache-components-adoption`,
+  `next-cache-components-optimizer`, `next-partial-prefetching-adoption`.
+  Every agent (Cline, Codex, Cursor, Gemini CLI, …) picks them up from a
+  fresh clone; AGENTS.md documents when to drive which.
+
+### Changed
+- **Next.js 15.5 → 16.3.2** in `apps/web`: Turbopack is now the default for
+  `next dev` and `next build`; App Router runs React canary (19.2 features).
+  No app code changes were required (no middleware file; no webpack-specific
+  config).
 - **Manufacturing module split** (`modules/manufacturing`, ADR 0026): a full
   production lifecycle as its own governed module — work orders
   (create → release → complete/cancel with availability and scrap checks),

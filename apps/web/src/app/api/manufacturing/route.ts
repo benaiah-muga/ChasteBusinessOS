@@ -4,8 +4,6 @@ import { bomLines, getDb, items, lots, stockMovements, workOrders } from "@chast
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 
-export const dynamic = "force-dynamic";
-
 async function guard(): Promise<
   { error: NextResponse } | { ctx: NonNullable<ReturnType<typeof actorFromResolved>>; executor: ReturnType<typeof buildExecutor> }
 > {

@@ -30,7 +30,7 @@
     "@chaste/plugin-kit": "workspace:*",
     "better-auth": "^1.7.1",
     "drizzle-orm": "^0.44.5",
-    "next": "^15.5.4",
+    "next": "^16.3.2",
     "nodemailer": "^9.0.5",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
