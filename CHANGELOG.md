@@ -1,7 +1,7 @@
 # Changelog
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
-versioning is [SemVer](https://semver.org/) — pre-1.0, minor bumps mark
+versioning is [SemVer](https://semver.org/), pre-1.0, minor bumps mark
 milestones and breaking changes call them out explicitly.
 
 Versioning continues from the v1 codebase (archived on the
@@ -12,23 +12,309 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
-- **Document ingestion (M3 complete)**: upload a bill/receipt image or paste
-  text; uploads are OCR'd to markdown via nemotron-parse (`MODEL_OCR`) and
-  indexed into org memory as `doc_chunk`. Expense-coding suggestions come
-  from a pure deterministic matcher in `erp-core` (property-tested,
-  works offline) with optional model-assisted line extraction — the LLM
-  never picks account codes. Suggestions flow into vendor bills through the
-  existing governed `purchasing.createBill`; deletion is destructive-gated.
-  New `/documents` console page, `documents.*` capabilities, and an offline
-  proof at `pnpm demo:m3` (see ADR 0013).
+- **Manufacturing module split** (`modules/manufacturing`, ADR 0026): a full
+  production lifecycle as its own governed module — work orders
+  (create → release → complete/cancel with availability and scrap checks),
+  multi-level BOMs with per-component scrap allowances, instant production
+  runs tagged with run references, cost previews at current moving-average
+  prices before posting, production run history with reversal status, and
+  upstream lot traceability for recalls. `manufacturing.reverseProductionRun`
+  fixes the old inverse gap by mirroring every posted movement (components
+  return at recorded costs; double reversal is refused). Manufacturing writes
+  exclusively through `@chaste/module-inventory`'s exported ledger
+  primitives — one append-only stock ledger, many writers.
+- **Inventory module surface**: stock movement history per item,
+  available-to-promise (on hand minus open reservations), stock reservations
+  (reserve/release with overbook refusal), cycle counts (snapshot → enter →
+  post variances through the ledger, refusing empty sheets and snapshot
+  drift), stock locations, lot listing with derived balances, and BOM tree
+  reads. Migration `0020` adds six tenant-isolated tables (work orders, lots,
+  locations, reservations, cycle counts + lines) under the standard RLS
+  policy.
+- **Inventory & Manufacturing UI** (`/inventory`, `/manufacturing`): both
+  pages are tabbed surfaces over the full capability set — items/valuations/
+  reorder alerts with PO drafting into purchasing, per-SKU ledger history,
+  reservations, counting worksheets, lots and locations on the inventory
+  side; BOM editor (scrap %, delete, nested tree view), work order board,
+  production runs with reversal, cost preview, and lot trace viewer on the
+  manufacturing side.
+- **Purchasing UI** (`/purchasing`): the previously headless module gets its
+  human surface — vendors, purchase orders with SKU-linked lines, goods
+  receipts that update stock, vendor bills matched to orders (three-way),
+  partial/full bill payments gated by policy, and AP aging.
+- **Customer care agent module** (`modules/support`, ADR 0025): support
+  conversations bound to one customer per thread, governed capabilities for
+  message logging, escalation, and resolution, and a draft-only AI reply
+  flow. Security by construction: the drafting loop sees exactly two scoped
+  read tools under a `support.read`-only actor, the order-status tool takes
+  zero model-controlled input (conversation binding is closed over
+  server-side, making cross-customer pivots impossible), customer text is
+  framed as untrusted data, drafts are human-released with agent provenance,
+  and escalation notifies through the existing ticket sink. Ships with
+  `/api/support`, `/api/customers` (read-only directory), a Customer care
+  inbox page, migration 0016 (RLS included), 11 regression tests, and
+  `pnpm demo:support` proving an embedded injection attempt leaves the
+  books untouched.
+- **Security hardening pass** (full audit remediation; see ADR 0024):
+  - Agent sessions are ownership-checked: `/api/chat` refuses a `sessionId`
+    belonging to another user or org (was a cross-tenant IDOR).
+  - Marketplace listings are publisher-owned: republishing a slug owned by
+    another org is refused, serialized by a per-slug advisory lock (closed a
+    listing-takeover supply-chain path); install/uninstall serialize on the
+    same lock to stop lost updates.
+  - Job worker actors are least-privilege: a queued job runs with exactly its
+    capability's permission instead of `*`, and unknown job types fail
+    permanently.
+  - Rate limiting on expensive and brute-forceable boundaries: agent chat
+    per-user budget (`CHAT_RATE_LIMIT_MAX`), invitation attempts and SCIM
+    bearer auth per source IP, onboarding per user; better-auth credential
+    routes now have explicit rate-limit rules and `trustedOrigins`.
+  - Conversation membership enforced for DM reads/writes at both the route
+    and the `messaging.*` capabilities.
+  - Session trajectory replay is owner-only (org admins may audit).
+  - Prompt-injection guard: every agent loop frames retrieved documents,
+    memories, transcripts, and tool results as untrusted data; model-filed
+    tickets are length-bounded.
+  - Agents can no longer invite members (`iam.inviteMember` is human-only).
+  - Approvals now expire after 7 days: gates are stamped at submit, refused
+    by kernel-side verify past expiry, and expire conditionally in the
+    decision pipeline (HTTP 410) instead of waiting forever.
+  - Org switcher validates membership before writing the tenant cookie;
+    baseline security headers (CSP, XFO, nosniff, HSTS, Referrer-Policy,
+    Permissions-Policy) ship from `next.config.mjs`.
+  - Low-severity fixes: invite acceptance compares emails case-insensitively,
+    SCIM provisioning normalizes emails to lowercase, health endpoint no
+    longer leaks DB errors anonymously, ledger `limit` is clamped,
+    POS register open is race-free via advisory lock, outbound mail subjects
+    are CRLF-sanitized, SCIM token error copy corrected.
+- **Durable capability-job queue**: `jobs` table (migration 0015, RLS policy
+  included) plus a FOR UPDATE SKIP LOCKED worker (`pnpm worker`). Jobs carry
+  a capability id + input and execute through the governed KernelExecutor
+  path, so background work obeys validation, permissions, and audit.
+  Document parsing now enqueues by default (202 + status "queued"; pass
+  `sync: true` to keep the old inline behavior).
+- **Governance eval harness v1** (`packages/kernel/src/eval.test.ts`): six
+  golden agent trajectories asserting harness invariants (governed tool
+  calls, honest hallucination errors, gate relaying, ticket-not-improvise,
+  maxSteps, trajectory events) against a scripted model adapter.
+- ADRs 0020-0023: trust-spine hardening; multi-currency groundwork and
+  migration path; per-org ledger chain heads + partitioning; Creator Mode
+  sandboxed proposal execution.
+
+### Changed
+- **Manufacturing split out of inventory** (ADR 0026): BOM/production/work-order
+  capabilities now live under the `manufacturing.*` namespace with their own
+  module toggle and `manufacturing.read/write` permissions; they write stock
+  exclusively through `@chaste/module-inventory`'s exported ledger primitives.
+  Orgs with explicit `enabled_modules` lists must add `"manufacturing"`.
+- **Capability output contracts renamed for clarity**: `stockReport` items now
+  expose `reservedThousandths`; work orders report `expectedGoodThousandths`;
+  cycle-count posting reports `postedVariances`; run reversal reports
+  `reversedMovements`/`removedFinishedThousandths`; `inventory.stockHistory`
+  is now `inventory.itemHistory`.
+- **Structured logging seam**: zero-dependency JSON logger in the kernel
+  (`LOG_LEVEL`-filtered); agent-loop failures and dropped trajectory writes
+  are logged with ids instead of being swallowed silently.
+- **Model-call resilience**: provider errors are typed
+  (`ModelProviderError` keeps HTTP status + retry hint) and chat/embedding
+  calls retry 429/5xx/network faults with exponential backoff and jitter.
+- **Agent-loop hardening**: capability input schemas must convert to JSON
+  Schema (checked at boot via registry conformance; previously failures
+  silently produced parameter-less tools that invited argument
+  hallucinations); sanitized tool-name collisions now fail loudly.
+- **Registry cached per process** instead of rebuilt and re-validated on
+  every request; bump `REGISTRY_VERSION` when changing capabilities.
+- Accounting dashboard GET computes aging from one bounded query
+  (limit 200) instead of fetching all open invoices and re-filtering twice.
+- eslint enforces architectural boundaries: core packages cannot import
+  modules/apps; cross-module imports are blocked except the accounting
+  posting service.
 
 ### Fixed
+- **Shadow timestamp columns broke FX rate posting (critical)**: four schema
+  fields (`fxRates.effectiveAt`, `user_roles.assignedAt`, `pos_sessions.openedAt`,
+  `conversation_members.joinedAt`) were declared with the `createdAt()` helper,
+  which hardcodes the column name `created_at` — drizzle emitted inserts with a
+  duplicate column and `accounting.recordFxRate` always failed. Real column
+  names now; migration 0021 renames them in place.
+- **Capability input schemas with `z.date()`/`z.coerce.date()`** failed boot-time
+  JSON-Schema conformance (hr.logTime, hr.timeReport, accounting.recordFxRate,
+  accounting.createRecurringTemplate); they take ISO date strings now, matching
+  what models emit.
+- **BOM explosion stopped at level one**: requirement computation filtered BOM
+  edges to the top assembly, so sub-assemblies were consumed as leaves instead
+  of exploding; multi-level production now reaches real leaves.
+- **Work-order completions close the order prematurely**: completions are now
+  partial-aware (per-completion run references, plan-exceeded refusal,
+  cancel refused while partial completions exist).
+- Cycle-count posting no longer accepts an empty sheet.
+- gaps.test suite cleanup order (payments/ledger events/jobs before parents)
+  so failed runs do not poison reruns.
+- **Approval double-execution race (critical)**: the approve path now claims
+  the gate atomically (`pending → executing`) before executing and finalizes
+  after; concurrent approvers get 409 instead of moving money twice. The
+  decision pipeline is extracted to `apps/web/src/server/approvals.ts` with a
+  concurrency regression suite (6 DB-integration tests).
+- **Event-ledger hash chain can no longer fork (critical)**: `PgLedgerStore`
+  serializes chain-head reads/writes behind a transaction-scoped advisory
+  lock; previously two concurrent appends could chain off a stale hash.
+- **Money gating is fail-closed**: `Capability.moneyAmount(input)` is now a
+  declared, conformance-enforced extractor replacing the largest-`*Minor`-
+  field name heuristic that silently bypassed thresholds for unconventionally
+  named amounts. `null` (amount unknowable up front) always gates. All five
+  money capabilities declare their amount; reversals gate unconditionally.
+- **Kernel verifies claimed approvals**: passing `approvedApprovalId` now
+  requires `ApprovalFlow.verify()` to confirm org, capability, status, and
+  canonical payload match; unverified or unimplemented flows refuse (fail
+  closed). Previously the executor took the caller's word.
+
+### Changed
+- **RLS is wired into every capability transaction**: all 19 module
+  transaction sites run through `withOrgContext(db, ctx.actor.orgId, ...)`
+  so Postgres enforces tenant scoping; app-level org predicates remain as
+  defense in depth. `withOrgContext` now exposes the proper drizzle `Tx`
+  type instead of an unsafe cast.
+- **One posting service**: `@chaste/module-accounting/posting` (`postEntry`,
+  `assertPeriodOpen`, `loadCoaMap`, `accountIdOf`) replaces four divergent
+  private period guards and six copy-pasted entry+lines insert blocks across
+  accounting, HR, POS, and purchasing; payroll period checks unified onto
+  date-based semantics. See ADR 0020.
+- ARCHITECTURE.md tech table now reflects what actually ships (route
+  handlers instead of tRPC, no XState/pg-boss/OTel/Playwright yet); stale,
+  duplicated ROADMAP checkboxes cleaned up.
+- CI gains a gitleaks workflow (full-history secret scan); `.env.example`
+  no longer narrates a past key leak; stale local-only v1 env backup removed.
+
+### Added
+- ADR 0020: trust-spine hardening decisions (atomic approvals, verified
+  gates, declared money amounts, serialized ledger appends, RLS wiring,
+  posting service).
+
+### Changed
+- **Home is a fully-fledged dashboard** (new `GET /api/dashboard` single-call
+  aggregation): KPI row (revenue, net income, cash, receivables with overdue
+  count, payables, weighted pipeline), a dependency-free SVG six-month
+  income-vs-expense chart, books-integrity panel, needs-attention list with
+  deep links (approvals, overdue invoices, low stock, unpaid bills, pending
+  leave), recent hash-chained ledger activity feed, and ops tiles for the
+  pipeline funnel, people, and POS. Quick-action chips prefill the chat dock
+  with editable prompts. The centered hero input is gone; the floating dock
+  is the only chat entry.
+- **Chat dock reworked**: four states now genuinely in effect everywhere,
+  including home: floating horizontal input bar at the lower center
+  (stronger elevation; page content reserves bottom padding), bubble at the
+  lower right, expanded panel, and a pinned right rail that reflows content.
+  The chosen state persists across reloads via localStorage. Console,
+  dashboard, and widget share one continuous conversation state.
+- **Default model moved** to NIM `deepseek-ai/deepseek-v4-flash` (fast,
+  agentic); OpenRouter remains available via MODEL_PROVIDER=openrouter with
+  automatic NIM fallback on upstream rate limits.
+- **Agent replies render cleanly**: markdown-lite renderer turns bold, code
+  spans, and lists into proper formatting instead of leaking raw `**`;
+  replies are sanitized so no em dash reaches the screen, and the system
+  prompt instructs dash-free, plain prose.
+
+### Added
+- **Cash-basis view + formal year-end close (ADR 0019)**: `accounting.cashBasisReport`
+  derives money-in/money-out/net from the accrual ledger with the identity
+  `net = in − out = Δcash` property-tested; `accounting.closeYear` rolls a fiscal
+  year into retained earnings with one balanced closing entry (destructive-gated,
+  inverse declared) and seals December. Accounting UI gained a cash-basis panel
+  with an approval-gated year-end close action.
+- **BOM-lite**: `bom_lines` table, `explodeBom`/`checkAvailability` pure functions
+  (cycle detection, availability math), and governed capabilities
+  `inventory.defineBom` / `inventory.produceFromBom` / `inventory.bomReport`.
+  Production consumes components at moving-average cost (`replayValuation`) and
+  adds finished units at rolled-up cost. New Inventory & BOM page with stock
+  levels, BOM editor, availability checker, and production runs.
+- **Email notifications** behind the existing `NotificationSink`: SMTP fan-out
+  joins console + webhook for approval requests and tickets; fails soft, no-op
+  when SMTP is unconfigured.
+- **Signed plugin distribution + marketplace groundwork (ADR 0018)**:
+  new `@chaste/plugin-kit` package, canonical-JSON manifests, ed25519
+  signatures, fail-closed verification, plus `marketplace_listings` table,
+  `creator.verifyPlugin` / `publishListing` / `installListing` /
+  `uninstallListing` / `listMarketplace` capabilities, `/api/marketplace`
+  routes, and a Marketplace UI. Publishing refuses bad signatures; install
+  re-verifies and is identity-gated.
+- **Creator Mode scaffolding generator**: `creator.scaffoldCapability` emits
+  capability source, test skeleton, and a risk-assessment doc from a spec, and
+  files them as a governed proposal ready for human review.
+- **RLS everywhere (ADR 0017)**: row-level-security policies on all tenant
+  tables (46 tables incl. parent-scoped child tables), `withOrgContext`
+  transaction-scoped tenant helper, and probe tests proving cross-tenant reads/
+  writes fail under a NOBYPASSRLS role.
+- **SSO + SCIM groundwork**: `sso_connections` (SAML/OIDC IdP metadata, domain
+  routing) with admin CRUD at `/api/team/sso`; SCIM 2.0 provisioning at
+  `/api/scim/v2/Users` (list/create/deactivate) with SHA-256-hashed bearer
+  tokens managed at `/api/scim/tokens`.
+- **Trajectory compaction + KV-cache metrics**: kernel folds old tool traffic
+  into stubs when sessions exceed a token budget (system prefix preserved as
+  cache anchor); adapters now capture provider-reported cached prompt tokens;
+  `/api/metrics` reports org-wide cache hit rate and the Sessions page shows it.
+- **SOC2-style control mapping** at `docs/soc2-control-mapping.md`.
+- **OpenRouter model support**: `MODEL_PROVIDER=openrouter` routes all
+  chat-side AI calls (agent loop, bill-line extraction) through OpenRouter
+  (e.g. `stealth/ox-alpha`, whose reasoning-stream deltas are handled), while
+  embeddings stay on NVIDIA NIM; automatic fallback to the primary NIM model
+  on upstream rate-limit keeps agent turns honest instead of dying
+  mid-conversation.
+- **Org memory retrieval (ADR 0016)**: new governed `documents.searchMemory`
+  read capability, semantic top-k over pgvector `memories` with graceful
+  text-search fallback. Registered like any capability, so the console agent
+  can finally ground answers in ingested documents and policies (and session
+  replays show what it grounded on). System prompt now searches memory before
+  filing a "can't know this" ticket.
+- **Natural-language task suite** (`pnpm nl:test`): 31 plain-language tasks,
+  10 easy, 10 medium, 11 complex, driving the real app end-to-end (auth,
+  onboarding, CRM, POS shifts, payroll gates, reversals, period sealing, RBAC,
+  document coding, agent quote-to-cash, memory recall, session replay, creator
+  mode) with assertions and per-tier scoring.
+- **Friendly error layer**: shared `lib/api.ts` maps every API failure to a
+  calm headline + actionable hint, while preserving the raw status/payload
+  behind a collapsible, copyable "Technical details" block for power users;
+  load failures get retry states instead of infinite skeletons; chat stream
+  errors explain themselves inline.
+- **Design system + console redesign (ADR 0015)**: brand dark-maroon accent
+  replaces default emerald; warm-stone neutrals; token layer in `globals.css`
+  (Tailwind v4 `@theme`) with a dependency-free component kit
+  (`components/ui.tsx`: Button/Card/Badge/Notice/EmptyState/Skeleton/
+  StatCard/Dialog/Switch) and an inline SVG icon set, no page may hand-roll a
+  button, badge, or input anymore. New grouped sidebar shell with mobile drawer,
+  pending-approvals count badge, org switcher, and a ⌘K command palette.
+  Every surface reworked: skeleton loaders, empty states with guidance,
+  accessible confirm dialogs for all destructive actions (reverse entry, close
+  period, pay bill, delete document, void payroll, deactivate employee, close
+  register), PR-style approvals and creator-proposal diffs with line tinting,
+  live drawer-variance preview in POS, suggested prompts + stop-generation +
+  persistent tool receipts in the Console chat, split-screen branded login,
+  relative timestamps, and full responsive behavior down to 375px. Review and
+  implementation contract: `docs/UI_REDESIGN_PLAN.md`.
+
+### Fixed
+- **Postgres connection exhaustion under dev**: `getDb()` cached its pool
+  module-scoped, so every Next.js hot reload opened a fresh unbounded client
+  until Postgres refused connections (`too many clients already`). Pools are
+  now bounded (`DATABASE_POOL_MAX`, default 10) and cached on `globalThis`.
+- **Channel creation rejected for owners**: `/api/conversations` POST checked
+  `permissions.has("messaging.write")` directly, failing wildcard (`*`) role
+  holders; it now uses the kernel matcher and returns 403 (not 401) when the
+  permission is genuinely missing.
+- Model-provider 429s now surface a retry hint instead of "429 status code
+  (no body)".
+- **Email/password sign-up was broken**: better-auth ≥1.7 stamps an `issuer`
+  on every credential account row, but the `auth_account` Drizzle schema (and
+  the database) lacked the column, so every `sign-up/email` call 500'd. Added
+  `auth_account.issuer` with migration `0012_tiny_wolfpack`. Also repaired a
+  forked drizzle meta chain (`0011_snapshot.json` pointed at the wrong parent
+  and had lost the `documents` tables), which had made `drizzle-kit generate`
+  emit duplicate table DDL.
 - Fresh databases failed to migrate: the pgvector extension was never enabled,
   so the `memories.embedding` column (`vector(1024)`) errored with
   `type "vector" does not exist` (CI and new local setups). The initial
   migration now runs `CREATE EXTENSION IF NOT EXISTS "vector"`.
 
-## [0.2.0] — 2026-08-22
+## [0.2.0], 2026-08-22
 
 The v2 capability-kernel rewrite of the entire platform, replacing the
 archived v1 codebase. Shipped in four batches:
@@ -65,7 +351,7 @@ archived v1 codebase. Shipped in four batches:
 - CRM pipeline depth: deals across six stages, weighted forecast by stage
   probability, `/crm` kanban with advance/lose/reopen actions.
 - Session replay UI (`/sessions`): full trajectory viewer over persisted
-  session events — user/assistant/tool-call/tool-result in order.
+  session events, user/assistant/tool-call/tool-result in order.
 - Kernel loop emits `tool_result` events so replays show outcomes.
 - Report pack: P&L + balance sheet as pure functions in `erp-core`
   (property-tested accounting equation) with UI cards on `/accounting`.
@@ -82,7 +368,7 @@ archived v1 codebase. Shipped in four batches:
   malformed capabilities at registration; `registry.validateAll()` runs at
   boot (missing inverse targets are fatal, missing inverses are warnings).
   6 new kernel tests.
-- `docs/adr/` — architecture decision records with index.
+- `docs/adr/`, architecture decision records with index.
 - Webhook notification seam (`NOTIFICATION_WEBHOOK_URL`) for approval
   requests and filed tickets.
 
@@ -126,7 +412,7 @@ archived v1 codebase. Shipped in four batches:
 
 ---
 
-## Changelog — v1 archive (superseded by the v2 rewrite)
+## Changelog, v1 archive (superseded by the v2 rewrite)
 
 The original v1 codebase was replaced by the capability-kernel rewrite.
 Its history is preserved below and on the [`v1-archive`](https://github.com/benaiah-muga/ChasteBusinessOS/releases/tag/v1-archive) tag; version numbering above resumes from v1's 0.1.0.
@@ -167,7 +453,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   `POST /api/v1/ai/chat` (verified end-to-end by `apps/api/src/nl-driver.ts`,
   a dynamic HTTP driver that sends each request through the same command/query
   bus a human uses and approves parked `confirm_action`s):
-  - `planDataQuestion` + `answerDataQuestion` — margin trend ("why did margins
+  - `planDataQuestion` + `answerDataQuestion`, margin trend ("why did margins
     fall this month?", "compare to last quarter"), sales grouped by location
     ("show this by branch", "show monthly sales by branch"), and stockout-risk
     proposals ("inventory is getting low; handle replenishment") are answered
@@ -184,33 +470,33 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   (`@chaste/ui-schema`, `@chaste/ai-core` `explanation.ts`)** so clients and
   evaluators can verify exactly which command/query ran (explainability).
 - **Deterministic company-operations intents (`@chaste/ai-core`
-  `orchestrator.ts`).** A second end-to-end NL suite — `apps/api/src/nl-driver-ops.ts`,
+  `orchestrator.ts`).** A second end-to-end NL suite, `apps/api/src/nl-driver-ops.ts`,
   15 requests across procurement, inventory, sales, invoicing, accounting,
-  finance, and reporting — now resolves correctly over `POST /api/v1/ai/chat`
+  finance, and reporting, now resolves correctly over `POST /api/v1/ai/chat`
   (15/15, exit code 0). Each write's real effect is re-checked through the
   query bus, not just card presence:
-  - **Operational writes with name→id resolution** — `pur.po.create`
+  - **Operational writes with name→id resolution**, `pur.po.create`
     ("raise a purchase order for 60 bags of Wheat Flour from Kampala Flour
     Mills", deterministic `PO-YYYY-NNNN` numbering), `inv.stock.adjust`
     (goods-receive `+N`, spoilage `−N`), `acc.journal.post` ("debit Expenses
-    800,000 and credit Cash 800,000" — balanced lines), and
+    800,000 and credit Cash 800,000", balanced lines), and
     `acc.invoice.create` with a resolved customer ("to Ntinda Supermarket",
     comma-separated amounts). New `hydrateEntityRefs` resolves vendor/product/
     warehouse/customer/account names to ids through the same read-query bus a
-    human uses, so the AI never invents a foreign key — an unknown name yields
+    human uses, so the AI never invents a foreign key, an unknown name yields
     a clear `ENTITY_NOT_FOUND` message instead of a bad write.
-  - **Operational reads** — purchase orders, stock levels (optionally scoped
+  - **Operational reads**, purchase orders, stock levels (optionally scoped
     to one warehouse), the customer list, outstanding/overdue receivables, and
     the monthly expense trend, plus location-filtered sales ("sales for the
     Jinja branch") and this-month-vs-last-month margin comparison. All answered
     from the read-query bus with a verifiable `plannedCommand`.
-  - **Dashboard with a named subject** — "create a dashboard for our stock
+  - **Dashboard with a named subject**, "create a dashboard for our stock
     levels at Ntinda" → `core.dashboard.create` with an `inv.stock.list`
     widget and a real name.
-  - **Read/write disambiguation** — read intents no longer shadow write
+  - **Read/write disambiguation**, read intents no longer shadow write
     messages ("raise a purchase order…" stays a write; "create a dashboard for
     our stock levels…" stays a dashboard create).
-- **`nl-driver-ops.ts` verifies data, not just intents** — after approving a
+- **`nl-driver-ops.ts` verifies data, not just intents**, after approving a
   parked `confirm_action`, the driver re-queries the bus and asserts the actual
   state change (stock quantities, PO count/vendor, resolved invoice customer,
   expense total, dashboard record), so a "passing" write is proven in the
@@ -218,7 +504,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
 - **Native business-tool agent loop (`@chaste/ai-core` `providers.ts`,
   `orchestrator.ts`).** For providers with native function calling, the LLM now
   discovers and calls the permission-filtered business bus directly as OpenAI
-  `tools` — one tool per command/query (143 bus registrations across 13
+  `tools`, one tool per command/query (143 bus registrations across 13
   modules, rendered via the existing `buildToolsFromBus`/`listForActor`
   surface), with the same Zod schemas, permissions, and request context as a
   human, so AI/manual parity is preserved:
@@ -228,7 +514,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     parses `message.tool_calls`, feeds results back as `tool` messages, and
     raises `max_tokens` to 4096 when tools are present (muse-glimmer-30b emits
     `reasoning_content` + tool calls). `TracedProvider` forwards the capability.
-  - `runBusinessToolLoop` (cap 10) — the model chains read tools to resolve
+  - `runBusinessToolLoop` (cap 10), the model chains read tools to resolve
     names → ids, then calls a write tool. Write calls dispatch only when
     `commandMayAutoExecute(deps.autonomy, meta)` permits (guarded_auto +
     `minAutonomyForAuto`); otherwise they park as `PendingPlanStep` confirm
@@ -252,14 +538,14 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     text-only fallback). **425 tests green; `pnpm lint`/`typecheck` 43/43.**
   - Verified live on NVIDIA NIM: `meta/muse-glimmer-30b` (default; native
     tool-calling works; 10–90 s/request at this tool-set size). Laguna
-    `poolside/laguna-xs-2.1` was trialed and dropped — it exceeded the 30 s
+    `poolside/laguna-xs-2.1` was trialed and dropped, it exceeded the 30 s
     completion timeout on the 151-tool surface and skipped write proposals.
   - New driver `apps/api/src/nl-driver-agent.ts` exercises the loop end-to-end
     with novel cross-department requests (read questions answered from org
-    data, write requests parking plans) — evaluated behaviorally (PASS/WARN/FAIL),
+    data, write requests parking plans), evaluated behaviorally (PASS/WARN/FAIL),
     soft outcomes (model clarifying, parking a related-but-different write)
     count as warnings, not exit failures.
-  - **Provider ergonomics (`@chaste/ai-core` `providers.ts`)** — the OpenAI
+  - **Provider ergonomics (`@chaste/ai-core` `providers.ts`)**, the OpenAI
     completion timeout is now configurable (`CHASTE_AI_TIMEOUT_MS`, default
     30 s), and Nemotron-3 models (`nvidia/nemotron-3-ultra-550b-a55b`) get the
     `chat_template_kwargs` they need for tool calling on NIM (they 500 without
@@ -271,36 +557,36 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   superfluous writes).** Prevents the agent from proposing redundant creates
   and steers tool selection by domain:
   - **Natural-key existence gate (`@chaste/ai-core`
-    `tools/natural-key.ts`)** — before any `*_create` write dispatches (or
+    `tools/natural-key.ts`)**, before any `*_create` write dispatches (or
     parks), the actor's own read-query bus is consulted for the natural key
     (vendor/customer/bpartner by name, product by `sku`, account by `code`,
     branch by `code`). If the record already exists the write is skipped and
-    the model is told the existing id — a best-effort guard that never blocks
+    the model is told the existing id, a best-effort guard that never blocks
     a legitimate write when the read fails or no rule matches.
-  - **Plan dedup at confirmation** — parked and terminal-plan create steps
+  - **Plan dedup at confirmation**, parked and terminal-plan create steps
     whose natural key already resolves are dropped from the confirm card, so a
     user never sees a redundant create.
   - **Platform domain skills (`@chaste/ai-core`
-    `skills/platform-skills.ts`, `@chaste/runtime` `PostgresSkillStore`)** —
+    `skills/platform-skills.ts`, `@chaste/runtime` `PostgresSkillStore`)**,
     eight read-only platform-scoped skills (purchasing, sales, inventory,
     accounting, crm, hr, manufacturing, operations) bundle the check-then-write
     doctrine per domain; the skill catalog and `loadSkill` now see them, and a
     deterministic keyword router injects the matched domain's doctrine into the
     tool-loop system prompt before any tool call.
-  - **Loop quality (`orchestrator.ts` `runBusinessToolLoop`)** —
+  - **Loop quality (`orchestrator.ts` `runBusinessToolLoop`)**,
     BudgetThinker-style remaining-budget re-injection on every tool round, and
     structured termination-cause logging (`[agent-loop] terminated: …`) so cap
     vs duplicate-break exits are distinguishable.
-  - **Richer tool descriptions** — native tool defs now annotate read-only
+  - **Richer tool descriptions**, native tool defs now annotate read-only
     vs write and, for guarded creates, "skips if the <entity> already exists
     (checked via <query>)".
   - `nl-driver-agent.ts` gains a write-redundancy case (`a5`: "Add Kampala
-    Flour Mills as a vendor …" — already exists) asserting no
+    Flour Mills as a vendor …", already exists) asserting no
     `pur.vendor.create` reaches the confirm card. Live on muse: **5/5 passing**
     (a5 answers "Kampala Flour Mills is already in the purchasing vendor list"),
     with the deterministic suites unchanged (18/18, 15/15).
 - **Authoring doctrine encoded (`AGENTS.md`, `skills/module-author`,
-  `skills/command-safety`, `skills/pr-hygiene`, `docs/module-development.md`)** —
+  `skills/command-safety`, `skills/pr-hygiene`, `docs/module-development.md`)**,
   the rules for adding modules/commands/tools now require the harness
   integration: a natural key + `NaturalKeyRule` per `*.create` (with the
   `*.list` query returning it), a `platform.<domain>` skill def + routing test
@@ -315,34 +601,34 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
 
 ### Fixed
 
-- **Platform module dead-code relocation (`modules/platform/src/index.ts`)** —
+- **Platform module dead-code relocation (`modules/platform/src/index.ts`)**,
   the analytics / import-rule / dashboard registrations had drifted into
   `createScheduleProcessor` after `return row ?? null;`, so they referenced
   out-of-scope `commands`/`queries` and were unreachable; moved into the
   `register({ commands, queries })` callback. Watch rules, dashboards, import
   rules, and replenishment reads now execute through the same bus as humans.
-- **Margin-trend sign bug (`core.analytics.marginTrend`)** — expense accounts
+- **Margin-trend sign bug (`core.analytics.marginTrend`)**, expense accounts
   were summed with a negative sign (`-debit`), inflating margin; revenue uses
   credits and expenses use debits, so `margin = revenue − expenses` is now
   correct. Also converted the `since` window to an ISO string for
   `postgres.js` (raw `Date` interpolation crashed the query).
 - **Day-of-month watch-rule name duplication ("Schedule payroll approval for
-  the 25th, and ping Finance if not approved by 3pm")** — the intent no longer
+  the 25th, and ping Finance if not approved by 3pm")**, the intent no longer
   repeats the trailing "ping Finance if not approved by 3pm" clause twice;
-  the rule name reads "Monthly: payroll approval — ping Finance if not
+  the rule name reads "Monthly: payroll approval, ping Finance if not
   approved by 3pm".
-- **Chat surfaces only respond to the running build** — the API resolves
+- **Chat surfaces only respond to the running build**, the API resolves
   `@chaste/ai-core` / `@chaste/module-platform` via their `dist/`, so source
   edits require a rebuild (`pnpm --filter @chaste/ai-core build`, etc.) before
   restart; the NL driver run that previously appeared green for #14 was an
   artifact of the old process still owning :3001.
 
 - **Agent harness spine (ADR 0014, research doc
-  `2026-08-15-future-architecture-ai-native-business-os`) — the first tranche
+  `2026-08-15-future-architecture-ai-native-business-os`), the first tranche
   of the pivot from "ERP with a chatbot" to "trustworthy business execution
   harness". Additive: nothing existing was removed; the command bus, outbox,
   audit, RBAC, and modules keep working unchanged.
-  - **Command envelope (`@chaste/kernel` `envelope.ts`)** — `CommandEnvelope`
+  - **Command envelope (`@chaste/kernel` `envelope.ts`)**, `CommandEnvelope`
     with `commandId`, `idempotencyKey`, `tenantId`, `actor`, `origin`
     (`human | agent | workflow | integration | scheduled`), `requestedAt`,
     `commandType`, `payload`, `reason`, `evidenceRefs`, `correlationId`,
@@ -350,12 +636,12 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     `ApprovalGrant`, `PolicyDecision`, `createCommandEnvelope`, and
     `dispatchCommand`. `dispatchCommand` funnels through the same
     `executeCommand` path as every human caller, so an agent origin is never
-    elevated — AI/manual parity by construction. Envelope provenance now flows
+    elevated, AI/manual parity by construction. Envelope provenance now flows
     into `RequestContext` and every `AuditEntry`, and is persisted by
     `PostgresAuditWriter` (`audit_log.origin` / `reason` / `evidence_refs` /
     `approval_grant_id` / `policy_context` / `idempotency_key` /
     `correlation_id` / `causation_id`, with an `audit_log_origin_idx` index).
-  - **Append-only agent trajectory log (`@chaste/ai-core` `trajectory/`)** —
+  - **Append-only agent trajectory log (`@chaste/ai-core` `trajectory/`)**,
     `AgentSessionEvent` union over the doc's `session/start` … `session/end`
     vocabulary, `SessionLog` interface + `InMemorySessionLog`, and
     `reconstructModelRequest`, which replays the stream into the
@@ -363,20 +649,20 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     memory reads, policy decisions) and verifies the hard reconstruction
     invariant (`complete`/`gaps`), with `summarizeModelRequest` for
     human/audit-facing summaries.
-  - **Context engine (`@chaste/ai-core` `context-engine/`)** — `ContextBundle`,
+  - **Context engine (`@chaste/ai-core` `context-engine/`)**, `ContextBundle`,
     tiered `ContextSection`s (tiers 0–5), `TokenBudget` with the doc's reserve
     policy (ordinary vs document/report vs tool-heavy) and allocation order,
     admission rules (source + purpose + token estimate + authorization proof;
     unauthorized sections are redacted, never admitted), fail-closed
     `overflow` when required context cannot fit, and `explainContext` so the
     engine can say why a section was included, summarized, or omitted.
-  - **Durable persistence (`@chaste/db`, `@chaste/runtime`)** — new
+  - **Durable persistence (`@chaste/db`, `@chaste/runtime`)**, new
     `agent_session_events` (append-only, identity `seq`) and
     `context_bundles`/`context_sections` tables (Drizzle + idempotent SQL
     migration), with `PostgresSessionLog` and `PostgresContextBundleStore`
     wired into `createRuntime` as `runtime.sessionLog` /
     `runtime.contextBundles`.
-  - **Tests** — kernel `envelope.test.ts` (envelope defaults, provenance
+  - **Tests**, kernel `envelope.test.ts` (envelope defaults, provenance
     recorded in audit, agent origin not elevated), ai-core
     `trajectory/session-log.test.ts` (append-only ordering, org-scoped session
     listing, complete + incomplete reconstruction), and
@@ -386,17 +672,17 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
 
 - **Tool and capability registry (ADR 0014 update, research doc §Tool and
   Capability Registry, §Tool Surface Optimization, §Agent Tool Wrapper
-  Template) — the second harness tranche** in `packages/ai-core/src/tools/`.
+  Template), the second harness tranche** in `packages/ai-core/src/tools/`.
   Agent tools are thin consumers of the same command/query bus: no tool
   implements business logic and no tool may hide a write outside the bus.
-  - **`BusinessToolDefinition` + `defineBusinessTool`** — the doc's wrapper
+  - **`BusinessToolDefinition` + `defineBusinessTool`**, the doc's wrapper
     template: `name`, short `description`, `kind` (`command`/`query`), the bus
     `command` name, optional `risk` override (defaults to the wrapped
     command's `CommandMeta` risk class), `exposeWhen` permission gates, strict
     `input`/`output` Zod contracts (the same ones the bus validates), and
     tool-surface metadata (idempotency, approval class, read/write access,
     expected latency/cost, good/bad examples, `renderResult`, `renderHuman`).
-  - **Execution pipeline (`executeBusinessTool`)** — implements the doc's
+  - **Execution pipeline (`executeBusinessTool`)**, implements the doc's
     order verbatim: log `tool/call` → validate args → authorize visibility and
     execution → classify risk → require approval if policy says so → dispatch
     through `dispatchCommand`/`executeQuery` under the actor's own (never
@@ -407,19 +693,19 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     failures), and granted approvals carry the durable `approvalGrantId` into
     the envelope. `defaultToolPolicy` allows `read`/`write_local` under the
     actor's own authority and requires a durable grant for `exec`/`external`.
-  - **`createToolRegistry`** — registers tools and `listForActor` hides every
+  - **`createToolRegistry`**, registers tools and `listForActor` hides every
     tool the actor cannot use, so tools stay out of model context unless the
     actor/task can use them.
-  - **Tool surface (`describeTool` / `describeToolSet`)** — deterministic,
+  - **Tool surface (`describeTool` / `describeToolSet`)**, deterministic,
     model-facing rendering of each tool's metadata with a `catalog: true`
     capability-directory one-liner mode for staged tool exposure (doc Stage
     0–4); `zodToSchemaText` produces a stable summary of strict input and
     canonical output schemas (boundary validation still uses the real Zod
     schemas).
-  - **Trajectory** — the `AgentSessionEvent` vocabulary gains `tool/result`
+  - **Trajectory**, the `AgentSessionEvent` vocabulary gains `tool/result`
     alongside the existing `tool/call` / `policy/decision` / `approval/*` /
     `command/query/dispatched|result` events.
-  - **Tests** — `tools/tools.test.ts` (21 tests) covering the doc's
+  - **Tests**, `tools/tools.test.ts` (21 tests) covering the doc's
     acceptance criteria: tools carry no business logic, call args are logged
     before dispatch, results logged after, approval-required renders as an
     approval request not a failure, denied/validation/error outcomes are
@@ -428,19 +714,19 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
 - **Durable approval grants (ADR 0014 update, research doc §Human
-  Collaboration) — the third harness tranche**. Human approval is a durable
-  grant — who granted, what exact action, which actor it authorizes, expiry,
-  conditions, policy basis, evidence shown — never a chat message the model may
+  Collaboration), the third harness tranche**. Human approval is a durable
+  grant, who granted, what exact action, which actor it authorizes, expiry,
+  conditions, policy basis, evidence shown, never a chat message the model may
   reinterpret.
-  - **`@chaste/kernel` `approvals.ts`** — `ApprovalGrantRecord` (envelope
+  - **`@chaste/kernel` `approvals.ts`**, `ApprovalGrantRecord` (envelope
     `ApprovalGrant` + `organizationId`, `grantedToUserId`, `status`, revoke
     bookkeeping), `ApprovalGrantStore` interface, `InMemoryApprovalGrantStore`,
     and the pure `grantCovers` matcher (org + actor + scope + expiry + revoked).
-  - **`@chaste/db` + `@chaste/runtime`** — `approval_grants` table (Drizzle +
+  - **`@chaste/db` + `@chaste/runtime`**, `approval_grants` table (Drizzle +
     idempotent SQL) and `PostgresApprovalGrantStore`, wired into
     `createRuntime` as `runtime.approvalGrants` so grants survive restarts and
     are shared across API + worker hosts.
-  - **`@chaste/ai-core` `tools/approvals.ts`** — `grantStoreApprovalResolver`
+  - **`@chaste/ai-core` `tools/approvals.ts`**, `grantStoreApprovalResolver`
     surfaces an inbox approval item (when wired), awaits the human decision,
     and on `allow`/`always` mints a durable grant whose id becomes the tool
     call's `approvalGrantId`; without a decision surface the call stays an
@@ -448,69 +734,69 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     store before the default risk policy, so a durable grant auto-allows
     subsequent identical calls until expiry/revocation; the trajectory's
     `policy/decision` cites `grant:<id>`.
-  - **Tool pipeline** — `ApprovalRequest` now carries `policyBasis` and
+  - **Tool pipeline**, `ApprovalRequest` now carries `policyBasis` and
     `evidenceRefs`; the command envelope's `policyContext` records the policy
     that produced the decision so audit and trajectory cite the grant/policy.
-  - **Tests** — kernel `approvals.test.ts` (scope/actor/org/expiry/revocation
+  - **Tests**, kernel `approvals.test.ts` (scope/actor/org/expiry/revocation
     matching, create/get/list/revoke/check) and ai-core `tools/approvals.test.ts`
     (approval → durable grant, denied → approval request, grant-covered
     auto-allow, per-actor isolation).
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
-- **Typed agent plans (ADR 0014 update, research doc §Planning) — the fourth
+- **Typed agent plans (ADR 0014 update, research doc §Planning), the fourth
   harness tranche** in `packages/ai-core/src/planning/`. A plan is a typed,
   inspectable, revisable artifact connecting intent → approval → execution,
   validated by Zod at every boundary.
-  - **`planning/types.ts`** — `AgentPlan` (`objective`, `assumptions`, `steps`,
+  - **`planning/types.ts`**, `AgentPlan` (`objective`, `assumptions`, `steps`,
     `requiredApprovals`, `risks`, `evidenceNeeded`, `stopConditions`),
     `PlanStep`, `ApprovalNeed`, `PlanRisk`, `EvidenceNeed`.
-  - **`planning/schema.ts`** — `.strict()` Zod contracts (`agentPlanSchema`,
+  - **`planning/schema.ts`**, `.strict()` Zod contracts (`agentPlanSchema`,
     `validatePlan`) so the model can propose a plan but never invent a shape
     the kernel rejects.
-  - **`planning/plan.ts`** — pure analysis: `planRisk` maps risk tiers onto
+  - **`planning/plan.ts`**, pure analysis: `planRisk` maps risk tiers onto
     plan risk levels aligned with the tool policy (`read`→low,
     `write_local`→medium, `exec`/`external`→high), `planRequiresApproval`,
     `summarizePlan` (model-facing), `renderPlan` (approval card).
-  - **`planning/approve.ts`** — `requestPlanApproval`: logs `plan/proposed`,
+  - **`planning/approve.ts`**, `requestPlanApproval`: logs `plan/proposed`,
     auto-runs low-risk plans, surfaces medium/high-risk plans as an inbox
     `plan` item (editable/rejectable), and on approval mints one durable grant
     per `requiredApproval` (command/resource-scoped, TTL, `policyBasis:
     "plan-approval"`, conditioned on the reason + plan id) so
     `grantCoveredToolPolicy` auto-allows the matching steps. Rejection mints
     nothing and logs `approval/rejected`; no decision surface fails closed.
-  - **Tests** — `planning/planning.test.ts` (risk classification, low-risk
+  - **Tests**, `planning/planning.test.ts` (risk classification, low-risk
     auto-run, approval → grants, rejection → no grants, fail-closed, grant
     covers approved command for the granted actor only).
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 - **Activities + task foundations (ADR 0014 update, research doc
-  §Proactive Scheduling / §Workflow, build item 7) — the fifth harness
+  §Proactive Scheduling / §Workflow, build item 7), the fifth harness
   tranche** in `@chaste/kernel` + `@chaste/db` + `@chaste/runtime`, following
   the durable-store pattern (model + in-memory store in kernel, Postgres store
   in runtime).
-  - **`@chaste/kernel` `activities.ts`** — `Activity` (kind, assignee,
+  - **`@chaste/kernel` `activities.ts`**, `Activity` (kind, assignee,
     createdBy, dueAt, timezone, recurrence, business-record link),
     `RecurrenceRule` with pure UTC `nextOccurrence` (daily/weekly/monthly +
     weekday narrowing + pinned time), `isOverdue` (derived, never stored),
     `ActivityStore` + `InMemoryActivityStore` with once-only complete/cancel,
     agenda ordering, and `overdue`.
-  - **`@chaste/kernel` `tasks.ts`** — workflow/task foundations: `Task`
+  - **`@chaste/kernel` `tasks.ts`**, workflow/task foundations: `Task`
     (status, priority, dueAt, `dependsOn` dependency graph, blocker reason),
     pure `taskBlockers` / `canTransition` / `readyTasks` (work queue = pending
     tasks with no blockers, due-date then priority order), and `TaskStore` +
     `InMemoryTaskStore` with dependency-enforcing transitions.
-  - **`@chaste/db` + `@chaste/runtime`** — `activities` and `workflow_tasks`
+  - **`@chaste/db` + `@chaste/runtime`**, `activities` and `workflow_tasks`
     tables (Drizzle + idempotent SQL), `PostgresActivityStore` and
     `PostgresTaskStore` wired into `createRuntime` as `runtime.activities` /
     `runtime.tasks`. Task transitions reuse the kernel's pure `canTransition`.
-  - **Tests** — kernel `activities.test.ts` + `tasks.test.ts` (recurrence,
+  - **Tests**, kernel `activities.test.ts` + `tasks.test.ts` (recurrence,
     overdue derivation, once-only transitions, dependency blocking, blocker
     reasons, work-queue ordering).
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 - **Harness orchestrator wiring (ADR 0014 update, research doc §Agent
-  Harness) — the sixth harness tranche** in `packages/ai-core/src/harness/`.
+  Harness), the sixth harness tranche** in `packages/ai-core/src/harness/`.
   Connects the tool registry, durable grants, typed plans, and trajectory into
-  a runnable whole — additively, leaving the existing ad-hoc orchestrator
+  a runnable whole, additively, leaving the existing ad-hoc orchestrator
   untouched.
-  - **`createHarness`** — `toolSurface(actor)` (model-facing tool list +
+  - **`createHarness`**, `toolSurface(actor)` (model-facing tool list +
     schemas from `listForActor` + `describeToolSet`), `call(params)` (executes
     a tool through `executeBusinessTool` with `grantCoveredToolPolicy` +
     `grantStoreApprovalResolver`; no grants/inbox/approver → approval calls
@@ -518,23 +804,23 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     gates on `requestPlanApproval`, topologically orders steps, runs each
     through the bus, skips dependents of failed steps, honors stop
     conditions, attaches `evidence/attached` per `expectedEvidence`).
-  - **`tools/execute.ts`** — an `allow` from `grant:<id>` now cites the
+  - **`tools/execute.ts`**, an `allow` from `grant:<id>` now cites the
     durable grant as the envelope's `approvalGrantId`, so a plan-approved
     step's audit and handler trace the exact grant that authorized it.
-  - **Tests** — `harness/harness.test.ts` (permission-filtered tool surfaces,
+  - **Tests**, `harness/harness.test.ts` (permission-filtered tool surfaces,
     read dispatch with trajectory, fail-closed approvals, plan grants covering
     external steps, dependency ordering + dep-failure skipping, stop
     conditions, boundary validation + missing-approver fail closed).
   - Docs: ADR 0014 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **(Activities + workflow tasks) command surface — the seventh harness
+- **(Activities + workflow tasks) command surface, the seventh harness
   tranche**, `modules/workflow-tasks` (`@chaste/module-workflow-tasks`),
   completing build-sequence item 7 of the research doc. Humans and agents
   exercise the same bus contract over the durable stores, so AI/manual parity
   holds by construction.
   - `createWorkflowTasksModule({ activities, tasks })` layers strict
     (`z.object(...).strict()`) Zod boundaries over the kernel
-    `ActivityStore`/`TaskStore` interfaces — the module owns no storage.
+    `ActivityStore`/`TaskStore` interfaces, the module owns no storage.
   - Commands: `activities.create` / `activities.complete` / `activities.cancel`;
     `workflow.tasks.create` / `workflow.tasks.complete`
     (dependency-enforced via `taskBlockers`) / `workflow.tasks.block` (records
@@ -545,37 +831,37 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   - `packages/runtime` builds the durable Postgres stores *before* module
     registration and injects them into the module, so the same stores serve
     the module and the harness.
-  - Tests: `workflow-tasks.test.ts` — manifest, CRUD round-trips, overdue
+  - Tests: `workflow-tasks.test.ts`, manifest, CRUD round-trips, overdue
     derivation, dependency-enforced completion, work-queue ordering, blocked
     reasons, strict input rejection, permission denial, and bus reachability
     with envelope provenance.
   - Docs: ADR 0014 tranche-7 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **Host layer (harness over HTTP/chat) — the eighth harness tranche**,
+- **Host layer (harness over HTTP/chat), the eighth harness tranche**,
   laying the build-item-9 foundation: the surface that *runs the native
   harness* and serves inbox plan/approval decisions through durable grants.
-  Additive — `/api/v1/ai/chat` and the legacy orchestrator are untouched.
-  - **Bus→tool adapter (`@chaste/ai-core` `tools/from-bus.ts`)** — every
+  Additive, `/api/v1/ai/chat` and the legacy orchestrator are untouched.
+  - **Bus→tool adapter (`@chaste/ai-core` `tools/from-bus.ts`)**, every
     registered command and query becomes a tool wrapping the same bus contract
     (`command` = bus name, `exposeWhen` = the command's permission strings,
     input/output = the same Zod schemas). No tool implements business logic and
-    risk is never invented — it derives from the wrapped command's metadata.
+    risk is never invented, it derives from the wrapped command's metadata.
     This is what populates the tool registry in production.
-  - **`harness/host.ts` — `createHarnessHost`** — wires the harness to durable
+  - **`harness/host.ts`, `createHarnessHost`**, wires the harness to durable
     stores and exposes `runPlan` (blocking), `submitPlan` (non-blocking:
     low-risk plans execute immediately; gated plans surface an inbox `plan`
     item and are stored), `decide` (a human's resolution: approval mints the
     plan's durable grants and executes its steps; rejection records the
     rejection; other item kinds resolve generically), `pendingItems` /
     `pendingPlans`, and `harnessFor(approverUserId)`.
-  - **`planning/approve.ts` split** — `proposePlanApproval` surfaces a plan
+  - **`planning/approve.ts` split**, `proposePlanApproval` surfaces a plan
     without blocking (`via: "awaiting"`), `grantPlanApprovals` mints the durable
     grants, and `requestPlanApproval` reuses both. Proposals now record an
     `approval/requested` trajectory event.
-  - **Harness extraction** — `harness/tool-context.ts` +
+  - **Harness extraction**, `harness/tool-context.ts` +
     `harness/run-plan-steps.ts` let the host execute plan steps under identical
     authority (same grants/policy/trajectory) after an external approval.
-  - **API routes (`apps/api`)** — `POST /api/v1/ai/plans`, `GET /api/v1/inbox`,
+  - **API routes (`apps/api`)**, `POST /api/v1/ai/plans`, `GET /api/v1/inbox`,
     `POST /api/v1/inbox/:id/decide`, backed by `app.harnessHost` (built once in
     `createAppContext` from the Postgres grant store, inbox, and trajectory).
   - Tests: `tools/from-bus.test.ts`, `harness/host.test.ts` (submit→decide→
@@ -584,28 +870,28 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     submit → inbox → decide → execute round-trip over HTTP).
   - Docs: ADR 0014 tranche-8 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **Durable workflow instances (build item 10) — the ninth harness tranche**,
+- **Durable workflow instances (build item 10), the ninth harness tranche**,
   the durable, resumable run state for workflows (`@chaste/kernel`
   `workflow-instances.ts`), executed over the bus through
   `modules/workflow-instances` (`@chaste/module-workflow-instances`).
-  Additive — the engine's one-shot resume and the legacy direct-run path are
+  Additive, the engine's one-shot resume and the legacy direct-run path are
   untouched.
-  - **Kernel state model + store interface** — `WorkflowInstance` (status,
+  - **Kernel state model + store interface**, `WorkflowInstance` (status,
     context, per-step results, error, timestamps) mutated only through pure
     helpers (`newWorkflowInstance`, `applyStepResult`, `finalizeInstance`,
     `completedStepIds`), with an `InMemoryWorkflowInstanceStore` and a
     `WorkflowInstanceStore` interface.
-  - **Additive engine options (`@chaste/ai-core` `workflows/engine.ts`)** —
+  - **Additive engine options (`@chaste/ai-core` `workflows/engine.ts`)**,
     `skipStepIds` (prior-run steps skipped without re-executing), `baseContext`
     (stored context resolves later steps' inputs), `runId` (persists across
     resume calls), `checkpoint` (per-step persistence hook).
-  - **`workflow.instance.*` bus surface** — `start` (runs the definition from
+  - **`workflow.instance.*` bus surface**, `start` (runs the definition from
     `core.workflow.get` with `runId = instance.id`), `advance` (resumes from the
     checkpoint, accepting newly approved gate ids), `cancel`, and org-scoped
     `get`/`list`. Permissions `workflow.instance.read` / `workflow.instance.write`
     declared in the manifest; everything flows through the command/query bus so
     AI/manual parity, audit, and permissions hold by construction.
-  - **`@chaste/db` + `@chaste/runtime`** — `workflow_runs` gains
+  - **`@chaste/db` + `@chaste/runtime`**, `workflow_runs` gains
     `created_by_user_id` + `updated_at` (ADD COLUMN IF NOT EXISTS migration);
     `PostgresWorkflowInstanceStore` upserts each checkpoint; wired as
     `runtime.workflowInstances` and registered in `createRuntime`.
@@ -617,32 +903,32 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     gated instance to completion without re-running steps).
   - Docs: ADR 0014 tranche-9 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **Durable pending plans — the tenth harness tranche**, replacing the host
+- **Durable pending plans, the tenth harness tranche**, replacing the host
   layer's last process-local state: a gated plan now persists to the shared
   `harness_plans` table (keyed by inbox item id), so a plan submitted on the
-  API host is decidable on the worker host. Additive — the host falls back to
+  API host is decidable on the worker host. Additive, the host falls back to
   the in-memory map when no `planStore` is supplied.
-  - **`@chaste/ai-core` `harness/plan-store.ts`** — `PlanStore` interface
+  - **`@chaste/ai-core` `harness/plan-store.ts`**, `PlanStore` interface
     (`save`, `getByItemId`, `getByPlanId`, `listByOrg`, `listAll`, `remove`)
     with `InMemoryPlanStore`; the stored record serializes the plan's
     `Actor.permissions` Set to an array and rebuilds it on load, so a replayed
     decision re-executes under the exact same authority.
-  - **`harness/host.ts`** — `createHarnessHost` accepts `planStore?`;
+  - **`harness/host.ts`**, `createHarnessHost` accepts `planStore?`;
     `submitPlan` persists the entry, `decide` loads it durably, `pendingPlans`
     lists from the store (now async). `PendingPlanEntry` moved to `plan-store.ts`.
-  - **`@chaste/db` + `@chaste/runtime`** — new `harness_plans` table with
+  - **`@chaste/db` + `@chaste/runtime`**, new `harness_plans` table with
     `pending`/`resolved` tombstone status; `PostgresPlanStore` wired as
     `runtime.planStore` and passed into `createHarnessHost` by `apps/api`.
   - Tests: `plan-store.test.ts` (serialization round-trip preserving
     permissions/evidence/policy context, CRUD, defensive copies), `host.test.ts`
     durable path (submit through one host, decide through another sharing the
-    store), and `packages/runtime/src/plan-store.e2e.test.ts` — submit on the
+    store), and `packages/runtime/src/plan-store.e2e.test.ts`, submit on the
     API host → `harness_plans` row → worker host decides → step executes under
     the replayed actor authority (grant minted, activity created by the agent
     user) → entry tombstoned; rejection tombstones without executing.
   - Docs: ADR 0014 tranche-10 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **Model router + cost controls — the eleventh harness tranche** (build item
+- **Model router + cost controls, the eleventh harness tranche** (build item
   13, cost-control half): the `ModelRouter` stage between the prompt envelope
   and the LLM call selects a provider per task class and records token/cost
   attribution. Every routed completion appends an append-only row to the
@@ -650,22 +936,22 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   summing recorded spend, so a cap configured on one host reflects spend
   recorded on every host. Fail-closed: unroutable task classes and exhausted
   budgets refuse the request.
-  - **`@chaste/ai-core` `model-router.ts`** — `TaskClass` (`rules`/`chat`/
+  - **`@chaste/ai-core` `model-router.ts`**, `TaskClass` (`rules`/`chat`/
     `planning`/`report`, zod-validated), `UsageLedger` (`record`,
     `spendForOrganization(since)`, `spendForSession`) + `InMemoryUsageLedger`,
     `createModelRouter({ providers, config, budget, prices, ledger })`,
     `estimateCostCents` (per-1M-token prices), `BudgetPolicy`,
     `ModelRouteError`, `BudgetLimitError`. Recording is unconditional;
     `budget.enabled` gates only the cap check.
-  - **Workflow builder** — optional `router` + `routerTaskClass` (default
+  - **Workflow builder**, optional `router` + `routerTaskClass` (default
     `planning`); with a per-request context, `generateWorkflowFromNL` routes
     the planning completion instead of calling the provider directly.
-  - **`@chaste/config`** — `ai.routerRoutes` (task class → provider id) and
+  - **`@chaste/config`**, `ai.routerRoutes` (task class → provider id) and
     `ai.cost` (enabled, org-monthly + session caps, per-provider prices).
-  - **`@chaste/db` + `@chaste/runtime`** — new `model_usage` table;
+  - **`@chaste/db` + `@chaste/runtime`**, new `model_usage` table;
     `PostgresUsageLedger` (insert-once, never update/delete) wired as
     `runtime.usage`.
-  - **`apps/api`** — `app.modelRouter` built over the traced provider +
+  - **`apps/api`**, `app.modelRouter` built over the traced provider +
     `runtime.usage`; `buildWorkflow` routes planning completions with the
     caller's org/session context; `GET /api/v1/ai/usage` reports org monthly
     spend from the durable ledger.
@@ -677,27 +963,27 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     `e2e-workflow.test.ts` asserting the usage route.
   - Docs: ADR 0014 tranche-11 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **Proactive coordinator — the twelfth harness tranche** (build item 13,
+- **Proactive coordinator, the twelfth harness tranche** (build item 13,
   part 2): natural-language schedules parse into exact
   who/what/when/condition/action objects *before* confirmation; watch rules
   (notify < suggest < draft < request_approval) fire durably with trigger
   evidence, proposed action, expected impact, and an explicit
   `requiredApproval` flag; quiet hours, a daily cap, and occurrence
-  deduplication manage fatigue; and the coordinator never executes a command —
+  deduplication manage fatigue; and the coordinator never executes a command,
   it hands the host an authority-safe plan to gate through approval.
-  - **`@chaste/ai-core` `proactive/`** — `schedule-parser.ts` (deterministic
+  - **`@chaste/ai-core` `proactive/`**, `schedule-parser.ts` (deterministic
     `parseScheduleText` → `ScheduleSpec` + `confirmSchedule`), `watch-rules.ts`
     (`WatchRule` + `WatchRuleStore` + `nextFireTime`, sharing kernel-activity
     recurrence), `coordinator.ts` (`ProactivePreferences` quiet hours / daily
     cap / channels, `ProactiveSuggestion` envelope, pure `deliveryGate` +
     `inQuietHours`, `collect`/`deliver`/`deliverDue`/`buildProactivePlan`),
     and dependency-free `types.ts` for the shared zod contracts.
-  - **`@chaste/db` + `@chaste/runtime`** — `watch_rules`,
+  - **`@chaste/db` + `@chaste/runtime`**, `watch_rules`,
     `proactive_preferences`, and `proactive_deliveries` (unique
     (org, dedupe_key) → exactly-once firing across hosts); Postgres stores
     wired as `runtime.watchRules` / `runtime.proactivePreferences` /
     `runtime.proactiveDeliveries`.
-  - **`apps/api`** — `app.proactive` surface; `/api/v1/proactive/rules` (CRUD
+  - **`apps/api`**, `app.proactive` surface; `/api/v1/proactive/rules` (CRUD
     + pause/resume), `/api/v1/proactive/preferences` (read/edit),
     `/api/v1/proactive/suggestions?now=` (dry-run, records nothing), and
     `/api/v1/proactive/tick` (collect + gate + record).
@@ -711,20 +997,20 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     tick, preferences).
   - Docs: ADR 0014 tranche-12 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **Evaluation harness, replay/fork, and scenario regression suite — the
+- **Evaluation harness, replay/fork, and scenario regression suite, the
   thirteenth harness tranche** (build item 14): the append-only trajectory
   becomes a verification surface. A session log replays into the exact
   model-visible request every time (hard invariant), forks a stream up to a
   boundary into a fresh identity with `session/forked` + `session/resumed`
   markers, and regression scenarios drive a real harness with the replay and
   fork guarantees attached to every verdict.
-  - **`@chaste/ai-core` `eval/`** — `replay.ts` (`replaySession`,
+  - **`@chaste/ai-core` `eval/`**, `replay.ts` (`replaySession`,
     `assertReplayInvariant` fail-closed, `summarizeTrace`), `fork.ts`
     (`forkSession` with boundary validation, copies events under a new
     identity, appends `session/forked` + `session/resumed`), `scenario.ts`
     (`Scenario`, `createScenarioContext`, `runScenario` auto-attaching replay
     + fork, `runScenarioSuite` → `SuiteReport`).
-  - **`@chaste/ai-core` `eval/scenarios/`** — golden scenarios over a real
+  - **`@chaste/ai-core` `eval/scenarios/`**, golden scenarios over a real
     kernel bus/tools/grants/decision surface with the harness pointed at the
     scenario's own session log: `harness/unauthorized-tool-refusal` (tool
     hidden + direct call denied under `tool-exposeWhen`, nothing dispatched)
@@ -734,18 +1020,18 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     reporting, fail-closed invariant, fork copy/markers/isolation/boundaries)
     and `scenario.test.ts` (verdict carries replay + fork, failing checks fail
     the scenario, golden suite passes, incomplete scenario fails);
-    `packages/runtime/src/replay-fork.e2e.test.ts` — a trajectory recorded on
+    `packages/runtime/src/replay-fork.e2e.test.ts`, a trajectory recorded on
     one host replays identically on a second independent host, and a fork
     survives a fresh store instance.
   - Docs: ADR 0014 tranche-13 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **MCP/integration plane — the fourteenth harness tranche** (build item 15):
+- **MCP/integration plane, the fourteenth harness tranche** (build item 15):
   the `mcp-gateway` exposes Chaste capabilities to external harnesses (Codex,
   Claude Code, opencode, DeepSeek Harness, MCP clients) as scoped tools
   mediated by Chaste. External harnesses never touch the database: every
   `tools/call` is revalidated, reauthorized, and audited on the shared session
   log through the same pipeline the native harness uses.
-  - **`@chaste/ai-core` `mcp/`** — `protocol.ts` (dependency-free JSON-RPC 2.0:
+  - **`@chaste/ai-core` `mcp/`**, `protocol.ts` (dependency-free JSON-RPC 2.0:
     `initialize`/`tools/list`/`tools/call`/`ping`, MCP error codes,
     `McpError`), `zod-json-schema.ts` (deterministic Zod → JSON Schema for
     `inputSchema`), `gateway.ts` (`createMcpGateway` + `createSession`:
@@ -753,7 +1039,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     explainable `isError` payloads, trajectory recording),
     `stdio.ts` (newline-delimited JSON-RPC stdio transport),
     `server.ts` (`createChasteMCPServer` from the command/query bus).
-  - **`apps/api`** — `app.tools` + `app.mcp`; `POST /api/v1/mcp` with a
+  - **`apps/api`**, `app.tools` + `app.mcp`; `POST /api/v1/mcp` with a
     per-request session (uuid `x-chaste-session` header for continuity) and
     tools scoped to the authenticated actor.
   - Tests: ai-core `mcp/gateway.test.ts` (initialize, scoping, read-tool call,
@@ -763,7 +1049,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     method-not-found, hidden-tool rejection).
   - Docs: ADR 0014 tranche-14 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **External harness adapters — the fifteenth harness tranche** (build item 16):
+- **External harness adapters, the fifteenth harness tranche** (build item 16):
   bounded delegation to Codex, Claude Code, opencode, and DeepSeek Harness.
   External harnesses are optional accelerators, never direct business
   authorities: every run is bound to a Chaste actor, its tool calls are
@@ -771,7 +1057,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   attach as artifacts, and the Chaste trajectory on `runId` remains the audit
   spine. Provider/model usage is recorded when the harness exposes it;
   otherwise the run is marked `usageVisibility: "unknown"`.
-  - **`@chaste/ai-core` `external-harness/`** — the `HarnessAdapter` contract
+  - **`@chaste/ai-core` `external-harness/`**, the `HarnessAdapter` contract
     (`start`/`followup`/`cancel`/`collect`/`capabilities`), the four declarative
     definitions (Codex, Claude Code, opencode, DeepSeek Harness), and
     `createHarnessAdapter`: runs record `externalHarness/*` events
@@ -780,7 +1066,7 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     tools outside the run's `allowedTools`, and collect a result whose
     `traceRef` is the Chaste trajectory id. `harnessRunFromTrajectory` rebuilds
     a handle from the session stream for stateless resume by `runId`.
-  - **`apps/api`** — `app.externalHarnesses` (the four adapters over the shared
+  - **`apps/api`**, `app.externalHarnesses` (the four adapters over the shared
     gateway + `sessionLog`); `GET /api/v1/harness-adapters`;
     `POST /api/v1/harness-adapters/:kind/runs` (start + optional first turn);
     `POST /api/v1/harness-adapters/:kind/runs/:runId/turns` (resume);
@@ -790,42 +1076,42 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
     usage visibility, resume-by-runId + collect, allowedTools gate).
   - Docs: ADR 0014 tranche-15 update `docs/adr/0014-agent-harness-spine-pivot.md`.
 
-- **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)** — Chaste detects coding
+- **Coding-agent reuse (`CHASTE_AI_PROVIDER=auto`)**, Chaste detects coding
   agents already installed on the host (Claude Code, Codex, OpenCode, Gemini,
   Grok, Cline, Antigravity, Pi, and 19 more) and reuses their model + endpoint +
   credential as an `AiProvider`, so operators bring their own subscription
   instead of configuring a second API key. Add an `AnthropicMessagesProvider`,
   a data-driven agent registry in `@chaste/ai-core` (`coding-agents.ts`), and a
   `prefer` override (`CHASTE_AI_PREFER_CODING_AGENT`). Agents are completion
-  backends only — no elevated privileges; OAuth-only agents (Cursor, Copilot,
+  backends only, no elevated privileges; OAuth-only agents (Cursor, Copilot,
   Devin, …) are reported as installed for the self-dev handoff, not reused.
   Docs: `docs/specs/coding-agent-reuse.md`, ADR 0013.
 
-- **Shared durable runtime (`@chaste/runtime`)** — a single `createRuntime(config, db)`
+- **Shared durable runtime (`@chaste/runtime`)**, a single `createRuntime(config, db)`
   factory builds the command/query registries, registers every shipped module once,
   and wires Postgres-backed stores (`pending_approvals`, `ai_wakes`, `ai_skills`).
   Both the API and the worker consume it, eliminating process-local store drift so
   standing rules / wakes / skills minted over HTTP are honored by scheduled
   follow-ups (ARCH-4, SC-4).
-- **Per-request bearer-token authentication** — the API resolves the acting user from
+- **Per-request bearer-token authentication**, the API resolves the acting user from
   an `Authorization: Bearer` token per request instead of a process-wide session
   singleton (with bootstrap-admin fallback for dev/legacy). Adds `POST /api/v1/auth/login`
   and a token-scoped `GET /api/v1/session`. Request-scoped `runCommandAsAuth` /
   `runQueryAsAuth` execute under the request principal while sharing the per-request
   audit/outbox transaction (ARCH-1).
-- **Persisted workflows** — AI-built workflows and their runs now survive restarts,
+- **Persisted workflows**, AI-built workflows and their runs now survive restarts,
   stored in `workflow_definitions` / `workflow_runs` and reached exclusively via the
   command/query bus (`core.workflow.create` / `get` / `list`), which humans and AI share
   (ARCH-5).
-- **Command-bus transactional outbox** — business writes, outbox enqueues, and audit
+- **Command-bus transactional outbox**, business writes, outbox enqueues, and audit
   events commit in one DB transaction via `createCommandHelpers`; success audit is
   in-transaction and failure audit is written out-of-transaction (ARCH-2).
-- **Org-scoped API keys** (`core.apikey.*`) — first-class machine credentials with
+- **Org-scoped API keys** (`core.apikey.*`), first-class machine credentials with
   their own permission scopes (subset of the catalog, validated at creation),
   hash-at-rest secrets, and an independent revoke / rotate / expire lifecycle.
   Authenticate with `X-Api-Key: <secret>`; audit attributes command execution to
   the `api_key` actor (`actorKind: "api_key"`).
-- **Durable outbox delivery (ARCH-9/REL-2)** — the worker now claims events with
+- **Durable outbox delivery (ARCH-9/REL-2)**, the worker now claims events with
   `FOR UPDATE SKIP LOCKED` (no double-processing across workers), tracks
   `attempts` / `last_error` on `outbox_events`, applies exponential backoff via
   `next_attempt_at`, and copies events that exhaust retries to an append-only
@@ -839,13 +1125,13 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
 
 ### Changed
 
-- **Command/query execution** — the kernel `InboxStore` and ai-core `WakeStore` /
+- **Command/query execution**, the kernel `InboxStore` and ai-core `WakeStore` /
   `SkillStore` became async interfaces with separate in-memory and Postgres
   implementations (ARCH-4, SC-4).
-- **Module boot integrity** — removed the dead `core-system` and `demo-crm` modules and
+- **Module boot integrity**, removed the dead `core-system` and `demo-crm` modules and
   added a boot-time registry integrity test that fails on duplicate command/query names
   or missing platform queries (ARCH-6).
-- **Platform module decomposition (ARCH-3)** — the platform "god module" is being split
+- **Platform module decomposition (ARCH-3)**, the platform "god module" is being split
   into bounded-context packages: `business-partner master data` (`core.bpartner.*`),
   `scheduling` (`core.reminder.*`, `core.followup.*`, `core.calendar.*`), and `identity`
   (`core.rbac.*`, `core.role.*`, `core.user.*`) now live in
@@ -853,109 +1139,109 @@ Its history is preserved below and on the [`v1-archive`](https://github.com/bena
   `@chaste/module-identity`. Command/query names and permissions are unchanged;
   ownership and contract tests moved with the code. `platform` shrinks and will keep
   shedding bounded contexts toward a thin aggregator.
-- **Chat confirmation cards** — only the live confirmation renders after a turn; stale
+- **Chat confirmation cards**, only the live confirmation renders after a turn; stale
   cards from a previous confirmation are pruned.
-- **AI orchestration robustness (natural clarification)** — the R10 recognition guard
+- **AI orchestration robustness (natural clarification)**, the R10 recognition guard
   discards an LLM-materialized plan when a deterministic intent is recognized but a
   required field is missing (e.g. `Create customer in Nairobi`), parking a focused
   clarification instead of a confirm with invented values; clarify probes now preserve
   trailing context (city, amount) so the answer merges correctly; the learned-context
   memory block and LLM prompt forbid copying past-execution values into new plans.
-- **Postgres e2e self-cleanup** — `apps/api/src/e2e.test.ts` deletes the customers,
+- **Postgres e2e self-cleanup**, `apps/api/src/e2e.test.ts` deletes the customers,
   invoices, memories, and chat sessions it creates, so test runs no longer pollute the
   shared dev database.
 
 ### Security (2026-08-08 audit remediation)
 
-- **F1 — no more anonymous admin bypass in production.** The "no token ⇒
+- **F1, no more anonymous admin bypass in production.** The "no token ⇒
   bootstrap admin" fallback is now a dev-only flag (`CHASTE_ALLOW_ANON_ADMIN`);
   production forces it off at config load (fail closed) and the prod Compose
   sets it explicitly. Bootstrap admin is now authenticatable: first boot mints a
   hashed-at-rest credential (`CHASTE_ADMIN_TOKEN` or a one-time generated token
   printed in dev only).
-- **F2 — workflow `condition` steps no longer execute code.** `new Function`
+- **F2, workflow `condition` steps no longer execute code.** `new Function`
   was replaced by a restricted predicate interpreter (`evaluateCondition`,
   tokenizer + recursive-descent parser with no function calls / global access),
   so a stored or LLM-injected condition can at worst evaluate to `false`.
   `lookupPath` also rejects prototype-key traversal (`__proto__`/`constructor`).
-- **F3 — workflow build/execute and the two remaining list routes run under the
-  authenticated caller** (`requestCtxForAuth`), not the bootstrap admin — org
+- **F3, workflow build/execute and the two remaining list routes run under the
+  authenticated caller** (`requestCtxForAuth`), not the bootstrap admin, org
   ownership and audit attribution match the requester.
-- **F4 — chat sessions are ownership-checked** (`DbSession.userId`); loading or
+- **F4, chat sessions are ownership-checked** (`DbSession.userId`); loading or
   continuing another user's session (incl. pending planned actions) is denied.
-- **F5 — bearer tokens expire.** `users.token_expires_at` is set on
+- **F5, bearer tokens expire.** `users.token_expires_at` is set on
   invite/create (`CHASTE_SESSION_TOKEN_TTL`, default 30 days) and enforced in
   `resolveUserByToken`; the previously-dead TTL config is now live.
-- **F7 — `core.user.create` stores tokens hashed at rest** (SHA-256), matching
+- **F7, `core.user.create` stores tokens hashed at rest** (SHA-256), matching
   `core.user.invite`; the legacy plaintext lookup remains only as a migration
   fallback for pre-hash rows.
-- **F6 — rate limiting at the HTTP edge** — dependency-free fixed-window
+- **F6, rate limiting at the HTTP edge**, dependency-free fixed-window
   limiters (`apps/api/src/rate-limit.ts`): `/auth/login` 10 req/15s per IP,
   `/ai/chat` 30 req/15s per IP plus 120 req/min per authenticated user;
   throttled responses carry `retry-after` and `429 RATE_LIMITED`.
-- **F8 — the external risk floor is now live** — `core.email.send` /
+- **F8, the external risk floor is now live**, `core.email.send` /
   `core.email.enqueue_template` declare `riskClass: "external"` (target-bound
   per `to`), and `core.backup.restore` declares `riskClass: "exec"`; all three
   require `full_autonomous` to auto-run, so standing rules can no longer send
   email or restore backups under `guarded_auto`.
-- **F9 — CORS allow-list** — the API now accepts only the configured
+- **F9, CORS allow-list**, the API now accepts only the configured
   `webOrigin` instead of reflecting any `Origin` header; non-browser
   (no-Origin) callers are unaffected.
 
-### Security (2026-08-08 — F10–F24 remediation)
+### Security (2026-08-08, F10–F24 remediation)
 
-- **F10 — infra fails closed.** Prod Compose requires `CHASTE_SESSION_SECRET`,
-  `POSTGRES_PASSWORD`, and `REDIS_PASSWORD` (`:?` — no shipped defaults);
+- **F10, infra fails closed.** Prod Compose requires `CHASTE_SESSION_SECRET`,
+  `POSTGRES_PASSWORD`, and `REDIS_PASSWORD` (`:?`, no shipped defaults);
   `CHASTE_BOOTSTRAP` defaults to `false` (first boot requires
   `CHASTE_ADMIN_TOKEN`); Redis runs with mandatory auth; all runtime images
   (`api`, `web`, `worker`, `migrate`) run as the non-root `node` user.
-- **F12 — audit log hygiene.** The command bus redacts sensitive free-text
+- **F12, audit log hygiene.** The command bus redacts sensitive free-text
   inputs (`body`, `note`, `goal`, `salary`, credentials, …) before writing
   `input_summary` (`kernel/src/redact.ts`); the worker no longer logs
   follow-up `goal` text.
-- **F13 — role permissions are catalog-validated.** `core.role.create/update`
-  reject any permission not in `PERMISSION_CATALOG` — including `*` — so a role
+- **F13, role permissions are catalog-validated.** `core.role.create/update`
+  reject any permission not in `PERMISSION_CATALOG`, including `*`, so a role
   can never silently grant more than the platform defines.
-- **F14 — backup restore is org-bound.** `core.backup.restore` refuses a
+- **F14, backup restore is org-bound.** `core.backup.restore` refuses a
   manifest whose `organizationId` differs from the caller's org.
-- **F15 — client-side token hygiene.** The web client clears the stored bearer
+- **F15, client-side token hygiene.** The web client clears the stored bearer
   token on any 401 so an expired/revoked credential drops back to login.
-- **F16 — audit reads are permissioned.** `/api/v1/audit` now goes through the
+- **F16, audit reads are permissioned.** `/api/v1/audit` now goes through the
   `core.audit.list` query (requires `core.rbac.read`) instead of a direct
   store call available to any authenticated user.
-- **F18 — Buzz webhook anti-replay.** Signed webhooks carry a unix-seconds `ts`
+- **F18, Buzz webhook anti-replay.** Signed webhooks carry a unix-seconds `ts`
   covered by the HMAC; payloads older than 5 minutes are rejected.
-- **F20 — legacy web forms authenticate.** `CreateVendorForm`,
+- **F20, legacy web forms authenticate.** `CreateVendorForm`,
   `CreateProductForm`, and `HrActions` route through `apiFetch` (Bearer
-  attached) instead of raw `fetch` — no more "executes as the admin".
-- **F21 — security headers.** `next.config.mjs` adds CSP (with connect-src for
+  attached) instead of raw `fetch`, no more "executes as the admin".
+- **F21, security headers.** `next.config.mjs` adds CSP (with connect-src for
   the API origin), `nosniff`, `DENY` framing, `Referrer-Policy: no-referrer`,
   HSTS, and a restrictive `Permissions-Policy`.
-- **F23 — CI least-privilege.** `ci.yml` scopes `GITHUB_TOKEN` to
+- **F23, CI least-privilege.** `ci.yml` scopes `GITHUB_TOKEN` to
   `contents: read` and adds a non-blocking `pnpm audit` step.
-- **F24 — reminders honor their channel.** `channel: email|both` now enqueues
+- **F24, reminders honor their channel.** `channel: email|both` now enqueues
   an outbound email through the email outbox (delivered by the worker), instead
   of being stored and never sent.
-- **Private overlay mesh (ADR 0012)** — opt-in `--profile mesh` adds a Headscale
+- **Private overlay mesh (ADR 0012)**, opt-in `--profile mesh` adds a Headscale
   control plane (`deploy/mesh/config.yaml` + `acl.json`) and Tailscale sidecars
   for `api`/`web`/`worker`; host port publication can be disabled (`API_BIND=` /
   `WEB_BIND=`) so services are reachable only over the tailnet.
 
 ### Fixed
 
-- **Web app never hydrated under dev CSP (`apps/web/next.config.mjs`)** — the
+- **Web app never hydrated under dev CSP (`apps/web/next.config.mjs`)**, the
   `script-src` policy lacked `'unsafe-eval'`, which blocked Next dev's
   `eval-source-map` chunks from executing, so React never mounted: every click
   (login submit, assistant orb, theme toggle) was inert while SSR HTML rendered
   normally. `'unsafe-eval'` is now added to `script-src` **only** in development;
   the production policy stays strict. Verified by React fiber markers + full
   login/chat flows in the browser.
-- **Stale chat confirm cards** — approving/answering one confirmation no longer leaves
+- **Stale chat confirm cards**, approving/answering one confirmation no longer leaves
   a second duplicate card visible in the composer.
 
 ## [0.1.0] - 2026-08-05
 
-First tagged release. Early alpha — not recommended for production workloads.
+First tagged release. Early alpha, not recommended for production workloads.
 
 ### Added
 
@@ -963,8 +1249,8 @@ First tagged release. Early alpha — not recommended for production workloads.
   commands, unread counts, and a full web UI at `/messaging`.
 - **Buzz bridge**: signed outbound webhook delivery from the worker
   (HMAC-SHA256 `X-Chaste-Signature`) plus a validated inbound webhook endpoint
-  on the API — external messaging with zero configured cost in a stock install.
-- **Email delivery**: transactional email outbox with pluggable adapters —
+  on the API, external messaging with zero configured cost in a stock install.
+- **Email delivery**: transactional email outbox with pluggable adapters,
   Resend (REST) preferred, then SMTP (nodemailer), then console. Provider
   auto-detection, retry + crash-recovery lease, and a `/email` admin page.
 - **Encrypted backups**: AES-256-GCM snapshot/restore (`CHASTE_BACKUP_KEY`)
@@ -997,13 +1283,13 @@ First tagged release. Early alpha — not recommended for production workloads.
   shared identity (name, email, phone, city, country, notes) for any party the
   org has a relationship with. Module role tables (`crm_customers`,
   `pur_vendors`, `hr_employees`, `crm_contacts`) gain a nullable
-  `businessPartnerId` FK — one identity per party, multiple roles (customer AND
+  `businessPartnerId` FK, one identity per party, multiple roles (customer AND
   vendor, employee AND contact). Platform module owns `core.bpartner.create`,
   `.update`, `.delete` (archive), `.list`, `.get` with Zod schemas, outbox
   events, and audit. New permissions: `core.bpartner.manage`, `core.bpartner.read`.
 - **Directory UI**: new `/directory` page (nav: "Directory") listing all business
   partners with type filter, search, KPI strip, create/edit modal, and archive
-  confirmation — the single place to manage parties across the org.
+  confirmation, the single place to manage parties across the org.
 - **Horizon A platform**: multi-branch (list/create/update/set_active/grant),
   capability gap tickets, in-app notifications foundation.
 - **Horizon A platform (cont.)**: capability catalog (search/list) + placement
@@ -1071,9 +1357,9 @@ First tagged release. Early alpha — not recommended for production workloads.
 - **Inbox once-only (R2/R3)**: confirm/cancel now resolve the canonical approval
   by its `toolCallId` (not the pending `id`), so approving/denying a multi-step or
   single-command plan updates the durable Inbox item and cross-surface
-  "first-responder-wins" actually engages — no more dangling `pending` approvals.
+  "first-responder-wins" actually engages, no more dangling `pending` approvals.
 - **Autonomy audit gate**: `effectiveAutonomyForPlan` no longer lets a later
-  step's `minAutonomyForAuto` mask an earlier `external`/`exec` confirm floor —
+  step's `minAutonomyForAuto` mask an earlier `external`/`exec` confirm floor,
   the reported/audited autonomy for a plan is now the strictest step.
 - **Channel session re-homing**: rebinding a thread target to a new session now
   removes it from the old session's index, so deleting the old session can't
@@ -1082,7 +1368,7 @@ First tagged release. Early alpha — not recommended for production workloads.
   reminder `failed` instead of dropping the whole batch; email outbox gains a
   crash-recovery lease (rows stuck in `sending` past a lease window are reclaimed
   to `queued` and retried).
-- **Single-command approvals mirror to the Inbox** — parity with multi-step plans,
+- **Single-command approvals mirror to the Inbox**, parity with multi-step plans,
   so a single external/write action is approvable from mobile/Slack and from
   unattended sessions.
 - **Deterministic scheduling parsers**: `parseScheduleFireAt` / `parseScheduleRange`

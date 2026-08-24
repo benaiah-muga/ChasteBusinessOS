@@ -10,6 +10,7 @@ import {
   vendors,
 } from "@chaste/db";
 import { computeAging } from "@chaste/erp-core";
+import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 
 export async function GET() {
@@ -43,17 +44,23 @@ export async function GET() {
       issuedAt: invoices.issuedAt,
     })
     .from(invoices)
-    .where(and(eq(invoices.orgId, orgId), sql`${invoices.totalMinor} > ${invoices.paidMinor}`));
+    .where(and(eq(invoices.orgId, orgId), sql`${invoices.totalMinor} > ${invoices.paidMinor}`))
+    // Bounded: an org with thousands of open invoices must not drag the
+    // dashboard; the aging buckets below aggregate what we fetched.
+    .orderBy(desc(invoices.issuedAt))
+    .limit(200);
 
   const now = new Date();
+  const outstanding = openRows.filter(
+    (r): r is typeof r & { issuedAt: Date } =>
+      r.issuedAt !== null && r.totalMinor - r.paidMinor > 0,
+  );
   const buckets = computeAging(
-    openRows
-      .filter((r) => r.issuedAt !== null && r.totalMinor - r.paidMinor > 0)
-      .map((r) => ({
-        invoiceNumber: r.number,
-        outstandingMinor: r.totalMinor - r.paidMinor,
-        issuedAt: r.issuedAt as Date,
-      })),
+    outstanding.map((r) => ({
+      invoiceNumber: r.number,
+      outstandingMinor: r.totalMinor - r.paidMinor,
+      issuedAt: r.issuedAt,
+    })),
     now,
   );
 
@@ -84,13 +91,11 @@ export async function GET() {
       postedAt: e.postedAt.toISOString(),
     })),
     aging: buckets,
-    agingInvoices: openRows
-      .filter((r) => r.issuedAt !== null && r.totalMinor - r.paidMinor > 0)
-      .map((r) => ({
-        number: r.number,
-        outstandingMinor: r.totalMinor - r.paidMinor,
-        ageDays: Math.floor((now.getTime() - (r.issuedAt as Date).getTime()) / 86_400_000),
-      })),
+    agingInvoices: outstanding.map((r) => ({
+      number: r.number,
+      outstandingMinor: r.totalMinor - r.paidMinor,
+      ageDays: Math.floor((now.getTime() - r.issuedAt.getTime()) / 86_400_000),
+    })),
     closedPeriods,
     bills: bills.map((b) => ({ ...b, outstandingMinor: b.totalMinor - b.paidMinor })),
   });
@@ -101,13 +106,25 @@ export async function POST(req: Request) {
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = (await req.json()) as { action?: string; entryId?: string; year?: number; month?: number; billNumber?: number; amountMinor?: number };
-  const executor = buildExecutorSafe();
+  const db = getDb().db;
+  const executor = buildExecutor(db, buildRegistry(db));
 
-  const humanCtx = actorCtx(resolved);
+  const humanCtx = actorFromResolved(resolved, {});
   if (!humanCtx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   if (body.action === "reverse" && body.entryId) {
     const result = await executor.execute("accounting.reverseEntry", humanCtx, { entryId: body.entryId });
+    return respond(result);
+  }
+  if (body.action === "cashBasis" && body.year) {
+    const result = await executor.execute("accounting.cashBasisReport", humanCtx, {
+      year: body.year,
+      ...(body.month ? { month: body.month } : {}),
+    });
+    return respond(result);
+  }
+  if (body.action === "closeYear" && body.year) {
+    const result = await executor.execute("accounting.closeYear", humanCtx, { year: body.year });
     return respond(result);
   }
   if (body.action === "closePeriod" && body.year && body.month) {
@@ -124,18 +141,6 @@ export async function POST(req: Request) {
   return NextResponse.json({ error: "invalid action" }, { status: 400 });
 }
 
-// Local helpers keep the route file self-contained.
-import { buildExecutor, buildRegistry, actorFromResolved } from "@/server/kernel";
-function buildRegistrySafe() {
-  return buildRegistry(getDb().db);
-}
-function buildExecutorSafe() {
-  return buildExecutor(getDb().db, buildRegistrySafe());
-}
-type Resolved = Awaited<ReturnType<typeof getResolvedUser>>;
-function actorCtx(resolved: NonNullable<Resolved>) {
-  return actorFromResolved(resolved, {});
-}
 function respond(result: { ok: boolean; data?: unknown; error?: string; pendingApproval?: unknown }) {
   if (result.pendingApproval) {
     return NextResponse.json({ ok: false, pendingApproval: true, reason: result.error }, { status: 202 });

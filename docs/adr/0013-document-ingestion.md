@@ -1,4 +1,4 @@
-# ADR 0013: Document ingestion — deterministic coding, model-assisted extraction
+# ADR 0013: Document ingestion, deterministic coding, model-assisted extraction
 
 Date: 2026-08-22 · Status: accepted
 
@@ -17,7 +17,7 @@ design. Two failure modes to avoid:
 ## Decision
 
 - **Storage:** documents live in Postgres (`documents` table), bytes ≤ 5MB
-  base64. No object storage yet — receipts are small and tenant-scoped
+  base64. No object storage yet, receipts are small and tenant-scoped
   queries are trivial; revisit when PDFs get large.
 - **Parsing** (`documents.parseDocument`): uploads go through nemotron-parse
   (`packages/ai/src/documents.ts`) into markdown; pasted text is normalized
@@ -31,7 +31,7 @@ design. Two failure modes to avoid:
   account names, synonym-expanded, tie-broken by ascending code, falling
   back to Operating Expenses (6000). The LLM never picks account codes.
 - **Governance:** ingestion is `write`; deletion is `destructive` (always
-  gated); suggestions are derived state with no inverse — re-running is the
+  gated); suggestions are derived state with no inverse, re-running is the
   undo. Nothing posts to the ledger from this module; bills are created via
   the existing `purchasing.createBill`, so money gating is unchanged.
 

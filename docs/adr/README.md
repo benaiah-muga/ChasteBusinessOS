@@ -18,6 +18,19 @@ the next number; superseded ones get a Status update, never deletion.
 | 0010 | Three-way matching on vendor bills | accepted |
 | 0012 | Creator Mode proposals are governed artifacts | accepted |
 | 0013 | Document ingestion: deterministic coding, model-assisted extraction | accepted |
+| 0014 | Payroll posts as one gated ledger entry | accepted |
+| 0015 | Design system brand shell | accepted |
+| 0016 | Org memory retrieval capability | accepted |
+| 0017 | RLS everywhere | accepted |
+| 0018 | Signed plugin manifests | accepted |
+| 0019 | Cash basis and year-end close | accepted |
+| 0020 | Trust spine hardening | accepted |
+| 0021 | Multi-currency groundwork | accepted |
+| 0022 | Ledger scaling | accepted |
+| 0023 | Creator sandboxing | accepted |
+| 0024 | Security audit remediation | accepted |
+| 0025 | Customer care agent | accepted |
+| 0026 | Manufacturing module split and full production lifecycle | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
-written down — if you made one of those calls, write the ADR.
+written down, if you made one of those calls, write the ADR.

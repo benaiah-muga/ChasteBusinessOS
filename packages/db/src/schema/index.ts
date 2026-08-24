@@ -1,4 +1,5 @@
 import {
+  bigint,
   bigserial,
   boolean,
   index,
@@ -22,6 +23,14 @@ export const organizations = pgTable("organizations", {
   id: id(),
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
+  /**
+   * Which platform modules this org runs, e.g. ["accounting","crm","pos"].
+   * NULL means every standard module is enabled (pre-toggle orgs keep
+   * working unchanged). Enforcement happens at the kernel executor, so
+   * disabled modules vanish from human routes, agent tool lists, and the
+   * job queue alike.
+   */
+  enabledModules: jsonb("enabled_modules"),
   baseCurrency: text("base_currency").notNull().default("USD"),
   fiscalYearStart: integer("fiscal_year_start_month").notNull().default(1),
   profileDescription: text("profile_description"),
@@ -102,7 +111,7 @@ export const userRoles = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     assignedBy: uuid("assigned_by").references(() => users.id),
-    assignedAt: createdAt(),
+    assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.roleId] })],
 );
@@ -130,7 +139,7 @@ export const ledgerEvents = pgTable(
   ],
 );
 
-/** Agent conversation sessions — replayable trajectories. */
+/** Agent conversation sessions, replayable trajectories. */
 export const agentSessions = pgTable(
   "agent_sessions",
   {
@@ -289,6 +298,9 @@ export const invoices = pgTable(
     taxMinor: integer("tax_minor").notNull(),
     totalMinor: integer("total_minor").notNull(),
     paidMinor: integer("paid_minor").notNull().default(0),
+    /** Captured at creation when currency ≠ org base: 1 unit = num/den base. */
+    fxRateNum: bigint("fx_rate_num", { mode: "number" }),
+    fxRateDen: integer("fx_rate_den"),
     memo: text("memo"),
     posSessionId: uuid("pos_session_id").references(() => posSessions.id, { onDelete: "set null" }),
     issuedAt: timestamp("issued_at", { withTimezone: true }),
@@ -343,6 +355,13 @@ export const journalEntries = pgTable(
     sourceType: text("source_type"), // invoice | payment | manual | reversal
     sourceId: uuid("source_id"),
     reversalOfId: uuid("reversal_of_id"),
+    /**
+     * One currency per entry (ADR 0021): every line of an entry shares it.
+     * Cross-currency settlement is two entries joined by an fx_settlements
+     * row, never mixed lines. Legacy rows are USD by default; the posting
+     * service stamps the org's base currency unless told otherwise.
+     */
+    currency: text("currency").notNull().default("USD"),
     postedAt: timestamp("posted_at", { withTimezone: true }).notNull().defaultNow(),
     postedByActorType: text("posted_by_actor_type").notNull(),
     postedByActorId: uuid("posted_by_actor_id"),
@@ -510,7 +529,7 @@ export const posSessions = pgTable(
     varianceMinor: integer("variance_minor"),
     openedByUserId: uuid("opened_by_user_id").references(() => users.id),
     closedByUserId: uuid("closed_by_user_id").references(() => users.id),
-    openedAt: createdAt(),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
   },
   (t) => [index("pos_session_org_idx").on(t.orgId, t.status)],
@@ -572,6 +591,8 @@ export const stockMovements = pgTable(
     refType: text("ref_type"), // e.g. "po_line", "pos_sale", "invoice"
     refId: uuid("ref_id"),
     unitCostMinor: integer("unit_cost_minor"),
+    locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "set null" }),
+    lotId: uuid("lot_id").references(() => lots.id, { onDelete: "set null" }),
     actorType: text("actor_type").notNull(),
     actorId: uuid("actor_id"),
     createdAt: createdAt(),
@@ -660,7 +681,7 @@ export const conversationMembers = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    joinedAt: createdAt(),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.conversationId, t.userId] })],
 );
@@ -738,6 +759,616 @@ export const documentSuggestions = pgTable(
   (t) => [index("doc_suggestion_doc_idx").on(t.documentId, t.status)],
 );
 
+// ── HR (employees, leave, payroll) ──────────────────────────────────────
+
+export const employees = pgTable(
+  "employees",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    email: text("email"),
+    title: text("title"),
+    monthlySalaryMinor: integer("monthly_salary_minor").notNull(),
+    /** Annual paid-leave entitlement in days; accrues monthly. */
+    annualLeaveDays: integer("annual_leave_days").notNull().default(21),
+    taxRateBps: integer("tax_rate_bps").notNull().default(1000),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    hiredAt: timestamp("hired_at", { withTimezone: true }).notNull().defaultNow(),
+    deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
+  },
+  (t) => [index("employee_org_idx").on(t.orgId)],
+);
+
+export const leaveRequests = pgTable(
+  "leave_requests",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("annual"), // annual | sick | unpaid
+    startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+    endDate: timestamp("end_date", { withTimezone: true }).notNull(),
+    calendarDays: integer("calendar_days").notNull(),
+    status: text("status").notNull().default("pending"), // pending | approved | rejected | cancelled
+    requestedByActorType: text("requested_by_actor_type").notNull(),
+    requestedByActorId: uuid("requested_by_actor_id"),
+    decidedByUserId: uuid("decided_by_user_id").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("leave_org_status_idx").on(t.orgId, t.status), index("leave_employee_idx").on(t.employeeId)],
+);
+
+/**
+ * A payroll run drafts payslips for a month; executing it posts one balanced
+ * journal entry (DR salary expense / CR cash) and is money-class gated.
+ */
+export const payrollRuns = pgTable(
+  "payroll_runs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    month: integer("month").notNull(), // 1-12
+    status: text("status").notNull().default("draft"), // draft | executed | voided
+    totalGrossMinor: integer("total_gross_minor").notNull().default(0),
+    totalTaxMinor: integer("total_tax_minor").notNull().default(0),
+    totalNetMinor: integer("total_net_minor").notNull().default(0),
+    headcount: integer("headcount").notNull().default(0),
+    entryId: uuid("entry_id"),
+    executedByActorType: text("executed_by_actor_type"),
+    executedByActorId: uuid("executed_by_actor_id"),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("payroll_run_org_period_idx").on(t.orgId, t.year, t.month)],
+);
+
+export const payslips = pgTable(
+  "payslips",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => payrollRuns.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "restrict" }),
+    grossMinor: integer("gross_minor").notNull(),
+    taxMinor: integer("tax_minor").notNull().default(0),
+    netMinor: integer("net_minor").notNull(),
+    workedFractionThousandths: integer("worked_fraction_thousandths").notNull().default(1000),
+  },
+  (t) => [index("payslip_run_idx").on(t.runId)],
+);
+
+// ── BOM-lite (assembly → components) ───────────────────────────────────
+
+/** Flat component list per assembly. Replaced wholesale on redefinition. */
+export const bomLines = pgTable(
+  "bom_lines",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    assemblyItemId: uuid("assembly_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    componentItemId: uuid("component_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    quantityThousandths: integer("quantity_thousandths").notNull(),
+    /** Extra allowance per unit consumed (thousandths of a percent). */
+    scrapPctThousandths: integer("scrap_pct_thousandths").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("bom_line_assembly_idx").on(t.orgId, t.assemblyItemId),
+    uniqueIndex("bom_line_edge_idx").on(t.assemblyItemId, t.componentItemId),
+  ],
+);
+
+// ── Manufacturing (locations, lots, work orders, reservations, counts) ──
+
+/** Physical stock location (warehouse, bin, shop-floor staging). */
+export const stockLocations = pgTable(
+  "stock_locations",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("stock_location_org_code_idx").on(t.orgId, t.code)],
+);
+
+/**
+ * A production/consumption batch of one item. Movements optionally carry a
+ * lot so recalls can be traced upstream through the consumption graph.
+ */
+export const lots = pgTable(
+  "lots",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    lotCode: text("lot_code").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("lot_org_item_code_idx").on(t.orgId, t.itemId, t.lotCode)],
+);
+
+/**
+ * Planned production run. Draft → released → completed/cancelled; release
+ * is policy-gated like any other governed write, completion posts the same
+ * atomic component-consumption/finished-goods movements as an instant run.
+ */
+export const workOrders = pgTable(
+  "work_orders",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    assemblyItemId: uuid("assembly_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "restrict" }),
+    plannedQtyThousandths: integer("planned_qty_thousandths").notNull(),
+    producedQtyThousandths: integer("produced_qty_thousandths").notNull().default(0),
+    /** Expected good-output fraction for planning previews. */
+    yieldPctThousandths: integer("yield_pct_thousandths").notNull().default(1_000_000),
+    status: text("status").notNull().default("draft"), // draft | released | completed | cancelled
+    note: text("note"),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    createdByActorType: text("created_by_actor_type"),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("work_order_org_number_idx").on(t.orgId, t.number), index("work_order_org_status_idx").on(t.orgId, t.status)],
+);
+
+/**
+ * An open claim against on-hand stock (e.g. a sales order or another work
+ * order). Reservations never move the ledger; they reduce what is
+ * available-to-promise until released or consumed by a real movement.
+ */
+export const stockReservations = pgTable(
+  "stock_reservations",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "restrict" }),
+    quantityThousandths: integer("quantity_thousandths").notNull(),
+    reason: text("reason").notNull(),
+    refType: text("ref_type"),
+    refId: uuid("ref_id"),
+    status: text("status").notNull().default("open"), // open | released | consumed
+    createdByActorType: text("created_by_actor_type"),
+    createdByActorId: uuid("created_by_actor_id"),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("stock_reservation_org_item_status_idx").on(t.orgId, t.itemId, t.status)],
+);
+
+/** A scheduled stock take. Posting writes adjustments through the ledger. */
+export const cycleCounts = pgTable(
+  "cycle_counts",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("open"), // open | posted | cancelled
+    note: text("note"),
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    createdByActorType: text("created_by_actor_type"),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("cycle_count_org_status_idx").on(t.orgId, t.status)],
+);
+
+export const cycleCountLines = pgTable(
+  "cycle_count_lines",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    countId: uuid("count_id")
+      .notNull()
+      .references(() => cycleCounts.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "restrict" }),
+    expectedThousandths: integer("expected_thousandths").notNull(),
+    countedThousandths: integer("counted_thousandths"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("cycle_count_line_unique_idx").on(t.countId, t.itemId)],
+);
+
+
+/**
+ * A federated-identity connection for one org. Credentials live here as
+ * configuration, never in code; the certificate is the IdP's public signing
+ * cert so there is no secret to leak.
+ */
+export const ssoConnections = pgTable(
+  "sso_connections",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    protocol: text("protocol").notNull(), // saml | oidc
+    label: text("label").notNull(),
+    idpEntityId: text("idp_entity_id").notNull(),
+    ssoUrl: text("sso_url").notNull(),
+    /** Public signing certificate from the IdP (X.509 PEM). Not a secret. */
+    idpCertificate: text("idp_certificate"),
+    /** Email-domain routing: users with this domain start here. */
+    domain: text("domain"),
+    status: text("status").notNull().default("active"), // active | disabled
+    createdByUserId: uuid("created_by_user_id").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index("sso_conn_org_idx").on(t.orgId), index("sso_conn_domain_idx").on(t.domain)],
+);
+
+/**
+ * SCIM bearer tokens are stored hashed; the raw token is shown once at
+ * creation and never again, same discipline as passwords.
+ */
+export const scimTokens = pgTable(
+  "scim_tokens",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    label: text("label").notNull().default("IdP provisioning"),
+    active: boolean("active").notNull().default(true),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index("scim_token_org_idx").on(t.orgId)],
+);
+
+// ── Marketplace groundwork (community capability packages) ──────────────
+
+/**
+ * A published capability package. The manifest is canonical JSON signed by
+ * the publisher's ed25519 key (see @chaste/plugin-kit); verification happens
+ * before a listing can be marked verified, and again on install.
+ */
+export const marketplaceListings = pgTable(
+  "marketplace_listings",
+  {
+    id: id(),
+    slug: text("slug").notNull().unique(),
+    businessDescription: text("business_description"),
+    name: text("name").notNull(),
+    version: text("version").notNull(),
+    summary: text("summary").notNull(),
+    manifest: jsonb("manifest").notNull(),
+    signature: text("signature").notNull(), // base64 ed25519 over canonical manifest
+    publisherPublicKey: text("publisher_public_key").notNull(), // base64
+    capabilityIds: jsonb("capability_ids").notNull().default([]),
+    status: text("status").notNull().default("submitted"), // submitted | verified | rejected
+    submittedByOrgId: uuid("submitted_by_org_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+    installedByOrgIds: jsonb("installed_by_org_ids").notNull().default([]),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("listing_status_idx").on(t.status)],
+);
+
+// ── Customer care (support desk) ────────────────────────────────────────
+
+/**
+ * One customer inquiry thread. The conversation is bound to exactly one
+ * customer at creation: every downstream tool (status lookups, drafts)
+ * resolves through this binding, so the support agent can never be steered
+ * into another customer's records by prompt injection.
+ */
+export const supportConversations = pgTable(
+  "support_conversations",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    subject: text("subject").notNull(),
+    status: text("status").notNull().default("open"), // open | escalated | resolved
+    assignedUserId: uuid("assigned_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("support_conv_org_status_idx").on(t.orgId, t.status),
+    index("support_conv_customer_idx").on(t.orgId, t.customerId),
+  ],
+);
+
+/**
+ * Thread entries. Provenance is explicit: customer | staff | agent | system.
+ * Agent-authored replies keep the releasing staff user on sender_user_id so
+ * every AI-sent word traces to the human who approved it.
+ */
+export const supportMessages = pgTable(
+  "support_messages",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => supportConversations.id, { onDelete: "cascade" }),
+    senderType: text("sender_type").notNull(), // customer | staff | agent | system
+    senderUserId: uuid("sender_user_id").references(() => users.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("support_msg_conversation_idx").on(t.conversationId, t.createdAt)],
+);
+
+
+// ── Multi-currency (ADR 0021 phases 2-3) ────────────────────────────────
+
+/** Posted FX facts, never live lookups. 1 quote = num/den base units. */
+export const fxRates = pgTable(
+  "fx_rates",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    base: text("base").notNull(), // org base currency, e.g. "USD"
+    quote: text("quote").notNull(), // foreign currency, e.g. "EUR"
+    rateNum: bigint("rate_num", { mode: "number" }).notNull(),
+    rateDen: integer("rate_den").notNull(),
+    effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull().defaultNow(),
+    source: text("source").notNull().default("manual"), // manual | import
+    recordedByActorType: text("recorded_by_actor_type").notNull(),
+    recordedByActorId: uuid("recorded_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("fx_rate_org_pair_idx").on(t.orgId, t.base, t.quote, t.effectiveAt)],
+);
+
+/**
+ * Links the two entries that settle one foreign-currency invoice: a
+ * base-currency cash/clearing/gain-loss entry and a foreign-currency
+ * clearing/AR entry. Realized gain or loss rides inside the base entry.
+ */
+export const fxSettlements = pgTable(
+  "fx_settlements",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    paymentId: uuid("payment_id")
+      .notNull()
+      .references(() => payments.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "restrict" }),
+    currency: text("currency").notNull(),
+    settledForeignMinor: integer("settled_foreign_minor").notNull(),
+    baseSettledMinor: integer("base_settled_minor").notNull(),
+    gainLossMinor: integer("gain_loss_minor").notNull(),
+    settleRateNum: bigint("settle_rate_num", { mode: "number" }).notNull(),
+    settleRateDen: integer("settle_rate_den").notNull(),
+    baseEntryId: uuid("base_entry_id").notNull(),
+    foreignEntryId: uuid("foreign_entry_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("fx_settlement_org_idx").on(t.orgId, t.currency)],
+);
+
+
+// ── Functional gap batch: quotes, recurring billing, timesheets,
+//    expense claims, customer portal shares, in-app notifications ──
+
+/** Sales quotes; accepting one converts it into an invoice verbatim. */
+export const quotes = pgTable(
+  "quotes",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    number: integer("number").notNull(),
+    status: text("status").notNull().default("draft"), // draft | sent | accepted | declined | expired
+    currency: text("currency").notNull().default("USD"),
+    subtotalMinor: integer("subtotal_minor").notNull(),
+    taxMinor: integer("tax_minor").notNull(),
+    totalMinor: integer("total_minor").notNull(),
+    memo: text("memo"),
+    convertedInvoiceId: uuid("converted_invoice_id").references(() => invoices.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("quote_org_number_idx").on(t.orgId, t.number)],
+);
+
+export const quoteLines = pgTable("quote_lines", {
+  id: id(),
+  quoteId: uuid("quote_id")
+    .notNull()
+    .references(() => quotes.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  quantity: integer("quantity").notNull(), // thousandths
+  unitPriceMinor: integer("unit_price_minor").notNull(),
+  taxMinor: integer("tax_minor").notNull().default(0),
+});
+
+/**
+ * Subscription-style invoicing templates. The durable worker expands due
+ * templates into real invoices through the governed path, then advances
+ * next_run_at — never posting directly.
+ */
+export const recurringInvoices = pgTable(
+  "recurring_invoices",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "restrict" }),
+    memo: text("memo"),
+    frequency: text("frequency").notNull(), // weekly | monthly | quarterly
+    /** Frozen price book: [{description, quantity, unitPriceMinor, taxMinor}]. */
+    lines: jsonb("lines").notNull(),
+    active: boolean("active").notNull().default(true),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("recurring_due_idx").on(t.orgId, t.active, t.nextRunAt)],
+);
+
+/** Employee timesheets: submitted minutes, supervisor-approved. */
+export const timeEntries = pgTable(
+  "time_entries",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "restrict" }),
+    workDate: timestamp("work_date", { withTimezone: true }).notNull(),
+    minutes: integer("minutes").notNull(), // positive, capped at 24h
+    note: text("note"),
+    status: text("status").notNull().default("submitted"), // submitted | approved | rejected
+    decidedByActorType: text("decided_by_actor_type"),
+    decidedByActorId: uuid("decided_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("time_entry_org_employee_idx").on(t.orgId, t.employeeId, t.workDate)],
+);
+
+/** Employee expense claims; approval gates the reimbursing payment. */
+export const expenseClaims = pgTable(
+  "expense_claims",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    claimantUserId: uuid("claimant_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull().default("USD"),
+    memo: text("memo").notNull(),
+    /** GL account to charge on reimbursement (defaults to 6000 series). */
+    accountCode: text("account_code"),
+    status: text("status").notNull().default("submitted"), // submitted | approved | rejected | paid
+    decidedByActorType: text("decided_by_actor_type"),
+    decidedByActorId: uuid("decided_by_actor_id"),
+    decisionReason: text("decision_reason"),
+    paymentEntryId: uuid("payment_entry_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("expense_claim_org_status_idx").on(t.orgId, t.status)],
+);
+
+/** Public read-only invoice links for the customer portal (revocable). */
+export const invoiceShares = pgTable(
+  "invoice_shares",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("invoice_share_invoice_idx").on(t.invoiceId)],
+);
+
+/** In-app notification feed; mirrors the NotificationSink events. */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Null = broadcast to everyone in the org. */
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // approval.requested | ticket.filed | system
+    title: text("title").notNull(),
+    body: text("body"),
+    href: text("href"),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("notification_org_unread_idx").on(t.orgId, t.userId, t.readAt, t.createdAt)],
+);
+
 // ── better-auth managed tables ──────────────────────────────────────────
 
 export const authUser = pgTable("auth_user", {
@@ -777,6 +1408,9 @@ export const authAccount = pgTable("auth_account", {
   refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
   scope: text("scope"),
   password: text("password"),
+  // better-auth ≥1.7 stamps the credential issuer (e.g. "better-auth") on
+  // every account row; missing column breaks all credential sign-ups.
+  issuer: text("issuer"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -789,3 +1423,31 @@ export const authVerification = pgTable("auth_verification", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Durable Postgres-backed job queue. Jobs carry a capability id + input and
+ * are executed through the governed path by the worker, so asynchronous work
+ * obeys the same validation, permission, and audit pipeline as everything
+ * else. Claiming uses FOR UPDATE SKIP LOCKED, so multiple workers are safe.
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // capability id, e.g. "documents.parseDocument"
+    payload: jsonb("payload").notNull(),
+    status: text("status").notNull().default("pending"), // pending | processing | done | failed
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    lastError: text("last_error"),
+    createdByActorType: text("created_by_actor_type").notNull().default("system"),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("job_status_idx").on(t.status, t.createdAt), index("job_org_idx").on(t.orgId)],
+);
+

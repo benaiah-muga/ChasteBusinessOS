@@ -4,11 +4,13 @@ import { z } from "zod";
 import {
   invitations,
   memberships,
+  organizations,
   rolePermissions,
   roles,
   users,
   userRoles,
 } from "@chaste/db";
+import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
@@ -69,7 +71,7 @@ const updateRolePermissions = (deps: ModuleDeps) =>
     }),
     output: z.object({ permissionCount: z.number() }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [role] = await tx
           .select()
           .from(roles)
@@ -106,7 +108,7 @@ const assignRole = (deps: ModuleDeps) =>
     }),
     output: z.object({ assigned: z.boolean() }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [member] = await tx
           .select({ id: memberships.id })
           .from(memberships)
@@ -140,7 +142,7 @@ const inviteMember = (deps: ModuleDeps) =>
     id: "iam.inviteMember",
     title: "Invite member",
     intent:
-      "Invite someone by email to join the organization with a specific role; they accept via a token link",
+      "Invite someone by email to join the organization with a specific role; they accept via a token link. Humans only: agents are refused and must ask their principal to invite",
     module: "iam",
     risk: "write",
     permission: "iam.admin",
@@ -151,6 +153,13 @@ const inviteMember = (deps: ModuleDeps) =>
     }),
     output: z.object({ invitationId: z.string(), token: z.string(), expiresAt: z.string() }),
     execute: async (ctx, input) => {
+      // Adding a person to an org is an identity decision. Agents act on
+      // instructions that may arrive injected through documents or chat, so
+      // they never extend membership regardless of what org policy allows;
+      // the human principal invites directly.
+      if (ctx.actor.type !== "human") {
+        throw new Error("member invitations require a human actor; ask your principal to send the invite");
+      }
       const [role] = await deps.db
         .select()
         .from(roles)
@@ -252,10 +261,87 @@ const listMembers = (deps: ModuleDeps) =>
     },
   });
 
+/**
+ * Turns platform modules on or off for the org. Identity-class on purpose:
+ * reshaping which surfaces the business operates is an authority decision,
+ * always human-approved, and reversible — the previous set rides along in
+ * the output so the inverse restores it exactly.
+ */
+const setModules = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "iam.setModules",
+    title: "Set enabled modules",
+    intent:
+      "Choose which platform modules this organization runs, such as accounting, pos, inventory, hr or support; disabled modules become unreachable in the UI and to agents until re-enabled",
+    module: "iam",
+    risk: "identity",
+    permission: "iam.admin",
+    input: z.object({
+      modules: z.array(z.string().min(1).max(40)).min(1),
+    }),
+    output: z.object({
+      enabledModules: z.array(z.string()),
+      previousModules: z.array(z.string()),
+    }),
+    inverse: {
+      capabilityId: "iam.restoreModules",
+      buildInput: (_input, output) => ({
+        modules: (output as { previousModules: string[] }).previousModules,
+      }),
+    },
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [org] = await tx
+          .select({ value: organizations.enabledModules })
+          .from(organizations)
+          .where(eq(organizations.id, ctx.actor.orgId))
+          .limit(1);
+        if (!org) throw new Error("organization not found");
+        const previousModules = Array.isArray(org.value) ? (org.value as string[]) : [];
+        await tx
+          .update(organizations)
+          .set({ enabledModules: [...new Set(input.modules)] })
+          .where(eq(organizations.id, ctx.actor.orgId));
+        return { enabledModules: [...new Set(input.modules)], previousModules };
+      });
+    },
+  });
+
+/**
+ * The inverse side of the switchboard: put back exactly the module list that
+ * was live before a setModules applied. Kept as its own governed id because
+ * a capability cannot be its own inverse.
+ */
+const restoreModules = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "iam.restoreModules",
+    title: "Restore enabled modules",
+    intent:
+      "Put back the exact module selection that was enabled before a recent change, undoing it when a switchboard edit turns out wrong",
+    module: "iam",
+    risk: "identity",
+    permission: "iam.admin",
+    input: z.object({
+      modules: z.array(z.string().min(1).max(40)).min(1),
+    }),
+    output: z.object({ enabledModules: z.array(z.string()) }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await tx
+          .update(organizations)
+          .set({ enabledModules: [...new Set(input.modules)] })
+          .where(eq(organizations.id, ctx.actor.orgId));
+        return { enabledModules: [...new Set(input.modules)] };
+      });
+    },
+  });
+
 export function registerIamCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(createRole(deps));
   registry.register(updateRolePermissions(deps));
   registry.register(assignRole(deps));
   registry.register(inviteMember(deps));
   registry.register(listMembers(deps));
+  registry.register(setModules(deps));
+  registry.register(restoreModules(deps));
 }

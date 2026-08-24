@@ -1,0 +1,575 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import {
+  ActionNotice,
+  Badge,
+  Button,
+  Card,
+  CardTitle,
+  EmptyState,
+  LoadingPage,
+  PageHeader,
+  SegmentedControl,
+  type ActionNoticeState,
+} from "@/components/ui";
+import { formatMoney } from "@/lib/format";
+import { IconListTree } from "@/components/icons";
+import { callApi, postApi } from "@/lib/api";
+import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+
+type Tab = "orders" | "bills" | "vendors";
+
+interface PoLine {
+  lineNumber: number;
+  description: string;
+  quantity: number;
+  unitPriceMinor: number;
+}
+interface PurchaseOrder {
+  id: string;
+  number: number;
+  vendorName: string;
+  status: string;
+  memo: string | null;
+  orderedMinor: number;
+  lines: PoLine[];
+}
+interface Bill {
+  number: number;
+  vendorName: string;
+  vendorRef: string | null;
+  memo: string | null;
+  totalMinor: number;
+  paidMinor: number;
+  dueMinor: number;
+  createdAt: string;
+}
+interface Vendor {
+  id: string;
+  name: string;
+  email?: string | null;
+}
+interface Aging {
+  buckets?: { label: string; totalMinor: number }[];
+  totalDueMinor?: number;
+}
+interface Payload {
+  vendors?: Vendor[];
+  orders?: PurchaseOrder[];
+  bills?: Bill[];
+  apAging?: Aging;
+}
+const qty = (t: number) => (t / 1000).toFixed(3);
+
+export default function PurchasingPage() {
+  const enabled = useModuleEnabled("purchasing");
+  const [data, setData] = useState<Payload | null>(null);
+  const [notice, setNotice] = useState<ActionNoticeState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<Tab>("orders");
+
+  const [vendorForm, setVendorForm] = useState({ name: "", email: "" });
+  const [poForm, setPoForm] = useState({
+    vendorId: "",
+    memo: "",
+    lines: [{ description: "", quantity: "1", unitPrice: "0.00", sku: "" }],
+  });
+  const [receipts, setReceipts] = useState<Record<string, string>>({});
+  const [billForm, setBillForm] = useState({
+    vendorId: "",
+    vendorRef: "",
+    poNumber: "",
+    lines: [{ description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "" }],
+  });
+  const [payAmount, setPayAmount] = useState<Record<string, string>>({});
+
+  const load = useCallback(async () => {
+    const res = await callApi<Payload>("/api/purchasing");
+    setData(res.data ?? {});
+    if (res.error) setNotice({ tone: "error", error: res.error });
+  }, []);
+
+  useEffect(() => {
+    if (enabled) void load();
+  }, [enabled, load]);
+
+  const post = useCallback(
+    async (body: Record<string, unknown>, label: string): Promise<boolean> => {
+      setBusy(true);
+      try {
+        const res = await postApi("/api/purchasing", body);
+        if (res.status === 202) {
+          setNotice({ tone: "pending", text: `${label} requires approval.` });
+        } else if (!res.ok) {
+          setNotice({ tone: "error", error: res.error ?? { title: `${label} failed`, hint: "Try again." } });
+        } else {
+          setNotice({ tone: "success", text: `${label} done.` });
+          await load();
+          return true;
+        }
+      } finally {
+        setBusy(false);
+      }
+      return false;
+    },
+    [load],
+  );
+
+  if (!enabled) return <ModuleDisabled label="Purchasing" />;
+  if (!data) return <LoadingPage />;
+
+  const vendors = data.vendors ?? [];
+  const orders = data.orders ?? [];
+  const bills = data.bills ?? [];
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Purchasing"
+        description="Vendors, purchase orders, receipts, bills, and payments — with three-way matching"
+        actions={
+          <SegmentedControl
+            ariaLabel="Purchasing sections"
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: "orders", label: "Orders" },
+              { value: "bills", label: "Bills & payments" },
+              { value: "vendors", label: "Vendors" },
+            ]}
+          />
+        }
+      />
+      {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
+
+      {tab === "orders" && (
+        <Card>
+          <CardTitle>Draft purchase order</CardTitle>
+          <div className="space-y-2 text-sm">
+            <div className="flex flex-wrap gap-2">
+              <select
+                className="rounded border bg-transparent px-2 py-1.5"
+                value={poForm.vendorId}
+                onChange={(e) => setPoForm({ ...poForm, vendorId: e.target.value })}
+              >
+                <option value="">Vendor…</option>
+                {vendors.map((v) => (
+                  <option key={v.id} value={v.id}>{v.name}</option>
+                ))}
+              </select>
+              <input
+                className="flex-1 rounded border bg-transparent px-2 py-1.5"
+                placeholder="Memo (optional)"
+                value={poForm.memo}
+                onChange={(e) => setPoForm({ ...poForm, memo: e.target.value })}
+              />
+            </div>
+            {poForm.lines.map((l, i) => (
+              <div key={i} className="flex flex-wrap gap-2">
+                <input
+                  className="flex-1 rounded border bg-transparent px-2 py-1.5"
+                  placeholder={`Line ${i + 1} description`}
+                  value={l.description}
+                  onChange={(e) => {
+                    const next = [...poForm.lines];
+                    next[i] = { ...l, description: e.target.value };
+                    setPoForm({ ...poForm, lines: next });
+                  }}
+                />
+                <input
+                  className="w-20 rounded border bg-transparent px-2 py-1.5"
+                  placeholder="Qty"
+                  value={l.quantity}
+                  onChange={(e) => {
+                    const next = [...poForm.lines];
+                    next[i] = { ...l, quantity: e.target.value };
+                    setPoForm({ ...poForm, lines: next });
+                  }}
+                />
+                <input
+                  className="w-24 rounded border bg-transparent px-2 py-1.5"
+                  placeholder="Unit price"
+                  value={l.unitPrice}
+                  onChange={(e) => {
+                    const next = [...poForm.lines];
+                    next[i] = { ...l, unitPrice: e.target.value };
+                    setPoForm({ ...poForm, lines: next });
+                  }}
+                />
+                <input
+                  className="w-24 rounded border bg-transparent px-2 py-1.5 font-mono"
+                  placeholder="SKU (opt.)"
+                  title="Links the line to a stocked item so receipts update stock"
+                  value={l.sku}
+                  onChange={(e) => {
+                    const next = [...poForm.lines];
+                    next[i] = { ...l, sku: e.target.value.toUpperCase() };
+                    setPoForm({ ...poForm, lines: next });
+                  }}
+                />
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <Button
+                tone="ghost"
+                size="sm"
+                onClick={() =>
+                  setPoForm({
+                    ...poForm,
+                    lines: [...poForm.lines, { description: "", quantity: "1", unitPrice: "0.00", sku: "" }],
+                  })
+                }
+              >
+                + Line
+              </Button>
+              <Button
+                disabled={busy || !poForm.vendorId || poForm.lines.some((l) => !l.description)}
+                onClick={() => {
+                  const lines = poForm.lines.map((l) => ({
+                    description: l.description,
+                    quantity: Math.round(Number(l.quantity || "0") * 1000),
+                    unitPriceMinor: Math.round(Number(l.unitPrice || "0") * 100),
+                    sku: l.sku || undefined,
+                  }));
+                  void post({ action: "createPurchaseOrder", vendorId: poForm.vendorId, memo: poForm.memo, lines }, "Draft order").then((ok) => {
+                    if (ok)
+                      setPoForm({ vendorId: "", memo: "", lines: [{ description: "", quantity: "1", unitPrice: "0.00", sku: "" }] });
+                  });
+                }}
+              >
+                Create order
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+
+      {tab === "orders" && (
+        <>
+          {orders.length === 0 ? (
+            <EmptyState icon={<IconListTree />} title="No purchase orders yet" hint="Draft one above; receipts against it feed three-way matching on bills." />
+          ) : (
+            orders.map((o) => (
+              <Card key={o.id}>
+                <CardTitle
+                  right={
+                    <Badge tone={o.status === "received" ? "green" : o.status === "closed" ? "neutral" : o.status === "void" ? "red" : "blue"}>
+                      {o.status}
+                    </Badge>
+                  }
+                >
+                  PO #{o.number} — {o.vendorName}
+                </CardTitle>
+                <p className="mb-2 text-xs opacity-60">
+                  Ordered {formatMoney(o.orderedMinor)}
+                  {o.memo ? ` · ${o.memo}` : ""}
+                </p>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left opacity-50">
+                      <th>#</th>
+                      <th>Description</th>
+                      <th className="text-right">Qty</th>
+                      <th className="text-right">Unit price</th>
+                      <th className="text-right">Receive qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {o.lines.map((l) => (
+                      <tr key={l.lineNumber} className="border-t">
+                        <td className="py-1">{l.lineNumber}</td>
+                        <td>{l.description}</td>
+                        <td className="text-right tabular-nums">{qty(l.quantity)}</td>
+                        <td className="text-right tabular-nums">{formatMoney(l.unitPriceMinor)}</td>
+                        <td className="text-right">
+                          {(o.status === "ordered" || o.status === "partial") && (
+                            <input
+                              className="w-16 rounded border bg-transparent px-1 py-0.5 text-right"
+                              placeholder={qty(l.quantity)}
+                              value={receipts[`${o.id}:${l.lineNumber}`] ?? ""}
+                              onChange={(e) => setReceipts({ ...receipts, [`${o.id}:${l.lineNumber}`]: e.target.value })}
+                            />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {(o.status === "ordered" || o.status === "partial") && (
+                  <div className="mt-2 flex justify-end">
+                    <Button
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        const lines = o.lines
+                          .map((l) => ({
+                            lineNumber: l.lineNumber,
+                            quantity: Math.round(Number(receipts[`${o.id}:${l.lineNumber}`] || "0") * 1000),
+                          }))
+                          .filter((l) => l.quantity > 0);
+                        if (!lines.length) return;
+                        void post({ action: "receiveGoods", poNumber: o.number, lines }, "Receive goods");
+                      }}
+                    >
+                      Record receipt
+                    </Button>
+                  </div>
+                )}
+              </Card>
+            ))
+          )}
+        </>
+      )}
+
+
+      {tab === "bills" && (
+        <>
+          <Card>
+            <CardTitle>Record vendor bill</CardTitle>
+            <div className="space-y-2 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <select
+                  className="rounded border bg-transparent px-2 py-1.5"
+                  value={billForm.vendorId}
+                  onChange={(e) => setBillForm({ ...billForm, vendorId: e.target.value })}
+                >
+                  <option value="">Vendor…</option>
+                  {vendors.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+                <input
+                  className="w-32 rounded border bg-transparent px-2 py-1.5"
+                  placeholder="Their ref #"
+                  value={billForm.vendorRef}
+                  onChange={(e) => setBillForm({ ...billForm, vendorRef: e.target.value })}
+                />
+                <input
+                  className="w-28 rounded border bg-transparent px-2 py-1.5"
+                  placeholder="PO # (match)"
+                  title="When set, every line must reference a PO line number and passes three-way matching"
+                  value={billForm.poNumber}
+                  onChange={(e) => setBillForm({ ...billForm, poNumber: e.target.value })}
+                />
+              </div>
+              {billForm.lines.map((l, i) => (
+                <div key={i} className="flex flex-wrap gap-2">
+                  <input
+                    className="flex-1 rounded border bg-transparent px-2 py-1.5"
+                    placeholder={`Line ${i + 1} description`}
+                    value={l.description}
+                    onChange={(e) => {
+                      const next = [...billForm.lines];
+                      next[i] = { ...l, description: e.target.value };
+                      setBillForm({ ...billForm, lines: next });
+                    }}
+                  />
+                  <input
+                    className="w-20 rounded border bg-transparent px-2 py-1.5"
+                    placeholder="Qty"
+                    value={l.quantity}
+                    onChange={(e) => {
+                      const next = [...billForm.lines];
+                      next[i] = { ...l, quantity: e.target.value };
+                      setBillForm({ ...billForm, lines: next });
+                    }}
+                  />
+                  <input
+                    className="w-24 rounded border bg-transparent px-2 py-1.5"
+                    placeholder="Unit price"
+                    value={l.unitPrice}
+                    onChange={(e) => {
+                      const next = [...billForm.lines];
+                      next[i] = { ...l, unitPrice: e.target.value };
+                      setBillForm({ ...billForm, lines: next });
+                    }}
+                  />
+                  {billForm.poNumber && (
+                    <input
+                      className="w-20 rounded border bg-transparent px-2 py-1.5"
+                      placeholder="PO line #"
+                      value={l.poLineNumber}
+                      onChange={(e) => {
+                        const next = [...billForm.lines];
+                        next[i] = { ...l, poLineNumber: e.target.value };
+                        setBillForm({ ...billForm, lines: next });
+                      }}
+                    />
+                  )}
+                </div>
+              ))}
+              <Button
+                disabled={busy || !billForm.vendorId || billForm.lines.some((l) => !l.description)}
+                onClick={() => {
+                  const hasPo = Boolean(billForm.poNumber);
+                  const lines = billForm.lines.map((l) => ({
+                    description: l.description,
+                    quantity: Math.round(Number(l.quantity || "0") * 1000),
+                    unitPriceMinor: Math.round(Number(l.unitPrice || "0") * 100),
+                    poLineNumber: hasPo ? Number(l.poLineNumber || "0") || undefined : undefined,
+                  }));
+                  void post(
+                    {
+                      action: "createBill",
+                      vendorId: billForm.vendorId,
+                      vendorRef: billForm.vendorRef || undefined,
+                      poNumber: hasPo ? Number(billForm.poNumber) : undefined,
+                      lines,
+                    },
+                    "Record bill",
+                  ).then((ok) => {
+                    if (ok)
+                      setBillForm({ vendorId: "", vendorRef: "", poNumber: "", lines: [{ description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "" }] });
+                  });
+                }}
+              >
+                Record bill
+              </Button>
+              <p className="text-xs opacity-50">
+                Bills matched to a purchase order pass three-way matching (ordered vs received vs billed) before posting.
+              </p>
+            </div>
+          </Card>
+
+          <Card>
+            <CardTitle>Accounts payable aging</CardTitle>
+            <div className="flex flex-wrap gap-4 text-sm">
+              {(data.apAging?.buckets ?? []).map((b) => (
+                <div key={b.label}>
+                  <div className="opacity-50">{b.label}</div>
+                  <div className="font-medium tabular-nums">{formatMoney(b.totalMinor)}</div>
+                </div>
+              ))}
+              {data.apAging?.totalDueMinor !== undefined && (
+                <div>
+                  <div className="opacity-50">Total due</div>
+                  <div className="font-semibold tabular-nums">{formatMoney(data.apAging.totalDueMinor)}</div>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {bills.length === 0 ? (
+            <EmptyState
+              icon={<IconListTree />}
+              title="No bills recorded"
+              hint="Record supplier invoices through the agent, optionally matched to a purchase order; they appear here with balances."
+            />
+          ) : (
+            <Card>
+              <CardTitle>Bills</CardTitle>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left opacity-50">
+                    <th>Bill</th>
+                    <th>Vendor</th>
+                    <th className="text-right">Total</th>
+                    <th className="text-right">Paid</th>
+                    <th className="text-right">Due</th>
+                    <th className="text-right">Pay amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bills.map((b) => (
+                    <tr key={b.number} className="border-t">
+                      <td className="whitespace-nowrap py-1.5 opacity-70">#{b.number}</td>
+                      <td>{b.vendorName}</td>
+                      <td className="text-right tabular-nums">{formatMoney(b.totalMinor)}</td>
+                      <td className="text-right tabular-nums">{formatMoney(b.paidMinor)}</td>
+                      <td className="text-right font-medium tabular-nums">{formatMoney(b.dueMinor)}</td>
+                      <td className="text-right">
+                        {b.dueMinor > 0 ? (
+                          <span className="inline-flex items-center gap-1">
+                            <input
+                              className="w-20 rounded border bg-transparent px-1 py-0.5 text-right"
+                              placeholder={(b.dueMinor / 100).toFixed(2)}
+                              value={payAmount[String(b.number)] ?? ""}
+                              onChange={(e) => setPayAmount({ ...payAmount, [String(b.number)]: e.target.value })}
+                            />
+                            <Button
+                              size="sm"
+                              disabled={busy || !Number(payAmount[String(b.number)])}
+                              onClick={() =>
+                                void post(
+                                  {
+                                    action: "payBill",
+                                    billNumber: b.number,
+                                    amountMinor: Math.round(Number(payAmount[String(b.number)] || "0") * 100),
+                                  },
+                                  `Payment on #${b.number}`,
+                                ).then((ok) => ok && setPayAmount((p) => ({ ...p, [String(b.number)]: "" })))
+                              }
+                            >
+                              Pay
+                            </Button>
+                          </span>
+                        ) : (
+                          <Badge tone="green">paid</Badge>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-2 text-xs opacity-50">
+                Payments above the policy threshold are gated and wait in the Approvals inbox.
+              </p>
+            </Card>
+          )}
+        </>
+      )}
+
+
+      {tab === "vendors" && (
+        <>
+          <Card>
+            <CardTitle>Add vendor</CardTitle>
+            <div className="flex flex-wrap gap-2 text-sm">
+              <input
+                className="flex-1 rounded border bg-transparent px-2 py-1.5"
+                placeholder="Name"
+                value={vendorForm.name}
+                onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })}
+              />
+              <input
+                className="flex-1 rounded border bg-transparent px-2 py-1.5"
+                placeholder="Email (optional)"
+                value={vendorForm.email}
+                onChange={(e) => setVendorForm({ ...vendorForm, email: e.target.value })}
+              />
+              <Button
+                disabled={busy || !vendorForm.name}
+                onClick={() =>
+                  void post(
+                    { action: "createVendor", name: vendorForm.name, email: vendorForm.email || undefined },
+                    `Add ${vendorForm.name}`,
+                  ).then((ok) => ok && setVendorForm({ name: "", email: "" }))
+                }
+              >
+                Add vendor
+              </Button>
+            </div>
+          </Card>
+          <Card>
+            <CardTitle>Vendors</CardTitle>
+            {vendors.length === 0 ? (
+              <EmptyState icon={<IconListTree />} title="No vendors yet" hint="Add the suppliers you buy from; orders and bills reference them." />
+            ) : (
+              <ul className="divide-y text-sm">
+                {vendors.map((v) => (
+                  <li key={v.id} className="flex items-center justify-between py-1.5">
+                    <span>{v.name}</span>
+                    {v.email ? <span className="opacity-50">{v.email}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+

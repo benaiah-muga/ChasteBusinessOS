@@ -1,46 +1,24 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
-  accounts,
   customers,
   invoices,
   items,
-  journalEntries,
-  journalLines,
   payments,
-  periods,
   posSessions,
   stockMovements,
 } from "@chaste/db";
-import { assertBalanced } from "@chaste/erp-core";
+import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
+import { assertPeriodOpen, postEntry } from "@chaste/module-accounting/posting";
 
 export interface ModuleDeps {
   db: Database["db"];
 }
 
+
 type Tx = Parameters<Parameters<ModuleDeps["db"]["transaction"]>[0]>[0];
-
-async function assertPeriodOpen(db: Tx | ModuleDeps["db"], orgId: string, date: Date): Promise<void> {
-  const closed = await db.select({ year: periods.year, month: periods.month }).from(periods).where(eq(periods.orgId, orgId));
-  const y = date.getUTCFullYear();
-  const m = date.getUTCMonth() + 1;
-  if (closed.some((p) => p.year === y && p.month === m)) {
-    throw new Error(`period ${y}-${String(m).padStart(2, "0")} is closed`);
-  }
-}
-
-async function coaMap(tx: Tx | ModuleDeps["db"], orgId: string): Promise<Map<string, string>> {
-  const rows = await tx.select({ code: accounts.code, id: accounts.id }).from(accounts).where(eq(accounts.orgId, orgId));
-  return new Map(rows.map((r) => [r.code, r.id]));
-}
-
-function accountIdOf(map: Map<string, string>, code: string): string {
-  const id = map.get(code);
-  if (!id) throw new Error(`account ${code} missing from chart of accounts`);
-  return id;
-}
 
 const WALK_IN = "Walk-in Customer";
 
@@ -69,22 +47,28 @@ const openSession = (deps: ModuleDeps) =>
     }),
     output: z.object({ sessionId: z.string() }),
     execute: async (ctx, input) => {
-      const [open] = await deps.db
-        .select({ id: posSessions.id })
-        .from(posSessions)
-        .where(and(eq(posSessions.orgId, ctx.actor.orgId), eq(posSessions.status, "open")))
-        .limit(1);
-      if (open) throw new Error("a register session is already open — close it first");
-      const [row] = await deps.db
-        .insert(posSessions)
-        .values({
-          orgId: ctx.actor.orgId,
-          register: input.register,
-          openingFloatMinor: input.openingFloatMinor,
-          openedByUserId: ctx.actor.type === "human" ? ctx.actor.id : null,
-        })
-        .returning({ id: posSessions.id });
-      return { sessionId: row!.id };
+      // "One open register per org" is a check-then-insert invariant; the
+      // advisory lock serializes concurrent opens so two sessions cannot
+      // both pass the check and double the drawer.
+      return deps.db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${ctx.actor.orgId}, 44))`);
+        const [open] = await tx
+          .select({ id: posSessions.id })
+          .from(posSessions)
+          .where(and(eq(posSessions.orgId, ctx.actor.orgId), eq(posSessions.status, "open")))
+          .limit(1);
+        if (open) throw new Error("a register session is already open, close it first");
+        const [row] = await tx
+          .insert(posSessions)
+          .values({
+            orgId: ctx.actor.orgId,
+            register: input.register,
+            openingFloatMinor: input.openingFloatMinor,
+            openedByUserId: ctx.actor.type === "human" ? ctx.actor.id : null,
+          })
+          .returning({ id: posSessions.id });
+        return { sessionId: row!.id };
+      });
     },
   });
 
@@ -111,6 +95,12 @@ const completeSale = (deps: ModuleDeps) =>
     risk: "money",
     permission: "pos.sell",
     moneyThresholdMinor: 100_000,
+    // Same total computation as execute(): quantity is thousandths of a unit.
+    moneyAmount: (input) =>
+      input.lines.reduce(
+        (sum, l) => sum + Math.round((l.quantity * l.unitPriceMinor) / 1000) + l.taxMinor,
+        0,
+      ),
     inverse: {
       capabilityId: "accounting.reverseEntry",
       buildInput: (_input, output) => ({ entryId: (output as { entryId: string }).entryId }),
@@ -126,7 +116,7 @@ const completeSale = (deps: ModuleDeps) =>
       changeGivenMinor: z.number(),
     }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const [session] = await tx
           .select()
@@ -172,32 +162,16 @@ const completeSale = (deps: ModuleDeps) =>
           .where(eq(invoices.orgId, ctx.actor.orgId));
         const invoiceNumber = Number(numRow?.maxNum ?? 0) + 1;
 
-        const map = await coaMap(tx, ctx.actor.orgId);
         const glLines = [
           { accountCode: "1000", debitMinor: total, creditMinor: 0 },
           { accountCode: "4000", debitMinor: 0, creditMinor: subtotal },
           ...(tax > 0 ? [{ accountCode: "2100", debitMinor: 0, creditMinor: tax }] : []),
         ];
-        assertBalanced({ memo: `POS sale #${invoiceNumber}`, lines: glLines });
-
-        const [entry] = await tx
-          .insert(journalEntries)
-          .values({
-            orgId: ctx.actor.orgId,
-            memo: `POS sale #${invoiceNumber} (${input.method})`,
-            sourceType: "pos_sale",
-            postedByActorType: ctx.actor.type,
-            postedByActorId: ctx.actor.id,
-          })
-          .returning({ id: journalEntries.id });
-        await tx.insert(journalLines).values(
-          glLines.map((l) => ({
-            entryId: entry!.id,
-            accountId: accountIdOf(map, l.accountCode),
-            debitMinor: l.debitMinor,
-            creditMinor: l.creditMinor,
-          })),
-        );
+        const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `POS sale #${invoiceNumber} (${input.method})`,
+          sourceType: "pos_sale",
+          lines: glLines,
+        });
 
         const [inv] = await tx
           .insert(invoices)
@@ -221,7 +195,7 @@ const completeSale = (deps: ModuleDeps) =>
           invoiceId: inv!.id,
           amountMinor: total,
           method: input.method === "card" ? "card" : "cash",
-          entryId: entry!.id,
+          entryId,
         });
 
         // Stock leaves the ledger in the same transaction as the money.
@@ -255,7 +229,7 @@ const completeSale = (deps: ModuleDeps) =>
   });
 
 /**
- * Closing counts the drawer. A variance is recorded honestly — it can never be
+ * Closing counts the drawer. A variance is recorded honestly, it can never be
  * silently adjusted away; investigate or reverse.
  */
 const closeSession = (deps: ModuleDeps) =>
@@ -274,7 +248,7 @@ const closeSession = (deps: ModuleDeps) =>
       flagged: z.boolean(),
     }),
     execute: async (ctx, input) => {
-      return deps.db.transaction(async (tx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [session] = await tx
           .select()
           .from(posSessions)

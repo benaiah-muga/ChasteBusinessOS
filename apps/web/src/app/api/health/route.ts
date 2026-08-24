@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { getDb } from "@chaste/db";
+import { logger } from "@chaste/kernel";
 
 export async function GET() {
   try {
@@ -12,9 +13,10 @@ export async function GET() {
       time: new Date().toISOString(),
     });
   } catch (err) {
-    return NextResponse.json(
-      { status: "degraded", error: err instanceof Error ? err.message : String(err) },
-      { status: 503 },
-    );
+    // Details stay in server logs; this endpoint is anonymous and must not
+    // disclose connection strings or topology.
+    logger.warn("health check failed", { error: err instanceof Error ? err.message : String(err) });
+    return NextResponse.json({ status: "degraded", db: "unavailable" }, { status: 503 });
   }
 }
+

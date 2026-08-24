@@ -1,5 +1,5 @@
 import type OpenAI from "openai";
-import { MODELS, nimClient } from "./nim";
+import { MODELS, chatClient } from "./nim";
 
 export const MODELS_OCR = () => process.env.MODEL_OCR ?? "nvidia/nemotron-parse-v1.2";
 
@@ -15,7 +15,7 @@ export async function parseDocumentImage(
   mimeType: string,
   opts: { client?: OpenAI; model?: string } = {},
 ): Promise<string> {
-  const client = opts.client ?? nimClient();
+  const client = opts.client ?? chatClient();
   const b64 = Buffer.from(bytes).toString("base64");
   const res = await client.chat.completions.create({
     model: opts.model ?? MODELS_OCR(),
@@ -35,14 +35,14 @@ export async function parseDocumentImage(
 
 /**
  * Pulls candidate bill lines out of parsed document text. Best-effort LLM
- * step over a strict JSON contract — callers must validate and fall back to
+ * step over a strict JSON contract, callers must validate and fall back to
  * human entry when it fails or when no key is configured.
  */
 export async function extractBillLinesFromText(
   documentText: string,
   opts: { client?: OpenAI; model?: string } = {},
 ): Promise<{ description: string; quantityThousandths: number; unitPriceMinor: number }[]> {
-  const client = opts.client ?? nimClient();
+  const client = opts.client ?? chatClient();
   const res = await client.chat.completions.create({
     model: opts.model ?? MODELS.primary(),
     messages: [

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { accounts, type Database } from "@chaste/db";
-import { DEFAULT_CHART_OF_ACCOUNTS } from "@chaste/erp-core";
+import { currencyMinorUnits, DEFAULT_CHART_OF_ACCOUNTS } from "@chaste/erp-core";
 import { embed } from "@chaste/ai";
 import { ledgerEventFor } from "@chaste/kernel";
 import { memberships, memories, organizations, policies, rolePermissions, roles, userRoles } from "@chaste/db";
@@ -27,8 +27,19 @@ export interface OnboardingResult {
  */
 export async function runOnboarding(
   db: Database["db"],
-  params: { userId: string; userEmail: string; orgName: string; businessDescription: string },
+  params: {
+    userId: string;
+    userEmail: string;
+    orgName: string;
+    businessDescription: string;
+    /** Base reporting currency (ADR 0021 phase 2): chosen once, at onboarding. */
+    baseCurrency?: string;
+  },
 ): Promise<OnboardingResult> {
+  const baseCurrency = (params.baseCurrency ?? "USD").toUpperCase();
+  if (!/^[A-Z]{3}$/.test(baseCurrency) || currencyMinorUnits(baseCurrency) === null) {
+    throw new Error(`unsupported base currency: ${baseCurrency}`);
+  }
   const existing = await db.select().from(memberships).where(eq(memberships.userId, params.userId)).limit(1);
   if (existing.length > 0) throw new Error("user already belongs to an organization");
 
@@ -43,7 +54,12 @@ export async function runOnboarding(
   const result = await db.transaction(async (tx) => {
     const [org] = await tx
       .insert(organizations)
-      .values({ name: params.orgName, slug, profileDescription: params.businessDescription })
+      .values({
+        name: params.orgName,
+        slug,
+        profileDescription: params.businessDescription,
+        baseCurrency,
+      })
       .returning({ id: organizations.id });
     if (!org) throw new Error("failed to create organization");
 
@@ -81,7 +97,7 @@ export async function runOnboarding(
     return { orgId: org.id };
   });
 
-  // Ledger entry after commit — the chain writer runs on its own connection.
+  // Ledger entry after commit, the chain writer runs on its own connection.
   const ledger = new PgLedgerStore(db);
   const ctx = {
     actor: { type: "human" as const, id: params.userId, orgId: result.orgId, permissions: new Set(["*"]) },

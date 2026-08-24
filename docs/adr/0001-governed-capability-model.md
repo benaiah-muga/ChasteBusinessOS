@@ -1,4 +1,4 @@
-# ADR 0001 — Governed capability model
+# ADR 0001, Governed capability model
 
 Date: 2026-08-21 · Status: accepted
 
@@ -14,6 +14,6 @@ policy, and a declared inverse for state changes. Capabilities register in
 a kernel registry; nothing executes outside it.
 
 ## Consequences
-- The agent's tool list *is* the product surface — no drift.
+- The agent's tool list *is* the product surface, no drift.
 - New modules must speak this contract; conformance is validated at boot.
 - Intent strings double as living documentation.

@@ -1,4 +1,4 @@
-# ADR 0012 — Creator Mode proposals are governed artifacts, not patches
+# ADR 0012, Creator Mode proposals are governed artifacts, not patches
 
 Date: 2026-08-22 · Status: accepted
 

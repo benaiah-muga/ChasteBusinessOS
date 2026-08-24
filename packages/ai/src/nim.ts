@@ -6,11 +6,16 @@ export interface ModelRef {
   model: string;
 }
 
+/** Strip a provider prefix so NIM-side callers never see "openrouter/x". */
+function stripProviderPrefix(model: string): string {
+  return model.startsWith("openrouter/") ? model.slice("openrouter/".length) : model;
+}
+
 export const MODELS = {
-  primary: () => process.env.MODEL_PRIMARY ?? "moonshotai/kimi-k2.6",
-  fast: () => process.env.MODEL_FAST ?? "meta/muse-glimmer-30b",
-  reasoning: () => process.env.MODEL_REASONING ?? "nvidia/nemotron-3-ultra-550b-a55b",
-  embeddings: () => process.env.MODEL_EMBEDDINGS ?? "nvidia/nv-embedqa-e5-v5",
+  primary: () => stripProviderPrefix(process.env.MODEL_PRIMARY ?? "moonshotai/kimi-k2.6"),
+  fast: () => stripProviderPrefix(process.env.MODEL_FAST ?? "meta/muse-glimmer-30b"),
+  reasoning: () => stripProviderPrefix(process.env.MODEL_REASONING ?? "nvidia/nemotron-3-ultra-550b-a55b"),
+  embeddings: () => stripProviderPrefix(process.env.MODEL_EMBEDDINGS ?? "nvidia/nv-embedqa-e5-v5"),
 } as const;
 
 export function nimClient(opts: { apiKey?: string; baseUrl?: string } = {}) {
@@ -20,6 +25,126 @@ export function nimClient(opts: { apiKey?: string; baseUrl?: string } = {}) {
     apiKey,
     baseURL: opts.baseUrl ?? process.env.NIM_BASE_URL ?? "https://integrate.api.nvidia.com/v1",
   });
+}
+
+/** Any OpenAI-compatible endpoint; used for OpenRouter etc. */
+export function compatClient(opts: { apiKey?: string; baseUrl?: string } = {}) {
+  const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+  return new OpenAI({
+    apiKey,
+    baseURL: opts.baseUrl ?? "https://openrouter.ai/api/v1",
+    defaultHeaders: { "X-Title": "ChasteBusinessOS" },
+  });
+}
+
+/**
+ * Provider selection: MODEL_PROVIDER=openrouter routes through
+ * OPENROUTER_API_KEY (e.g. stealth/ox-alpha); default is NVIDIA NIM.
+ */
+export function resolveClient(model?: string): OpenAI {
+  const provider = process.env.MODEL_PROVIDER ?? "";
+  if (provider === "openrouter" || (model ?? "").startsWith("openrouter/")) {
+    return compatClient();
+  }
+  return nimClient();
+}
+
+/** Provider-aware client for chat-side calls; embeddings stay on NIM. */
+export function chatClient(): OpenAI {
+  return resolveClient();
+}
+
+export function resolveModel(): string {
+  return stripProviderPrefix(process.env.MODEL_PRIMARY ?? "moonshotai/kimi-k2.6");
+}
+
+/**
+ * Provider error that keeps the HTTP status and retry hint. The previous
+ * implementation re-wrapped 429s as generic Errors, destroying the only
+ * signal callers needed to classify retryability.
+ */
+export class ModelProviderError extends Error {
+  constructor(
+    readonly status: number | undefined,
+    readonly retryAfterMs: number | undefined,
+    message: string,
+    cause: unknown,
+  ) {
+    super(message, { cause });
+    this.name = "ModelProviderError";
+  }
+}
+
+function statusOf(err: unknown): number | undefined {
+  return (err as { status?: number } | null)?.status;
+}
+
+/** True for transient failures worth retrying with backoff. */
+export function isRetryableModelError(err: unknown): boolean {
+  const status = statusOf(err);
+  if (status === 429) return true;
+  if (status !== undefined && status >= 500 && status < 600) return true;
+  const code = (err as { code?: string } | null)?.code;
+  return code === "ECONNRESET" || code === "ETIMEDOUT" || code === "EAI_AGAIN";
+}
+
+export interface RetryOptions {
+  /** Total attempts including the first; default 3. */
+  attempts?: number;
+  /** Base delay for exponential backoff; default 500ms. */
+  baseDelayMs?: number;
+}
+
+/**
+ * Retry with exponential backoff + jitter around provider calls. The last
+ * error is rethrown as-is (typed when it came from withRateLimitHint), so
+ * callers can still branch on status.
+ */
+export async function withRetry<T>(call: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
+  const attempts = opts.attempts ?? 3;
+  const base = opts.baseDelayMs ?? 500;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await call();
+    } catch (err) {
+      lastError = err;
+      if (attempt === attempts || !isRetryableModelError(err)) throw err;
+      const hintMs = (err as { retryAfterMs?: number }).retryAfterMs;
+      const backoff = Math.min(base * 2 ** (attempt - 1), 8_000);
+      const jitter = Math.random() * backoff * 0.25;
+      await new Promise((r) => setTimeout(r, hintMs ?? backoff + jitter));
+    }
+  }
+  throw lastError;
+}
+
+/** Wraps provider errors in ModelProviderError, keeping status + reset hint. */
+export async function withRateLimitHint<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    const e = err as { status?: number; headers?: Record<string, unknown>; message?: string };
+    const status = e?.status;
+    if (status === 429 || (status !== undefined && status >= 500)) {
+      const h = e?.headers ?? {};
+      const raw = h["x-ratelimit-reset"] ?? h["retry-after"];
+      const seconds = typeof raw === "string" ? Number(raw) : undefined;
+      const retryAfterMs =
+        seconds !== undefined && Number.isFinite(seconds)
+          ? // retry-after is seconds unless clearly milliseconds already
+            seconds > 10_000 ? seconds : seconds * 1000
+          : undefined;
+      throw new ModelProviderError(
+        status,
+        retryAfterMs,
+        `model provider rate limit hit${raw ? `, retry after ${String(raw)}` : ", try again shortly"}`,
+        err,
+      );
+    }
+    throw err;
+  }
 }
 
 export interface ChatMessage {
@@ -33,15 +158,19 @@ export async function chat(
 ): Promise<string> {
   const messages: ChatMessage[] =
     typeof input === "string" ? [{ role: "user", content: input }] : input;
-  const client = opts.client ?? nimClient();
-  const res = await client.chat.completions.create({
-    model: opts.model ?? MODELS.primary(),
-    messages: messages.map((m) =>
-      m.role === "tool" ? { ...m, tool_call_id: "adhoc" } : m,
-    ) as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-    temperature: opts.temperature ?? 0.2,
-    max_tokens: opts.maxTokens ?? 4096,
-  });
+  const client = opts.client ?? chatClient();
+  const res = await withRetry(() =>
+    withRateLimitHint(() =>
+      client.chat.completions.create({
+        model: opts.model ?? MODELS.primary(),
+        messages: messages.map((m) =>
+          m.role === "tool" ? { ...m, tool_call_id: "adhoc" } : m,
+        ) as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+        temperature: opts.temperature ?? 0.2,
+        max_tokens: opts.maxTokens ?? 4096,
+      }),
+    ),
+  );
   // NIM reasoning models return content in a nonstandard field.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const m: any = res.choices[0]?.message;
@@ -65,6 +194,6 @@ export async function embed(
   };
   // NIM requires provider-specific params absent from the SDK's types.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const res = await client.embeddings.create(body as any);
+  const res = await withRetry(() => withRateLimitHint(() => client.embeddings.create(body as any)));
   return res.data.map((d) => d.embedding as number[]);
 }

@@ -66,7 +66,7 @@ export async function POST(req: Request) {
       openingFloatMinor: body.data.openingFloatMinor,
     });
   } else if (body.data.action === "sale") {
-    // Only open sessions can take sales — enforced inside the capability.
+    // Only open sessions can take sales, enforced inside the capability.
     const [session] = await db
       .select({ status: posSessions.status })
       .from(posSessions)

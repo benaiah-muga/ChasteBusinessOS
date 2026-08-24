@@ -46,7 +46,7 @@ async function main() {
   // 2. Agent issues an invoice: 20 lamps @ $120 + $60 tax
   const inv = await executor.execute("accounting.createInvoice", agentCtx, {
     customerId: cust.data.customerId,
-    memo: "Order #1042 — pendant lamps",
+    memo: "Order #1042, pendant lamps",
     lines: [{ description: "Pendant lamp", quantity: 20000, unitPriceMinor: 12_000, taxMinor: 6_000 }],
   });
   console.log(`✓ invoice #${inv.data?.invoiceNumber} posted: ${formatMinor(inv.data?.totalMinor ?? 0)} → entry ${inv.data?.entryId?.slice(0, 8)}`);

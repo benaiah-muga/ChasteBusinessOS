@@ -63,4 +63,24 @@ describe("capability conformance", () => {
     );
     expect(issues).toHaveLength(0);
   });
+
+  it("rejects money capabilities that do not declare moneyAmount", () => {
+    const issues = assertWellFormedCapability(
+      defineCapability({ ...base, id: "demo.chargeCard", risk: "money" }),
+    );
+    const issue = issues.find((i) => i.rule === "money-amount-required");
+    expect(issue?.level).toBe("error");
+  });
+
+  it("accepts money capabilities with a declared moneyAmount", () => {
+    const issues = assertWellFormedCapability(
+      defineCapability({
+        ...base,
+        id: "demo.chargeCard",
+        risk: "money",
+        moneyAmount: (input: { x: string }) => Number(input.x) || null,
+      }),
+    );
+    expect(issues.some((i) => i.rule === "money-amount-required")).toBe(false);
+  });
 });

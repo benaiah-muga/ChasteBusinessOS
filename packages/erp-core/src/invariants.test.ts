@@ -22,7 +22,7 @@ describe("double-entry invariants (property-based)", () => {
         try {
           totals = computeInvoiceTotals(lines);
         } catch (err) {
-          // Zero-value invoices are rejected outright — also acceptable.
+          // Zero-value invoices are rejected outright, also acceptable.
           expect((err as Error).message).toMatch(/non-zero total/);
           return;
         }

@@ -49,7 +49,7 @@ async function main() {
     .returning();
   await executor.execute("messaging.sendMessage", agentCtx, {
     conversationId: conv!.id,
-    body: "Invoice #1 issued to Bar & Co — follow up on payment next week.",
+    body: "Invoice #1 issued to Bar & Co, follow up on payment next week.",
   });
   const convMsgs = await db.select().from(messages).where(eq(messages.conversationId, conv!.id));
   console.log("✓ agent posted to #general:", JSON.stringify(convMsgs[0]?.body.slice(0, 60)));
@@ -87,7 +87,7 @@ async function main() {
     { ...humanCtx, now: oldDate },
     { name: "Should Fail" },
   );
-  void blocked; // crm doesn't check periods — use invoice instead:
+  void blocked; // crm doesn't check periods, use invoice instead:
 
   const blockedInvoice = await executor.execute(
     "accounting.createInvoice",

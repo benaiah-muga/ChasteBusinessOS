@@ -10,6 +10,14 @@ import type { CapabilityRegistry } from "./registry";
 export interface ApprovalFlow {
   /** Returns true when execution may proceed immediately. */
   submit(request: ApprovalRequest, ctx: ActionContext): Promise<boolean>;
+  /**
+   * Verifies that an approval id genuinely authorizes this exact capability
+   * and payload. Called by the executor whenever a caller passes
+   * `approvedApprovalId`; the kernel never trusts the caller to have checked.
+   * Return false when the row is missing, cross-org, consumed, or the payload
+   * differs from what was gated. Fail closed when unimplemented.
+   */
+  verify?(approvalId: string, request: ApprovalRequest, ctx: ActionContext): Promise<boolean>;
 }
 
 export interface ExecutorDeps {
@@ -17,6 +25,17 @@ export interface ExecutorDeps {
   policy?: PolicyEngine;
   approvals?: ApprovalFlow;
   ledger: LedgerStore;
+  /**
+   * Optional per-org module gate. When provided, capabilities whose `module`
+   * is disabled for the acting org are refused before any validation or
+   * policy work: disabled means unreachable from human routes, agent tool
+   * lists, and the job queue alike.
+   */
+  modules?: ModuleGate;
+}
+
+export interface ModuleGate {
+  isEnabled(orgId: string, moduleId: string): boolean | Promise<boolean>;
 }
 
 export class KernelExecutor {
@@ -29,10 +48,11 @@ export class KernelExecutor {
   }
 
   /**
-   * The single execution path for every action — human or agent.
+   * The single execution path for every action, human or agent.
    * validate → authorize → gate → execute → audit.
-   * `approvalId` bypasses the gate for actions a human already approved
-   * (the approval row itself is the authority; caller must verify it).
+   * `approvedApprovalId` bypasses the gate only after the ApprovalFlow's
+   * verify() confirms the row authorizes this capability + payload; the
+   * kernel never takes the caller's word for it.
    */
   async execute<I, O>(
     capId: string,
@@ -42,6 +62,16 @@ export class KernelExecutor {
   ): Promise<CapabilityResult<O>> {
     const cap = this.deps.registry.get(capId) as Capability<I, O> | undefined;
     if (!cap) return { ok: false, error: `unknown capability: ${capId}` };
+
+    // Module availability is checked before anything else about the action:
+    // a disabled module must not even validate inputs, appear in tool lists,
+    // or run under an approval that predates the disablement.
+    if (this.deps.modules && cap.module) {
+      const enabled = await this.deps.modules.isEnabled(ctx.actor.orgId, cap.module);
+      if (!enabled) {
+        return { ok: false, error: `module "${cap.module}" is disabled for this organization` };
+      }
+    }
 
     const parsed = cap.input.safeParse(rawInput);
     if (!parsed.success) {
@@ -53,7 +83,22 @@ export class KernelExecutor {
       return { ok: false, error: `forbidden: ${decision.reason}` };
     }
 
-    if (decision.requiresApproval && !opts.approvedApprovalId) {
+    if (decision.requiresApproval && opts.approvedApprovalId) {
+      // A claimed approval must match this capability and this exact payload.
+      // The kernel verifies; callers are not trusted to have checked. An app
+      // that does not implement verify() gets fail-closed behavior.
+      const request = approvalRequestFor(cap, parsed.data, decision);
+      const valid = this.approvals.verify
+        ? await this.approvals.verify(opts.approvedApprovalId, request, ctx)
+        : false;
+      if (!valid) {
+        return { ok: false, error: "approval verification failed for the supplied approval id" };
+      }
+      await this.audit(ctx, "approval.granted", cap.id, {
+        capabilityId: cap.id,
+        approvalId: opts.approvedApprovalId,
+      });
+    } else if (decision.requiresApproval) {
       const request = approvalRequestFor(cap, parsed.data, decision);
       const proceed = await this.approvals.submit(request, ctx);
       if (!proceed) {

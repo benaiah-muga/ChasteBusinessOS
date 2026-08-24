@@ -1,7 +1,8 @@
 export type AccountType = "asset" | "liability" | "equity" | "income" | "expense";
 
 export interface JournalLineInput {
-  accountCode: string;
+  /** Account code; omit when posting against a pre-resolved account id. */
+  accountCode?: string;
   debitMinor: number;
   creditMinor: number;
 }
@@ -15,7 +16,7 @@ export class UnbalancedEntryError extends Error {}
 
 /**
  * The invariant that makes the books trustworthy: debits equal credits.
- * Throws rather than returning — an unbalanced entry must never exist.
+ * Throws rather than returning, an unbalanced entry must never exist.
  */
 export function assertBalanced(entry: JournalEntryInput): void {
   if (entry.lines.length < 2) throw new UnbalancedEntryError("entry needs at least two lines");
@@ -46,6 +47,7 @@ export const DEFAULT_CHART_OF_ACCOUNTS: { code: string; name: string; type: Acco
   { code: "1200", name: "Inventory", type: "asset" },
   { code: "2000", name: "Accounts Payable", type: "liability" },
   { code: "2100", name: "Sales Tax Payable", type: "liability" },
+  { code: "2200", name: "Payroll Liabilities", type: "liability" },
   { code: "3000", name: "Owner's Equity", type: "equity" },
   { code: "3100", name: "Retained Earnings", type: "equity" },
   { code: "4000", name: "Sales Revenue", type: "income" },

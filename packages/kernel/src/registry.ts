@@ -1,6 +1,7 @@
 import type { Actor, Capability } from "./capability";
 import { assertWellFormedCapability, type ConformanceIssue } from "./conformance";
 import { hasPermission } from "./policy";
+import { z } from "zod";
 
 export class CapabilityRegistry {
   private readonly map = new Map<string, Capability>();
@@ -36,9 +37,25 @@ export class CapabilityRegistry {
   }
 
   /**
+   * A registry view limited to the given module ids (null = unrestricted).
+   * Used to build agent tool lists: a model should never see tools whose
+   * module the org has disabled, so hallucinated calls cannot even start.
+   */
+  scopedToModules(enabled: ReadonlySet<string> | null): CapabilityRegistry {
+    const scoped = new CapabilityRegistry();
+    for (const cap of this.all()) {
+      if (!cap.module || !enabled || enabled.has(cap.module)) {
+        // Conformance already ran on registration; skip re-validation.
+        (scoped as unknown as { map: Map<string, Capability> }).map.set(cap.id, cap);
+      }
+    }
+    return scoped;
+  }
+
+  /**
    * Cross-capability checks that can only run after all registrations:
    * inverse targets must exist. Warnings (missing inverses etc.) are
-   * reported, not thrown — tracked debt beats silent gaps.
+   * reported, not thrown, tracked debt beats silent gaps.
    */
   validateAll(): ConformanceIssue[] {
     const issues: ConformanceIssue[] = [];
@@ -49,6 +66,19 @@ export class CapabilityRegistry {
           level: "error",
           rule: "inverse-exists",
           message: `inverse "${cap.inverse.capabilityId}" is not registered`,
+        });
+      }
+      // The agent loop presents inputs as JSON Schema; an unconvertible
+      // schema would surface as a parameter-less tool and invite argument
+      // hallucinations. Discover that at boot, not mid-conversation.
+      try {
+        z.toJSONSchema(cap.input, { target: "draft-7" });
+      } catch (err) {
+        issues.push({
+          capabilityId: cap.id,
+          level: "error",
+          rule: "input-schema-serializable",
+          message: `input schema is not convertible to JSON Schema: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
       const orphanWarnings = assertWellFormedCapability(cap).filter((i) => i.level === "warning");

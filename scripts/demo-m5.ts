@@ -54,7 +54,7 @@ async function main() {
   });
   console.log("✓ card sale $18.00 posted (drawer untouched)");
 
-  // Close with a $2 short drawer — must be flagged honestly
+  // Close with a $2 short drawer, must be flagged honestly
   const closed = await executor.execute("pos.closeSession", ctx, { sessionId, countedCashMinor: 12_800 });
   console.log(`✓ closed: expected ${formatMinor(closed.data!.expectedCashMinor as number)}, counted $128.00, variance ${formatMinor(closed.data!.varianceMinor as number)}, flagged: ${closed.data!.flagged}`);
   if (!closed.data!.flagged) throw new Error("variance was not flagged!");

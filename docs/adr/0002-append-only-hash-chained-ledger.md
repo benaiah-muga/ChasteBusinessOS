@@ -1,4 +1,4 @@
-# ADR 0002 — Append-only, hash-chained event ledger
+# ADR 0002, Append-only, hash-chained event ledger
 
 Date: 2026-08-21 · Status: accepted
 

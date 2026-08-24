@@ -55,6 +55,16 @@ export interface Capability<I = unknown, O = unknown> {
    * Ignored unless risk === "money".
    */
   moneyThresholdMinor?: number;
+  /**
+   * Extracts the governing monetary amount (minor units) from validated
+   * input. Mandatory for risk === "money" capabilities (conformance):
+   * gating on a name heuristic failed open whenever an input named its
+   * amount unconventionally. Return null when no amount is knowable up
+   * front (e.g. reversals); null is treated as "always gate", never as
+   * "no gate". Declared as a method so Capability stays assignable across
+   * input types (bivariance), matching execute().
+   */
+  moneyAmount?(input: I): number | null;
   inverse?: { capabilityId: string } & InverseSpec<I>;
   execute(ctx: ActionContext, input: I): Promise<O>;
 }

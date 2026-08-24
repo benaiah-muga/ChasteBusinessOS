@@ -2,6 +2,22 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  CardTitle,
+  LoadingPage,
+  ActionNotice,
+  CopyButton,
+  Notice,
+  type ActionNoticeState,
+  PageHeader,
+} from "@/components/ui";
+import { IconLink, IconPlus } from "@/components/icons";
+import { postApi } from "@/lib/api";
+import { ModulesManager } from "./modules-manager";
 
 interface Member {
   userId: string;
@@ -22,12 +38,10 @@ interface TeamData {
   catalog: string[];
 }
 
-const usdless = (k: string) => k;
-
 export default function TeamPage() {
   const router = useRouter();
   const [data, setData] = useState<TeamData | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<(ActionNoticeState & { inviteUrl?: string }) | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [inviteEmail, setInviteEmail] = useState("");
@@ -38,9 +52,7 @@ export default function TeamPage() {
   const load = useCallback(() => {
     fetch("/api/team")
       .then((r) => r.json())
-      .then((d) => {
-        setData(d.error ? null : d);
-      });
+      .then((d) => setData(d.error ? null : d));
   }, []);
 
   useEffect(() => {
@@ -49,24 +61,21 @@ export default function TeamPage() {
 
   async function post(payload: Record<string, unknown>, label: string) {
     setBusy(true);
-    setNotice(null);
     try {
-      const res = await fetch("/api/team", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
+      const res = await postApi<{ data?: { token?: string } }>("/api/team", payload);
+      const json = res.data ?? {};
       if (res.status === 202) {
-        setNotice(`${label} needs human approval — check the Approvals inbox.`);
+        setNotice({ tone: "pending", text: `${label} needs human approval, check the Approvals inbox.` });
       } else if (!res.ok) {
-        setNotice(`${label} failed: ${json.error}`);
+        setNotice({ tone: "error", error: res.error! });
       } else if (label === "Invite") {
-        const acceptUrl = `${window.location.origin}/invite/${json.data.token}`;
-        setNotice(`Invite created. Share this link: ${acceptUrl}`);
+        const acceptUrl = `${window.location.origin}/invite/${json.data?.token ?? ""}`;
+        setNotice({ tone: "success", text: `Invite created for ${inviteEmail}. Share this link:`, inviteUrl: acceptUrl });
         await navigator.clipboard?.writeText(acceptUrl).catch(() => {});
+        setInviteEmail("");
+        setInviteRoleId("");
       } else {
-        setNotice(`${label} done.`);
+        setNotice({ tone: "success", text: `${label} done.` });
       }
       load();
       router.refresh();
@@ -75,127 +84,143 @@ export default function TeamPage() {
     }
   }
 
-  if (!data) return <p className="text-sm text-neutral-400">Loading…</p>;
+  if (!data) return <LoadingPage />;
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-semibold tracking-tight">Team</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        Roles map to capability permissions. Role changes are identity-class actions: they always
-        require a human approval before taking effect.
-      </p>
+      <ModulesManager />
+      <PageHeader
+        title="Team & roles"
+        description="Roles map to capability permissions. Role changes are identity-class actions: they always require a human approval before taking effect."
+      />
 
-      {notice && (
-        <p className="mb-4 rounded-lg bg-emerald-50 px-4 py-2 text-sm break-all text-emerald-800">{notice}</p>
+      {notice && notice.tone !== "error" && (
+        <Notice tone={notice.tone} onDismiss={() => setNotice(null)}>
+          {notice.text}
+          {notice.inviteUrl && (
+            <span className="mt-2 flex items-center gap-2 rounded-md border border-emerald-200 bg-white px-2.5 py-1.5 font-mono text-xs break-all text-stone-600">
+              <IconLink className="size-3.5 shrink-0 text-stone-400" />
+              <span className="min-w-0 flex-1 truncate">{notice.inviteUrl}</span>
+              <CopyButton text={notice.inviteUrl} label="Copy link" />
+            </span>
+          )}
+        </Notice>
+      )}
+      {notice && notice.tone === "error" && (
+        <ActionNotice state={notice} onDismiss={() => setNotice(null)} />
       )}
 
-      <section className="mb-8 grid gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 font-medium">Members</h2>
-          <table className="w-full text-left text-sm">
-            <tbody>
-              {data.members.map((m) => (
-                <tr key={m.userId} className="border-b border-neutral-100 last:border-0">
-                  <td className="py-2">
-                    <p className="font-medium">{m.name ?? m.email}</p>
-                    <p className="text-xs text-neutral-400">{m.email}</p>
-                  </td>
-                  <td className="py-2 text-right font-mono text-xs text-neutral-500">
-                    {m.roleKeys.join(", ") || "no role"}
-                  </td>
-                  <td className="py-2 pl-3 text-right">
-                    {!m.roleKeys.includes("owner") && data.roles.length > 0 && (
-                      <select
-                        defaultValue=""
-                        disabled={busy}
-                        onChange={(e) =>
-                          e.target.value &&
-                          post(
-                            { action: "assignRole", userId: m.userId, roleId: e.target.value },
-                            "Role assignment",
-                          )
-                        }
-                        className="rounded border border-neutral-300 px-1.5 py-1 text-xs"
-                      >
-                        <option value="">change role…</option>
-                        {data.roles.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <section className="grid gap-4 xl:grid-cols-[1fr_420px]">
+        {/* Members */}
+        <Card>
+          <CardTitle right={<Badge>{data.members.length}</Badge>}>Members</CardTitle>
+          <ul className="-mt-2 divide-y divide-stone-100">
+            {data.members.map((m) => (
+              <li key={m.userId} className="flex items-center gap-3 py-3">
+                <Avatar name={m.name ?? m.email} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-stone-800">{m.name ?? m.email}</p>
+                  <p className="truncate text-xs text-stone-400">{m.email}</p>
+                </div>
+                <div className="flex flex-wrap justify-end gap-1">
+                  {(m.roleKeys.length ? m.roleKeys : ["no role"]).map((k) => (
+                    <Badge key={k} tone={k === "owner" ? "maroon" : "neutral"}>
+                      {k}
+                    </Badge>
+                  ))}
+                </div>
+                {!m.roleKeys.includes("owner") && data.roles.length > 0 && (
+                  <label className="shrink-0">
+                    <span className="sr-only">Change role for {m.name ?? m.email}</span>
+                    <select
+                      defaultValue=""
+                      disabled={busy}
+                      onChange={(e) =>
+                        e.target.value && post({ action: "assignRole", userId: m.userId, roleId: e.target.value }, "Role assignment")
+                      }
+                      className="select h-7 w-36 px-2 py-0 text-xs"
+                    >
+                      <option value="">change role…</option>
+                      {data.roles.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </li>
+            ))}
+          </ul>
 
-        <div className="space-y-4">
-          <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-3 font-medium">Invite</h2>
-            <div className="flex gap-2">
+          {/* Invite */}
+          <div className="mt-4 border-t border-stone-100 pt-4">
+            <h3 className="mb-2.5 text-[13px] font-medium text-stone-700">Invite a member</h3>
+            <div className="flex flex-wrap gap-2">
               <input
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="email@company.com"
                 type="email"
-                className="min-w-0 flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none"
+                aria-label="Invite email address"
+                className="input min-w-0 flex-1"
               />
-              <select
-                value={inviteRoleId}
-                onChange={(e) => setInviteRoleId(e.target.value)}
-                className="rounded-lg border border-neutral-300 px-2 py-2 text-sm"
-              >
-                <option value="">role…</option>
-                {data.roles.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-              <button
+              <label className="w-36">
+                <span className="sr-only">Role for invite</span>
+                <select value={inviteRoleId} onChange={(e) => setInviteRoleId(e.target.value)} className="select">
+                  <option value="">role…</option>
+                  {data.roles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                loading={busy}
+                disabled={!inviteEmail || !inviteRoleId}
                 onClick={() => post({ action: "invite", email: inviteEmail, roleId: inviteRoleId }, "Invite")}
-                disabled={busy || !inviteEmail || !inviteRoleId}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-40"
               >
                 Invite
-              </button>
+              </Button>
             </div>
+            <p className="mt-2 text-xs text-stone-400">The invite link lands on your clipboard; share it with the new member.</p>
           </div>
+        </Card>
 
-          <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-3 font-medium">Roles</h2>
-            <ul className="space-y-2">
+        {/* Roles */}
+        <div className="space-y-4">
+          <Card>
+            <CardTitle>Roles</CardTitle>
+            <ul className="-mt-2 divide-y divide-stone-100">
               {data.roles.map((r) => (
-                <li key={r.id} className="flex items-center gap-3 text-sm">
-                  <span className="font-mono text-xs text-neutral-400">{usdless(r.key)}</span>
-                  <span>{r.name}</span>
-                  <span className="text-xs text-neutral-400">
+                <li key={r.id} className="flex items-center gap-2.5 py-2.5 text-sm">
+                  <span className="font-mono text-xs text-stone-400">{r.key}</span>
+                  <span className="font-medium text-stone-800">{r.name}</span>
+                  <span className="ml-auto text-xs whitespace-nowrap text-stone-400">
                     {r.permissions.includes("*") ? "all powers" : `${r.permissions.length} permissions`}
                   </span>
                   {!r.isSystem && (
-                    <button
-                      onClick={() =>
-                        setEditingPerms({ roleId: r.id, selected: new Set(r.permissions) })
-                      }
-                      className="ml-auto text-xs text-emerald-700 underline underline-offset-2"
+                    <Button
+                      tone="ghost"
+                      size="sm"
+                      onClick={() => setEditingPerms({ roleId: r.id, selected: new Set(r.permissions) })}
                     >
-                      edit
-                    </button>
+                      Edit
+                    </Button>
                   )}
                 </li>
               ))}
             </ul>
+
             {editingPerms && (
-              <div className="mt-4 max-h-72 overflow-y-auto rounded-lg border border-neutral-200 p-3">
-                <p className="mb-2 font-mono text-xs uppercase tracking-wide text-neutral-500">
-                  permissions for this role
+              <div className="mt-4 rounded-lg border border-maroon-200 bg-maroon-50/40 p-3.5">
+                <p className="mb-2.5 text-xs font-semibold tracking-wide text-maroon-800 uppercase">
+                  Permissions · {data.roles.find((r) => r.id === editingPerms.roleId)?.name}
                 </p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {data.catalog.map((perm) => (
-                    <label key={perm} className="flex items-center gap-1.5 text-xs">
+                <div className="grid max-h-64 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+                  {[...data.catalog, "*"].map((perm) => (
+                    <label key={perm} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-white/70">
                       <input
                         type="checkbox"
                         checked={editingPerms.selected.has(perm)}
@@ -205,52 +230,33 @@ export default function TeamPage() {
                           else next.delete(perm);
                           setEditingPerms({ ...editingPerms, selected: next });
                         }}
+                        className="accent-maroon-700"
                       />
-                      <span className="font-mono">{perm}</span>
+                      <span className="font-mono">{perm}{perm === "*" ? " (everything)" : ""}</span>
                     </label>
                   ))}
-                  <label className="flex items-center gap-1.5 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={editingPerms.selected.has("*")}
-                      onChange={(e) => {
-                        const next = new Set(editingPerms.selected);
-                        if (e.target.checked) next.add("*");
-                        else next.delete("*");
-                        setEditingPerms({ ...editingPerms, selected: next });
-                      }}
-                    />
-                    <span className="font-mono">* (everything)</span>
-                  </label>
                 </div>
-                <div className="mt-3 flex gap-2">
-                  <button
+                <div className="mt-3 flex justify-end gap-2">
+                  <Button tone="secondary" size="sm" onClick={() => setEditingPerms(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    loading={busy}
                     onClick={() => {
                       post(
-                        {
-                          action: "setPermissions",
-                          roleId: editingPerms.roleId,
-                          permissions: [...editingPerms.selected],
-                        },
+                        { action: "setPermissions", roleId: editingPerms.roleId, permissions: [...editingPerms.selected] },
                         "Permission update",
                       );
                       setEditingPerms(null);
                     }}
-                    disabled={busy}
-                    className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:opacity-40"
                   >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => setEditingPerms(null)}
-                    className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-50"
-                  >
-                    Cancel
-                  </button>
+                    Save permissions
+                  </Button>
                 </div>
               </div>
             )}
-          </div>
+          </Card>
 
           <form
             onSubmit={(e) => {
@@ -260,21 +266,24 @@ export default function TeamPage() {
               post({ action: "createRole", key, name: newRoleName }, "Create role");
               setNewRoleName("");
             }}
-            className="flex gap-2 rounded-xl border border-dashed border-neutral-300 p-4"
+            className="flex items-end gap-2 rounded-xl border border-dashed border-stone-300 p-4"
           >
-            <input
-              value={newRoleName}
-              onChange={(e) => setNewRoleName(e.target.value)}
-              placeholder="New role name…"
-              className="min-w-0 flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={busy || !newRoleName.trim()}
-              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-40"
-            >
+            <div className="flex-1">
+              <label htmlFor="new-role-name" className="label">
+                New role
+              </label>
+              <input
+                id="new-role-name"
+                value={newRoleName}
+                onChange={(e) => setNewRoleName(e.target.value)}
+                placeholder="e.g. Bookkeeper"
+                className="input"
+              />
+            </div>
+            <Button type="submit" loading={busy} disabled={!newRoleName.trim()}>
+              <IconPlus className="size-3.5" />
               Create
-            </button>
+            </Button>
           </form>
         </div>
       </section>

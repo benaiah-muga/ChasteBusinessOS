@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button, Notice } from "@/components/ui";
+import { IconLandmark, IconSparkle, IconUsers } from "@/components/icons";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -32,47 +34,90 @@ export default function OnboardingPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-16">
-      <p className="mb-2 font-mono text-xs uppercase tracking-widest text-emerald-700">Setup</p>
-      <h1 className="mb-3 text-3xl font-semibold tracking-tight">Tell us about your business</h1>
-      <p className="mb-8 text-neutral-600">
-        Describe what you do in plain language. Chaste uses this to configure your workspace,
-        seed your books, and give your AI co-worker lasting context.
-      </p>
+    <main className="mx-auto flex min-h-screen max-w-5xl items-center px-6 py-16">
+      <div className="grid w-full gap-12 lg:grid-cols-[1fr_1.2fr] lg:items-center">
+        {/* Context panel */}
+        <section className="hidden lg:block">
+          <span className="inline-flex items-center gap-2 text-xs font-semibold tracking-widest text-maroon-700 uppercase">
+            <IconSparkle className="size-4" />
+            Workspace setup
+          </span>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-balance text-stone-900">
+            Your books, seeded by a sentence.
+          </h1>
+          <p className="mt-4 leading-relaxed text-stone-600">
+            Describe what you do in plain language, the same way you'd explain it to a new
+            bookkeeper. Chaste takes it from there.
+          </p>
+          <ul className="mt-8 space-y-4 text-sm text-stone-600">
+            <li className="flex gap-3">
+              <IconLandmark className="mt-0.5 size-4 shrink-0 text-maroon-700" />
+              Your chart of accounts is seeded and your books open balanced.
+            </li>
+            <li className="flex gap-3">
+              <IconSparkle className="mt-0.5 size-4 shrink-0 text-maroon-700" />
+              Your AI co-worker reads this once and remembers it forever.
+            </li>
+            <li className="flex gap-3">
+              <IconUsers className="mt-0.5 size-4 shrink-0 text-maroon-700" />
+              You become the owner with full authority over every gated action.
+            </li>
+          </ul>
+        </section>
 
-      <form onSubmit={submit} className="space-y-5">
-        <label className="block text-sm">
-          Business name
-          <input
-            required
-            minLength={2}
-            value={orgName}
-            onChange={(e) => setOrgName(e.target.value)}
-            placeholder="Glow Works Ltd"
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 focus:border-emerald-600 focus:outline-none"
-          />
-        </label>
-        <label className="block text-sm">
-          What does your business do? Who are your customers? How do you make money?
-          <textarea
-            required
-            minLength={20}
-            rows={6}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="We design and sell handmade lighting fixtures online and to interior designers. Most customers order 10–50 units at a time. We offer 2% discount to returning wholesale buyers…"
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 leading-relaxed focus:border-emerald-600 focus:outline-none"
-          />
-        </label>
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded-lg bg-emerald-700 px-6 py-2.5 font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-        >
-          {busy ? "Setting up…" : "Set up my workspace"}
-        </button>
-      </form>
+        {/* Form */}
+        <section>
+          <div className="mb-6 flex items-center gap-2 lg:hidden">
+            <IconSparkle className="size-4 text-maroon-700" />
+            <p className="text-xs font-semibold tracking-widest text-maroon-700 uppercase">Workspace setup</p>
+          </div>
+          <form onSubmit={submit} className="card card-pad sm:p-6">
+            <div className="mb-5">
+              <label htmlFor="orgName" className="label">
+                Business name
+              </label>
+              <input
+                id="orgName"
+                required
+                minLength={2}
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                placeholder="Glow Works Ltd"
+                className="input"
+              />
+            </div>
+            <div className="mb-5">
+              <label htmlFor="description" className="label">
+                What does your business do?
+              </label>
+              <textarea
+                id="description"
+                required
+                minLength={20}
+                rows={7}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="We design and sell handmade lighting fixtures online and to interior designers. Most customers order 10–50 units at a time. We offer 2% discount to returning wholesale buyers…"
+                className="textarea resize-none"
+              />
+              <div className="mt-1.5 flex justify-between text-xs text-stone-400">
+                <span>Who are your customers? How do you make money?</span>
+                <span aria-hidden="true">{description.length}/20 min</span>
+              </div>
+            </div>
+
+            {error && (
+              <Notice tone="error" onDismiss={() => setError(null)}>
+                {error}
+              </Notice>
+            )}
+
+            <Button type="submit" size="lg" loading={busy} disabled={description.trim().length < 20 || orgName.trim().length < 2}>
+              {busy ? "Setting up…" : "Set up my workspace"}
+            </Button>
+          </form>
+        </section>
+      </div>
     </main>
   );
 }

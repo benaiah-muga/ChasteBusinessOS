@@ -39,14 +39,18 @@ export class DefaultPolicyEngine implements PolicyEngine {
     }
 
     // Agents cannot self-approve money above the capability's threshold.
+    // A null amount (unknowable up front) gates unconditionally: fail closed.
     if (cap.risk === "money" && ctx.actor.type === "agent") {
-      const amount = extractMoneyMinor(_input);
+      const amount = cap.moneyAmount ? cap.moneyAmount(_input as never) : null;
       const threshold = cap.moneyThresholdMinor ?? 0;
-      if (amount !== null && amount > threshold) {
+      if (amount === null || amount > threshold) {
         return {
           allowed: true,
           requiresApproval: true,
-          reason: `amount ${amount} exceeds autonomous threshold ${threshold}`,
+          reason:
+            amount === null
+              ? "amount is not knowable before execution; human approval required"
+              : `amount ${amount} exceeds autonomous threshold ${threshold}`,
         };
       }
     }
@@ -83,41 +87,32 @@ export class OrgPolicyEngine implements PolicyEngine {
     const rule = rules.find((r) => matchesPattern(r.capabilityPattern, cap.id));
 
     // Money actions are governed by amount thresholds below, not by the
-    // blanket risk cap — otherwise every retail sale needs sign-off.
+    // blanket risk cap, otherwise every retail sale needs sign-off.
     if (rule && cap.risk !== "money" && RISK_RANK[cap.risk] > RISK_RANK[rule.maxRiskAutonomous]) {
       return { allowed: true, requiresApproval: true, reason: `org policy caps autonomy at "${rule.maxRiskAutonomous}"` };
     }
 
     if (cap.risk === "money") {
       const threshold = rule?.moneyThresholdMinor ?? cap.moneyThresholdMinor ?? 0;
-      const amount = extractMoneyMinor(input);
+      const amount = cap.moneyAmount ? cap.moneyAmount(input as never) : null;
       const gated = ctx.actor.type === "agent" || threshold > 0;
-      if (gated && amount !== null && amount > threshold) {
+      // Null amount gates even humans when a threshold is configured: the
+      // org asked for sign-off on money, we cannot prove this action is
+      // below it, so it waits for approval. Fail closed, never open.
+      if (gated && (amount === null || amount > threshold)) {
         return {
           allowed: true,
           requiresApproval: true,
-          reason: `amount ${amount} exceeds autonomous threshold ${threshold}`,
+          reason:
+            amount === null
+              ? "amount is not knowable before execution; human approval required"
+              : `amount ${amount} exceeds autonomous threshold ${threshold}`,
         };
       }
     }
 
     return { allowed: true, requiresApproval: false, reason: "within policy" };
   }
-}
-
-/** Finds the largest integer `*_minor` field in an input object, if any. */
-function extractMoneyMinor(input: unknown): number | null {
-  if (typeof input !== "object" || input === null) return null;
-  let max: number | null = null;
-  for (const [k, v] of Object.entries(input)) {
-    if (typeof v === "number" && Number.isSafeInteger(v) && k.endsWith("Minor")) {
-      max = max === null ? v : Math.max(max, v);
-    } else if (typeof v === "object" && v !== null) {
-      const nested = extractMoneyMinor(v);
-      if (nested !== null) max = max === null ? nested : Math.max(max, nested);
-    }
-  }
-  return max;
 }
 
 export function approvalRequestFor(

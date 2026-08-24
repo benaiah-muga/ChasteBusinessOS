@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { desc, eq } from "drizzle-orm";
-import { agentSessions, getDb, organizations, sessionEvents, tickets } from "@chaste/db";
-import { hasPermission, runAgentLoop, type TicketSink } from "@chaste/kernel";
-
-const hasPermissionFor = hasPermission;
-import { OpenAiCompatAdapter, MODELS } from "@chaste/ai";
+import { and, eq } from "drizzle-orm";
+import { agentSessions, getDb, organizations, tickets } from "@chaste/db";
+import { hasPermission as hasPermissionFor, logger, runAgentLoop, type TicketSink } from "@chaste/kernel";
+import { OpenAiCompatAdapter, MODELS, nimClient, resolveClient } from "@chaste/ai";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
+import { appendSessionEvent, addTokenUsage } from "@/server/session-events";
 import { getResolvedUser } from "@/server/session";
+import { chatLimitForUser } from "@/server/rate-limit";
+import { resolveEnabledModules } from "@/app/(app)/_shell/modules";
 
 export const maxDuration = 120;
 
@@ -22,8 +23,12 @@ You operate an ERP through registered capabilities. Rules:
 - Prefer tools over prose when the user wants something done; confirm results with specifics (numbers, ids).
 - Amounts are in minor units (cents). Quantities are thousandths of a unit.
 - If a tool returns pendingApproval: true, tell the user approval is required and it's waiting in the Approvals inbox.
+- Before saying you can't know something, call documents.searchMemory; ingested documents and policies live there.
 - If no capability fits, say so honestly and call file_ticket.
-- Never invent capabilities, accounts, or numbers.`;
+- Never invent capabilities, accounts, or numbers.
+Writing style:
+- Never use em dashes or en dashes; use commas, colons, or periods instead.
+- Keep replies short and plain: short paragraphs, minimal markdown. Bold (**like this**) sparingly for key numbers only.`;
 const creatorAddendum = `
 
 Creator Mode is active. You may propose changes to this platform itself via
@@ -37,16 +42,55 @@ export async function POST(req: Request) {
   const ctx = actorFromResolved(resolved, { asAgent: true });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
+  // Each turn can fan out into a multi-step paid model loop; cap per-user
+  // spend before doing any work.
+  const limit = chatLimitForUser(resolved.userId);
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "too many requests" },
+      { status: 429, headers: { "retry-after": String(limit.retryAfterSec) } },
+    );
+  }
+
   const body = bodySchema.safeParse(await req.json());
   if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
   const db = getDb().db;
-  const registry = buildRegistry(db);
+  const registry = buildRegistry(db).scopedToModules(
+    resolveEnabledModules(resolved.enabledModules),
+  );
   const executor = buildExecutor(db, registry);
-  const model = new OpenAiCompatAdapter({ model: MODELS.primary() });
+  const usingOpenRouter = process.env.MODEL_PROVIDER === "openrouter";
+  const modelRef = MODELS.primary();
+  const model = new OpenAiCompatAdapter({
+    client: resolveClient(usingOpenRouter ? `openrouter/${modelRef}` : modelRef),
+    model: modelRef,
+    // Upstream shared pools (e.g. stealth/ox-alpha) throttle under load;
+    // falling back to the primary NIM model keeps agent turns honest
+    // instead of dying mid-conversation.
+    fallback:
+      process.env.NVIDIA_API_KEY && usingOpenRouter
+        ? { client: nimClient(), model: process.env.MODEL_PRIMARY_NIM ?? "moonshotai/kimi-k2.6" }
+        : undefined,
+  });
 
   let sessionId = body.data.sessionId;
   if (sessionId) {
+    // Ownership gate: a client-supplied session id must belong to this user
+    // in this org, otherwise trajectory events and token usage would be
+    // appended to someone else's replayable record.
+    const [owned] = await db
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.orgId, ctx.actor.orgId),
+          eq(agentSessions.userId, resolved.userId),
+        ),
+      )
+      .limit(1);
+    if (!owned) return NextResponse.json({ error: "session not found" }, { status: 404 });
     await db.update(agentSessions).set({ updatedAt: new Date() }).where(eq(agentSessions.id, sessionId));
   } else {
     const [session] = await db
@@ -75,16 +119,7 @@ export async function POST(req: Request) {
     },
   };
 
-  let seq =
-    (
-      await db
-        .select({ seq: sessionEvents.seq })
-        .from(sessionEvents)
-        .where(eq(sessionEvents.sessionId, sessionId))
-        .orderBy(desc(sessionEvents.seq))
-        .limit(1)
-    )[0]?.seq ?? 0;
-  await db.insert(sessionEvents).values({ sessionId, seq: ++seq, role: "user", content: { text: body.data.message } });
+  await appendSessionEvent(db, sessionId, "user", { text: body.data.message });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -116,20 +151,25 @@ export async function POST(req: Request) {
                 send({ type: "tool", name: c.name });
               }
               if (event.role === "tool_call" || event.role === "tool_result") {
-                seq += 1;
-                void db
-                  .insert(sessionEvents)
-                  .values({ sessionId, seq, role: event.role, content: event.content as object })
-                  .catch(() => {});
+                // Fire-and-forget persistence, but failures are logged:
+                // silent trajectory gaps made replay/audit untrustworthy.
+                void appendSessionEvent(db, sessionId, event.role, event.content as object);
               }
             },
           },
           ticketSink,
         );
-        seq += 1;
-        await db.insert(sessionEvents).values({ sessionId, seq, role: "assistant", content: { text: result.finalMessage } });
+        await appendSessionEvent(db, sessionId, "assistant", { text: result.finalMessage });
+        // Token accounting incl. cached prompt tokens (KV-cache hit rate);
+        // accumulated atomically server-side (no lost updates).
+        await addTokenUsage(db, sessionId, result.usage);
         send({ type: "done", sessionId, reply: result.finalMessage });
       } catch (err) {
+        logger.error("agent loop failed", {
+          sessionId,
+          orgId: ctx.actor.orgId,
+          error: err instanceof Error ? err.message : String(err),
+        });
         send({ type: "error", error: err instanceof Error ? err.message : String(err) });
       } finally {
         controller.close();

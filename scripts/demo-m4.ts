@@ -48,7 +48,7 @@ async function main() {
   });
   console.log(`✓ vendor bill #${bill.data?.billNumber}: ${formatMinor(bill.data!.totalMinor as number)} → DR COGS / CR AP`);
 
-  // Pay it — above threshold → approval required
+  // Pay it, above threshold → approval required
   const pay = await executor.execute("purchasing.payBill", agentCtx, {
     billNumber: bill.data!.billNumber as number,
     amountMinor: bill.data!.totalMinor as number,
