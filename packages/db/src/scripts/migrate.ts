@@ -1,13 +1,5 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
-import postgres from "postgres";
-import { fileURLToPath } from "node:url";
+import { runMigrations } from "../migrate";
 
-const url = process.env.DATABASE_URL ?? "postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2";
-
-const client = postgres(url, { max: 1 });
-await migrate(drizzle(client), {
-  migrationsFolder: fileURLToPath(new URL("../../drizzle", import.meta.url)),
-});
-await client.end();
+const result = await runMigrations();
 console.log("migrations applied");
+if (result.backupSkippedReason) console.warn(`warning: ${result.backupSkippedReason}`);
