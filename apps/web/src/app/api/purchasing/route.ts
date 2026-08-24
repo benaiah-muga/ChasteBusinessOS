@@ -4,8 +4,6 @@ import { getDb, poLines, purchaseOrders, vendorBills, vendors } from "@chaste/db
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 
-export const dynamic = "force-dynamic";
-
 /**
  * Full human surface for the purchasing module: vendors, orders, receipts,
  * bills, payments, and AP aging — every capability the agent has, through

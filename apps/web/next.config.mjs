@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Cache Components (ADR 0028): routes validate for instant navigation;
+  // segments not yet converted opt out via `export const instant = false`.
+  cacheComponents: true,
   transpilePackages: ["@chaste/kernel", "@chaste/db", "@chaste/ai"],
   serverExternalPackages: ["postgres"],
   async headers() {
