@@ -103,6 +103,17 @@ const createDeal = (deps: ModuleDeps) =>
     }),
     output: z.object({ dealId: z.string() }),
     execute: async (ctx, input) => {
+      // A customer id must point at this org's customer. The FK alone cannot
+      // check tenancy (ids are global), so without this guard a deal could
+      // silently attach to another organization's customer.
+      if (input.customerId) {
+        const [owned] = await deps.db
+          .select({ id: customers.id })
+          .from(customers)
+          .where(and(eq(customers.id, input.customerId), eq(customers.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!owned) throw new Error("customer not found in this organization");
+      }
       const [row] = await deps.db
         .insert(deals)
         .values({
