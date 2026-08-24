@@ -33,6 +33,20 @@ The full v1 changelog is preserved at the bottom of this file.
   customer on cards. Customer writes go through the governed capability path.
   `crm.createDeal` now refuses customer ids from other organizations (a
   tenancy gap found by the new tests).
+- **Boot-time auto-migration with pre-migration snapshots** (`packages/db/src/migrate.ts`,
+  wired via `apps/web/src/instrumentation.ts`): the web server now applies
+  pending Drizzle migrations once at startup, before accepting requests,
+  serialized by a Postgres advisory lock so multi-instance deploys cannot
+  race. Before the first change of each run a `pg_dump` snapshot is written
+  to `packages/db/backups/` (gitignored, newest 10 kept) so a bad migration
+  is recoverable by restore. Production refuses to serve when migrations
+  fail; development logs and continues. Controls: `AUTO_MIGRATE_ON_BOOT=0`
+  restores manual migration, `CHASTE_SKIP_MIGRATION_BACKUP=1` disables
+  snapshots, `CHASTE_STRICT_MIGRATION_BACKUP=1` refuses to migrate without a
+  verified snapshot. Snapshots prefer the host `pg_dump` and fall back to the
+  database container's own client when the host binary is missing or older
+  than the server (`CHASTE_PG_DUMP_BIN` / `CHASTE_DB_CONTAINER` overrides).
+  Documented in README "Upgrading".
 - **Next.js 16.3 agent tooling** (ADR 0027): the repo now points every AI
   coding agent at Next.js's version-matched bundled docs — the official
   managed `nextjs-agent-rules` block in `AGENTS.md` (byte-identical to what

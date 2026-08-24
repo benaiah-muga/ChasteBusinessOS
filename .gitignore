@@ -13,6 +13,9 @@ tsconfig.tsbuildinfo
 .env.*
 !.env.example
 
+# pre-migration pg_dump snapshots
+packages/db/backups/
+
 # misc
 *.log
 .DS_Store

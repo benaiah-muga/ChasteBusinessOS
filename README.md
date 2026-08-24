@@ -89,6 +89,40 @@ pnpm demo:m4      # vendor bill → gated payment → P&L and balance sheet prov
 pnpm demo:m5      # register session → sales → drawer variance flagged
 ```
 
+## Upgrading
+
+Updates ship as new app code plus incremental database migrations. Your data
+survives updates: migrations are additive `ALTER`s applied in place by
+Drizzle's idempotent migrator, and a `pg_dump` snapshot is taken
+automatically before any migration runs.
+
+```sh
+git pull            # get the new version
+pnpm install
+pnpm dev            # or: pnpm build && pnpm start
+```
+
+That's it. The web server applies pending migrations once at boot, before it
+accepts requests (serialized across instances by a Postgres advisory lock),
+so you can't end up serving new code against an old schema.
+
+Controls and safety nets:
+
+- Pre-migration snapshots live in `packages/db/backups/` (newest 10 kept).
+  Restore one with `psql "$DATABASE_URL" < <snapshot>.sql` after stopping the
+  app. Snapshots use the host `pg_dump`, falling back to the one inside the
+  database container when the host client is missing or older than the
+  server; override with `CHASTE_PG_DUMP_BIN` (a command with flags) or rename
+  the container with `CHASTE_DB_CONTAINER`.
+- Set `CHASTE_STRICT_MIGRATION_BACKUP=1` in production to refuse migrating
+  when a snapshot cannot be taken (e.g. `pg_dump` not installed and no
+  container fallback available).
+- Set `AUTO_MIGRATE_ON_BOOT=0` if you prefer to migrate manually with
+  `pnpm --filter @chaste/db db:migrate`; the app then refuses to start in
+  production until the schema is current.
+- Upgrade notes for behavioral changes are in [CHANGELOG.md](CHANGELOG.md)
+  under the version you're moving to.
+
 ## Documentation
 
 - [Vision](VISION.md), what we're building and what we won't compromise
