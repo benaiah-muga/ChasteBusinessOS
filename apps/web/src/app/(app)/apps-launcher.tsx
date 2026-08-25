@@ -5,27 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { appsForOrg, tileStyle, type AppInfo } from "./_shell/apps";
 import { appPins, usePinnedApps } from "./_shell/pins";
+import { recordAppVisit, useRecentApps } from "./_shell/recent-apps";
 import { IconPinTack, IconSearch } from "@/components/icons";
 import { cn } from "@/lib/format";
-
-const RECENTS_KEY = "chaste-recent-apps";
-
-export function recordAppVisit(href: string) {
-  try {
-    const prev: string[] = JSON.parse(localStorage.getItem(RECENTS_KEY) ?? "[]");
-    localStorage.setItem(RECENTS_KEY, JSON.stringify([href, ...prev.filter((h) => h !== href)].slice(0, 4)));
-  } catch {
-    // Storage unavailable; recents are a convenience, not a feature.
-  }
-}
-
-function recentHrefs(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(RECENTS_KEY) ?? "[]") as string[];
-  } catch {
-    return [];
-  }
-}
 
 /**
  * The launcher: every business module as an application, one keystroke away.
@@ -48,6 +30,7 @@ export function AppsLauncher({
 
   const apps = useMemo(() => appsForOrg(enabledModules), [enabledModules]);
   const pinnedIds = usePinnedApps();
+  const recentHrefs = useRecentApps();
 
   const groups = useMemo(() => {
     if (!open) return [] as { label: string; items: AppInfo[] }[];
@@ -56,7 +39,7 @@ export function AppsLauncher({
       !q || a.name.toLowerCase().includes(q) || a.tagline.toLowerCase().includes(q);
     const recent = q
       ? []
-      : recentHrefs()
+      : recentHrefs
           .map((h) => apps.find((a) => a.href === h))
           .filter((a): a is AppInfo => !!a);
     const visited = new Set(recent.map((a) => a.href));
@@ -158,7 +141,12 @@ export function AppsLauncher({
                         aria-selected={isActive}
                         data-active={isActive}
                         onMouseEnter={() => setActive(index)}
-                        onClick={() => recordAppVisit(app.href)}
+                        onClick={() => {
+                          // Close immediately so the click feels like launching,
+                          // not like browsing; navigation completes underneath.
+                          recordAppVisit(app.href);
+                          onClose();
+                        }}
                         className="app-tile"
                       >
                         <span
@@ -168,10 +156,7 @@ export function AppsLauncher({
                         >
                           <TileIcon className="size-5.5" />
                         </span>
-                        <span className="w-full">
-                          <span className="block text-sm font-medium text-stone-900">{app.name}</span>
-                          <span className="block truncate text-xs text-stone-500">{app.tagline}</span>
-                        </span>
+                        <span className="text-sm font-medium text-stone-900">{app.name}</span>
                       </Link>
                       <button
                         type="button"

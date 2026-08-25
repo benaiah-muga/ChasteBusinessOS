@@ -60,7 +60,7 @@ export default function OnboardingPage() {
             </li>
             <li className="flex gap-3">
               <IconSparkle className="mt-0.5 size-4 shrink-0 text-maroon-700" />
-              Your AI co-worker reads this once and remembers it forever.
+              Your AI workmate reads this once and remembers it forever.
             </li>
             <li className="flex gap-3">
               <IconUsers className="mt-0.5 size-4 shrink-0 text-maroon-700" />

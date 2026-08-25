@@ -27,6 +27,7 @@ export const MODULE_CATALOG: ModuleInfo[] = [
   { id: "hr", label: "HR & Payroll", description: "Employees, leave, payroll runs", href: "/hr" },
   { id: "messaging", label: "Messages", description: "Internal channels and DMs with agent participation", href: "/messages" },
   { id: "support", label: "Customer care", description: "Support desk with AI-drafted replies", href: "/support" },
+  { id: "skills", label: "Skills", description: "Advisory playbooks the workmate can consult", href: null },
   { id: "creator", label: "Creator & marketplace", description: "Capability proposals and signed plugins", href: "/proposals" },
 ];
 

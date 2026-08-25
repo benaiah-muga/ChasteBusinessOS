@@ -6,6 +6,7 @@ import { callApi } from "@/lib/api";
 import { APPS, tileStyle } from "../_shell/apps";
 import { appPins, MAX_PINS, usePinnedApps } from "../_shell/pins";
 import { useModuleEnabled } from "../_shell/module-context";
+import { ModulesManager } from "../_shell/modules-manager";
 import { THEMES, applyTheme, useTheme, type ThemeId } from "@/components/theme";
 import { IconCheck, IconPinTack } from "@/components/icons";
 import { cn } from "@/lib/format";
@@ -47,8 +48,24 @@ export default function SettingsPage() {
 
       <AppearanceSection theme={theme} />
       <PinsSection pinnedIds={pinnedIds} apps={[...businessApps, ...systemApps]} />
+      <ModulesSection />
       <WorkspaceSection orgName={orgName} modulesNote={accountingOn ? "Managed by owners" : "Restricted set"} />
     </div>
+  );
+}
+
+function ModulesSection() {
+  return (
+    <section aria-label="Modules" className="mb-10">
+      <h2 className="text-sm font-semibold text-stone-800">Modules</h2>
+      <p className="mt-1 text-sm text-stone-500">
+        Which applications your organization runs. Turning a module off hides it from people, the
+        workmate, and the job queue at once; changes are identity-class and wait for approval.
+      </p>
+      <div className="mt-4">
+        <ModulesManager />
+      </div>
+    </section>
   );
 }
 

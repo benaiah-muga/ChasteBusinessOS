@@ -129,7 +129,7 @@ export async function POST(req: Request, { params }: Params) {
         agentCtx,
         {
           sessionId: crypto.randomUUID(),
-          systemPrompt: `You are Chaste, the AI co-worker in the internal chat "${conv.title}" of an ERP organization. You can use capabilities when a colleague asks for something operational. Be concise and collegial.${orgRow?.profileDescription ? `\nBusiness context: ${orgRow.profileDescription}` : ""}`,
+          systemPrompt: `You are Chaste, the AI workmate in the internal chat "${conv.title}" of an ERP organization. You can use capabilities when a colleague asks for something operational. Be concise and collegial.${orgRow?.profileDescription ? `\nBusiness context: ${orgRow.profileDescription}` : ""}`,
           userGoal: `Recent conversation:\n${transcript}\n\nRespond to the latest message as Chaste. Post your reply using messaging.sendMessage to conversation ${id}.`,
           maxSteps: 5,
         },

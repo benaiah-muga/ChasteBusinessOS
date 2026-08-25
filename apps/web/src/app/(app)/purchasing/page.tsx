@@ -51,8 +51,18 @@ interface Vendor {
   email?: string | null;
 }
 interface Aging {
-  buckets?: { label: string; totalMinor: number }[];
-  totalDueMinor?: number;
+  buckets?: {
+    current: number;
+    d30: number;
+    d60: number;
+    d90plus: number;
+    totalOutstanding: number;
+  };
+}
+interface Product {
+  sku: string;
+  name: string;
+  avgUnitCostMinor?: number;
 }
 interface Payload {
   vendors?: Vendor[];
@@ -83,10 +93,17 @@ export default function PurchasingPage() {
     lines: [{ description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "" }],
   });
   const [payAmount, setPayAmount] = useState<Record<string, string>>({});
+  const [products, setProducts] = useState<Product[]>([]);
+  const [quickVendor, setQuickVendor] = useState<{ open: boolean; name: string; email: string }>({
+    open: false,
+    name: "",
+    email: "",
+  });
 
   const load = useCallback(async () => {
-    const res = await callApi<Payload>("/api/purchasing");
+    const [res, inv] = await Promise.all([callApi<Payload>("/api/purchasing"), callApi<{ items?: Product[] }>("/api/inventory")]);
     setData(res.data ?? {});
+    setProducts(inv.data?.items ?? []);
     if (res.error) setNotice({ tone: "error", error: res.error });
   }, []);
 
@@ -147,7 +164,7 @@ export default function PurchasingPage() {
         <Card>
           <CardTitle>Draft purchase order</CardTitle>
           <div className="space-y-2 text-sm">
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <select
                 className="rounded border bg-transparent px-2 py-1.5"
                 value={poForm.vendorId}
@@ -158,15 +175,77 @@ export default function PurchasingPage() {
                   <option key={v.id} value={v.id}>{v.name}</option>
                 ))}
               </select>
+              {vendors.length === 0 && !quickVendor.open && (
+                <span className="text-xs text-stone-500">
+                  No vendors yet —
+                  <button type="button" className="ml-1 font-medium text-maroon-700 underline underline-offset-2" onClick={() => setQuickVendor({ open: true, name: "", email: "" })}>
+                    create one here
+                  </button>
+                </span>
+              )}
+              {vendors.length > 0 && (
+                <Button tone="ghost" size="sm" onClick={() => setQuickVendor({ open: !quickVendor.open, name: "", email: "" })}>
+                  + New vendor
+                </Button>
+              )}
               <input
-                className="flex-1 rounded border bg-transparent px-2 py-1.5"
+                className="min-w-40 flex-1 rounded border bg-transparent px-2 py-1.5"
                 placeholder="Memo (optional)"
                 value={poForm.memo}
                 onChange={(e) => setPoForm({ ...poForm, memo: e.target.value })}
               />
             </div>
+            {quickVendor.open && (
+              <div className="flex flex-wrap items-center gap-2 rounded border border-stone-200 bg-stone-50 p-2">
+                <input
+                  className="flex-1 rounded border bg-transparent px-2 py-1.5"
+                  placeholder="Vendor name"
+                  value={quickVendor.name}
+                  onChange={(e) => setQuickVendor({ ...quickVendor, name: e.target.value })}
+                />
+                <input
+                  className="w-48 rounded border bg-transparent px-2 py-1.5"
+                  placeholder="Email (optional)"
+                  value={quickVendor.email}
+                  onChange={(e) => setQuickVendor({ ...quickVendor, email: e.target.value })}
+                />
+                <Button
+                  size="sm"
+                  disabled={busy || !quickVendor.name.trim()}
+                  onClick={() => {
+                    void post({ action: "createVendor", name: quickVendor.name.trim(), email: quickVendor.email || undefined }, "Vendor created").then((ok) => {
+                      if (ok) setQuickVendor({ open: false, name: "", email: "" });
+                    });
+                  }}
+                >
+                  Save & use
+                </Button>
+              </div>
+            )}
             {poForm.lines.map((l, i) => (
               <div key={i} className="flex flex-wrap gap-2">
+                <select
+                  className="w-44 rounded border bg-transparent px-2 py-1.5"
+                  title="Pick a stocked product to fill this line"
+                  value={products.some((p) => p.sku === l.sku) ? l.sku : ""}
+                  onChange={(e) => {
+                    const p = products.find((x) => x.sku === e.target.value);
+                    if (!p) return;
+                    const next = [...poForm.lines];
+                    next[i] = {
+                      ...l,
+                      description: l.description || p.name,
+                      sku: p.sku,
+                      unitPrice: p.avgUnitCostMinor != null ? (p.avgUnitCostMinor / 100).toFixed(2) : l.unitPrice,
+                    };
+                    setPoForm({ ...poForm, lines: next });
+                  }}
+                >
+                  <option value="">{products.length ? "Product…" : "No products yet"}</option>
+                  {products.map((p) => (
+                    <option key={p.sku} value={p.sku}>{p.name} · {p.sku}</option>
+                  ))}
+                </select>
                 <input
                   className="flex-1 rounded border bg-transparent px-2 py-1.5"
                   placeholder={`Line ${i + 1} description`}
@@ -208,6 +287,16 @@ export default function PurchasingPage() {
                     setPoForm({ ...poForm, lines: next });
                   }}
                 />
+                <button
+                  type="button"
+                  aria-label={`Remove line ${i + 1}`}
+                  title="Remove line"
+                  disabled={poForm.lines.length === 1}
+                  className="rounded px-2 py-1.5 text-stone-400 transition-colors hover:bg-red-50 hover:text-red-700 disabled:pointer-events-none disabled:opacity-30"
+                  onClick={() => setPoForm({ ...poForm, lines: poForm.lines.filter((_, j) => j !== i) })}
+                >
+                  ✕
+                </button>
               </div>
             ))}
             <div className="flex gap-2">
@@ -436,17 +525,31 @@ export default function PurchasingPage() {
           <Card>
             <CardTitle>Accounts payable aging</CardTitle>
             <div className="flex flex-wrap gap-4 text-sm">
-              {(data.apAging?.buckets ?? []).map((b) => (
-                <div key={b.label}>
-                  <div className="opacity-50">{b.label}</div>
-                  <div className="font-medium tabular-nums">{formatMoney(b.totalMinor)}</div>
-                </div>
-              ))}
-              {data.apAging?.totalDueMinor !== undefined && (
-                <div>
-                  <div className="opacity-50">Total due</div>
-                  <div className="font-semibold tabular-nums">{formatMoney(data.apAging.totalDueMinor)}</div>
-                </div>
+              {data.apAging?.buckets ? (
+                <>
+                  <div>
+                    <div className="opacity-50">Current</div>
+                    <div className="font-medium tabular-nums">{formatMoney(data.apAging.buckets.current)}</div>
+                  </div>
+                  <div>
+                    <div className="opacity-50">31–60 days</div>
+                    <div className="font-medium tabular-nums">{formatMoney(data.apAging.buckets.d30)}</div>
+                  </div>
+                  <div>
+                    <div className="opacity-50">61–90 days</div>
+                    <div className="font-medium tabular-nums">{formatMoney(data.apAging.buckets.d60)}</div>
+                  </div>
+                  <div>
+                    <div className="opacity-50">90+ days</div>
+                    <div className="font-medium tabular-nums">{formatMoney(data.apAging.buckets.d90plus)}</div>
+                  </div>
+                  <div>
+                    <div className="opacity-50">Total outstanding</div>
+                    <div className="font-semibold tabular-nums">{formatMoney(data.apAging.buckets.totalOutstanding)}</div>
+                  </div>
+                </>
+              ) : (
+                <div className="opacity-50">No outstanding bills.</div>
               )}
             </div>
           </Card>

@@ -8,15 +8,18 @@ import { EnabledModulesProvider } from "./_shell/module-context";
 import { resolveEnabledModules } from "./_shell/modules";
 import { resolveApp, tileStyle } from "./_shell/apps";
 import { usePinnedApps } from "./_shell/pins";
+import { recordAppVisit, useRecentApps } from "./_shell/recent-apps";
 import { CommandPalette } from "./command-palette";
 import { NotificationsBell } from "./notifications-bell";
 import { ChatWidget } from "./chat-widget";
 import { useChatDockMode } from "./chat-widget-state";
-import { AppsLauncher, recordAppVisit } from "./apps-launcher";
+import { AppsLauncher } from "./apps-launcher";
 import {
+  IconFileText,
   IconGrid,
   IconInbox,
   IconLogOut,
+  IconMessage,
   IconSearch,
   IconSettings,
   IconSparkle,
@@ -123,6 +126,38 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
     .map((id) => resolveApp(id))
     .filter((a): a is NonNullable<typeof a> => !!a);
 
+  // Three most-recently-used apps that aren't already pinned join the rail.
+  const mru = useRecentApps()
+    .filter((href) => href !== "/" && !pinned.some((p) => p.href === href))
+    .slice(0, 3)
+    .map((href) => resolveApp(href))
+    .filter((a): a is NonNullable<typeof a> => !!a);
+
+  const railTile = (app: NonNullable<ReturnType<typeof resolveApp>>) => {
+    const active = pathname === app.href;
+    return (
+      <Link
+        key={app.id}
+        href={app.href}
+        aria-label={app.name}
+        aria-current={active ? "page" : undefined}
+        data-active={active ? "true" : undefined}
+        className="rail-btn"
+      >
+        <span
+          aria-hidden="true"
+          style={tileStyle(app.hue)}
+          className="flex size-6 items-center justify-center rounded-md"
+        >
+          <app.icon className="size-3.5" />
+        </span>
+        <span aria-hidden="true" className="rail-tip">
+          {app.name}
+        </span>
+      </Link>
+    );
+  };
+
   const rail = (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-14 flex-col items-center gap-1 border-r border-stone-200 bg-white py-3 lg:flex">
       <Link
@@ -147,34 +182,15 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
         badge: pendingApprovals,
       })}
 
-      {/* Pinned favorites — the user's daily drivers, one click away */}
-      {pinned.length > 0 && (
+      {/* Pinned favorites and recent apps — the daily drivers, one click away */}
+      {(pinned.length > 0 || mru.length > 0) && (
         <div className="mt-2 flex flex-col items-center gap-1">
           <span aria-hidden="true" className="mb-1 h-px w-6 bg-stone-200" />
-          {pinned.map((app) => {
-            const active = pathname === app.href;
-            return (
-              <Link
-                key={app.id}
-                href={app.href}
-                aria-label={app.name}
-                aria-current={active ? "page" : undefined}
-                data-active={active ? "true" : undefined}
-                className="rail-btn"
-              >
-                <span
-                  aria-hidden="true"
-                  style={tileStyle(app.hue)}
-                  className="flex size-6 items-center justify-center rounded-md"
-                >
-                  <app.icon className="size-3.5" />
-                </span>
-                <span aria-hidden="true" className="rail-tip">
-                  {app.name}
-                </span>
-              </Link>
-            );
-          })}
+          {pinned.map(railTile)}
+          {mru.length > 0 && pinned.length > 0 && (
+            <span aria-hidden="true" className="my-1 h-px w-6 bg-stone-100" />
+          )}
+          {mru.map(railTile)}
         </div>
       )}
 
@@ -186,18 +202,18 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
         <button
           type="button"
           onClick={() => {
-            // Toggle the co-worker between pinned dock and quiet bubble.
+            // Toggle the workmate between pinned dock and quiet bubble.
             import("./chat-widget-state").then(({ chatDock }) => {
               chatDock.set(dockMode === "pinned" || dockMode === "open" ? "bubble" : "pinned");
             });
           }}
-          aria-label="Your AI co-worker"
+          aria-label="Your AI workmate"
           data-active={chatPinned ? "true" : undefined}
           className="rail-btn"
         >
           <IconSparkle className="size-5" />
           <span aria-hidden="true" className="rail-tip">
-            AI co-worker
+            AI workmate
           </span>
         </button>
         <ThemeMenu />
@@ -295,9 +311,46 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
             </button>
           </header>
 
-          <main id="main" className={cn("mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8", inputMode && "pb-32")}>
+          <main
+            id="main"
+            className={cn("mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:px-8 lg:pb-8", inputMode && "pb-36 lg:pb-32")}
+          >
             {children}
           </main>
+
+          {/* Mobile bottom navigation: the four anchors, thumb-reachable */}
+          <nav
+            aria-label="Primary"
+            className="fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch border-t border-stone-200 bg-white/95 backdrop-blur lg:hidden"
+          >
+            {(
+              [
+                ["/", "Home", IconGrid],
+                ["/documents", "Documents", IconFileText],
+                ["/messages", "Messages", IconMessage],
+                ["/settings", "Settings", IconSettings],
+              ] as const
+            ).map(([href, label, NavIcon]) => {
+              const active = pathname === href;
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "relative flex flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors duration-100",
+                    active ? "text-maroon-800" : "text-stone-400 hover:text-stone-600",
+                  )}
+                >
+                  <NavIcon className="size-5" />
+                  {label}
+                  {active && (
+                    <span aria-hidden="true" className="absolute top-0 h-0.5 w-8 rounded-full bg-maroon-700" />
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
 
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} enabledModules={enabled} />

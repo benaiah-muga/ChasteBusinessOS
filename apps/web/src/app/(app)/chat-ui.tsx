@@ -228,7 +228,7 @@ export function ChatInput({
           }
         }}
         rows={1}
-        aria-label="Message your co-worker"
+        aria-label="Message your workmate"
         placeholder={placeholder}
         className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-stone-400"
       />

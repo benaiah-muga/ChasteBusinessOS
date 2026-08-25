@@ -17,7 +17,6 @@ import {
 } from "@/components/ui";
 import { IconLink, IconPlus } from "@/components/icons";
 import { postApi } from "@/lib/api";
-import { ModulesManager } from "./modules-manager";
 
 interface Member {
   userId: string;
@@ -88,7 +87,6 @@ export default function TeamPage() {
 
   return (
     <div>
-      <ModulesManager />
       <PageHeader
         title="Team & roles"
         description="Roles map to capability permissions. Role changes are identity-class actions: they always require a human approval before taking effect."

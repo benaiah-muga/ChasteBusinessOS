@@ -109,7 +109,7 @@ export default function MessagesPage() {
     <div>
       <PageHeader
         title="Messages"
-        description="Team channels and DMs. Conversations with Chaste enabled let your AI co-worker read the thread and act when colleagues ask."
+        description="Team channels and DMs. Conversations with Chaste enabled let your AI workmate read the thread and act when colleagues ask."
       />
 
       {loadError && (
@@ -156,7 +156,7 @@ export default function MessagesPage() {
               />
               <label className="flex cursor-pointer items-center gap-2 text-xs text-stone-600">
                 <input type="checkbox" checked={newAgent} onChange={(e) => setNewAgent(e.target.checked)} className="accent-maroon-700" />
-                Include Chaste (AI co-worker)
+                Include Chaste (AI workmate)
               </label>
               <Button type="submit" size="sm" className="w-full" disabled={!newTitle.trim()}>
                 Create

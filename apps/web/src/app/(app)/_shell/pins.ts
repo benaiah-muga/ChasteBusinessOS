@@ -8,12 +8,21 @@ import { useSyncExternalStore } from "react";
 const KEY = "chaste-pinned-apps";
 export const MAX_PINS = 5;
 
+/** A sensible starting rail: the communication and creation surfaces. */
+const DEFAULT_PINS = ["documents", "messaging", "creator"];
+
 function load(): string[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? "[]") as string[];
-    return Array.isArray(raw) ? raw.slice(0, MAX_PINS) : [];
+    const raw = localStorage.getItem(KEY);
+    if (raw === null) {
+      // First run: seed the defaults so the rail is useful immediately.
+      localStorage.setItem(KEY, JSON.stringify(DEFAULT_PINS));
+      return [...DEFAULT_PINS];
+    }
+    const parsed = JSON.parse(raw) as string[];
+    return Array.isArray(parsed) ? parsed.slice(0, MAX_PINS) : [];
   } catch {
-    return [];
+    return [...DEFAULT_PINS];
   }
 }
 

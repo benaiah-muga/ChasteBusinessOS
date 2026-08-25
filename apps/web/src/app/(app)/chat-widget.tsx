@@ -16,10 +16,23 @@ import {
 } from "@/components/icons";
 import { chatStore, useChat } from "./chat-store";
 import { MessageList, useAutoScroll, useChatSend } from "./chat-ui";
-import { chatDock, chatDraft, useChatDockMode } from "./chat-widget-state";
+import { chatDock, chatDraft, useChatDockMode, type ChatDockMode } from "./chat-widget-state";
 import { cn, timeAgo } from "@/lib/format";
 
 const DOCK_Z = "z-50";
+
+/** Tracks one media query; SSR-safe (defaults to false until mounted). */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const sync = () => setMatches(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, [query]);
+  return matches;
+}
 
 /**
  * The chat dock: one continuous conversation across four states.
@@ -27,7 +40,8 @@ const DOCK_Z = "z-50";
  * - "bubble": shrunk to a bubble at the lower right
  * - "open": expanded panel overlaying the lower right
  * - "pinned": docked to the right edge; AppShell reserves the width so
- *   nothing behind it is obstructed
+ *   nothing behind it is obstructed. On phones a pinned dock would cover
+ *   the screen, so it falls back to the floating panel there.
  */
 export function ChatWidget() {
   // Rehydrate the user's last chosen dock state after mount (SSR-safe).
@@ -40,6 +54,12 @@ export function ChatWidget() {
 
 function ChatDockBody() {
   const mode = useChatDockMode();
+  const isPhone = useMediaQuery("(max-width: 1023px)");
+  const effective: ChatDockMode = mode === "pinned" && isPhone ? "open" : mode;
+  return <ChatDockInner mode={effective} />;
+}
+
+function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" }) {
   const { messages, busy, creator } = useChat();
   const { send, stop } = useChatSend();
   const [input, setInput] = useState("");
@@ -84,7 +104,7 @@ function ChatDockBody() {
           }
         }}
         rows={1}
-        aria-label="Message your co-worker"
+        aria-label="Message your workmate"
         placeholder="Message…"
         className="max-h-28 min-w-0 flex-1 resize-none rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-maroon-500"
       />
@@ -139,7 +159,7 @@ function ChatDockBody() {
           )}
         </span>
         <div className="min-w-0 flex-1 leading-tight">
-          <p className="truncate text-[13px] font-semibold text-stone-900">Co-worker</p>
+          <p className="truncate text-[13px] font-semibold text-stone-900">Workmate</p>
           <button
             type="button"
             onClick={() => setTab("prefs")}
@@ -198,7 +218,7 @@ function ChatDockBody() {
   if (mode === "pinned") {
     return (
       <aside
-        aria-label="Chat with your co-worker"
+        aria-label="Chat with your workmate"
         className={`fixed inset-y-0 right-0 ${DOCK_Z} flex w-[380px] flex-col border-l border-stone-200 bg-white pt-12 lg:pt-0`}
       >
         {header(
@@ -220,7 +240,7 @@ function ChatDockBody() {
     return (
       <div
         role="dialog"
-        aria-label="Chat with your co-worker"
+        aria-label="Chat with your workmate"
         className={`fixed right-4 bottom-4 ${DOCK_Z} flex w-[min(420px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl ring-1 ring-black/5 sm:right-6 sm:bottom-6`}
         style={{ height: "min(600px, calc(100vh - 6rem))" }}
       >
@@ -245,8 +265,8 @@ function ChatDockBody() {
         type="button"
         onClick={() => chatDock.set("open")}
         aria-label="Open chat"
-        title="Chat with your co-worker"
-        className={`fixed right-5 bottom-5 ${DOCK_Z} flex size-14 cursor-pointer items-center justify-center rounded-full bg-maroon-800 text-white shadow-xl ring-1 ring-black/10 transition-transform duration-150 hover:scale-105 hover:bg-maroon-900`}
+        title="Chat with your workmate"
+        className={`fixed right-5 bottom-20 lg:bottom-5 ${DOCK_Z} flex size-14 cursor-pointer items-center justify-center rounded-full bg-maroon-800 text-white shadow-xl ring-1 ring-black/10 transition-transform duration-150 hover:scale-105 hover:bg-maroon-900`}
       >
         <IconSparkle className="size-6" />
         {busy && <span aria-hidden="true" className="absolute -top-0.5 -right-0.5 size-3.5 animate-pulse rounded-full border-2 border-white bg-emerald-500" />}
@@ -256,7 +276,7 @@ function ChatDockBody() {
 
   // Default: horizontal input bar floating at the lower center of every page.
   return (
-    <div className={`pointer-events-none fixed inset-x-0 bottom-5 ${DOCK_Z} flex justify-center px-4`}>
+    <div className={`pointer-events-none fixed inset-x-0 bottom-20 lg:bottom-5 ${DOCK_Z} flex justify-center px-4`}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -277,8 +297,8 @@ function ChatDockBody() {
             }
           }}
           rows={1}
-          aria-label="Message your co-worker"
-          placeholder="Ask your co-worker anything…"
+          aria-label="Message your workmate"
+          placeholder="Ask your workmate anything…"
           className="max-h-24 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-stone-400"
         />
         {input.trim() && !busy && (
@@ -324,7 +344,7 @@ interface AgentSessionRow {
   createdAt: string;
 }
 
-/** Past co-worker sessions, freshest first; full trajectories live in /sessions. */
+/** Past workmate sessions, freshest first; full trajectories live in /sessions. */
 function SessionHistory() {
   const [rows, setRows] = useState<AgentSessionRow[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -360,7 +380,7 @@ function SessionHistory() {
           <p className="mt-2 text-sm leading-relaxed text-stone-500">
             No conversations yet.
             <br />
-            Everything you and your co-worker do is logged here.
+            Everything you and your workmate do is logged here.
           </p>
         </div>
       )}
@@ -414,7 +434,7 @@ function ConsolePreferences({ onDone }: { onDone: () => void }) {
           <div>
             <p className="text-[13px] font-medium text-stone-900">Creator mode</p>
             <p className="text-[11px] leading-snug text-stone-400">
-              Let the co-worker propose new capabilities, not just use existing ones.
+              Let the workmate propose new capabilities, not just use existing ones.
             </p>
           </div>
           <Switch checked={creator} onChange={(v) => chatStore.setCreator(v)} label="" />

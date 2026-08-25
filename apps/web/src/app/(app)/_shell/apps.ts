@@ -55,7 +55,7 @@ export const APPS: AppInfo[] = [
   { id: "creator", name: "Creator", tagline: "Capability proposals & plugins", href: "/proposals", icon: IconPullRequest, hue: 280, moduleId: "creator" },
   { id: "approvals", name: "Approvals", tagline: "Actions waiting on you", href: "/approvals", icon: IconShieldCheck, hue: 0, system: true },
   { id: "ledger", name: "Ledger", tagline: "The append-only event trail", href: "/ledger", icon: IconHash, hue: 0, system: true },
-  { id: "sessions", name: "Agent sessions", tagline: "What your co-worker did", href: "/sessions", icon: IconListTree, hue: 0, system: true },
+  { id: "sessions", name: "Agent sessions", tagline: "What your workmate did", href: "/sessions", icon: IconListTree, hue: 0, system: true },
   { id: "team", name: "Team & roles", tagline: "People and permissions", href: "/team", icon: IconUsers, hue: 0, system: true },
   { id: "settings", name: "Settings", tagline: "Appearance, pins, workspace", href: "/settings", icon: IconSettings, hue: 0, system: true },
 ];

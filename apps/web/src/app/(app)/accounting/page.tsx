@@ -203,10 +203,10 @@ export default function AccountingPage() {
             type="button"
             onClick={askCoWorker}
             className="btn btn-md btn-secondary"
-            title="Ask your co-worker about your position"
+            title="Ask your workmate about your position"
           >
             <IconSparkle className="size-3.5" />
-            Ask co-worker
+            Ask workmate
           </button>
           <Button tone="secondary" onClick={() => setCloseOpen(true)}>
             <IconLock className="size-3.5" />
@@ -461,7 +461,7 @@ function OverviewTab({
           <EmptyState
             icon={<IconUndo />}
             title="No journal entries yet"
-            hint="Post an invoice, bill, sale, or payroll run — or just ask your co-worker below."
+            hint="Post an invoice, bill, sale, or payroll run — or just ask your workmate below."
           />
         ) : (
           <ol className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
@@ -569,7 +569,7 @@ function JournalSection({
         <EmptyState
           icon={<IconUndo />}
           title={search ? "No entries match" : "No journal entries yet"}
-          hint={search ? "Try a different filter." : "Post an invoice, bill, sale, or payroll run — or just ask your co-worker."}
+          hint={search ? "Try a different filter." : "Post an invoice, bill, sale, or payroll run — or just ask your workmate."}
         />
       ) : (
         <div className="table-shell">
@@ -662,7 +662,7 @@ function PayablesSection({
 }) {
   const total = openBills.reduce((s, b) => s + b.outstandingMinor, 0);
   if (bills.length === 0)
-    return <EmptyState icon={<IconInbox />} title="No vendor bills yet" hint="Record a bill from Purchasing, or ask your co-worker to log one." />;
+    return <EmptyState icon={<IconInbox />} title="No vendor bills yet" hint="Record a bill from Purchasing, or ask your workmate to log one." />;
   return (
     <section>
       <p className="mb-3 text-sm text-stone-500">

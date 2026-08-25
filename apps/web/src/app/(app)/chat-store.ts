@@ -24,7 +24,7 @@ interface ChatState {
 
 const GREETING: ChatMsg = {
   role: "assistant",
-  text: "Hi, I'm your business co-worker. Ask me to do things, or ask about your books. Everything I do goes through the same governed path as you.",
+  text: "Hi, I'm your business workmate. Ask me to do things, or ask about your books. Everything I do goes through the same governed path as you.",
 };
 
 let state: ChatState = { messages: [GREETING], busy: false, creator: false };

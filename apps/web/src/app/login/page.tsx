@@ -38,7 +38,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen lg:grid-cols-[1.1fr_460px]">
+    <main className="grid min-h-screen lg:grid-cols-2">
       {/* The ledger panel: deep burgundy, ruled like an accounts book */}
       <section
         className="ledger-rules relative hidden flex-col justify-between overflow-hidden p-12 text-white lg:flex"
@@ -60,7 +60,7 @@ export default function LoginPage() {
           <h1 className="text-[32px] leading-[1.2] font-semibold tracking-tight text-balance">
             Describe your business.
             <br />
-            Your AI co-worker runs it,
+            Your AI workmate runs it,
             <br />
             <span className="text-white/60">under your authority.</span>
           </h1>
@@ -95,7 +95,7 @@ export default function LoginPage() {
           <span className="flex size-9 items-center justify-center rounded-lg bg-white/10 text-base font-bold ring-1 ring-white/15">C</span>
           <div>
             <p className="text-sm leading-tight font-semibold tracking-tight text-white">Chaste Business OS</p>
-            <p className="text-[11px] text-white/40">Your AI co-worker, under your authority</p>
+            <p className="text-[11px] text-white/40">Your AI workmate, under your authority</p>
           </div>
         </div>
 

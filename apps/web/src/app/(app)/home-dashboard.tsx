@@ -98,7 +98,7 @@ export function HomeDashboard({ orgName }: { orgName: string }) {
           </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight text-stone-900">{orgName}</h1>
         </div>
-        <nav aria-label="Ask your co-worker" className="flex flex-wrap items-center gap-2">
+        <nav aria-label="Ask your workmate" className="flex flex-wrap items-center gap-2">
           <span className="hidden items-center gap-1 text-xs text-stone-400 sm:flex">
             <IconSparkle className="size-3.5" />
             Ask
@@ -148,10 +148,10 @@ function DashboardBody({ data, attentionCount }: { data: DashboardPayload; atten
         <NeedsYouQueue data={data} count={attentionCount} />
       </section>
 
-      {/* What is moving */}
+      {/* What is moving — one screen, three columns, no scrolling to triage */}
       <section
-        aria-label="Working capital and operations"
-        className="mt-8 grid gap-x-8 gap-y-6 border-t border-stone-200 pt-5 md:grid-cols-3"
+        aria-label="Working capital, operations, and ledger"
+        className="mt-8 grid gap-x-8 gap-y-6 border-t border-stone-200 pt-5 md:grid-cols-2 lg:grid-cols-3"
       >
         <div>
           <p className="figure-label mb-3">Working capital</p>
@@ -205,10 +205,9 @@ function DashboardBody({ data, attentionCount }: { data: DashboardPayload; atten
               data.ops.headcount === 0 && <li className="text-stone-400">Quiet across the floor.</li>}
           </ul>
         </div>
-      </section>
 
-      {/* The ledger, alive */}
-      <ActivityFeed activity={data.activity} />
+        <ActivityFeed activity={data.activity.slice(0, 5)} embedded />
+      </section>
     </div>
   );
 }
@@ -479,9 +478,12 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
   );
 }
 
-function ActivityFeed({ activity }: { activity: DashboardPayload["activity"] }) {
+function ActivityFeed({ activity, embedded = false }: { activity: DashboardPayload["activity"]; embedded?: boolean }) {
   return (
-    <section aria-label="Recent ledger activity" className="mt-8 border-t border-stone-200 pt-5 pb-20 lg:pb-4">
+    <section
+      aria-label="Recent ledger activity"
+      className={embedded ? "" : "mt-8 border-t border-stone-200 pt-5 pb-20 lg:pb-4"}
+    >
       <div className="flex items-baseline justify-between gap-3">
         <p className="figure-label">Ledger · recent</p>
         <Link href="/ledger" className="text-[13px] font-medium text-maroon-800 hover:underline">
@@ -491,9 +493,9 @@ function ActivityFeed({ activity }: { activity: DashboardPayload["activity"] }) 
       {activity.length === 0 ? (
         <p className="mt-3 text-sm text-stone-400">Nothing recorded yet.</p>
       ) : (
-        <ol className="mt-4 space-y-0">
+        <ol className="mt-3 space-y-0">
           {activity.map((e, i) => (
-            <li key={e.seq} className="relative flex items-center gap-3 py-1.5 pl-5 text-sm">
+            <li key={e.seq} className="relative flex items-center gap-2.5 py-1.5 pl-4 text-[13px]">
               {/* Timeline spine */}
               <span
                 aria-hidden="true"
@@ -504,11 +506,9 @@ function ActivityFeed({ activity }: { activity: DashboardPayload["activity"] }) 
               {i < activity.length - 1 && (
                 <span aria-hidden="true" className="absolute left-[2.5px] top-1/2 h-full w-px bg-stone-100" />
               )}
-              <Badge tone={e.actorType === "agent" ? "violet" : e.actorType === "human" ? "blue" : "neutral"}>
-                {e.actorType}
-              </Badge>
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-stone-600">{e.capabilityId ?? e.kind}</span>
-              <time className="shrink-0 text-xs text-stone-400">{timeAgo(e.occurredAt)}</time>
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-stone-600">{e.capabilityId ?? e.kind}</span>
+              <span className="shrink-0 text-[11px] text-stone-400">{e.actorType === "agent" ? "agent" : ""}</span>
+              <time className="shrink-0 text-[11px] text-stone-400">{timeAgo(e.occurredAt)}</time>
             </li>
           ))}
         </ol>

@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     template: "%s · Chaste",
   },
   description:
-    "The agentic ERP, describe your business, and an AI co-worker runs it under your authority. Every action governed, auditable, reversible.",
+    "The agentic ERP, describe your business, and an AI workmate runs it under your authority. Every action governed, auditable, reversible.",
 };
 
 export const viewport: Viewport = {

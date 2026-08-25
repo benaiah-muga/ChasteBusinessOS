@@ -306,7 +306,7 @@ function DealsTab(props: {
         <EmptyState
           icon={<IconTrendingUp />}
           title="No deals yet"
-          hint="Add your first deal above, or ask your co-worker to create one from a conversation."
+          hint="Add your first deal above, or ask your workmate to create one from a conversation."
         />
       ) : (
         <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-3 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
@@ -437,7 +437,7 @@ function CustomersTab(props: {
         <EmptyState
           icon={<IconUser />}
           title="No customers yet"
-          hint="Add your first customer above, or ask your co-worker in chat; invoices need a customer record."
+          hint="Add your first customer above, or ask your workmate in chat; invoices need a customer record."
         />
       ) : (
         <div className="overflow-hidden rounded-xl border border-stone-200 bg-white">
