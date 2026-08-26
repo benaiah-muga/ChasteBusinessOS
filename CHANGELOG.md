@@ -11,6 +11,44 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Fixed
+- **ThemeMenu hydration mismatch**: replaced direct DOM read (`document.documentElement.dataset.mode`) with the `useMode()` state during render, eliminating the server/client HTML mismatch that triggered a full client-side tree regeneration.
+
+### Added
+- **Tabbed app framework (`AppFrame`)**: every business app now opens into a
+  shared frame — breadcrumb, app identity, underline tabs with live counts.
+  Tabs persist per app and initialize from `?tab=` for deep-linking. CRM,
+  Settings, POS, Inventory, Purchasing, Manufacturing, Documents, Support,
+  Analytics, Messages, and Proposals all adopt it; Products, Sales, HR, and
+  Accounting gain tab counts and persistence.
+- **Overview tabs**: CRM, POS, Inventory, Purchasing, Manufacturing, Documents,
+  and Support each open on an operational overview (KPIs, needs-attention,
+  recent activity) derived from live data; operation surfaces live in tabs.
+- **CRM pipeline drag-and-drop**: deal cards drag between stages (HTML5 DnD)
+  with optimistic moves, rollback on failure, and a live-region announcement;
+  keyboard paths (Advance / Mark lost / Reopen) are preserved. Every move
+  still flows through the governed `crm.moveDealStage` capability.
+- **Settings rebuilt as four tabs**: Appearance (mode, themes, pinned apps),
+  Workspace (org, modules, email/SMTP), Localization (display currency,
+  metric/imperial units, date format, week start — persisted per device via
+  the new `chaste-prefs` store), and AI & automation (new `GET /api/ai-config`
+  honestly reflecting provider, endpoint, and model configuration from the
+  server environment; keys never reach the browser).
+- **Meridian is the default theme** for new devices.
+
+### Changed
+- **Dashboard fits one desktop screen**: the ledger band compacts (tighter
+  paddings, chart drawn inside the band), setup shows the first two steps with
+  the rest behind "Show N more", the ledger feed trims to three entries, and
+  the body reflows into three columns (needs-you · working capital ·
+  operations & ledger) on wide screens. Mobile keeps its natural scroll.
+
+### Fixed
+- **Theme hydration mismatch**: the pre-paint theme script now runs with
+  `suppressHydrationWarning` on `<html>`, ending the React hydration console
+  error on every page.
+- Dev server picks the next free port when 3000 is occupied (previous commit).
+
 ### Changed
 - **Dashboard redesign ("the bookkeeper's cover page")**: the home screen now
   opens with a deep ledger band — net income set as a cover figure over fine

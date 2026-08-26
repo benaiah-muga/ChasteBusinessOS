@@ -12,7 +12,7 @@ export const THEMES = [
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]["id"];
-export const DEFAULT_THEME: ThemeId = "chaste";
+export const DEFAULT_THEME: ThemeId = "meridian";
 
 export const MODES = [
   { id: "light", label: "Light" },
@@ -147,8 +147,8 @@ export function ThemeMenu() {
               background: `linear-gradient(135deg, ${swatches[theme][0]} 50%, ${swatches[theme][1]} 50%)`,
             }}
           />
-          {/* Resolved-mode tick: read from the DOM, re-rendered by useMode(). */}
-          {typeof document !== "undefined" && document.documentElement.dataset.mode === "dark" && (
+          {/* Resolved-mode tick: use the mode state from useMode() to avoid hydration mismatch. */}
+          {mode === "dark" && (
             <IconMoon className="absolute right-0.5 top-0.5 size-2.5 text-stone-500" />
           )}
           <IconChevronDown className="absolute right-1 bottom-1 size-2.5 text-stone-400" />
