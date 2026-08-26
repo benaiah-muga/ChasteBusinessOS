@@ -11,78 +11,76 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
-### Fixed
-- **ThemeMenu hydration mismatch**: replaced direct DOM read (`document.documentElement.dataset.mode`) with the `useMode()` state during render, eliminating the server/client HTML mismatch that triggered a full client-side tree regeneration.
+## [0.4.0], 2026-08-26
 
 ### Added
 - **Tabbed app framework (`AppFrame`)**: every business app now opens into a
   shared frame — breadcrumb, app identity, underline tabs with live counts.
-  Tabs persist per app and initialize from `?tab=` for deep-linking. CRM,
-  Settings, POS, Inventory, Purchasing, Manufacturing, Documents, Support,
-  Analytics, Messages, and Proposals all adopt it; Products, Sales, HR, and
-  Accounting gain tab counts and persistence.
-- **Overview tabs**: CRM, POS, Inventory, Purchasing, Manufacturing, Documents,
-  and Support each open on an operational overview (KPIs, needs-attention,
-  recent activity) derived from live data; operation surfaces live in tabs.
+  Tabs persist per app (`persistKey`) and initialize from `?tab=` for
+  deep-linking; writes `chaste-app-tab:{key}` to localStorage. CRM, Settings,
+  POS, Inventory, Purchasing, Manufacturing, Documents, Support, Analytics,
+  Messages, and Proposals all adopt it; Products, Sales, HR, and Accounting
+  gain tab counts and persistence.
+- **Overview dashboards**: CRM, POS, Inventory, Purchasing, Manufacturing,
+  Documents, and Support each open on an operational overview (KPI stat
+  cards, needs-attention lists, recent activity) derived from live data;
+  operation surfaces live in tabs.
 - **CRM pipeline drag-and-drop**: deal cards drag between stages (HTML5 DnD)
-  with optimistic moves, rollback on failure, and a live-region announcement;
-  keyboard paths (Advance / Mark lost / Reopen) are preserved. Every move
-  still flows through the governed `crm.moveDealStage` capability.
+  with optimistic moves, rollback on failure, and an `aria-live` status
+  region for screen readers; keyboard paths (Advance / Mark lost / Reopen)
+  are preserved. Every move flows through the governed `crm.moveDealStage`
+  capability.
 - **Settings rebuilt as four tabs**: Appearance (mode, themes, pinned apps),
   Workspace (org, modules, email/SMTP), Localization (display currency,
   metric/imperial units, date format, week start — persisted per device via
-  the new `chaste-prefs` store), and AI & automation (new `GET /api/ai-config`
+  the new `chaste-prefs` store), and AI & Automation (new `GET /api/ai-config`
   honestly reflecting provider, endpoint, and model configuration from the
-  server environment; keys never reach the browser).
+  server environment; API keys never reach the browser).
+- **Device-local preferences** (`lib/prefs.ts`): `usePrefs()` hook with
+  pub/sub sync, `CURRENCIES` constant (USD/KES/EUR/GBP/TZS/UGX), and
+  `formatMoneyIn(code, minor)` for currency-aware display.
 - **Meridian is the default theme** for new devices.
 
 ### Changed
 - **Dashboard fits one desktop screen**: the ledger band compacts (tighter
-  paddings, chart drawn inside the band), setup shows the first two steps with
-  the rest behind "Show N more", the ledger feed trims to three entries, and
+  paddings, chart drawn inside the band), setup shows the first two steps
+  with "Show N more" expandable, the ledger feed trims to three entries, and
   the body reflows into three columns (needs-you · working capital ·
   operations & ledger) on wide screens. Mobile keeps its natural scroll.
+- **Dashboard redesign ("the bookkeeper's cover page")**: the home screen
+  opens with a deep ledger band — net income set as a cover figure over fine
+  ruling, revenue/expenses/cash inline, and the income-vs-expenses trend
+  drawn as a smooth SVG area chart inside the band (theme-aware via `--band`
+  tokens). Below it the paper body is re-set: setup steps as a quiet card,
+  the needs-you queue as whole-row links, working capital and pipeline in
+  bordered ledgers, and a staggered entrance that respects reduced motion.
 
 ### Fixed
-- **Theme hydration mismatch**: the pre-paint theme script now runs with
+- **ThemeMenu hydration mismatch**: replaced direct DOM read
+  (`document.documentElement.dataset.mode`) with the `useMode()` state
+  during render, eliminating the server/client HTML mismatch that triggered
+  a full client-side tree regeneration.
+- **Theme hydration flash**: the pre-paint theme script now runs with
   `suppressHydrationWarning` on `<html>`, ending the React hydration console
   error on every page.
-- Dev server picks the next free port when 3000 is occupied (previous commit).
-
-### Changed
-- **Dashboard redesign ("the bookkeeper's cover page")**: the home screen now
-  opens with a deep ledger band — net income set as a cover figure over fine
-  ruling, revenue/expenses/cash inline, and the income-vs-expenses trend drawn
-  as a smooth SVG area chart inside the band (theme-aware via new `--band`
-  tokens, so every theme and dark mode gets its own inked hero). Below it the
-  paper body is re-set: setup steps as a quiet card, the needs-you queue as
-  whole-row links, working capital and pipeline in bordered ledgers, and a
-  staggered entrance that respects reduced motion. The sidebar rail and apps
-  catalogue are untouched; this composition is the reference for module pages.
+- Dev server picks the next free port when 3000 is occupied.
 
 ### Added
 - **Guided setup ("what is expected of me")**: `GET /api/setup` computes a
   live checklist per organization — products, customers, vendors, team,
   email, website widget, Creator-mode agent — each item with a one-sentence
-  "why", done-state computed from real data, and a take-me-there link. The
-  home dashboard shows remaining steps in an unobtrusive card; steps can be
-  hidden locally.
+  "why", done-state computed from real data, and a take-me-there link.
 - **Creator-mode coding-agent wizard**: `GET /api/creator/agent` detects
   installed coding CLIs (Claude Code, Codex CLI, Gemini CLI) read-only on
-  the server PATH. The Proposals page shows a connected badge when found,
-  or a three-step install/auth wizard with copyable commands — the app
-  never runs installs itself, it verifies afterwards.
+  the server PATH. The Proposals page shows a connected badge or a
+  three-step install/auth wizard with copyable commands.
 - **Product sale prices & archiving**: items carry a default sale price
-  (`sale_price_minor`, new migration) exposed through
-  `inventory.stockReport` and pre-filling price pickers; new governed
+  (`sale_price_minor`) exposed through `inventory.stockReport`; governed
   capability `inventory.archiveItem` retires products without destroying
-  history (archived items drop out of reports and reorder alerts). The
-  Products app gets a sale-price field, catalog column, per-row archive,
-  and the Sales quote form gets a product picker that fills description
-  and price from the catalog.
+  history. Products app gets a sale-price field, catalog column, per-row
+  archive; Sales quote form gets a product picker.
 - **Customer care inline customer create**: the new-conversation dialog can
-  create a missing customer on the spot and continue, matching the pattern
-  already present in Purchasing and Sales.
+  create a missing customer on the spot and continue.
 - **Products & sales test coverage**: new end-to-end suite
   (`products.test.ts`) covering catalog creation, duplicate-SKU rejection,
   archive/restore semantics, quote totals, accept-converts-to-invoice with
@@ -90,513 +88,170 @@ The full v1 changelog is preserved at the bottom of this file.
   decline.
 - **Purchasing workflow (request → approval → RFQ → award)**: new
   `purchase_requests` and `rfqs` tables plus governed capabilities —
-  `purchasing.createPurchaseRequest`, `purchasing.decidePurchaseRequest`
-  (approve/reject), `purchasing.createRfq` (one tracked RFQ per vendor on an
-  approved request), `purchasing.recordQuote` (amount, lead time, notes),
-  `purchasing.selectWinningQuote` (marks the winner won, siblings lost,
-  raises the purchase order, converts the request), and the read-only
-  `purchasing.listPurchaseWorkflow`. The Purchasing page opens on a new
-  "Requests & RFQs" tab covering the whole flow; the procure-to-pay skill
-  teaches both the formal RFQ route and the informal direct-PO route.
+  `purchasing.createPurchaseRequest`, `purchasing.decidePurchaseRequest`,
+  `purchasing.createRfq`, `purchasing.recordQuote`,
+  `purchasing.selectWinningQuote`, and the read-only
+  `purchasing.listPurchaseWorkflow`.
 - **@mentions in internal messaging**: messages carry explicit mentions
-  (`messages.mentions`); `messaging.listPeople` lists org members + the
-  workmate as mention targets; mentioning a colleague sends them a
-  notification and @mentioning the agent pulls it into any conversation,
-  even channels where it doesn't otherwise participate. The Messages
-  composer has a type-`@` picker with keyboard navigation, and message
-  bodies render accented mentions.
+  (`messages.mentions`); `messaging.listPeople` lists mention targets;
+  mentioning a colleague sends a notification. Messages composer has a
+  type-`@` picker with keyboard navigation.
 - **Dark mode**: proper tri-state toggle (Light / Dark / System) in the rail
-  appearance menu and Settings → Appearance. Dark themes are defined per
-  palette (inverted neutral ramp, deep accent tints, brightened accents),
-  `bg-white` surfaces invert globally via the Tailwind token, semantic
-  badges/buttons get dark pairs, and a pre-paint bootstrap in `layout.tsx`
-  applies the stored preference with no flash.
+  and Settings → Appearance. Dark themes per palette, `bg-white` surfaces
+  invert globally, and a pre-paint bootstrap applies the stored preference
+  with no flash.
 - **Digital clock** in the workspace chrome: quiet live HH:MM:SS at the
   bottom of the desktop rail and in the mobile top bar, hydration-safe.
-
-### Fixed
-- Migration journal timestamps for 0025+ were being silently skipped
-  because 0024 had been journaled with a future `when`; migrations now apply
-  in order (schema caught up: `support_settings`, `messages.mentions`,
-  purchasing workflow tables).
-- Unfinished WIP from the previous session: missing `tsconfig.json` in
-  `modules/skills` (broke typecheck for every module), unresolved imports in
-  Settings' email section, type errors in the email invoice route and the
-  embeddable widget chat, and the missing drizzle snapshot for migration
-  0024 (regenerated from schema).
-
-### Added
 - **Bank feeds & reconciliation** (Accounting → Bank tab): bank accounts
-  (`bank_accounts`) and imported statement lines (`bank_transactions`) with
-  new governed capabilities — `accounting.addBankAccount`,
-  `accounting.importBankFeed` (≤500 rows, duplicate lines skipped so
-  re-pasting an export is safe), `accounting.matchBankTransaction` /
-  `unmatchBankTransaction`, `accounting.excludeBankTransaction` /
-  `unexcludeBankTransaction`, `accounting.deleteBankTransaction` (the import
-  undo path), and the read-only `accounting.bankSummary`. New
-  `/api/banking` route exposes the full human surface through the same
-  executor; the Bank tab offers paste-CSV feed import, a payment-match flow,
-  exclude buttons, and the "N unmatched" summary line.
+  and imported statement lines with governed capabilities for import, match,
+  exclude, and delete; `/api/banking` route; paste-CSV feed import and
+  payment-match flow.
 - **Sales tax filing** (Accounting → Tax tab): `accounting.salesTaxReport`
-  sums taxable sales and tax collected from non-void invoices in a window;
-  `accounting.fileSalesTaxReturn` posts DR Sales Tax Payable (2100) /
-  CR Cash (1000) via the normal entry mechanism, records the return in
-  `sales_tax_filings`, refuses overlapping already-filed periods, and
-  reverses through `accounting.reverseEntry`. Recent filings appear in the
-  Tax tab.
-
-- **Console tabs** (follow-up to ADR 0030): the co-worker panel now has a
-  proper identity header (avatar, live status, mode) with three icon tabs —
-  **New** conversation (`chatStore.reset()`, session id cleared, history
-  preserved in the log), **History** (past agent sessions from
-  `/api/sessions` with status dots and relative times, linking to the full
-  trajectory log), and **Preferences** (creator mode, dock behavior picker,
-  fresh start). The composer footer trades the inline switch for send/newline
+  and `accounting.fileSalesTaxReturn` with overlap rejection and reversal
+  support.
+- **Console tabs** (follow-up to ADR 0030): co-worker panel identity header
+  with New / History / Preferences tabs; composer footer with send/newline
   hints and a creator chip.
-- **Pinned apps**: pin up to five favorites from the launcher (hover tack) or
-  Settings; pins appear on the workspace rail under a hairline divider.
-- **Settings application** (`/settings`, system app in the catalog + rail):
-  appearance (four palette cards), pinned-app manager, and workspace facts
-  linking to Team & roles and the session log.
-- **Rail affordances**: every rail icon now shows a styled hover/focus
-  tooltip (with keyboard hints where they exist), and the active interface is
-  marked by an accent notch on the rail edge plus the tinted state.
+- **Pinned apps**: pin up to five favorites from the launcher or Settings;
+  pins appear on the workspace rail under a hairline divider.
+- **Settings application** (`/settings`): appearance, pinned-app manager,
+  and workspace facts linking to Team & roles and the session log.
+- **Rail affordances**: every rail icon shows a styled hover/focus tooltip
+  with keyboard hints; active interface marked by an accent notch.
+- **Governed analytics module** (ADR 0029, `@chaste/module-analytics`):
+  five read-only dataset extractors, Arquero frame-op layer, and
+  `analytics.renderReport` composing narrative text, SVG charts, and tables
+  into a downloadable HTML document.
+- **Full CRM surface**: "Pipeline" is now "CRM" with two tabs — Customers
+  (list, create, soft-deactivate) alongside the existing deal pipeline.
+- **Boot-time auto-migration with pre-migration snapshots**: the web server
+  applies pending Drizzle migrations at startup, serialized by advisory lock,
+  with `pg_dump` snapshots for rollback.
+- **Next.js 16.3 agent tooling** (ADR 0027): bundled docs, `.mcp.json`
+  wiring, `agent-browser` CLI, and official Skills committed.
+- **Cache Components adoption, incremental pass** (ADR 0028):
+  `cacheComponents: true` validated by `next build`.
+- **Official Next.js Skills** committed at `.agents/skills/`.
+- **Manufacturing module split** (`modules/manufacturing`, ADR 0026): full
+  production lifecycle — work orders, multi-level BOMs with scrap, cost
+  previews, run reversal, lot traceability.
+- **Inventory module surface**: stock history, available-to-promise,
+  reservations, cycle counts, locations, lot balances, valuation.
+- **Purchasing UI** (`/purchasing`): vendors, purchase orders, goods
+  receipts, vendor bills (three-way match), partial/full bill payments,
+  AP aging.
+- **Customer care agent module** (`modules/support`, ADR 0025): support
+  conversations, draft-only AI reply flow, escalation, 11 regression tests.
+- **Security hardening pass** (ADR 0024): session ownership checks,
+  marketplace publisher ownership, least-privilege job workers, rate limiting,
+  conversation membership enforcement, prompt-injection guard, 7-day approval
+  expiry, security headers, and low-severity fixes.
+- **Durable capability-job queue**: `jobs` table with FOR UPDATE SKIP LOCKED
+  worker (`pnpm worker`), executing through the governed KernelExecutor path.
+- **Governance eval harness v1**: six golden agent trajectories asserting
+  harness invariants against a scripted model adapter.
+- **Cash-basis view + formal year-end close (ADR 0019)**:
+  `accounting.cashBasisReport` and `accounting.closeYear`.
+- **BOM-lite**: `bom_lines` table, `explodeBom`/`checkAvailability` pure
+  functions, and governed capabilities for define/produce/report.
+- **Email notifications** behind `NotificationSink`: SMTP fan-out for
+  approval requests and tickets.
+- **Signed plugin distribution + marketplace (ADR 0018)**: `@chaste/plugin-kit`,
+  ed25519 signatures, `creator.verifyPlugin`/`publishListing`/`installListing`.
+- **Creator Mode scaffolding generator**: `creator.scaffoldCapability` emits
+  capability source, test skeleton, and risk-assessment doc.
+- **RLS everywhere (ADR 0017)**: policies on all 46 tenant tables with
+  probe tests under NOBYPASSRLS.
+- **SSO + SCIM groundwork**: `sso_connections` table, admin CRUD, SCIM 2.0
+  provisioning at `/api/scim/v2/Users`.
+- **Trajectory compaction + KV-cache metrics**: token-budget folding and
+  `/api/metrics` cache hit-rate dashboard.
+- **OpenRouter model support**: `MODEL_PROVIDER=openrouter` with automatic
+  NIM fallback on rate limits.
+- **Org memory retrieval (ADR 0016)**: `documents.searchMemory` semantic
+  top-k over pgvector with text-search fallback.
+- **Natural-language task suite** (`pnpm nl:test`): 31 plain-language tasks
+  driving the real app end-to-end with per-tier scoring.
+- **Friendly error layer**: `lib/api.ts` maps every API failure to a calm
+  headline + actionable hint with collapsible technical details.
+- **Design system + console redesign (ADR 0015)**: brand dark-maroon accent,
+  warm-stone neutrals, Tailwind v4 `@theme` token layer, component kit
+  (`components/ui.tsx`), inline SVG icon set, grouped sidebar shell, ⌘K
+  command palette, split-screen branded login, full responsive to 375px.
 
 ### Changed
-- **Density pass**: dashboard vertical rhythm tightened (~30% less air
-  between the pulse, working-capital, operations, and ledger sections; chart
-  height reduced); launcher grid and header tightened.
-
-- **OS navigation model** (ADR 0030): the five-group ERP sidebar is replaced by
-  a slim workspace rail (Home, Apps ⌘G, Search ⌘K, Approvals, notifications,
-  AI co-worker toggle, theme menu, account popover with org switcher) and a
-  full-screen **Apps Launcher** — every business module as an independent
-  application tile with type-to-filter, keyboard grid navigation, and a Recent
-  apps group. The ⌘K palette now draws from the same application catalog and
-  gains theme-switch commands. Mobile collapses the rail into a top bar with
-  the launcher one tap away.
-- **Application frames and tabs** (`_shell/app-frame.tsx`): applications open
-  at an Overview with breadcrumb, contextual actions, and operation tabs.
-  Accounting is the first app on the new frame — Overview | Journal |
-  Receivables | Payables | Reports | Periods — preserving every existing
-  capability (bill payment, mirror reversals, period/year-end close, cash
-  basis, P&L, balance sheet) in its new home.
-- **Four designed color themes**: Chaste (brick `#9B1313` / burgundy
-  `#38000A`, default), Graphite (ink & steel), Verdant (forest & sage), and
-  Meridian (bronze & sand). All neutrals route through the `stone-*` scale and
-  all accents through the `maroon-*` scale (Tailwind v4 token architecture),
-  so switching themes re-skins the entire product — including legacy pages —
-  with semantic state colors untouched. Persisted per user, applied before
-  first paint, switchable from the rail or the command palette.
-- **Command-center dashboard**: asymmetric composition replacing the generic
-  KPI-card grid — financial pulse (net income, revenue/expenses/cash,
-  six-month income-vs-expense bars), a "Needs you" triage queue (severity
-  dots, every item ending in a verb), working-capital figures, pipeline shape,
-  operations signals, and the event ledger as an actor-colored timeline.
-- **Redesigned authentication and onboarding**: the split-screen login keeps
-  its concept but drops the AI-slop gradient blobs for a ledger-ruled burgundy
-  panel with numbered Governed/Auditable/Reversible proof points; onboarding
-  carries the monogram identity.
-
-### Changed
-- The AI co-worker dock is reachable from the rail on desktop (toggle between
-  pinned dock and quiet bubble); its visual language follows the theme tokens.
-- Main content width widened to `max-w-7xl` to give applications room; the
-  dashboard self-limits to `max-w-6xl` for reading rhythm.
+- **OS navigation model** (ADR 0030): five-group ERP sidebar replaced by
+  workspace rail + full-screen Apps Launcher with type-to-filter and
+  keyboard grid navigation.
+- **Application frames and tabs** (`_shell/app-frame.tsx`): applications
+  open at an Overview with breadcrumb and operation tabs.
+- **Four designed color themes**: Chaste, Graphite, Verdant, Meridian —
+  switching re-skins the entire product via Tailwind v4 token architecture.
+- **Command-center dashboard**: financial pulse, "Needs you" triage queue,
+  working-capital figures, pipeline shape, operations signals, event ledger.
+- **Redesigned authentication and onboarding**: ledger-ruled burgundy panel
+  with Governed/Auditable/Reversible proof points.
+- **Manufacturing split out of inventory** (ADR 0026): BOM/production/
+  work-order capabilities under `manufacturing.*` namespace.
+- **Capability output contracts renamed for clarity**: `reservedThousandths`,
+  `expectedGoodThousandths`, `postedVariances`, `reversedMovements`.
+- **Structured logging seam**: zero-dependency JSON kernel logger.
+- **Model-call resilience**: typed `ModelProviderError`, exponential backoff.
+- **Registry cached per process** instead of per request.
+- **RLS wired into every capability transaction**: 19 module transaction
+  sites through `withOrgContext`.
+- **One posting service**: `@chaste/module-accounting/posting` replaces four
+  divergent private period guards.
+- **Next.js 15.5 → 16.3.2**: Turbopack default for dev and build.
+- **AI co-worker dock** reachable from the rail; visual language follows
+  theme tokens.
+- **Main content width** widened to `max-w-7xl`.
+- ARCHITECTURE.md tech table updated to reflect actual shipping stack.
+- CI gains gitleaks workflow; `.env.example` cleaned up.
 
 ### Removed
-- `_shell/nav.ts` (the sidebar navigation tree) — superseded by the
-  application catalog in `_shell/apps.ts`; nothing imports it.
+- `_shell/nav.ts` (sidebar navigation tree) — superseded by the application
+  catalog in `_shell/apps.ts`.
 
 ### Fixed
-- Accounting's year-end close now lives behind its own confirmation dialog in
-  the Periods tab (previously inline next to a cash-basis summary).
-
-### Added
-- **Governed analytics module** (ADR 0029, `@chaste/module-analytics`):
-  five read-only dataset extractors (`analytics.pipelineByStage`,
-  `revenueByMonth`, `invoiceAging`, `salesByCustomer`, `stockLevels`), each
-  gated by its source module's read permission and org-scoped; a declarative
-  Arquero frame-op layer (filter/sort/top/pick/groupBy/pctOfTotal, Zod-validated,
-  no code execution); and `analytics.renderReport`, which composes extracts
-  into narrative text, ECharts server-rendered SVG charts, and exact tables in
-  one downloadable self-contained HTML document (print-to-PDF ready). Manual
-  surface: `/analytics` page with dataset previews and per-section chart
-  pickers. Agent surface: the chat co-worker can call the same extractors and
-  report renderer as governed tools. Every organization now carries an
-  optional `dataRegion` tag (migration `0022_real_shape.sql`) that is stamped
-  onto all analytics outputs; cross-org analytics is impossible by
-  construction because actors are org-bound.
-- **Full CRM surface**: the module formerly shown as "Pipeline" is now "CRM"
-  with two tabs. New Customers tab (list, create via `crm.createCustomer`,
-  soft-deactivate via `crm.deactivateCustomer`) alongside the existing deal
-  pipeline; deals can be linked to customers at creation and show the linked
-  customer on cards. Customer writes go through the governed capability path.
-  `crm.createDeal` now refuses customer ids from other organizations (a
-  tenancy gap found by the new tests).
-- **Boot-time auto-migration with pre-migration snapshots** (`packages/db/src/migrate.ts`,
-  wired via `apps/web/src/instrumentation.ts`): the web server now applies
-  pending Drizzle migrations once at startup, before accepting requests,
-  serialized by a Postgres advisory lock so multi-instance deploys cannot
-  race. Before the first change of each run a `pg_dump` snapshot is written
-  to `packages/db/backups/` (gitignored, newest 10 kept) so a bad migration
-  is recoverable by restore. Production refuses to serve when migrations
-  fail; development logs and continues. Controls: `AUTO_MIGRATE_ON_BOOT=0`
-  restores manual migration, `CHASTE_SKIP_MIGRATION_BACKUP=1` disables
-  snapshots, `CHASTE_STRICT_MIGRATION_BACKUP=1` refuses to migrate without a
-  verified snapshot. Snapshots prefer the host `pg_dump` and fall back to the
-  database container's own client when the host binary is missing or older
-  than the server (`CHASTE_PG_DUMP_BIN` / `CHASTE_DB_CONTAINER` overrides).
-  Documented in README "Upgrading".
-- **Next.js 16.3 agent tooling** (ADR 0027): the repo now points every AI
-  coding agent at Next.js's version-matched bundled docs — the official
-  managed `nextjs-agent-rules` block in `AGENTS.md` (byte-identical to what
-  `next dev` upserts, with project guidance preserved outside the markers),
-  a committed `.mcp.json` wiring `next-devtools-mcp` to the dev server's
-  built-in `/_next/mcp` endpoint (errors, logs, routes, compilation checks,
-  server-action lookup), and `CLAUDE.md` (`@AGENTS.md`). `AGENTS.md` also
-  documents the `agent-browser` CLI for structured DOM/console/Web Vitals
-  access and the official Skills (`next-dev-loop`,
-  `next-cache-components-adoption`, `next-cache-components-optimizer`,
-  `next-partial-prefetching-adoption`); UI edits should be verified at
-  runtime via the dev-server MCP before the normal verification gate.
-- **Cache Components adoption, incremental pass** (ADR 0028):
-  `cacheComponents: true` is on and validated by `next build`. The two
-  `force-dynamic` API route configs were removed (dynamic-by-default now);
-  the codemod opted out exactly three server segments (`root layout`,
-  `(app)` layout, home page) with TODO-marked `instant = false`; no sync-IO
-  blockers existed outside client components. `/portal/[token]` was fully
-  converted to the Suspense params pattern and now ships as a Partial
-  Prerender; `/login` and `/onboarding` are now fully static. Backlog:
-  remove the three opt-outs one feature at a time via the adoption skill's
-  inner loop.
-- **Official Next.js Skills committed** at `.agents/skills/`:
-  `next-dev-loop`, `next-cache-components-adoption`,
-  `next-cache-components-optimizer`, `next-partial-prefetching-adoption`.
-  Every agent (Cline, Codex, Cursor, Gemini CLI, …) picks them up from a
-  fresh clone; AGENTS.md documents when to drive which.
-
-### Fixed
-- **Fresh-install migration chain repaired**: migration `0019_cheerful_spyke`
-  enabled RLS on `quote_lines` with a policy referencing an `org_id` column
-  that table does not have (it is intentionally parent-scoped through its
-  quote), so every fresh database failed mid-migration and CI could not
-  provision a schema. The stray policy statements were removed; existing
-  databases are unaffected (Drizzle applies pending migrations by timestamp,
-  not content hash).
-- **Migration tooling integrity**: migration `0021_rename_shadow_timestamps`
-  had been hand-written without its Drizzle snapshot, which silently broke
-  all future `drizzle-kit generate` runs; the missing `meta/0021_snapshot.json`
-  was reconstructed. The same drift meant the live schema was missing the
-  rebuilt `fx_rate_org_pair_idx` (now including `effective_at`); migration
-  `0022_real_shape.sql` applies it.
-
-### Changed
-- **Next.js 15.5 → 16.3.2** in `apps/web`: Turbopack is now the default for
-  `next dev` and `next build`; App Router runs React canary (19.2 features).
-  No app code changes were required (no middleware file; no webpack-specific
-  config).
-- **Manufacturing module split** (`modules/manufacturing`, ADR 0026): a full
-  production lifecycle as its own governed module — work orders
-  (create → release → complete/cancel with availability and scrap checks),
-  multi-level BOMs with per-component scrap allowances, instant production
-  runs tagged with run references, cost previews at current moving-average
-  prices before posting, production run history with reversal status, and
-  upstream lot traceability for recalls. `manufacturing.reverseProductionRun`
-  fixes the old inverse gap by mirroring every posted movement (components
-  return at recorded costs; double reversal is refused). Manufacturing writes
-  exclusively through `@chaste/module-inventory`'s exported ledger
-  primitives — one append-only stock ledger, many writers.
-- **Inventory module surface**: stock movement history per item,
-  available-to-promise (on hand minus open reservations), stock reservations
-  (reserve/release with overbook refusal), cycle counts (snapshot → enter →
-  post variances through the ledger, refusing empty sheets and snapshot
-  drift), stock locations, lot listing with derived balances, and BOM tree
-  reads. Migration `0020` adds six tenant-isolated tables (work orders, lots,
-  locations, reservations, cycle counts + lines) under the standard RLS
-  policy.
-- **Inventory & Manufacturing UI** (`/inventory`, `/manufacturing`): both
-  pages are tabbed surfaces over the full capability set — items/valuations/
-  reorder alerts with PO drafting into purchasing, per-SKU ledger history,
-  reservations, counting worksheets, lots and locations on the inventory
-  side; BOM editor (scrap %, delete, nested tree view), work order board,
-  production runs with reversal, cost preview, and lot trace viewer on the
-  manufacturing side.
-- **Purchasing UI** (`/purchasing`): the previously headless module gets its
-  human surface — vendors, purchase orders with SKU-linked lines, goods
-  receipts that update stock, vendor bills matched to orders (three-way),
-  partial/full bill payments gated by policy, and AP aging.
-- **Customer care agent module** (`modules/support`, ADR 0025): support
-  conversations bound to one customer per thread, governed capabilities for
-  message logging, escalation, and resolution, and a draft-only AI reply
-  flow. Security by construction: the drafting loop sees exactly two scoped
-  read tools under a `support.read`-only actor, the order-status tool takes
-  zero model-controlled input (conversation binding is closed over
-  server-side, making cross-customer pivots impossible), customer text is
-  framed as untrusted data, drafts are human-released with agent provenance,
-  and escalation notifies through the existing ticket sink. Ships with
-  `/api/support`, `/api/customers` (read-only directory), a Customer care
-  inbox page, migration 0016 (RLS included), 11 regression tests, and
-  `pnpm demo:support` proving an embedded injection attempt leaves the
-  books untouched.
-- **Security hardening pass** (full audit remediation; see ADR 0024):
-  - Agent sessions are ownership-checked: `/api/chat` refuses a `sessionId`
-    belonging to another user or org (was a cross-tenant IDOR).
-  - Marketplace listings are publisher-owned: republishing a slug owned by
-    another org is refused, serialized by a per-slug advisory lock (closed a
-    listing-takeover supply-chain path); install/uninstall serialize on the
-    same lock to stop lost updates.
-  - Job worker actors are least-privilege: a queued job runs with exactly its
-    capability's permission instead of `*`, and unknown job types fail
-    permanently.
-  - Rate limiting on expensive and brute-forceable boundaries: agent chat
-    per-user budget (`CHAT_RATE_LIMIT_MAX`), invitation attempts and SCIM
-    bearer auth per source IP, onboarding per user; better-auth credential
-    routes now have explicit rate-limit rules and `trustedOrigins`.
-  - Conversation membership enforced for DM reads/writes at both the route
-    and the `messaging.*` capabilities.
-  - Session trajectory replay is owner-only (org admins may audit).
-  - Prompt-injection guard: every agent loop frames retrieved documents,
-    memories, transcripts, and tool results as untrusted data; model-filed
-    tickets are length-bounded.
-  - Agents can no longer invite members (`iam.inviteMember` is human-only).
-  - Approvals now expire after 7 days: gates are stamped at submit, refused
-    by kernel-side verify past expiry, and expire conditionally in the
-    decision pipeline (HTTP 410) instead of waiting forever.
-  - Org switcher validates membership before writing the tenant cookie;
-    baseline security headers (CSP, XFO, nosniff, HSTS, Referrer-Policy,
-    Permissions-Policy) ship from `next.config.mjs`.
-  - Low-severity fixes: invite acceptance compares emails case-insensitively,
-    SCIM provisioning normalizes emails to lowercase, health endpoint no
-    longer leaks DB errors anonymously, ledger `limit` is clamped,
-    POS register open is race-free via advisory lock, outbound mail subjects
-    are CRLF-sanitized, SCIM token error copy corrected.
-- **Durable capability-job queue**: `jobs` table (migration 0015, RLS policy
-  included) plus a FOR UPDATE SKIP LOCKED worker (`pnpm worker`). Jobs carry
-  a capability id + input and execute through the governed KernelExecutor
-  path, so background work obeys validation, permissions, and audit.
-  Document parsing now enqueues by default (202 + status "queued"; pass
-  `sync: true` to keep the old inline behavior).
-- **Governance eval harness v1** (`packages/kernel/src/eval.test.ts`): six
-  golden agent trajectories asserting harness invariants (governed tool
-  calls, honest hallucination errors, gate relaying, ticket-not-improvise,
-  maxSteps, trajectory events) against a scripted model adapter.
-- ADRs 0020-0023: trust-spine hardening; multi-currency groundwork and
-  migration path; per-org ledger chain heads + partitioning; Creator Mode
-  sandboxed proposal execution.
-
-### Changed
-- **Manufacturing split out of inventory** (ADR 0026): BOM/production/work-order
-  capabilities now live under the `manufacturing.*` namespace with their own
-  module toggle and `manufacturing.read/write` permissions; they write stock
-  exclusively through `@chaste/module-inventory`'s exported ledger primitives.
-  Orgs with explicit `enabled_modules` lists must add `"manufacturing"`.
-- **Capability output contracts renamed for clarity**: `stockReport` items now
-  expose `reservedThousandths`; work orders report `expectedGoodThousandths`;
-  cycle-count posting reports `postedVariances`; run reversal reports
-  `reversedMovements`/`removedFinishedThousandths`; `inventory.stockHistory`
-  is now `inventory.itemHistory`.
-- **Structured logging seam**: zero-dependency JSON logger in the kernel
-  (`LOG_LEVEL`-filtered); agent-loop failures and dropped trajectory writes
-  are logged with ids instead of being swallowed silently.
-- **Model-call resilience**: provider errors are typed
-  (`ModelProviderError` keeps HTTP status + retry hint) and chat/embedding
-  calls retry 429/5xx/network faults with exponential backoff and jitter.
-- **Agent-loop hardening**: capability input schemas must convert to JSON
-  Schema (checked at boot via registry conformance; previously failures
-  silently produced parameter-less tools that invited argument
-  hallucinations); sanitized tool-name collisions now fail loudly.
-- **Registry cached per process** instead of rebuilt and re-validated on
-  every request; bump `REGISTRY_VERSION` when changing capabilities.
-- Accounting dashboard GET computes aging from one bounded query
-  (limit 200) instead of fetching all open invoices and re-filtering twice.
-- eslint enforces architectural boundaries: core packages cannot import
-  modules/apps; cross-module imports are blocked except the accounting
-  posting service.
-
-### Fixed
+- **ThemeMenu hydration mismatch** (see above).
+- **Theme hydration flash** (see above).
+- Accounting's year-end close lives behind its own confirmation dialog.
+- **Fresh-install migration chain repaired**: `0019_cheerful_spyke` RLS
+  policy on `quote_lines` referencing a nonexistent `org_id` removed.
+- **Migration tooling integrity**: `0021` Drizzle snapshot reconstructed.
 - **Shadow timestamp columns broke FX rate posting (critical)**: four schema
-  fields (`fxRates.effectiveAt`, `user_roles.assignedAt`, `pos_sessions.openedAt`,
-  `conversation_members.joinedAt`) were declared with the `createdAt()` helper,
-  which hardcodes the column name `created_at` — drizzle emitted inserts with a
-  duplicate column and `accounting.recordFxRate` always failed. Real column
-  names now; migration 0021 renames them in place.
-- **Capability input schemas with `z.date()`/`z.coerce.date()`** failed boot-time
-  JSON-Schema conformance (hr.logTime, hr.timeReport, accounting.recordFxRate,
-  accounting.createRecurringTemplate); they take ISO date strings now, matching
-  what models emit.
-- **BOM explosion stopped at level one**: requirement computation filtered BOM
-  edges to the top assembly, so sub-assemblies were consumed as leaves instead
-  of exploding; multi-level production now reaches real leaves.
-- **Work-order completions close the order prematurely**: completions are now
-  partial-aware (per-completion run references, plan-exceeded refusal,
-  cancel refused while partial completions exist).
+  fields with `createdAt()` hardcoded `created_at`; real column names now.
+- **Capability input schemas with `z.date()`/`z.coerce.date()`** now take
+  ISO date strings.
+- **BOM explosion stopped at level one**: sub-assemblies now reach real leaves.
+- **Work-order completions**: now partial-aware with plan-exceeded refusal.
 - Cycle-count posting no longer accepts an empty sheet.
-- gaps.test suite cleanup order (payments/ledger events/jobs before parents)
-  so failed runs do not poison reruns.
-- **Approval double-execution race (critical)**: the approve path now claims
-  the gate atomically (`pending → executing`) before executing and finalizes
-  after; concurrent approvers get 409 instead of moving money twice. The
-  decision pipeline is extracted to `apps/web/src/server/approvals.ts` with a
-  concurrency regression suite (6 DB-integration tests).
-- **Event-ledger hash chain can no longer fork (critical)**: `PgLedgerStore`
-  serializes chain-head reads/writes behind a transaction-scoped advisory
-  lock; previously two concurrent appends could chain off a stale hash.
-- **Money gating is fail-closed**: `Capability.moneyAmount(input)` is now a
-  declared, conformance-enforced extractor replacing the largest-`*Minor`-
-  field name heuristic that silently bypassed thresholds for unconventionally
-  named amounts. `null` (amount unknowable up front) always gates. All five
-  money capabilities declare their amount; reversals gate unconditionally.
-- **Kernel verifies claimed approvals**: passing `approvedApprovalId` now
-  requires `ApprovalFlow.verify()` to confirm org, capability, status, and
-  canonical payload match; unverified or unimplemented flows refuse (fail
-  closed). Previously the executor took the caller's word.
-
-### Changed
-- **RLS is wired into every capability transaction**: all 19 module
-  transaction sites run through `withOrgContext(db, ctx.actor.orgId, ...)`
-  so Postgres enforces tenant scoping; app-level org predicates remain as
-  defense in depth. `withOrgContext` now exposes the proper drizzle `Tx`
-  type instead of an unsafe cast.
-- **One posting service**: `@chaste/module-accounting/posting` (`postEntry`,
-  `assertPeriodOpen`, `loadCoaMap`, `accountIdOf`) replaces four divergent
-  private period guards and six copy-pasted entry+lines insert blocks across
-  accounting, HR, POS, and purchasing; payroll period checks unified onto
-  date-based semantics. See ADR 0020.
-- ARCHITECTURE.md tech table now reflects what actually ships (route
-  handlers instead of tRPC, no XState/pg-boss/OTel/Playwright yet); stale,
-  duplicated ROADMAP checkboxes cleaned up.
-- CI gains a gitleaks workflow (full-history secret scan); `.env.example`
-  no longer narrates a past key leak; stale local-only v1 env backup removed.
+- **Approval double-execution race (critical)**: atomic gate claiming with
+  concurrency regression suite.
+- **Event-ledger hash chain can no longer fork (critical)**: transaction-
+  scoped advisory lock on chain-head reads/writes.
+- **Money gating is fail-closed**: declared `Capability.moneyAmount(input)`
+  extractor replaces the field-name heuristic.
+- **Kernel verifies claimed approvals**: `ApprovalFlow.verify()` confirms
+  org, capability, status, and canonical payload match.
+- **Postgres connection exhaustion under dev**: bounded pools cached on
+  `globalThis`.
+- **Channel creation rejected for owners**: kernel matcher replaces direct
+  permission check.
+- Model-provider 429s surface a retry hint.
+- **Email/password sign-up broken**: `auth_account.issuer` column added.
+- Fresh databases: pgvector extension now enabled in initial migration.
+- Migration journal timestamps for 0025+ no longer silently skipped.
+- Unfinished WIP: missing `tsconfig.json`, unresolved imports, type errors,
+  missing drizzle snapshot for migration 0024.
+- Dev server picks next free port when 3000 is occupied.
 
 ### Added
-- ADR 0020: trust-spine hardening decisions (atomic approvals, verified
-  gates, declared money amounts, serialized ledger appends, RLS wiring,
-  posting service).
-
-### Changed
-- **Home is a fully-fledged dashboard** (new `GET /api/dashboard` single-call
-  aggregation): KPI row (revenue, net income, cash, receivables with overdue
-  count, payables, weighted pipeline), a dependency-free SVG six-month
-  income-vs-expense chart, books-integrity panel, needs-attention list with
-  deep links (approvals, overdue invoices, low stock, unpaid bills, pending
-  leave), recent hash-chained ledger activity feed, and ops tiles for the
-  pipeline funnel, people, and POS. Quick-action chips prefill the chat dock
-  with editable prompts. The centered hero input is gone; the floating dock
-  is the only chat entry.
-- **Chat dock reworked**: four states now genuinely in effect everywhere,
-  including home: floating horizontal input bar at the lower center
-  (stronger elevation; page content reserves bottom padding), bubble at the
-  lower right, expanded panel, and a pinned right rail that reflows content.
-  The chosen state persists across reloads via localStorage. Console,
-  dashboard, and widget share one continuous conversation state.
-- **Default model moved** to NIM `deepseek-ai/deepseek-v4-flash` (fast,
-  agentic); OpenRouter remains available via MODEL_PROVIDER=openrouter with
-  automatic NIM fallback on upstream rate limits.
-- **Agent replies render cleanly**: markdown-lite renderer turns bold, code
-  spans, and lists into proper formatting instead of leaking raw `**`;
-  replies are sanitized so no em dash reaches the screen, and the system
-  prompt instructs dash-free, plain prose.
-
-### Added
-- **Cash-basis view + formal year-end close (ADR 0019)**: `accounting.cashBasisReport`
-  derives money-in/money-out/net from the accrual ledger with the identity
-  `net = in − out = Δcash` property-tested; `accounting.closeYear` rolls a fiscal
-  year into retained earnings with one balanced closing entry (destructive-gated,
-  inverse declared) and seals December. Accounting UI gained a cash-basis panel
-  with an approval-gated year-end close action.
-- **BOM-lite**: `bom_lines` table, `explodeBom`/`checkAvailability` pure functions
-  (cycle detection, availability math), and governed capabilities
-  `inventory.defineBom` / `inventory.produceFromBom` / `inventory.bomReport`.
-  Production consumes components at moving-average cost (`replayValuation`) and
-  adds finished units at rolled-up cost. New Inventory & BOM page with stock
-  levels, BOM editor, availability checker, and production runs.
-- **Email notifications** behind the existing `NotificationSink`: SMTP fan-out
-  joins console + webhook for approval requests and tickets; fails soft, no-op
-  when SMTP is unconfigured.
-- **Signed plugin distribution + marketplace groundwork (ADR 0018)**:
-  new `@chaste/plugin-kit` package, canonical-JSON manifests, ed25519
-  signatures, fail-closed verification, plus `marketplace_listings` table,
-  `creator.verifyPlugin` / `publishListing` / `installListing` /
-  `uninstallListing` / `listMarketplace` capabilities, `/api/marketplace`
-  routes, and a Marketplace UI. Publishing refuses bad signatures; install
-  re-verifies and is identity-gated.
-- **Creator Mode scaffolding generator**: `creator.scaffoldCapability` emits
-  capability source, test skeleton, and a risk-assessment doc from a spec, and
-  files them as a governed proposal ready for human review.
-- **RLS everywhere (ADR 0017)**: row-level-security policies on all tenant
-  tables (46 tables incl. parent-scoped child tables), `withOrgContext`
-  transaction-scoped tenant helper, and probe tests proving cross-tenant reads/
-  writes fail under a NOBYPASSRLS role.
-- **SSO + SCIM groundwork**: `sso_connections` (SAML/OIDC IdP metadata, domain
-  routing) with admin CRUD at `/api/team/sso`; SCIM 2.0 provisioning at
-  `/api/scim/v2/Users` (list/create/deactivate) with SHA-256-hashed bearer
-  tokens managed at `/api/scim/tokens`.
-- **Trajectory compaction + KV-cache metrics**: kernel folds old tool traffic
-  into stubs when sessions exceed a token budget (system prefix preserved as
-  cache anchor); adapters now capture provider-reported cached prompt tokens;
-  `/api/metrics` reports org-wide cache hit rate and the Sessions page shows it.
-- **SOC2-style control mapping** at `docs/soc2-control-mapping.md`.
-- **OpenRouter model support**: `MODEL_PROVIDER=openrouter` routes all
-  chat-side AI calls (agent loop, bill-line extraction) through OpenRouter
-  (e.g. `stealth/ox-alpha`, whose reasoning-stream deltas are handled), while
-  embeddings stay on NVIDIA NIM; automatic fallback to the primary NIM model
-  on upstream rate-limit keeps agent turns honest instead of dying
-  mid-conversation.
-- **Org memory retrieval (ADR 0016)**: new governed `documents.searchMemory`
-  read capability, semantic top-k over pgvector `memories` with graceful
-  text-search fallback. Registered like any capability, so the console agent
-  can finally ground answers in ingested documents and policies (and session
-  replays show what it grounded on). System prompt now searches memory before
-  filing a "can't know this" ticket.
-- **Natural-language task suite** (`pnpm nl:test`): 31 plain-language tasks,
-  10 easy, 10 medium, 11 complex, driving the real app end-to-end (auth,
-  onboarding, CRM, POS shifts, payroll gates, reversals, period sealing, RBAC,
-  document coding, agent quote-to-cash, memory recall, session replay, creator
-  mode) with assertions and per-tier scoring.
-- **Friendly error layer**: shared `lib/api.ts` maps every API failure to a
-  calm headline + actionable hint, while preserving the raw status/payload
-  behind a collapsible, copyable "Technical details" block for power users;
-  load failures get retry states instead of infinite skeletons; chat stream
-  errors explain themselves inline.
-- **Design system + console redesign (ADR 0015)**: brand dark-maroon accent
-  replaces default emerald; warm-stone neutrals; token layer in `globals.css`
-  (Tailwind v4 `@theme`) with a dependency-free component kit
-  (`components/ui.tsx`: Button/Card/Badge/Notice/EmptyState/Skeleton/
-  StatCard/Dialog/Switch) and an inline SVG icon set, no page may hand-roll a
-  button, badge, or input anymore. New grouped sidebar shell with mobile drawer,
-  pending-approvals count badge, org switcher, and a ⌘K command palette.
-  Every surface reworked: skeleton loaders, empty states with guidance,
-  accessible confirm dialogs for all destructive actions (reverse entry, close
-  period, pay bill, delete document, void payroll, deactivate employee, close
-  register), PR-style approvals and creator-proposal diffs with line tinting,
-  live drawer-variance preview in POS, suggested prompts + stop-generation +
-  persistent tool receipts in the Console chat, split-screen branded login,
-  relative timestamps, and full responsive behavior down to 375px. Review and
-  implementation contract: `docs/UI_REDESIGN_PLAN.md`.
-
-### Fixed
-- **Postgres connection exhaustion under dev**: `getDb()` cached its pool
-  module-scoped, so every Next.js hot reload opened a fresh unbounded client
-  until Postgres refused connections (`too many clients already`). Pools are
-  now bounded (`DATABASE_POOL_MAX`, default 10) and cached on `globalThis`.
-- **Channel creation rejected for owners**: `/api/conversations` POST checked
-  `permissions.has("messaging.write")` directly, failing wildcard (`*`) role
-  holders; it now uses the kernel matcher and returns 403 (not 401) when the
-  permission is genuinely missing.
-- Model-provider 429s now surface a retry hint instead of "429 status code
-  (no body)".
-- **Email/password sign-up was broken**: better-auth ≥1.7 stamps an `issuer`
-  on every credential account row, but the `auth_account` Drizzle schema (and
-  the database) lacked the column, so every `sign-up/email` call 500'd. Added
-  `auth_account.issuer` with migration `0012_tiny_wolfpack`. Also repaired a
-  forked drizzle meta chain (`0011_snapshot.json` pointed at the wrong parent
-  and had lost the `documents` tables), which had made `drizzle-kit generate`
-  emit duplicate table DDL.
-- Fresh databases failed to migrate: the pgvector extension was never enabled,
-  so the `memories.embedding` column (`vector(1024)`) errored with
-  `type "vector" does not exist` (CI and new local setups). The initial
-  migration now runs `CREATE EXTENSION IF NOT EXISTS "vector"`.
+- ADRs 0015–0030 covering design system, org memory, RLS, plugin kit,
+  trust-spine hardening, multi-currency, ledger partitioning, creator-mode
+  sandbox, support module, security audit remediation, OS navigation model,
+  cache components, and Next.js agent tooling.
 
 ## [0.2.0], 2026-08-22
 
