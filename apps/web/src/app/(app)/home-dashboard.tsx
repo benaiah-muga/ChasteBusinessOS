@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { callApi } from "@/lib/api";
 import { formatMoney, formatMoneyWhole, timeAgo } from "@/lib/format";
-import { Badge } from "@/components/ui";
 import { IconArrowRight, IconSparkle } from "@/components/icons";
 
 /**
- * The home dashboard: a command center answering three questions in order —
- * how is the business doing (financial pulse), what needs me (the queue),
- * what is moving (pipeline, operations, the event ledger).
+ * The home dashboard reads like the cover page of the accounts book:
+ * a deep ledger band answering "how is the business doing", then quiet paper
+ * answering "what needs me" and "what is moving".
  */
 
 interface DashboardPayload {
@@ -123,44 +122,14 @@ export function HomeDashboard({ orgName }: { orgName: string }) {
 
   return (
     <div className="mx-auto max-w-6xl">
-      {/* Masthead: quiet orientation, no confetti */}
-      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div>
-          <p className="figure-label">
-            {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
-          </p>
-          <h1 className="mt-1 text-xl font-semibold tracking-tight text-stone-900">{orgName}</h1>
-        </div>
-        <nav aria-label="Ask your workmate" className="flex flex-wrap items-center gap-2">
-          <span className="hidden items-center gap-1 text-xs text-stone-400 sm:flex">
-            <IconSparkle className="size-3.5" />
-            Ask
-          </span>
-          {ASK_ACTIONS.map((a) => (
-            <button
-              key={a.label}
-              type="button"
-              onClick={() => openChatWith(a.prompt)}
-              className="cursor-pointer rounded-full border border-stone-200 px-3 py-1 text-xs font-medium text-stone-500 transition-colors duration-150 hover:border-maroon-300 hover:text-maroon-900"
-            >
-              {a.label}
-            </button>
-          ))}
-        </nav>
-      </header>
+      <Masthead orgName={orgName} data={data} />
 
       {error && (
         <p className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>
       )}
 
       {!data ? (
-        <div className="mt-8 space-y-6">
-          <div className="h-40 animate-pulse rounded-xl bg-stone-100" />
-          <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-            <div className="h-56 animate-pulse rounded-xl bg-stone-100" />
-            <div className="h-56 animate-pulse rounded-xl bg-stone-100" />
-          </div>
-        </div>
+        <BodySkeleton />
       ) : (
         <>
           {setup && <SetupChecklist items={setup} dismissed={dismissed} onDismiss={dismissItem} />}
@@ -170,6 +139,299 @@ export function HomeDashboard({ orgName }: { orgName: string }) {
     </div>
   );
 }
+
+/* --------------------------------------------------------------- masthead -- */
+
+/**
+ * The band: the one bold surface in the product. Net income set like a
+ * ledger cover figure over fine ruling, with the year's shape drawn beneath.
+ */
+function Masthead({ orgName, data }: { orgName: string; data: DashboardPayload | null }) {
+  const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  const m = data?.money;
+  const positive = !m || m.netIncomeMinor >= 0;
+
+  return (
+    <section
+      aria-label="Financial pulse"
+      className="rise ledger-rules relative overflow-hidden rounded-2xl shadow-[0_12px_40px_-16px_rgb(0_0_0/0.45)]"
+      style={
+        {
+          backgroundColor: "var(--band)",
+          color: "var(--band-ink)",
+          "--rule-color": "rgba(255, 255, 255, 0.055)",
+          "--rise-delay": "0ms",
+        } as React.CSSProperties
+      }
+    >
+      {/* Soft sheen so the ink reads as cloth, not flat paint */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{ background: "radial-gradient(110% 130% at 88% -20%, rgba(255,255,255,0.09), transparent 55%)" }}
+      />
+
+      <div className="relative p-6 sm:p-8 lg:p-10">
+        {/* Orientation line + the workmate's quick handles */}
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <p className="text-[11px] font-semibold tracking-[0.14em] uppercase opacity-60">
+            {today}
+            {orgName && (
+              <>
+                <span aria-hidden="true" className="mx-2 opacity-50">
+                  ·
+                </span>
+                {orgName}
+              </>
+            )}
+          </p>
+          <nav aria-label="Ask your workmate" className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 hidden items-center gap-1.5 text-[11px] font-medium tracking-wide uppercase opacity-50 sm:flex">
+              <IconSparkle className="size-3.5" />
+              Ask
+            </span>
+            {ASK_ACTIONS.map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                onClick={() => openChatWith(a.prompt)}
+                className="cursor-pointer rounded-full border border-white/15 px-3 py-1 text-xs font-medium whitespace-nowrap text-current/80 transition-colors duration-150 hover:border-white/40 hover:bg-white/5 hover:text-current"
+              >
+                {a.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {/* The figure */}
+        <div className="mt-8 flex flex-wrap items-end justify-between gap-x-10 gap-y-6 sm:mt-10">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold tracking-[0.14em] uppercase opacity-60">Net income · to date</p>
+            <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+              {m ? (
+                <p
+                  className={`tnum text-5xl leading-none font-semibold tracking-tight sm:text-6xl ${
+                    positive ? "" : "text-red-300"
+                  }`}
+                >
+                  {formatMoneyWhole(m.netIncomeMinor)}
+                </p>
+              ) : (
+                <span aria-hidden="true" className="inline-block h-11 w-64 animate-pulse rounded-lg bg-white/10 sm:h-13" />
+              )}
+              {m?.balanced != null &&
+                (m.balanced ? (
+                  <span className="badge border border-emerald-300/25 bg-emerald-400/15 text-emerald-200">
+                    books balanced
+                  </span>
+                ) : (
+                  <span className="badge border border-red-300/25 bg-red-400/15 text-red-200">
+                    unbalanced — investigate
+                  </span>
+                ))}
+              {m && data && <MonthDelta trend={data.trend} />}
+            </div>
+
+            <dl className="tnum mt-7 flex flex-wrap gap-x-8 gap-y-3 sm:gap-x-10">
+              <Stat label="Revenue" value={m ? formatMoney(m.revenueMinor) : undefined} />
+              <Stat label="Expenses" value={m ? formatMoney(m.expenseMinor) : undefined} />
+              <Stat label="Cash" value={m ? (m.cashMinor === null ? "—" : formatMoney(m.cashMinor)) : undefined} />
+            </dl>
+          </div>
+        </div>
+
+        {data && data.trend.length > 0 && (
+          <TrendArea data={data.trend} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Stat({ label, value }: { label: string; value?: string }) {
+  return (
+    <div>
+      <dt className="text-[10px] font-semibold tracking-[0.14em] uppercase opacity-50">{label}</dt>
+      <dd className="mt-1 text-sm font-medium opacity-95 sm:text-base">
+        {value ?? <span aria-hidden="true" className="inline-block h-4 w-20 animate-pulse rounded bg-white/10" />}
+      </dd>
+    </div>
+  );
+}
+
+/** Month-over-month direction of net income; shown only when it can be honest. */
+function MonthDelta({ trend }: { trend: DashboardPayload["trend"] }) {
+  const delta = useMemo(() => {
+    if (trend.length < 2) return null;
+    const net = (d: { incomeMinor: number; expenseMinor: number }) => d.incomeMinor - d.expenseMinor;
+    const last = net(trend[trend.length - 1]!);
+    const prev = net(trend[trend.length - 2]!);
+    if (prev === 0) return null;
+    const pct = Math.round(((last - prev) / Math.abs(prev)) * 100);
+    const prevMonth = monthLabel(trend[trend.length - 2]!.month);
+    return { up: last >= prev, pct: Math.abs(pct), prevMonth };
+  }, [trend]);
+
+  if (!delta) return null;
+  return (
+    <span
+      className={`inline-flex translate-y-[-4px] items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium tnum ${
+        delta.up ? "bg-emerald-400/15 text-emerald-200" : "bg-red-400/15 text-red-200"
+      }`}
+    >
+      {delta.up ? "↑" : "↓"} {delta.pct}% vs {delta.prevMonth}
+    </span>
+  );
+}
+
+function monthLabel(month: string): string {
+  const d = new Date(`${month}-01T00:00:00`);
+  return Number.isNaN(d.getTime()) ? month : d.toLocaleString(undefined, { month: "short" });
+}
+
+/* ------------------------------------------------------------------ chart -- */
+
+type Pt = [number, number];
+
+/** Catmull-Rom → cubic bézier: the year's shape as one continuous stroke. */
+function smoothPath(pts: Pt[]): string {
+  if (pts.length < 2) return "";
+  const f = (n: number) => Number(n.toFixed(1));
+  let d = `M ${f(pts[0]![0])} ${f(pts[0]![1])}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i]!;
+    const p1 = pts[i]!;
+    const p2 = pts[i + 1]!;
+    const p3 = pts[i + 2] ?? p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${f(c1x)} ${f(c1y)}, ${f(c2x)} ${f(c2y)}, ${f(p2[0])} ${f(p2[1])}`;
+  }
+  return d;
+}
+
+function TrendArea({ data }: { data: DashboardPayload["trend"] }) {
+  const gradId = useId();
+  const W = 600;
+  const H = 120;
+
+  const n = data.length;
+  const max = Math.max(1, ...data.flatMap((d) => [d.incomeMinor, d.expenseMinor]));
+  const x = (i: number) => (n === 1 ? W / 2 : 6 + (i / (n - 1)) * (W - 12));
+  const y = (v: number) => H - 18 - (v / max) * (H - 44);
+
+  const incomePts = data.map((d, i) => [x(i), y(d.incomeMinor)] as Pt);
+  const expensePts = data.map((d, i) => [x(i), y(d.expenseMinor)] as Pt);
+  const incomeLine = smoothPath(incomePts);
+  const expenseLine = smoothPath(expensePts);
+  const area =
+    incomeLine +
+    ` L ${incomePts[incomePts.length - 1]![0]} ${H} L ${incomePts[0]![0]} ${H} Z`;
+  const last = incomePts[incomePts.length - 1]!;
+
+  return (
+    <figure className="mt-8 sm:mt-9">
+      <div className="relative">
+        <svg
+          role="img"
+          aria-label={`Income vs expenses over the last ${n} month${n === 1 ? "" : "s"}. Latest month: income ${formatMoney(
+            data[n - 1]!.incomeMinor,
+          )}, expenses ${formatMoney(data[n - 1]!.expenseMinor)}.`}
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          className="block h-24 w-full sm:h-28"
+        >
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--band-accent)" stopOpacity="0.30" />
+            <stop offset="100%" stopColor="var(--band-accent)" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+
+        {/* Ledger ruling continues through the chart at quarter height */}
+        {[0.25, 0.5, 0.75].map((t) => (
+          <line
+            key={t}
+            x1="0"
+            x2={W}
+            y1={18 + t * (H - 44)}
+            y2={18 + t * (H - 44)}
+            stroke="rgba(255,255,255,0.07)"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+
+        {area && <path d={area} fill={`url(#${gradId})`} />}
+        {expenseLine && (
+          <path
+            d={expenseLine}
+            fill="none"
+            stroke="rgba(255,255,255,0.38)"
+            strokeWidth="1.5"
+            strokeDasharray="4 4"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {incomeLine && (
+          <path
+            d={incomeLine}
+            fill="none"
+            stroke="var(--band-accent)"
+            strokeWidth="2"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        </svg>
+
+        {/* The live end of the line, positioned in HTML so it stays round */}
+        {n > 1 && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2"
+            style={
+              {
+                left: `${(last[0] / W) * 100}%`,
+                top: `${(last[1] / H) * 100}%`,
+                backgroundColor: "var(--band-accent)",
+                "--tw-ring-color": "var(--band)",
+              } as React.CSSProperties
+            }
+          />
+        )}
+      </div>
+
+      <figcaption className="mt-2.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px]">
+        <span className="flex gap-4 opacity-70">
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden="true" className="h-0.5 w-3.5 rounded-full" style={{ backgroundColor: "var(--band-accent)" }} />
+            Income
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="h-0 w-3.5 border-t-2 border-dashed opacity-70"
+              style={{ borderColor: "rgba(255,255,255,0.6)" }}
+            />
+            Expenses
+          </span>
+        </span>
+        <span className="tnum flex gap-3 opacity-50">
+          {data.slice(0, 9).map((d, i) => (
+            <span key={d.month} className={i > 0 && i < n - 1 ? "hidden sm:inline" : undefined}>
+              {monthLabel(d.month)}
+            </span>
+          ))}
+        </span>
+      </figcaption>
+    </figure>
+  );
+}
+
+/* ------------------------------------------------------------- setup list -- */
 
 /**
  * What is expected of this workspace, computed live: each unfinished step
@@ -187,35 +449,39 @@ function SetupChecklist({
   const pending = items.filter((i) => !i.done && !dismissed.has(i.id));
   if (pending.length === 0) return null;
   return (
-    <section aria-label="Workspace setup" className="mt-6 rounded-xl border border-maroon-200 bg-maroon-50/50 p-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="figure-label">Get set up · {pending.length} left</p>
+    <section
+      aria-label="Workspace setup"
+      className="rise mt-4 rounded-xl border border-stone-200 bg-white px-5 py-4 shadow-xs"
+      style={{ "--rise-delay": "90ms" } as React.CSSProperties}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="figure-label">Get set up</p>
         <span className="text-xs text-stone-500">
-          Each step takes a minute; the workmate can do most of them with you.
+          {pending.length} step{pending.length === 1 ? "" : "s"} left — a minute each, the workmate can help.
         </span>
       </div>
-      <ol className="mt-3 grid gap-x-8 gap-y-3 md:grid-cols-2">
+      <ol className="mt-2 divide-y divide-stone-100">
         {pending.map((item) => (
-          <li key={item.id} className="group flex items-start gap-2.5 text-sm leading-relaxed">
-            <span aria-hidden="true" className="mt-[7px] size-1.5 shrink-0 rounded-full bg-maroon-600" />
+          <li key={item.id} className="group flex items-start gap-3 py-2.5 text-sm leading-relaxed first:pt-1 last:pb-0">
+            <span aria-hidden="true" className="mt-[8px] size-1.5 shrink-0 rounded-full bg-maroon-600" />
             <span className="min-w-0 flex-1">
               <span className="font-medium text-stone-900">{item.title}</span>
               <span className="block text-xs text-stone-500">{item.why}</span>
             </span>
-            <span className="flex shrink-0 items-center gap-1.5 pt-0.5">
+            <span className="flex shrink-0 items-center gap-2 pt-0.5">
               <Link
                 href={item.href}
                 className="inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-maroon-800 hover:underline"
               >
                 Take me there
-                <IconArrowRight className="size-3" />
+                <IconArrowRight className="size-3 transition-transform duration-150 group-hover:translate-x-0.5" />
               </Link>
               <button
                 type="button"
                 aria-label={`Hide "${item.title}"`}
                 title="Hide this step"
                 onClick={() => onDismiss(item.id)}
-                className="cursor-pointer rounded px-1 text-[11px] text-stone-400 transition-colors hover:text-stone-700"
+                className="cursor-pointer rounded px-1 text-[11px] text-stone-300 transition-colors hover:text-stone-700"
               >
                 ✕
               </button>
@@ -227,230 +493,49 @@ function SetupChecklist({
   );
 }
 
-/* ------------------------------------------------------------------ body -- */
+/* ------------------------------------------------------------------- body -- */
+
+function BodySkeleton() {
+  return (
+    <div className="mt-4 space-y-6" aria-hidden="true">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="skeleton h-52 rounded-xl" />
+        <div className="skeleton h-52 rounded-xl" />
+      </div>
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="skeleton h-40 rounded-xl" />
+        <div className="skeleton h-40 rounded-xl" />
+        <div className="skeleton h-40 rounded-xl" />
+      </div>
+    </div>
+  );
+}
 
 function DashboardBody({ data, attentionCount }: { data: DashboardPayload; attentionCount: number }) {
   return (
-    <div className="mt-5">
-      {/* The pulse: open composition, no card walls */}
-      <section aria-label="Financial pulse" className="grid gap-8 lg:grid-cols-[1.6fr_1fr]">
-        <FinancialPulse data={data} />
+    <div className="mt-8">
+      <section aria-label="What needs you and working capital" className="grid gap-x-8 gap-y-8 lg:grid-cols-[minmax(0,1fr)_360px]">
         <NeedsYouQueue data={data} count={attentionCount} />
+        <WorkingCapital data={data} />
       </section>
 
-      {/* What is moving — one screen, three columns, no scrolling to triage */}
       <section
-        aria-label="Working capital, operations, and ledger"
-        className="mt-8 grid gap-x-8 gap-y-6 border-t border-stone-200 pt-5 md:grid-cols-2 lg:grid-cols-3"
+        aria-label="Operations and ledger"
+        className="rise mt-10 grid gap-x-8 gap-y-6 border-t border-stone-200 pt-6 md:grid-cols-2 lg:grid-cols-[1fr_minmax(0,420px)]"
+        style={{ "--rise-delay": "150ms" } as React.CSSProperties}
       >
-        <div>
-          <p className="figure-label mb-3">Working capital</p>
-          <dl className="space-y-2.5 text-sm">
-            <FigureRow
-              label="Receivables outstanding"
-              value={formatMoney(data.workingCapital.arOutstandingMinor)}
-              note={data.workingCapital.overdueCount > 0 ? `${data.workingCapital.overdueCount} overdue` : undefined}
-              tone={data.workingCapital.overdueCount > 0 ? "warn" : "default"}
-            />
-            <FigureRow label="Payables due" value={formatMoney(data.workingCapital.apOutstandingMinor)} />
-            <FigureRow
-              label={`Weighted pipeline · ${data.pipeline.openCount} open`}
-              value={formatMoneyWhole(data.pipeline.weightedForecastMinor)}
-            />
-          </dl>
-          <FunnelBar stages={data.pipeline.stages} />
-        </div>
-
-        <div>
-          <p className="figure-label mb-3">Operations</p>
-          <ul className="space-y-2 text-sm text-stone-600">
-            {data.ops.posOpen && (
-              <li className="flex items-center gap-2">
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-500" />
-                Register “{data.ops.posOpen.register}” is open
-              </li>
-            )}
-            {data.ops.lowStock.length > 0 && (
-              <li className="flex items-center gap-2">
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-500" />
-                {data.ops.lowStock.length} item{data.ops.lowStock.length === 1 ? "" : "s"} at reorder point
-              </li>
-            )}
-            {data.ops.docsAwaitingCoding > 0 && (
-              <li className="flex items-center gap-2">
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-sky-500" />
-                {data.ops.docsAwaitingCoding} document{data.ops.docsAwaitingCoding === 1 ? "" : "s"} awaiting coding
-              </li>
-            )}
-            {data.ops.headcount > 0 && (
-              <li className="flex items-center gap-2">
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-stone-300" />
-                {data.ops.headcount} on the team
-                {data.ops.pendingLeave > 0 ? `, ${data.ops.pendingLeave} leave pending` : ""}
-              </li>
-            )}
-            {!data.ops.posOpen &&
-              data.ops.lowStock.length === 0 &&
-              data.ops.docsAwaitingCoding === 0 &&
-              data.ops.headcount === 0 && <li className="text-stone-400">Quiet across the floor.</li>}
-          </ul>
-        </div>
-
-        <ActivityFeed activity={data.activity.slice(0, 5)} embedded />
+        <Operations data={data} />
+        <ActivityFeed activity={data.activity.slice(0, 6)} embedded />
       </section>
     </div>
   );
 }
 
-function FinancialPulse({ data }: { data: DashboardPayload }) {
-  const m = data.money;
-  const positive = m.netIncomeMinor >= 0;
-  return (
-    <div>
-      <p className="figure-label mb-3">Net income · to date</p>
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
-        <p
-          className={`tnum text-[44px] leading-none font-semibold tracking-tight ${
-            positive ? "text-stone-900" : "text-red-700"
-          }`}
-        >
-          {formatMoney(m.netIncomeMinor)}
-        </p>
-        {m.balanced !== null &&
-          (m.balanced ? (
-            <Badge tone="green">books balanced</Badge>
-          ) : (
-            <Badge tone="red">unbalanced — investigate</Badge>
-          ))}
-      </div>
-      <p className="tnum mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-stone-500">
-        <span>
-          Revenue <strong className="font-medium text-stone-800">{formatMoney(m.revenueMinor)}</strong>
-        </span>
-        <span>
-          Expenses <strong className="font-medium text-stone-800">{formatMoney(m.expenseMinor)}</strong>
-        </span>
-        <span>
-          Cash{" "}
-          <strong className="font-medium text-stone-800">
-            {m.cashMinor === null ? "—" : formatMoney(m.cashMinor)}
-          </strong>
-        </span>
-      </p>
-      <TrendChart data={data.trend} />
-    </div>
-  );
-}
-
-function FigureRow({
-  label,
-  value,
-  note,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  note?: string;
-  tone?: "default" | "warn";
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-stone-100 pb-2 last:border-0 last:pb-0">
-      <dt className="text-stone-500">{label}</dt>
-      <dd className="flex items-baseline gap-2">
-        {note && (
-          <span className={tone === "warn" ? "text-xs font-medium text-amber-700" : "text-xs text-stone-400"}>{note}</span>
-        )}
-        <span className="tnum font-medium text-stone-900">{value}</span>
-      </dd>
-    </div>
-  );
-}
-
-function TrendChart({ data }: { data: DashboardPayload["trend"] }) {
-  if (data.length === 0) return null;
-  const max = Math.max(1, ...data.flatMap((d) => [d.incomeMinor, d.expenseMinor]));
-  return (
-    <div className="mt-5">
-      <div className="flex h-28 items-end gap-3 border-b border-stone-200 pb-px">
-        {data.map((d) => (
-          <div key={d.month} className="flex h-full flex-1 items-end justify-center">
-            <div
-              role="img"
-              aria-label={`${d.month}: income ${formatMoney(d.incomeMinor)}, expenses ${formatMoney(d.expenseMinor)}`}
-              className="flex h-full w-full max-w-12 items-end justify-center gap-1"
-            >
-              <div
-                className="w-1/3 rounded-t-[3px] bg-maroon-600/90 transition-colors duration-150 hover:bg-maroon-500"
-                style={{ height: `${Math.max(1.5, (d.incomeMinor / max) * 100)}%` }}
-                title={`Income ${formatMoney(d.incomeMinor)}`}
-              />
-              <div
-                className="w-1/3 rounded-t-[3px] bg-stone-200 transition-colors duration-150 hover:bg-stone-300"
-                style={{ height: `${Math.max(1.5, (d.expenseMinor / max) * 100)}%` }}
-                title={`Expenses ${formatMoney(d.expenseMinor)}`}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-2 flex items-center justify-between text-[11px] text-stone-400">
-        <span className="flex gap-4">
-          <span className="flex items-center gap-1.5">
-            <span aria-hidden="true" className="size-2 rounded-sm bg-maroon-600/90" /> Income
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span aria-hidden="true" className="size-2 rounded-sm bg-stone-200 ring-1 ring-stone-300" /> Expenses
-          </span>
-        </span>
-        <span className="tnum">{data.map((d) => d.month.slice(5)).join(" · ")}</span>
-      </div>
-    </div>
-  );
-}
-
-function FunnelBar({ stages }: { stages: DashboardPayload["pipeline"]["stages"] }) {
-  const total = Math.max(1, stages.reduce((s, x) => s + x.count, 0));
-  const tones: Record<string, string> = {
-    lead: "bg-stone-300",
-    qualified: "bg-maroon-300",
-    proposal: "bg-maroon-500",
-    negotiation: "bg-maroon-700",
-    won: "bg-emerald-600",
-    lost: "bg-red-300",
-  };
-  return (
-    <div className="mt-3">
-      <div className="flex h-2.5 overflow-hidden rounded-full">
-        {stages.map(
-          (s) =>
-            s.count > 0 && (
-              <div
-                key={s.stage}
-                className={`${tones[s.stage]} h-full`}
-                style={{ width: `${(s.count / total) * 100}%` }}
-                title={`${s.stage}: ${s.count}`}
-              />
-            ),
-        )}
-      </div>
-      <ul className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-stone-500">
-        {stages.map((s) => (
-          <li key={s.stage} className="flex items-center justify-between gap-2 capitalize">
-            <span className="flex items-center gap-1.5">
-              <span aria-hidden="true" className={`size-2 rounded-full ${tones[s.stage]}`} />
-              {s.stage}
-            </span>
-            <span className="tnum">{s.count}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+/* ----------------------------------------------------------- needs you ----- */
 
 /**
  * The queue: every item is one sentence ending in a verb. Severity is a dot,
- * not a siren; the point is triage, not alarm.
+ * not a siren; the point is triage, not alarm. Whole rows are links.
  */
 function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number }) {
   type Item = { key: string; severity: "high" | "med" | "low"; text: React.ReactNode; href: string; cta: string };
@@ -529,16 +614,22 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
   };
 
   return (
-    <aside aria-label="Needs you">
-      <p className="figure-label mb-3">
-        Needs you
-        {count > 0 && (
-          <span className="ml-2 rounded-full bg-maroon-100 px-2 py-0.5 text-[11px] text-maroon-800">{count}</span>
-        )}
-      </p>
+    <section aria-label="Needs you" className="rise" style={{ "--rise-delay": "60ms" } as React.CSSProperties}>
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <p className="figure-label">
+          Needs you
+          {count > 0 && (
+            <span className="tnum ml-2 inline-flex -translate-y-px items-center rounded-full bg-maroon-100 px-2 py-0.5 text-[11px] text-maroon-800">
+              {count}
+            </span>
+          )}
+        </p>
+        {items.length === 0 && <span className="text-xs text-stone-400">All clear</span>}
+      </div>
+
       {items.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-stone-200 px-4 py-6">
-          <IconSparkle className="size-4 text-stone-300" />
+        <div className="rounded-xl border border-dashed border-stone-200 bg-white/50 px-5 py-8 text-center">
+          <IconSparkle className="mx-auto size-4 text-stone-300" />
           <p className="mt-2 text-sm leading-relaxed text-stone-500">
             Nothing needs you right now.
             <br />
@@ -546,27 +637,166 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
           </p>
         </div>
       ) : (
-        <ol className="space-y-3">
+        <ol className="divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xs">
           {items.map((item) => (
-            <li key={item.key} className="flex items-start gap-2.5 text-sm leading-relaxed">
-              <span aria-hidden="true" className={`mt-[7px] size-1.5 shrink-0 rounded-full ${dot[item.severity]}`} />
-              <span className="min-w-0 flex-1 text-stone-700">
-                {item.text}
-                <Link
-                  href={item.href}
-                  className="ml-1.5 inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-maroon-800 hover:underline"
-                >
+            <li key={item.key}>
+              <Link href={item.href} className="group flex items-center gap-3 px-4 py-3.5 transition-colors duration-100 hover:bg-stone-50">
+                <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${dot[item.severity]}`} />
+                <span className="min-w-0 flex-1 text-sm leading-relaxed text-stone-700">{item.text}</span>
+                <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-medium whitespace-nowrap text-maroon-800">
                   {item.cta}
-                  <IconArrowRight className="size-3" />
-                </Link>
-              </span>
+                  <IconArrowRight className="size-3 transition-transform duration-150 group-hover:translate-x-0.5" />
+                </span>
+              </Link>
             </li>
           ))}
         </ol>
       )}
+    </section>
+  );
+}
+
+/* ------------------------------------------------------ working capital ---- */
+
+function WorkingCapital({ data }: { data: DashboardPayload }) {
+  return (
+    <aside aria-label="Working capital" className="rise" style={{ "--rise-delay": "100ms" } as React.CSSProperties}>
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <p className="figure-label">Working capital</p>
+        <Link href="/accounting" className="text-xs font-medium text-maroon-800 hover:underline">
+          Open books →
+        </Link>
+      </div>
+
+      <dl className="rounded-xl border border-stone-200 bg-white px-4 py-2 shadow-xs">
+        <FigureRow
+          label="Receivables outstanding"
+          value={formatMoney(data.workingCapital.arOutstandingMinor)}
+          note={data.workingCapital.overdueCount > 0 ? `${data.workingCapital.overdueCount} overdue` : undefined}
+          tone={data.workingCapital.overdueCount > 0 ? "warn" : "default"}
+        />
+        <FigureRow label="Payables due" value={formatMoney(data.workingCapital.apOutstandingMinor)} />
+        <FigureRow
+          label={`Weighted pipeline · ${data.pipeline.openCount} open`}
+          value={formatMoneyWhole(data.pipeline.weightedForecastMinor)}
+        />
+      </dl>
+
+      <FunnelBar stages={data.pipeline.stages} />
     </aside>
   );
 }
+
+function FigureRow({
+  label,
+  value,
+  note,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  note?: string;
+  tone?: "default" | "warn";
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-stone-100 py-2.5 last:border-0">
+      <dt className="text-[13px] text-stone-500">{label}</dt>
+      <dd className="flex items-baseline gap-2">
+        {note && (
+          <span className={tone === "warn" ? "text-xs font-medium text-amber-700" : "text-xs text-stone-400"}>{note}</span>
+        )}
+        <span className="tnum text-sm font-medium text-stone-900">{value}</span>
+      </dd>
+    </div>
+  );
+}
+
+function FunnelBar({ stages }: { stages: DashboardPayload["pipeline"]["stages"] }) {
+  const total = Math.max(1, stages.reduce((s, x) => s + x.count, 0));
+  const tones: Record<string, string> = {
+    lead: "bg-stone-300",
+    qualified: "bg-maroon-300",
+    proposal: "bg-maroon-500",
+    negotiation: "bg-maroon-700",
+    won: "bg-emerald-600",
+    lost: "bg-red-300",
+  };
+  return (
+    <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
+      <p className="figure-label mb-3">Pipeline by stage</p>
+      <div className="flex h-2.5 overflow-hidden rounded-full bg-stone-100">
+        {stages.map(
+          (s) =>
+            s.count > 0 && (
+              <div
+                key={s.stage}
+                className={`${tones[s.stage]} h-full transition-[width] duration-500`}
+                style={{ width: `${(s.count / total) * 100}%` }}
+                title={`${s.stage}: ${s.count}`}
+              />
+            ),
+        )}
+      </div>
+      <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-stone-500">
+        {stages.map((s) => (
+          <li key={s.stage} className="flex items-center justify-between gap-2 capitalize">
+            <span className="flex items-center gap-1.5">
+              <span aria-hidden="true" className={`size-2 rounded-full ${tones[s.stage]}`} />
+              {s.stage}
+            </span>
+            <span className="tnum">{s.count}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ operations --- */
+
+function Operations({ data }: { data: DashboardPayload }) {
+  return (
+    <div aria-label="Operations">
+      <p className="figure-label mb-3">Operations</p>
+      <ul className="space-y-2.5 text-sm text-stone-600">
+        {data.ops.posOpen && (
+          <OpRow tone="bg-emerald-500">Register “{data.ops.posOpen.register}” is open</OpRow>
+        )}
+        {data.ops.lowStock.length > 0 && (
+          <OpRow tone="bg-amber-500">
+            {data.ops.lowStock.length} item{data.ops.lowStock.length === 1 ? "" : "s"} at reorder point
+          </OpRow>
+        )}
+        {data.ops.docsAwaitingCoding > 0 && (
+          <OpRow tone="bg-sky-500">
+            {data.ops.docsAwaitingCoding} document{data.ops.docsAwaitingCoding === 1 ? "" : "s"} awaiting coding
+          </OpRow>
+        )}
+        {data.ops.headcount > 0 && (
+          <OpRow tone="bg-stone-300">
+            {data.ops.headcount} on the team
+            {data.ops.pendingLeave > 0 ? `, ${data.ops.pendingLeave} leave pending` : ""}
+          </OpRow>
+        )}
+        {!data.ops.posOpen &&
+          data.ops.lowStock.length === 0 &&
+          data.ops.docsAwaitingCoding === 0 &&
+          data.ops.headcount === 0 && <li className="text-stone-400">Quiet across the floor.</li>}
+      </ul>
+    </div>
+  );
+}
+
+function OpRow({ tone, children }: { tone: string; children: React.ReactNode }) {
+  return (
+    <li className="flex items-center gap-2.5">
+      <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${tone}`} />
+      {children}
+    </li>
+  );
+}
+
+/* --------------------------------------------------------------- ledger ---- */
 
 function ActivityFeed({ activity, embedded = false }: { activity: DashboardPayload["activity"]; embedded?: boolean }) {
   return (
@@ -576,7 +806,7 @@ function ActivityFeed({ activity, embedded = false }: { activity: DashboardPaylo
     >
       <div className="flex items-baseline justify-between gap-3">
         <p className="figure-label">Ledger · recent</p>
-        <Link href="/ledger" className="text-[13px] font-medium text-maroon-800 hover:underline">
+        <Link href="/ledger" className="text-xs font-medium text-maroon-800 hover:underline">
           View all →
         </Link>
       </div>
@@ -585,10 +815,11 @@ function ActivityFeed({ activity, embedded = false }: { activity: DashboardPaylo
       ) : (
         <ol className="mt-3 space-y-0">
           {activity.map((e, i) => (
-            <li key={e.seq} className="relative flex items-center gap-2.5 py-1.5 pl-4 text-[13px]">
+            <li key={e.seq} className="relative flex items-center gap-2.5 py-2 pl-4 text-[13px]">
               {/* Timeline spine */}
               <span
                 aria-hidden="true"
+                title={e.actorType}
                 className={`absolute left-0 top-1/2 size-1.5 -translate-y-1/2 rounded-full ${
                   e.actorType === "agent" ? "bg-violet-500" : e.actorType === "human" ? "bg-sky-500" : "bg-stone-300"
                 }`}
@@ -597,8 +828,10 @@ function ActivityFeed({ activity, embedded = false }: { activity: DashboardPaylo
                 <span aria-hidden="true" className="absolute left-[2.5px] top-1/2 h-full w-px bg-stone-100" />
               )}
               <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-stone-600">{e.capabilityId ?? e.kind}</span>
-              <span className="shrink-0 text-[11px] text-stone-400">{e.actorType === "agent" ? "agent" : ""}</span>
-              <time className="shrink-0 text-[11px] text-stone-400">{timeAgo(e.occurredAt)}</time>
+              {e.actorType === "agent" && (
+                <span className="badge badge-violet hidden shrink-0 text-[10px] sm:inline-flex">agent</span>
+              )}
+              <time className="tnum shrink-0 text-[11px] text-stone-400">{timeAgo(e.occurredAt)}</time>
             </li>
           ))}
         </ol>

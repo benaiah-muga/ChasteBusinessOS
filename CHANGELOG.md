@@ -11,6 +11,17 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+- **Dashboard redesign ("the bookkeeper's cover page")**: the home screen now
+  opens with a deep ledger band — net income set as a cover figure over fine
+  ruling, revenue/expenses/cash inline, and the income-vs-expenses trend drawn
+  as a smooth SVG area chart inside the band (theme-aware via new `--band`
+  tokens, so every theme and dark mode gets its own inked hero). Below it the
+  paper body is re-set: setup steps as a quiet card, the needs-you queue as
+  whole-row links, working capital and pipeline in bordered ledgers, and a
+  staggered entrance that respects reduced motion. The sidebar rail and apps
+  catalogue are untouched; this composition is the reference for module pages.
+
 ### Added
 - **Guided setup ("what is expected of me")**: `GET /api/setup` computes a
   live checklist per organization — products, customers, vendors, team,
