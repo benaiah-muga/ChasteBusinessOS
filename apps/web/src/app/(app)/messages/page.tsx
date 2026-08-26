@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
+import { Badge, Button, EmptyState, LoadingPage } from "@/components/ui";
 import { IconAlertTriangle, IconBot, IconChevronLeft, IconHash, IconPlus, IconSend, IconUser, IconX } from "@/components/icons";
 import { cn, timeAgo } from "@/lib/format";
 import { callApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
 
 interface Conversation {
   id: string;
@@ -193,11 +194,10 @@ export default function MessagesPage() {
   if (!__enabled) return <ModuleDisabled label="Messages" />;
 
   return (
-    <div>
-      <PageHeader
-        title="Messages"
-        description="Team channels and DMs. Conversations with Chaste enabled let your AI workmate read the thread and act when colleagues ask."
-      />
+    <AppFrame
+      appId="messaging"
+      description="Team channels and DMs. Conversations with Chaste enabled let your AI workmate read the thread and act when colleagues ask."
+    >
 
       {loadError && (
         <EmptyState
@@ -444,6 +444,6 @@ export default function MessagesPage() {
           )}
         </section>
       </div>
-    </div>
+    </AppFrame>
   );
 }

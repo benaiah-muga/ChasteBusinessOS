@@ -9,16 +9,16 @@ import {
   CardTitle,
   EmptyState,
   LoadingPage,
-  PageHeader,
-  SegmentedControl,
+  StatCard,
   type ActionNoticeState,
 } from "@/components/ui";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, timeAgo } from "@/lib/format";
 import { IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
 
-type Tab = "requests" | "orders" | "bills" | "vendors";
+type Tab = "overview" | "requests" | "orders" | "bills" | "vendors";
 
 interface PoLine {
   lineNumber: number;
@@ -96,7 +96,7 @@ export default function PurchasingPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("requests");
+  const [tab, setTab] = useState<Tab>("overview");
 
   const [vendorForm, setVendorForm] = useState({ name: "", email: "" });
   const [poForm, setPoForm] = useState({
@@ -161,27 +161,28 @@ export default function PurchasingPage() {
   const vendors = data.vendors ?? [];
   const orders = data.orders ?? [];
   const bills = data.bills ?? [];
+  const requests = data.requests ?? [];
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Purchasing (Procurement)"
-        description="Vendors, purchase orders, receipts, bills, and payments — with three-way matching"
-        actions={
-          <SegmentedControl
-            ariaLabel="Purchasing sections"
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: "requests", label: "Requests & RFQs" },
-              { value: "orders", label: "Orders" },
-              { value: "bills", label: "Bills & payments" },
-              { value: "vendors", label: "Vendors" },
-            ]}
-          />
-        }
-      />
+    <AppFrame
+      appId="purchasing"
+      description="Vendors, purchase orders, receipts, bills, and payments — with three-way matching"
+      persistKey="purchasing"
+      tabs={[
+        { id: "overview", label: "Overview" },
+        { id: "requests", label: "Requests & RFQs", count: requests.filter((r) => r.status === "pending_review").length || undefined },
+        { id: "orders", label: "Orders", count: orders.filter((o) => o.status === "approved").length || undefined },
+        { id: "bills", label: "Bills & payments" },
+        { id: "vendors", label: "Vendors", count: vendors.length || undefined },
+      ]}
+      activeTab={tab}
+      onTabChange={(id) => setTab(id as Tab)}
+    >
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
+
+      {tab === "overview" && (
+        <PurchasingOverview data={data} goTo={(t) => setTab(t)} />
+      )}
 
       {tab === "requests" && (
         <>
@@ -920,6 +921,108 @@ export default function PurchasingPage() {
           </Card>
         </>
       )}
+    </AppFrame>
+  );
+}
+
+/* -------------------------------------------------------------- overview --- */
+
+function PurchasingOverview({ data, goTo }: { data: Payload; goTo: (tab: Tab) => void }) {
+  const orders = data.orders ?? [];
+  const bills = data.bills ?? [];
+  const requests = data.requests ?? [];
+  const vendors = data.vendors ?? [];
+
+  const openOrders = orders.filter((o) => o.status === "approved");
+  const openValue = openOrders.reduce((s, o) => s + o.orderedMinor, 0);
+  const pendingRequests = requests.filter((r) => r.status === "pending_review");
+  const outstanding = data.apAging?.buckets?.totalOutstanding ?? 0;
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const spendThisMonth = bills
+    .filter((b) => new Date(b.createdAt).getTime() >= monthStart.getTime())
+    .reduce((s, b) => s + b.totalMinor, 0);
+  const dueBills = bills.filter((b) => b.dueMinor > 0);
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <StatCard label="Open POs" value={openOrders.length} sub={openValue > 0 ? formatMoney(openValue) : undefined} />
+        <StatCard
+          label="Requests pending"
+          value={pendingRequests.length}
+          tone={pendingRequests.length > 0 ? "warn" : "default"}
+        />
+        <StatCard label="Spend this month" value={formatMoney(spendThisMonth)} />
+        <StatCard label="Payables outstanding" value={formatMoney(outstanding)} />
+        <StatCard label="Vendors" value={vendors.length} />
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardTitle
+            right={
+              pendingRequests.length > 0 ? (
+                <Button tone="ghost" onClick={() => goTo("requests")}>
+                  Review requests →
+                </Button>
+              ) : undefined
+            }
+          >
+            Decisions waiting on you
+          </CardTitle>
+          {pendingRequests.length === 0 ? (
+            <EmptyState icon={<IconListTree />} title="No requests pending" hint="Purchase requests land here for review." />
+          ) : (
+            <ul className="divide-y text-sm">
+              {pendingRequests.slice(0, 5).map((r) => (
+                <li key={r.id} className="flex items-center justify-between gap-3 py-2">
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{r.title}</span>
+                    <span className="text-xs opacity-50">
+                      raised {timeAgo(r.createdAt)}
+                      {r.estimatedAmountMinor ? ` · est. ${formatMoney(r.estimatedAmountMinor)}` : ""}
+                    </span>
+                  </span>
+                  <Badge tone="amber">pending</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card>
+          <CardTitle
+            right={
+              dueBills.length > 0 ? (
+                <Button tone="ghost" onClick={() => goTo("bills")}>
+                  Bills & payments →
+                </Button>
+              ) : undefined
+            }
+          >
+            Bills to pay
+          </CardTitle>
+          {dueBills.length === 0 ? (
+            <p className="text-sm opacity-60">Nothing due — vendors are current.</p>
+          ) : (
+            <ul className="divide-y text-sm">
+              {dueBills.slice(0, 5).map((b) => (
+                <li key={b.number} className="flex items-center justify-between gap-3 py-2">
+                  <span className="min-w-0">
+                    <span className="block truncate">
+                      Bill #{b.number} · {b.vendorName}
+                    </span>
+                    <span className="text-xs opacity-50">raised {timeAgo(b.createdAt)}</span>
+                  </span>
+                  <span className="tnum shrink-0 font-medium">{formatMoney(b.dueMinor)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

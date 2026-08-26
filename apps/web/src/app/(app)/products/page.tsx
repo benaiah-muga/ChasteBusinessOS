@@ -139,6 +139,7 @@ export default function ProductsPage() {
       ]}
       activeTab={tab}
       onTabChange={(id) => setTab(id as Tab)}
+      persistKey="products"
     >
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
 

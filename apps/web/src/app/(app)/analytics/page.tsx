@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ActionNotice, type ActionNoticeState, Button, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
+import { ActionNotice, type ActionNoticeState, Button, EmptyState, LoadingPage } from "@/components/ui";
 import { IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
 
 interface DatasetInfo {
   id: string;
@@ -125,11 +126,10 @@ export default function AnalyticsPage() {
   const allColsOf = (datasetId: string) => previews[datasetId]?.columns ?? [];
 
   return (
-    <div>
-      <PageHeader
-        title="Analytics"
-        description="Compose governed datasets into a report with charts and exact numbers. Your workmate can build the same reports from chat."
-      />
+    <AppFrame
+      appId="analytics"
+      description="Compose governed datasets into a report with charts and exact numbers. Your workmate can build the same reports from chat."
+    >
 
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
 
@@ -301,6 +301,6 @@ export default function AnalyticsPage() {
           )}
         </>
       )}
-    </div>
+    </AppFrame>
   );
 }

@@ -10,8 +10,8 @@ import {
   EmptyState,
   LoadingPage,
   ActionNotice,
+  StatCard,
   type ActionNoticeState,
-  PageHeader,
   SegmentedControl,
 } from "@/components/ui";
 import { IconCard, IconCash, IconLock, IconPlus, IconTrash } from "@/components/icons";
@@ -19,6 +19,9 @@ import { cn, formatMoney, statusTone, timeAgo, toMinor } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
+
+type Tab = "overview" | "sell" | "sessions";
 
 interface PosSession {
   id: string;
@@ -49,6 +52,7 @@ export default function PosPage() {
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const [closeConfirm, setCloseConfirm] = useState(false);
+  const [tab, setTab] = useState<Tab>("overview");
 
   const openSession = sessions?.find((s) => s.status === "open") ?? null;
 
@@ -109,44 +113,130 @@ export default function PosPage() {
 
   if (!__enabled) return <ModuleDisabled label="Point of sale" />;
 
-  return (
-    <div>
-      <PageHeader
-        title="Point of sale"
-        description="Sales post instantly to the ledger as one balanced entry. Closing counts the drawer, variances are recorded, never smoothed over."
-      />
+  const openSessions = sessions.filter((s) => s.status === "open");
+  const varianceSessions = sessions.filter((s) => s.varianceMinor !== null && s.varianceMinor !== 0);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const closedToday = sessions.filter(
+    (s) => s.closedAt && new Date(s.closedAt).getTime() >= todayStart.getTime(),
+  );
 
+  return (
+    <AppFrame
+      appId="pos"
+      description="Sales post instantly to the ledger as one balanced entry. Closing counts the drawer, variances are recorded, never smoothed over."
+      persistKey="pos"
+      tabs={[
+        { id: "overview", label: "Overview" },
+        { id: "sell", label: openSession ? "Sell · register open" : "Sell" },
+        { id: "sessions", label: "Sessions", count: sessions.length || undefined },
+      ]}
+      activeTab={tab}
+      onTabChange={(id) => setTab(id as Tab)}
+    >
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
 
-      {!openSession && (
-        <Card className="max-w-md">
-          <CardTitle>Open the register</CardTitle>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label htmlFor="float" className="label">
-                Opening float
-              </label>
-              <input
-                id="float"
-                value={float}
-                onChange={(e) => setFloat(e.target.value)}
-                inputMode="decimal"
-                placeholder="100.00"
-                className="input"
-              />
-            </div>
-            <Button
-              className="mt-[22px]"
-              loading={busy}
-              onClick={() => post({ action: "open", openingFloatMinor: toMinor(float) }, "Open session")}
-            >
-              Open register
-            </Button>
+      {tab === "overview" && (
+        <div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard
+              label="Register"
+              value={openSession ? openSession.register : "closed"}
+              sub={openSession ? `open since ${timeAgo(openSession.openedAt)}` : "no session running"}
+              tone={openSession ? "success" : "default"}
+            />
+            <StatCard label="Expected in drawer" value={openSession ? formatMoney(expectedCash) : "—"} />
+            <StatCard
+              label="Closed today"
+              value={closedToday.length}
+              sub={varianceSessions.length > 0 ? `${varianceSessions.length} variance flag` : undefined}
+            />
+            <StatCard
+              label="Variance flags"
+              value={varianceSessions.length}
+              tone={varianceSessions.length > 0 ? "warn" : "default"}
+            />
           </div>
-        </Card>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardTitle>The floor right now</CardTitle>
+              {openSession ? (
+                <ul className="space-y-2 text-sm">
+                  <li className="flex items-center gap-2">
+                    <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-500" />
+                    “{openSession.register}” is open — float {formatMoney(openSession.openingFloatMinor)}
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <span aria-hidden="true" className="size-1.5 rounded-full bg-stone-300" />
+                    {openSessions.length > 1 ? `${openSessions.length} registers open` : "One register running"}
+                  </li>
+                </ul>
+              ) : (
+                <p className="text-sm opacity-60">No register is open. Open one from the Sell tab to start ringing sales.</p>
+              )}
+              <div className="mt-4 flex gap-2">
+                <Button onClick={() => setTab("sell")}>{openSession ? "Ring a sale" : "Open register"}</Button>
+                <Button tone="ghost" onClick={() => setTab("sessions")}>
+                  Session history
+                </Button>
+              </div>
+            </Card>
+
+            <Card>
+              <CardTitle>Watch list</CardTitle>
+              {varianceSessions.length === 0 ? (
+                <p className="text-sm opacity-60">No drawer variances on record. Counts have matched expected cash.</p>
+              ) : (
+                <ul className="divide-y text-sm">
+                  {varianceSessions.slice(0, 4).map((s) => (
+                    <li key={s.id} className="flex items-center justify-between gap-2 py-2">
+                      <span>
+                        {s.register} · closed {timeAgo(s.closedAt!)}
+                      </span>
+                      <span className="tnum font-medium text-red-700">{formatMoney(s.varianceMinor!)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+        </div>
       )}
 
-      {openSession && (
+      {tab === "sell" && (
+        <div>
+          {!openSession && (
+            <Card className="max-w-md">
+              <CardTitle>Open the register</CardTitle>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label htmlFor="float" className="label">
+                    Opening float
+                  </label>
+                  <input
+                    id="float"
+                    value={float}
+                    onChange={(e) => setFloat(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="100.00"
+                    className="input"
+                  />
+                </div>
+                <Button
+                  className="mt-[22px]"
+                  loading={busy}
+                  onClick={() => post({ action: "open", openingFloatMinor: toMinor(float) }, "Open session")}
+                >
+                  Open register
+                </Button>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {tab === "sell" && openSession && (
         <div className="grid items-start gap-4 lg:grid-cols-[1fr_380px]">
           {/* Sale builder */}
           <Card>
@@ -274,47 +364,46 @@ export default function PosPage() {
         </div>
       )}
 
-      {sessions.length > 0 && (
-        <section className="mt-8">
-          <h2 className="section-title mb-3">Register history</h2>
-          <div className="table-shell">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Register</th>
-                  <th>Status</th>
-                  <th>Opened</th>
-                  <th className="text-right">Expected</th>
-                  <th className="text-right">Counted</th>
-                  <th className="text-right">Variance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sessions.map((s) => (
-                  <tr key={s.id} className={s.varianceMinor !== null && s.varianceMinor !== 0 ? "bg-red-50/50" : undefined}>
-                    <td className="font-medium">{s.register}</td>
-                    <td>
-                      <Badge tone={statusTone(s.status)}>{s.status}</Badge>
-                    </td>
-                    <td className="text-xs whitespace-nowrap text-stone-500" title={new Date(s.openedAt).toLocaleString()}>
-                      {timeAgo(s.openedAt)}
-                    </td>
-                    <td className="num">{s.expectedCashMinor !== null ? formatMoney(s.expectedCashMinor) : "-"}</td>
-                    <td className="num">{s.countedCashMinor !== null ? formatMoney(s.countedCashMinor) : "-"}</td>
-                    <td className={cn("num", s.varianceMinor ? "font-semibold text-red-700" : "")}>
-                      {s.varianceMinor !== null ? formatMoney(s.varianceMinor) : "-"}
-                    </td>
+      {tab === "sessions" &&
+        (sessions.length > 0 ? (
+          <section>
+            <h2 className="section-title mb-3">Register history</h2>
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Register</th>
+                    <th>Status</th>
+                    <th>Opened</th>
+                    <th className="text-right">Expected</th>
+                    <th className="text-right">Counted</th>
+                    <th className="text-right">Variance</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      {sessions.length === 0 && !openSession && (
-        <EmptyState icon={<IconCash />} title="No register sessions yet" hint="Open a register above to start ringing sales." />
-      )}
+                </thead>
+                <tbody>
+                  {sessions.map((s) => (
+                    <tr key={s.id} className={s.varianceMinor !== null && s.varianceMinor !== 0 ? "bg-red-50/50" : undefined}>
+                      <td className="font-medium">{s.register}</td>
+                      <td>
+                        <Badge tone={statusTone(s.status)}>{s.status}</Badge>
+                      </td>
+                      <td className="text-xs whitespace-nowrap text-stone-500" title={new Date(s.openedAt).toLocaleString()}>
+                        {timeAgo(s.openedAt)}
+                      </td>
+                      <td className="num">{s.expectedCashMinor !== null ? formatMoney(s.expectedCashMinor) : "-"}</td>
+                      <td className="num">{s.countedCashMinor !== null ? formatMoney(s.countedCashMinor) : "-"}</td>
+                      <td className={cn("num", s.varianceMinor ? "font-semibold text-red-700" : "")}>
+                        {s.varianceMinor !== null ? formatMoney(s.varianceMinor) : "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : (
+          <EmptyState icon={<IconCash />} title="No register sessions yet" hint="Open a register from the Sell tab to start ringing sales." />
+        ))}
 
       <ConfirmDialog
         open={closeConfirm}
@@ -341,6 +430,6 @@ export default function PosPage() {
         confirmLabel="Close & reconcile"
         busy={busy}
       />
-    </div>
+    </AppFrame>
   );
 }

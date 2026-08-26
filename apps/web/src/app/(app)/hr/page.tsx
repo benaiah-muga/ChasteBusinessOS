@@ -27,15 +27,7 @@ import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
 
-const TABS = [
-  { id: "overview", label: "Overview" },
-  { id: "people", label: "People" },
-  { id: "leave", label: "Leave" },
-  { id: "time", label: "Time" },
-  { id: "payroll", label: "Payroll" },
-] as const;
-
-type TabId = (typeof TABS)[number]["id"];
+type TabId = "overview" | "people" | "leave" | "time" | "payroll";
 
 interface Employee {
   id: string;
@@ -329,9 +321,16 @@ export default function HrPage() {
     <AppFrame
       appId="hr"
       description="Hire people, decide leave and timesheets, and run payroll — drafts must be confirmed before money moves."
-      tabs={TABS.map((t) => ({ id: t.id, label: t.label }))}
+      tabs={[
+        { id: "overview", label: "Overview" },
+        { id: "people", label: "People", count: activeStaff.length || undefined },
+        { id: "leave", label: "Leave", count: pendingLeave.length || undefined },
+        { id: "time", label: "Time", count: time.rows.filter((r) => r.pendingMinutes > 0).length || undefined },
+        { id: "payroll", label: "Payroll", count: runs.filter((r) => r.status === "draft").length || undefined },
+      ]}
       activeTab={tab}
       onTabChange={changeTab}
+      persistKey="hr"
     >
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
 

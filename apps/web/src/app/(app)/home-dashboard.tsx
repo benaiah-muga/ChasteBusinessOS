@@ -171,7 +171,7 @@ function Masthead({ orgName, data }: { orgName: string; data: DashboardPayload |
         style={{ background: "radial-gradient(110% 130% at 88% -20%, rgba(255,255,255,0.09), transparent 55%)" }}
       />
 
-      <div className="relative p-6 sm:p-8 lg:p-10">
+      <div className="relative p-4 sm:p-5 lg:p-6">
         {/* Orientation line + the workmate's quick handles */}
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           <p className="text-[11px] font-semibold tracking-[0.14em] uppercase opacity-60">
@@ -203,21 +203,21 @@ function Masthead({ orgName, data }: { orgName: string; data: DashboardPayload |
           </nav>
         </div>
 
-        {/* The figure */}
-        <div className="mt-8 flex flex-wrap items-end justify-between gap-x-10 gap-y-6 sm:mt-10">
+        {/* The figure, with the working stats held at its flank */}
+        <div className="mt-3 flex flex-wrap items-end justify-between gap-x-10 gap-y-4 sm:mt-3.5">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold tracking-[0.14em] uppercase opacity-60">Net income · to date</p>
-            <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-2">
               {m ? (
                 <p
-                  className={`tnum text-5xl leading-none font-semibold tracking-tight sm:text-6xl ${
+                  className={`tnum text-3xl leading-none font-semibold tracking-tight sm:text-4xl ${
                     positive ? "" : "text-red-300"
                   }`}
                 >
                   {formatMoneyWhole(m.netIncomeMinor)}
                 </p>
               ) : (
-                <span aria-hidden="true" className="inline-block h-11 w-64 animate-pulse rounded-lg bg-white/10 sm:h-13" />
+                <span aria-hidden="true" className="inline-block h-8 w-48 animate-pulse rounded-lg bg-white/10 sm:h-10" />
               )}
               {m?.balanced != null &&
                 (m.balanced ? (
@@ -231,13 +231,13 @@ function Masthead({ orgName, data }: { orgName: string; data: DashboardPayload |
                 ))}
               {m && data && <MonthDelta trend={data.trend} />}
             </div>
-
-            <dl className="tnum mt-7 flex flex-wrap gap-x-8 gap-y-3 sm:gap-x-10">
-              <Stat label="Revenue" value={m ? formatMoney(m.revenueMinor) : undefined} />
-              <Stat label="Expenses" value={m ? formatMoney(m.expenseMinor) : undefined} />
-              <Stat label="Cash" value={m ? (m.cashMinor === null ? "—" : formatMoney(m.cashMinor)) : undefined} />
-            </dl>
           </div>
+
+          <dl className="tnum flex flex-wrap gap-x-8 gap-y-3 sm:gap-x-10">
+            <Stat label="Revenue" value={m ? formatMoney(m.revenueMinor) : undefined} />
+            <Stat label="Expenses" value={m ? formatMoney(m.expenseMinor) : undefined} />
+            <Stat label="Cash" value={m ? (m.cashMinor === null ? "—" : formatMoney(m.cashMinor)) : undefined} />
+          </dl>
         </div>
 
         {data && data.trend.length > 0 && (
@@ -332,7 +332,7 @@ function TrendArea({ data }: { data: DashboardPayload["trend"] }) {
   const last = incomePts[incomePts.length - 1]!;
 
   return (
-    <figure className="mt-8 sm:mt-9">
+    <figure className="mt-3 sm:mt-4">
       <div className="relative">
         <svg
           role="img"
@@ -341,7 +341,7 @@ function TrendArea({ data }: { data: DashboardPayload["trend"] }) {
           )}, expenses ${formatMoney(data[n - 1]!.expenseMinor)}.`}
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="none"
-          className="block h-24 w-full sm:h-28"
+          className="block h-12 w-full sm:h-14"
         >
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
@@ -404,7 +404,7 @@ function TrendArea({ data }: { data: DashboardPayload["trend"] }) {
         )}
       </div>
 
-      <figcaption className="mt-2.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px]">
+      <figcaption className="mt-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px]">
         <span className="flex gap-4 opacity-70">
           <span className="flex items-center gap-1.5">
             <span aria-hidden="true" className="h-0.5 w-3.5 rounded-full" style={{ backgroundColor: "var(--band-accent)" }} />
@@ -435,7 +435,8 @@ function TrendArea({ data }: { data: DashboardPayload["trend"] }) {
 
 /**
  * What is expected of this workspace, computed live: each unfinished step
- * says why it matters and links straight to where it gets done.
+ * says why it matters and links straight to where it gets done. Two steps
+ * stay visible; the rest fold away to keep the dashboard one screen.
  */
 function SetupChecklist({
   items,
@@ -446,12 +447,16 @@ function SetupChecklist({
   dismissed: Set<string>;
   onDismiss: (id: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const pending = items.filter((i) => !i.done && !dismissed.has(i.id));
   if (pending.length === 0) return null;
+  const visible = expanded ? pending : pending.slice(0, 2);
+  const hidden = pending.length - visible.length;
+
   return (
     <section
       aria-label="Workspace setup"
-      className="rise mt-4 rounded-xl border border-stone-200 bg-white px-5 py-4 shadow-xs"
+      className="rise mt-3 rounded-xl border border-stone-200 bg-white px-4 py-3 shadow-xs"
       style={{ "--rise-delay": "90ms" } as React.CSSProperties}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -460,15 +465,15 @@ function SetupChecklist({
           {pending.length} step{pending.length === 1 ? "" : "s"} left — a minute each, the workmate can help.
         </span>
       </div>
-      <ol className="mt-2 divide-y divide-stone-100">
-        {pending.map((item) => (
-          <li key={item.id} className="group flex items-start gap-3 py-2.5 text-sm leading-relaxed first:pt-1 last:pb-0">
-            <span aria-hidden="true" className="mt-[8px] size-1.5 shrink-0 rounded-full bg-maroon-600" />
-            <span className="min-w-0 flex-1">
+      <ol className="mt-1.5 divide-y divide-stone-100">
+        {visible.map((item) => (
+          <li key={item.id} className="group flex items-center gap-3 py-1.5 text-sm first:pt-0.5 last:pb-0">
+            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-maroon-600" />
+            <span className="min-w-0 flex-1 truncate">
               <span className="font-medium text-stone-900">{item.title}</span>
-              <span className="block text-xs text-stone-500">{item.why}</span>
+              <span className="text-xs text-stone-400"> — {item.why}</span>
             </span>
-            <span className="flex shrink-0 items-center gap-2 pt-0.5">
+            <span className="flex shrink-0 items-center gap-2">
               <Link
                 href={item.href}
                 className="inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-maroon-800 hover:underline"
@@ -489,6 +494,26 @@ function SetupChecklist({
           </li>
         ))}
       </ol>
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          aria-expanded={expanded}
+          className="mt-1.5 cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-maroon-800"
+        >
+          Show {hidden} more step{hidden === 1 ? "" : "s"} ↓
+        </button>
+      )}
+      {expanded && pending.length > 2 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          aria-expanded={expanded}
+          className="mt-1.5 block cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-maroon-800"
+        >
+          Show fewer steps ↑
+        </button>
+      )}
     </section>
   );
 }
@@ -513,20 +538,13 @@ function BodySkeleton() {
 
 function DashboardBody({ data, attentionCount }: { data: DashboardPayload; attentionCount: number }) {
   return (
-    <div className="mt-8">
-      <section aria-label="What needs you and working capital" className="grid gap-x-8 gap-y-8 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <NeedsYouQueue data={data} count={attentionCount} />
-        <WorkingCapital data={data} />
-      </section>
-
-      <section
-        aria-label="Operations and ledger"
-        className="rise mt-10 grid gap-x-8 gap-y-6 border-t border-stone-200 pt-6 md:grid-cols-2 lg:grid-cols-[1fr_minmax(0,420px)]"
-        style={{ "--rise-delay": "150ms" } as React.CSSProperties}
-      >
+    <div className="mt-4 grid items-start gap-x-6 gap-y-4 md:grid-cols-2 xl:grid-cols-[1.1fr_1fr_1.1fr]">
+      <NeedsYouQueue data={data} count={attentionCount} />
+      <WorkingCapital data={data} />
+      <div className="rise space-y-5 md:col-span-2 xl:col-span-1" style={{ "--rise-delay": "150ms" } as React.CSSProperties}>
         <Operations data={data} />
-        <ActivityFeed activity={data.activity.slice(0, 6)} embedded />
-      </section>
+        <ActivityFeed activity={data.activity.slice(0, 3)} embedded />
+      </div>
     </div>
   );
 }
@@ -640,7 +658,7 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
         <ol className="divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xs">
           {items.map((item) => (
             <li key={item.key}>
-              <Link href={item.href} className="group flex items-center gap-3 px-4 py-3.5 transition-colors duration-100 hover:bg-stone-50">
+              <Link href={item.href} className="group flex items-center gap-3 px-4 py-2.5 transition-colors duration-100 hover:bg-stone-50">
                 <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${dot[item.severity]}`} />
                 <span className="min-w-0 flex-1 text-sm leading-relaxed text-stone-700">{item.text}</span>
                 <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-medium whitespace-nowrap text-maroon-800">
@@ -699,7 +717,7 @@ function FigureRow({
   tone?: "default" | "warn";
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-stone-100 py-2.5 last:border-0">
+    <div className="flex items-baseline justify-between gap-3 border-b border-stone-100 py-1.5 last:border-0">
       <dt className="text-[13px] text-stone-500">{label}</dt>
       <dd className="flex items-baseline gap-2">
         {note && (
@@ -722,8 +740,8 @@ function FunnelBar({ stages }: { stages: DashboardPayload["pipeline"]["stages"] 
     lost: "bg-red-300",
   };
   return (
-    <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
-      <p className="figure-label mb-3">Pipeline by stage</p>
+    <div className="mt-3 rounded-xl border border-stone-200 bg-white p-3 shadow-xs">
+      <p className="figure-label mb-2.5">Pipeline by stage</p>
       <div className="flex h-2.5 overflow-hidden rounded-full bg-stone-100">
         {stages.map(
           (s) =>
@@ -737,7 +755,7 @@ function FunnelBar({ stages }: { stages: DashboardPayload["pipeline"]["stages"] 
             ),
         )}
       </div>
-      <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-stone-500">
+      <ul className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-stone-500 sm:grid-cols-3">
         {stages.map((s) => (
           <li key={s.stage} className="flex items-center justify-between gap-2 capitalize">
             <span className="flex items-center gap-1.5">
@@ -758,7 +776,7 @@ function Operations({ data }: { data: DashboardPayload }) {
   return (
     <div aria-label="Operations">
       <p className="figure-label mb-3">Operations</p>
-      <ul className="space-y-2.5 text-sm text-stone-600">
+      <ul className="space-y-2 text-sm text-stone-600">
         {data.ops.posOpen && (
           <OpRow tone="bg-emerald-500">Register “{data.ops.posOpen.register}” is open</OpRow>
         )}
@@ -815,7 +833,7 @@ function ActivityFeed({ activity, embedded = false }: { activity: DashboardPaylo
       ) : (
         <ol className="mt-3 space-y-0">
           {activity.map((e, i) => (
-            <li key={e.seq} className="relative flex items-center gap-2.5 py-2 pl-4 text-[13px]">
+            <li key={e.seq} className="relative flex items-center gap-2.5 py-1.5 pl-4 text-[13px]">
               {/* Timeline spine */}
               <span
                 aria-hidden="true"

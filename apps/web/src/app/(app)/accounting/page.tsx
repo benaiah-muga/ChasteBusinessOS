@@ -235,7 +235,16 @@ export default function AccountingPage() {
     <AppFrame
       appId="accounting"
       description="Entries are immutable — corrections are mirror reversals. Sealed periods refuse new postings."
-      tabs={TABS.map((t) => ({ id: t.id, label: t.label }))}
+      tabs={[
+        { id: "overview", label: "Overview" },
+        { id: "journal", label: "Journal" },
+        { id: "receivables", label: "Receivables", count: data?.agingInvoices.length || undefined },
+        { id: "payables", label: "Payables", count: data?.bills.filter((b) => b.outstandingMinor > 0).length || undefined },
+        { id: "bank", label: "Bank", count: banking?.summary.unmatchedCount || undefined },
+        { id: "tax", label: "Tax" },
+        { id: "reports", label: "Reports" },
+        { id: "periods", label: "Periods & close" },
+      ]}
       activeTab={tab}
       onTabChange={changeTab}
       actions={

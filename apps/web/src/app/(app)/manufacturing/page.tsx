@@ -9,16 +9,16 @@ import {
   CardTitle,
   EmptyState,
   LoadingPage,
-  SegmentedControl,
+  StatCard,
   type ActionNoticeState,
-  PageHeader,
 } from "@/components/ui";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { IconChevronDown, IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
 
-type Tab = "boms" | "production" | "orders" | "runs";
+type Tab = "overview" | "boms" | "production" | "orders" | "runs";
 
 interface BomEdge {
   assemblySku: string;
@@ -86,7 +86,7 @@ export default function ManufacturingPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("boms");
+  const [tab, setTab] = useState<Tab>("overview");
 
   const [bomForm, setBomForm] = useState({
     assemblySku: "",
@@ -201,25 +201,25 @@ export default function ManufacturingPage() {
   );
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Manufacturing"
-        description="Bills of materials, production runs, and work orders"
-        actions={
-          <SegmentedControl<Tab>
-            ariaLabel="Manufacturing sections"
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: "boms", label: "BOMs" },
-              { value: "production", label: "Produce" },
-              { value: "orders", label: `Work orders${(data.workOrders ?? []).length ? ` (${data.workOrders!.length})` : ""}` },
-              { value: "runs", label: "Runs & lots" },
-            ]}
-          />
-        }
-      />
+    <AppFrame
+      appId="manufacturing"
+      description="Bills of materials, production runs, and work orders"
+      persistKey="manufacturing"
+      tabs={[
+        { id: "overview", label: "Overview" },
+        { id: "boms", label: "BOMs", count: assembliesWithBoms.length || undefined },
+        { id: "production", label: "Produce" },
+        { id: "orders", label: "Work orders", count: (data.workOrders ?? []).length || undefined },
+        { id: "runs", label: "Runs & lots" },
+      ]}
+      activeTab={tab}
+      onTabChange={(id) => setTab(id as Tab)}
+    >
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
+
+      {tab === "overview" && (
+        <ManufacturingOverview data={data} busy={busy} goTo={setTab} />
+      )}
 
       {tab === "boms" && (
         <>
@@ -594,6 +594,110 @@ export default function ManufacturingPage() {
           </Card>
         </>
       )}
+    </AppFrame>
+  );
+}
+
+/* -------------------------------------------------------------- overview --- */
+
+function ManufacturingOverview({
+  data,
+  busy,
+  goTo,
+}: {
+  data: Payload;
+  busy: boolean;
+  goTo: (tab: Tab) => void;
+}) {
+  void busy;
+  const orders = data.workOrders ?? [];
+  const drafts = orders.filter((w) => w.status === "draft");
+  const released = orders.filter((w) => w.status === "released");
+  const completed = orders.filter((w) => w.status === "completed");
+  const runs = data.productionRuns ?? [];
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const runsThisMonth = runs.filter((r) => new Date(r.occurredAt).getTime() >= monthStart.getTime() && !r.reversed);
+  const producedThisMonth = runsThisMonth.reduce((s, r) => s + r.producedThousandths, 0);
+  const costThisMonth = runsThisMonth.reduce((s, r) => s + r.costTotalMinor, 0);
+  const lots = data.lots ?? [];
+  const expiringSoon = lots.filter((l) => {
+    if (!l.expiresAt) return false;
+    const days = (new Date(l.expiresAt).getTime() - Date.now()) / 86400000;
+    return days <= 30;
+  });
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard label="Open work orders" value={drafts.length + released.length} sub={`${released.length} released`} />
+        <StatCard label="Assemblies with BOMs" value={(data.boms ? new Set(data.boms.map((b) => b.assemblySku)).size : 0)} />
+        <StatCard label="Produced this month" value={qty(producedThisMonth)} sub={`${runsThisMonth.length} run${runsThisMonth.length === 1 ? "" : "s"}`} />
+        <StatCard label="Production cost · month" value={formatMoney(costThisMonth)} />
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardTitle
+            right={
+              drafts.length + released.length > 0 ? (
+                <Button tone="ghost" onClick={() => goTo("orders")}>
+                  All work orders →
+                </Button>
+              ) : undefined
+            }
+          >
+            Work orders in flight
+          </CardTitle>
+          {drafts.length + released.length === 0 ? (
+            <EmptyState
+              icon={<IconListTree />}
+              title="No open work orders"
+              hint="Plan one from a BOM, or produce directly from the Produce tab."
+            />
+          ) : (
+            <ul className="divide-y text-sm">
+              {[...released, ...drafts].slice(0, 5).map((w) => (
+                <li key={w.id} className="flex items-center justify-between gap-2 py-2">
+                  <span>
+                    WO #{w.number} · <span className="font-mono text-xs">{w.assemblySku}</span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="tabular-nums text-xs opacity-70">
+                      {qty(w.producedQtyThousandths)}/{qty(w.plannedQtyThousandths)}
+                    </span>
+                    <Badge tone={w.status === "released" ? "blue" : "neutral"}>{w.status}</Badge>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card>
+          <CardTitle>Watch list</CardTitle>
+          {completed.length === 0 && expiringSoon.length === 0 ? (
+            <p className="text-sm opacity-60">Nothing needs attention on the floor.</p>
+          ) : (
+            <ul className="divide-y text-sm">
+              {expiringSoon.slice(0, 4).map((l) => (
+                <li key={l.id} className="flex items-center justify-between gap-2 py-2">
+                  <span>
+                    Lot <span className="font-mono text-xs">{l.lotCode}</span> of {l.sku}
+                  </span>
+                  <Badge tone="amber">expires {formatDateTime(l.expiresAt!)}</Badge>
+                </li>
+              ))}
+              {completed.length > 0 && (
+                <li className="flex items-center justify-between gap-2 py-2 text-xs opacity-60">
+                  {completed.length} work order{completed.length === 1 ? "" : "s"} completed all-time · history under Runs &amp; lots
+                </li>
+              )}
+            </ul>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

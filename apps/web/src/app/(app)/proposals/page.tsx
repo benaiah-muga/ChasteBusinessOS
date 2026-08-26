@@ -15,6 +15,9 @@ import { IconAlertTriangle, IconCircleCheck, IconPullRequest, IconSparkle } from
 import { cn, statusTone, timeAgo } from "@/lib/format";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
+
+type Tab = "proposals" | "setup";
 
 interface AgentCandidate {
   cli: string;
@@ -155,6 +158,7 @@ function Diff({ text }: { text: string }) {
 
 export default function ProposalsPage() {
   const __enabled = useModuleEnabled("creator");
+  const [tab, setTab] = useState<Tab>("proposals");
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
@@ -202,17 +206,23 @@ export default function ProposalsPage() {
   if (!__enabled) return <ModuleDisabled label="Proposals" />;
 
   return (
-    <div>
-      <PageHeader
-        title="Creator proposals"
-        description="When you enable Creator Mode in the console, the agent can propose changes to this platform itself. Nothing merges automatically, your approval records the decision and the diff lands through a normal pull request where CI verifies it again."
-      />
-
+    <AppFrame
+      appId="creator"
+      description="When you enable Creator Mode in the console, the agent can propose changes to this platform itself. Nothing merges automatically — your approval records the decision and the diff lands through a normal pull request where CI verifies it again."
+      persistKey="proposals"
+      tabs={[
+        { id: "proposals", label: "Proposals", count: proposals?.length || undefined },
+        { id: "setup", label: "Setup" },
+      ]}
+      activeTab={tab}
+      onTabChange={(id) => setTab(id as Tab)}
+    >
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
 
-      <AgentSetupCard />
+      {tab === "setup" && <AgentSetupCard />}
 
-      {proposals === null ? (
+      {tab === "proposals" &&
+      (proposals === null ? (
         <LoadingPage />
       ) : proposals.length === 0 ? (
         <EmptyState
@@ -286,7 +296,7 @@ export default function ProposalsPage() {
             </Card>
           ))}
         </div>
-      )}
-    </div>
+      ))}
+    </AppFrame>
   );
 }

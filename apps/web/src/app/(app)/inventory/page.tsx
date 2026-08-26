@@ -9,16 +9,16 @@ import {
   CardTitle,
   EmptyState,
   LoadingPage,
-  SegmentedControl,
+  StatCard,
   type ActionNoticeState,
-  PageHeader,
 } from "@/components/ui";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { IconChevronDown, IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
 
-type Tab = "levels" | "reorder" | "counts" | "locations";
+type Tab = "overview" | "levels" | "reorder" | "counts" | "locations";
 
 interface StockItem {
   sku: string;
@@ -93,7 +93,7 @@ export default function InventoryPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("levels");
+  const [tab, setTab] = useState<Tab>("overview");
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [history, setHistory] = useState<Record<string, Movement[]>>({});
@@ -188,25 +188,23 @@ export default function InventoryPage() {
   if (!__enabled) return <ModuleDisabled label="Inventory" />;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Inventory"
-        description="Stock ledger, valuation, counting, and what to buy next"
-        actions={
-          <SegmentedControl<Tab>
-            ariaLabel="Inventory sections"
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: "levels", label: "Stock levels" },
-              { value: "reorder", label: `Reorder${(data.reorderAlerts ?? []).length ? ` (${data.reorderAlerts!.length})` : ""}` },
-              { value: "counts", label: "Cycle counts" },
-              { value: "locations", label: "Locations" },
-            ]}
-          />
-        }
-      />
+    <AppFrame
+      appId="inventory"
+      description="Stock ledger, valuation, counting, and what to buy next"
+      persistKey="inventory"
+      tabs={[
+        { id: "overview", label: "Overview" },
+        { id: "levels", label: "Stock levels", count: items.length || undefined },
+        { id: "reorder", label: "Reorder", count: (data.reorderAlerts ?? []).length || undefined },
+        { id: "counts", label: "Cycle counts" },
+        { id: "locations", label: "Locations" },
+      ]}
+      activeTab={tab}
+      onTabChange={(id) => setTab(id as Tab)}
+    >
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
+
+      {tab === "overview" && <InventoryOverview data={data} totalValue={totalValue} goTo={(t) => setTab(t)} />}
 
       {tab === "levels" && (
         <>
@@ -598,6 +596,109 @@ export default function InventoryPage() {
       <p className="text-xs opacity-50">
         Money values display in major units; the ledger stores integer minor units. {formatMoney(0)}
       </p>
+    </AppFrame>
+  );
+}
+
+/* -------------------------------------------------------------- overview --- */
+
+function InventoryOverview({
+  data,
+  totalValue,
+  goTo,
+}: {
+  data: Payload;
+  totalValue: number;
+  goTo: (tab: Tab) => void;
+}) {
+  const items = data.items ?? [];
+  const alerts = data.reorderAlerts ?? [];
+  const counts = data.cycleCounts ?? [];
+  const openCounts = counts.filter((c) => c.status !== "posted");
+  const reservations = (data.reservations ?? []).filter((r) => r.status === "active");
+  const reservedValue = items.reduce((s, i) => s + Math.round((i.avgUnitCostMinor * i.reservedThousandths) / 1000), 0);
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard label="Tracked items" value={items.length} />
+        <StatCard label="Stock value" value={formatMoney(totalValue)} tone="accent" />
+        <StatCard
+          label="Below reorder point"
+          value={alerts.length}
+          sub={alerts.length > 0 ? "action needed" : "all healthy"}
+          tone={alerts.length > 0 ? "warn" : "success"}
+        />
+        <StatCard label="Reserved units" value={qty(items.reduce((s, i) => s + i.reservedThousandths, 0))} sub={reservedValue > 0 ? formatMoney(reservedValue) : undefined} />
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardTitle
+            right={
+              alerts.length > 0 ? (
+                <Button tone="ghost" onClick={() => goTo("reorder")}>
+                  Reorder →
+                </Button>
+              ) : undefined
+            }
+          >
+            Reorder now
+          </CardTitle>
+          {alerts.length === 0 ? (
+            <p className="text-sm opacity-60">Every item is at or above its reorder point.</p>
+          ) : (
+            <ul className="divide-y text-sm">
+              {alerts.slice(0, 5).map((a) => (
+                <li key={a.sku} className="flex items-center justify-between gap-2 py-2">
+                  <span>
+                    <span className="font-mono text-xs opacity-60">{a.sku}</span> · {a.name}
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="tabular-nums text-xs opacity-60">
+                      {qty(a.onHandThousandths)}/{qty(a.reorderPointThousandths)}
+                    </span>
+                    <Badge tone="amber">short {qty(a.shortfallThousandths)}</Badge>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card>
+          <CardTitle>Counts & reservations</CardTitle>
+          <ul className="divide-y text-sm">
+            <li className="flex items-center justify-between gap-2 py-2">
+              <span>Open cycle counts</span>
+              <span className="flex items-center gap-2">
+                <span className="tnum text-xs opacity-60">{openCounts.length}</span>
+                <Button tone="ghost" onClick={() => goTo("counts")}>
+                  Count →
+                </Button>
+              </span>
+            </li>
+            <li className="flex items-center justify-between gap-2 py-2">
+              <span>Active reservations</span>
+              <span className="tnum text-xs opacity-60">{reservations.length}</span>
+            </li>
+            <li className="flex items-center justify-between gap-2 py-2">
+              <span>Locations</span>
+              <span className="flex items-center gap-2">
+                <span className="tnum text-xs opacity-60">{(data.locations ?? []).length}</span>
+                <Button tone="ghost" onClick={() => goTo("locations")}>
+                  Manage →
+                </Button>
+              </span>
+            </li>
+          </ul>
+          {counts.length > 0 && (
+            <p className="mt-2 text-xs opacity-50">
+              Last count {formatDateTime(counts[0]!.createdAt)} · {counts[0]!.status}
+            </p>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

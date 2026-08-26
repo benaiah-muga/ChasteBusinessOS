@@ -15,21 +15,23 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#38000a",
+  themeColor: "#2a1e10",
 };
 
 // Apply the persisted theme and light/dark mode before first paint so there
-// is no flash of the wrong appearance.
+// is no flash of the wrong appearance. Meridian is the default theme. The
+// script mutates <html> before React hydrates, hence suppressHydrationWarning.
 const themeInit = `try{
-var t=localStorage.getItem("chaste-theme");if(t&&t!=="chaste")document.documentElement.dataset.theme=t;
-var m=localStorage.getItem("chaste-mode");if(m!=="light"&&m!=="dark")m="system";
+var t=localStorage.getItem("chaste-theme");if(t!=="chaste"&&t!=="graphite"&&t!=="verdant")t="meridian";
+document.documentElement.dataset.theme=t;
+var m=localStorage.getItem("chaste-mode");if(m!=="dark"&&m!=="light")m="system";
 var dark=m==="dark"||(m==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);
 if(dark)document.documentElement.dataset.mode="dark";
 }catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>

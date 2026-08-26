@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
-import { IconAlertTriangle, IconBot, IconChevronLeft, IconPlus, IconSend, IconX } from "@/components/icons";
+import { Badge, Button, EmptyState, LoadingPage, StatCard } from "@/components/ui";
+import { IconAlertTriangle, IconBot, IconChevronLeft, IconLifeBuoy, IconPlus, IconSend, IconX } from "@/components/icons";
 import { cn, timeAgo } from "@/lib/format";
 import { callApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { postApi } from "@/lib/api";
+import { AppFrame } from "../_shell/app-frame";
+
+type Tab = "overview" | "inbox" | "widget";
 
 interface ConversationRow {
   id: string;
@@ -45,7 +48,7 @@ const SENDER_LABEL: Record<string, string> = {
 export default function SupportPage() {
   const __enabled = useModuleEnabled("support");
   const [convs, setConvs] = useState<ConversationRow[] | null>(null);
-  const [showChannels, setShowChannels] = useState(false);
+  const [tab, setTab] = useState<Tab>("overview");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [conv, setConv] = useState<ConversationRow | null>(null);
   const [msgs, setMsgs] = useState<SupportMessage[]>([]);
@@ -219,27 +222,99 @@ export default function SupportPage() {
 
   if (!__enabled) return <ModuleDisabled label="Customer care" />;
 
-  return (
-    <div className="flex h-full flex-col">
-      <PageHeader
-        title="Customer care"
-        description="Answer inbound inquiries with AI-drafted replies. Drafts never reach the customer until a human sends them."
-        actions={
-          <>
-            <Button tone={showChannels ? "primary" : "secondary"} onClick={() => setShowChannels((v) => !v)}>
-              Website widget
-            </Button>
-            <Button tone="primary" onClick={openNewConversation}>
-              <IconPlus className="size-4" />
-              New conversation
-            </Button>
-          </>
-        }
-      />
+  const openCount = (convs ?? []).filter((c) => c.status === "open").length;
+  const escalatedCount = (convs ?? []).filter((c) => c.status === "escalated").length;
+  const resolvedCount = (convs ?? []).filter((c) => c.status === "resolved").length;
 
-      {showChannels ? (
-        <ChannelsPanel />
-      ) : (
+  return (
+    <AppFrame
+      appId="support"
+      description="Answer inbound inquiries with AI-drafted replies. Drafts never reach the customer until a human sends them."
+      persistKey="support"
+      tabs={[
+        { id: "overview", label: "Overview" },
+        { id: "inbox", label: "Inbox", count: openCount + escalatedCount || undefined },
+        { id: "widget", label: "Website widget" },
+      ]}
+      activeTab={tab}
+      onTabChange={(id) => setTab(id as Tab)}
+      actions={
+        tab === "inbox" ? (
+          <Button tone="primary" onClick={openNewConversation}>
+            <IconPlus className="size-4" />
+            New conversation
+          </Button>
+        ) : undefined
+      }
+    >
+      {tab === "overview" && (
+        <div className="mb-6">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard label="Open inquiries" value={openCount} tone={openCount > 0 ? "warn" : "success"} />
+            <StatCard label="Escalated" value={escalatedCount} tone={escalatedCount > 0 ? "warn" : "default"} />
+            <StatCard label="Resolved" value={resolvedCount} tone="success" />
+            <StatCard label="Conversations" value={convs?.length ?? 0} />
+          </div>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+            <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+              <p className="figure-label mb-3">Latest activity</p>
+              {(convs ?? []).length === 0 ? (
+                <EmptyState
+                  icon={<IconLifeBuoy className="size-5" />}
+                  title="No conversations yet"
+                  hint="Open one per customer inquiry so every answer stays on the record."
+                />
+              ) : (
+                <ul className="divide-y divide-stone-100">
+                  {[...(convs ?? [])]
+                    .sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? ""))
+                    .slice(0, 5)
+                    .map((c) => (
+                      <li key={c.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-stone-800">{c.subject}</span>
+                          <span className="text-xs opacity-50">
+                            {c.customerName} · {c.lastMessageAt ? timeAgo(c.lastMessageAt) : "no messages"}
+                          </span>
+                        </span>
+                        <Badge tone={STATUS_TONE[c.status] ?? "neutral"}>{c.status}</Badge>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+              <p className="figure-label mb-3">How care works here</p>
+              <ul className="space-y-2.5 text-sm leading-relaxed opacity-80">
+                <li className="flex gap-2">
+                  <IconBot aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-violet-500" />
+                  The workmate drafts replies from the customer&apos;s own order history — nothing else.
+                </li>
+                <li className="flex gap-2">
+                  <IconSend aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-sky-500" />
+                  A human sends every draft; the model never talks to customers directly.
+                </li>
+                <li className="flex gap-2">
+                  <IconLifeBuoy aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-maroon-600" />
+                  The website widget routes visitors into the same governed inbox.
+                </li>
+              </ul>
+              <div className="mt-4 flex gap-2">
+                <Button onClick={() => setTab("inbox")}>Open inbox</Button>
+                <Button tone="ghost" onClick={() => setTab("widget")}>
+                  Website widget
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "widget" && <ChannelsPanel />}
+
+      {tab === "inbox" && (
         <>
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 pt-0 lg:grid-cols-[320px_1fr]">
         {/* Inbox list */}
@@ -484,7 +559,7 @@ export default function SupportPage() {
       )}
         </>
       )}
-    </div>
+    </AppFrame>
   );
 }
 

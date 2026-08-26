@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { resolveApp, tileStyle } from "./apps";
 import { IconChevronLeft } from "@/components/icons";
@@ -9,12 +9,17 @@ import { cn } from "@/lib/format";
 export interface AppTab {
   id: string;
   label: string;
+  /** Optional live count rendered as a quiet pill next to the label. */
+  count?: number;
 }
 
 /**
  * The frame every application opens into: where am I (breadcrumb), what can
  * this app do (tabs), and what can I do right now (actions). The overview is
  * always the first tab; deeper areas are operation surfaces.
+ *
+ * With `persistKey`, the chosen tab is remembered per app and initialized
+ * from `?tab=` so support workflows can deep-link.
  */
 export function AppFrame({
   appId,
@@ -22,6 +27,7 @@ export function AppFrame({
   tabs,
   activeTab,
   onTabChange,
+  persistKey,
   actions,
   children,
 }: {
@@ -31,11 +37,31 @@ export function AppFrame({
   tabs?: AppTab[];
   activeTab?: string;
   onTabChange?: (id: string) => void;
+  persistKey?: string;
   actions?: ReactNode;
   children: ReactNode;
 }) {
   const app = resolveApp(appId);
   const Icon = app?.icon;
+
+  // Deep link (?tab=) wins on mount; afterwards the last choice is remembered.
+  useEffect(() => {
+    if (!persistKey || !onTabChange || !activeTab) return;
+    const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    const known = (id: string | null) => (id && tabs?.some((t) => t.id === id) ? id : null);
+    const target = known(fromUrl) ?? (fromUrl ? null : known(localStorage.getItem(`chaste-app-tab:${persistKey}`)));
+    if (target && target !== activeTab) onTabChange(target);
+    // Run once on mount: URL wins, then the remembered tab.
+  }, []);
+
+  useEffect(() => {
+    if (!persistKey || !activeTab) return;
+    try {
+      localStorage.setItem(`chaste-app-tab:${persistKey}`, activeTab);
+    } catch {
+      // Session-only memory when storage is unavailable.
+    }
+  }, [persistKey, activeTab]);
 
   return (
     <div>
@@ -89,6 +115,11 @@ export function AppFrame({
                 className={cn("tab mr-4")}
               >
                 {t.label}
+                {t.count != null && (
+                  <span className="tnum rounded-full bg-stone-100 px-1.5 py-px text-[11px] font-medium text-stone-500">
+                    {t.count}
+                  </span>
+                )}
               </button>
             ))}
           </div>
