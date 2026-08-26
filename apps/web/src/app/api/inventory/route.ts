@@ -138,7 +138,16 @@ export async function POST(req: Request) {
           sku: str("sku")!,
           name: str("name")!,
           unitLabel: str("unitLabel") ?? "unit",
+          salePriceMinor: num("salePriceMinor") ?? 0,
           reorderPointThousandths: num("reorderPointThousandths") ?? 0,
+        }),
+      );
+    case "archiveItem":
+      if (!str("sku")) return NextResponse.json({ error: "sku required" }, { status: 400 });
+      return respond(
+        await executor.execute("inventory.archiveItem", ctx, {
+          sku: str("sku")!,
+          archive: body.archive !== false,
         }),
       );
     case "adjustStock": {

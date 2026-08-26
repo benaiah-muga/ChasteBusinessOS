@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
-import { IconAlertTriangle, IconBot, IconChevronLeft, IconHash, IconPlus, IconSend, IconX } from "@/components/icons";
+import { Badge, Button, EmptyState, LoadingPage } from "@/components/ui";
+import { IconAlertTriangle, IconBot, IconChevronLeft, IconHash, IconPlus, IconSend, IconUser, IconX } from "@/components/icons";
 import { cn, timeAgo } from "@/lib/format";
 import { callApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
 
 interface Conversation {
   id: string;
@@ -19,6 +20,50 @@ interface Message {
   senderType: string;
   body: string;
   createdAt: string;
+  mentions?: { type: string; id: string }[] | null;
+}
+interface Person {
+  type: "user" | "agent";
+  id: string;
+  name: string;
+}
+
+/** The composer inserts this short alias for the agent; it contains no spaces. */
+const AGENT_ALIAS = "Chaste";
+
+function personAlias(p: Person): string {
+  return p.type === "agent" ? AGENT_ALIAS : p.name.split(" ")[0] ?? p.name;
+}
+
+/** Scans a draft for @aliases that resolve to real people/agents. */
+function extractMentions(body: string, people: Person[]): { type: "user" | "agent"; id: string }[] {
+  const lower = body.toLowerCase();
+  const seen = new Map<string, { type: "user" | "agent"; id: string }>();
+  for (const p of people) {
+    const alias = personAlias(p).toLowerCase();
+    if (alias && lower.includes(`@${alias}`) && !seen.has(p.id)) {
+      seen.set(p.id, { type: p.type, id: p.id });
+    }
+  }
+  return [...seen.values()];
+}
+
+/** Renders a message body with @mentions accented. */
+function Body({ body }: { body: string }) {
+  const parts = body.split(/(@[A-Za-z0-9_.-]+)/g);
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.startsWith("@") ? (
+          <span key={i} className="font-medium text-maroon-700 underline decoration-maroon-300 underline-offset-2">
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
 }
 
 export default function MessagesPage() {
@@ -33,6 +78,49 @@ export default function MessagesPage() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+
+  const mentionCandidates =
+    mentionQuery == null
+      ? []
+      : people.filter((p) => personAlias(p).toLowerCase().startsWith(mentionQuery.toLowerCase()));
+
+  useEffect(() => {
+    void callApi<{ people?: Person[] }>("/api/conversations/people").then((res) => {
+      if (res.data?.people) setPeople(res.data.people);
+    });
+  }, []);
+
+  /** Detects an @token immediately before the caret and opens the picker. */
+  function syncMentionQuery() {
+    const el = composerRef.current;
+    if (!el) return;
+    const upto = el.value.slice(0, el.selectionStart ?? el.value.length);
+    const m = /@([A-Za-z0-9_.-]*)$/.exec(upto);
+    if (m?.[1] != null) {
+      setMentionQuery(m[1]);
+      setMentionIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
+  }
+
+  function pickMention(p: Person) {
+    const el = composerRef.current;
+    if (!el) return;
+    const caret = el.selectionStart ?? el.value.length;
+    const before = el.value.slice(0, caret).replace(/@[A-Za-z0-9_.-]*$/, `@${personAlias(p)} `);
+    setDraft(before + el.value.slice(caret));
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = before.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
 
   const activeConv = convs?.find((c) => c.id === activeId) ?? null;
 
@@ -73,7 +161,7 @@ export default function MessagesPage() {
       await fetch(`/api/conversations/${activeId}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, mentions: extractMentions(body, people) }),
       });
       // Refresh the thread, includes the agent's reply when it participates.
       const refreshed = await fetch(`/api/conversations/${activeId}/messages`).then((r) => r.json());
@@ -106,11 +194,10 @@ export default function MessagesPage() {
   if (!__enabled) return <ModuleDisabled label="Messages" />;
 
   return (
-    <div>
-      <PageHeader
-        title="Messages"
-        description="Team channels and DMs. Conversations with Chaste enabled let your AI co-worker read the thread and act when colleagues ask."
-      />
+    <AppFrame
+      appId="messaging"
+      description="Team channels and DMs. Conversations with Chaste enabled let your AI workmate read the thread and act when colleagues ask."
+    >
 
       {loadError && (
         <EmptyState
@@ -156,7 +243,7 @@ export default function MessagesPage() {
               />
               <label className="flex cursor-pointer items-center gap-2 text-xs text-stone-600">
                 <input type="checkbox" checked={newAgent} onChange={(e) => setNewAgent(e.target.checked)} className="accent-maroon-700" />
-                Include Chaste (AI co-worker)
+                Include Chaste (AI workmate)
               </label>
               <Button type="submit" size="sm" className="w-full" disabled={!newTitle.trim()}>
                 Create
@@ -256,7 +343,7 @@ export default function MessagesPage() {
                             isAgent ? "bg-violet-50 text-violet-950" : "bg-stone-100 text-stone-800",
                           )}
                         >
-                          {m.body}
+                          <Body body={m.body} />
                         </div>
                       </div>
                     </div>
@@ -264,11 +351,72 @@ export default function MessagesPage() {
                 })}
               </div>
 
-              <form onSubmit={send} className="flex items-end gap-2 border-t border-stone-100 p-3">
+              <form onSubmit={send} className="relative flex items-end gap-2 border-t border-stone-100 p-3">
+                {mentionQuery != null && mentionCandidates.length > 0 && (
+                  <ul
+                    role="listbox"
+                    aria-label="Mention someone"
+                    className="absolute bottom-full left-3 z-10 mb-1 w-64 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg"
+                  >
+                    {mentionCandidates.map((p, i) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i === mentionIndex}
+                          onMouseEnter={() => setMentionIndex(i)}
+                          onClick={() => pickMention(p)}
+                          className={cn(
+                            "flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm",
+                            i === mentionIndex ? "bg-maroon-50 text-maroon-900" : "text-stone-700 hover:bg-stone-50",
+                          )}
+                        >
+                          {p.type === "agent" ? (
+                            <IconBot className="size-3.5 shrink-0 text-violet-600" />
+                          ) : (
+                            <IconUser className="size-3.5 shrink-0 text-stone-400" />
+                          )}
+                          <span className="truncate">
+                            @{personAlias(p)}
+                            <span className="ml-1.5 text-xs font-normal text-stone-400">
+                              {p.type === "agent" ? "pulls the AI in" : p.name}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <textarea
+                  ref={composerRef}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    syncMentionQuery();
+                  }}
                   onKeyDown={(e) => {
+                    if (mentionQuery != null && mentionCandidates.length > 0) {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setMentionIndex((i) => Math.min(i + 1, mentionCandidates.length - 1));
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setMentionIndex((i) => Math.max(i - 1, 0));
+                        return;
+                      }
+                      if (e.key === "Enter" || e.key === "Tab") {
+                        e.preventDefault();
+                        pickMention(mentionCandidates[mentionIndex]!);
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setMentionQuery(null);
+                        return;
+                      }
+                    }
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       void send(e);
@@ -276,7 +424,7 @@ export default function MessagesPage() {
                   }}
                   rows={1}
                   aria-label={`Message ${activeConv.title}`}
-                  placeholder="Write a message…"
+                  placeholder="Write a message… type @ to mention a colleague or the agent"
                   className="textarea max-h-32 flex-1 resize-none py-2"
                 />
                 <button
@@ -296,6 +444,6 @@ export default function MessagesPage() {
           )}
         </section>
       </div>
-    </div>
+    </AppFrame>
   );
 }

@@ -24,7 +24,7 @@ interface ChatState {
 
 const GREETING: ChatMsg = {
   role: "assistant",
-  text: "Hi, I'm your business co-worker. Ask me to do things, or ask about your books. Everything I do goes through the same governed path as you.",
+  text: "Hi, I'm your business workmate. Ask me to do things, or ask about your books. Everything I do goes through the same governed path as you.",
 };
 
 let state: ChatState = { messages: [GREETING], busy: false, creator: false };
@@ -130,6 +130,12 @@ async function send(textRaw?: string) {
   }
 }
 
+function reset() {
+  abortRef?.abort();
+  sessionId = undefined;
+  patch({ messages: [GREETING], busy: false });
+}
+
 export const chatStore = {
   subscribe(listener: () => void) {
     listeners.add(listener);
@@ -139,6 +145,8 @@ export const chatStore = {
   send,
   stop: () => abortRef?.abort(),
   setCreator: (v: boolean) => patch({ creator: v }),
+  /** Start a fresh conversation; the old one remains in the session log. */
+  reset,
 };
 
 export function useChat(): ChatState {

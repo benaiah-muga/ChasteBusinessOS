@@ -75,7 +75,7 @@ export default function SessionsPage() {
     <div>
       <PageHeader
         title="Agent sessions"
-        description="Every conversation with your AI co-worker, replayable event by event, what it saw, called, and answered."
+        description="Every conversation with your AI workmate, replayable event by event, what it saw, called, and answered."
       />
 
       {cache?.totals && (
@@ -95,7 +95,7 @@ export default function SessionsPage() {
         <EmptyState
           icon={<IconBot />}
           title="No sessions yet"
-          hint="Talk to your co-worker in the Console, every exchange is recorded here for replay and audit."
+          hint="Talk to your workmate in the Console, every exchange is recorded here for replay and audit."
         />
       ) : (
         <div className="grid h-[calc(100vh-240px)] min-h-[420px] gap-4 lg:grid-cols-[320px_1fr]">

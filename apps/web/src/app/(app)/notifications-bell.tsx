@@ -19,7 +19,7 @@ interface NotificationRow {
  * notifications table that every governed event (approvals, escalations)
  * mirrors into via the NotificationSink.
  */
-export function NotificationsBell() {
+export function NotificationsBell({ align = "right" }: { align?: "left" | "right" }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<NotificationRow[] | null>(null);
   const [unread, setUnread] = useState(0);
@@ -69,12 +69,15 @@ export function NotificationsBell() {
           setOpen((v) => !v);
           void load();
         }}
-        className="icon-btn relative"
+        className="icon-btn group relative"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-4.5">
           <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" strokeLinecap="round" strokeLinejoin="round" />
           <path d="M13.7 21a2 2 0 0 1-3.4 0" strokeLinecap="round" />
         </svg>
+        <span aria-hidden="true" className="rail-tip">
+          Notifications
+        </span>
         {unread > 0 && (
           <span className="absolute top-0.5 right-0.5 flex size-3.5 items-center justify-center rounded-full bg-maroon-700 text-[8px] font-bold text-white">
             {unread > 9 ? "9+" : unread}
@@ -83,7 +86,12 @@ export function NotificationsBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-80 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg">
+        <div
+          className={cn(
+            "absolute z-40 mt-2 w-80 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg",
+            align === "right" ? "right-0" : "left-0",
+          )}
+        >
           <p className="border-b border-stone-100 px-4 py-2.5 text-xs font-semibold tracking-wide text-stone-500 uppercase">
             Notifications
           </p>

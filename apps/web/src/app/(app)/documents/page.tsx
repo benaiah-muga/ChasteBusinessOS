@@ -10,14 +10,17 @@ import {
   EmptyState,
   LoadingPage,
   ActionNotice,
+  StatCard,
   type ActionNoticeState,
-  PageHeader,
 } from "@/components/ui";
 import { IconFileText, IconInfo, IconTrash, IconUpload } from "@/components/icons";
 import { cn, statusTone, timeAgo } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
+
+type Tab = "overview" | "library" | "ingest";
 
 interface DocRow {
   id: string;
@@ -63,6 +66,7 @@ export default function DocumentsPage() {
   const [text, setText] = useState("");
   const [file, setFile] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [tab, setTab] = useState<Tab>("overview");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -134,16 +138,74 @@ export default function DocumentsPage() {
 
   if (!__enabled) return <ModuleDisabled label="Documents" />;
 
-  return (
-    <div>
-      <PageHeader
-        title="Documents"
-        description="Upload a bill or receipt and the agent reads it. Parsed text lands in org memory; expense coding is suggested against your chart of accounts, nothing posts until you act on it."
-      />
+  const parsedCount = (docs ?? []).filter((d) => statusTone(d.status) === "green").length;
+  const pendingCount = (docs ?? []).filter((d) => statusTone(d.status) === "amber").length;
 
+  return (
+    <AppFrame
+      appId="documents"
+      description="Upload a bill or receipt and the agent reads it. Parsed text lands in org memory; expense coding is suggested against your chart of accounts, nothing posts until you act on it."
+      persistKey="documents"
+      tabs={[
+        { id: "overview", label: "Overview" },
+        { id: "library", label: "Library", count: docs?.length || undefined },
+        { id: "ingest", label: "Ingest" },
+      ]}
+      activeTab={tab}
+      onTabChange={(id) => setTab(id as Tab)}
+    >
       {message && <ActionNotice state={message} onDismiss={() => setMessage(null)} />}
 
-      {/* Ingest */}
+      {tab === "overview" && (
+        <div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard label="Documents" value={docs?.length ?? 0} />
+            <StatCard label="Parsed" value={parsedCount} tone="success" />
+            <StatCard label="Awaiting parse" value={pendingCount} tone={pendingCount > 0 ? "warn" : "default"} />
+            <StatCard label="This week" value={(docs ?? []).filter((d) => new Date(d.createdAt).getTime() > Date.now() - 7 * 86400000).length} />
+          </div>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+            <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+              <p className="figure-label mb-3">Recently ingested</p>
+              {docs === null ? (
+                <LoadingPage />
+              ) : docs.length === 0 ? (
+                <EmptyState
+                  icon={<IconFileText />}
+                  title="No documents yet"
+                  hint="Ingest your first vendor bill — coding suggestions appear after parsing."
+                />
+              ) : (
+                <ul className="divide-y text-sm">
+                  {docs.slice(0, 5).map((d) => (
+                    <li key={d.id} className="flex items-center justify-between gap-3 py-2">
+                      <span className="min-w-0 truncate">{d.title}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+                        <span className="text-xs whitespace-nowrap opacity-50">{timeAgo(d.createdAt)}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+              <p className="figure-label mb-3">Feed the memory</p>
+              <p className="text-sm leading-relaxed opacity-70">
+                Drop in a vendor bill or receipt and the agent reads it, suggests expense coding against your chart of
+                accounts, and keeps the text searchable. Nothing posts until you act on a suggestion.
+              </p>
+              <Button className="mt-4" onClick={() => setTab("ingest")}>
+                Ingest a document
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "ingest" && (
       <Card className="mb-8">
         <CardTitle>New document</CardTitle>
         <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
@@ -228,9 +290,11 @@ export default function DocumentsPage() {
           </Button>
         </div>
       </Card>
+      )}
 
       {/* List */}
-      {docs === null ? (
+      {tab === "library" &&
+      (docs === null ? (
         <LoadingPage />
       ) : docs.length === 0 ? (
         <EmptyState
@@ -278,7 +342,7 @@ export default function DocumentsPage() {
             </tbody>
           </table>
         </div>
-      )}
+      ))}
 
       {/* Detail */}
       {detail && (
@@ -384,6 +448,6 @@ export default function DocumentsPage() {
         confirmLabel="Delete"
         busy={busy}
       />
-    </div>
+    </AppFrame>
   );
 }

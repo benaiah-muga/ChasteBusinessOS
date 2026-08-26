@@ -57,7 +57,13 @@ export async function GET(_req: Request, { params }: Params) {
 
   const rows = await getDb()
     .db.select(
-      { id: messages.id, senderType: messages.senderType, body: messages.body, createdAt: messages.createdAt },
+      {
+        id: messages.id,
+        senderType: messages.senderType,
+        body: messages.body,
+        createdAt: messages.createdAt,
+        mentions: messages.mentions,
+      },
     )
     .from(messages)
     .where(eq(messages.conversationId, id))
@@ -66,7 +72,15 @@ export async function GET(_req: Request, { params }: Params) {
   return NextResponse.json({ conversation: conv, messages: rows });
 }
 
-const sendSchema = z.object({ body: z.string().min(1).max(8000) });
+const mentionSchema = z.object({
+  type: z.enum(["user", "agent"]),
+  id: z.string().min(1).max(80),
+});
+
+const sendSchema = z.object({
+  body: z.string().min(1).max(8000),
+  mentions: z.array(mentionSchema).max(20).optional(),
+});
 
 export async function POST(req: Request, { params }: Params) {
   const resolved = await getResolvedUser();
@@ -91,14 +105,18 @@ export async function POST(req: Request, { params }: Params) {
   const sent = await executor.execute("messaging.sendMessage", humanCtx, {
     conversationId: id,
     body: parsed.data.body,
+    mentions: parsed.data.mentions,
   });
   if (!sent.ok && !sent.pendingApproval) {
     return NextResponse.json({ error: sent.error }, { status: 422 });
   }
 
+  // The workmate answers in channels where it participates, and an explicit
+  // @mention pulls it into any conversation on demand.
+  const agentMentioned = parsed.data.mentions?.some((m) => m.type === "agent") ?? false;
   let agentReply: string | null = null;
 
-  if (conv.agentEnabled) {
+  if (conv.agentEnabled || agentMentioned) {
     // The agent catches up on the thread, then answers under its own authority.
     const nameRows = await db.select({ id: users.id, name: users.name, email: users.email }).from(users);
     const namesById = new Map(nameRows.map((u) => [u.id, u.name ?? u.email]));
@@ -129,7 +147,7 @@ export async function POST(req: Request, { params }: Params) {
         agentCtx,
         {
           sessionId: crypto.randomUUID(),
-          systemPrompt: `You are Chaste, the AI co-worker in the internal chat "${conv.title}" of an ERP organization. You can use capabilities when a colleague asks for something operational. Be concise and collegial.${orgRow?.profileDescription ? `\nBusiness context: ${orgRow.profileDescription}` : ""}`,
+          systemPrompt: `You are Chaste, the AI workmate in the internal chat "${conv.title}" of an ERP organization. You can use capabilities when a colleague asks for something operational. Be concise and collegial.${orgRow?.profileDescription ? `\nBusiness context: ${orgRow.profileDescription}` : ""}`,
           userGoal: `Recent conversation:\n${transcript}\n\nRespond to the latest message as Chaste. Post your reply using messaging.sendMessage to conversation ${id}.`,
           maxSteps: 5,
         },

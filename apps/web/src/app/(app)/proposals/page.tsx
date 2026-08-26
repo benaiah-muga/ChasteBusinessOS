@@ -11,10 +11,111 @@ import {
   LoadingPage,
   PageHeader,
 } from "@/components/ui";
-import { IconAlertTriangle, IconCircleCheck, IconPullRequest } from "@/components/icons";
+import { IconAlertTriangle, IconCircleCheck, IconPullRequest, IconSparkle } from "@/components/icons";
 import { cn, statusTone, timeAgo } from "@/lib/format";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
+
+type Tab = "proposals" | "setup";
+
+interface AgentCandidate {
+  cli: string;
+  label: string;
+  install: string;
+  authNote: string;
+}
+interface AgentStatus {
+  installed: boolean;
+  cli: string | null;
+  label: string | null;
+  version: string | null;
+  candidates: AgentCandidate[];
+}
+
+/**
+ * Creator-mode onboarding: detect an installed coding agent, or walk the
+ * human through installing one — the app never runs the install itself,
+ * it only hands over the command and verifies afterwards.
+ */
+function AgentSetupCard() {
+  const [agent, setAgent] = useState<AgentStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const check = useCallback(async () => {
+    setChecking(true);
+    const res = await callApi<AgentStatus>("/api/creator/agent");
+    if (res.data) setAgent(res.data);
+    setChecking(false);
+  }, []);
+
+  useEffect(() => {
+    void check();
+  }, [check]);
+
+  if (!agent) return null;
+  if (agent.installed) {
+    return (
+      <div className="mb-6 flex flex-wrap items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3.5 text-sm">
+        <IconCircleCheck className="size-4 shrink-0 text-emerald-600" />
+        <span className="text-emerald-900">
+          <strong className="font-medium">{agent.label}</strong> is connected{agent.version ? ` · ${agent.version}` : ""}.
+          Switch on Creator mode in the console and ask it for an improvement.
+        </span>
+      </div>
+    );
+  }
+  const first = agent.candidates[0];
+  return (
+    <div className="mb-6 rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+        <IconSparkle className="size-4 text-maroon-700" />
+        Connect a coding agent to use Creator mode
+      </h2>
+      <p className="mt-1 max-w-3xl text-sm leading-relaxed text-stone-500">
+        Creator mode works by an agent proposing changes as reviewed diffs. No supported coding CLI
+        {agent.candidates.map((c) => ` ${c.label}`).join(" ·")} was found on this machine's PATH.
+        Install one — you only leave the app to sign in with the vendor.
+      </p>
+      <ol className="mt-3 space-y-2.5 text-sm">
+        <li className="flex flex-wrap items-center gap-2">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-maroon-100 text-[11px] font-bold text-maroon-800">
+            1
+          </span>
+          <span className="text-stone-600">Install {first?.label ?? "an agent"}:</span>
+          <code className="rounded bg-stone-100 px-2 py-0.5 font-mono text-xs">{first?.install}</code>
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard.writeText(first?.install ?? "").then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1600);
+              });
+            }}
+            className="cursor-pointer text-xs font-medium text-maroon-700 underline underline-offset-2"
+          >
+            {copied ? "copied ✓" : "copy"}
+          </button>
+        </li>
+        <li className="flex flex-wrap items-start gap-2">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-maroon-100 text-[11px] font-bold text-maroon-800">
+            2
+          </span>
+          <span className="text-stone-600">{first?.authNote}</span>
+        </li>
+        <li className="flex flex-wrap items-center gap-2">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-maroon-100 text-[11px] font-bold text-maroon-800">
+            3
+          </span>
+          <Button size="sm" loading={checking} onClick={() => void check()}>
+            Check again
+          </Button>
+        </li>
+      </ol>
+    </div>
+  );
+}
 
 interface Proposal {
   id: string;
@@ -57,6 +158,7 @@ function Diff({ text }: { text: string }) {
 
 export default function ProposalsPage() {
   const __enabled = useModuleEnabled("creator");
+  const [tab, setTab] = useState<Tab>("proposals");
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
@@ -104,15 +206,23 @@ export default function ProposalsPage() {
   if (!__enabled) return <ModuleDisabled label="Proposals" />;
 
   return (
-    <div>
-      <PageHeader
-        title="Creator proposals"
-        description="When you enable Creator Mode in the console, the agent can propose changes to this platform itself. Nothing merges automatically, your approval records the decision and the diff lands through a normal pull request where CI verifies it again."
-      />
-
+    <AppFrame
+      appId="creator"
+      description="When you enable Creator Mode in the console, the agent can propose changes to this platform itself. Nothing merges automatically — your approval records the decision and the diff lands through a normal pull request where CI verifies it again."
+      persistKey="proposals"
+      tabs={[
+        { id: "proposals", label: "Proposals", count: proposals?.length || undefined },
+        { id: "setup", label: "Setup" },
+      ]}
+      activeTab={tab}
+      onTabChange={(id) => setTab(id as Tab)}
+    >
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
 
-      {proposals === null ? (
+      {tab === "setup" && <AgentSetupCard />}
+
+      {tab === "proposals" &&
+      (proposals === null ? (
         <LoadingPage />
       ) : proposals.length === 0 ? (
         <EmptyState
@@ -186,7 +296,7 @@ export default function ProposalsPage() {
             </Card>
           ))}
         </div>
-      )}
-    </div>
+      ))}
+    </AppFrame>
   );
 }

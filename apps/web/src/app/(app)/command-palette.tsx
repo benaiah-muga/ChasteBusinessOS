@@ -2,9 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ALL_NAV_ITEMS } from "./_shell/nav";
-import { IconSearch } from "@/components/icons";
+import { appsForOrg, tileStyle, type AppInfo } from "./_shell/apps";
+import { IconPalette, IconSearch } from "@/components/icons";
+import { THEMES, applyTheme, type ThemeId } from "@/components/theme";
 import { cn } from "@/lib/format";
+
+type Command =
+  | { kind: "app"; app: AppInfo }
+  | { kind: "theme"; id: ThemeId; label: string };
 
 export function CommandPalette({
   open,
@@ -21,15 +26,22 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const results = useMemo(() => {
+  const results = useMemo<Command[]>(() => {
     const q = query.trim().toLowerCase();
-    const base = enabledModules
-      ? ALL_NAV_ITEMS.filter((i) => !("moduleId" in i) || !i.moduleId || enabledModules.has(i.moduleId))
-      : ALL_NAV_ITEMS;
-    if (!q) return base;
-    return base.filter(
-      (i) => i.label.toLowerCase().includes(q) || i.group.toLowerCase().includes(q),
+    const apps = appsForOrg(enabledModules).filter(
+      (a) => !q || a.name.toLowerCase().includes(q) || a.tagline.toLowerCase().includes(q),
     );
+    const themes = q && "theme".includes(q)
+      ? THEMES.map((t) => ({
+          kind: "theme" as const,
+          id: t.id,
+          label: `Theme · ${t.label}`,
+        }))
+      : [];
+    return [
+      ...apps.map((app) => ({ kind: "app" as const, app })),
+      ...themes,
+    ];
   }, [query, enabledModules]);
 
   useEffect(() => {
@@ -40,9 +52,7 @@ export function CommandPalette({
     }
   }, [open]);
 
-  useEffect(() => {
-    setActive(0);
-  }, [query]);
+  useEffect(() => setActive(0), [query]);
 
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
@@ -50,9 +60,10 @@ export function CommandPalette({
 
   if (!open) return null;
 
-  function go(href: string) {
+  function run(cmd: Command) {
     onClose();
-    router.push(href);
+    if (cmd.kind === "app") router.push(cmd.app.href);
+    else applyTheme(cmd.id);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -63,14 +74,14 @@ export function CommandPalette({
       e.preventDefault();
       setActive((a) => Math.max(a - 1, 0));
     } else if (e.key === "Enter" && results[active]) {
-      go(results[active]!.href);
+      run(results[active]!);
     } else if (e.key === "Escape") {
       onClose();
     }
   }
 
   return (
-    <div className="overlay-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="overlay-backdrop z-50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         role="dialog"
         aria-modal="true"
@@ -84,33 +95,50 @@ export function CommandPalette({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Where to?"
-            aria-label="Search pages"
+            placeholder="Jump to an app…"
+            aria-label="Search pages and commands"
             className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-stone-400"
           />
           <kbd className="kbd">esc</kbd>
         </div>
         <div ref={listRef} className="max-h-80 overflow-y-auto p-1.5" role="listbox">
           {results.length === 0 && <p className="px-3 py-8 text-center text-sm text-stone-400">Nothing matches “{query}”.</p>}
-          {results.map((item, i) => {
-            const Icon = item.icon;
+          {results.map((cmd, i) => {
+            const isActive = i === active;
             return (
               <button
-                key={item.href}
+                key={cmd.kind === "app" ? cmd.app.id : cmd.id}
                 type="button"
                 role="option"
-                aria-selected={i === active}
-                data-active={i === active}
+                aria-selected={isActive}
+                data-active={isActive}
                 onMouseEnter={() => setActive(i)}
-                onClick={() => go(item.href)}
+                onClick={() => run(cmd)}
                 className={cn(
-                  "flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors duration-75",
-                  i === active ? "bg-maroon-50 text-maroon-900" : "text-stone-700",
+                  "flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-75",
+                  isActive ? "bg-maroon-50" : "",
                 )}
               >
-                <Icon className={cn("size-4 shrink-0", i === active ? "text-maroon-700" : "text-stone-400")} />
-                <span className="flex-1 font-medium">{item.label}</span>
-                <span className="text-xs text-stone-400">{item.group}</span>
+                {cmd.kind === "app" ? (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      style={tileStyle(cmd.app.hue)}
+                      className={cn("flex size-7 shrink-0 items-center justify-center rounded-lg", isActive && "scale-105")}
+                    >
+                      <cmd.app.icon className="size-4" />
+                    </span>
+                    <span className="flex-1 font-medium">{cmd.app.name}</span>
+                    <span className="truncate text-xs text-stone-400">{cmd.app.tagline}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-500">
+                      <IconPalette className="size-4" />
+                    </span>
+                    <span className="flex-1 font-medium">{cmd.label}</span>
+                  </>
+                )}
               </button>
             );
           })}
@@ -122,6 +150,9 @@ export function CommandPalette({
           </span>
           <span className="flex items-center gap-1">
             <kbd className="kbd">↵</kbd> open
+          </span>
+          <span className="ml-auto flex items-center gap-1">
+            <kbd className="kbd">⌘G</kbd> apps
           </span>
         </div>
       </div>

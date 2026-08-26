@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/client";
 import { Button, Notice } from "@/components/ui";
-import { IconAlertTriangle, IconEye, IconEyeOff, IconLandmark, IconShieldCheck, IconSparkle } from "@/components/icons";
+import { IconAlertTriangle, IconEye, IconEyeOff } from "@/components/icons";
 
 const authClient = createAuthClient();
 
@@ -38,63 +38,76 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen lg:grid-cols-[1fr_460px]">
-      {/* Brand panel */}
-      <section className="relative hidden flex-col justify-between overflow-hidden bg-maroon-950 p-12 text-white lg:flex">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 opacity-[0.35]"
-          style={{
-            background:
-              "radial-gradient(600px circle at 20% 10%, rgba(164,90,102,0.5), transparent 55%), radial-gradient(500px circle at 80% 85%, rgba(138,65,79,0.6), transparent 55%)",
-          }}
-        />
-        <div className="relative">
-          <span className="inline-flex items-center gap-2.5">
-            <span className="flex size-9 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15">
-              <IconSparkle className="size-5" />
-            </span>
-            <span className="text-lg font-semibold tracking-tight">Chaste Business OS</span>
+    <main className="grid min-h-screen lg:grid-cols-2">
+      {/* The ledger panel: deep burgundy, ruled like an accounts book */}
+      <section
+        className="ledger-rules relative hidden flex-col justify-between overflow-hidden p-12 text-white lg:flex"
+        style={{ background: "linear-gradient(160deg, var(--color-maroon-900), var(--color-maroon-950))" }}
+      >
+        {/* Wordmark */}
+        <div className="relative flex items-center gap-3">
+          <span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-lg font-bold ring-1 ring-white/15">
+            C
           </span>
+          <div>
+            <p className="text-[15px] leading-tight font-semibold tracking-tight">Chaste Business OS</p>
+            <p className="text-xs text-white/40">The operating system for your business</p>
+          </div>
         </div>
-        <div className="relative max-w-md">
-          <h1 className="text-[28px] leading-snug font-semibold tracking-tight text-balance">
-            Describe your business. Your AI co-worker runs it, under your authority.
+
+        {/* Statement */}
+        <div className="relative max-w-lg">
+          <h1 className="text-[32px] leading-[1.2] font-semibold tracking-tight text-balance">
+            Describe your business.
+            <br />
+            Your AI workmate runs it,
+            <br />
+            <span className="text-white/60">under your authority.</span>
           </h1>
-          <ul className="mt-8 space-y-4 text-sm text-maroon-100/90">
-            <li className="flex gap-3">
-              <IconSparkle className="mt-0.5 size-4 shrink-0 text-maroon-300" />
-              Ask in plain language: create customers, invoice, pay bills, run payroll.
-            </li>
-            <li className="flex gap-3">
-              <IconShieldCheck className="mt-0.5 size-4 shrink-0 text-maroon-300" />
-              Every money and identity action waits for your approval. Nothing acts silently.
-            </li>
-            <li className="flex gap-3">
-              <IconLandmark className="mt-0.5 size-4 shrink-0 text-maroon-300" />
-              Double-entry books that cannot lie, immutable postings, hash-chained audit trail.
-            </li>
-          </ul>
         </div>
-        <p className="relative text-xs text-maroon-200/60">Governed · Auditable · Reversible</p>
+
+        {/* Proof points: numbered rows over hairlines, no icon soup */}
+        <ul className="relative max-w-md">
+          {[
+            ["01", "Governed", "Every money and identity action waits for your approval. Nothing acts silently."],
+            ["02", "Auditable", "A hash-chained event trail records who did what — human or agent — forever."],
+            ["03", "Reversible", "Double-entry books that cannot lie. Corrections are mirror reversals, never edits."],
+          ].map(([num, title, body]) => (
+            <li key={num} className="border-t border-white/10 py-4 first:border-t-0">
+              <div className="flex gap-4">
+                <span className="tnum pt-0.5 text-xs font-medium text-white/30">{num}</span>
+                <div>
+                  <p className="text-sm font-semibold tracking-wide text-white/90 uppercase">{title}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-white/50">{body}</p>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        <p className="relative text-xs text-white/25">Governed · Auditable · Reversible</p>
       </section>
 
-      {/* Form panel */}
-      <section className="flex items-center justify-center px-6 py-12">
-        <div className="w-full max-w-sm">
-          <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex size-9 items-center justify-center rounded-lg bg-maroon-800 text-white">
-              <IconSparkle className="size-5" />
-            </span>
-            <span className="text-lg font-semibold tracking-tight text-stone-900">Chaste Business OS</span>
+      {/* Form panel: paper, quiet, precise */}
+      <section className="flex flex-col bg-canvas">
+        {/* Compact brand strip on mobile */}
+        <div className="flex items-center gap-2.5 px-6 pt-6 pb-2 lg:hidden" style={{ background: "linear-gradient(160deg, var(--color-maroon-900), var(--color-maroon-950))" }}>
+          <span className="flex size-9 items-center justify-center rounded-lg bg-white/10 text-base font-bold ring-1 ring-white/15">C</span>
+          <div>
+            <p className="text-sm leading-tight font-semibold tracking-tight text-white">Chaste Business OS</p>
+            <p className="text-[11px] text-white/40">Your AI workmate, under your authority</p>
           </div>
+        </div>
 
-          <h2 className="text-xl font-semibold tracking-tight text-stone-900">
-            {mode === "signup" ? "Create your account" : "Welcome back"}
-          </h2>
-          <p className="mt-1 mb-7 text-sm text-stone-500">
-            {mode === "signup" ? "Set up your workspace in the next step." : "Sign in to your workspace."}
-          </p>
+        <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-6 py-12">
+          <div className="mb-7">
+            <h2 className="text-xl font-semibold tracking-tight text-stone-900">
+              {mode === "signup" ? "Create your workspace" : "Welcome back"}
+            </h2>
+            <p className="mt-1 mb-7 text-sm text-stone-500">
+              {mode === "signup" ? "Set up your workspace in the next step." : "Sign in to your workspace."}
+            </p>
+          </div>
 
           <form onSubmit={submit} className="space-y-4">
             {mode === "signup" && (
@@ -117,7 +130,6 @@ export default function LoginPage() {
                 Email
               </label>
               <input
-                id="email"
                 type="email"
                 required
                 value={email}

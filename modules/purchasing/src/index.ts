@@ -1,9 +1,11 @@
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   items,
   poLines,
   purchaseOrders,
+  purchaseRequests,
+  rfqs,
   stockMovements,
   vendorBillLines,
   vendorBills,
@@ -454,6 +456,287 @@ const receivePO = (deps: ModuleDeps) =>
     },
   });
 
+// ── Purchasing workflow: request → review → RFQ → quotes → award ───────
+
+const createPurchaseRequest = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.createPurchaseRequest",
+    title: "Create purchase request",
+    intent:
+      "Raise an internal purchase request for review and approval before anything is ordered; the first step of the procure-to-pay workflow",
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    input: z.object({
+      title: z.string().min(3).max(200),
+      justification: z.string().min(10).max(4000),
+      estimatedAmountMinor: z.number().int().nonnegative().optional(),
+    }),
+    output: z.object({ requestId: z.string() }),
+    execute: async (ctx, input) => {
+      const [row] = await deps.db
+        .insert(purchaseRequests)
+        .values({
+          orgId: ctx.actor.orgId,
+          title: input.title,
+          justification: input.justification,
+          estimatedAmountMinor: input.estimatedAmountMinor ?? null,
+          requestedByUserId: ctx.actor.type === "human" ? ctx.actor.id : null,
+        })
+        .returning({ id: purchaseRequests.id });
+      return { requestId: row!.id };
+    },
+  });
+
+const decidePurchaseRequest = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.decidePurchaseRequest",
+    title: "Approve or reject purchase request",
+    intent:
+      "Record a reviewer's approve or reject decision on a pending purchase request; only approved requests may go out as RFQs",
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    input: z.object({
+      requestId: z.string(),
+      decision: z.enum(["approve", "reject"]),
+      reason: z.string().max(1000).optional(),
+    }),
+    output: z.object({ status: z.string() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [req] = await tx
+          .select({ id: purchaseRequests.id, status: purchaseRequests.status })
+          .from(purchaseRequests)
+          .where(and(eq(purchaseRequests.id, input.requestId), eq(purchaseRequests.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!req) throw new Error("purchase request not found");
+        if (req.status !== "pending_review") throw new Error(`request is already ${req.status}`);
+        const status = input.decision === "approve" ? "approved" : "rejected";
+        await tx
+          .update(purchaseRequests)
+          .set({
+            status,
+            decidedByUserId: ctx.actor.type === "human" ? ctx.actor.id : null,
+            decisionReason: input.reason ?? null,
+            decidedAt: ctx.now,
+          })
+          .where(eq(purchaseRequests.id, req.id));
+        return { status };
+      });
+    },
+  });
+
+const createRfq = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.createRfq",
+    title: "Send RFQ to vendors",
+    intent:
+      "Request competitive quotes from one or more vendors for an approved purchase request, creating one tracked RFQ per vendor",
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    input: z.object({
+      requestId: z.string(),
+      vendorIds: z.array(z.string()).min(1).max(10),
+    }),
+    output: z.object({ rfqIds: z.array(z.string()) }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [req] = await tx
+          .select({ id: purchaseRequests.id, status: purchaseRequests.status })
+          .from(purchaseRequests)
+          .where(and(eq(purchaseRequests.id, input.requestId), eq(purchaseRequests.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!req) throw new Error("purchase request not found");
+        if (req.status !== "approved") throw new Error("only approved requests can go out as RFQs");
+
+        const vendorRows = await tx
+          .select({ id: vendors.id })
+          .from(vendors)
+          .where(eq(vendors.orgId, ctx.actor.orgId));
+        const known = new Set(vendorRows.map((v) => v.id));
+        const unknown = input.vendorIds.filter((v) => !known.has(v));
+        if (unknown.length > 0) throw new Error("unknown vendor id(s)");
+
+        const rows = await tx
+          .insert(rfqs)
+          .values(input.vendorIds.map((vendorId) => ({ orgId: ctx.actor.orgId, requestId: req.id, vendorId })))
+          .returning({ id: rfqs.id });
+        return { rfqIds: rows.map((r) => r.id) };
+      });
+    },
+  });
+
+const recordQuote = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.recordQuote",
+    title: "Record a vendor quote",
+    intent:
+      "Log a vendor's quote (amount, lead time, notes) against an open RFQ so bids can be compared and a winner selected",
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    input: z.object({
+      rfqId: z.string(),
+      amountMinor: z.number().int().positive(),
+      leadTimeDays: z.number().int().nonnegative().optional(),
+      notes: z.string().max(2000).optional(),
+    }),
+    output: z.object({ status: z.string() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [rfq] = await tx
+          .select({ id: rfqs.id, status: rfqs.status })
+          .from(rfqs)
+          .where(and(eq(rfqs.id, input.rfqId), eq(rfqs.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!rfq) throw new Error("RFQ not found");
+        if (rfq.status === "won" || rfq.status === "lost") throw new Error("this RFQ is already decided");
+        await tx
+          .update(rfqs)
+          .set({
+            status: "quoted",
+            quoteAmountMinor: input.amountMinor,
+            quoteLeadTimeDays: input.leadTimeDays ?? null,
+            quoteNotes: input.notes ?? null,
+            quotedAt: ctx.now,
+          })
+          .where(eq(rfqs.id, rfq.id));
+        return { status: "quoted" };
+      });
+    },
+  });
+
+const selectWinningQuote = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.selectWinningQuote",
+    title: "Select winning quote and raise PO",
+    intent:
+      "Award an approved request to a vendor's quoted price: marks that RFQ won, its siblings lost, and raises the purchase order so receiving and billing can proceed",
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    input: z.object({ rfqId: z.string() }),
+    output: z.object({ poNumber: z.number(), vendorId: z.string(), quoteAmountMinor: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [winner] = await tx
+          .select()
+          .from(rfqs)
+          .where(and(eq(rfqs.id, input.rfqId), eq(rfqs.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!winner) throw new Error("RFQ not found");
+        if (winner.status !== "quoted") throw new Error("record this vendor's quote before awarding");
+        const [req] = await tx
+          .select({ status: purchaseRequests.status, title: purchaseRequests.title })
+          .from(purchaseRequests)
+          .where(and(eq(purchaseRequests.id, winner.requestId), eq(purchaseRequests.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!req) throw new Error("purchase request not found");
+        if (req.status !== "approved") throw new Error("request is no longer approvable into an order");
+
+        // Sibling bids lose; the winner converts into a purchase order.
+        await tx.update(rfqs).set({ status: "lost" }).where(
+          and(eq(rfqs.requestId, winner.requestId), eq(rfqs.orgId, ctx.actor.orgId)),
+        );
+        await tx.update(rfqs).set({ status: "won" }).where(eq(rfqs.id, winner.id));
+
+        const [numRow] = await tx
+          .select({ maxNum: sql<number>`coalesce(max(${purchaseOrders.number}), 0)` })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.orgId, ctx.actor.orgId));
+        const poNumber = Number(numRow?.maxNum ?? 0) + 1;
+        const [po] = await tx
+          .insert(purchaseOrders)
+          .values({
+            orgId: ctx.actor.orgId,
+            vendorId: winner.vendorId,
+            number: poNumber,
+            status: "ordered",
+            memo: `From RFQ award · ${req.title}`,
+            orderedAt: ctx.now,
+          })
+          .returning({ id: purchaseOrders.id });
+        await tx.insert(poLines).values({
+          poId: po!.id,
+          description: req.title,
+          quantity: 1000,
+          unitPriceMinor: winner.quoteAmountMinor ?? 0,
+        });
+
+        await tx
+          .update(purchaseRequests)
+          .set({ status: "converted", decidedAt: ctx.now })
+          .where(eq(purchaseRequests.id, winner.requestId));
+        return { poNumber, vendorId: winner.vendorId, quoteAmountMinor: winner.quoteAmountMinor ?? 0 };
+      });
+    },
+  });
+
+const listPurchaseWorkflow = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.listPurchaseWorkflow",
+    title: "List purchase requests and RFQs",
+    intent:
+      "List recent internal purchase requests with their approval state and every RFQ bid on them, so you can review, chase quotes, or award a winner",
+    module: "purchasing",
+    risk: "read",
+    permission: "purchasing.read",
+    input: z.object({}),
+    output: z.object({
+      requests: z.array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          justification: z.string(),
+          estimatedAmountMinor: z.number().nullable(),
+          status: z.string(),
+          createdAt: z.string(),
+          rfqs: z.array(
+            z.object({
+              id: z.string(),
+              vendorId: z.string(),
+              status: z.string(),
+              quoteAmountMinor: z.number().nullable(),
+              quoteLeadTimeDays: z.number().nullable(),
+            }),
+          ),
+        }),
+      ),
+    }),
+    execute: async (ctx) => {
+      const reqRows = await deps.db
+        .select()
+        .from(purchaseRequests)
+        .where(eq(purchaseRequests.orgId, ctx.actor.orgId))
+        .orderBy(desc(purchaseRequests.createdAt))
+        .limit(50);
+      const rfqRows = reqRows.length
+        ? await deps.db.select().from(rfqs).where(eq(rfqs.orgId, ctx.actor.orgId))
+        : [];
+      return {
+        requests: reqRows.map((r) => ({
+          id: r.id,
+          title: r.title,
+          justification: r.justification,
+          estimatedAmountMinor: r.estimatedAmountMinor,
+          status: r.status,
+          createdAt: r.createdAt.toISOString(),
+          rfqs: rfqRows
+            .filter((f) => f.requestId === r.id)
+            .map((f) => ({
+              id: f.id,
+              vendorId: f.vendorId,
+              status: f.status,
+              quoteAmountMinor: f.quoteAmountMinor,
+              quoteLeadTimeDays: f.quoteLeadTimeDays,
+            })),
+        })),
+      };
+    },
+  });
+
 export function registerPurchasingCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(createVendor(deps));
   registry.register(createPO(deps));
@@ -461,4 +744,10 @@ export function registerPurchasingCapabilities(registry: CapabilityRegistry, dep
   registry.register(createBill(deps));
   registry.register(payBill(deps));
   registry.register(apAging(deps));
+  registry.register(createPurchaseRequest(deps));
+  registry.register(decidePurchaseRequest(deps));
+  registry.register(createRfq(deps));
+  registry.register(recordQuote(deps));
+  registry.register(selectWinningQuote(deps));
+  registry.register(listPurchaseWorkflow(deps));
 }

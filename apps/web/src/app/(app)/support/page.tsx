@@ -1,11 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
-import { IconAlertTriangle, IconBot, IconChevronLeft, IconPlus, IconSend, IconX } from "@/components/icons";
+import { Badge, Button, EmptyState, LoadingPage, StatCard } from "@/components/ui";
+import { IconAlertTriangle, IconBot, IconChevronLeft, IconLifeBuoy, IconPlus, IconSend, IconX } from "@/components/icons";
 import { cn, timeAgo } from "@/lib/format";
 import { callApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { postApi } from "@/lib/api";
+import { AppFrame } from "../_shell/app-frame";
+
+type Tab = "overview" | "inbox" | "widget";
 
 interface ConversationRow {
   id: string;
@@ -44,6 +48,7 @@ const SENDER_LABEL: Record<string, string> = {
 export default function SupportPage() {
   const __enabled = useModuleEnabled("support");
   const [convs, setConvs] = useState<ConversationRow[] | null>(null);
+  const [tab, setTab] = useState<Tab>("overview");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [conv, setConv] = useState<ConversationRow | null>(null);
   const [msgs, setMsgs] = useState<SupportMessage[]>([]);
@@ -57,6 +62,7 @@ export default function SupportPage() {
   const [newSubject, setNewSubject] = useState("");
   const [customerOptions, setCustomerOptions] = useState<CustomerOption[]>([]);
   const [newCustomerId, setNewCustomerId] = useState("");
+  const [quickCustomer, setQuickCustomer] = useState({ open: false, name: "", email: "" });
   const threadRef = useRef<HTMLDivElement>(null);
 
   const loadConvs = useCallback(async () => {
@@ -174,6 +180,29 @@ export default function SupportPage() {
     setNewCustomerId(options[0]?.id ?? "");
   }
 
+  async function createCustomerHere() {
+    if (!quickCustomer.name.trim()) return;
+    setBusy(true);
+    const res = await postApi<{ customerId?: string }>("/api/customers", {
+      action: "create",
+      name: quickCustomer.name.trim(),
+      email: quickCustomer.email.trim() || undefined,
+    });
+    setBusy(false);
+    if (!res.ok || !res.data?.customerId) {
+      setError(res.error?.title ?? "Couldn't create the customer");
+      return;
+    }
+    const created: CustomerOption = {
+      id: res.data.customerId,
+      name: quickCustomer.name.trim(),
+      email: quickCustomer.email.trim() || null,
+    };
+    setCustomerOptions((opts) => [...opts, created]);
+    setNewCustomerId(created.id);
+    setQuickCustomer({ open: false, name: "", email: "" });
+  }
+
   async function createConversation() {
     if (!newCustomerId || !newSubject.trim()) return;
     setBusy(true);
@@ -193,20 +222,101 @@ export default function SupportPage() {
 
   if (!__enabled) return <ModuleDisabled label="Customer care" />;
 
+  const openCount = (convs ?? []).filter((c) => c.status === "open").length;
+  const escalatedCount = (convs ?? []).filter((c) => c.status === "escalated").length;
+  const resolvedCount = (convs ?? []).filter((c) => c.status === "resolved").length;
+
   return (
-    <div className="flex h-full flex-col">
-      <PageHeader
-        title="Customer care"
-        description="Answer inbound inquiries with AI-drafted replies. Drafts never reach the customer until a human sends them."
-        actions={
+    <AppFrame
+      appId="support"
+      description="Answer inbound inquiries with AI-drafted replies. Drafts never reach the customer until a human sends them."
+      persistKey="support"
+      tabs={[
+        { id: "overview", label: "Overview" },
+        { id: "inbox", label: "Inbox", count: openCount + escalatedCount || undefined },
+        { id: "widget", label: "Website widget" },
+      ]}
+      activeTab={tab}
+      onTabChange={(id) => setTab(id as Tab)}
+      actions={
+        tab === "inbox" ? (
           <Button tone="primary" onClick={openNewConversation}>
             <IconPlus className="size-4" />
             New conversation
           </Button>
-        }
-      />
+        ) : undefined
+      }
+    >
+      {tab === "overview" && (
+        <div className="mb-6">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard label="Open inquiries" value={openCount} tone={openCount > 0 ? "warn" : "success"} />
+            <StatCard label="Escalated" value={escalatedCount} tone={escalatedCount > 0 ? "warn" : "default"} />
+            <StatCard label="Resolved" value={resolvedCount} tone="success" />
+            <StatCard label="Conversations" value={convs?.length ?? 0} />
+          </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 pt-0 lg:grid-cols-[320px_1fr]">
+          <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+            <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+              <p className="figure-label mb-3">Latest activity</p>
+              {(convs ?? []).length === 0 ? (
+                <EmptyState
+                  icon={<IconLifeBuoy className="size-5" />}
+                  title="No conversations yet"
+                  hint="Open one per customer inquiry so every answer stays on the record."
+                />
+              ) : (
+                <ul className="divide-y divide-stone-100">
+                  {[...(convs ?? [])]
+                    .sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? ""))
+                    .slice(0, 5)
+                    .map((c) => (
+                      <li key={c.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-stone-800">{c.subject}</span>
+                          <span className="text-xs opacity-50">
+                            {c.customerName} · {c.lastMessageAt ? timeAgo(c.lastMessageAt) : "no messages"}
+                          </span>
+                        </span>
+                        <Badge tone={STATUS_TONE[c.status] ?? "neutral"}>{c.status}</Badge>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+              <p className="figure-label mb-3">How care works here</p>
+              <ul className="space-y-2.5 text-sm leading-relaxed opacity-80">
+                <li className="flex gap-2">
+                  <IconBot aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-violet-500" />
+                  The workmate drafts replies from the customer&apos;s own order history — nothing else.
+                </li>
+                <li className="flex gap-2">
+                  <IconSend aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-sky-500" />
+                  A human sends every draft; the model never talks to customers directly.
+                </li>
+                <li className="flex gap-2">
+                  <IconLifeBuoy aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-maroon-600" />
+                  The website widget routes visitors into the same governed inbox.
+                </li>
+              </ul>
+              <div className="mt-4 flex gap-2">
+                <Button onClick={() => setTab("inbox")}>Open inbox</Button>
+                <Button tone="ghost" onClick={() => setTab("widget")}>
+                  Website widget
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "widget" && <ChannelsPanel />}
+
+      {tab === "inbox" && (
+        <>
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 pt-0 lg:grid-cols-[320px_1fr]">
         {/* Inbox list */}
         <aside className="min-h-0 overflow-y-auto rounded-xl border border-stone-200 bg-white shadow-xs">
           {convs.length === 0 ? (
@@ -388,7 +498,7 @@ export default function SupportPage() {
               id="support-customer"
               value={newCustomerId}
               onChange={(e) => setNewCustomerId(e.target.value)}
-              className="input mb-3"
+              className="input mb-2"
             >
               {customerOptions.length === 0 && <option value="">No customers yet</option>}
               {customerOptions.map((c) => (
@@ -397,6 +507,35 @@ export default function SupportPage() {
                 </option>
               ))}
             </select>
+            {!quickCustomer.open ? (
+              <button
+                type="button"
+                onClick={() => setQuickCustomer({ open: true, name: "", email: "" })}
+                className="mb-3 cursor-pointer text-xs font-medium text-maroon-700 underline underline-offset-2 hover:text-maroon-900"
+              >
+                + New customer
+              </button>
+            ) : (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 p-2">
+                <input
+                  aria-label="New customer name"
+                  placeholder="Customer name"
+                  className="min-w-32 flex-1 rounded border bg-transparent px-2 py-1.5 text-sm"
+                  value={quickCustomer.name}
+                  onChange={(e) => setQuickCustomer({ ...quickCustomer, name: e.target.value })}
+                />
+                <input
+                  aria-label="New customer email"
+                  placeholder="Email (optional)"
+                  className="w-40 rounded border bg-transparent px-2 py-1.5 text-sm"
+                  value={quickCustomer.email}
+                  onChange={(e) => setQuickCustomer({ ...quickCustomer, email: e.target.value })}
+                />
+                <Button size="sm" disabled={busy || !quickCustomer.name.trim()} onClick={() => void createCustomerHere()}>
+                  Save &amp; use
+                </Button>
+              </div>
+            )}
             <label htmlFor="support-subject" className="label">What is this about?</label>
             <input
               id="support-subject"
@@ -418,6 +557,118 @@ export default function SupportPage() {
           </div>
         </div>
       )}
+        </>
+      )}
+    </AppFrame>
+  );
+}
+
+/**
+ * Zero-step setup for the website channel: the embed token is provisioned
+ * on first load, the snippet is copyable, and AI behavior is one toggle.
+ */
+function ChannelsPanel() {
+  const [state, setState] = useState<{ autoReplyEnabled: boolean; greeting: string; embedToken: string } | null>(null);
+  const [greeting, setGreeting] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await callApi<{ autoReplyEnabled: boolean; greeting: string; embedToken: string }>("/api/support/channels");
+      if (res.data) {
+        setState(res.data);
+        setGreeting(res.data.greeting);
+      }
+    })();
+  }, []);
+
+  if (!state) return <div className="p-4 text-sm text-stone-400">Loading channel settings…</div>;
+
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const snippet = `<script src="${origin}/widget.js" data-chaste="${state.embedToken}" async></script>`;
+  const link = `${origin}/widget/${state.embedToken}`;
+
+  async function patch(body: Record<string, unknown>) {
+    setBusy(true);
+    const res = await postApi<typeof state>("/api/support/channels", body);
+    setBusy(false);
+    if (res.ok && res.data) setState(res.data);
+  }
+
+  function copy(text: string, label: string) {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 1600);
+    });
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6 overflow-y-auto p-4">
+      <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+        <h2 className="text-sm font-semibold text-stone-900">Put chat on your website</h2>
+        <p className="mt-1 text-sm text-stone-500">
+          Paste this into your marketing site before <code className="rounded bg-stone-100 px-1">&lt;/body&gt;</code>. A
+          floating &ldquo;Chat with us&rdquo; bubble appears; conversations land in this inbox as customers.
+        </p>
+        <pre className="mt-3 overflow-x-auto rounded-lg bg-stone-950 p-3 text-[12px] leading-relaxed text-stone-100">{snippet}</pre>
+        <div className="mt-2 flex items-center gap-2">
+          <Button tone="secondary" size="sm" onClick={() => copy(snippet, "snippet")}>{copied === "snippet" ? "Copied ✓" : "Copy snippet"}</Button>
+          <Button tone="ghost" size="sm" onClick={() => void patch({ regenerateToken: true })} disabled={busy}>
+            Regenerate token…
+          </Button>
+        </div>
+        <p className="mt-3 text-xs text-stone-500">
+          Prefer a plain link? Share{" "}
+          <button type="button" onClick={() => copy(link, "link")} className="font-medium text-maroon-700 underline underline-offset-2">
+            {copied === "link" ? "copied ✓" : "the standalone chat page"}
+          </button>{" "}
+          anywhere — email signatures, social bios, help docs.
+        </p>
+      </section>
+
+      <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+        <h2 className="text-sm font-semibold text-stone-900">AI behavior</h2>
+        <label className="mt-3 flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={state.autoReplyEnabled}
+            onChange={(e) => void patch({ autoReplyEnabled: e.target.checked })}
+            disabled={busy}
+            className="mt-0.5 size-4 accent-[#9b1313]"
+          />
+          <span className="text-sm text-stone-700">
+            <strong className="font-medium">Answer visitors automatically.</strong>{" "}
+            <span className="text-stone-500">
+              Replies are grounded in your knowledge base and order history. When you turn this off — or a visitor asks
+              for a human — the thread waits for staff and shows as needing you.
+            </span>
+          </span>
+        </label>
+        <label htmlFor="widget-greeting" className="mt-4 block text-sm font-medium text-stone-700">
+          First message visitors see
+        </label>
+        <textarea
+          id="widget-greeting"
+          rows={2}
+          value={greeting}
+          maxLength={300}
+          onChange={(e) => setGreeting(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-stone-400"
+        />
+        <Button tone="secondary" size="sm" disabled={busy || !greeting.trim() || greeting === state.greeting} onClick={() => void patch({ greeting })} className="mt-2">
+          Save greeting
+        </Button>
+      </section>
+
+      <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+        <h2 className="text-sm font-semibold text-stone-900">What the AI can reach</h2>
+        <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-stone-500">
+          <li>Your knowledge base (Documents app)</li>
+          <li>The asking customer&apos;s own order status — nothing about other customers</li>
+          <li>Nothing else. Escalated threads are answered only by people.</li>
+        </ul>
+      </section>
     </div>
   );
 }

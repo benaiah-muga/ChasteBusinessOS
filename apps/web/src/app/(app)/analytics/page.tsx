@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ActionNotice, type ActionNoticeState, Button, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
+import { ActionNotice, type ActionNoticeState, Button, EmptyState, LoadingPage } from "@/components/ui";
 import { IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
+import { AppFrame } from "../_shell/app-frame";
 
 interface DatasetInfo {
   id: string;
@@ -125,11 +126,10 @@ export default function AnalyticsPage() {
   const allColsOf = (datasetId: string) => previews[datasetId]?.columns ?? [];
 
   return (
-    <div>
-      <PageHeader
-        title="Analytics"
-        description="Compose governed datasets into a report with charts and exact numbers. Your co-worker can build the same reports from chat."
-      />
+    <AppFrame
+      appId="analytics"
+      description="Compose governed datasets into a report with charts and exact numbers. Your workmate can build the same reports from chat."
+    >
 
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
 
@@ -178,7 +178,7 @@ export default function AnalyticsPage() {
             <textarea
               value={narrative}
               onChange={(e) => setNarrative(e.target.value)}
-              placeholder="Optional narrative for the report header (or let your co-worker draft it in chat)…"
+              placeholder="Optional narrative for the report header (or let your workmate draft it in chat)…"
               aria-label="Report narrative"
               rows={2}
               className="input mb-4 w-full max-w-xl resize-y"
@@ -301,6 +301,6 @@ export default function AnalyticsPage() {
           )}
         </>
       )}
-    </div>
+    </AppFrame>
   );
 }

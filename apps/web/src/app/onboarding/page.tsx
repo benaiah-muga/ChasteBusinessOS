@@ -38,11 +38,15 @@ export default function OnboardingPage() {
       <div className="grid w-full gap-12 lg:grid-cols-[1fr_1.2fr] lg:items-center">
         {/* Context panel */}
         <section className="hidden lg:block">
-          <span className="inline-flex items-center gap-2 text-xs font-semibold tracking-widest text-maroon-700 uppercase">
-            <IconSparkle className="size-4" />
-            Workspace setup
+          <span
+            aria-hidden="true"
+            className="mb-5 flex size-11 items-center justify-center rounded-xl text-lg font-bold text-white"
+            style={{ background: "linear-gradient(160deg, var(--color-maroon-800), var(--color-maroon-950))" }}
+          >
+            C
           </span>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-balance text-stone-900">
+          <p className="figure-label">Workspace setup</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-balance text-stone-900">
             Your books, seeded by a sentence.
           </h1>
           <p className="mt-4 leading-relaxed text-stone-600">
@@ -56,7 +60,7 @@ export default function OnboardingPage() {
             </li>
             <li className="flex gap-3">
               <IconSparkle className="mt-0.5 size-4 shrink-0 text-maroon-700" />
-              Your AI co-worker reads this once and remembers it forever.
+              Your AI workmate reads this once and remembers it forever.
             </li>
             <li className="flex gap-3">
               <IconUsers className="mt-0.5 size-4 shrink-0 text-maroon-700" />
@@ -67,9 +71,15 @@ export default function OnboardingPage() {
 
         {/* Form */}
         <section>
-          <div className="mb-6 flex items-center gap-2 lg:hidden">
-            <IconSparkle className="size-4 text-maroon-700" />
-            <p className="text-xs font-semibold tracking-widest text-maroon-700 uppercase">Workspace setup</p>
+          <div className="mb-6 flex items-center gap-2.5 lg:hidden">
+            <span
+              aria-hidden="true"
+              className="flex size-9 items-center justify-center rounded-lg text-sm font-bold text-white"
+              style={{ background: "linear-gradient(160deg, var(--color-maroon-800), var(--color-maroon-950))" }}
+            >
+              C
+            </span>
+            <p className="figure-label">Workspace setup</p>
           </div>
           <form onSubmit={submit} className="card card-pad sm:p-6">
             <div className="mb-5">

@@ -48,6 +48,7 @@ const createItem = (deps: ModuleDeps) =>
       sku: z.string().min(1).max(40),
       name: z.string().min(1).max(120),
       unitLabel: z.string().max(20).default("unit"),
+      salePriceMinor: z.number().int().nonnegative().default(0),
       reorderPointThousandths: z.number().int().nonnegative().default(0),
     }),
     output: z.object({ itemId: z.string() }),
@@ -65,10 +66,47 @@ const createItem = (deps: ModuleDeps) =>
           sku: input.sku,
           name: input.name,
           unitLabel: input.unitLabel,
+          salePriceMinor: input.salePriceMinor,
           reorderPointThousandths: input.reorderPointThousandths,
         })
         .returning({ id: items.id });
       return { itemId: row!.id };
+    },
+  });
+
+/**
+ * Archiving retires a product without destroying history: past quote and
+ * invoice lines keep their SKU references, and stock movements stay intact.
+ */
+const archiveItem = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "inventory.archiveItem",
+    title: "Archive or restore item",
+    intent:
+      "Retire a product from the active catalog so it stops appearing in pickers and reorder alerts, or bring an archived one back",
+    module: "inventory",
+    risk: "write",
+    permission: "inventory.write",
+    // Self-reversible by design (archive: false restores); the registry
+    // forbids declaring a capability as its own inverse, so this warning is
+    // expected and justified.
+    input: z.object({
+      sku: z.string().min(1),
+      archive: z.boolean().default(true),
+    }),
+    output: z.object({ sku: z.string(), archived: z.boolean() }),
+    execute: async (ctx, input) => {
+      const [item] = await deps.db
+        .select({ id: items.id })
+        .from(items)
+        .where(and(eq(items.orgId, ctx.actor.orgId), eq(items.sku, input.sku)))
+        .limit(1);
+      if (!item) throw new Error(`SKU "${input.sku}" not found`);
+      await deps.db
+        .update(items)
+        .set({ archivedAt: input.archive ? new Date() : null })
+        .where(eq(items.id, item.id));
+      return { sku: input.sku, archived: input.archive };
     },
   });
 
@@ -150,6 +188,7 @@ const stockReport = (deps: ModuleDeps) =>
           sku: z.string(),
           name: z.string(),
           unitLabel: z.string(),
+          salePriceMinor: z.number(),
           onHandThousandths: z.number(),
           valueMinor: z.number(),
           avgUnitCostMinor: z.number(),
@@ -165,7 +204,7 @@ const stockReport = (deps: ModuleDeps) =>
       const rows = await deps.db
         .select()
         .from(items)
-        .where(eq(items.orgId, ctx.actor.orgId))
+        .where(and(eq(items.orgId, ctx.actor.orgId), sql`${items.archivedAt} IS NULL`))
         .orderBy(asc(items.sku));
       const out = [];
       let totalValueMinor = 0;
@@ -184,6 +223,7 @@ const stockReport = (deps: ModuleDeps) =>
           sku: item.sku,
           name: item.name,
           unitLabel: item.unitLabel,
+          salePriceMinor: item.salePriceMinor,
           onHandThousandths: level,
           valueMinor: valuation.totalValueMinor,
           avgUnitCostMinor:
@@ -656,6 +696,7 @@ const listLots = (deps: ModuleDeps) =>
 
 export function registerInventoryCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(createItem(deps));
+  registry.register(archiveItem(deps));
   registry.register(adjustStock(deps));
   registry.register(stockReport(deps));
   registry.register(stockHistory(deps));
