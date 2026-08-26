@@ -60,6 +60,23 @@ const ASK_ACTIONS = [
   { label: "Where is my cash?", prompt: "Give me the cash position: cash balance in, out, and net this month." },
 ];
 
+interface SetupItem {
+  id: string;
+  title: string;
+  why: string;
+  href: string;
+  done: boolean;
+}
+
+/** Hidden setup items persist locally; they reappear only when still undone on a fresh device. */
+function loadDismissed(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem("chaste-setup-dismissed") ?? "[]") as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
 function openChatWith(prompt: string) {
   void (async () => {
     const { chatDock, chatDraft } = await import("./chat-widget-state");
@@ -71,6 +88,8 @@ function openChatWith(prompt: string) {
 export function HomeDashboard({ orgName }: { orgName: string }) {
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [setup, setSetup] = useState<SetupItem[] | null>(null);
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     void (async () => {
@@ -78,7 +97,21 @@ export function HomeDashboard({ orgName }: { orgName: string }) {
       if (!res.data) setError(res.error?.title ?? "Could not load your dashboard");
       else setData(res.data);
     })();
+    void callApi<{ items?: SetupItem[] }>("/api/setup").then((res) => {
+      if (res.data?.items) setSetup(res.data.items);
+      setDismissed(loadDismissed());
+    });
   }, []);
+
+  function dismissItem(id: string) {
+    const next = new Set(dismissed).add(id);
+    setDismissed(next);
+    try {
+      localStorage.setItem("chaste-setup-dismissed", JSON.stringify([...next]));
+    } catch {
+      // Session-only dismissal when storage is unavailable.
+    }
+  }
 
   const attentionCount = data
     ? data.ops.pendingApprovals +
@@ -130,10 +163,67 @@ export function HomeDashboard({ orgName }: { orgName: string }) {
         </div>
       ) : (
         <>
+          {setup && <SetupChecklist items={setup} dismissed={dismissed} onDismiss={dismissItem} />}
           <DashboardBody data={data} attentionCount={attentionCount} />
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * What is expected of this workspace, computed live: each unfinished step
+ * says why it matters and links straight to where it gets done.
+ */
+function SetupChecklist({
+  items,
+  dismissed,
+  onDismiss,
+}: {
+  items: SetupItem[];
+  dismissed: Set<string>;
+  onDismiss: (id: string) => void;
+}) {
+  const pending = items.filter((i) => !i.done && !dismissed.has(i.id));
+  if (pending.length === 0) return null;
+  return (
+    <section aria-label="Workspace setup" className="mt-6 rounded-xl border border-maroon-200 bg-maroon-50/50 p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="figure-label">Get set up · {pending.length} left</p>
+        <span className="text-xs text-stone-500">
+          Each step takes a minute; the workmate can do most of them with you.
+        </span>
+      </div>
+      <ol className="mt-3 grid gap-x-8 gap-y-3 md:grid-cols-2">
+        {pending.map((item) => (
+          <li key={item.id} className="group flex items-start gap-2.5 text-sm leading-relaxed">
+            <span aria-hidden="true" className="mt-[7px] size-1.5 shrink-0 rounded-full bg-maroon-600" />
+            <span className="min-w-0 flex-1">
+              <span className="font-medium text-stone-900">{item.title}</span>
+              <span className="block text-xs text-stone-500">{item.why}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5 pt-0.5">
+              <Link
+                href={item.href}
+                className="inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-maroon-800 hover:underline"
+              >
+                Take me there
+                <IconArrowRight className="size-3" />
+              </Link>
+              <button
+                type="button"
+                aria-label={`Hide "${item.title}"`}
+                title="Hide this step"
+                onClick={() => onDismiss(item.id)}
+                className="cursor-pointer rounded px-1 text-[11px] text-stone-400 transition-colors hover:text-stone-700"
+              >
+                ✕
+              </button>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

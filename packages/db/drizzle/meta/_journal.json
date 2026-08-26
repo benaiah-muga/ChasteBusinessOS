@@ -162,6 +162,41 @@
       "when": 1787586405534,
       "tag": "0022_real_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1787663985490,
+      "tag": "0023_big_phalanx",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787687819357,
+      "tag": "0024_fixed_ultimates",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787751400000,
+      "tag": "0025_abnormal_maelstrom",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787752400000,
+      "tag": "0026_curved_moon_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1787753400000,
+      "tag": "0027_mature_elektra",
+      "breakpoints": true
     }
   ]
 }

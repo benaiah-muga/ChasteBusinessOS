@@ -133,6 +133,116 @@
   --color-canvas: #fbf9f4;
 }
 
+/*
+ * Dark mode. The neutral ramp flips (50 becomes the deepest surface, 950 the
+ * brightest ink) and `white` — Tailwind's default surface — becomes elevated
+ * ink, so every bg-white/text-white pair inverts together. Each theme keeps
+ * its accent identity: tint backgrounds go deep, text-on-tint goes pale,
+ * mid accents brighten enough to carry white text and read as links on dark.
+ */
+[data-mode="dark"] {
+  --color-stone-50: #1b1815;
+  --color-stone-100: #23201c;
+  --color-stone-200: #322d28;
+  --color-stone-300: #47413a;
+  --color-stone-400: #6e675e;
+  --color-stone-500: #8d857a;
+  --color-stone-600: #a89f93;
+  --color-stone-700: #c2bab0;
+  --color-stone-800: #d9d3cb;
+  --color-stone-900: #ece8e2;
+  --color-stone-950: #f7f4f0;
+
+  /* Tailwind's default surface follows the mode, so every bg-white/text-white
+     pair inverts together instead of each component needing its own rule. */
+  --color-white: #26221d;
+
+  --color-canvas: #141210;
+}
+
+/* Semantic status colors keep their hue but drop into dark-appropriate pairs. */
+[data-mode="dark"] .badge-green {
+  @apply bg-emerald-950 text-emerald-300;
+}
+[data-mode="dark"] .badge-amber {
+  @apply bg-amber-950 text-amber-300;
+}
+[data-mode="dark"] .badge-red {
+  @apply bg-red-950 text-red-300;
+}
+[data-mode="dark"] .badge-blue {
+  @apply bg-sky-950 text-sky-300;
+}
+[data-mode="dark"] .badge-violet {
+  @apply bg-violet-950 text-violet-300;
+}
+[data-mode="dark"] .btn-danger {
+  @apply bg-red-500 text-stone-50 hover:bg-red-400 active:bg-red-300;
+}
+[data-mode="dark"] .btn-danger-secondary {
+  @apply border-red-800 bg-red-950/60 text-red-300 hover:border-red-700 hover:bg-red-950;
+}
+/* The scrim stays a true blackout even though stone-950 now points at ink. */
+[data-mode="dark"] .overlay-backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+[data-theme="chaste"][data-mode="dark"] {
+  --color-maroon-50: #26120e;
+  --color-maroon-100: #361914;
+  --color-maroon-200: #55241d;
+  --color-maroon-300: #85453a;
+  --color-maroon-400: #b25a4b;
+  --color-maroon-500: #cf5340;
+  --color-maroon-600: #dd5f4a;
+  --color-maroon-700: #e47a60;
+  --color-maroon-800: #eda692;
+  --color-maroon-900: #f3cab9;
+  --color-maroon-950: #f9e2d7;
+}
+
+[data-theme="graphite"][data-mode="dark"] {
+  --color-maroon-50: #0f1720;
+  --color-maroon-100: #152230;
+  --color-maroon-200: #1f3549;
+  --color-maroon-300: #34586f;
+  --color-maroon-400: #4d7d97;
+  --color-maroon-500: #5f97b4;
+  --color-maroon-600: #6fa5c2;
+  --color-maroon-700: #88b8d1;
+  --color-maroon-800: #aed0e2;
+  --color-maroon-900: #cae2ee;
+  --color-maroon-950: #e0eff6;
+}
+
+[data-theme="verdant"][data-mode="dark"] {
+  --color-maroon-50: #101a10;
+  --color-maroon-100: #182517;
+  --color-maroon-200: #243823;
+  --color-maroon-300: #3c5a3a;
+  --color-maroon-400: #587f54;
+  --color-maroon-500: #6d9668;
+  --color-maroon-600: #7da578;
+  --color-maroon-700: #94b98f;
+  --color-maroon-800: #b6d3b1;
+  --color-maroon-900: #d0e5cd;
+  --color-maroon-950: #e4f1e2;
+}
+
+[data-theme="meridian"][data-mode="dark"] {
+  --color-maroon-50: #1e170c;
+  --color-maroon-100: #2b2110;
+  --color-maroon-200: #43331a;
+  --color-maroon-300: #6b5327;
+  --color-maroon-400: #96752f;
+  --color-maroon-500: #b28c38;
+  --color-maroon-600: #c49d42;
+  --color-maroon-700: #d2b25e;
+  --color-maroon-800: #e3cc8f;
+  --color-maroon-900: #eeddb2;
+  --color-maroon-950: #f6ecd0;
+}
+
 @layer base {
   html {
     scrollbar-gutter: stable;
@@ -367,7 +477,7 @@
 
   /* ---------- Apps launcher tile ---------- */
   .app-tile {
-    @apply flex cursor-pointer flex-col items-start gap-3 rounded-xl border border-transparent p-3 text-left transition-all duration-150 hover:border-stone-200 hover:bg-white focus-visible:border-maroon-400 active:scale-[0.98];
+    @apply flex cursor-pointer flex-col items-start gap-2.5 rounded-xl border border-transparent px-2 py-2.5 text-left transition-all duration-150 hover:border-stone-200 hover:bg-white focus-visible:border-maroon-400 active:scale-[0.98];
   }
 
   /* Ledger ruling: the fine horizontal hairlines of an accounts book. */

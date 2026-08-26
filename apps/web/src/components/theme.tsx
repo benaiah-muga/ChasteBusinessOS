@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { IconCheck, IconChevronDown } from "@/components/icons";
+import { IconCheck, IconChevronDown, IconMoon, IconSun } from "@/components/icons";
 import { cn } from "@/lib/format";
 
 export const THEMES = [
@@ -14,12 +14,46 @@ export const THEMES = [
 export type ThemeId = (typeof THEMES)[number]["id"];
 export const DEFAULT_THEME: ThemeId = "chaste";
 
+export const MODES = [
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+  { id: "system", label: "System" },
+] as const;
+
+export type ModeId = (typeof MODES)[number]["id"];
+export const DEFAULT_MODE: ModeId = "system";
+
+const modeListeners = new Set<(m: ModeId) => void>();
+const listeners = new Set<(t: ThemeId) => void>();
+
 function currentTheme(): ThemeId {
   const attr = document.documentElement.dataset.theme as ThemeId | undefined;
   return attr && THEMES.some((t) => t.id === attr) ? attr : DEFAULT_THEME;
 }
 
-const listeners = new Set<(t: ThemeId) => void>();
+function currentMode(): ModeId {
+  const raw = localStorage.getItem("chaste-mode");
+  return raw === "light" || raw === "dark" || raw === "system" ? raw : DEFAULT_MODE;
+}
+
+/**
+ * Resolves the stored preference against the OS setting and reflects it as
+ * data-mode on <html>. Called by the pre-paint bootstrap in layout.tsx too,
+ * so first paint is already in the right mode.
+ */
+export function applyMode(m: ModeId) {
+  const dark =
+    m === "dark" ||
+    (m === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  if (dark) document.documentElement.dataset.mode = "dark";
+  else delete document.documentElement.dataset.mode;
+  try {
+    localStorage.setItem("chaste-mode", m);
+  } catch {
+    // Storage unavailable; the choice lives until reload.
+  }
+  for (const fn of modeListeners) fn(m);
+}
 
 /** Applies the theme to the document and persists it. Safe to call anywhere. */
 export function applyTheme(t: ThemeId) {
@@ -46,9 +80,30 @@ export function useTheme(): ThemeId {
   return theme;
 }
 
+/** Subscribes to light/dark/system preference changes. */
+export function useMode(): ModeId {
+  const [mode, setMode] = useState<ModeId>(DEFAULT_MODE);
+  useEffect(() => {
+    const sync = (m: ModeId) => setMode(m);
+    modeListeners.add(sync);
+    setMode(currentMode());
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSystem = () => {
+      if (currentMode() === "system") applyMode("system");
+    };
+    mq.addEventListener("change", onSystem);
+    return () => {
+      modeListeners.delete(sync);
+      mq.removeEventListener("change", onSystem);
+    };
+  }, []);
+  return mode;
+}
+
 /** Small popover menu anchored bottom-left; also reachable from ⌘K. */
 export function ThemeMenu() {
   const theme = useTheme();
+  const mode = useMode();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -81,7 +136,7 @@ export function ThemeMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Change theme"
+        aria-label="Change appearance"
         className="rail-btn"
       >
         <span className="flex items-center">
@@ -92,19 +147,50 @@ export function ThemeMenu() {
               background: `linear-gradient(135deg, ${swatches[theme][0]} 50%, ${swatches[theme][1]} 50%)`,
             }}
           />
+          {/* Resolved-mode tick: read from the DOM, re-rendered by useMode(). */}
+          {typeof document !== "undefined" && document.documentElement.dataset.mode === "dark" && (
+            <IconMoon className="absolute right-0.5 top-0.5 size-2.5 text-stone-500" />
+          )}
           <IconChevronDown className="absolute right-1 bottom-1 size-2.5 text-stone-400" />
         </span>
         <span aria-hidden="true" className="rail-tip">
-          Theme
+          Appearance
         </span>
       </button>
       {open && (
         <div
           role="menu"
-          aria-label="Theme"
+          aria-label="Appearance"
           className="overlay-panel absolute bottom-11 left-0 z-50 w-48 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl"
         >
-          <p className="px-2 pt-1 pb-1.5 text-[11px] font-semibold tracking-wider text-stone-400 uppercase">Theme</p>
+          <p className="px-2 pt-1 pb-1.5 text-[11px] font-semibold tracking-wider text-stone-400 uppercase">Mode</p>
+          {MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={mode === m.id}
+              onClick={() => applyMode(m.id)}
+              className={cn(
+                "flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors duration-75",
+                mode === m.id ? "bg-maroon-50 text-maroon-900" : "text-stone-700 hover:bg-stone-100",
+              )}
+            >
+              {m.id === "dark" ? (
+                <IconMoon className="size-3.5 shrink-0" />
+              ) : m.id === "light" ? (
+                <IconSun className="size-3.5 shrink-0" />
+              ) : (
+                <span aria-hidden="true" className="flex size-3.5 shrink-0">
+                  <IconSun className="size-3.5" />
+                  <IconMoon className="-ml-2 size-3.5" />
+                </span>
+              )}
+              <span className="flex-1 font-medium">{m.label}</span>
+              {mode === m.id && <IconCheck className="size-3.5 shrink-0 text-maroon-700" />}
+            </button>
+          ))}
+          <p className="px-2 pt-2.5 pb-1.5 text-[11px] font-semibold tracking-wider text-stone-400 uppercase">Theme</p>
           {THEMES.map((t) => (
             <button
               key={t.id}

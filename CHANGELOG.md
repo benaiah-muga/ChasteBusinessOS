@@ -12,6 +12,90 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **Guided setup ("what is expected of me")**: `GET /api/setup` computes a
+  live checklist per organization — products, customers, vendors, team,
+  email, website widget, Creator-mode agent — each item with a one-sentence
+  "why", done-state computed from real data, and a take-me-there link. The
+  home dashboard shows remaining steps in an unobtrusive card; steps can be
+  hidden locally.
+- **Creator-mode coding-agent wizard**: `GET /api/creator/agent` detects
+  installed coding CLIs (Claude Code, Codex CLI, Gemini CLI) read-only on
+  the server PATH. The Proposals page shows a connected badge when found,
+  or a three-step install/auth wizard with copyable commands — the app
+  never runs installs itself, it verifies afterwards.
+- **Product sale prices & archiving**: items carry a default sale price
+  (`sale_price_minor`, new migration) exposed through
+  `inventory.stockReport` and pre-filling price pickers; new governed
+  capability `inventory.archiveItem` retires products without destroying
+  history (archived items drop out of reports and reorder alerts). The
+  Products app gets a sale-price field, catalog column, per-row archive,
+  and the Sales quote form gets a product picker that fills description
+  and price from the catalog.
+- **Customer care inline customer create**: the new-conversation dialog can
+  create a missing customer on the spot and continue, matching the pattern
+  already present in Purchasing and Sales.
+- **Products & sales test coverage**: new end-to-end suite
+  (`products.test.ts`) covering catalog creation, duplicate-SKU rejection,
+  archive/restore semantics, quote totals, accept-converts-to-invoice with
+  balanced-posting assertion, double-convert race safety, and terminal
+  decline.
+- **Purchasing workflow (request → approval → RFQ → award)**: new
+  `purchase_requests` and `rfqs` tables plus governed capabilities —
+  `purchasing.createPurchaseRequest`, `purchasing.decidePurchaseRequest`
+  (approve/reject), `purchasing.createRfq` (one tracked RFQ per vendor on an
+  approved request), `purchasing.recordQuote` (amount, lead time, notes),
+  `purchasing.selectWinningQuote` (marks the winner won, siblings lost,
+  raises the purchase order, converts the request), and the read-only
+  `purchasing.listPurchaseWorkflow`. The Purchasing page opens on a new
+  "Requests & RFQs" tab covering the whole flow; the procure-to-pay skill
+  teaches both the formal RFQ route and the informal direct-PO route.
+- **@mentions in internal messaging**: messages carry explicit mentions
+  (`messages.mentions`); `messaging.listPeople` lists org members + the
+  workmate as mention targets; mentioning a colleague sends them a
+  notification and @mentioning the agent pulls it into any conversation,
+  even channels where it doesn't otherwise participate. The Messages
+  composer has a type-`@` picker with keyboard navigation, and message
+  bodies render accented mentions.
+- **Dark mode**: proper tri-state toggle (Light / Dark / System) in the rail
+  appearance menu and Settings → Appearance. Dark themes are defined per
+  palette (inverted neutral ramp, deep accent tints, brightened accents),
+  `bg-white` surfaces invert globally via the Tailwind token, semantic
+  badges/buttons get dark pairs, and a pre-paint bootstrap in `layout.tsx`
+  applies the stored preference with no flash.
+- **Digital clock** in the workspace chrome: quiet live HH:MM:SS at the
+  bottom of the desktop rail and in the mobile top bar, hydration-safe.
+
+### Fixed
+- Migration journal timestamps for 0025+ were being silently skipped
+  because 0024 had been journaled with a future `when`; migrations now apply
+  in order (schema caught up: `support_settings`, `messages.mentions`,
+  purchasing workflow tables).
+- Unfinished WIP from the previous session: missing `tsconfig.json` in
+  `modules/skills` (broke typecheck for every module), unresolved imports in
+  Settings' email section, type errors in the email invoice route and the
+  embeddable widget chat, and the missing drizzle snapshot for migration
+  0024 (regenerated from schema).
+
+### Added
+- **Bank feeds & reconciliation** (Accounting → Bank tab): bank accounts
+  (`bank_accounts`) and imported statement lines (`bank_transactions`) with
+  new governed capabilities — `accounting.addBankAccount`,
+  `accounting.importBankFeed` (≤500 rows, duplicate lines skipped so
+  re-pasting an export is safe), `accounting.matchBankTransaction` /
+  `unmatchBankTransaction`, `accounting.excludeBankTransaction` /
+  `unexcludeBankTransaction`, `accounting.deleteBankTransaction` (the import
+  undo path), and the read-only `accounting.bankSummary`. New
+  `/api/banking` route exposes the full human surface through the same
+  executor; the Bank tab offers paste-CSV feed import, a payment-match flow,
+  exclude buttons, and the "N unmatched" summary line.
+- **Sales tax filing** (Accounting → Tax tab): `accounting.salesTaxReport`
+  sums taxable sales and tax collected from non-void invoices in a window;
+  `accounting.fileSalesTaxReturn` posts DR Sales Tax Payable (2100) /
+  CR Cash (1000) via the normal entry mechanism, records the return in
+  `sales_tax_filings`, refuses overlapping already-filed periods, and
+  reverses through `accounting.reverseEntry`. Recent filings appear in the
+  Tax tab.
+
 - **Console tabs** (follow-up to ADR 0030): the co-worker panel now has a
   proper identity header (avatar, live status, mode) with three icon tabs —
   **New** conversation (`chatStore.reset()`, session id cleared, history

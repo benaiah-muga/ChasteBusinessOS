@@ -1,0 +1,1 @@
+ALTER TABLE "items" ADD COLUMN "sale_price_minor" integer DEFAULT 0 NOT NULL;

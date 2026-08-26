@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { callApi } from "@/lib/api";
+import { callApi, postApi } from "@/lib/api";
+import { Button } from "@/components/ui";
 import { APPS, tileStyle } from "../_shell/apps";
 import { appPins, MAX_PINS, usePinnedApps } from "../_shell/pins";
 import { useModuleEnabled } from "../_shell/module-context";
 import { ModulesManager } from "../_shell/modules-manager";
-import { THEMES, applyTheme, useTheme, type ThemeId } from "@/components/theme";
-import { IconCheck, IconPinTack } from "@/components/icons";
+import { THEMES, applyTheme, applyMode, useTheme, useMode, type ThemeId, MODES } from "@/components/theme";
+import { IconCheck, IconMoon, IconPinTack, IconSun } from "@/components/icons";
 import { cn } from "@/lib/format";
 
 const SWATCH: Record<ThemeId, [string, string]> = {
@@ -24,6 +25,7 @@ const SWATCH: Record<ThemeId, [string, string]> = {
  */
 export default function SettingsPage() {
   const theme = useTheme();
+  const mode = useMode();
   const pinnedIds = usePinnedApps();
   const accountingOn = useModuleEnabled("accounting");
   const [orgName, setOrgName] = useState<string>("");
@@ -46,9 +48,10 @@ export default function SettingsPage() {
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-stone-900">Make it yours</h1>
       </header>
 
-      <AppearanceSection theme={theme} />
+      <AppearanceSection theme={theme} mode={mode} />
       <PinsSection pinnedIds={pinnedIds} apps={[...businessApps, ...systemApps]} />
       <ModulesSection />
+      <EmailSection />
       <WorkspaceSection orgName={orgName} modulesNote={accountingOn ? "Managed by owners" : "Restricted set"} />
     </div>
   );
@@ -69,13 +72,39 @@ function ModulesSection() {
   );
 }
 
-function AppearanceSection({ theme }: { theme: ThemeId }) {
+function AppearanceSection({ theme, mode }: { theme: ThemeId; mode: ReturnType<typeof useMode> }) {
   return (
     <section aria-label="Appearance" className="mb-10">
       <h2 className="text-sm font-semibold text-stone-800">Appearance</h2>
       <p className="mt-1 text-sm text-stone-500">
         Four palettes, one product. Semantic colors — success, warnings, errors — never change.
       </p>
+      <div
+        role="radiogroup"
+        aria-label="Color mode"
+        className="mt-4 flex w-fit gap-1 rounded-xl border border-stone-200 bg-white p-1 shadow-xs"
+      >
+        {MODES.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            role="radio"
+            aria-checked={mode === m.id}
+            onClick={() => applyMode(m.id)}
+            className={cn(
+              "flex cursor-pointer items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-150",
+              mode === m.id ? "bg-maroon-50 text-maroon-900" : "text-stone-500 hover:bg-stone-100",
+            )}
+          >
+            {m.id === "dark" ? (
+              <IconMoon className="size-3.5" />
+            ) : m.id === "light" ? (
+              <IconSun className="size-3.5" />
+            ) : null}
+            {m.label}
+          </button>
+        ))}
+      </div>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {THEMES.map((t) => {
           const active = theme === t.id;
@@ -192,6 +221,62 @@ function WorkspaceSection({ orgName, modulesNote }: { orgName: string; modulesNo
           </dd>
         </div>
       </dl>
+    </section>
+  );
+}
+
+/** Outbound email: shows whether SMTP is live and proves it with a test send. */
+function EmailSection() {
+  const [status, setStatus] = useState<{ configured: boolean; from: string | null } | null>(null);
+  const [to, setTo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await callApi<{ configured: boolean; from: string | null }>("/api/email");
+      if (res.data) setStatus(res.data);
+    })();
+  }, []);
+
+  async function sendTest() {
+    setBusy(true);
+    setNote(null);
+    const res = await postApi<{ reason?: string }>("/api/email", { action: "test", to: to.trim() });
+    setBusy(false);
+    setNote(res.ok ? "Test email sent — check the inbox." : (res.error?.title ?? "Send failed."));
+  }
+
+  return (
+    <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
+      <h2 className="text-sm font-semibold text-stone-900">Email</h2>
+      {!status ? (
+        <p className="mt-1 text-sm text-stone-400">Checking…</p>
+      ) : status.configured ? (
+        <p className="mt-1 text-sm text-stone-500">
+          SMTP is configured{status.from ? <> — sending as <code className="rounded bg-stone-100 px-1">{status.from}</code></> : null}. Invoices, approvals, and customer care all deliver through it.
+        </p>
+      ) : (
+        <p className="mt-1 text-sm text-stone-500">
+          Set <code className="rounded bg-stone-100 px-1">SMTP_HOST</code> (+ optional{" "}
+          <code className="rounded bg-stone-100 px-1">SMTP_FROM</code>) in the server environment to enable delivery.
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          aria-label="Test recipient"
+          type="email"
+          placeholder="you@company.com"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          disabled={!status?.configured}
+          className="w-56 rounded border border-stone-200 bg-transparent px-2 py-1.5 text-sm outline-none focus:border-stone-400 disabled:opacity-50"
+        />
+        <Button size="sm" tone="secondary" disabled={busy || !status?.configured || !/.+@.+\..+/.test(to)} onClick={() => void sendTest()}>
+          Send test email
+        </Button>
+        {note && <span className="text-xs text-stone-500">{note}</span>}
+      </div>
     </section>
   );
 }

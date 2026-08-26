@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, gt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, lt, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   accounts,
+  bankAccounts,
+  bankTransactions,
   customers,
   expenseClaims,
   fxRates,
@@ -13,6 +15,7 @@ import {
   quoteLines,
   quotes,
   recurringInvoices,
+  salesTaxFilings,
   journalEntries,
   journalLines,
   organizations,
@@ -1592,8 +1595,523 @@ const generateDueInvoices = (deps: ModuleDeps) =>
     },
   });
 
+// ── Bank feeds & reconciliation ─────────────────────────────────────────
+
+const bankFeedRow = z.object({
+  postedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amountMinor: z.number().int(),
+  description: z.string().min(1),
+});
+
+const addBankAccount = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.addBankAccount",
+    title: "Add bank account",
+    intent:
+      "Register an external bank account so imported statement lines land somewhere and can be reconciled against the books",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    // No mechanical inverse: deleting an account would cascade away its
+    // statement history, which are reconciliation facts. An unused account
+    // is simply left dormant rather than erased.
+    input: z.object({
+      name: z.string().min(1),
+      currencyCode: z.string().length(3).uppercase().default("USD"),
+      last4: z.string().regex(/^\d{4}$/).optional(),
+      balanceMinor: z.number().int().default(0),
+    }),
+    output: z.object({ bankAccountId: z.string() }),
+    execute: async (ctx, input) => {
+      const [row] = await deps.db
+        .insert(bankAccounts)
+        .values({
+          orgId: ctx.actor.orgId,
+          name: input.name,
+          currencyCode: input.currencyCode,
+          last4: input.last4 ?? null,
+          balanceMinor: input.balanceMinor,
+        })
+        .returning({ id: bankAccounts.id });
+      return { bankAccountId: row!.id };
+    },
+  });
+
+const importBankFeed = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.importBankFeed",
+    title: "Import bank feed",
+    intent:
+      "Load statement lines from a bank export so real cash movements appear for matching against payments and ledger entries",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    // No mechanical inverse: an import records external facts, and each row
+    // has its own undo paths — unmatch/unexclude reset state and
+    // accounting.deleteBankTransaction removes an erroneously imported line.
+    input: z.object({
+      /** Omitted = the org's only account; ambiguous with several. */
+      bankAccountId: z.string().uuid().optional(),
+      rows: z.array(bankFeedRow).min(1).max(500),
+    }),
+    output: z.object({ inserted: z.number(), skipped: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        let accountId = input.bankAccountId;
+        if (!accountId) {
+          const existing = await tx
+            .select({ id: bankAccounts.id })
+            .from(bankAccounts)
+            .where(eq(bankAccounts.orgId, ctx.actor.orgId));
+          if (existing.length !== 1) {
+            throw new Error(
+              existing.length === 0
+                ? "no bank account yet; add one first"
+                : "several bank accounts exist; pass bankAccountId",
+            );
+          }
+          accountId = existing[0]!.id;
+        }
+        const [acct] = await tx
+          .select({ id: bankAccounts.id })
+          .from(bankAccounts)
+          .where(and(eq(bankAccounts.id, accountId), eq(bankAccounts.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!acct) throw new Error("bank account not found");
+
+        // Idempotency: exact duplicate lines (same day, amount, text) within
+        // the account are skipped, so re-pasting the same export is safe.
+        const seen = new Set(
+          (
+            await tx
+              .select({
+                postedAt: bankTransactions.postedAt,
+                amountMinor: bankTransactions.amountMinor,
+                description: bankTransactions.description,
+              })
+              .from(bankTransactions)
+              .where(and(eq(bankTransactions.orgId, ctx.actor.orgId), eq(bankTransactions.bankAccountId, accountId)))
+          ).map((r) => `${r.postedAt.toISOString()}|${r.amountMinor}|${r.description}`),
+        );
+
+        const fresh = [];
+        let skipped = 0;
+        for (const r of input.rows) {
+          const postedAt = new Date(`${r.postedAt}T00:00:00Z`);
+          if (Number.isNaN(postedAt.getTime())) throw new Error(`invalid date: ${r.postedAt}`);
+          const key = `${postedAt.toISOString()}|${r.amountMinor}|${r.description}`;
+          if (seen.has(key)) {
+            skipped += 1;
+            continue;
+          }
+          seen.add(key);
+          fresh.push({
+            orgId: ctx.actor.orgId,
+            bankAccountId: accountId,
+            postedAt,
+            amountMinor: r.amountMinor,
+            description: r.description,
+          });
+        }
+        if (fresh.length > 0) await tx.insert(bankTransactions).values(fresh);
+        return { inserted: fresh.length, skipped };
+      });
+    },
+  });
+
+const deleteBankTransaction = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.deleteBankTransaction",
+    title: "Remove bank transaction",
+    intent:
+      "Delete an unmatched statement line imported by mistake; this is the undo path that makes feed imports reversible",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    // Deletion of a raw fact is deliberately terminal — the line came from
+    // the bank's export, so the real restore path is importing it again.
+    input: z.object({ transactionId: z.string().uuid() }),
+    output: z.object({ deleted: z.boolean() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const removed = await tx
+          .delete(bankTransactions)
+          .where(
+            and(
+              eq(bankTransactions.id, input.transactionId),
+              eq(bankTransactions.orgId, ctx.actor.orgId),
+              eq(bankTransactions.status, "unmatched"),
+            ),
+          )
+          .returning({ id: bankTransactions.id });
+        if (removed.length === 0) throw new Error("transaction not found or already matched/excluded");
+        return { deleted: true };
+      });
+    },
+  });
+
+const matchBankTransaction = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.matchBankTransaction",
+    title: "Match bank transaction",
+    intent:
+      "Link a bank statement line to the payment or ledger entry that explains it, closing it out of the unmatched queue",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    inverse: {
+      capabilityId: "accounting.unmatchBankTransaction",
+      buildInput: (input) => ({ transactionId: (input as { transactionId: string }).transactionId }),
+    },
+    input: z
+      .object({
+        transactionId: z.string().uuid(),
+        paymentId: z.string().uuid().optional(),
+        entryId: z.string().uuid().optional(),
+      })
+      .refine((v) => (v.paymentId !== undefined) !== (v.entryId !== undefined), {
+        message: "pass exactly one of paymentId or entryId",
+      }),
+    output: z.object({ status: z.literal("matched") }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [bt] = await tx
+          .select({ id: bankTransactions.id })
+          .from(bankTransactions)
+          .where(and(eq(bankTransactions.id, input.transactionId), eq(bankTransactions.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!bt) throw new Error("bank transaction not found");
+
+        if (input.paymentId) {
+          const [p] = await tx
+            .select({ id: payments.id })
+            .from(payments)
+            .where(and(eq(payments.id, input.paymentId), eq(payments.orgId, ctx.actor.orgId)))
+            .limit(1);
+          if (!p) throw new Error("payment not found");
+        }
+        if (input.entryId) {
+          const [e] = await tx
+            .select({ id: journalEntries.id })
+            .from(journalEntries)
+            .where(and(eq(journalEntries.id, input.entryId), eq(journalEntries.orgId, ctx.actor.orgId)))
+            .limit(1);
+          if (!e) throw new Error("journal entry not found");
+        }
+
+        // Conditional claim so two racers cannot both claim one statement line.
+        const claimed = await tx
+          .update(bankTransactions)
+          .set({
+            status: "matched",
+            matchedPaymentId: input.paymentId ?? null,
+            matchedEntryId: input.entryId ?? null,
+          })
+          .where(and(eq(bankTransactions.id, bt.id), eq(bankTransactions.status, "unmatched")))
+          .returning({ id: bankTransactions.id });
+        if (claimed.length === 0) throw new Error("transaction was just matched by someone else");
+        return { status: "matched" as const };
+      });
+    },
+  });
+
+const unmatchBankTransaction = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.unmatchBankTransaction",
+    title: "Unmatch bank transaction",
+    intent:
+      "Undo a mistaken reconciliation by releasing a matched statement line back into the unmatched queue",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    input: z.object({ transactionId: z.string().uuid() }),
+    output: z.object({ status: z.literal("unmatched") }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const updated = await tx
+          .update(bankTransactions)
+          .set({ status: "unmatched", matchedPaymentId: null, matchedEntryId: null })
+          .where(
+            and(
+              eq(bankTransactions.id, input.transactionId),
+              eq(bankTransactions.orgId, ctx.actor.orgId),
+              eq(bankTransactions.status, "matched"),
+            ),
+          )
+          .returning({ id: bankTransactions.id });
+        if (updated.length === 0) throw new Error("transaction not found or not matched");
+        return { status: "unmatched" as const };
+      });
+    },
+  });
+
+const excludeBankTransaction = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.excludeBankTransaction",
+    title: "Exclude bank transaction",
+    intent:
+      "Mark a statement line as not-a-business-transaction (e.g. a personal transfer) so it stops counting as unmatched",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    inverse: {
+      capabilityId: "accounting.unexcludeBankTransaction",
+      buildInput: (input) => ({ transactionId: (input as { transactionId: string }).transactionId }),
+    },
+    input: z.object({ transactionId: z.string().uuid() }),
+    output: z.object({ status: z.literal("excluded") }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const updated = await tx
+          .update(bankTransactions)
+          .set({ status: "excluded" })
+          .where(
+            and(
+              eq(bankTransactions.id, input.transactionId),
+              eq(bankTransactions.orgId, ctx.actor.orgId),
+              eq(bankTransactions.status, "unmatched"),
+            ),
+          )
+          .returning({ id: bankTransactions.id });
+        if (updated.length === 0) throw new Error("transaction not found or not unmatched");
+        return { status: "excluded" as const };
+      });
+    },
+  });
+
+const unexcludeBankTransaction = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.unexcludeBankTransaction",
+    title: "Un-exclude bank transaction",
+    intent:
+      "Bring an excluded statement line back into the unmatched queue because the exclusion was a mistake",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    input: z.object({ transactionId: z.string().uuid() }),
+    output: z.object({ status: z.literal("unmatched") }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const updated = await tx
+          .update(bankTransactions)
+          .set({ status: "unmatched" })
+          .where(
+            and(
+              eq(bankTransactions.id, input.transactionId),
+              eq(bankTransactions.orgId, ctx.actor.orgId),
+              eq(bankTransactions.status, "excluded"),
+            ),
+          )
+          .returning({ id: bankTransactions.id });
+        if (updated.length === 0) throw new Error("transaction not found or not excluded");
+        return { status: "unmatched" as const };
+      });
+    },
+  });
+
+const bankSummary = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.bankSummary",
+    title: "Bank reconciliation summary",
+    intent:
+      "Show per-account statement totals and the unmatched count, which is the number that says whether reconciliation is done",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({}),
+    output: z.object({
+      accounts: z.array(
+        z.object({
+          bankAccountId: z.string(),
+          name: z.string(),
+          currencyCode: z.string(),
+          last4: z.string().nullable(),
+          balanceMinor: z.number(),
+          count: z.number(),
+          moneyInMinor: z.number(),
+          moneyOutMinor: z.number(),
+        }),
+      ),
+      unmatchedCount: z.number(),
+    }),
+    execute: async (ctx) => {
+      const accts = await deps.db
+        .select()
+        .from(bankAccounts)
+        .where(eq(bankAccounts.orgId, ctx.actor.orgId))
+        .orderBy(bankAccounts.createdAt);
+      const stats = await deps.db
+        .select({
+          bankAccountId: bankTransactions.bankAccountId,
+          count: sql<number>`count(*)`,
+          moneyIn: sql<number>`coalesce(sum(case when ${bankTransactions.amountMinor} > 0 then ${bankTransactions.amountMinor} else 0 end), 0)`,
+          moneyOut: sql<number>`coalesce(sum(case when ${bankTransactions.amountMinor} < 0 then -${bankTransactions.amountMinor} else 0 end), 0)`,
+        })
+        .from(bankTransactions)
+        .where(eq(bankTransactions.orgId, ctx.actor.orgId))
+        .groupBy(bankTransactions.bankAccountId);
+      const byAccount = new Map(stats.map((s) => [s.bankAccountId, s]));
+      const [unmatched] = await deps.db
+        .select({ n: sql<number>`count(*)` })
+        .from(bankTransactions)
+        .where(and(eq(bankTransactions.orgId, ctx.actor.orgId), eq(bankTransactions.status, "unmatched")));
+      return {
+        accounts: accts.map((a) => ({
+          bankAccountId: a.id,
+          name: a.name,
+          currencyCode: a.currencyCode,
+          last4: a.last4,
+          balanceMinor: Number(a.balanceMinor),
+          count: Number(byAccount.get(a.id)?.count ?? 0),
+          moneyInMinor: Number(byAccount.get(a.id)?.moneyIn ?? 0),
+          moneyOutMinor: Number(byAccount.get(a.id)?.moneyOut ?? 0),
+        })),
+        unmatchedCount: Number(unmatched?.n ?? 0),
+      };
+    },
+  });
+
+// ── Sales tax filing ────────────────────────────────────────────────────
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+function dateWindow(fromIso: string, toIso: string): { start: Date; end: Date } {
+  const start = new Date(`${fromIso}T00:00:00Z`);
+  const endExclusive = new Date(`${toIso}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(endExclusive.getTime())) {
+    throw new Error("dates must be YYYY-MM-DD");
+  }
+  if (endExclusive < start) throw new Error("`to` is before `from`");
+  endExclusive.setUTCDate(endExclusive.getUTCDate() + 1); // include the `to` day
+  return { start, end: endExclusive };
+}
+
+const salesTaxReport = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.salesTaxReport",
+    title: "Sales tax report",
+    intent:
+      "Sum the sales tax collected on non-void invoices inside a period so you know what a return will declare before filing it",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({ from: isoDate, to: isoDate }),
+    output: z.object({
+      taxableSalesMinor: z.number(),
+      taxCollectedMinor: z.number(),
+      /** Collected-side only: vendor bill lines carry no tax column today. */
+      basis: z.literal("invoice-tax-minor"),
+    }),
+    execute: async (ctx, input) => {
+      const { start, end } = dateWindow(input.from, input.to);
+      const [row] = await deps.db
+        .select({
+          taxable: sql<number>`coalesce(sum(${invoices.subtotalMinor}), 0)`,
+          tax: sql<number>`coalesce(sum(${invoices.taxMinor}), 0)`,
+        })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.orgId, ctx.actor.orgId),
+            gte(invoices.issuedAt, start),
+            lt(invoices.issuedAt, end),
+            sql`${invoices.status} <> 'void'`,
+          ),
+        );
+      return {
+        taxableSalesMinor: Number(row?.taxable ?? 0),
+        taxCollectedMinor: Number(row?.tax ?? 0),
+        basis: "invoice-tax-minor" as const,
+      };
+    },
+  });
+
+const fileSalesTaxReturn = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.fileSalesTaxReturn",
+    title: "File sales tax return",
+    intent:
+      "Record a filed sales-tax return by debiting Sales Tax Payable for the remitted tax, netting out what invoices accrued, and sealing the window against double filing",
+    module: "accounting",
+    risk: "money",
+    permission: "accounting.post",
+    // Null like reverseEntry: the remitted amount lives in the report the
+    // filer confirms, so policy always gates this for human approval.
+    moneyAmount: () => null,
+    inverse: {
+      capabilityId: "accounting.reverseEntry",
+      buildInput: (_input, output) => ({ entryId: (output as { entryId?: string }).entryId ?? "" }),
+    },
+    input: z.object({
+      periodFrom: isoDate,
+      periodTo: isoDate,
+      taxMinor: z.number().int().positive(),
+    }),
+    output: z.object({ filingId: z.string(), entryId: z.string(), taxMinor: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
+
+        const { start, end } = dateWindow(input.periodFrom, input.periodTo);
+        const overlapping = await tx
+          .select({ id: salesTaxFilings.id })
+          .from(salesTaxFilings)
+          .where(
+            and(
+              eq(salesTaxFilings.orgId, ctx.actor.orgId),
+              // Half-open interval overlap test; the filings table is the
+              // single source of truth for what was already remitted.
+              lt(salesTaxFilings.periodFrom, end),
+              gt(salesTaxFilings.periodTo, start),
+            ),
+          )
+          .limit(1);
+        if (overlapping.length > 0) {
+          throw new Error(`period ${input.periodFrom}…${input.periodTo} overlaps an already-filed return`);
+        }
+
+        // Invoice collection credited 2100 (Sales Tax Payable); the filing
+        // debits that same account so the liability nets to zero. Remitting
+        // means cash leaves, so the balancing side is 1000 Cash — the same
+        // convention payBill uses when money goes out.
+        const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `Sales tax filing ${input.periodFrom} → ${input.periodTo}`,
+          sourceType: "sales_tax_filing",
+          lines: [
+            { accountCode: "2100", debitMinor: input.taxMinor, creditMinor: 0 },
+            { accountCode: "1000", debitMinor: 0, creditMinor: input.taxMinor },
+          ],
+        });
+
+        const [filing] = await tx
+          .insert(salesTaxFilings)
+          .values({
+            orgId: ctx.actor.orgId,
+            periodFrom: start,
+            periodTo: end,
+            taxMinor: input.taxMinor,
+            entryId,
+            filedByActorType: ctx.actor.type,
+            filedByActorId: ctx.actor.id,
+          })
+          .returning({ id: salesTaxFilings.id });
+
+        return { filingId: filing!.id, entryId, taxMinor: input.taxMinor };
+      });
+    },
+  });
 
 export function registerAccountingCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
+  registry.register(addBankAccount(deps));
+  registry.register(importBankFeed(deps));
+  registry.register(deleteBankTransaction(deps));
+  registry.register(matchBankTransaction(deps));
+  registry.register(unmatchBankTransaction(deps));
+  registry.register(excludeBankTransaction(deps));
+  registry.register(unexcludeBankTransaction(deps));
+  registry.register(bankSummary(deps));
+  registry.register(salesTaxReport(deps));
+  registry.register(fileSalesTaxReturn(deps));
   registry.register(generateDueInvoices(deps));
   registry.register(recordFxRate(deps));
   registry.register(unrealizedFxExposure(deps));

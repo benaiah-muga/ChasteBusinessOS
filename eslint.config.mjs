@@ -4,7 +4,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["**/node_modules/**", "**/.next/**", "**/dist/**", "**/.turbo/**", "**/next-env.d.ts", "packages/db/drizzle/**"],
+    ignores: ["**/node_modules/**", "**/.next/**", "**/dist/**", "**/.turbo/**", "**/next-env.d.ts", "packages/db/drizzle/**", "apps/web/public/**"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

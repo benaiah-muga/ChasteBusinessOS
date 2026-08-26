@@ -18,8 +18,14 @@ export const viewport: Viewport = {
   themeColor: "#38000a",
 };
 
-// Apply the persisted theme before first paint so there is no flash.
-const themeInit = `try{var t=localStorage.getItem("chaste-theme");if(t&&t!=="chaste")document.documentElement.dataset.theme=t}catch(e){}`;
+// Apply the persisted theme and light/dark mode before first paint so there
+// is no flash of the wrong appearance.
+const themeInit = `try{
+var t=localStorage.getItem("chaste-theme");if(t&&t!=="chaste")document.documentElement.dataset.theme=t;
+var m=localStorage.getItem("chaste-mode");if(m!=="light"&&m!=="dark")m="system";
+var dark=m==="dark"||(m==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);
+if(dark)document.documentElement.dataset.mode="dark";
+}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

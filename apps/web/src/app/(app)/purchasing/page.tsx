@@ -18,7 +18,7 @@ import { IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 
-type Tab = "orders" | "bills" | "vendors";
+type Tab = "requests" | "orders" | "bills" | "vendors";
 
 interface PoLine {
   lineNumber: number;
@@ -69,6 +69,25 @@ interface Payload {
   orders?: PurchaseOrder[];
   bills?: Bill[];
   apAging?: Aging;
+  requests?: PurchaseRequest[];
+}
+interface RfqBid {
+  id: string;
+  vendorName: string;
+  status: string; // sent | quoted | won | lost
+  quoteAmountMinor: number | null;
+  quoteLeadTimeDays: number | null;
+  quoteNotes?: string | null;
+}
+interface PurchaseRequest {
+  id: string;
+  title: string;
+  justification: string;
+  estimatedAmountMinor: number | null;
+  status: string; // pending_review | approved | rejected | converted
+  decisionReason?: string | null;
+  createdAt: string;
+  rfqs: RfqBid[];
 }
 const qty = (t: number) => (t / 1000).toFixed(3);
 
@@ -77,7 +96,7 @@ export default function PurchasingPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("orders");
+  const [tab, setTab] = useState<Tab>("requests");
 
   const [vendorForm, setVendorForm] = useState({ name: "", email: "" });
   const [poForm, setPoForm] = useState({
@@ -99,6 +118,9 @@ export default function PurchasingPage() {
     name: "",
     email: "",
   });
+  const [requestForm, setRequestForm] = useState({ title: "", justification: "", estimate: "" });
+  const [rfqPick, setRfqPick] = useState<Record<string, string[]>>({});
+  const [quoteDraft, setQuoteDraft] = useState<Record<string, { amount: string; leadTime: string }>>({});
 
   const load = useCallback(async () => {
     const [res, inv] = await Promise.all([callApi<Payload>("/api/purchasing"), callApi<{ items?: Product[] }>("/api/inventory")]);
@@ -133,7 +155,7 @@ export default function PurchasingPage() {
     [load],
   );
 
-  if (!enabled) return <ModuleDisabled label="Purchasing" />;
+  if (!enabled) return <ModuleDisabled label="Purchasing (Procurement)" />;
   if (!data) return <LoadingPage />;
 
   const vendors = data.vendors ?? [];
@@ -143,7 +165,7 @@ export default function PurchasingPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Purchasing"
+        title="Purchasing (Procurement)"
         description="Vendors, purchase orders, receipts, bills, and payments — with three-way matching"
         actions={
           <SegmentedControl
@@ -151,6 +173,7 @@ export default function PurchasingPage() {
             value={tab}
             onChange={setTab}
             options={[
+              { value: "requests", label: "Requests & RFQs" },
               { value: "orders", label: "Orders" },
               { value: "bills", label: "Bills & payments" },
               { value: "vendors", label: "Vendors" },
@@ -159,6 +182,231 @@ export default function PurchasingPage() {
         }
       />
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
+
+      {tab === "requests" && (
+        <>
+          <Card>
+            <CardTitle>Raise a purchase request</CardTitle>
+            <div className="space-y-2 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <input
+                  className="min-w-48 flex-1 rounded border bg-transparent px-2 py-1.5"
+                  placeholder="What needs buying? e.g. Packaging supplies for Q4"
+                  value={requestForm.title}
+                  onChange={(e) => setRequestForm({ ...requestForm, title: e.target.value })}
+                />
+                <input
+                  className="w-32 rounded border bg-transparent px-2 py-1.5"
+                  placeholder="Estimate (opt.)"
+                  value={requestForm.estimate}
+                  onChange={(e) => setRequestForm({ ...requestForm, estimate: e.target.value })}
+                />
+              </div>
+              <textarea
+                className="textarea min-h-16 w-full py-2 text-sm"
+                rows={2}
+                placeholder="Justify it for the reviewer: why now, from whom, what changes if it is declined…"
+                value={requestForm.justification}
+                onChange={(e) => setRequestForm({ ...requestForm, justification: e.target.value })}
+              />
+              <div className="flex items-center gap-3">
+                <Button
+                  disabled={
+                    busy ||
+                    requestForm.title.trim().length < 3 ||
+                    requestForm.justification.trim().length < 10
+                  }
+                  onClick={() =>
+                    void post(
+                      {
+                        action: "createPurchaseRequest",
+                        title: requestForm.title.trim(),
+                        justification: requestForm.justification.trim(),
+                        estimatedAmountMinor: Math.round(Number(requestForm.estimate || "0") * 100) || undefined,
+                      },
+                      "Purchase request raised",
+                    ).then((ok) => ok && setRequestForm({ title: "", justification: "", estimate: "" }))
+                  }
+                >
+                  Submit request
+                </Button>
+                <span className="text-xs opacity-50">
+                  Requests wait for a reviewer. Approved ones go out as RFQs; the winning bid becomes a purchase order.
+                </span>
+              </div>
+            </div>
+          </Card>
+
+          {(data.requests ?? []).length === 0 ? (
+            <EmptyState
+              icon={<IconListTree />}
+              title="No purchase requests yet"
+              hint="Raise one above — or ask the workmate — to start the request → approval → quotes → order flow."
+            />
+          ) : (
+            (data.requests ?? []).map((r) => {
+              const picked = rfqPick[r.id] ?? [];
+              return (
+                <Card key={r.id}>
+                  <CardTitle
+                    right={
+                      <Badge
+                        tone={
+                          r.status === "approved" || r.status === "converted"
+                            ? "green"
+                            : r.status === "rejected"
+                              ? "red"
+                              : r.status === "converted"
+                                ? "violet"
+                                : "amber"
+                        }
+                      >
+                        {r.status.replace("_", " ")}
+                      </Badge>
+                    }
+                  >
+                    {r.title}
+                  </CardTitle>
+                  <p className="mb-1 text-xs opacity-60">{r.justification}</p>
+                  {r.estimatedAmountMinor != null && (
+                    <p className="mb-1 text-xs opacity-60">Estimated {formatMoney(r.estimatedAmountMinor)}</p>
+                  )}
+                  {r.decisionReason && <p className="mb-1 text-xs italic opacity-50">“{r.decisionReason}”</p>}
+
+                  {r.status === "pending_review" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Button size="sm" disabled={busy} onClick={() => void post({ action: "decidePurchaseRequest", requestId: r.id, decision: "approve" }, "Request approved")}>
+                        Approve
+                      </Button>
+                      <Button size="sm" tone="dangerSecondary" disabled={busy} onClick={() => void post({ action: "decidePurchaseRequest", requestId: r.id, decision: "reject", reason: window.prompt("Reason for rejection (optional)") || undefined }, "Request rejected")}>
+                        Reject
+                      </Button>
+                    </div>
+                  )}
+
+                  {r.status === "approved" && (
+                    <div className="mt-3 space-y-2 border-t pt-3 text-sm">
+                      <p className="text-xs font-medium uppercase tracking-wide opacity-50">Send RFQs to vendors</p>
+                      {vendors.length === 0 ? (
+                        <p className="text-xs opacity-60">No vendors yet — add them in the Vendors tab first.</p>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                            {vendors.map((v) => (
+                              <label key={v.id} className="flex cursor-pointer items-center gap-1.5 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={picked.includes(v.id)}
+                                  onChange={(e) =>
+                                    setRfqPick({
+                                      ...rfqPick,
+                                      [r.id]: e.target.checked ? [...picked, v.id] : picked.filter((x) => x !== v.id),
+                                    })
+                                  }
+                                  className="accent-maroon-700"
+                                />
+                                {v.name}
+                              </label>
+                            ))}
+                          </div>
+                          <Button
+                            size="sm"
+                            disabled={busy || picked.length === 0}
+                            onClick={() => void post({ action: "createRfq", requestId: r.id, vendorIds: picked }, `RFQs sent to ${picked.length} vendor(s)`)}
+                          >
+                            Send RFQs ({picked.length})
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {(r.status === "approved" || r.status === "converted") && r.rfqs.length > 0 && (
+                    <table className="mt-3 w-full text-sm">
+                      <thead>
+                        <tr className="text-left opacity-50">
+                          <th>Vendor</th>
+                          <th>Bid status</th>
+                          <th className="text-right">Quote</th>
+                          <th className="text-right">Lead time</th>
+                          <th className="text-right">Record quote / award</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r.rfqs.map((f) => {
+                          const draft = quoteDraft[f.id] ?? { amount: "", leadTime: "" };
+                          return (
+                            <tr key={f.id} className="border-t">
+                              <td className="py-1.5">{f.vendorName}</td>
+                              <td>
+                                <Badge tone={f.status === "won" ? "green" : f.status === "quoted" ? "blue" : f.status === "lost" ? "neutral" : "amber"}>
+                                  {f.status}
+                                </Badge>
+                              </td>
+                              <td className="text-right tabular-nums">{f.quoteAmountMinor != null ? formatMoney(f.quoteAmountMinor) : "—"}</td>
+                              <td className="text-right tabular-nums">{f.quoteLeadTimeDays != null ? `${f.quoteLeadTimeDays}d` : "—"}</td>
+                              <td>
+                                {f.status === "sent" && (
+                                  <span className="flex items-center justify-end gap-1">
+                                    <input
+                                      className="w-20 rounded border bg-transparent px-1 py-0.5 text-right"
+                                      placeholder="Quote"
+                                      value={draft.amount}
+                                      onChange={(e) => setQuoteDraft({ ...quoteDraft, [f.id]: { ...draft, amount: e.target.value } })}
+                                    />
+                                    <input
+                                      className="w-12 rounded border bg-transparent px-1 py-0.5 text-right"
+                                      placeholder="Days"
+                                      value={draft.leadTime}
+                                      onChange={(e) => setQuoteDraft({ ...quoteDraft, [f.id]: { ...draft, leadTime: e.target.value } })}
+                                    />
+                                    <Button
+                                      size="sm"
+                                      disabled={busy || !Number(draft.amount)}
+                                      onClick={() => {
+                                        void post(
+                                          {
+                                            action: "recordQuote",
+                                            rfqId: f.id,
+                                            amountMinor: Math.round(Number(draft.amount || "0") * 100),
+                                            leadTimeDays: Number(draft.leadTime || "0") || undefined,
+                                          },
+                                          `Quote recorded for ${f.vendorName}`,
+                                        ).then((ok) => ok && setQuoteDraft((q) => ({ ...q, [f.id]: { amount: "", leadTime: "" } })));
+                                      }}
+                                    >
+                                      Save
+                                    </Button>
+                                  </span>
+                                )}
+                                {f.status === "quoted" && r.status === "approved" && (
+                                  <Button
+                                    size="sm"
+                                    tone="primary"
+                                    disabled={busy}
+                                    onClick={() =>
+                                      void post(
+                                        { action: "selectWinningQuote", rfqId: f.id },
+                                        `${f.vendorName} awarded — purchase order raised`,
+                                      )
+                                    }
+                                  >
+                                    Award & raise PO
+                                  </Button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </Card>
+              );
+            })
+          )}
+        </>
+      )}
 
       {tab === "orders" && (
         <Card>

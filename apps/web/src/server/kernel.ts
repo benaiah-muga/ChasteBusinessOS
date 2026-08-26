@@ -181,10 +181,6 @@ export const consoleNotifications: NotificationSink = {
   },
 };
 
-function smtpConfigured(): boolean {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_TO);
-}
-
 async function mailer() {
   const nodemailer = (await import("nodemailer")).default;
   return nodemailer.createTransport({
@@ -213,17 +209,38 @@ function headerSafe(text: string): string {
 }
 
 async function sendMail(subject: string, text: string): Promise<void> {
-  if (!smtpConfigured()) return;
+  const to = process.env.SMTP_TO;
+  if (!process.env.SMTP_HOST || !to) return;
+  await sendOrgMail({ to, subject, text });
+}
+
+interface OutboundMail {
+  to: string;
+  subject: string;
+  text: string;
+  attachments?: { filename: string; content: string; contentType?: string }[];
+}
+
+/**
+ * Customer-facing outbound email (invoice copies, test sends). Unlike the
+ * internal notification path this is a real product surface, so delivery
+ * failure is reported to the caller instead of swallowed.
+ */
+export async function sendOrgMail(mail: OutboundMail): Promise<{ sent: boolean; reason?: string }> {
+  if (!process.env.SMTP_HOST) return { sent: false, reason: "SMTP is not configured" };
   try {
     const transport = await mailer();
     await transport.sendMail({
       from: process.env.SMTP_FROM ?? "chaste@localhost",
-      to: process.env.SMTP_TO,
-      subject: headerSafe(subject),
-      text,
+      to: mail.to,
+      subject: headerSafe(mail.subject),
+      text: mail.text,
+      attachments: mail.attachments,
     });
+    return { sent: true };
   } catch (err) {
     console.warn("[smtp] delivery failed:", err instanceof Error ? err.message : err);
+    return { sent: false, reason: err instanceof Error ? err.message : "delivery failed" };
   }
 }
 

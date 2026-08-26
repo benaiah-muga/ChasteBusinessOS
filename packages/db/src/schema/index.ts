@@ -574,6 +574,8 @@ export const items = pgTable(
     sku: text("sku").notNull(),
     name: text("name").notNull(),
     unitLabel: text("unit_label").notNull().default("unit"),
+    /** Default selling price in minor units; pre-fills quote and invoice lines. */
+    salePriceMinor: integer("sale_price_minor").notNull().default(0),
     /** Thousandths of a unit; 0 disables reorder alerts. */
     reorderPointThousandths: integer("reorder_point_thousandths").notNull().default(0),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -707,13 +709,76 @@ export const messages = pgTable(
     senderType: text("sender_type").notNull().default("human"), // human | agent | system
     senderUserId: uuid("sender_user_id").references(() => users.id),
     body: text("body").notNull(),
+    /**
+     * Explicit @mentions carried by this message: [{ type: "user"|"agent",
+     * id }]. Users get a notification; mentioning the agent pulls it into
+     * threads where it does not otherwise participate.
+     */
+    mentions: jsonb("mentions"),
     createdAt: createdAt(),
   },
   (t) => [index("message_conversation_idx").on(t.conversationId, t.createdAt)],
 );
 
-// ── Document ingestion (OCR → coding suggestions → bills) ──────────────
+// ── Purchasing workflow: request → review → RFQ → quotes → award ───────
 
+/**
+ * An internal purchase request. The front of the procure-to-pay funnel:
+ * anyone can raise one, a reviewer approves or rejects it, and an approved
+ * request is what RFQs quote against. Conversion to a purchase order marks
+ * it converted; requests are append-only after that.
+ */
+export const purchaseRequests = pgTable(
+  "purchase_requests",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    justification: text("justification").notNull(),
+    estimatedAmountMinor: integer("estimated_amount_minor"),
+    /** pending_review | approved | rejected | converted */
+    status: text("status").notNull().default("pending_review"),
+    requestedByUserId: uuid("requested_by_user_id").references(() => users.id),
+    decidedByUserId: uuid("decided_by_user_id").references(() => users.id),
+    decisionReason: text("decision_reason"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("purchase_request_org_status_idx").on(t.orgId, t.status, t.createdAt)],
+);
+
+/**
+ * One RFQ per vendor per approved request. Quotes are recorded on the same
+ * row; awarding marks the winner "won", siblings "lost", and mints the
+ * purchase order through purchasing.createPurchaseOrder.
+ */
+export const rfqs = pgTable(
+  "rfqs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => purchaseRequests.id, { onDelete: "cascade" }),
+    vendorId: uuid("vendor_id")
+      .notNull()
+      .references(() => vendors.id, { onDelete: "cascade" }),
+    /** sent | quoted | won | lost */
+    status: text("status").notNull().default("sent"),
+    quoteAmountMinor: integer("quote_amount_minor"),
+    quoteLeadTimeDays: integer("quote_lead_time_days"),
+    quoteNotes: text("quote_notes"),
+    quotedAt: timestamp("quoted_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("rfq_org_request_idx").on(t.orgId, t.requestId), index("rfq_vendor_idx").on(t.vendorId)],
+);
+
+// ── Document ingestion (OCR → coding suggestions → bills) ──────────────
 /**
  * An ingested business document (vendor bill, receipt, statement). Raw bytes
  * stay in the row until parsing; parsed markdown is what memory and the
@@ -1459,3 +1524,105 @@ export const jobs = pgTable(
   (t) => [index("job_status_idx").on(t.status, t.createdAt), index("job_org_idx").on(t.orgId)],
 );
 
+// ── Banking (feeds & reconciliation) ────────────────────────────────────
+
+/**
+ * External bank accounts mirrored for reconciliation. balanceMinor is the
+ * statement-side balance, not a ledger figure — the GL stays authoritative;
+ * this column only feeds the "does the bank agree with the books" check.
+ */
+export const bankAccounts = pgTable(
+  "bank_accounts",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    currencyCode: text("currency_code").notNull().default("USD"),
+    last4: text("last4"),
+    balanceMinor: bigint("balance_minor", { mode: "number" }).notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("bank_account_org_idx").on(t.orgId, t.name)],
+);
+
+/**
+ * Statement lines from an imported feed. A row starts unmatched and leaves
+ * unmatched only by being matched (linked to a payment or journal entry) or
+ * excluded (declared not-a-business-transaction). Both are state changes on
+ * the row; the raw line is never rewritten, so re-imports stay idempotent.
+ */
+export const bankTransactions = pgTable(
+  "bank_transactions",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    bankAccountId: uuid("bank_account_id")
+      .notNull()
+      .references(() => bankAccounts.id, { onDelete: "cascade" }),
+    postedAt: timestamp("posted_at", { withTimezone: true }).notNull(),
+    /** Signed: positive = money in, negative = money out (bank convention). */
+    amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
+    description: text("description").notNull(),
+    status: text("status").notNull().default("unmatched"), // unmatched | matched | excluded
+    matchedPaymentId: uuid("matched_payment_id").references(() => payments.id, { onDelete: "set null" }),
+    matchedEntryId: uuid("matched_entry_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("bank_tx_org_account_posted_idx").on(t.orgId, t.bankAccountId, t.postedAt),
+    index("bank_tx_org_status_idx").on(t.orgId, t.status),
+  ],
+);
+
+/**
+ * Filed sales-tax returns. One filing per period window: the overlap guard
+ * on these rows is what stops double-remitting the same tax to the
+ * authority, so it lives in data, not in anyone's memory.
+ */
+export const salesTaxFilings = pgTable(
+  "sales_tax_filings",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    periodFrom: timestamp("period_from", { withTimezone: true }).notNull(),
+    periodTo: timestamp("period_to", { withTimezone: true }).notNull(),
+    taxMinor: bigint("tax_minor", { mode: "number" }).notNull(),
+    entryId: uuid("entry_id")
+      .notNull()
+      .references(() => journalEntries.id, { onDelete: "restrict" }),
+    filedByActorType: text("filed_by_actor_type").notNull(),
+    filedByActorId: uuid("filed_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("sales_tax_filing_org_idx").on(t.orgId, t.periodFrom)],
+);
+
+
+/**
+ * Customer-care channel configuration: how the embeddable website widget
+ * behaves. One row per org; the embed token is what a marketing site script
+ * carries, so it must be revocable without touching anything else.
+ */
+export const supportSettings = pgTable(
+  "support_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** 192-bit token embedded in the customer's website snippet. */
+    embedToken: text("embed_token").notNull(),
+    autoReplyEnabled: boolean("auto_reply_enabled").notNull().default(true),
+    greeting: text("greeting")
+      .notNull()
+      .default("Hi — ask us anything and we'll get right back to you."),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("support_settings_token_idx").on(t.embedToken)],
+);

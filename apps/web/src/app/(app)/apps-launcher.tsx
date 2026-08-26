@@ -127,7 +127,7 @@ export function AppsLauncher({
           {groups.map((group) => (
             <div key={group.label}>
               <p className="figure-label mb-1.5 mt-1 px-1">{group.label}</p>
-              <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-4">
+              <div className="grid grid-cols-3 gap-0.5 sm:grid-cols-4 lg:grid-cols-6">
                 {group.items.map((app) => {
                   index += 1;
                   const isActive = index === active;
@@ -152,7 +152,7 @@ export function AppsLauncher({
                         <span
                           aria-hidden="true"
                           style={tileStyle(app.hue)}
-                          className={`flex size-11 items-center justify-center rounded-[11px] transition-transform duration-150${isActive ? " scale-[1.04]" : ""}`}
+                          className={`flex size-10 items-center justify-center rounded-[11px] transition-transform duration-150${isActive ? " scale-[1.04]" : ""}`}
                         >
                           <TileIcon className="size-5.5" />
                         </span>

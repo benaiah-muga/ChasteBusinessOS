@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { getDb, poLines, purchaseOrders, vendorBills, vendors } from "@chaste/db";
+import { getDb, poLines, purchaseOrders, purchaseRequests, rfqs, vendorBills, vendors } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 
@@ -62,6 +62,17 @@ export async function GET() {
   const aging = await executor.execute("purchasing.apAging", ctx, {});
   if (!aging.ok) return NextResponse.json({ error: aging.error }, { status: 500 });
 
+  // Procure-to-pay workflow: requests with their RFQ bids.
+  const requestRows = await db
+    .select()
+    .from(purchaseRequests)
+    .where(eq(purchaseRequests.orgId, orgId))
+    .orderBy(desc(purchaseRequests.createdAt))
+    .limit(50);
+  const rfqRows = requestRows.length
+    ? await db.select().from(rfqs).where(eq(rfqs.orgId, orgId))
+    : [];
+
   void sql;
   return NextResponse.json({
     vendors: vendorRows,
@@ -77,6 +88,25 @@ export async function GET() {
       createdAt: b.createdAt,
     })),
     apAging: aging.data ?? {},
+    requests: requestRows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      justification: r.justification,
+      estimatedAmountMinor: r.estimatedAmountMinor,
+      status: r.status,
+      decisionReason: r.decisionReason,
+      createdAt: r.createdAt,
+      rfqs: rfqRows
+        .filter((f) => f.requestId === r.id)
+        .map((f) => ({
+          id: f.id,
+          vendorName: vendorName.get(f.vendorId) ?? "",
+          status: f.status,
+          quoteAmountMinor: f.quoteAmountMinor,
+          quoteLeadTimeDays: f.quoteLeadTimeDays,
+          quoteNotes: f.quoteNotes,
+        })),
+    })),
   });
 }
 
@@ -162,6 +192,43 @@ export async function POST(req: Request) {
           amountMinor: body.amountMinor as number,
           method: (body.method as "cash" | "bank_transfer" | "card") ?? "bank_transfer",
         }),
+      );
+    case "createPurchaseRequest":
+      return respond(
+        await executor.execute("purchasing.createPurchaseRequest", ctx, {
+          title: body.title as string,
+          justification: body.justification as string,
+          estimatedAmountMinor: (body.estimatedAmountMinor as number) || undefined,
+        }),
+      );
+    case "decidePurchaseRequest":
+      return respond(
+        await executor.execute("purchasing.decidePurchaseRequest", ctx, {
+          requestId: body.requestId as string,
+          decision: body.decision as "approve" | "reject",
+          reason: (body.reason as string) || undefined,
+        }),
+      );
+    case "createRfq": {
+      const vendorIds = body.vendorIds as string[] | undefined;
+      if (!body.requestId || !vendorIds?.length)
+        return NextResponse.json({ error: "requestId and vendorIds are required" }, { status: 400 });
+      return respond(
+        await executor.execute("purchasing.createRfq", ctx, { requestId: body.requestId as string, vendorIds }),
+      );
+    }
+    case "recordQuote":
+      return respond(
+        await executor.execute("purchasing.recordQuote", ctx, {
+          rfqId: body.rfqId as string,
+          amountMinor: body.amountMinor as number,
+          leadTimeDays: (body.leadTimeDays as number) || undefined,
+          notes: (body.notes as string) || undefined,
+        }),
+      );
+    case "selectWinningQuote":
+      return respond(
+        await executor.execute("purchasing.selectWinningQuote", ctx, { rfqId: body.rfqId as string }),
       );
     default:
       return NextResponse.json({ error: "invalid action" }, { status: 400 });

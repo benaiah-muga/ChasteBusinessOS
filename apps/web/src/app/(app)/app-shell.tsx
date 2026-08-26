@@ -11,6 +11,7 @@ import { usePinnedApps } from "./_shell/pins";
 import { recordAppVisit, useRecentApps } from "./_shell/recent-apps";
 import { CommandPalette } from "./command-palette";
 import { NotificationsBell } from "./notifications-bell";
+import { DigitalClock } from "./_shell/clock";
 import { ChatWidget } from "./chat-widget";
 import { useChatDockMode } from "./chat-widget-state";
 import { AppsLauncher } from "./apps-launcher";
@@ -195,6 +196,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
       )}
 
       <div className="mt-auto flex flex-col items-center gap-1">
+        <DigitalClock className="tnum mb-1 text-[11px] leading-none font-medium text-stone-500" />
         <NotificationsBell align="left" />
         {railButton("Settings", <IconSettings className="size-5" />, () => router.push("/settings"), {
           active: pathname === "/settings",
@@ -290,6 +292,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
             <span className="min-w-0 flex-1 truncate px-1 text-sm font-semibold tracking-tight text-stone-900">
               {currentApp?.name || orgName || "Chaste"}
             </span>
+            <DigitalClock className="tnum mr-1 shrink-0 text-[11px] font-medium text-stone-500" />
             <button type="button" onClick={() => setPaletteOpen(true)} aria-label="Search" className="icon-btn">
               <IconSearch className="size-5" />
             </button>

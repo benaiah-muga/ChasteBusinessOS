@@ -6,6 +6,7 @@ import {
   journalEntries,
   journalLines,
   periods,
+  salesTaxFilings,
   vendorBills,
   vendors,
 } from "@chaste/db";
@@ -84,6 +85,19 @@ export async function GET() {
     .orderBy(desc(vendorBills.number))
     .limit(30);
 
+  const filings = await db
+    .select({
+      id: salesTaxFilings.id,
+      periodFrom: salesTaxFilings.periodFrom,
+      periodTo: salesTaxFilings.periodTo,
+      taxMinor: salesTaxFilings.taxMinor,
+      createdAt: salesTaxFilings.createdAt,
+    })
+    .from(salesTaxFilings)
+    .where(eq(salesTaxFilings.orgId, orgId))
+    .orderBy(desc(salesTaxFilings.createdAt))
+    .limit(20);
+
   return NextResponse.json({
     entries: entries.map((e) => ({
       ...e,
@@ -98,6 +112,13 @@ export async function GET() {
     })),
     closedPeriods,
     bills: bills.map((b) => ({ ...b, outstandingMinor: b.totalMinor - b.paidMinor })),
+    filings: filings.map((f) => ({
+      id: f.id,
+      periodFrom: f.periodFrom.toISOString().slice(0, 10),
+      periodTo: f.periodTo.toISOString().slice(0, 10),
+      taxMinor: Number(f.taxMinor),
+      filedAt: f.createdAt.toISOString(),
+    })),
   });
 }
 
@@ -105,7 +126,19 @@ export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const body = (await req.json()) as { action?: string; entryId?: string; year?: number; month?: number; billNumber?: number; amountMinor?: number };
+  const body = (await req.json()) as {
+    action?: string;
+    entryId?: string;
+    year?: number;
+    month?: number;
+    billNumber?: number;
+    amountMinor?: number;
+    from?: string;
+    to?: string;
+    periodFrom?: string;
+    periodTo?: string;
+    taxMinor?: number;
+  };
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
 
@@ -135,6 +168,21 @@ export async function POST(req: Request) {
     const result = await executor.execute("purchasing.payBill", humanCtx, {
       billNumber: body.billNumber,
       amountMinor: body.amountMinor,
+    });
+    return respond(result);
+  }
+  if (body.action === "salesTaxReport" && body.from && body.to) {
+    const result = await executor.execute("accounting.salesTaxReport", humanCtx, {
+      from: body.from as string,
+      to: body.to as string,
+    });
+    return respond(result);
+  }
+  if (body.action === "fileSalesTaxReturn" && body.periodFrom && body.periodTo && body.taxMinor) {
+    const result = await executor.execute("accounting.fileSalesTaxReturn", humanCtx, {
+      periodFrom: body.periodFrom as string,
+      periodTo: body.periodTo as string,
+      taxMinor: body.taxMinor as number,
     });
     return respond(result);
   }

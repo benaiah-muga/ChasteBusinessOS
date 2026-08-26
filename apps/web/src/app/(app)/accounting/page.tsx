@@ -44,6 +44,7 @@ interface Overview {
   agingInvoices: { number: number; outstandingMinor: number; ageDays: number }[];
   closedPeriods: { year: number; month: number }[];
   bills: { id: string; number: number; status: string; totalMinor: number; paidMinor: number; vendorName: string; outstandingMinor: number }[];
+  filings: Filing[];
 }
 interface Reports {
   pnl: { revenueMinor: number; expenseMinor: number; netIncomeMinor: number; lines: { code: string; name: string; amountMinor: number }[] };
@@ -56,12 +57,30 @@ interface CashBasis {
   accrualRevenueMinor: number;
   uncollectedMinor: number;
 }
+interface Filing {
+  id: string;
+  periodFrom: string;
+  periodTo: string;
+  taxMinor: number;
+  filedAt: string;
+}
+interface Banking {
+  accounts: { id: string; name: string; currencyCode: string; last4: string | null; balanceMinor: number }[];
+  unmatched: { id: string; bankAccountId: string; postedAt: string; amountMinor: number; description: string }[];
+  payments: { id: string; invoiceNumber: number | null; customerName: string; amountMinor: number; receivedAt: string }[];
+  summary: {
+    accounts: { bankAccountId: string; name: string; count: number; moneyInMinor: number; moneyOutMinor: number }[];
+    unmatchedCount: number;
+  };
+}
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "journal", label: "Journal" },
   { id: "receivables", label: "Receivables" },
   { id: "payables", label: "Payables" },
+  { id: "bank", label: "Bank" },
+  { id: "tax", label: "Tax" },
   { id: "reports", label: "Reports" },
   { id: "periods", label: "Periods & close" },
 ] as const;
@@ -80,6 +99,7 @@ export default function AccountingPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [reports, setReports] = useState<Reports | null>(null);
   const [cash, setCash] = useState<CashBasis | null>(null);
+  const [banking, setBanking] = useState<Banking | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,7 +113,7 @@ export default function AccountingPage() {
   const load = useCallback(async () => {
     setLoadError(null);
     const year = new Date().getUTCFullYear();
-    const [ov, rp, cb] = await Promise.all([
+    const [ov, rp, cb, bk] = await Promise.all([
       callApi<Overview>("/api/accounting"),
       callApi<Reports>("/api/reports"),
       fetch("/api/accounting", {
@@ -101,6 +121,8 @@ export default function AccountingPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "cashBasis", year }),
       }).then((r) => (r.ok ? r.json() : null)).then((j: { data?: CashBasis } | null) => j?.data ?? null),
+      // Banking is auxiliary to this page's core; its absence must not blank the books.
+      callApi<Banking>("/api/banking").then((r) => (r.ok ? r.data : null)),
     ]);
     if (!ov.ok || !rp.ok) {
       setLoadError(ov.error?.title ?? rp.error?.title ?? "Couldn't load your books");
@@ -109,6 +131,7 @@ export default function AccountingPage() {
     setData(ov.data);
     setReports(rp.data);
     setCash(cb);
+    setBanking(bk);
   }, []);
 
   useEffect(() => {
@@ -124,6 +147,24 @@ export default function AccountingPage() {
     setBusy(true);
     try {
       const res = await postApi("/api/accounting", payload);
+      if (res.status === 202) {
+        setNotice({ tone: "pending", text: `${label} needs human approval, it's in the Approvals inbox.` });
+      } else if (!res.ok) {
+        setNotice({ tone: "error", error: res.error! });
+      } else {
+        setNotice({ tone: "success", text: `${label} done.` });
+      }
+      void load();
+    } finally {
+      setBusy(false);
+      router.refresh();
+    }
+  }
+
+  async function bankAction(payload: Record<string, unknown>, label: string) {
+    setBusy(true);
+    try {
+      const res = await postApi("/api/banking", payload);
       if (res.status === 202) {
         setNotice({ tone: "pending", text: `${label} needs human approval, it's in the Approvals inbox.` });
       } else if (!res.ok) {
@@ -182,7 +223,7 @@ export default function AccountingPage() {
   const openBills = data.bills.filter((b) => b.outstandingMinor > 0);
   const recentEntries = data.entries.slice(0, 6);
 
-  function askCoWorker() {
+  function askWorkmate() {
     void (async () => {
       const { chatDock, chatDraft } = await import("../chat-widget-state");
       chatDock.set("open");
@@ -201,7 +242,7 @@ export default function AccountingPage() {
         <>
           <button
             type="button"
-            onClick={askCoWorker}
+            onClick={askWorkmate}
             className="btn btn-md btn-secondary"
             title="Ask your workmate about your position"
           >
@@ -244,6 +285,10 @@ export default function AccountingPage() {
       {tab === "payables" && (
         <PayablesSection bills={data.bills} openBills={openBills} onPay={setPayTarget} />
       )}
+
+      {tab === "bank" && <BankSection banking={banking} busy={busy} onAction={bankAction} />}
+
+      {tab === "tax" && <TaxSection filings={data.filings} busy={busy} onAction={action} />}
 
       {tab === "reports" && reports?.pnl && <ReportsSection reports={reports} cash={cash} year={new Date().getUTCFullYear()} />}
 
@@ -624,6 +669,29 @@ function JournalSection({
 /* ------------------------------------------------------- receivables/payables */
 
 function ReceivablesSection({ a, agingInvoices }: { a: Overview["aging"]; agingInvoices: Overview["agingInvoices"] }) {
+  const [emailFor, setEmailFor] = useState<number | null>(null);
+  const [emailTo, setEmailTo] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailNote, setEmailNote] = useState<string | null>(null);
+
+  async function sendInvoice(number: number) {
+    setEmailBusy(true);
+    setEmailNote(null);
+    const res = await postApi<{ sent?: boolean; reason?: string }>("/api/email", {
+      action: "emailInvoice",
+      invoiceNumber: number,
+      to: emailTo.trim(),
+    });
+    setEmailBusy(false);
+    if (res.ok) {
+      setEmailFor(null);
+      setEmailTo("");
+      setEmailNote(`Invoice #${number} sent.`);
+    } else {
+      setEmailNote(res.error?.title ?? "Couldn't send — is SMTP configured in Settings?");
+    }
+  }
+
   return (
     <section>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
@@ -637,16 +705,43 @@ function ReceivablesSection({ a, agingInvoices }: { a: Overview["aging"]; agingI
       {agingInvoices.length > 0 ? (
         <ul className="mt-4 divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-4 shadow-xs">
           {agingInvoices.map((inv) => (
-            <li key={inv.number} className="flex items-center gap-3 py-2.5 text-sm">
-              <span className="font-medium text-stone-800">Invoice #{inv.number}</span>
-              <span className="tnum ml-auto text-stone-600">{formatMoney(inv.outstandingMinor)}</span>
-              <Badge tone={inv.ageDays > 60 ? "red" : inv.ageDays > 30 ? "amber" : "neutral"}>{inv.ageDays}d old</Badge>
+            <li key={inv.number} className="py-2.5 text-sm">
+              <div className="flex items-center gap-3">
+                <span className="font-medium text-stone-800">Invoice #{inv.number}</span>
+                <span className="tnum ml-auto text-stone-600">{formatMoney(inv.outstandingMinor)}</span>
+                <Badge tone={inv.ageDays > 60 ? "red" : inv.ageDays > 30 ? "amber" : "neutral"}>{inv.ageDays}d old</Badge>
+                <button
+                  type="button"
+                  aria-label={`Email invoice ${inv.number}`}
+                  title="Email this invoice to the customer"
+                  onClick={() => setEmailFor(emailFor === inv.number ? null : inv.number)}
+                  className="cursor-pointer rounded p-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+                >
+                  ✉
+                </button>
+              </div>
+              {emailFor === inv.number && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 p-2">
+                  <input
+                    aria-label={`Recipient for invoice ${inv.number}`}
+                    type="email"
+                    placeholder="customer@example.com"
+                    value={emailTo}
+                    onChange={(e) => setEmailTo(e.target.value)}
+                    className="min-w-48 flex-1 rounded border border-stone-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-stone-400"
+                  />
+                  <Button size="sm" disabled={emailBusy || !/.+@.+\..+/.test(emailTo)} onClick={() => void sendInvoice(inv.number)}>
+                    Send with share link
+                  </Button>
+                </div>
+              )}
             </li>
           ))}
         </ul>
       ) : (
         <QuietLine>No outstanding invoices — receivables are clear.</QuietLine>
       )}
+      {emailNote && <p className="mt-2 text-xs text-stone-500">{emailNote}</p>}
     </section>
   );
 }
@@ -879,3 +974,377 @@ function PeriodsSection({
     </section>
   );
 }
+/* -------------------------------------------------------------------- bank -- */
+
+/** Parses pasted CSV lines of `YYYY-MM-DD,amount,description`; amounts may carry commas. */
+function parseFeedCsv(text: string): { rows: { postedAt: string; amountMinor: number; description: string }[]; errors: string[] } {
+  const rows: { postedAt: string; amountMinor: number; description: string }[] = [];
+  const errors: string[] = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    const t = line.trim();
+    if (!t) return;
+    const m = t.match(/^(\d{4}-\d{2}-\d{2})\s*,\s*(-?[\d,]+(?:\.\d+)?)\s*,\s*(.+)$/);
+    const datePart = m?.[1];
+    const amountPart = m?.[2];
+    const descPart = m?.[3];
+    if (!datePart || !amountPart || !descPart) {
+      errors.push(`line ${i + 1}: expected date,amount,description`);
+      return;
+    }
+    const amount = Number(amountPart.replace(/,/g, ""));
+    if (!Number.isFinite(amount)) {
+      errors.push(`line ${i + 1}: "${amountPart}" is not a number`);
+      return;
+    }
+    rows.push({ postedAt: datePart, amountMinor: Math.round(amount * 100), description: descPart.trim() });
+  });
+  return { rows, errors };
+}
+
+function BankSection({
+  banking,
+  busy,
+  onAction,
+}: {
+  banking: Banking | null;
+  busy: boolean;
+  onAction: (payload: Record<string, unknown>, label: string) => Promise<void>;
+}) {
+  const [feed, setFeed] = useState("");
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [accountId, setAccountId] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newLast4, setNewLast4] = useState("");
+  const [matchPicks, setMatchPicks] = useState<Record<string, string>>({});
+
+  if (!banking) {
+    return (
+      <EmptyState
+        icon={<IconInbox />}
+        title="Bank feeds couldn't load"
+        hint="Check your connection and retry from the Overview tab."
+      />
+    );
+  }
+
+  const summary = banking.summary;
+  const accounts = banking.accounts;
+
+  function addAccount() {
+    if (!newName.trim()) return;
+    void onAction(
+      { action: "addBankAccount", name: newName.trim(), last4: newLast4.trim() || undefined },
+      `Add account “${newName.trim()}”`,
+    );
+    setNewName("");
+    setNewLast4("");
+  }
+
+  function importFeed() {
+    const { rows, errors } = parseFeedCsv(feed);
+    setParseErrors(errors);
+    if (rows.length === 0) return;
+    void onAction(
+      { action: "importBankFeed", bankAccountId: accountId || undefined, rows },
+      `Import ${rows.length} statement line${rows.length === 1 ? "" : "s"}`,
+    );
+    setFeed("");
+  }
+
+  return (
+    <section className="max-w-3xl space-y-8">
+      <p className="tnum text-sm text-stone-600">
+        <span className={cn("font-semibold", summary.unmatchedCount > 0 ? "text-amber-700" : "text-emerald-700")}>
+          {summary.unmatchedCount}
+        </span>{" "}
+        unmatched statement line{summary.unmatchedCount === 1 ? "" : "s"}
+      </p>
+
+      <div>
+        <h2 className="mb-3 text-sm font-semibold text-stone-800">Accounts</h2>
+        {accounts.length === 0 ? (
+          <QuietLine>No bank accounts yet — add one below to start importing statements.</QuietLine>
+        ) : (
+          <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
+            {accounts.map((a) => {
+              const stat = summary.accounts.find((s) => s.bankAccountId === a.id);
+              return (
+                <li key={a.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm">
+                  <span className="font-medium text-stone-800">{a.name}</span>
+                  {a.last4 && <span className="text-stone-400">••••{a.last4}</span>}
+                  <Badge>{a.currencyCode}</Badge>
+                  {stat && <Badge tone={stat.count > 0 ? "amber" : "green"}>{stat.count} lines</Badge>}
+                  <span className="tnum ml-auto font-medium">{formatMoney(a.balanceMinor)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            className="input w-48"
+            placeholder="Account name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            aria-label="New bank account name"
+          />
+          <input
+            className="input w-24"
+            placeholder="Last 4"
+            maxLength={4}
+            value={newLast4}
+            onChange={(e) => setNewLast4(e.target.value)}
+            aria-label="Last four digits"
+          />
+          <Button tone="secondary" disabled={busy || !newName.trim()} onClick={addAccount}>
+            Add account
+          </Button>
+        </div>
+      </div>
+
+
+      <div className="border-t border-stone-200 pt-6">
+        <h2 className="text-sm font-semibold text-stone-800">Import feed</h2>
+        <p className="mt-1 text-sm leading-relaxed text-stone-500">
+          Paste bank export lines, one per row: <code className="text-stone-700">date,amount,description</code> — e.g.
+          <code className="ml-1 text-stone-700">2025-06-01,-42.10,Card fees</code>. Positive is money in. Duplicate lines
+          are skipped automatically, so re-pasting an export is safe.
+        </p>
+        {accounts.length > 1 && (
+          <select
+            className="input mt-3 w-64"
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            aria-label="Account to import into"
+          >
+            <option value="">Select account…</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <textarea
+          className="input mt-3 h-32 w-full font-mono text-xs"
+          placeholder={"2025-06-01,1250.00,ACME wire\n2025-06-02,-42.10,Card fees"}
+          value={feed}
+          onChange={(e) => setFeed(e.target.value)}
+          aria-label="Statement lines"
+        />
+        {parseErrors.length > 0 && (
+          <ul className="mt-2 space-y-0.5 text-xs text-red-700">
+            {parseErrors.slice(0, 5).map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
+        )}
+        <Button className="mt-3" disabled={busy || !feed.trim()} onClick={importFeed}>
+          Import lines
+        </Button>
+      </div>
+
+      <div className="border-t border-stone-200 pt-6">
+        <h2 className="text-sm font-semibold text-stone-800">Unmatched transactions</h2>
+        {banking.unmatched.length === 0 ? (
+          <div className="mt-3">
+            <EmptyState
+              icon={<IconInbox />}
+              title="Nothing waiting"
+              hint="Every imported statement line is matched or excluded."
+            />
+          </div>
+        ) : (
+          <ul className="mt-3 divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
+            {banking.unmatched.map((t) => (
+              <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-sm">
+                <time className="w-20 shrink-0 text-xs text-stone-400">{t.postedAt.slice(0, 10)}</time>
+                <span className="min-w-0 flex-1 truncate text-stone-800" title={t.description}>
+                  {t.description}
+                </span>
+                <span className={cn("tnum shrink-0 font-medium", t.amountMinor < 0 && "text-red-700")}>
+                  {formatMoney(t.amountMinor)}
+                </span>
+                <select
+                  className="input w-56 py-1 text-xs"
+                  value={matchPicks[t.id] ?? ""}
+                  onChange={(e) => setMatchPicks((p) => ({ ...p, [t.id]: e.target.value }))}
+                  aria-label={`Match ${t.description} against payment`}
+                >
+                  <option value="">Match to payment…</option>
+                  {banking.payments.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.customerName} · #{p.invoiceNumber ?? "?"} · {formatMoney(p.amountMinor)}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  tone="secondary"
+                  size="sm"
+                  disabled={busy || !matchPicks[t.id]}
+                  onClick={() =>
+                    void onAction(
+                      { action: "matchBankTransaction", transactionId: t.id, paymentId: matchPicks[t.id] },
+                      "Match",
+                    )
+                  }
+                >
+                  Match
+                </Button>
+                <Button
+                  tone="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void onAction({ action: "excludeBankTransaction", transactionId: t.id }, "Exclude")}
+                >
+                  Exclude
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
+/* --------------------------------------------------------------------- tax -- */
+
+function TaxSection({
+  filings,
+  busy,
+  onAction,
+}: {
+  filings: Filing[];
+  busy: boolean;
+  onAction: (payload: Record<string, unknown>, label: string) => Promise<void>;
+}) {
+  const year = new Date().getUTCFullYear();
+  const [from, setFrom] = useState(`${year}-01-01`);
+  const [to, setTo] = useState(`${year}-12-31`);
+  const [report, setReport] = useState<{ taxableSalesMinor: number; taxCollectedMinor: number } | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  async function runReport() {
+    setRunning(true);
+    setReportError(null);
+    try {
+      const res = await postApi<{ taxableSalesMinor: number; taxCollectedMinor: number }>("/api/accounting", {
+        action: "salesTaxReport",
+        from,
+        to,
+      });
+      if (!res.ok || !res.data) {
+        setReportError(res.error?.hint ?? "Couldn't compute the report");
+        setReport(null);
+      } else {
+        setReport(res.data);
+      }
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <section className="max-w-xl space-y-8">
+      <div>
+        <h2 className="text-sm font-semibold text-stone-800">Sales tax report</h2>
+        <p className="mt-1 text-sm leading-relaxed text-stone-500">
+          Totals the tax collected on non-void invoices inside the window (vendor bill lines carry no tax today, so this
+          is the collected side only).
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <input type="date" className="input w-40" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Period from" />
+          <span className="text-stone-400">→</span>
+          <input type="date" className="input w-40" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Period to" />
+          <Button tone="secondary" disabled={busy || running || !from || !to} onClick={() => void runReport()}>
+            Run report
+          </Button>
+        </div>
+        {reportError && <p className="mt-2 text-sm text-red-700">{reportError}</p>}
+        {report && (
+          <dl className="mt-4 grid grid-cols-2 gap-x-8 border-y border-stone-200 py-4">
+            <Figure label="Taxable sales" value={formatMoney(report.taxableSalesMinor)} />
+            <Figure label="Tax collected" value={formatMoney(report.taxCollectedMinor)} tone="default" />
+          </dl>
+        )}
+      </div>
+
+      <div className="border-t border-stone-200 pt-6">
+        <h2 className="text-sm font-semibold text-stone-800">File return</h2>
+        <p className="mt-1 text-sm leading-relaxed text-stone-500">
+          Filing debits Sales Tax Payable for the remitted tax and credits Cash, then seals{" "}
+          <strong className="text-stone-700">{from}</strong> → <strong className="text-stone-700">{to}</strong> against
+          double filing. Overlapping returns are refused.
+        </p>
+        <Button
+          className="mt-3"
+          tone="danger"
+          disabled={busy || !report || report.taxCollectedMinor <= 0}
+          onClick={() => setConfirmOpen(true)}
+        >
+          File return for {from} → {to}
+        </Button>
+        {!report && <p className="mt-2 text-xs text-stone-500">Run the report first — the filing uses its figures.</p>}
+      </div>
+
+
+      <div className="border-t border-stone-200 pt-6">
+        <h2 className="text-sm font-semibold text-stone-800">Recent filings</h2>
+        {filings.length === 0 ? (
+          <div className="mt-3">
+            <QuietLine>No returns filed yet.</QuietLine>
+          </div>
+        ) : (
+          <ul className="mt-3 divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
+            {filings.map((f) => (
+              <li key={f.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <span className="font-medium text-stone-800">
+                  {f.periodFrom} → {f.periodTo}
+                </span>
+                <span className="tnum ml-auto font-medium">{formatMoney(f.taxMinor)}</span>
+                <time className="hidden w-24 shrink-0 text-right text-xs text-stone-400 sm:block">
+                  {formatDateTime(f.filedAt)}
+                </time>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={async () => {
+          if (!report) return;
+          await onAction(
+            {
+              action: "fileSalesTaxReturn",
+              periodFrom: from,
+              periodTo: to,
+              taxMinor: report.taxCollectedMinor,
+            },
+            `File sales tax return ${from} → ${to}`,
+          );
+          setReport(null);
+          setConfirmOpen(false);
+        }}
+        title="File sales tax return"
+        body={
+          <>
+            File a return for <strong className="text-stone-900">{from}</strong> →{" "}
+            <strong className="text-stone-900">{to}</strong> declaring{" "}
+            <strong className="text-stone-900">{report ? formatMoney(report.taxCollectedMinor) : ""}</strong> of
+            collected tax? This posts a ledger entry and refuses any overlapping future filing.
+          </>
+        }
+        confirmLabel="File return"
+        busy={busy}
+      />
+    </section>
+  );
+}
+

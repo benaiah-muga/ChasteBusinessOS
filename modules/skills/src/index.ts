@@ -32,12 +32,14 @@ skill({
   id: "procure-to-pay",
   name: "Procure to pay",
   summary:
-    "Buy from a vendor end to end: vendor on file, purchase order sent, goods received, bill matched and paid.",
-  tags: ["purchasing", "vendor", "purchase order", "bill", "payment", "procurement", "buy", "rfq"],
+    "Buy from a vendor end to end: raise the request, get approval, collect quotes, order, receive, match the bill, pay.",
+  tags: ["purchasing", "vendor", "purchase order", "bill", "payment", "procurement", "buy", "rfq", "quote", "approval"],
   steps: [
-    "Confirm what is being bought, the quantity, and the target vendor. Ask only for what is missing.",
+    "Confirm what is being bought, roughly what it should cost, and why. Ask only for what is missing.",
+    "Formal route: raise a purchase request with purchasing.createPurchaseRequest, then have a reviewer approve it with purchasing.decidePurchaseRequest.",
+    "For competitive buying, send RFQs with purchasing.createRfq (needs an approved request), record each vendor's bid with purchasing.recordQuote, then award the best one with purchasing.selectWinningQuote — it raises the PO for you.",
+    "Informal route (small or repeat buys): skip the request and create the purchase order directly with purchasing.createPurchaseOrder; put each distinct item on its own line.",
     "If the vendor does not exist, create them with purchasing.createVendor, then continue where you left off.",
-    "Create a purchase order with purchasing.createPurchaseOrder; put each distinct item on its own line.",
     "When goods or the service arrive, record them against the order with purchasing.receiveGoods.",
     "When the vendor's invoice arrives, record it with purchasing.createBill referencing the order so three-way matching runs.",
     "Pay with purchasing.payBill when the user says to pay; amounts above policy thresholds queue for approval on their own.",
@@ -45,13 +47,18 @@ skill({
   ],
   capabilities: [
     "purchasing.createVendor",
+    "purchasing.createPurchaseRequest",
+    "purchasing.decidePurchaseRequest",
+    "purchasing.createRfq",
+    "purchasing.recordQuote",
+    "purchasing.selectWinningQuote",
     "purchasing.createPurchaseOrder",
     "purchasing.receiveGoods",
     "purchasing.createBill",
     "purchasing.payBill",
   ],
   notes:
-    "Never pay a bill that failed three-way matching without flagging the mismatch first. Partial deliveries are normal: receive what arrived and leave the order open.",
+    "Never pay a bill that failed three-way matching without flagging the mismatch first. Partial deliveries are normal: receive what arrived and leave the order open. Use the formal RFQ route when value is high or vendors should compete; improvise the informal route when speed matters more than process.",
 });
 
 skill({
@@ -63,21 +70,20 @@ skill({
   steps: [
     "Confirm the customer, what they are buying, prices, and any discount. Ask only for what is missing.",
     "If the customer does not exist, create them with crm.createCustomer, then continue where you left off.",
-    "Draft a quotation with accounting.createQuote; share it with accounting.shareQuote if the customer wants a link.",
-    "On acceptance, mirror the quote into an invoice with accounting.createInvoice, then mark it accepted with accounting.acceptQuote.",
+    "Draft a quotation with accounting.createQuote — it goes out as sent immediately.",
+    "On acceptance, convert it with accounting.acceptQuote; it creates the real invoice on the books verbatim.",
     "Record the payment with accounting.recordPayment when it arrives.",
     "Report the quote number, invoice number, amount, and outstanding balance.",
   ],
   capabilities: [
     "crm.createCustomer",
     "accounting.createQuote",
-    "accounting.shareQuote",
     "accounting.acceptQuote",
-    "accounting.createInvoice",
+    "accounting.declineQuote",
     "accounting.recordPayment",
   ],
   notes:
-    "If the customer negotiates, issue a new quote rather than editing the old one; quotes are offers, not mutable records.",
+    "Quotes are created already marked sent. If the customer negotiates, decline the old quote and create a fresh one; quotes are offers, not mutable records.",
 });
 
 skill({
