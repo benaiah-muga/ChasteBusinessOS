@@ -1,0 +1,33 @@
+# secrets & local state
+.env
+.env.*
+!.env.example
+packages/db/backups/
+
+# deps (reinstalled inside the image)
+node_modules
+.pnpm-store
+apps/web/node_modules
+
+# build artifacts (rebuilt inside the image)
+.next
+apps/web/.next
+dist
+.turbo
+turbo
+tsconfig.tsbuildinfo
+coverage
+
+# vcs & tooling
+.git
+.gitignore
+.gith*/*
+.github
+.agents
+.kilo
+.mcp.json
+
+# misc
+*.log
+playwright-report
+docker-compose*.yml

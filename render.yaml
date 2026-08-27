@@ -1,0 +1,58 @@
+# ChasteBusinessOS — Render blueprint for the investor demo deployment.
+#
+# This mirrors what is provisioned with the Render CLI (see
+# .agents/skills or scripts in this branch) as reproducible infrastructure-
+# as-code: a Docker web service backed by a Render Postgres (pgvector).
+# Free Postgres expires after 30 days by design of the demo.
+#
+# `sync: false` env vars are secrets that must be set in the Render
+# dashboard after the service exists (OPENROUTER_API_KEY, BETTER_AUTH_SECRET).
+
+services:
+  - type: web
+    name: chaste-business-os
+    runtime: docker
+    repo: https://github.com/benaiah-muga/ChasteBusinessOS
+    plan: free
+    branch: demo/render-deploy
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://chaste-business-os.onrender.com
+      - key: DATABASE_URL
+        fromDatabase:
+          name: chaste-business-os-db
+          property: connectionString
+      - key: NIM_BASE_URL
+        value: https://integrate.api.nvidia.com/v1
+      - key: MODEL_PROVIDER
+        value: openrouter
+      - key: MODEL_PRIMARY
+        value: thinkingmachines/inkling
+      - key: MODEL_FAST
+        value: deepseek-ai/deepseek-v4-flash-0731
+      - key: MODEL_REASONING
+        value: nvidia/nemotron-3-super-120b-a12b
+      - key: MODEL_EMBEDDINGS
+        value: nvidia/nv-embedqa-e5-v5
+      - key: EMBEDDING_DIMENSIONS
+        value: "1024"
+      - key: LOG_LEVEL
+        value: info
+      - key: AUTO_MIGRATE_ON_BOOT
+        value: "1"
+      - key: CHASTE_SKIP_MIGRATION_BACKUP
+        value: "1"
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: BETTER_AUTH_SECRET
+        sync: false
+
+databases:
+  - name: chaste-business-os-db
+    plan: free
+    databaseName: chaste_os_v2
+    user: chaste
