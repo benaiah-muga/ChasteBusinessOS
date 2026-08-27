@@ -3,6 +3,12 @@ const nextConfig = {
   // Cache Components (ADR 0028): routes validate for instant navigation;
   // segments not yet converted opt out via `export const instant = false`.
   cacheComponents: true,
+  // Build hosts can expose dozens of cores (Render's builder reported 48);
+  // Next sizes its page-data worker pool from `cpu count - 1` (DefaultServerConfig
+  // in config-shared), and 47 workers importing the full capability kernel blew
+  // the build container's memory on Render. Cap workers so any CI host builds
+  // within 8 GB instead of parallelizing into an OOM.
+  experimental: { cpus: 4 },
   transpilePackages: ["@chaste/kernel", "@chaste/db", "@chaste/ai"],
   serverExternalPackages: ["postgres"],
   async headers() {

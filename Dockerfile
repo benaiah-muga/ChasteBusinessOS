@@ -24,13 +24,15 @@ RUN pnpm install --frozen-lockfile
 # packages without one are skipped (they export source, transpiled by Next)
 #
 # Render injects its service environment variables as the build args below;
-# both are consumed by `next build` (the DB for route-metadata collection,
-# NEXT_PUBLIC_APP_URL is inlined into client bundles). They are read-only in
-# this stage, never copied into the runner stage, so no secrets land in the
-# final image.
+# all three are consumed by `next build`: the DB for route-metadata
+# collection, NEXT_PUBLIC_APP_URL is inlined into client bundles, and
+# better-auth refuses to instantiate in production without BETTER_AUTH_SECRET.
+# They are read-only in this stage, never copied into the runner stage, so no
+# secrets land in the final image.
 FROM deps AS build
 ARG DATABASE_URL
 ARG NEXT_PUBLIC_APP_URL
+ARG BETTER_AUTH_SECRET
 ENV NODE_ENV=production \
     CHASTE_SKIP_MIGRATION_BACKUP=1
 # Build web directly (not via turbo): no @chaste/* package defines a build
