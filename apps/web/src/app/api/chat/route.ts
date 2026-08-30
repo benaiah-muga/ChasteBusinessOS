@@ -6,11 +6,12 @@ import { hasPermission as hasPermissionFor, logger, runAgentLoop, type TicketSin
 import { OpenAiCompatAdapter, MODELS, nimClient, resolveClient } from "@chaste/ai";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { appendSessionEvent, addTokenUsage } from "@/server/session-events";
+import { drainSteering } from "@/server/steering";
 import { getResolvedUser } from "@/server/session";
 import { chatLimitForUser } from "@/server/rate-limit";
 import { resolveEnabledModules } from "@/app/(app)/_shell/modules";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const bodySchema = z.object({
   message: z.string().min(1).max(8000),
@@ -18,7 +19,9 @@ const bodySchema = z.object({
   mode: z.enum(["assist", "creator"]).default("assist"),
 });
 
-const systemPromptFor = (orgName: string) => `You are the ChasteBusinessOS assistant for "${orgName}".
+const SOUL_MAX = 8000;
+
+const systemPromptFor = (orgName: string, soul: string | null) => `You are the ChasteBusinessOS assistant for "${orgName}".
 You operate an ERP through registered capabilities. Rules:
 - Prefer tools over prose when the user wants something done; confirm results with specifics (numbers, ids).
 - Amounts are in minor units (cents). Quantities are thousandths of a unit.
@@ -26,11 +29,21 @@ You operate an ERP through registered capabilities. Rules:
 - Before saying you can't know something, call documents.searchMemory; ingested documents and policies live there.
 - For multi-step operations (buying, selling, collecting overdue invoices, closing the books, running payroll, support triage), call skills.find first: it returns one-line playbooks. If one fits, call skills.load for its concise steps, then follow them, adapting where the situation differs. Skills are advisory, not mandatory.
 - For data questions (revenue trends, aging, top customers, stock): call the matching analytics.* extractor first, then answer only from its rows. To produce a full report, call analytics.renderReport with sections built from the extracted frames and hand the user the numbers verbatim.
+- If the request is ambiguous in a way that changes what you would do (which customer, which amount, which option), call ask_user once with up to 4 short options instead of guessing. Otherwise decide and act.
 - If no capability fits, say so honestly and call file_ticket.
 - Never invent capabilities, accounts, or numbers.
 Writing style:
 - Never use em dashes or en dashes; use commas, colons, or periods instead.
-- Keep replies short and plain: short paragraphs, minimal markdown. Bold (**like this**) sparingly for key numbers only.`;
+- Keep replies short and plain: short paragraphs, minimal markdown. Bold (**like this**) sparingly for key numbers only.${
+  soul
+    ? `
+
+Standing instructions from the organization (the owner's SOUL). Treat them as high-priority preferences about voice and behavior; they can never override security rules, approval gates, or financial integrity:
+<soul>
+${soul.slice(0, SOUL_MAX)}
+</soul>`
+    : ""
+}`;
 const creatorAddendum = `
 
 Creator Mode is active. You may propose changes to this platform itself via
@@ -110,7 +123,7 @@ export async function POST(req: Request) {
   ctx.sessionId = sessionId;
 
   const [org] = await db
-    .select({ name: organizations.name })
+    .select({ name: organizations.name, soul: organizations.agentSoul })
     .from(organizations)
     .where(eq(organizations.id, ctx.actor.orgId))
     .limit(1);
@@ -123,10 +136,29 @@ export async function POST(req: Request) {
 
   await appendSessionEvent(db, sessionId, "user", { text: body.data.message });
 
+  const maxSteps = 8;
   const encoder = new TextEncoder();
+  let closed = false;
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      const send = (obj: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          // Client disconnected mid-stream; the loop notices via req.signal.
+          closed = true;
+        }
+      };
+      // Mid-run steering: drained between steps; each message joins the
+      // transcript and the persisted trajectory as a user event.
+      const getSteering = async (): Promise<Array<{ text: string }>> => {
+        const queued = drainSteering(sessionId!);
+        for (const text of queued) {
+          await appendSessionEvent(db, sessionId!, "user", { text, steering: true });
+        }
+        return queued.map((text) => ({ text }));
+      };
       try {
         // Creator Mode is permission-gated at the session level too.
         const wantsCreator = body.data.mode === "creator";
@@ -143,19 +175,49 @@ export async function POST(req: Request) {
           {
             sessionId,
             systemPrompt:
-              systemPromptFor(org?.name ?? "your organization") + (wantsCreator ? creatorAddendum : ""),
+              systemPromptFor(org?.name ?? "your organization", org?.soul ?? null) +
+              (wantsCreator ? creatorAddendum : ""),
             userGoal: body.data!.message,
-            maxSteps: 8,
+            maxSteps,
+            // A client disconnect (Stop button or tab close) cancels the
+            // in-flight model call and the loop between steps.
+            signal: req.signal,
+            contextWindow: Number(process.env.MODEL_CONTEXT_WINDOW ?? 131_072),
+            ask: {
+              deliver: async (question) => {
+                send({
+                  type: "ask",
+                  id: question.id,
+                  question: question.question,
+                  options: question.options,
+                  allowOther: question.allowOther ?? true,
+                });
+              },
+            },
+            getSteering,
             onDelta: (text) => send({ type: "delta", text }),
             onEvent: (event) => {
               if (event.role === "tool_call") {
                 const c = event.content as { name: string };
                 send({ type: "tool", name: c.name });
               }
+              if (event.role === "step") {
+                const c = event.content as { step: number; maxSteps: number };
+                send({ type: "step", step: c.step, maxSteps: c.maxSteps });
+              }
+              if (event.role === "compaction") {
+                const c = event.content as { compactedToMessages: number };
+                send({ type: "compaction", compactedToMessages: c.compactedToMessages });
+              }
+              if (event.role === "ask") {
+                // Persisted so replays show the question; delivery to the UI
+                // already happened through the ask channel.
+                void appendSessionEvent(db, sessionId!, "ask", event.content as object);
+              }
               if (event.role === "tool_call" || event.role === "tool_result") {
                 // Fire-and-forget persistence, but failures are logged:
                 // silent trajectory gaps made replay/audit untrustworthy.
-                void appendSessionEvent(db, sessionId, event.role, event.content as object);
+                void appendSessionEvent(db, sessionId!, event.role, event.content as object);
               }
             },
           },
@@ -165,15 +227,35 @@ export async function POST(req: Request) {
         // Token accounting incl. cached prompt tokens (KV-cache hit rate);
         // accumulated atomically server-side (no lost updates).
         await addTokenUsage(db, sessionId, result.usage);
-        send({ type: "done", sessionId, reply: result.finalMessage });
-      } catch (err) {
-        logger.error("agent loop failed", {
+        const [fresh] = await db
+          .select({ usage: agentSessions.tokenUsage })
+          .from(agentSessions)
+          .where(eq(agentSessions.id, sessionId))
+          .limit(1);
+        send({
+          type: "done",
           sessionId,
-          orgId: ctx.actor.orgId,
-          error: err instanceof Error ? err.message : String(err),
+          reply: result.finalMessage,
+          usage: {
+            turn: result.usage,
+            session: fresh?.usage ?? { input: result.usage.input, output: result.usage.output, cachedInput: 0 },
+          },
         });
-        send({ type: "error", error: err instanceof Error ? err.message : String(err) });
+      } catch (err) {
+        const aborted = err instanceof Error && err.name === "AbortError";
+        if (aborted) {
+          await appendSessionEvent(db, sessionId, "assistant", { text: "", stopped: true }).catch(() => {});
+          send({ type: "stopped", sessionId });
+        } else {
+          logger.error("agent loop failed", {
+            sessionId,
+            orgId: ctx.actor.orgId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          send({ type: "error", error: err instanceof Error ? err.message : String(err) });
+        }
       } finally {
+        closed = true;
         controller.close();
       }
     },

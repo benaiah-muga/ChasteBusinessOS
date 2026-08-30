@@ -39,6 +39,7 @@ import { registerDocumentCapabilities } from "@chaste/module-documents";
 import { registerHrCapabilities } from "@chaste/module-hr";
 import { registerSupportCapabilities } from "@chaste/module-support";
 import { registerSkillCapabilities } from "@chaste/module-skills";
+import { registerRoutineCapabilities } from "@chaste/module-routines";
 
 const registryCache = globalThis as unknown as {
   __chasteRegistry?: { version: string; registry: CapabilityRegistry };
@@ -71,6 +72,7 @@ export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   registerHrCapabilities(registry, { db });
   registerSupportCapabilities(registry, { db });
   registerSkillCapabilities(registry);
+  registerRoutineCapabilities(registry, { db });
 
   // Boot-time ecosystem check: broken inverses are fatal, missing inverses
   // are surfaced debt. Never discover these at runtime.

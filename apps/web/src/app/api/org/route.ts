@@ -48,3 +48,38 @@ export async function POST(req: Request) {
   });
   return NextResponse.json({ ok: true });
 }
+
+const soulSchema = z.object({ agentSoul: z.string().max(8000) });
+
+/**
+ * Updates the org's standing agent persona (SOUL). Admin-gated: this text
+ * steers every agent turn for the whole organization.
+ */
+export async function PATCH(req: Request) {
+  const resolved = await getResolvedUser();
+  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!resolved.permissions.has("iam.admin") && !resolved.permissions.has("*")) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  const body = soulSchema.safeParse(await req.json().catch(() => null));
+  if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+
+  const db = getDb().db;
+  await db
+    .update(organizations)
+    .set({ agentSoul: body.data.agentSoul.trim() || null })
+    .where(eq(organizations.id, resolved.orgId));
+  return NextResponse.json({ ok: true });
+}
+
+/** Returns the org's current SOUL text for the settings editor. */
+export async function PUT() {
+  const resolved = await getResolvedUser();
+  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const [org] = await getDb()
+    .db.select({ agentSoul: organizations.agentSoul })
+    .from(organizations)
+    .where(eq(organizations.id, resolved.orgId))
+    .limit(1);
+  return NextResponse.json({ agentSoul: org?.agentSoul ?? "" });
+}

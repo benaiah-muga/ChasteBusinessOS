@@ -1,4 +1,5 @@
 export * from "./capability";
+export * from "./compaction";
 export * from "./conformance";
 export * from "./registry";
 export * from "./policy";

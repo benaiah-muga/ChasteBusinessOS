@@ -9,9 +9,18 @@ export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const provider = process.env.MODEL_PROVIDER === "openrouter" ? "openrouter" : "nvidia";
+  const providerEnv = process.env.MODEL_PROVIDER ?? "";
+  const provider = ["openrouter", "groq", "mistral", "zai"].includes(providerEnv) ? providerEnv : "nvidia";
   const configured =
-    provider === "openrouter" ? Boolean(process.env.OPENROUTER_API_KEY) : Boolean(process.env.NVIDIA_API_KEY);
+    provider === "openrouter"
+      ? Boolean(process.env.OPENROUTER_API_KEY)
+      : provider === "groq"
+        ? Boolean(process.env.GROQ_API_KEY)
+        : provider === "mistral"
+          ? Boolean(process.env.MISTRAL_API_KEY)
+          : provider === "zai"
+            ? Boolean(process.env.ZAI_API_KEY)
+            : Boolean(process.env.NVIDIA_API_KEY);
 
   return NextResponse.json({
     provider,
@@ -19,7 +28,13 @@ export async function GET() {
     baseUrl:
       provider === "openrouter"
         ? "https://openrouter.ai/api/v1"
-        : (process.env.NIM_BASE_URL ?? "https://integrate.api.nvidia.com/v1"),
+        : provider === "groq"
+          ? "https://api.groq.com/openai/v1"
+          : provider === "mistral"
+            ? "https://api.mistral.ai/v1"
+            : provider === "zai"
+              ? (process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4")
+              : (process.env.NIM_BASE_URL ?? "https://integrate.api.nvidia.com/v1"),
     models: {
       primary: process.env.MODEL_PRIMARY ?? "moonshotai/kimi-k2.6",
       fast: process.env.MODEL_FAST ?? "meta/muse-glimmer-30b",

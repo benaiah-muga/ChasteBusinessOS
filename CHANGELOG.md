@@ -11,6 +11,91 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+- **Z.ai (GLM) model provider**: `MODEL_PROVIDER=zai` routes agent turns
+  through Z.ai's OpenAI-compatible endpoint (`ZAI_API_KEY`, `ZAI_BASE_URL`);
+  `zai/` model prefixes are stripped like `groq/`. `resolveClient` now gives
+  an explicit model prefix precedence over `MODEL_PROVIDER`, so one process
+  can talk to a secondary provider per call. Settings → AI & Automation
+  shows the provider and connection state.
+- **Routines (Paperclip-style recurring agent runs, ADR 0031)**: a new
+  `routines` module and table let a business schedule the agent in plain
+  language ("every 30 minutes", "weekdays at 9am", "weekly on monday at
+  09:00"; model-assisted normalization for anything else). Runs fire from
+  the durable job queue (claimed `FOR UPDATE SKIP LOCKED`, schedule advanced
+  at claim time, at-most-once), execute as headless, replayable agent
+  sessions under a fixed least-privilege system bundle (org reads +
+  `messaging.write`), stay silent on `NO_ACTION`, and surface findings as
+  notifications. Each routine can own a secret webhook token:
+  `POST /api/routines/webhook/:token` lets Paperclip, cron, or any external
+  orchestrator trigger a governed run. New Settings → Routines tab (create
+  from natural language, pause/resume, run now, delete, copy webhook URL)
+  plus a daily heartbeat preset (OpenClaw-style proactive check).
+- **Agent persona (SOUL)**: `organizations.agent_soul` holds standing,
+  admin-editable persona instructions (Settings → AI & Automation → Agent
+  persona), injected into every chat system prompt framed as preferences
+  that cannot override security, approvals, or financial integrity.
+- **`ask_user` clarification tool**: the agent can now ask the human one
+  structured question instead of guessing or hallucinating. Kernel loop
+  gains an `AskUserChannel`; the chat route streams an `ask` event; the chat
+  UI renders a question card with tappable options and a free-text "Other",
+  locks after answering, and the answer flows back as the next user turn.
+  Questions are persisted to the trajectory so replays show them.
+- **Live agent console in the chat dock**: while the agent works, the dock
+  header shows "Step N/M · last-tool", and a console strip shows run state
+  and cumulative token count; finished replies carry a per-turn token chip
+  (input / output / % served from provider cache).
+- **Message queueing and mid-run steering (opencode-style)**: messages typed
+  while the agent runs are queued (visible, dismissible, auto-sent when the
+  run settles) instead of silently dropped; `POST /api/chat/steer` injects a
+  message into the running loop between steps, persisted to the trajectory
+  as a steering event. The kernel loop drains steering via
+  `getSteering()` each step.
+- **Coding-agent detection, fixed and unified**: detection now scans PATH
+  natively (the old `which`-spawn approach failed under an overridden PATH
+  with ENOENT) and config dirs for opencode, Claude Code, Codex, Kilo Code
+  (including its real binary and config locations), Aider (its config-file
+  globs never matched before), and Gemini CLI, with version probing. The
+  Creator-mode setup card lists every detected agent with versions and
+  flags config-only installs; detection is unit-tested with fixture homes
+  and fake PATHs (`scripts/gates/detector-positive-control.ts` is the live
+  positive control).
+- **Context-window-aware compaction**: the agent loop compacts when the
+  transcript exceeds the model's context window minus a reserve
+  (`MODEL_CONTEXT_WINDOW`, default 131072, reserve 24,576) instead of a
+  fixed 24k budget, so larger-window models keep far more history; loop
+  options `contextWindow`/`reserveTokens` and the legacy budget remain.
+- **Routine-run observability**: routine runs create `Routine: <name>`
+  agent sessions visible in Sessions, and the worker script (`pnpm worker`)
+  now loads `.env` and actually runs — its import paths previously pointed
+  at a nonexistent `./apps/...` location, so the queue never drained.
+
+### Changed
+- **Document memory indexing degrades to a zero vector**: `embedDocChunk` now
+  inserts a content chunk with a zero-length embedding when the embedding
+  service is unavailable (previously an embedding failure silently skipped the
+  insert, so parsed documents produced zero searchable memory).
+- **Demo and worker scripts load `.env`** (`--env-file-if-exists=.env` /
+  shared loader), so the documented local proofs (`pnpm demo:*`,
+  `pnpm worker`) work without exporting variables by hand.
+- **Migration 0028**: `routines` table under standard tenant-isolation RLS,
+  `organizations.agent_soul`, and pg_trgm adoption (below).
+
+### Fixed
+- **Provider prefix precedence**: `resolveClient` checked `MODEL_PROVIDER`
+  before the model's `provider/` prefix, so e.g. `zai/model` silently routed
+  to the env's provider; explicit prefixes now win.
+- **Real server-side stop**: the chat route now wires the request abort
+  signal into the kernel loop and model adapter, so Stop (or closing the
+  tab) cancels the in-flight provider call instead of letting the loop run
+  to completion invisibly.
+- **`pg_trgm` adopted for memory text search (ADR 0032)**: migration 0028
+  enables the extension and adds a GIN trigram index on `memories.content`,
+  so keyword/ILIKE fallback search no longer sequential-scans.
+- **`pnpm worker` was dead on arrival**: wrong relative imports meant the
+  queue drained never; fixed (and env-loading added), verified end-to-end by
+  the routines E2E gate.
+
 ## [0.4.0], 2026-08-26
 
 ### Added

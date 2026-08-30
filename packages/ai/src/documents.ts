@@ -1,5 +1,5 @@
 import type OpenAI from "openai";
-import { MODELS, chatClient } from "./nim";
+import { MODELS, chatClient } from "./providers";
 
 export const MODELS_OCR = () => process.env.MODEL_OCR ?? "nvidia/nemotron-parse-v1.2";
 

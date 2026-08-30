@@ -43,6 +43,13 @@ export const organizations = pgTable("organizations", {
   fiscalYearStart: integer("fiscal_year_start_month").notNull().default(1),
   profileDescription: text("profile_description"),
   settings: jsonb("settings").notNull().default({}),
+  /**
+   * The org's standing agent persona and non-negotiable instructions
+   * ("Soul"): voice, tone, hard rules the workmate must always follow.
+   * Injected into the agent system prompt ahead of any task, never into
+   * posted financial documents. NULL means the platform default voice.
+   */
+  agentSoul: text("agent_soul"),
   createdAt: createdAt(),
 });
 
@@ -1496,6 +1503,46 @@ export const authVerification = pgTable("auth_verification", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Routines (Paperclip-style recurring execution layer): a named agent task
+ * with a natural-language schedule, run by the worker when due, triggerable
+ * manually, or triggerable via a per-routine webhook token (so external
+ * orchestrators like Paperclip can fire Chaste agent runs). A routine never
+ * acts by itself: each run goes through the governed executor as a system
+ * actor scoped to a least-privilege permission bundle.
+ */
+export const routines = pgTable(
+  "routines",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** What the agent should do on each run; natural language, bounded. */
+    prompt: text("prompt").notNull(),
+    /** The user's original scheduling words, kept verbatim for the UI. */
+    scheduleText: text("schedule_text"),
+    /** Structured schedule the scheduler actually executes (erp-core). */
+    schedule: jsonb("schedule").notNull(),
+    triggerType: text("trigger_type").notNull().default("schedule"), // schedule | webhook | manual
+    /** Secret path segment for webhook triggers; null = webhook disabled. */
+    webhookToken: text("webhook_token"),
+    enabled: boolean("enabled").notNull().default(true),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastStatus: text("last_status"), // ok | failed | running
+    lastError: text("last_error"),
+    createdByActorType: text("created_by_actor_type").notNull().default("user"),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("routine_due_idx").on(t.orgId, t.enabled, t.nextRunAt),
+    index("routine_webhook_token_idx").on(t.webhookToken),
+  ],
+);
 
 /**
  * Durable Postgres-backed job queue. Jobs carry a capability id + input and
