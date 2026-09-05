@@ -18,6 +18,8 @@ export interface ModuleInfo {
 export const MODULE_CATALOG: ModuleInfo[] = [
   { id: "accounting", label: "Accounting", description: "Ledger, invoicing, bills, payments, reports", href: "/accounting" },
   { id: "analytics", label: "Analytics", description: "Governed datasets, charts, downloadable reports", href: "/analytics" },
+  { id: "marketing", label: "Marketing", description: "Segments, campaigns, honest send log", href: "/marketing" },
+  { id: "projects", label: "Projects", description: "Project boards & tasks", href: "/projects" },
   { id: "pos", label: "Point of sale", description: "Register sessions and instant sales", href: "/pos" },
   { id: "inventory", label: "Inventory", description: "Stock ledger, valuation, counting, reorder alerts", href: "/inventory" },
   { id: "manufacturing", label: "Manufacturing", description: "BOMs, work orders, production runs, traceability", href: "/manufacturing" },
