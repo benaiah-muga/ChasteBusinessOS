@@ -204,6 +204,48 @@
       "when": 1788025798343,
       "tag": "0028_crazy_lady_ursula",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788128167775,
+      "tag": "0029_m7_inventory",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788214560000,
+      "tag": "0030_m9_sales_crm",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788268800000,
+      "tag": "0031_m10_money_depth",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788355200000,
+      "tag": "0032_m11_people_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788441600000,
+      "tag": "0033_m12_understanding",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1788528000000,
+      "tag": "0034_m13_retail_reach",
+      "breakpoints": true
     }
   ]
 }

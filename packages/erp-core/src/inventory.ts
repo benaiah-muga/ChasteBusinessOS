@@ -18,6 +18,12 @@ export interface CostedMovement extends StockMovement {
   unitCostMinor?: number | undefined;
   /** Quantity sold out (positive number), for outward movements. */
   quantityOut?: number | undefined;
+  /**
+   * Transfer legs relocate quantity between locations without acquiring or
+   * consuming value; valuation replay skips them entirely so round trips
+   * cannot drift the moving average (ADR 0033).
+   */
+  valueNeutral?: boolean | undefined;
 }
 
 export interface ValuationState {
@@ -77,6 +83,11 @@ export function needsReorder(quantityOnHand: number, reorderPoint: number): bool
 export function replayValuation(history: readonly CostedMovement[]): ValuationState {
   let state = EMPTY_VALUATION;
   for (const m of history) {
+    // Transfer legs relocate quantity without value effect (ADR 0033).
+    if (m.valueNeutral) {
+      state = { ...state, quantityOnHand: state.quantityOnHand + m.quantityDelta };
+      continue;
+    }
     const delta = m.quantityDelta;
     if (delta > 0) {
       state = applyMovement(state, { quantityDelta: delta, unitCostMinor: m.unitCostMinor });

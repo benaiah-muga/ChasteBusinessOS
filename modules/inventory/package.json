@@ -12,6 +12,7 @@
   "dependencies": {
     "@chaste/db": "workspace:*",
     "@chaste/erp-core": "workspace:*",
+    "@chaste/module-accounting": "workspace:*",
     "@chaste/kernel": "workspace:*",
     "drizzle-orm": "^0.44.5",
     "zod": "^4.1.5"
