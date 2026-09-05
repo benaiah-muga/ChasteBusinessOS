@@ -27,7 +27,7 @@ import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
 
-type TabId = "overview" | "people" | "leave" | "time" | "payroll";
+type TabId = "overview" | "people" | "leave" | "time" | "payroll" | "expenses";
 
 interface Employee {
   id: string;
@@ -327,6 +327,7 @@ export default function HrPage() {
         { id: "leave", label: "Leave", count: pendingLeave.length || undefined },
         { id: "time", label: "Time", count: time.rows.filter((r) => r.pendingMinutes > 0).length || undefined },
         { id: "payroll", label: "Payroll", count: runs.filter((r) => r.status === "draft").length || undefined },
+        { id: "expenses", label: "Expenses" },
       ]}
       activeTab={tab}
       onTabChange={changeTab}
@@ -907,6 +908,8 @@ export default function HrPage() {
         </>
       )}
 
+      {tab === "expenses" && <ExpensesTab />}
+
       {/* Deactivate employee */}
       <ConfirmDialog
         open={deactivateTarget !== null}
@@ -1162,3 +1165,209 @@ function OverviewTab({
     </>
   );
 }
+
+/* --------------------------------------------------------------- expenses -- */
+
+/** Mirrors accounting.listExpenseClaims' output rows (via /api/expenses). */
+interface ExpenseClaim {
+  id: string;
+  claimantUserId: string;
+  amountMinor: number;
+  status: string;
+  memo: string;
+}
+
+function ExpensesTab() {
+  const router = useRouter();
+  const [claims, setClaims] = useState<ExpenseClaim[] | null>(null);
+  const [notice, setNotice] = useState<ActionNoticeState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ amount: "", memo: "", accountCode: "" });
+
+  const loadClaims = useCallback(async (): Promise<boolean> => {
+    const res = await callApi<{ claims?: ExpenseClaim[] }>("/api/expenses");
+    if (!res.ok || !res.data) {
+      setNotice({ tone: "error", error: res.error! });
+      return false;
+    }
+    setClaims(res.data.claims ?? []);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    void loadClaims();
+  }, [loadClaims]);
+
+  async function post(payload: Record<string, unknown>, label: string): Promise<boolean> {
+    setBusy(true);
+    try {
+      const res = await postApi("/api/expenses", payload);
+      if (res.status === 202) {
+        setNotice({ tone: "pending", text: `${label} is above the payment threshold — it's in the Approvals inbox.` });
+      } else if (!res.ok) {
+        setNotice({ tone: "error", error: res.error! });
+      } else {
+        setNotice({ tone: "success", text: `${label} done.` });
+      }
+      router.refresh();
+      return res.ok;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitClaim(): Promise<void> {
+    const memo = form.memo.trim();
+    const amountMinor = Math.round(Number(form.amount || "0") * 100);
+    if (!memo || !Number.isInteger(amountMinor) || amountMinor <= 0) {
+      setNotice({ tone: "error", error: { title: "Check the claim", hint: "An amount and a short explanation of the expense are both required." } });
+      return;
+    }
+    const ok = await post({ action: "submit", amountMinor, memo, accountCode: form.accountCode.trim() || undefined }, "Expense claim");
+    if (ok) {
+      setForm({ amount: "", memo: "", accountCode: "" });
+      await loadClaims();
+    }
+  }
+
+  async function decideClaim(claim: ExpenseClaim, approved: boolean): Promise<void> {
+    const ok = await post(
+      { action: "decide", claimId: claim.id, decision: approved ? "approved" : "rejected" },
+      approved ? "Approve claim" : "Reject claim",
+    );
+    if (ok) await loadClaims();
+  }
+
+  async function payClaim(claim: ExpenseClaim): Promise<void> {
+    const ok = await post({ action: "pay", claimId: claim.id, amountMinor: claim.amountMinor }, "Reimbursement");
+    if (ok) await loadClaims();
+  }
+
+  const pendingCount = claims?.filter((c) => c.status === "submitted").length ?? 0;
+  const approvedCount = claims?.filter((c) => c.status === "approved").length ?? 0;
+
+  return (
+    <>
+      {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
+
+      <Card>
+        <CardTitle>Submit an expense claim</CardTitle>
+        <form
+          className="flex flex-wrap items-end gap-2 text-sm"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submitClaim();
+          }}
+        >
+          <div className="w-36">
+            <label htmlFor="expense-amount" className="label">
+              Amount
+            </label>
+            <input
+              id="expense-amount"
+              inputMode="decimal"
+              className="input tnum"
+              placeholder="120.00"
+              value={form.amount}
+              onChange={(e) => setForm({ ...form, amount: e.target.value })}
+            />
+          </div>
+          <div className="min-w-56 flex-1">
+            <label htmlFor="expense-memo" className="label">
+              What &amp; why
+            </label>
+            <input
+              id="expense-memo"
+              className="input"
+              placeholder="Taxi to the client kickoff"
+              value={form.memo}
+              onChange={(e) => setForm({ ...form, memo: e.target.value })}
+            />
+          </div>
+          <div className="w-32">
+            <label htmlFor="expense-account" className="label">
+              Account <span className="opacity-50">(optional)</span>
+            </label>
+            <input
+              id="expense-account"
+              className="input tnum"
+              placeholder="6900"
+              value={form.accountCode}
+              onChange={(e) => setForm({ ...form, accountCode: e.target.value })}
+            />
+          </div>
+          <Button type="submit" loading={busy} disabled={!form.memo.trim() || !form.amount}>
+            Submit claim
+          </Button>
+        </form>
+        <p className="mt-3 text-xs text-stone-400">
+          The spend category is suggested from your explanation. A claim waits for a decision before any money moves, and reimbursements above
+          the policy threshold need a second approval.
+        </p>
+      </Card>
+
+      <Card>
+        <CardTitle>Claims</CardTitle>
+        {claims === null ? (
+          <p className="text-sm text-stone-400">Loading…</p>
+        ) : claims.length === 0 ? (
+          <EmptyState
+            icon={<IconCash />}
+            title="No expense claims yet"
+            hint="Filed claims appear here with their decision and payment state."
+          />
+        ) : (
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Claim</th>
+                  <th>Filed by</th>
+                  <th className="text-right">Amount</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {claims.map((c) => (
+                  <tr key={c.id}>
+                    <td className="max-w-72 truncate font-medium text-stone-900">{c.memo}</td>
+                    <td className="font-mono text-xs text-stone-400">{c.claimantUserId.slice(0, 8)}</td>
+                    <td className="tnum text-right">{formatMoney(c.amountMinor)}</td>
+                    <td>
+                      <Badge tone={statusTone(c.status)}>{c.status}</Badge>
+                    </td>
+                    <td className="whitespace-nowrap text-right">
+                      {c.status === "submitted" && (
+                        <span className="inline-flex gap-1.5">
+                          <Button size="sm" loading={busy} onClick={() => void decideClaim(c, true)}>
+                            Approve
+                          </Button>
+                          <Button size="sm" tone="secondary" loading={busy} aria-label="Reject claim" onClick={() => void decideClaim(c, false)}>
+                            Reject
+                          </Button>
+                        </span>
+                      )}
+                      {c.status === "approved" && (
+                        <Button size="sm" loading={busy} onClick={() => void payClaim(c)}>
+                          Pay {formatMoney(c.amountMinor)}
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {(pendingCount > 0 || approvedCount > 0) && (
+          <p className="mt-2 text-xs text-stone-400">
+            {pendingCount > 0 && `${pendingCount} awaiting decision. `}
+            {approvedCount > 0 && `${approvedCount} approved and awaiting reimbursement.`}
+          </p>
+        )}
+      </Card>
+    </>
+  );
+}
+

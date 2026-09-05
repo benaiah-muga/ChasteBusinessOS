@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import {
+  customers,
   getDb,
   invoices,
   journalEntries,
@@ -98,6 +99,12 @@ export async function GET() {
     .orderBy(desc(salesTaxFilings.createdAt))
     .limit(20);
 
+  const customerRows = await db
+    .select({ id: customers.id, name: customers.name })
+    .from(customers)
+    .where(eq(customers.orgId, orgId))
+    .orderBy(asc(customers.name));
+
   return NextResponse.json({
     entries: entries.map((e) => ({
       ...e,
@@ -119,6 +126,7 @@ export async function GET() {
       taxMinor: Number(f.taxMinor),
       filedAt: f.createdAt.toISOString(),
     })),
+    customers: customerRows,
   });
 }
 
@@ -138,6 +146,7 @@ export async function POST(req: Request) {
     periodFrom?: string;
     periodTo?: string;
     taxMinor?: number;
+    customerId?: string;
   };
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
@@ -184,6 +193,20 @@ export async function POST(req: Request) {
       periodTo: body.periodTo as string,
       taxMinor: body.taxMinor as number,
     });
+    return respond(result);
+  }
+  if (body.action === "customerStatement" && body.customerId) {
+    const result = await executor.execute("accounting.customerStatement", humanCtx, {
+      customerId: body.customerId,
+    });
+    return respond(result);
+  }
+  if (body.action === "buildReminders") {
+    const result = await executor.execute("accounting.buildReminders", humanCtx, {});
+    return respond(result);
+  }
+  if (body.action === "cashForecast") {
+    const result = await executor.execute("accounting.cashForecast", humanCtx, {});
     return respond(result);
   }
   return NextResponse.json({ error: "invalid action" }, { status: 400 });

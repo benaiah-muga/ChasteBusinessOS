@@ -12,13 +12,13 @@ import {
   StatCard,
   type ActionNoticeState,
 } from "@/components/ui";
-import { formatMoney, timeAgo } from "@/lib/format";
+import { formatDate, formatMoney, timeAgo } from "@/lib/format";
 import { IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
 
-type Tab = "overview" | "requests" | "orders" | "bills" | "vendors";
+type Tab = "overview" | "requests" | "orders" | "bills" | "vendors" | "intel";
 
 interface PoLine {
   lineNumber: number;
@@ -70,6 +70,18 @@ interface Payload {
   bills?: Bill[];
   apAging?: Aging;
   requests?: PurchaseRequest[];
+  priceHistory?: { rows: PriceHistoryRow[] };
+}
+interface PriceHistoryRow {
+  vendorName: string;
+  itemSku: string | null;
+  itemDescription: string;
+  unitPriceMinor: number;
+  orderedAt: string | null;
+}
+interface SupplierStatementView {
+  closingBalanceMinor: number;
+  rows: { date: string; kind: string; ref: string; amountMinor: number; balanceMinor: number }[];
 }
 interface RfqBid {
   id: string;
@@ -174,6 +186,7 @@ export default function PurchasingPage() {
         { id: "orders", label: "Orders", count: orders.filter((o) => o.status === "approved").length || undefined },
         { id: "bills", label: "Bills & payments" },
         { id: "vendors", label: "Vendors", count: vendors.length || undefined },
+        { id: "intel", label: "Prices & statements" },
       ]}
       activeTab={tab}
       onTabChange={(id) => setTab(id as Tab)}
@@ -921,6 +934,8 @@ export default function PurchasingPage() {
           </Card>
         </>
       )}
+
+      {tab === "intel" && <VendorIntelSection vendors={vendors} initialRows={data.priceHistory?.rows ?? []} />}
     </AppFrame>
   );
 }
@@ -1023,6 +1038,195 @@ function PurchasingOverview({ data, goTo }: { data: Payload; goTo: (tab: Tab) =>
           )}
         </Card>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- intel -- */
+
+/**
+ * M10 procurement-intel surfaces: what each vendor actually charged per item
+ * over time, and a running-balance statement to reconcile against the vendor's
+ * own month-end statement. Both are read capabilities via the same executor.
+ */
+function VendorIntelSection({
+  vendors,
+  initialRows,
+}: {
+  vendors: Vendor[];
+  initialRows: PriceHistoryRow[];
+}) {
+  const [rows, setRows] = useState<PriceHistoryRow[]>(initialRows);
+  const [skuFilter, setSkuFilter] = useState("");
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [vendorId, setVendorId] = useState("");
+  const [statement, setStatement] = useState<SupplierStatementView | null>(null);
+  const [statementBusy, setStatementBusy] = useState(false);
+  const [statementError, setStatementError] = useState<string | null>(null);
+
+  async function loadHistory(sku?: string) {
+    setHistoryBusy(true);
+    setHistoryError(null);
+    const res = await postApi<{ rows: PriceHistoryRow[] }>("/api/purchasing", {
+      action: "priceHistory",
+      ...(sku ? { sku } : {}),
+    });
+    setHistoryBusy(false);
+    if (res.ok && res.data) setRows(res.data.rows);
+    else setHistoryError(res.error?.title ?? "Couldn't load price history");
+  }
+
+  async function loadStatement() {
+    if (!vendorId) return;
+    setStatementBusy(true);
+    setStatementError(null);
+    const res = await postApi<SupplierStatementView>("/api/purchasing", {
+      action: "supplierStatement",
+      vendorId,
+    });
+    setStatementBusy(false);
+    if (res.ok && res.data) setStatement(res.data);
+    else setStatementError(res.error?.title ?? "Couldn't load the statement");
+  }
+
+  return (
+    <div className="space-y-8">
+      <Card>
+        <CardTitle
+          right={
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void loadHistory(skuFilter.trim() || undefined);
+              }}
+            >
+              <input
+                className="w-32 rounded border bg-transparent px-2 py-1 text-sm"
+                placeholder="Filter by SKU"
+                value={skuFilter}
+                onChange={(e) => setSkuFilter(e.target.value)}
+                aria-label="Filter price history by SKU"
+              />
+              <Button size="sm" tone="ghost" disabled={historyBusy} type="submit">
+                {historyBusy ? "Loading…" : "Apply"}
+              </Button>
+            </form>
+          }
+        >
+          Supplier price history
+        </CardTitle>
+        {historyError ? (
+          <EmptyState icon={<IconListTree />} title={historyError} hint="Try again in a moment." />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon={<IconListTree />}
+            title="No purchase prices recorded"
+            hint="Prices fill in as purchase orders are raised; check back after your next order."
+          />
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left opacity-50">
+                <th>Vendor</th>
+                <th>Item</th>
+                <th>SKU</th>
+                <th className="text-right">Unit price</th>
+                <th className="text-right">Last ordered</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={`${r.vendorName}-${r.itemDescription}-${i}`} className="border-t">
+                  <td className="py-1.5 font-medium">{r.vendorName}</td>
+                  <td className="text-stone-600">{r.itemDescription}</td>
+                  <td className="font-mono text-xs text-stone-500">{r.itemSku ?? "—"}</td>
+                  <td className="text-right tabular-nums">{formatMoney(r.unitPriceMinor)}</td>
+                  <td className="text-right text-stone-500">
+                    {r.orderedAt ? timeAgo(r.orderedAt) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      <Card>
+        <CardTitle>Supplier statement</CardTitle>
+        {vendors.length === 0 ? (
+          <EmptyState
+            icon={<IconListTree />}
+            title="No vendors yet"
+            hint="Add a vendor first; statements build from bills, payments, and credits."
+          />
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <select
+                className="rounded border bg-transparent px-2 py-1.5"
+                value={vendorId}
+                onChange={(e) => setVendorId(e.target.value)}
+                aria-label="Vendor"
+              >
+                <option value="">Vendor…</option>
+                {vendors.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" disabled={!vendorId || statementBusy} onClick={() => void loadStatement()}>
+                {statementBusy ? "Loading…" : "Load statement"}
+              </Button>
+            </div>
+            {statementError && <p className="mt-2 text-xs text-red-700">{statementError}</p>}
+            {statement &&
+              (statement.rows.length === 0 ? (
+                <p className="mt-3 text-sm opacity-60">No activity with this vendor yet.</p>
+              ) : (
+                <>
+                  <table className="mt-4 w-full text-sm">
+                    <thead>
+                      <tr className="text-left opacity-50">
+                        <th>Date</th>
+                        <th>Kind</th>
+                        <th>Ref</th>
+                        <th className="text-right">Amount</th>
+                        <th className="text-right">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statement.rows.map((row, i) => (
+                        <tr key={`${row.ref}-${i}`} className="border-t">
+                          <td className="whitespace-nowrap py-1.5 text-stone-600">{formatDate(row.date)}</td>
+                          <td>
+                            <Badge tone={row.kind === "bill" ? "neutral" : "green"}>{row.kind}</Badge>
+                          </td>
+                          <td className="text-stone-600">{row.ref}</td>
+                          <td
+                            className={`text-right tabular-nums ${row.amountMinor < 0 ? "text-emerald-700" : "text-stone-800"}`}
+                          >
+                            {formatMoney(row.amountMinor)}
+                          </td>
+                          <td className="text-right font-medium tabular-nums">{formatMoney(row.balanceMinor)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-2 text-right text-sm">
+                    Closing balance{" "}
+                    <span className="tnum font-semibold">{formatMoney(statement.closingBalanceMinor)}</span>
+                  </p>
+                  <p className="mt-1 text-xs opacity-50">
+                    Reconcile this against the statement the vendor sends at month end.
+                  </p>
+                </>
+              ))}
+          </>
+        )}
+      </Card>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
-import { getDb, posSessions } from "@chaste/db";
+import { getDb, invoices, posSessions } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 
@@ -14,11 +14,34 @@ export async function GET() {
     .where(eq(posSessions.orgId, resolved.orgId))
     .orderBy(desc(posSessions.openedAt))
     .limit(20);
+  const saleRows = await getDb()
+    .db.select({
+      id: invoices.id,
+      number: invoices.number,
+      status: invoices.status,
+      totalMinor: invoices.totalMinor,
+      creditedMinor: invoices.creditedMinor,
+      memo: invoices.memo,
+      createdAt: invoices.createdAt,
+    })
+    .from(invoices)
+    .where(and(eq(invoices.orgId, resolved.orgId), isNotNull(invoices.posSessionId)))
+    .orderBy(desc(invoices.number))
+    .limit(20);
   return NextResponse.json({
     sessions: rows.map((s) => ({
       ...s,
       openedAt: s.openedAt.toISOString(),
       closedAt: s.closedAt?.toISOString() ?? null,
+    })),
+    sales: saleRows.map((s) => ({
+      id: s.id,
+      number: s.number,
+      status: s.status,
+      totalMinor: s.totalMinor,
+      creditedMinor: s.creditedMinor,
+      memo: s.memo,
+      createdAt: s.createdAt.toISOString(),
     })),
   });
 }
@@ -46,6 +69,15 @@ const actionSchema = z.discriminatedUnion("action", [
     action: z.literal("close"),
     sessionId: z.string(),
     countedCashMinor: z.number().int().nonnegative(),
+  }),
+  z.object({
+    action: z.literal("returnSale"),
+    invoiceId: z.string().uuid(),
+    reason: z.string().min(3).max(500),
+  }),
+  z.object({
+    action: z.literal("shiftSummary"),
+    sessionId: z.string().uuid(),
   }),
 ]);
 
@@ -79,6 +111,17 @@ export async function POST(req: Request) {
       sessionId: body.data.sessionId,
       method: body.data.method,
       lines: body.data.lines,
+    });
+  } else if (body.data.action === "returnSale") {
+    // money-risk with no declared amount: the gate always holds, a 202 with
+    // pendingApproval is the normal outcome until someone approves it.
+    result = await executor.execute("pos.returnSale", humanCtx, {
+      invoiceId: body.data.invoiceId,
+      reason: body.data.reason,
+    });
+  } else if (body.data.action === "shiftSummary") {
+    result = await executor.execute("pos.shiftSummary", humanCtx, {
+      sessionId: body.data.sessionId,
     });
   } else {
     result = await executor.execute("pos.closeSession", humanCtx, {

@@ -207,5 +207,10 @@ export async function GET() {
     },
     trend,
     activity,
+    signals: await (async () => {
+      const run = await executor.execute("signals.list", ctx, {});
+      const data = run.data as { signals?: unknown[] } | undefined;
+      return (data?.signals ?? []).slice(0, 8);
+    })(),
   });
 }
