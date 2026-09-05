@@ -8,6 +8,8 @@ import {
   supportConversations,
   supportMessages,
   type Database,
+  supportCannedResponses,
+  supportKbArticles,
 } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
@@ -92,7 +94,7 @@ const startConversation = (deps: ModuleDeps) =>
             status: "open",
             createdByActorType: ctx.actor.type,
             createdByActorId: ctx.actor.id,
-          })
+            ticketNumber: ((await deps.db.select({ n: sql<number>`coalesce(max(${supportConversations.ticketNumber}), 0)` }).from(supportConversations).where(eq(supportConversations.orgId, ctx.actor.orgId)))[0]?.n ?? 0) + 1,})
           .returning({ id: supportConversations.id });
         await tx.insert(supportMessages).values({
           orgId: ctx.actor.orgId,
@@ -470,6 +472,107 @@ const reopenConversation = (deps: ModuleDeps) =>
     },
   });
 
+
+// ── M12: ticket depth ──────────────────────────────────────────────────
+
+const suggestTicketCategory = (memo: string): string => {
+  const t = memo.toLowerCase();
+  if (/(refund|return|damaged)/.test(t)) return "billing";
+  if (/(bug|error|crash|not working|broken)/.test(t)) return "technical";
+  if (/(how do|how to|question|help)/.test(t)) return "how-to";
+  if (/(ship|deliver|tracking|late)/.test(t)) return "shipping";
+  return "general";
+};
+
+const updateTicket = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "support.updateTicket",
+    title: "Update ticket",
+    intent:
+      "Set a ticket's priority, category, assignee, and SLA due date so aging and breaches are measurable instead of vibes",
+    module: "support",
+    risk: "write",
+    permission: "support.write",
+    input: z.object({
+      conversationId: z.string().uuid(),
+      priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+      category: z.string().max(40).optional(),
+      assigneeUserId: z.string().uuid().optional(),
+      slaDueAt: z.string().datetime().optional(),
+    }),
+    output: z.object({ updated: z.literal(true) }),
+    execute: async (ctx, input) => {
+      const [conv] = await deps.db
+        .select({ id: supportConversations.id })
+        .from(supportConversations)
+        .where(and(eq(supportConversations.id, input.conversationId), eq(supportConversations.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!conv) throw new Error("ticket not found");
+      await deps.db
+        .update(supportConversations)
+        .set({
+          ...(input.priority ? { priority: input.priority } : {}),
+          ...(input.category ? { category: input.category } : {}),
+          ...(input.assigneeUserId ? { assignedUserId: input.assigneeUserId } : {}),
+          ...(input.slaDueAt ? { slaDueAt: new Date(input.slaDueAt) } : {}),
+          updatedAt: ctx.now,
+        })
+        .where(eq(supportConversations.id, input.conversationId));
+      return { updated: true as const };
+    },
+  });
+
+const suggestCategory = (_deps: ModuleDeps) =>
+  defineCapability({
+    id: "support.suggestCategory",
+    title: "Suggest ticket category",
+    intent: "Draft a category for a ticket from its text using fixed rules — a suggestion, never a decision",
+    module: "support",
+    risk: "read",
+    permission: "support.read",
+    input: z.object({ text: z.string().min(1).max(2000) }),
+    output: z.object({ category: z.string(), draft: z.literal(true) }),
+    execute: async (ctx, input) => ({ category: suggestTicketCategory(input.text), draft: true as const }),
+  });
+
+const createCannedResponse = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "support.createCannedResponse",
+    title: "Create canned response",
+    intent: "Save a reusable reply under a short shortcut so agents answer consistently in one step",
+    module: "support",
+    risk: "write",
+    permission: "support.write",
+    input: z.object({ shortcut: z.string().min(1).max(40), title: z.string().min(1).max(120), body: z.string().min(1).max(4000) }),
+    output: z.object({ cannedResponseId: z.string() }),
+    execute: async (ctx, input) => {
+      const [row] = await deps.db
+        .insert(supportCannedResponses)
+        .values({ orgId: ctx.actor.orgId, shortcut: input.shortcut, title: input.title, body: input.body })
+        .onConflictDoUpdate({ target: [supportCannedResponses.orgId, supportCannedResponses.shortcut], set: { title: input.title, body: input.body } })
+        .returning({ id: supportCannedResponses.id });
+      return { cannedResponseId: row!.id };
+    },
+  });
+
+const createKbArticle = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "support.createKbArticle",
+    title: "Create KB article",
+    intent: "Author a knowledge-base article so recurring questions get answered once, publicly",
+    module: "support",
+    risk: "write",
+    permission: "support.write",
+    input: z.object({ title: z.string().min(1).max(200), body: z.string().min(1).max(20000), category: z.string().max(40).optional() }),
+    output: z.object({ articleId: z.string() }),
+    execute: async (ctx, input) => {
+      const [row] = await deps.db
+        .insert(supportKbArticles)
+        .values({ orgId: ctx.actor.orgId, title: input.title, body: input.body, category: input.category ?? null })
+        .returning({ id: supportKbArticles.id });
+      return { articleId: row!.id };
+    },
+  });
 export function registerSupportCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(startConversation(deps));
   registry.register(postMessage(deps));
@@ -479,5 +582,10 @@ export function registerSupportCapabilities(registry: CapabilityRegistry, deps: 
   registry.register(searchKnowledge(deps));
   registry.register(escalateConversation(deps));
   registry.register(resolveConversation(deps));
+  registry.register(updateTicket(deps));
+  registry.register(suggestCategory(deps));
+  registry.register(createCannedResponse(deps));
+  registry.register(createKbArticle(deps));
   registry.register(reopenConversation(deps));
 }
+export { createSupportSignalProducer } from "./signals";

@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "@chaste/db";
-import type { ActionContext } from "@chaste/kernel";
+import type { ActionContext, SignalProducer } from "@chaste/kernel";
 
 /**
  * Governed analytics datasets.
@@ -16,6 +16,8 @@ import type { ActionContext } from "@chaste/kernel";
 
 export interface AnalyticsDeps {
   db: Database["db"];
+  /** Composed signal feed, injected at the app layer (ADR 0034/0039). */
+  signals?: SignalProducer;
 }
 
 export const datasetShape = z.object({

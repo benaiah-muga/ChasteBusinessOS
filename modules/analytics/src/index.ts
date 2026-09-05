@@ -1,6 +1,8 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
+import { explainChange } from "@chaste/erp-core";
+import { customers, invoiceLines, invoices } from "@chaste/db";
 import {
   datasetShape,
   extractInvoiceAging,
@@ -154,6 +156,183 @@ const stockLevels = (deps: AnalyticsDeps) =>
     execute: async (ctx): Promise<DatasetResult> => extractStockLevels(deps, ctx),
   });
 
+// ── M12: explainChange + askYourBusiness ────────────────────────────────
+
+async function metricRowsByDimension(
+  deps: AnalyticsDeps,
+  orgId: string,
+  dimension: "customer" | "product",
+  from: Date,
+  to: Date,
+): Promise<Array<{ key: string; valueMinor: number }>> {
+  const base = deps.db
+    .select({
+      key: dimension === "customer" ? sql<string>`coalesce(${customers.name}, ${invoices.customerId}::text)` : sql<string>`${invoiceLines.description}`,
+      valueMinor: sql<number>`coalesce(sum(${invoiceLines.quantity} * ${invoiceLines.unitPriceMinor} / 1000), 0)`,
+    })
+    .from(invoiceLines)
+    .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id));
+  const joined =
+    dimension === "customer"
+      ? base.leftJoin(customers, eq(customers.id, invoices.customerId))
+      : base;
+  const rows = await joined
+    .where(
+      and(
+        eq(invoices.orgId, orgId),
+        sql`${invoices.status} IN ('sent', 'paid')`,
+        sql`${invoices.voidedAt} IS NULL`,
+        sql`${invoices.issuedAt} >= ${from.toISOString()}`,
+        sql`${invoices.issuedAt} < ${to.toISOString()}`,
+      ),
+    )
+    .groupBy(sql`1`);
+  return rows.map((r) => ({ key: r.key, valueMinor: Number(r.valueMinor) }));
+}
+
+const explainChangeCap = (deps: AnalyticsDeps) =>
+  defineCapability({
+    id: "analytics.explainChange",
+    title: "Explain metric change",
+    intent:
+      "Attribute a revenue change across a dimension — customers or products — with exact contributions that sum to the delta and drill down to the underlying invoices",
+    module: "analytics",
+    risk: "read",
+    permission: "analytics.report",
+    input: z.object({
+      dimension: z.enum(["customer", "product"]),
+      periodAFrom: z.string().datetime(),
+      periodATo: z.string().datetime(),
+      periodBFrom: z.string().datetime(),
+      periodBTo: z.string().datetime(),
+    }),
+    output: z.object({
+      priorTotalMinor: z.number(),
+      currentTotalMinor: z.number(),
+      deltaMinor: z.number(),
+      contributions: z.array(
+        z.object({
+          key: z.string(),
+          priorMinor: z.number(),
+          currentMinor: z.number(),
+          deltaMinor: z.number(),
+          shareOfDelta: z.number().nullable(),
+        }),
+      ),
+      drill: z.array(
+        z.object({
+          key: z.string(),
+          invoiceIds: z.array(z.string()),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      const a = await metricRowsByDimension(deps, ctx.actor.orgId, input.dimension, new Date(input.periodAFrom), new Date(input.periodATo));
+      const b = await metricRowsByDimension(deps, ctx.actor.orgId, input.dimension, new Date(input.periodBFrom), new Date(input.periodBTo));
+      const decomposition = explainChange(a, b);
+
+      // Drill: sample invoice ids behind the five biggest movers.
+      const movers = decomposition.contributions.slice(0, 5).map((c) => c.key);
+      const drill: Array<{ key: string; invoiceIds: string[] }> = [];
+      for (const key of movers) {
+        const base = deps.db
+          .select({ id: invoices.id })
+          .from(invoiceLines)
+          .innerJoin(invoices, eq(invoiceLines.invoiceId, invoices.id));
+        const joined = input.dimension === "customer" ? base.leftJoin(customers, eq(customers.id, invoices.customerId)) : base;
+        const rows = await joined
+          .where(
+            and(
+              sql`${invoices.orgId} = ${ctx.actor.orgId}`,
+              sql`${invoices.status} IN ('sent', 'paid')`,
+              sql`${invoices.voidedAt} IS NULL`,
+              sql`${invoices.issuedAt} >= ${input.periodBFrom}`,
+              sql`${invoices.issuedAt} < ${input.periodBTo}`,
+              sql`(${input.dimension === "customer" ? sql`coalesce(${customers.name}, ${invoices.customerId}::text)` : sql`${invoiceLines.description}`}) = ${key}`,
+            ),
+          )
+          .limit(10);
+        drill.push({ key, invoiceIds: rows.map((r) => r.id) });
+      }
+      return { ...decomposition, drill };
+    },
+  });
+
+const askYourBusiness = (deps: AnalyticsDeps) =>
+  defineCapability({
+    id: "analytics.askYourBusiness",
+    title: "Ask your business",
+    intent:
+      "Compose a cited answer about revenue, collections, and pipeline from governed extracts plus the signal feed, ending in one proposed governed action",
+    module: "analytics",
+    risk: "read",
+    permission: "analytics.report",
+    input: z.object({ focus: z.enum(["revenue", "collections", "pipeline"]).optional() }),
+    output: z.object({
+      sections: z.array(
+        z.object({
+          heading: z.string(),
+          citations: z.array(z.string()),
+          lines: z.array(z.string()),
+        }),
+      ),
+      proposedAction: z
+        .object({
+          capabilityId: z.string(),
+          inputDraft: z.record(z.string(), z.unknown()),
+          why: z.string(),
+        })
+        .nullable(),
+    }),
+    execute: async (ctx, input) => {
+      const focus = input.focus ?? "revenue";
+      const sections: Array<{ heading: string; citations: string[]; lines: string[] }> = [];
+      let proposedAction: { capabilityId: string; inputDraft: Record<string, unknown>; why: string } | null = null;
+
+      if (focus === "revenue") {
+        const sales = await extractSalesByCustomer(deps, ctx, 3);
+        const top = sales.rows.slice(0, 3) as Array<Record<string, unknown>>;
+        sections.push({
+          heading: "Top customers this period",
+          citations: top.map((r) => String(r.customerName)),
+          lines: top.map((r) => `${r.customerName}: ${r.invoiceCount} invoice(s), ${r.total_minor} minor`),
+        });
+      } else if (focus === "collections") {
+        const aging = await extractInvoiceAging(deps, ctx);
+        sections.push({
+          heading: "Receivables aging",
+          citations: (aging.rows as Array<Record<string, unknown>>).slice(0, 5).map((r) => String(r.invoice_id ?? r.invoiceId ?? "")),
+          lines: aging.rows.slice(0, 5).map((r) => JSON.stringify(r)),
+        });
+      } else {
+        const pipeline = await extractPipelineByStage(deps, ctx);
+        sections.push({
+          heading: "Pipeline by stage",
+          citations: [],
+          lines: (pipeline.rows as Array<Record<string, unknown>>).map((r) => JSON.stringify(r)),
+        });
+      }
+
+      const signals = deps.signals ? await deps.signals(ctx.actor.orgId, ctx.now) : [];
+      const top = signals[0];
+      if (top) {
+        sections.push({
+          heading: "Needs attention",
+          citations: [top.id],
+          lines: [top.subject],
+        });
+        if (top.suggestedAction) {
+          proposedAction = {
+            capabilityId: top.suggestedAction.capabilityId,
+            inputDraft: top.suggestedAction.inputDraft ?? {},
+            why: top.subject,
+          };
+        }
+      }
+      return { sections, proposedAction };
+    },
+  });
+
 export function registerAnalyticsCapabilities(registry: CapabilityRegistry, deps: AnalyticsDeps): void {
   registry.register(renderReport(deps));
   registry.register(pipelineByStage(deps));
@@ -161,4 +340,7 @@ export function registerAnalyticsCapabilities(registry: CapabilityRegistry, deps
   registry.register(invoiceAging(deps));
   registry.register(salesByCustomer(deps));
   registry.register(stockLevels(deps));
+  registry.register(explainChangeCap(deps));
+  registry.register(askYourBusiness(deps));
 }
+export type { AnalyticsDeps } from "./datasets";

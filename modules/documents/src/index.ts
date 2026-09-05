@@ -1,7 +1,14 @@
 import { and, desc, eq, ilike, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { embed, extractBillLinesFromText, parseDocumentImage } from "@chaste/ai";
-import { accounts, documentSuggestions, documents, memories, type Database } from "@chaste/db";
+import {
+  accounts,
+  documentSuggestions,
+  documents,
+  documentVersions,
+  memories,
+  type Database,
+} from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import { suggestExpenseAccount, type AccountType, type CoderAccount } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
@@ -47,6 +54,10 @@ const createDocument = (deps: ModuleDeps) =>
     input: z
       .object({
         title: z.string().min(1).max(200),
+        folder: z.string().max(300).optional(),
+        refType: z.string().max(40).optional(),
+        refId: z.string().uuid().optional(),
+        expiresAt: z.string().datetime().optional(),
         text: z.string().min(1).max(100_000).optional().describe("pasted document text"),
         fileBase64: z.string().max(Math.ceil(MAX_UPLOAD_BYTES * BASE64_CHARS_PER_BYTE)).optional(),
         mimeType: z.string().regex(/^[\w.+-]+\/[\w.+-]+$/).optional(),
@@ -69,7 +80,10 @@ const createDocument = (deps: ModuleDeps) =>
           rawText: input.text ?? null,
           createdByActorType: ctx.actor.type,
           createdByActorId: ctx.actor.id,
-        })
+        folder: (input as { folder?: string }).folder ?? null,
+    refType: (input as { refType?: string }).refType ?? null,
+    refId: (input as { refId?: string }).refId ?? null,
+    expiresAt: (input as { expiresAt?: Date | string }).expiresAt ? new Date((input as { expiresAt?: Date | string }).expiresAt as string) : null,})
         .returning({ id: documents.id });
       return { documentId: row!.id };
     },
@@ -345,6 +359,79 @@ const listDocuments = (deps: ModuleDeps) =>
     },
   });
 
+
+// ── M12: version history ───────────────────────────────────────────────
+
+const addVersion = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.addVersion",
+    title: "Add document version",
+    intent:
+      "Replace a document's content with a new version: the old content is archived in an append-only history and the document becomes the latest",
+    module: "documents",
+    risk: "write",
+    permission: "documents.write",
+    input: z.object({
+      documentId: z.string().uuid(),
+      contentBase64: z.string().optional(),
+      rawText: z.string().optional(),
+      note: z.string().max(500).optional(),
+    }),
+    output: z.object({ version: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [doc] = await tx
+          .select()
+          .from(documents)
+          .where(and(eq(documents.id, input.documentId), eq(documents.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!doc) throw new Error("document not found");
+        if (!input.contentBase64 && !input.rawText) throw new Error("a version needs contentBase64 or rawText");
+        const [maxRow] = await tx
+          .select({ maxV: sql<number>`coalesce(max(${documentVersions.version}), 0)` })
+          .from(documentVersions)
+          .where(eq(documentVersions.documentId, doc.id));
+        const nextVersion = Number(maxRow?.maxV ?? 0) + 1;
+        await tx.insert(documentVersions).values({
+          orgId: ctx.actor.orgId,
+          documentId: doc.id,
+          version: nextVersion,
+          contentBase64: doc.contentBase64,
+          rawText: doc.rawText,
+          note: input.note ?? null,
+          createdByActorType: ctx.actor.type,
+          createdByActorId: ctx.actor.id,
+        });
+        await tx
+          .update(documents)
+          .set({ contentBase64: input.contentBase64 ?? doc.contentBase64, rawText: input.rawText ?? doc.rawText, updatedAt: ctx.now })
+          .where(eq(documents.id, doc.id));
+        return { version: nextVersion };
+      });
+    },
+  });
+
+const listVersions = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.listVersions",
+    title: "List document versions",
+    intent: "Show a document's append-only version history, oldest to newest",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({ documentId: z.string().uuid() }),
+    output: z.object({ versions: z.array(z.object({ version: z.number(), note: z.string().nullable(), createdAt: z.string() })) }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const rows = await tx
+          .select({ version: documentVersions.version, note: documentVersions.note, createdAt: documentVersions.createdAt })
+          .from(documentVersions)
+          .where(and(eq(documentVersions.orgId, ctx.actor.orgId), eq(documentVersions.documentId, input.documentId)))
+          .orderBy(documentVersions.version);
+        return { versions: rows.map((r) => ({ version: r.version, note: r.note, createdAt: r.createdAt.toISOString() })) };
+      });
+    },
+  });
 export function registerDocumentCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(createDocument(deps));
   registry.register(deleteDocument(deps));
@@ -352,4 +439,7 @@ export function registerDocumentCapabilities(registry: CapabilityRegistry, deps:
   registry.register(suggestCoding(deps));
   registry.register(listDocuments(deps));
   registry.register(searchMemory(deps));
+  registry.register(addVersion(deps));
+  registry.register(listVersions(deps));
 }
+export { createDocumentSignalProducer } from "./signals";
