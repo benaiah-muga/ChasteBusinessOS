@@ -109,6 +109,12 @@ export class KernelExecutor {
     }
 
     try {
+      // Surface the module gate to capabilities whose cross-module effects
+      // must degrade gracefully (ADR 0035): an enabled capability can ask
+      // whether a sibling module is enabled and skip that effect only.
+      if (this.deps.modules) {
+        ctx.services.moduleGate = this.deps.modules;
+      }
       const data = await cap.execute(ctx, parsed.data);
       await this.audit(ctx, "capability.executed", cap.id, { input: parsed.data });
       return { ok: true, data };

@@ -84,7 +84,17 @@ export class OrgPolicyEngine implements PolicyEngine {
     if (!base.allowed || cap.risk === "identity" || cap.risk === "destructive") return base;
 
     const rules = await this.loadRules(ctx.actor.orgId);
-    const rule = rules.find((r) => matchesPattern(r.capabilityPattern, cap.id));
+    const matching = rules.filter((r) => matchesPattern(r.capabilityPattern, cap.id));
+    // Most specific pattern wins: "purchasing.createPurchaseOrder" beats
+    // "purchasing.*" beats the onboarding blanket "*". Ties resolve to the
+    // stricter autonomy cap, because ambiguity must never loosen a gate.
+    const rule = matching
+      .slice()
+      .sort((a, b) => {
+        const bySpecificity = b.capabilityPattern.length - a.capabilityPattern.length;
+        if (bySpecificity !== 0) return bySpecificity;
+        return RISK_RANK[a.maxRiskAutonomous] - RISK_RANK[b.maxRiskAutonomous];
+      })[0];
 
     // Money actions are governed by amount thresholds below, not by the
     // blanket risk cap, otherwise every retail sale needs sign-off.
