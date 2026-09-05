@@ -1,5 +1,5 @@
 {
-  "name": "@chaste/module-crm",
+  "name": "@chaste/module-sales",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@chaste/db": "workspace:*",
+    "@chaste/erp-core": "workspace:*",
     "@chaste/kernel": "workspace:*",
-    "zod": "^4.1.5",
+    "@chaste/module-accounting": "workspace:*",
+    "@chaste/module-inventory": "workspace:*",
     "drizzle-orm": "^0.44.5",
-    "@chaste/erp-core": "workspace:*"
+    "zod": "^4.1.5"
   }
 }
