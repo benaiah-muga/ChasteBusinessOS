@@ -17,20 +17,18 @@ const BASE64_CHARS_PER_BYTE = 4 / 3;
 
 /** Best-effort org-memory write; retrieval degrades gracefully without a key. */
 async function embedDocChunk(tx: Tx | ModuleDeps["db"], orgId: string, documentId: string, title: string, text: string): Promise<void> {
-  try {
-    const [vec] = await embed([text.slice(0, 8000)], { inputType: "passage" });
-    const dim = Number(process.env.EMBEDDING_DIMENSIONS ?? 1024);
-    await tx.insert(memories).values({
-      orgId,
-      kind: "doc_chunk",
-      source: `document:${documentId}`,
-      content: text.slice(0, 8000),
-      embedding: vec ?? new Array(dim).fill(0),
-      metadata: { documentId, title },
-    });
-  } catch {
-    // Parsing succeeded; memory indexing is best-effort by design.
-  }
+  const vec = await embed([text.slice(0, 8000)], { inputType: "passage" })
+    .then((rows) => rows[0])
+    .catch(() => undefined);
+  const dim = Number(process.env.EMBEDDING_DIMENSIONS ?? 1024);
+  await tx.insert(memories).values({
+    orgId,
+    kind: "doc_chunk",
+    source: `document:${documentId}`,
+    content: text.slice(0, 8000),
+    embedding: vec ?? new Array(dim).fill(0),
+    metadata: { documentId, title },
+  });
 }
 
 const createDocument = (deps: ModuleDeps) =>

@@ -1,14 +1,101 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { ErrorDetails, ToolChip } from "@/components/ui";
 import { IconArrowRight, IconSparkle } from "@/components/icons";
-import { chatStore, useChat, type ChatMsg } from "./chat-store";
+import { chatStore, useChat, type AskPayload, type ChatMsg, type TokenUsage } from "./chat-store";
 
 export function scrollChatToBottom(ref: RefObject<HTMLDivElement | null>) {
   requestAnimationFrame(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight });
   });
+}
+
+/** Compact token counts for chips: 1234 -> "1.2k". */
+export function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function UsageChip({ usage }: { usage: TokenUsage }) {
+  const cachedPct =
+    usage.input > 0 ? Math.min(100, Math.round((usage.cachedInput / usage.input) * 100)) : 0;
+  return (
+    <span
+      title={`${formatTokens(usage.input)} prompt tokens, ${formatTokens(usage.output)} reply tokens${usage.cachedInput ? `, ${formatTokens(usage.cachedInput)} served from provider cache` : ""}`}
+      className="mt-1.5 inline-flex w-fit items-center gap-1.5 rounded-full bg-stone-100 px-2 py-0.5 font-mono text-[10px] text-stone-500"
+    >
+      <span>in {formatTokens(usage.input)}</span>
+      <span aria-hidden="true">·</span>
+      <span>out {formatTokens(usage.output)}</span>
+      {cachedPct > 0 && (
+        <>
+          <span aria-hidden="true">·</span>
+          <span>{cachedPct}% cached</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/** Clarification card: options to tap, or free text; locks after answering. */
+function AskCard({ ask, answered }: { ask: AskPayload; answered?: string }) {
+  const [other, setOther] = useState("");
+  const done = answered !== undefined;
+  return (
+    <div className="mt-2 rounded-xl border border-stone-200 bg-stone-50 p-3">
+      <p className="text-sm font-medium text-stone-800">{ask.question}</p>
+      {done ? (
+        <p className="mt-2 inline-flex rounded-full bg-maroon-50 px-2.5 py-1 text-xs font-medium text-maroon-800">
+          {answered}
+        </p>
+      ) : (
+        <>
+          {ask.options && ask.options.length > 0 && (
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {ask.options.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => chatStore.answerAsk(ask.id, opt)}
+                  className="cursor-pointer rounded-full border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors duration-150 hover:border-maroon-400 hover:bg-maroon-50 hover:text-maroon-900"
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
+          {ask.allowOther && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const text = other.trim();
+                if (text) chatStore.answerAsk(ask.id, text);
+              }}
+              className="mt-2 flex items-center gap-1.5"
+            >
+              <input
+                value={other}
+                onChange={(e) => setOther(e.target.value)}
+                placeholder="Other…"
+                aria-label="Other answer"
+                className="min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-xs outline-none placeholder:text-stone-400 focus:border-maroon-400"
+              />
+              <button
+                type="submit"
+                disabled={!other.trim()}
+                aria-label="Send answer"
+                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-maroon-700 text-white transition-colors duration-150 hover:bg-maroon-800 disabled:pointer-events-none disabled:opacity-35"
+              >
+                <IconArrowRight className="size-3.5" />
+              </button>
+            </form>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -170,6 +257,8 @@ export function MessageList({ messages, busy, compact = false }: { messages: Cha
                   </span>
                 )
               )}
+              {m.ask && <AskCard ask={m.ask} answered={m.answered} />}
+              {m.usage && <UsageChip usage={m.usage} />}
             </div>
           </div>
         );

@@ -15,7 +15,7 @@ import {
   IconX,
 } from "@/components/icons";
 import { chatStore, useChat } from "./chat-store";
-import { MessageList, useAutoScroll, useChatSend } from "./chat-ui";
+import { MessageList, formatTokens, useAutoScroll, useChatSend } from "./chat-ui";
 import { chatDock, chatDraft, useChatDockMode, type ChatDockMode } from "./chat-widget-state";
 import { cn, timeAgo } from "@/lib/format";
 
@@ -60,7 +60,7 @@ function ChatDockBody() {
 }
 
 function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" }) {
-  const { messages, busy, creator } = useChat();
+  const { messages, busy, creator, queue, step, lastTool, sessionUsage } = useChat();
   const { send, stop } = useChatSend();
   const [input, setInput] = useState("");
   const scrollRef = useAutoScroll(messages);
@@ -86,6 +86,51 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
       <MessageList messages={messages} busy={busy} compact />
     </div>
   );
+
+  /**
+   * Live console strip: what the agent is doing right now (loop step, last
+   * capability, cumulative tokens) — the Marker-style status row from modern
+   * chat UIs, kept to one quiet line.
+   */
+  const consoleStrip = busy ? (
+    <div className="flex items-center gap-2 border-t border-stone-100 bg-stone-50/60 px-3 py-1.5 font-mono text-[10px] text-stone-500">
+      <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" aria-hidden="true" />
+      <span className="shimmer">working</span>
+      {step && (
+        <span>
+          step {step.step}/{step.maxSteps}
+        </span>
+      )}
+      {lastTool && <span className="truncate text-stone-400">{lastTool}</span>}
+      <span className="ml-auto shrink-0 tabular-nums">
+        {formatTokens(sessionUsage.input + sessionUsage.output)} tok
+      </span>
+    </div>
+  ) : null;
+
+  const queuedChips =
+    queue.length > 0 ? (
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-stone-100 px-3 pt-2">
+        <span className="text-[10px] font-medium text-stone-400">queued</span>
+        {queue.map((q) => (
+          <span
+            key={q}
+            className="inline-flex max-w-full items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] text-stone-600"
+          >
+            <span className="truncate">{q}</span>
+            <button
+              type="button"
+              onClick={() => chatStore.removeQueued(q)}
+              aria-label={`Remove queued message: ${q}`}
+              className="cursor-pointer text-stone-400 hover:text-stone-700"
+            >
+              <IconX className="size-3" />
+            </button>
+          </span>
+        ))}
+      </div>
+    ) : null;
+
   const composer = (
     <form
       onSubmit={(e) => {
@@ -105,7 +150,7 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
         }}
         rows={1}
         aria-label="Message your workmate"
-        placeholder="Message…"
+        placeholder={busy ? "Queue a message, it sends when the agent finishes…" : "Message…"}
         className="max-h-28 min-w-0 flex-1 resize-none rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-maroon-500"
       />
       <div className="mt-1.5 flex items-center justify-between gap-2 pl-1">
@@ -119,6 +164,7 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
               creator
             </button>
           )}
+          {queue.length > 0 && <span className="text-stone-500">{queue.length} queued</span>}
           <span className="hidden sm:inline">
             <kbd className="kbd">⏎</kbd> send · <kbd className="kbd">⇧⏎</kbd> newline
           </span>
@@ -170,7 +216,13 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
               aria-hidden="true"
               className={`size-1.5 rounded-full ${busy ? "animate-pulse bg-emerald-500" : "bg-emerald-500"}`}
             />
-            {busy ? "Working…" : creator ? "Creator mode" : "Assist mode"}
+            {busy
+              ? step
+                ? `Step ${step.step}/${step.maxSteps}${lastTool ? ` · ${lastTool.split(".").pop() ?? lastTool}` : ""}`
+                : "Working…"
+              : creator
+                ? "Creator mode"
+                : "Assist mode"}
           </button>
         </div>
         {actions}
@@ -207,6 +259,8 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
     tab === "chat" ? (
       <>
         {transcript}
+        {consoleStrip}
+        {queuedChips}
         {composer}
       </>
     ) : tab === "history" ? (
@@ -301,10 +355,11 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
           placeholder="Ask your workmate anything…"
           className="max-h-24 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-stone-400"
         />
-        {input.trim() && !busy && (
+        {input.trim() && (
           <button
             type="submit"
-            aria-label="Send message"
+            aria-label={busy ? "Queue message" : "Send message"}
+            title={busy ? "The agent is working: this message will queue" : "Send message"}
             className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-maroon-700 text-white transition-colors duration-150 hover:bg-maroon-800"
           >
             <IconArrowRight className="size-4" />
