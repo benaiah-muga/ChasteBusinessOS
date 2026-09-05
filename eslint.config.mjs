@@ -49,9 +49,14 @@ export default tseslint.config(
     },
   },
   // Modules are independent bounded contexts: no cross-module imports,
-  // except HR/POS/purchasing importing the shared posting service.
+  // except HR/POS/purchasing/inventory importing the shared posting service
+  // (ADR 0020; inventory added by ADR 0033 for valuation postings).
+  // Manufacturing and sales sit outside the restricted lists deliberately:
+  // they consume the sanctioned seams (inventory's stock writer and ATP
+  // helpers, accounting's invoice writer) as their designed integration
+  // surface (ADR 0036 for sales).
   {
-    files: ["modules/{crm,messaging,iam,inventory,documents,creator}/src/**/*.ts"],
+    files: ["modules/{crm,messaging,iam,documents,creator}/src/**/*.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -67,7 +72,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["modules/{hr,pos,purchasing}/src/**/*.ts"],
+    files: ["modules/{hr,pos,purchasing,inventory}/src/**/*.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
