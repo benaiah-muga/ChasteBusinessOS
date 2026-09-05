@@ -7,6 +7,7 @@ import {
   bankTransactions,
   customers,
   expenseClaims,
+  expensePolicies,
   fxRates,
   fxSettlements,
   invoiceLines,
@@ -21,12 +22,16 @@ import {
   organizations,
   payments,
   periods,
+  vendorBills,
 } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import { assertPeriodOpen, baseCurrencyOf, postEntry } from "./posting";
 import {
+  buildCashFlowStatement,
   buildInvoiceEntryLines,
   buildPaymentEntryLines,
+  buildThirteenWeekForecast,
+  cashBalanceFromEntries,
   computeAging,
   computeBalanceSheet,
   computeCashBasis,
@@ -34,7 +39,9 @@ import {
   computeInvoiceTotals,
   computeYearEndClose,
   currencyMinorUnits,
+  evaluateExpensePolicy,
   fxRateFromDecimal,
+  suggestExpenseCategory,
   toBaseMinor,
   type AccountBalance,
   type FxRate,
@@ -103,11 +110,11 @@ const lineSchema = z.object({
 
 /**
  * Shared sales-document posting path: inserts the invoice + lines and posts
- * the AR/revenue entry. Used verbatim by accounting.createInvoice AND by
- * quote acceptance, so a converted quote becomes an ordinary invoice with
- * no parallel write path.
+ * the AR/revenue entry. Used verbatim by accounting.createInvoice, quote
+ * acceptance, AND sales-order delivery (ADR 0036), so every revenue path
+ * produces an ordinary invoice through one shared write path.
  */
-async function insertInvoiceWithPosting(
+export async function insertInvoiceWithPosting(
   tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0],
   ctx: ActionContext,
   input: {
@@ -116,11 +123,13 @@ async function insertInvoiceWithPosting(
     lines: Array<{ description: string; quantity: number; unitPriceMinor: number; taxMinor?: number }>;
     currency?: string;
     fxRate?: string;
+    /** Overrides the customer's payment-term default. */
+    dueAt?: Date;
   },
 ): Promise<{ invoiceId: string; invoiceNumber: number; totalMinor: number; entryId: string; currency: string }> {
   await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
   const cust = await tx
-    .select({ id: customers.id })
+    .select({ id: customers.id, paymentTermDays: customers.paymentTermDays })
     .from(customers)
     .where(and(eq(customers.id, input.customerId), eq(customers.orgId, ctx.actor.orgId)))
     .limit(1);
@@ -170,6 +179,11 @@ async function insertInvoiceWithPosting(
       totalMinor: totals.totalMinor,
       memo: input.memo ?? null,
       issuedAt: ctx.now,
+      dueAt:
+        input.dueAt ??
+        (cust[0]!.paymentTermDays && cust[0]!.paymentTermDays > 0
+          ? new Date(ctx.now.getTime() + cust[0]!.paymentTermDays * 86_400_000)
+          : ctx.now),
     })
     .returning({ id: invoices.id });
 
@@ -219,6 +233,8 @@ const createInvoice = (deps: ModuleDeps) =>
       currency: z.string().optional(),
       /** Explicit rate override (decimal string); else latest posted rate. */
       fxRate: z.string().optional(),
+      /** Override the customer's payment-term default due date (M10). */
+      dueAt: z.string().datetime().optional(),
     }),
     output: z.object({
       invoiceId: z.string(),
@@ -229,7 +245,10 @@ const createInvoice = (deps: ModuleDeps) =>
     }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        const created = await insertInvoiceWithPosting(tx, ctx, input);
+        const created = await insertInvoiceWithPosting(tx, ctx, {
+          ...input,
+          dueAt: input.dueAt ? new Date(input.dueAt) : undefined,
+        });
         return {
           invoiceId: created.invoiceId,
           invoiceNumber: created.invoiceNumber,
@@ -985,6 +1004,8 @@ const quoteCreate = (deps: ModuleDeps) =>
     input: z.object({
       customerId: z.string(),
       memo: z.string().optional(),
+      /** Past this instant the quote can no longer be accepted (M9). */
+      expiresAt: z.string().datetime().optional(),
       lines: z.array(lineSchema).min(1),
     }),
     output: z.object({ quoteId: z.string(), quoteNumber: z.number(), totalMinor: z.number() }),
@@ -1017,6 +1038,9 @@ const quoteCreate = (deps: ModuleDeps) =>
             taxMinor: totals.taxMinor,
             totalMinor: totals.totalMinor,
             memo: input.memo ?? null,
+            // Normalize: the registry validates inputs, but direct execute
+            // (tests, internal calls) may hand us an ISO string.
+            expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
             createdByActorType: ctx.actor.type,
             createdByActorId: ctx.actor.id,
           })
@@ -1055,6 +1079,11 @@ const quoteAccept = (deps: ModuleDeps) =>
           .limit(1);
         if (!q) throw new Error("quote not found");
         if (q.status !== "sent") throw new Error(`quote is ${q.status}; only sent quotes convert`);
+        if (q.expiresAt && q.expiresAt.getTime() <= ctx.now.getTime()) {
+          throw new Error(
+            `quote expired on ${q.expiresAt.toISOString().slice(0, 10)}; decline it and issue a fresh quote`,
+          );
+        }
 
         const lines = await tx
           .select({
@@ -1116,6 +1145,42 @@ const quoteDecline = (deps: ModuleDeps) =>
           .returning({ id: quotes.id });
         if (updated.length === 0) throw new Error("quote not found or already decided");
         return { status: "declined" as const };
+      });
+    },
+  });
+
+/**
+ * Marks every sent quote whose validity has lapsed as expired (M9).
+ * No inverse: expiry is honest archiving — acceptance is refused past the
+ * deadline regardless, so un-expiring would only invite overwriting history
+ * with a lie. Declining stays available for anything that needs a decision
+ * recorded.
+ */
+const quoteExpire = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.expireQuote",
+    title: "Expire lapsed quotes",
+    intent:
+      "Sweep all sent quotes past their validity date into expired so the pipeline stops showing dead quotes as open",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    input: z.object({}),
+    output: z.object({ expiredCount: z.number().int() }),
+    execute: async (ctx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const expired = await tx
+          .update(quotes)
+          .set({ status: "expired", decidedAt: ctx.now })
+          .where(
+            and(
+              eq(quotes.orgId, ctx.actor.orgId),
+              eq(quotes.status, "sent"),
+              lt(quotes.expiresAt, ctx.now),
+            ),
+          )
+          .returning({ id: quotes.id });
+        return { expiredCount: expired.length };
       });
     },
   });
@@ -1328,8 +1393,18 @@ const expenseSubmit = (deps: ModuleDeps) =>
       amountMinor: z.number().int().positive(),
       memo: z.string().min(3).max(500),
       accountCode: z.string().optional(),
+      /** Overrides the rules-first suggestion from the memo (M11). */
+      category: z.string().max(40).optional(),
+      /** Receipt attached through the documents seam (M11). */
+      documentId: z.string().uuid().optional(),
     }),
-    output: z.object({ claimId: z.string(), status: z.literal("submitted") }),
+    output: z.object({
+      claimId: z.string(),
+      status: z.literal("submitted"),
+      category: z.string(),
+      overPolicyLimit: z.boolean(),
+      policyLimitMinor: z.number().nullable(),
+    }),
     inverse: {
       capabilityId: "accounting.decideExpenseClaim",
       buildInput: (_input, output) => ({
@@ -1341,6 +1416,9 @@ const expenseSubmit = (deps: ModuleDeps) =>
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const base = await baseCurrencyOf(tx, ctx.actor.orgId);
+        const category = input.category ?? suggestExpenseCategory(input.memo);
+        const policies = await tx.select({ category: expensePolicies.category, limitMinor: expensePolicies.limitMinor }).from(expensePolicies).where(eq(expensePolicies.orgId, ctx.actor.orgId));
+        const policy = evaluateExpensePolicy(category, input.amountMinor, policies);
         const [row] = await tx
           .insert(expenseClaims)
           .values({
@@ -1350,9 +1428,17 @@ const expenseSubmit = (deps: ModuleDeps) =>
             currency: base,
             memo: input.memo,
             accountCode: input.accountCode ?? null,
+            category,
+            documentId: input.documentId ?? null,
           })
           .returning({ id: expenseClaims.id });
-        return { claimId: row!.id, status: "submitted" as const };
+        return {
+          claimId: row!.id,
+          status: "submitted" as const,
+          category,
+          overPolicyLimit: policy.overLimit,
+          policyLimitMinor: policy.limitMinor,
+        };
       });
     },
   });
@@ -2101,6 +2187,411 @@ const fileSalesTaxReturn = (deps: ModuleDeps) =>
     },
   });
 
+// ── M10: money depth — credit notes, statements, reminders, cash flow ──
+
+/**
+ * AR credit note (M10, ADR 0037): reversal-style, like reverseEntry. The
+ * document is never edited — a proportional mirror entry reduces revenue,
+ * tax, and the receivable, and the credited amount lands on an immutable
+ * column. Always gates: the reversed amount lives in the invoice, not the
+ * input, so the policy engine treats it as "always require a human".
+ */
+const creditNote = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.creditNote",
+    title: "Credit an invoice",
+    intent:
+      "Correct or concede an issued invoice by crediting part of it through an approved reversing entry; the invoice itself is never edited",
+    module: "accounting",
+    risk: "money",
+    permission: "accounting.post",
+    moneyAmount: () => null,
+    input: z.object({
+      invoiceId: z.string().uuid(),
+      amountMinor: z.number().int().positive(),
+      reason: z.string().min(3).max(500),
+    }),
+    output: z.object({ entryId: z.string(), creditedMinor: z.number(), invoiceBalanceMinor: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
+        const [inv] = await tx
+          .select()
+          .from(invoices)
+          .where(and(eq(invoices.id, input.invoiceId), eq(invoices.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!inv) throw new Error("invoice not found");
+        if (inv.status === "void") throw new Error("invoice is void; nothing to credit");
+        const balance = inv.totalMinor - inv.paidMinor - inv.creditedMinor;
+        if (input.amountMinor > balance) {
+          throw new Error(
+            `credit ${input.amountMinor} exceeds the open balance ${balance} (total ${inv.totalMinor} − paid ${inv.paidMinor} − credited ${inv.creditedMinor})`,
+          );
+        }
+
+        const revenueShare = Math.round((input.amountMinor * (inv.totalMinor - inv.taxMinor)) / inv.totalMinor);
+        const taxShare = input.amountMinor - revenueShare;
+        // Zero-tax invoices have no tax leg; an empty 0/0 line is rejected.
+        const mirrorLines = [
+          revenueShare > 0 ? { accountCode: "4000", debitMinor: revenueShare, creditMinor: 0 } : null,
+          taxShare > 0 ? { accountCode: "2100", debitMinor: taxShare, creditMinor: 0 } : null,
+          { accountCode: "1100", debitMinor: 0, creditMinor: input.amountMinor },
+        ].filter((l) => l !== null);
+        const [origEntry] = await tx
+          .select({ id: journalEntries.id })
+          .from(journalEntries)
+          .where(
+            and(
+              eq(journalEntries.orgId, ctx.actor.orgId),
+              eq(journalEntries.sourceType, "invoice"),
+              eq(journalEntries.sourceId, inv.id),
+            ),
+          )
+          .limit(1);
+        const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `Credit note on invoice ${inv.number}: ${input.reason}`,
+          sourceType: "invoice_credit_note",
+          sourceId: inv.id,
+          reversalOfId: origEntry?.id ?? null,
+          lines: mirrorLines,
+        });
+        const credited = inv.creditedMinor + input.amountMinor;
+        await tx.update(invoices).set({ creditedMinor: credited }).where(eq(invoices.id, inv.id));
+        return {
+          entryId,
+          creditedMinor: credited,
+          invoiceBalanceMinor: inv.totalMinor - inv.paidMinor - credited,
+        };
+      });
+    },
+  });
+
+/** One rendered line of a statement, with the running balance after it. */
+const statementRow = z.object({
+  date: z.string(),
+  kind: z.string(),
+  ref: z.string(),
+  amountMinor: z.number(),
+  balanceMinor: z.number(),
+});
+
+const customerStatement = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.customerStatement",
+    title: "Customer statement",
+    intent:
+      "Render a customer's account as a dated, running-balance statement of invoices, payments, and credit notes — the document you can send when they dispute what they owe",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({ customerId: z.string().uuid() }),
+    output: z.object({
+      openingBalanceMinor: z.number(),
+      closingBalanceMinor: z.number(),
+      rows: z.array(statementRow),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const invRows = await tx
+          .select({
+            id: invoices.id,
+            number: invoices.number,
+            totalMinor: invoices.totalMinor,
+            creditedMinor: invoices.creditedMinor,
+            issuedAt: invoices.issuedAt,
+            createdAt: invoices.createdAt,
+            voidedAt: invoices.voidedAt,
+          })
+          .from(invoices)
+          .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.customerId, input.customerId)));
+        const live = invRows.filter((i) => !i.voidedAt);
+        const invoiceIds = new Set(live.map((i) => i.id));
+        const payRows = invoiceIds.size
+          ? await tx
+              .select({ invoiceId: payments.invoiceId, amountMinor: payments.amountMinor, receivedAt: payments.receivedAt })
+              .from(payments)
+              .where(eq(payments.orgId, ctx.actor.orgId))
+          : [];
+        const creditRows = invoiceIds.size
+          ? await tx
+              .select({
+                entryId: journalEntries.id,
+                sourceId: journalEntries.sourceId,
+                postedAt: journalEntries.postedAt,
+                creditMinor: journalLines.creditMinor,
+                debitMinor: journalLines.debitMinor,
+                code: accounts.code,
+              })
+              .from(journalEntries)
+              .innerJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
+              .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+              .where(
+                and(
+                  eq(journalEntries.orgId, ctx.actor.orgId),
+                  eq(journalEntries.sourceType, "invoice_credit_note"),
+                  eq(accounts.code, "1100"),
+                ),
+              )
+          : [];
+
+        type Row = { date: Date; kind: string; ref: string; amountMinor: number };
+        const rows: Row[] = [];
+        for (const i of live) {
+          // Gross: credits appear as their own statement lines below.
+          rows.push({ date: i.issuedAt ?? i.createdAt, kind: "invoice", ref: `Invoice #${i.number}`, amountMinor: i.totalMinor });
+          const credited = creditRows.filter((c) => c.sourceId === i.id);
+          for (const c of credited) {
+            const amount = c.creditMinor - c.debitMinor;
+            rows.push({ date: c.postedAt, kind: "credit_note", ref: `Credit on invoice #${i.number}`, amountMinor: -amount });
+          }
+        }
+        for (const p of payRows) {
+          if (!invoiceIds.has(p.invoiceId)) continue;
+          rows.push({ date: p.receivedAt, kind: "payment", ref: "Payment received", amountMinor: -p.amountMinor });
+        }
+        rows.sort((a, b) => a.date.getTime() - b.date.getTime() || a.kind.localeCompare(b.kind));
+        let running = 0;
+        const rendered = rows.map((r) => {
+          running += r.amountMinor;
+          return { date: r.date.toISOString(), kind: r.kind, ref: r.ref, amountMinor: r.amountMinor, balanceMinor: running };
+        });
+        return {
+          openingBalanceMinor: 0,
+          closingBalanceMinor: running,
+          rows: rendered,
+        };
+      });
+    },
+  });
+
+/**
+ * Deterministic reminder drafting (M10, ADR 0037): who is overdue, by how
+ * much, and the exact message to send. Delivery rides the messaging seam;
+ * opted-out customers are excluded here, not at send time.
+ */
+const buildReminders = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.buildReminders",
+    title: "Draft payment reminders",
+    intent:
+      "List overdue customer balances with a drafted, polite reminder message each, skipping anyone who opted out, so a routine or a human can send them as-is",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({}),
+    output: z.object({
+      reminders: z.array(
+        z.object({
+          customerId: z.string(),
+          customerName: z.string(),
+          overdueCount: z.number(),
+          oldestDaysOverdue: z.number(),
+          totalOverdueMinor: z.number(),
+          message: z.string(),
+        }),
+      ),
+    }),
+    execute: async (ctx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const rows = await tx
+          .select({
+            invoiceId: invoices.id,
+            number: invoices.number,
+            totalMinor: invoices.totalMinor,
+            paidMinor: invoices.paidMinor,
+            creditedMinor: invoices.creditedMinor,
+            dueAt: invoices.dueAt,
+            issuedAt: invoices.issuedAt,
+            customerId: customers.id,
+            customerName: customers.name,
+          })
+          .from(invoices)
+          .innerJoin(customers, eq(customers.id, invoices.customerId))
+          .where(
+            and(
+              eq(invoices.orgId, ctx.actor.orgId),
+              eq(invoices.status, "sent"),
+              sql`${invoices.voidedAt} IS NULL`,
+              eq(customers.reminderOptOut, false),
+            ),
+          )
+          .limit(500);
+
+        const perCustomer = new Map<string, { name: string; count: number; total: number; oldest: number }>();
+        for (const r of rows) {
+          const balance = r.totalMinor - r.paidMinor - r.creditedMinor;
+          if (balance <= 0) continue;
+          const due = r.dueAt ?? r.issuedAt;
+          if (!due) continue;
+          const daysOverdue = Math.floor((ctx.now.getTime() - due.getTime()) / 86_400_000);
+          if (daysOverdue <= 0) continue;
+          const e = perCustomer.get(r.customerId) ?? { name: r.customerName, count: 0, total: 0, oldest: 0 };
+          e.count += 1;
+          e.total += balance;
+          e.oldest = Math.max(e.oldest, daysOverdue);
+          perCustomer.set(r.customerId, e);
+        }
+        const reminders = [...perCustomer.entries()].map(([customerId, e]) => ({
+          customerId,
+          customerName: e.name,
+          overdueCount: e.count,
+          oldestDaysOverdue: e.oldest,
+          totalOverdueMinor: e.total,
+          message: `Hi ${e.name} — a friendly nudge that ${e.count} invoice${e.count === 1 ? "" : "s"} totalling $${(e.total / 100).toFixed(2)} ${e.count === 1 ? "is" : "are"} now ${e.oldest} day${e.oldest === 1 ? "" : "s"} past due. If you have already sent payment, thank you and please disregard; otherwise we would appreciate it at your earliest convenience.`,
+        }));
+        reminders.sort((a, b) => b.totalOverdueMinor - a.totalOverdueMinor);
+        return { reminders };
+      });
+    },
+  });
+
+/** Assemble balanced ledger lines into the erp-core entry shape. */
+async function loadCashFlowEntries(
+  tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0],
+  orgId: string,
+) {
+  const entryRows = await tx
+    .select({ id: journalEntries.id, postedAt: journalEntries.postedAt })
+    .from(journalEntries)
+    .where(eq(journalEntries.orgId, orgId));
+  const lineRows = await tx
+    .select({
+      entryId: journalLines.entryId,
+      code: accounts.code,
+      type: accounts.type,
+      debitMinor: journalLines.debitMinor,
+      creditMinor: journalLines.creditMinor,
+    })
+    .from(journalLines)
+    .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+    .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
+    .where(eq(journalEntries.orgId, orgId));
+  type CashLine = { accountCode: string; accountType: "asset" | "liability" | "equity" | "income" | "expense"; debitMinor: number; creditMinor: number };
+  const byEntry = new Map<string, { occurredAt: Date; lines: CashLine[] }>();
+  for (const e of entryRows) byEntry.set(e.id, { occurredAt: e.postedAt, lines: [] });
+  for (const l of lineRows) {
+    const b = byEntry.get(l.entryId);
+    // accounts.type is a text column; the ledger only ever holds COA types.
+    if (b) b.lines.push({ accountCode: l.code, accountType: l.type as CashLine["accountType"], debitMinor: l.debitMinor, creditMinor: l.creditMinor });
+  }
+  return [...byEntry.values()];
+}
+
+const cashFlow = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.cashFlow",
+    title: "Cash flow statement",
+    intent:
+      "Derive the direct-method cash flow statement from the ledger — operating, investing, and financing buckets that provably tie to the cash balance",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({ cashAccountCodes: z.array(z.string()).default(["1000"]) }),
+    output: z.object({
+      openingMinor: z.number(),
+      closingMinor: z.number(),
+      netMinor: z.number(),
+      cashBalanceMinor: z.number(),
+      ties: z.boolean(),
+      operating: z.object({ inflowMinor: z.number(), outflowMinor: z.number(), netMinor: z.number(), entries: z.number() }),
+      investing: z.object({ inflowMinor: z.number(), outflowMinor: z.number(), netMinor: z.number(), entries: z.number() }),
+      financing: z.object({ inflowMinor: z.number(), outflowMinor: z.number(), netMinor: z.number(), entries: z.number() }),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const entries = await loadCashFlowEntries(tx, ctx.actor.orgId);
+        return buildCashFlowStatement(entries, { cashCodes: input.cashAccountCodes, openingMinor: 0 });
+      });
+    },
+  });
+
+const cashForecast = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.cashForecast",
+    title: "13-week cash forecast",
+    intent:
+      "Project thirteen weekly cash closes from current cash plus open receivable and payable due dates, and flag the projected trough",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({ cashAccountCodes: z.array(z.string()).default(["1000"]) }),
+    output: z.object({
+      startMinor: z.number(),
+      finalMinor: z.number(),
+      lowestCloseMinor: z.number(),
+      lowestWeekIndex: z.number(),
+      weeks: z.array(
+        z.object({
+          weekStart: z.string(),
+          inflowMinor: z.number(),
+          outflowMinor: z.number(),
+          closeMinor: z.number(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const entries = await loadCashFlowEntries(tx, ctx.actor.orgId);
+        const startMinor = cashBalanceFromEntries(entries, input.cashAccountCodes);
+        const arRows = await tx
+          .select({ dueAt: invoices.dueAt, issuedAt: invoices.issuedAt, totalMinor: invoices.totalMinor, paidMinor: invoices.paidMinor, creditedMinor: invoices.creditedMinor })
+          .from(invoices)
+          .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.status, "sent"), sql`${invoices.voidedAt} IS NULL`));
+        const apRows = await tx
+          .select({ dueAt: vendorBills.dueAt, createdAt: vendorBills.createdAt, totalMinor: vendorBills.totalMinor, paidMinor: vendorBills.paidMinor, creditedMinor: vendorBills.creditedMinor })
+          .from(vendorBills)
+          .where(and(eq(vendorBills.orgId, ctx.actor.orgId), eq(vendorBills.status, "open"), sql`${vendorBills.voidedAt} IS NULL`));
+        const flows = [] as Array<{ dueAt: Date; amountMinor: number; kind: "inflow" | "outflow" }>;
+        for (const r of arRows) {
+          const bal = r.totalMinor - r.paidMinor - r.creditedMinor;
+          if (bal > 0) flows.push({ dueAt: r.dueAt ?? r.issuedAt ?? ctx.now, amountMinor: bal, kind: "inflow" });
+        }
+        for (const r of apRows) {
+          const bal = r.totalMinor - r.paidMinor - r.creditedMinor;
+          if (bal > 0) flows.push({ dueAt: r.dueAt ?? r.createdAt, amountMinor: bal, kind: "outflow" });
+        }
+        const forecast = buildThirteenWeekForecast(startMinor, flows, ctx.now);
+        return {
+          startMinor: forecast.startMinor,
+          finalMinor: forecast.finalMinor,
+          lowestCloseMinor: forecast.lowestCloseMinor,
+          lowestWeekIndex: forecast.lowestWeekIndex,
+          weeks: forecast.weeks.map((w) => ({
+            weekStart: w.weekStart.toISOString(),
+            inflowMinor: w.inflowMinor,
+            outflowMinor: w.outflowMinor,
+            closeMinor: w.closeMinor,
+          })),
+        };
+      });
+    },
+  });
+
+// ── M11: expense policy ────────────────────────────────────────────────
+
+const setExpensePolicy = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.setExpensePolicy",
+    title: "Set expense policy limit",
+    intent:
+      "Cap what a category of expense may cost before it is scrutinized harder; claims over the limit stay visible as signals until decided",
+    module: "accounting",
+    risk: "write",
+    permission: "expenses.decide",
+    input: z.object({ category: z.string().min(2).max(40), limitMinor: z.number().int().nonnegative() }),
+    output: z.object({ set: z.literal(true), category: z.string(), limitMinor: z.number() }),
+    execute: async (ctx, input) => {
+      await deps.db
+        .insert(expensePolicies)
+        .values({ orgId: ctx.actor.orgId, category: input.category, limitMinor: input.limitMinor })
+        .onConflictDoUpdate({
+          target: [expensePolicies.orgId, expensePolicies.category],
+          set: { limitMinor: input.limitMinor },
+        });
+      return { set: true as const, category: input.category, limitMinor: input.limitMinor };
+    },
+  });
+
 export function registerAccountingCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(addBankAccount(deps));
   registry.register(importBankFeed(deps));
@@ -2118,12 +2609,14 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(quoteCreate(deps));
   registry.register(quoteAccept(deps));
   registry.register(quoteDecline(deps));
+  registry.register(quoteExpire(deps));
   registry.register(quoteList(deps));
   registry.register(accountingCreateTemplate(deps));
   registry.register(accountingPauseTemplate(deps));
   registry.register(accountingResumeTemplate(deps));
   registry.register(accountingListTemplates(deps));
   registry.register(expenseSubmit(deps));
+  registry.register(setExpensePolicy(deps));
   registry.register(expenseDecide(deps));
   registry.register(expensePay(deps));
   registry.register(expenseList(deps));
@@ -2132,6 +2625,11 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(listInvoices(deps));
   registry.register(recordPayment(deps));
   registry.register(reverseEntry(deps));
+  registry.register(creditNote(deps));
+  registry.register(customerStatement(deps));
+  registry.register(buildReminders(deps));
+  registry.register(cashFlow(deps));
+  registry.register(cashForecast(deps));
   registry.register(trialBalance(deps));
   registry.register(arAging(deps));
   registry.register(closePeriod(deps));
@@ -2141,3 +2639,5 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(cashBasisReport(deps));
   registry.register(closeYear(deps));
 }
+
+export { createAccountingSignalProducer } from "./signals";
