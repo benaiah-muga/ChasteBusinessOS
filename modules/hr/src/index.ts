@@ -2,6 +2,8 @@ import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   employees,
+  jobApplicants,
+  jobOpenings,
   leaveRequests,
   payrollRuns,
   payslips,
@@ -585,6 +587,441 @@ const timeReport = (deps: ModuleDeps) =>
     },
   });
 
+// ── M11: structure, attendance, leave polish, recruitment-lite ─────────
+
+const RECRUITMENT_STAGES = ["applied", "screening", "interview", "offer"] as const;
+
+const updateEmployeeStructure = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.updateEmployeeStructure",
+    title: "Update employee structure",
+    intent:
+      "Set where an employee sits — department, position, reporting line — and their emergency contact, so the directory answers who does what and who to call",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({
+      employeeId: z.string().uuid(),
+      department: z.string().max(100).optional(),
+      position: z.string().max(100).optional(),
+      managerEmployeeId: z.string().uuid().optional(),
+      emergencyContactName: z.string().max(120).optional(),
+      emergencyContactPhone: z.string().max(40).optional(),
+    }),
+    output: z.object({ updated: z.literal(true) }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        if (input.managerEmployeeId) {
+          const [mgr] = await tx
+            .select({ id: employees.id })
+            .from(employees)
+            .where(and(eq(employees.id, input.managerEmployeeId), eq(employees.orgId, ctx.actor.orgId)))
+            .limit(1);
+          if (!mgr) throw new Error("manager employee not found in this organization");
+          if (input.managerEmployeeId === input.employeeId) throw new Error("an employee does not report to themselves");
+        }
+        const updated = await tx
+          .update(employees)
+          .set({
+            ...(input.department !== undefined ? { department: input.department } : {}),
+            ...(input.position !== undefined ? { title: input.position } : {}),
+            ...(input.managerEmployeeId !== undefined ? { managerEmployeeId: input.managerEmployeeId } : {}),
+            ...(input.emergencyContactName !== undefined ? { emergencyContactName: input.emergencyContactName } : {}),
+            ...(input.emergencyContactPhone !== undefined ? { emergencyContactPhone: input.emergencyContactPhone } : {}),
+          })
+          .where(and(eq(employees.id, input.employeeId), eq(employees.orgId, ctx.actor.orgId)))
+          .returning({ id: employees.id });
+        if (updated.length === 0) throw new Error("employee not found");
+        return { updated: true as const };
+      });
+    },
+  });
+
+const LATE_THRESHOLD_MINUTES = 9 * 60; // 09:00 in minutes-of-day (UTC)
+
+function minutesOfDay(d: Date): number {
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+
+const clockIn = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.clockIn",
+    title: "Clock in",
+    intent:
+      "Open an attendance entry for an employee right now, flagging lateness against the 09:00 start so patterns surface instead of rumors",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({ employeeId: z.string().uuid() }),
+    output: z.object({ entryId: z.string(), late: z.boolean() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [emp] = await tx
+          .select({ id: employees.id })
+          .from(employees)
+          .where(and(eq(employees.id, input.employeeId), eq(employees.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!emp) throw new Error("employee not found");
+        const open = await tx
+          .select({ id: timeEntries.id })
+          .from(timeEntries)
+          .where(
+            and(
+              eq(timeEntries.orgId, ctx.actor.orgId),
+              eq(timeEntries.employeeId, input.employeeId),
+              sql`${timeEntries.clockedInAt} IS NOT NULL AND ${timeEntries.clockedOutAt} IS NULL`,
+            ),
+          )
+          .limit(1);
+        if (open.length > 0) throw new Error("already clocked in; clock out first");
+        const late = minutesOfDay(ctx.now) > LATE_THRESHOLD_MINUTES;
+        const [entry] = await tx
+          .insert(timeEntries)
+          .values({
+            orgId: ctx.actor.orgId,
+            employeeId: input.employeeId,
+            workDate: ctx.now,
+            minutes: 0, // set at clock-out
+            clockedInAt: ctx.now,
+            late,
+            note: late ? "clocked in late" : null,
+            decidedByActorType: null,
+          })
+          .returning({ id: timeEntries.id });
+        return { entryId: entry!.id, late };
+      });
+    },
+  });
+
+const clockOut = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.clockOut",
+    title: "Clock out",
+    intent: "Close the open attendance entry and settle the minutes worked from the clock-in time",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({ employeeId: z.string().uuid() }),
+    output: z.object({ entryId: z.string(), minutes: z.number().int() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [entry] = await tx
+          .select()
+          .from(timeEntries)
+          .where(
+            and(
+              eq(timeEntries.orgId, ctx.actor.orgId),
+              eq(timeEntries.employeeId, input.employeeId),
+              sql`${timeEntries.clockedInAt} IS NOT NULL AND ${timeEntries.clockedOutAt} IS NULL`,
+            ),
+          )
+          .orderBy(desc(timeEntries.clockedInAt))
+          .limit(1);
+        if (!entry) throw new Error("no open clock-in entry");
+        const minutes = Math.max(1, Math.round((ctx.now.getTime() - (entry.clockedInAt?.getTime() ?? ctx.now.getTime())) / 60_000));
+        await tx
+          .update(timeEntries)
+          .set({ clockedOutAt: ctx.now, minutes })
+          .where(eq(timeEntries.id, entry.id));
+        return { entryId: entry.id, minutes };
+      });
+    },
+  });
+
+const leaveBalance = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.leaveBalance",
+    title: "Leave balance",
+    intent:
+      "Show an employee's derived paid-leave position — entitlement minus approved days already taken this year — so nobody guesses at a balance",
+    module: "hr",
+    risk: "read",
+    permission: "hr.read",
+    input: z.object({ employeeId: z.string().uuid() }),
+    output: z.object({
+      entitlementDays: z.number(),
+      takenDays: z.number(),
+      remainingDays: z.number(),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [emp] = await tx
+          .select({ annualLeaveDays: employees.annualLeaveDays })
+          .from(employees)
+          .where(and(eq(employees.id, input.employeeId), eq(employees.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!emp) throw new Error("employee not found");
+        const yearStart = new Date(Date.UTC(ctx.now.getUTCFullYear(), 0, 1));
+        const approved = await tx
+          .select({ startDate: leaveRequests.startDate, endDate: leaveRequests.endDate })
+          .from(leaveRequests)
+          .where(
+            and(
+              eq(leaveRequests.orgId, ctx.actor.orgId),
+              eq(leaveRequests.employeeId, input.employeeId),
+              eq(leaveRequests.kind, "annual"),
+              eq(leaveRequests.status, "approved"),
+              gte(leaveRequests.startDate, yearStart),
+            ),
+          );
+        const takenDays = approved.reduce((sum, r) => sum + calendarDaysBetween(r.startDate, r.endDate), 0);
+        return {
+          entitlementDays: emp.annualLeaveDays,
+          takenDays,
+          remainingDays: emp.annualLeaveDays - takenDays,
+        };
+      });
+    },
+  });
+
+const leaveCalendar = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.leaveCalendar",
+    title: "Leave calendar",
+    intent: "List approved leave across the team for a month so staffing clashes surface before they happen",
+    module: "hr",
+    risk: "read",
+    permission: "hr.read",
+    input: z.object({ year: z.number().int(), month: z.number().int().min(1).max(12) }),
+    output: z.object({
+      entries: z.array(
+        z.object({
+          employeeName: z.string(),
+          kind: z.string(),
+          startDate: z.string(),
+          endDate: z.string(),
+          days: z.number(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const monthStart = new Date(Date.UTC(input.year, input.month - 1, 1));
+        const monthEnd = new Date(Date.UTC(input.year, input.month, 1));
+        const rows = await tx
+          .select({
+            name: employees.name,
+            kind: leaveRequests.kind,
+            startDate: leaveRequests.startDate,
+            endDate: leaveRequests.endDate,
+          })
+          .from(leaveRequests)
+          .innerJoin(employees, eq(employees.id, leaveRequests.employeeId))
+          .where(
+            and(
+              eq(leaveRequests.orgId, ctx.actor.orgId),
+              eq(leaveRequests.status, "approved"),
+              gte(leaveRequests.endDate, monthStart),
+              lte(leaveRequests.startDate, monthEnd),
+            ),
+          );
+        return {
+          entries: rows.map((r) => ({
+            employeeName: r.name,
+            kind: r.kind,
+            startDate: r.startDate.toISOString(),
+            endDate: r.endDate.toISOString(),
+            days: calendarDaysBetween(r.startDate, r.endDate),
+          })),
+        };
+      });
+    },
+  });
+
+const createOpening = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.createOpening",
+    title: "Open a job opening",
+    intent: "Register a role the team is hiring for so applicants have something to apply to",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({ title: z.string().min(1).max(120), department: z.string().max(100).optional(), note: z.string().max(500).optional() }),
+    output: z.object({ openingId: z.string() }),
+    inverse: {
+      capabilityId: "hr.closeOpening",
+      buildInput: (_input, output) => ({ openingId: (output as { openingId: string }).openingId }),
+    },
+    execute: async (ctx, input) => {
+      const [row] = await deps.db
+        .insert(jobOpenings)
+        .values({ orgId: ctx.actor.orgId, title: input.title, department: input.department ?? null, note: input.note ?? null })
+        .returning({ id: jobOpenings.id });
+      return { openingId: row!.id };
+    },
+  });
+
+const closeOpening = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.closeOpening",
+    title: "Close job opening",
+    intent: "Close a job opening so it stops collecting applicants",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({ openingId: z.string().uuid() }),
+    output: z.object({ closed: z.literal(true) }),
+    execute: async (ctx, input) => {
+      const updated = await deps.db
+        .update(jobOpenings)
+        .set({ status: "closed" })
+        .where(and(eq(jobOpenings.id, input.openingId), eq(jobOpenings.orgId, ctx.actor.orgId)))
+        .returning({ id: jobOpenings.id });
+      if (updated.length === 0) throw new Error("opening not found");
+      return { closed: true as const };
+    },
+  });
+
+const addApplicant = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.addApplicant",
+    title: "Add applicant",
+    intent: "Register a candidate for an open role at the applied stage of the pipeline",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({
+      openingId: z.string().uuid(),
+      name: z.string().min(1).max(120),
+      email: z.string().email().optional(),
+      note: z.string().max(500).optional(),
+    }),
+    output: z.object({ applicantId: z.string() }),
+    execute: async (ctx, input) => {
+      const [opening] = await deps.db
+        .select({ id: jobOpenings.id, status: jobOpenings.status })
+        .from(jobOpenings)
+        .where(and(eq(jobOpenings.id, input.openingId), eq(jobOpenings.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!opening) throw new Error("opening not found");
+      if (opening.status !== "open") throw new Error("opening is closed");
+      const [row] = await deps.db
+        .insert(jobApplicants)
+        .values({ orgId: ctx.actor.orgId, openingId: input.openingId, name: input.name, email: input.email ?? null, note: input.note ?? null })
+        .returning({ id: jobApplicants.id });
+      return { applicantId: row!.id };
+    },
+  });
+
+const moveApplicant = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.moveApplicant",
+    title: "Move applicant stage",
+    intent: "Advance or reject a candidate through the pipeline; hiring is its own action because it creates an employee",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({
+      applicantId: z.string().uuid(),
+      stage: z.enum([...RECRUITMENT_STAGES, "rejected"]),
+    }),
+    output: z.object({ moved: z.literal(true), stage: z.string() }),
+    execute: async (ctx, input) => {
+      const [applicant] = await deps.db
+        .select({ id: jobApplicants.id, stage: jobApplicants.stage })
+        .from(jobApplicants)
+        .where(and(eq(jobApplicants.id, input.applicantId), eq(jobApplicants.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!applicant) throw new Error("applicant not found");
+      if (applicant.stage === "hired") throw new Error("applicant is already hired");
+      if (applicant.stage === "rejected") throw new Error("applicant was rejected; start a new application");
+      await deps.db
+        .update(jobApplicants)
+        .set({ stage: input.stage })
+        .where(and(eq(jobApplicants.id, input.applicantId), eq(jobApplicants.orgId, ctx.actor.orgId)));
+      return { moved: true as const, stage: input.stage };
+    },
+  });
+
+const hireApplicant = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.hireApplicant",
+    title: "Hire applicant",
+    intent:
+      "Convert a candidate at the offer stage into a real employee — same path as a direct hire, with the opening's department carried over and the pipeline closed",
+    module: "hr",
+    risk: "write",
+    permission: "hr.write",
+    input: z.object({
+      applicantId: z.string().uuid(),
+      monthlySalaryMinor: z.number().int().positive(),
+      annualLeaveDays: z.number().int().positive().optional(),
+    }),
+    output: z.object({ employeeId: z.string(), applicantId: z.string() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [applicant] = await tx
+          .select({
+            id: jobApplicants.id,
+            name: jobApplicants.name,
+            email: jobApplicants.email,
+            stage: jobApplicants.stage,
+            openingId: jobApplicants.openingId,
+          })
+          .from(jobApplicants)
+          .where(and(eq(jobApplicants.id, input.applicantId), eq(jobApplicants.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!applicant) throw new Error("applicant not found");
+        if (applicant.stage === "hired") throw new Error("applicant is already hired");
+        if (applicant.stage === "rejected") throw new Error("applicant was rejected");
+        const [opening] = await tx
+          .select({ title: jobOpenings.title, department: jobOpenings.department })
+          .from(jobOpenings)
+          .where(eq(jobOpenings.id, applicant.openingId))
+          .limit(1);
+
+        const [emp] = await tx
+          .insert(employees)
+          .values({
+            orgId: ctx.actor.orgId,
+            name: applicant.name,
+            email: applicant.email,
+            title: opening?.title ?? null,
+            department: opening?.department ?? null,
+            monthlySalaryMinor: input.monthlySalaryMinor,
+            annualLeaveDays: input.annualLeaveDays ?? 21,
+          })
+          .returning({ id: employees.id });
+        await tx
+          .update(jobApplicants)
+          .set({ stage: "hired", hiredEmployeeId: emp!.id })
+          .where(eq(jobApplicants.id, applicant.id));
+        return { employeeId: emp!.id, applicantId: applicant.id };
+      });
+    },
+  });
+
+const listApplicants = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.listApplicants",
+    title: "List applicants",
+    intent: "Show the candidate pipeline for a job opening, in stage order, with notes",
+    module: "hr",
+    risk: "read",
+    permission: "hr.read",
+    input: z.object({ openingId: z.string().uuid() }),
+    output: z.object({
+      applicants: z.array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          stage: z.string(),
+          note: z.string().nullable(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const rows = await tx
+          .select({ id: jobApplicants.id, name: jobApplicants.name, stage: jobApplicants.stage, note: jobApplicants.note })
+          .from(jobApplicants)
+          .where(and(eq(jobApplicants.orgId, ctx.actor.orgId), eq(jobApplicants.openingId, input.openingId)))
+          .orderBy(asc(jobApplicants.createdAt));
+        return { applicants: rows };
+      });
+    },
+  });
+
 export function registerHrCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(logTime(deps));
   registry.register(decideTimeEntry(deps));
@@ -598,4 +1035,16 @@ export function registerHrCapabilities(registry: CapabilityRegistry, deps: Modul
   registry.register(executePayrollRun(deps));
   registry.register(voidPayrollRun(deps));
   registry.register(listEmployees(deps));
+  registry.register(updateEmployeeStructure(deps));
+  registry.register(clockIn(deps));
+  registry.register(clockOut(deps));
+  registry.register(leaveBalance(deps));
+  registry.register(leaveCalendar(deps));
+  registry.register(createOpening(deps));
+  registry.register(closeOpening(deps));
+  registry.register(addApplicant(deps));
+  registry.register(moveApplicant(deps));
+  registry.register(hireApplicant(deps));
+  registry.register(listApplicants(deps));
 }
+export { createHrSignalProducer } from "./signals";
