@@ -7,6 +7,8 @@ import {
   payments,
   posSessions,
   stockMovements,
+  journalEntries,
+  journalLines,
 } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
@@ -126,24 +128,36 @@ const completeSale = (deps: ModuleDeps) =>
         if (!session) throw new Error("session not found");
         if (session.status !== "open") throw new Error("session is closed");
 
+        // Graceful degradation (ADR 0035): with the inventory module disabled,
+        // a sale is a pure money event — no item resolution, no oversell
+        // checks, no ledger legs. No gate configured behaves as enabled.
+        const gate = ctx.services.moduleGate as
+          | { isEnabled(orgId: string, moduleId: string): boolean | Promise<boolean> }
+          | undefined;
+        const inventoryEnabled = gate
+          ? await gate.isEnabled(ctx.actor.orgId, "inventory")
+          : true;
+
         // Resolve stocked lines first so oversell fails before any posting.
         const stockLines: { itemId: string; sku: string; quantity: number }[] = [];
-        for (const l of input.lines) {
-          if (!l.sku) continue;
-          const [item] = await tx
-            .select()
-            .from(items)
-            .where(and(eq(items.orgId, ctx.actor.orgId), eq(items.sku, l.sku)))
-            .limit(1);
-          if (!item) throw new Error(`no stocked item with SKU ${l.sku}`);
-          const [mov] = await tx
-            .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
-            .from(stockMovements)
-            .where(and(eq(stockMovements.orgId, ctx.actor.orgId), eq(stockMovements.itemId, item.id)));
-          if (Number(mov?.total ?? 0) < l.quantity) {
-            throw new Error(`insufficient stock for ${l.sku}: ${Number(mov?.total ?? 0)} thousandths on hand`);
+        if (inventoryEnabled) {
+          for (const l of input.lines) {
+            if (!l.sku) continue;
+            const [item] = await tx
+              .select()
+              .from(items)
+              .where(and(eq(items.orgId, ctx.actor.orgId), eq(items.sku, l.sku)))
+              .limit(1);
+            if (!item) throw new Error(`no stocked item with SKU ${l.sku}`);
+            const [mov] = await tx
+              .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
+              .from(stockMovements)
+              .where(and(eq(stockMovements.orgId, ctx.actor.orgId), eq(stockMovements.itemId, item.id)));
+            if (Number(mov?.total ?? 0) < l.quantity) {
+              throw new Error(`insufficient stock for ${l.sku}: ${Number(mov?.total ?? 0)} thousandths on hand`);
+            }
+            stockLines.push({ itemId: item.id, sku: l.sku, quantity: l.quantity });
           }
-          stockLines.push({ itemId: item.id, sku: l.sku, quantity: l.quantity });
         }
 
         let subtotal = 0;
@@ -190,6 +204,9 @@ const completeSale = (deps: ModuleDeps) =>
           })
           .returning({ id: invoices.id });
 
+        // Link the sale entry to the invoice so returns can mirror it.
+        await tx.update(journalEntries).set({ sourceId: inv!.id }).where(eq(journalEntries.id, entryId));
+
         await tx.insert(payments).values({
           orgId: ctx.actor.orgId,
           invoiceId: inv!.id,
@@ -198,8 +215,9 @@ const completeSale = (deps: ModuleDeps) =>
           entryId,
         });
 
-        // Stock leaves the ledger in the same transaction as the money.
-        for (const sl of stockLines) {
+        // Stock leaves the ledger in the same transaction as the money —
+        // only when the inventory module is enabled (ADR 0035).
+        for (const sl of inventoryEnabled ? stockLines : []) {
           await tx.insert(stockMovements).values({
             orgId: ctx.actor.orgId,
             itemId: sl.itemId,
@@ -277,8 +295,143 @@ const closeSession = (deps: ModuleDeps) =>
     },
   });
 
+
+// ── M13: returns + shift summaries ─────────────────────────────────────
+
+const returnSale = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "pos.returnSale",
+    title: "Return POS sale",
+    intent:
+      "Take goods back at the register: refund the customer through a balanced reversing entry, credit the sale invoice, and put the stock back on the shelf — the original sale is never edited",
+    // Always gates: the refunded amount lives in the sale, not the input.
+    module: "pos",
+    risk: "money",
+    permission: "pos.sell",
+    moneyAmount: () => null,
+    input: z.object({
+      invoiceId: z.string().uuid(),
+      reason: z.string().min(3).max(500),
+    }),
+    output: z.object({ refundEntryId: z.string(), creditedMinor: z.number(), restockedLines: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
+        const [inv] = await tx
+          .select()
+          .from(invoices)
+          .where(and(eq(invoices.id, input.invoiceId), eq(invoices.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!inv) throw new Error("sale not found");
+        if (inv.status === "void") throw new Error("sale is void");
+        // POS sales are paid at the register, so the refundable amount is
+        // total minus what has already been returned — paid is refundable.
+        const refundable = inv.totalMinor - inv.creditedMinor;
+        if (refundable <= 0) throw new Error(`sale has nothing left to return (total ${inv.totalMinor} − credited ${inv.creditedMinor})`);
+        const refund = refundable;
+        const [origEntry] = await tx
+          .select({ id: journalEntries.id })
+          .from(journalEntries)
+          .where(and(eq(journalEntries.orgId, ctx.actor.orgId), eq(journalEntries.sourceType, "pos_sale"), eq(journalEntries.sourceId, inv.id)))
+          .limit(1);
+        if (!origEntry) throw new Error("sale entry not found; cannot mirror a return");
+        // Mirror the original sale entry exactly (reverseEntry mechanics):
+        // every line swaps sides. Full returns only — partial credits go
+        // through accounting.creditNote.
+        const origLines = await tx
+          .select({ accountId: journalLines.accountId, debitMinor: journalLines.debitMinor, creditMinor: journalLines.creditMinor })
+          .from(journalLines)
+          .where(eq(journalLines.entryId, origEntry.id));
+        const mirrorLines = origLines.map((l) => ({
+          accountId: l.accountId,
+          debitMinor: l.creditMinor,
+          creditMinor: l.debitMinor,
+        }));
+        const refundEntryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `POS return on sale ${inv.number}: ${input.reason}`,
+          sourceType: "pos_return",
+          sourceId: inv.id,
+          reversalOfId: origEntry?.id ?? null,
+          lines: mirrorLines,
+        });
+        await tx.update(invoices).set({ creditedMinor: inv.creditedMinor + refund }).where(eq(invoices.id, inv.id));
+
+        // Stock back: the sale took items out with negative legs referencing
+        // the invoice; the return mirrors each one positively.
+        const saleLegs = await tx
+          .select({ itemId: stockMovements.itemId, quantityDelta: stockMovements.quantityDelta, unitCostMinor: stockMovements.unitCostMinor })
+          .from(stockMovements)
+          .where(and(eq(stockMovements.orgId, ctx.actor.orgId), eq(stockMovements.refType, "invoice"), eq(stockMovements.refId, inv.id)));
+        let restockedLines = 0;
+        for (const leg of saleLegs) {
+          if (leg.quantityDelta >= 0) continue;
+          await tx.insert(stockMovements).values({
+            orgId: ctx.actor.orgId,
+            itemId: leg.itemId,
+            quantityDelta: -leg.quantityDelta,
+            reason: "sale",
+            refType: "pos_return",
+            refId: inv.id,
+            unitCostMinor: leg.unitCostMinor,
+            note: `POS return on sale ${inv.number}: ${input.reason}`,
+            actorType: ctx.actor.type,
+            actorId: ctx.actor.id,
+          });
+          restockedLines += 1;
+        }
+        return { refundEntryId, creditedMinor: inv.creditedMinor + refund, restockedLines };
+      });
+    },
+  });
+
+const shiftSummary = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "pos.shiftSummary",
+    title: "Shift summary",
+    intent:
+      "Summarize a register session — sales count, takings, expected versus counted cash, and variance — so closing a shift is a check, not a guess",
+    module: "pos",
+    risk: "read",
+    permission: "pos.read",
+    input: z.object({ sessionId: z.string().uuid() }),
+    output: z.object({
+      register: z.string(),
+      status: z.string(),
+      salesCount: z.number(),
+      takingsMinor: z.number(),
+      expectedCashMinor: z.number(),
+      countedCashMinor: z.number().nullable(),
+      varianceMinor: z.number().nullable(),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [session] = await tx
+          .select()
+          .from(posSessions)
+          .where(and(eq(posSessions.id, input.sessionId), eq(posSessions.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!session) throw new Error("session not found");
+        const [agg] = await tx
+          .select({ count: sql<number>`count(*)`, takings: sql<number>`coalesce(sum(${invoices.totalMinor}), 0)` })
+          .from(invoices)
+          .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.posSessionId, session.id)));
+        return {
+          register: session.register,
+          status: session.status,
+          salesCount: Number(agg?.count ?? 0),
+          takingsMinor: Number(agg?.takings ?? 0),
+          expectedCashMinor: session.expectedCashMinor,
+          countedCashMinor: session.countedCashMinor,
+          varianceMinor: session.varianceMinor,
+        };
+      });
+    },
+  });
+
 export function registerPosCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(openSession(deps));
   registry.register(completeSale(deps));
   registry.register(closeSession(deps));
+  registry.register(returnSale(deps));
+  registry.register(shiftSummary(deps));
 }
