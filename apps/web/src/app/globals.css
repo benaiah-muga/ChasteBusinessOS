@@ -44,6 +44,32 @@
   --color-maroon-950: #38000a;
 
   --color-canvas: #faf9f8;
+
+  /*
+   * Auth & onboarding surface: warm beige paper, golden-olive accent.
+   *
+   * Deliberately separate from the stone-/maroon- ramps above. The rest of
+   * the product is a burgundy ledger; the auth surface is warm sand, and
+   * keeping two scales means restyling one can never disturb the other.
+   */
+  --color-sand-50: #faf6ed;
+  --color-sand-100: #f8f2e4;
+  --color-sand-200: #efe7d3;
+  --color-sand-300: #e3d8be;
+  --color-cream: #fffdf7;
+
+  --color-gold-300: #e3c867;
+  --color-gold-400: #d2ae45;
+  --color-gold-500: #c19a32;
+  --color-gold-600: #b8902a;
+  --color-gold-700: #96761f;
+
+  --color-ink: #1a1a1a;
+  --color-ink-muted: #555555;
+
+  --font-display: "Inter", "Plus Jakarta Sans", "Geist", ui-sans-serif,
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
 }
 
 /* Theme: Graphite. Ink-blue accent on cool slate neutrals. Quiet, technical. */
@@ -204,6 +230,27 @@
   --color-white: #26221d;
 
   --color-canvas: #141210;
+
+  /*
+   * Auth surface in dark mode. The sand ramp inverts to deep warm browns and
+   * ink flips to paper; gold barely moves because it carries dark text and
+   * reads as a link on both. Without this the sign-in page would be a lit
+   * rectangle inside an otherwise dark product.
+   */
+  --color-sand-50: #171512;
+  --color-sand-100: #1c1a16;
+  --color-sand-200: #2a2621;
+  --color-sand-300: #3a342c;
+  --color-cream: #211f1a;
+
+  --color-gold-300: #e8d28a;
+  --color-gold-400: #d9bc62;
+  --color-gold-500: #c19a32;
+  --color-gold-600: #b8902a;
+  --color-gold-700: #9a7823;
+
+  --color-ink: #f4efe4;
+  --color-ink-muted: #b0a899;
 }
 
 /* Semantic status colors keep their hue but drop into dark-appropriate pairs. */

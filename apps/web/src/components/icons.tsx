@@ -199,6 +199,15 @@ export const IconArrowRight = (p: IconProps) => (
   </Base>
 );
 
+/** Pointed both ways — "reversible", for the auth value props. */
+export const IconArrowsHorizontal = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M7 8 3 12l4 4" />
+    <path d="M17 8l4 4-4 4" />
+    <path d="M3 12h18" />
+  </Base>
+);
+
 /** Shrink: arrows collapsing inward. */
 export const IconMinimize = (p: IconProps) => (
   <Base {...p}>
