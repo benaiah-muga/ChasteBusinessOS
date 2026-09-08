@@ -1,0 +1,34 @@
+# Local development database only.
+#
+# The app itself runs on the host (`pnpm dev`); this just provides Postgres 16
+# with pgvector. If you would rather not run containers at all, see the hosted
+# and native Postgres paths in docs/SETUP.md.
+#
+#   docker compose up -d      start
+#   docker compose down       stop (data survives in the named volume)
+#   docker compose down -v    stop and delete the data
+#
+# Host port is 5433 so it does not collide with a Postgres you already run.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: chaste-pgvector
+    environment:
+      POSTGRES_USER: chaste
+      POSTGRES_PASSWORD: chaste_dev
+      POSTGRES_DB: chaste_os_v2
+    ports:
+      - "5433:5432"
+    volumes:
+      - chaste-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chaste -d chaste_os_v2"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  chaste-pgdata:
