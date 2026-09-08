@@ -165,6 +165,9 @@ importers:
       '@chaste/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@chaste/erp-core':
+        specifier: workspace:*
+        version: link:../../packages/erp-core
       '@chaste/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
