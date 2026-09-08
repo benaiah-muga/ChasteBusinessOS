@@ -187,6 +187,22 @@ The full v1 changelog is preserved at the bottom of this file.
   `pnpm worker`) work without exporting variables by hand.
 - **Migration 0028**: `routines` table under standard tenant-isolation RLS,
   `organizations.agent_soul`, and pg_trgm adoption (below).
+- **CI: fast lockfile pre-flight.** A new DB-free `lockfile` job fails in
+  ~30s with the actual remedy when `pnpm-lock.yaml` drifts from the workspace
+  manifests, instead of surfacing a bare `ERR_PNPM_OUTDATED_LOCKFILE` after
+  Postgres is already up and migrations have run.
+- **CI: secret scanning allowlists environment templates.** `.gitleaks.toml`
+  permits `.env.example`, `.env.sample` and `.env.template`, which hold
+  `KEY=` placeholders rather than credentials. Both the legacy `[allowlist]`
+  and current `[[allowlists]]` keys are set, because CI pins gitleaks 8.24.3
+  and only the legacy key is honoured by that version.
+- **`main` is branch-protected.** The `verify` and `gitleaks` checks are
+  required, branches must be up to date with `main` before merging, and force
+  pushes and branch deletion are disabled.
+- **Contributing: stacked-PR policy and PR template.** A stacked PR is not
+  independently reviewable — its diff is the delta against its parent branch,
+  not against `main`. The template now forces authors to declare the chain,
+  and `CONTRIBUTING.md` documents how to keep a stack from rotting.
 
 ### Fixed
 - **Provider prefix precedence**: `resolveClient` checked `MODEL_PROVIDER`
@@ -202,6 +218,20 @@ The full v1 changelog is preserved at the bottom of this file.
 - **`pnpm worker` was dead on arrival**: wrong relative imports meant the
   queue drained never; fixed (and env-loading added), verified end-to-end by
   the routines E2E gate.
+- **`insertInvoiceWithPosting` was never exported** from `modules/accounting`
+  (`TS2459`). It survived the life of its PR because CI aborted at
+  `pnpm install` on a stale lockfile, so the typecheck never ran — a good
+  example of a broken pipeline hiding a real defect rather than just being
+  noisy.
+- **Inventory posting-seam lint rule restored**: `eslint.config.mjs` listed
+  `inventory` in the wrong `no-restricted-imports` group, rejecting
+  `@chaste/module-accounting/posting` imports. Because the milestone branches
+  were siblings rather than a chain, the fix made in M7 never reached
+  M8–M13; the stack was rebuilt as a true linear chain (each branch's parent
+  is the branch below it) so the boundary now holds everywhere.
+- **`pnpm-lock.yaml` regenerated on seven branches**: workspace dependencies
+  had been added without it, so `pnpm install --frozen-lockfile` aborted CI
+  before lint, typecheck, or tests ran.
 
 ## [0.4.0], 2026-08-26
 
