@@ -1,6 +1,7 @@
 export * from "./capability";
 export * from "./compaction";
 export * from "./conformance";
+export * from "./signals";
 export * from "./registry";
 export * from "./policy";
 export * from "./ledger";

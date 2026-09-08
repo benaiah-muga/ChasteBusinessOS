@@ -12,7 +12,7 @@ export interface MovementInput {
   orgId: string;
   itemId: string;
   quantityDelta: number;
-  reason: "purchase" | "sale" | "adjustment" | "production";
+  reason: "purchase" | "sale" | "adjustment" | "production" | "transfer";
   note?: string | undefined;
   refType?: string | undefined;
   refId?: string | undefined;
@@ -62,6 +62,7 @@ export async function movementHistory(db: DbLike, orgId: string, itemId: string)
     .select({
       quantityDelta: stockMovements.quantityDelta,
       unitCostMinor: stockMovements.unitCostMinor,
+      reason: stockMovements.reason,
       createdAt: stockMovements.createdAt,
     })
     .from(stockMovements)
