@@ -3,6 +3,7 @@ import { z } from "zod";
 import { bomLines, items, lots, stockMovements, workOrders, type Database } from "@chaste/db";
 import {
   checkAvailability,
+  maxProducibleUnits,
   replayValuation,
   explodeBom,
   plannedGoodQuantity,
@@ -110,6 +111,8 @@ const createWorkOrder = (deps: ModuleDeps) =>
       assemblySku: z.string(),
       plannedQtyThousandths: z.number().int().positive(),
       yieldPctThousandths: pctInput.default(1_000_000),
+      /** Work center that runs this order (M11 planning-lite). */
+      workCenter: z.string().max(80).optional(),
       note: z.string().max(500).optional(),
     }),
     output: z.object({ workOrderId: z.string(), number: z.number(), expectedGoodThousandths: z.number() }),
@@ -132,6 +135,7 @@ const createWorkOrder = (deps: ModuleDeps) =>
             number,
             assemblyItemId: assembly.id,
             plannedQtyThousandths: input.plannedQtyThousandths,
+            workCenter: input.workCenter ?? null,
             yieldPctThousandths: input.yieldPctThousandths,
             note: input.note ?? null,
             createdByActorType: ctx.actor.type,
@@ -829,11 +833,94 @@ const deleteBom = (deps: ModuleDeps) =>
 
 
 
+// ── M11: planning-lite — feasibility answers + lead-time memory ────────
+
+const checkProductionFeasibility = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "manufacturing.checkProductionFeasibility",
+    title: "Check production feasibility",
+    intent:
+      "Answer can-we-produce-N with the arithmetic: BOM-explosed component needs versus stock, per-component shortfalls, the producible ceiling, and the estimated lead time",
+    module: "manufacturing",
+    risk: "read",
+    permission: "manufacturing.read",
+    input: z.object({
+      assemblySku: z.string(),
+      desiredUnitsThousandths: z.number().int().positive(),
+    }),
+    output: z.object({
+      producible: z.boolean(),
+      maxProducibleThousandths: z.number(),
+      estimatedLeadTimeDays: z.number().nullable(),
+      lines: z.array(
+        z.object({
+          itemId: z.string(),
+          requiredThousandths: z.number(),
+          onHandThousandths: z.number(),
+          shortfallThousandths: z.number(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const assembly = await itemBySku(tx, ctx.actor.orgId, input.assemblySku);
+        if (!assembly) throw new Error(`no item with sku ${input.assemblySku}`);
+        const edges = await tx.select().from(bomLines).where(and(eq(bomLines.orgId, ctx.actor.orgId), eq(bomLines.assemblyItemId, assembly.id)));
+        if (edges.length === 0) throw new Error(`item ${input.assemblySku} has no bill of materials; nothing to explode`);
+
+        const requirements = explodeBom(
+          edges.map((e) => ({ assemblyItemId: e.assemblyItemId, componentItemId: e.componentItemId, quantityThousandths: e.quantityThousandths })),
+          assembly.id,
+          input.desiredUnitsThousandths,
+        );
+        const onHand = new Map<string, number>();
+        for (const r of requirements) {
+          onHand.set(r.itemId, await stockOnHand(tx, ctx.actor.orgId, r.itemId));
+        }
+        const availability = checkAvailability(requirements, onHand);
+
+        // Ceiling from per-unit needs (explode one unit, scrap applied at
+        // the BOM edge level by explodeBom scaling — per-unit re-derivation
+        // keeps the ceiling independent of the desired quantity).
+        const perUnit = explodeBom(
+          edges.map((e) => ({ assemblyItemId: e.assemblyItemId, componentItemId: e.componentItemId, quantityThousandths: e.quantityThousandths })),
+          assembly.id,
+          1_000,
+        );
+        const ceiling = maxProducibleUnits(
+          perUnit.map((p) => ({ componentItemId: p.itemId, perUnitThousandths: p.quantityThousandths })),
+          onHand,
+        );
+
+        const [lead] = await tx
+          .select({
+            avgDays: sql<number>`coalesce(avg(extract(epoch from (${workOrders.completedAt} - ${workOrders.releasedAt})) / 86400), 0)`,
+          })
+          .from(workOrders)
+          .where(and(eq(workOrders.orgId, ctx.actor.orgId), eq(workOrders.assemblyItemId, assembly.id), eq(workOrders.status, "completed")));
+        const avgDays = Number(lead?.avgDays ?? 0);
+
+        return {
+          producible: availability.producible,
+          maxProducibleThousandths: ceiling,
+          estimatedLeadTimeDays: avgDays > 0 ? Math.ceil(avgDays) : null,
+          lines: availability.lines.map((l) => ({
+            itemId: l.itemId,
+            requiredThousandths: l.quantityThousandths,
+            onHandThousandths: l.onHandThousandths,
+            shortfallThousandths: l.shortfallThousandths,
+          })),
+        };
+      });
+    },
+  });
+
 export function registerManufacturingCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registerManufacturingWriteCapabilities(registry, deps);
   registry.register(productionRuns(deps));
   registry.register(workOrdersList(deps));
   registry.register(bomTree(deps));
+  registry.register(checkProductionFeasibility(deps));
   registry.register(costPreview(deps));
   registry.register(defineBom(deps));
   registry.register(produceFromBom(deps));
