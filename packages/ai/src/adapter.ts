@@ -1,6 +1,6 @@
 import type { AgentTurn, LoopMessage, ModelAdapter, ToolCall, ToolSpec } from "@chaste/kernel";
 import type OpenAI from "openai";
-import { nimClient } from "./nim";
+import { nimClient } from "./providers";
 
 interface PendingToolCall {
   id: string;

@@ -25,11 +25,19 @@ interface AgentCandidate {
   install: string;
   authNote: string;
 }
+interface DetectedAgentInfo {
+  id: string;
+  label: string;
+  version: string | null;
+  viaBinary: boolean;
+  configDirs: string[];
+}
 interface AgentStatus {
   installed: boolean;
   cli: string | null;
   label: string | null;
   version: string | null;
+  agents: DetectedAgentInfo[];
   candidates: AgentCandidate[];
 }
 
@@ -63,6 +71,15 @@ function AgentSetupCard() {
           <strong className="font-medium">{agent.label}</strong> is connected{agent.version ? ` · ${agent.version}` : ""}.
           Switch on Creator mode in the console and ask it for an improvement.
         </span>
+        {agent.agents.length > 1 && (
+          <span className="w-full text-xs text-emerald-800/80">
+            Also detected:{" "}
+            {agent.agents
+              .filter((a) => a.label !== agent.label)
+              .map((a) => `${a.label}${a.version ? ` (${a.version})` : a.viaBinary ? "" : " (config only)"}`)
+              .join(" · ")}
+          </span>
+        )}
       </div>
     );
   }

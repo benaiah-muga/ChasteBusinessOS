@@ -56,10 +56,39 @@ export function compactTrajectory(
   return { messages: [...out, ...messages.slice(cut)], compactedCount: cut };
 }
 
-/** True when the transcript exceeds the token budget (char-estimated). */
+/** Default assumed model context window when the caller does not declare one. */
+export const DEFAULT_CONTEXT_WINDOW = 131_072;
+/** Headroom kept for the model's reply when budgeting a context window. */
+export const DEFAULT_RESERVE_TOKENS = 24_576;
+
+export interface CompactionTriggerOptions {
+  /** Fixed token budget (legacy mode). Ignored when contextWindow is set. */
+  tokenBudget?: number;
+  /** Model context window; compaction triggers at window minus reserve. */
+  contextWindow?: number;
+  /** Tokens reserved for the model's reply; default 24,576. */
+  reserveTokens?: number;
+}
+
+/**
+ * True when the transcript exceeds its budget (char-estimated). Two modes:
+ * a fixed tokenBudget (legacy, default 24k), or a share of the model's
+ * context window: compact once the transcript could crowd out the reply,
+ * i.e. estimated tokens > contextWindow - reserveTokens. The window mode
+ * means a 200k-window model compacts much later than a 32k one, instead of
+ * folding context at the same fixed point for every model.
+ */
 export function shouldCompact(
   messages: readonly LoopMessage[],
-  tokenBudget = 24_000,
+  opts: CompactionTriggerOptions | number = 24_000,
 ): boolean {
-  return estimateTokens(messages) > tokenBudget;
+  if (typeof opts === "number") return estimateTokens(messages) > opts;
+  if (opts.contextWindow !== undefined) {
+    const budget = Math.max(
+      4_000,
+      opts.contextWindow - (opts.reserveTokens ?? DEFAULT_RESERVE_TOKENS),
+    );
+    return estimateTokens(messages) > budget;
+  }
+  return estimateTokens(messages) > (opts.tokenBudget ?? 24_000);
 }

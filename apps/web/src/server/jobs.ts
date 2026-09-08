@@ -3,6 +3,7 @@ import { jobs, recurringInvoices, type Database } from "@chaste/db";
 import { nextRunAfter, type RecurringFrequency } from "@chaste/erp-core";
 import type { ActionContext, Actor, Logger } from "@chaste/kernel";
 import { buildExecutor, buildRegistry } from "@/server/kernel";
+import { executeRoutine } from "@/server/routines";
 
 /**
  * Durable capability-job queue. Jobs reference a registered capability by id
@@ -181,6 +182,17 @@ export async function processOneJob(db: Database["db"], log: Logger): Promise<bo
         processed,
         more,
       });
+      return true;
+    }
+
+    if (job.type === "routines.executeRoutine") {
+      // Scheduling happened at claim time (tickRoutines); the run itself
+      // goes through the governed executor inside executeRoutine.
+      await executeRoutine(db, log2, job.payload as { routineId: string; trigger: string });
+      await db
+        .update(jobs)
+        .set({ status: "done", lastError: null, updatedAt: new Date() })
+        .where(sql`${jobs.id} = ${job.id}`);
       return true;
     }
 

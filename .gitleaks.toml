@@ -1,0 +1,33 @@
+# Gitleaks configuration for ChasteBusinessOS.
+#
+# The Secrets workflow scans the commit range of every push and pull request
+# (fetch-depth: 0), so a finding in any commit of a PR fails the check. The
+# default ruleset is kept intact; only known-safe placeholder files are
+# excluded.
+#
+# Both the current ([[allowlists]]) and legacy ([allowlist]) keys are set on
+# purpose: gitleaks-action currently pins 8.24.3, which honours the legacy
+# key for path allowlists, while newer releases prefer the plural form.
+
+title = "ChasteBusinessOS"
+
+[extend]
+useDefault = true
+
+# Legacy key - honoured by gitleaks 8.24.x (pinned by gitleaks-action@v2).
+[allowlist]
+description = "Environment variable templates hold KEY= placeholders, never real credentials."
+paths = [
+  '''\.env\.example$''',
+  '''\.env\.sample$''',
+  '''\.env\.template$''',
+]
+
+# Current key - honoured by gitleaks >= 8.25.
+[[allowlists]]
+description = "Environment variable templates hold KEY= placeholders, never real credentials."
+paths = [
+  '''\.env\.example$''',
+  '''\.env\.sample$''',
+  '''\.env\.template$''',
+]

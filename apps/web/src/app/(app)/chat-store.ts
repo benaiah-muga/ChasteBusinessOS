@@ -8,18 +8,45 @@ import { useSyncExternalStore } from "react";
  * (or expanding back) never loses history or an in-flight stream.
  */
 
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cachedInput: number;
+}
+
+export interface AskPayload {
+  id: string;
+  question: string;
+  options?: string[];
+  allowOther: boolean;
+}
+
 export interface ChatMsg {
   role: "user" | "assistant";
   text: string;
   activity?: string[];
   detail?: string;
   error?: boolean;
+  /** Set when the model asked a clarification question in this message. */
+  ask?: AskPayload;
+  /** The option (or free text) the user answered with, once answered. */
+  answered?: string;
+  /** Token usage for this assistant turn, from the provider's own report. */
+  usage?: TokenUsage;
 }
 
 interface ChatState {
   messages: ChatMsg[];
   busy: boolean;
   creator: boolean;
+  /** Typed-but-not-sent messages while a run is in flight (auto-queued). */
+  queue: string[];
+  /** Current loop position, for the live console strip. */
+  step: { step: number; maxSteps: number } | null;
+  /** Last tool the agent called, for the live status line. */
+  lastTool: string | null;
+  /** Cumulative tokens for this conversation (server-reported). */
+  sessionUsage: TokenUsage;
 }
 
 const GREETING: ChatMsg = {
@@ -27,7 +54,17 @@ const GREETING: ChatMsg = {
   text: "Hi, I'm your business workmate. Ask me to do things, or ask about your books. Everything I do goes through the same governed path as you.",
 };
 
-let state: ChatState = { messages: [GREETING], busy: false, creator: false };
+const zeroUsage: TokenUsage = { input: 0, output: 0, cachedInput: 0 };
+
+let state: ChatState = {
+  messages: [GREETING],
+  busy: false,
+  creator: false,
+  queue: [],
+  step: null,
+  lastTool: null,
+  sessionUsage: zeroUsage,
+};
 
 const listeners = new Set<() => void>();
 
@@ -51,12 +88,12 @@ function updateLast(mutate: (m: ChatMsg) => void) {
 let sessionId: string | undefined;
 let abortRef: AbortController | null = null;
 
-async function send(textRaw?: string) {
-  const text = (textRaw ?? "").trim();
-  if (!text || state.busy) return;
+async function runTurn(text: string) {
   patch({
     messages: [...state.messages, { role: "user", text }, { role: "assistant", text: "", activity: [] }],
     busy: true,
+    step: null,
+    lastTool: null,
   });
 
   abortRef = new AbortController();
@@ -92,19 +129,52 @@ async function send(textRaw?: string) {
           reply?: string;
           sessionId?: string;
           error?: string;
+          step?: number;
+          maxSteps?: number;
+          id?: string;
+          question?: string;
+          options?: string[];
+          allowOther?: boolean;
+          usage?: { turn?: TokenUsage; session?: TokenUsage };
         };
         if (evt.type === "delta") {
           updateLast((m) => {
             m.text += evt.text ?? "";
           });
         } else if (evt.type === "tool") {
+          patch({ lastTool: evt.name ?? null });
           updateLast((m) => {
             m.activity = [...(m.activity ?? []), evt.name ?? ""];
           });
+        } else if (evt.type === "step") {
+          patch({
+            step: { step: evt.step ?? 0, maxSteps: evt.maxSteps ?? 0 },
+          });
+        } else if (evt.type === "ask") {
+          updateLast((m) => {
+            m.ask = {
+              id: evt.id ?? "",
+              question: evt.question ?? "",
+              options: evt.options,
+              allowOther: evt.allowOther ?? true,
+            };
+          });
         } else if (evt.type === "done") {
           sessionId = evt.sessionId ?? sessionId;
+          const turn = evt.usage?.turn;
+          const session = evt.usage?.session;
+          if (turn) {
+            updateLast((m) => {
+              m.usage = turn;
+            });
+          }
+          if (session) patch({ sessionUsage: session });
           updateLast((m) => {
             if (!m.text && evt.reply) m.text = evt.reply;
+          });
+        } else if (evt.type === "stopped") {
+          updateLast((m) => {
+            if (!m.text) m.text = "Stopped.";
           });
         } else if (evt.type === "error") {
           updateLast((m) => {
@@ -126,14 +196,51 @@ async function send(textRaw?: string) {
     });
   } finally {
     abortRef = null;
-    patch({ busy: false });
+    patch({ busy: false, step: null, lastTool: null });
+    // Steering, chat-style: anything typed mid-run goes out right after the
+    // current run settles, in order.
+    const next = state.queue[0];
+    if (next !== undefined) {
+      patch({ queue: state.queue.slice(1) });
+      void runTurn(next);
+    }
   }
+}
+
+async function send(textRaw?: string) {
+  const text = (textRaw ?? "").trim();
+  if (!text) return;
+  if (state.busy) {
+    // Queue instead of dropping: the message visibly waits and auto-sends.
+    patch({ queue: [...state.queue, text] });
+    return;
+  }
+  await runTurn(text);
+}
+
+/** Answers a pending clarification; the choice becomes the next user turn. */
+function answerAsk(questionId: string, choice: string) {
+  const messages = [...state.messages];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = { ...messages[i]! };
+    if (m.role === "assistant" && m.ask?.id === questionId) {
+      m.answered = choice;
+      messages[i] = m;
+      patch({ messages });
+      void send(choice);
+      return;
+    }
+  }
+}
+
+function removeQueued(text: string) {
+  patch({ queue: state.queue.filter((q) => q !== text) });
 }
 
 function reset() {
   abortRef?.abort();
   sessionId = undefined;
-  patch({ messages: [GREETING], busy: false });
+  patch({ messages: [GREETING], busy: false, queue: [], step: null, lastTool: null, sessionUsage: zeroUsage });
 }
 
 export const chatStore = {
@@ -144,6 +251,8 @@ export const chatStore = {
   getState: () => state,
   send,
   stop: () => abortRef?.abort(),
+  answerAsk,
+  removeQueued,
   setCreator: (v: boolean) => patch({ creator: v }),
   /** Start a fresh conversation; the old one remains in the session log. */
   reset,

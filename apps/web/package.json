@@ -29,6 +29,7 @@
     "@chaste/module-purchasing": "workspace:*",
     "@chaste/module-support": "workspace:*",
     "@chaste/module-skills": "workspace:*",
+    "@chaste/module-routines": "workspace:*",
     "@chaste/plugin-kit": "workspace:*",
     "better-auth": "^1.7.1",
     "drizzle-orm": "^0.44.5",

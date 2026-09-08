@@ -33,6 +33,7 @@ const TABS = [
   { id: "workspace", label: "Workspace" },
   { id: "localization", label: "Localization" },
   { id: "ai", label: "AI & automation" },
+  { id: "routines", label: "Routines" },
 ] as const;
 
 /**
@@ -55,6 +56,7 @@ export default function SettingsPage() {
       {tab === "workspace" && <WorkspaceTab />}
       {tab === "localization" && <LocalizationTab />}
       {tab === "ai" && <AiTab />}
+      {tab === "routines" && <RoutinesTab />}
     </AppFrame>
   );
 }
@@ -336,7 +338,15 @@ function AiTab() {
             <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
               <dt className="text-stone-500">Provider</dt>
               <dd className="flex items-center gap-2 font-medium text-stone-900">
-                {config.provider === "openrouter" ? "OpenRouter" : "NVIDIA NIM"}
+                {config.provider === "openrouter"
+                  ? "OpenRouter"
+                  : config.provider === "groq"
+                    ? "Groq"
+                    : config.provider === "mistral"
+                      ? "Mistral"
+                      : config.provider === "zai"
+                        ? "Z.ai (GLM)"
+                        : "NVIDIA NIM"}
                 {config.configured ? (
                   <span className="badge badge-green">connected</span>
                 ) : (
@@ -358,7 +368,13 @@ function AiTab() {
             <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               Set <code className="rounded bg-amber-100 px-1">NVIDIA_API_KEY</code> (or{" "}
               <code className="rounded bg-amber-100 px-1">OPENROUTER_API_KEY</code> with{" "}
-              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=openrouter</code>) in the server environment.
+              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=openrouter</code>, or{" "}
+              <code className="rounded bg-amber-100 px-1">GROQ_API_KEY</code> with{" "}
+              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=groq</code>, or{" "}
+              <code className="rounded bg-amber-100 px-1">MISTRAL_API_KEY</code> with{" "}
+              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=mistral</code>, or{" "}
+              <code className="rounded bg-amber-100 px-1">ZAI_API_KEY</code> with{" "}
+              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=zai</code>) in the server environment.
             </p>
           )}
 
@@ -384,6 +400,10 @@ function AiTab() {
           </div>
         </>
       )}
+
+      <div className="mt-8 border-t border-stone-100 pt-6">
+        <SoulSection />
+      </div>
     </div>
   );
 }
@@ -537,5 +557,251 @@ function EmailSection() {
         </div>
       </div>
     </Section>
+  );
+}
+
+/* --------------------------------------------------- soul + routines ---- */
+
+function SoulSection() {
+  const [soul, setSoul] = useState<string>("");
+  const [loaded, setLoaded] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void callApi<{ agentSoul: string }>("/api/org", { method: "PUT" }).then((res) => {
+      if (res.data) setSoul(res.data.agentSoul ?? "");
+      setLoaded(true);
+    });
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    setNote(null);
+    const res = await callApi("/api/org", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentSoul: soul }),
+    });
+    setBusy(false);
+    setNote(res.ok ? "Saved. Your workmate picks it up on the next message." : (res.error?.title ?? "Could not save"));
+  }
+
+  return (
+    <Section
+      title="Agent persona (SOUL)"
+      hint="Standing instructions your workmate follows in every conversation: voice, tone, hard rules. It cannot override security, approvals, or financial integrity."
+    >
+      <div className="max-w-2xl">
+        <textarea
+          value={soul}
+          onChange={(e) => setSoul(e.target.value)}
+          disabled={!loaded}
+          rows={5}
+          aria-label="Agent persona instructions"
+          placeholder={"Example:\n- We are a hardware store; keep replies practical and short.\n- Always mention outstanding balances when discussing a customer.\n- Never recommend credit terms beyond Net 30."}
+          className="w-full resize-y rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-stone-400 focus:border-maroon-500"
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <Button size="sm" loading={busy} onClick={() => void save()}>
+            Save persona
+          </Button>
+          {note && <span className="text-xs text-stone-500">{note}</span>}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+interface RoutineRow {
+  id: string;
+  name: string;
+  scheduleLabel: string;
+  triggerType: string;
+  enabled: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  webhookUrl: string | null;
+}
+
+const HEARTBEAT_PROMPT =
+  "Proactive heartbeat: scan the business for anything that needs attention (overdue invoices, low stock against reorder points, aging bills, stuck deals). If something needs attention, summarize it with concrete numbers and post it to #general. If nothing needs attention, reply NO_ACTION.";
+
+function RoutinesTab() {
+  const [rows, setRows] = useState<RoutineRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [scheduleText, setScheduleText] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [withWebhook, setWithWebhook] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const load = () => {
+    void callApi<{ routines: RoutineRow[] }>("/api/routines").then((res) => {
+      if (res.data) setRows(res.data.routines);
+      else setError(res.error?.title ?? "Could not load routines");
+    });
+  };
+  useEffect(load, []);
+
+  async function act(body: Record<string, unknown>, successNote: string) {
+    const res = await postApi("/api/routines", body);
+    if (res.ok) {
+      setNote(successNote);
+      load();
+    } else {
+      setNote(res.error?.title ?? "That did not work");
+    }
+  }
+
+  async function create(overrides?: { name: string; prompt: string; scheduleText: string }) {
+    setCreating(true);
+    setNote(null);
+    const payload = overrides ?? { name, prompt, scheduleText, withWebhook };
+    const res = await postApi<{ webhookUrl: string | null }>("/api/routines", { action: "create", ...payload });
+    setCreating(false);
+    if (res.ok) {
+      setNote(
+        res.data?.webhookUrl
+          ? `Routine created. Webhook trigger: ${res.data.webhookUrl}`
+          : "Routine created.",
+      );
+      setName("");
+      setScheduleText("");
+      setPrompt("");
+      setWithWebhook(false);
+      load();
+    } else {
+      setNote(res.error?.title ?? "Could not create the routine");
+    }
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <Section
+        title="Routines"
+        hint="Recurring agent runs, scheduled in plain language. Each run is a governed, replayable agent session; findings land in your notifications."
+      >
+        <div className="mb-5 grid gap-2 rounded-xl border border-stone-200 bg-white p-4 shadow-xs sm:grid-cols-[1fr_1fr]">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name, e.g. Morning check"
+            aria-label="Routine name"
+            className="input"
+          />
+          <input
+            value={scheduleText}
+            onChange={(e) => setScheduleText(e.target.value)}
+            placeholder="When, e.g. weekdays at 9am"
+            aria-label="Schedule in plain language"
+            className="input"
+          />
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="What should the agent check or do each run?"
+            aria-label="Routine instructions"
+            rows={2}
+            className="input resize-y sm:col-span-2"
+          />
+          <label className="flex items-center gap-2 text-xs text-stone-600">
+            <input
+              type="checkbox"
+              checked={withWebhook}
+              onChange={(e) => setWithWebhook(e.target.checked)}
+              className="accent-maroon-700"
+            />
+            Allow webhook trigger (Paperclip-compatible)
+          </label>
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              size="sm"
+              loading={creating}
+              disabled={!name.trim() || !scheduleText.trim() || !prompt.trim()}
+              onClick={() => void create()}
+            >
+              Create routine
+            </Button>
+            <Button
+              size="sm"
+              tone="secondary"
+              onClick={() =>
+                void create({ name: "Heartbeat", prompt: HEARTBEAT_PROMPT, scheduleText: "daily at 08:00" })
+              }
+            >
+              Daily heartbeat preset
+            </Button>
+          </div>
+        </div>
+
+        {note && <p className="mb-4 text-xs text-stone-500">{note}</p>}
+        {error && <p className="mb-4 text-sm text-red-700">{error}</p>}
+
+        {rows !== null && rows.length === 0 && (
+          <p className="text-sm text-stone-400">
+            No routines yet. Create one above, or start with the daily heartbeat.
+          </p>
+        )}
+        <ul className="space-y-2">
+          {rows?.map((r) => (
+            <li key={r.id} className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-stone-900">{r.name}</span>
+                <span className="badge">{r.scheduleLabel}</span>
+                {r.triggerType === "webhook" && <span className="badge">webhook</span>}
+                <span
+                  className={
+                    r.lastStatus === "ok"
+                      ? "badge badge-green"
+                      : r.lastStatus === "failed"
+                        ? "badge badge-red"
+                        : "badge"
+                  }
+                  title={r.lastError ?? undefined}
+                >
+                  {r.lastStatus ?? "never run"}
+                </span>
+                <div className="ml-auto flex items-center gap-2">
+                  <Button size="sm" tone="secondary" onClick={() => void act({ action: "runNow", routineId: r.id }, "Run queued; the worker will pick it up.")}>
+                    Run now
+                  </Button>
+                  <Button
+                    size="sm"
+                    tone="secondary"
+                    onClick={() => void act({ action: "update", routineId: r.id, enabled: !r.enabled }, r.enabled ? "Routine paused." : "Routine resumed.")}
+                  >
+                    {r.enabled ? "Pause" : "Resume"}
+                  </Button>
+                  <Button size="sm" tone="secondary" onClick={() => void act({ action: "delete", routineId: r.id }, "Routine deleted.")}>
+                    Delete
+                  </Button>
+                </div>
+              </div>
+              <p className="mt-1.5 text-xs leading-relaxed text-stone-500">{r.lastError ?? "Read-only runner; findings become notifications."}</p>
+              <p className="mt-1 text-[11px] text-stone-400">
+                {r.enabled && r.nextRunAt ? `Next run ${new Date(r.nextRunAt).toLocaleString()}` : "Paused"}
+                {r.webhookUrl && (
+                  <>
+                    {" · "}
+                    <button
+                      type="button"
+                      title={r.webhookUrl}
+                      onClick={() => void navigator.clipboard.writeText(r.webhookUrl ?? "")}
+                      className="cursor-pointer font-mono underline underline-offset-2"
+                    >
+                      copy webhook URL
+                    </button>
+                  </>
+                )}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </Section>
+    </div>
   );
 }

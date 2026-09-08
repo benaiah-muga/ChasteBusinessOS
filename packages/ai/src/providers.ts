@@ -1,14 +1,23 @@
 import OpenAI from "openai";
 
+/**
+ * Model providers and routing. Started life as "nim.ts" when NVIDIA NIM was
+ * the only provider; every OpenAI-compatible provider (NIM, OpenRouter,
+ * Groq, Mistral, Z.ai) now lives here behind one resolveClient seam.
+ */
+
 export interface ModelRef {
   /** provider id: "nim" | any OpenAI-compatible base URL key */
   provider: string;
   model: string;
 }
 
-/** Strip a provider prefix so NIM-side callers never see "openrouter/x". */
-function stripProviderPrefix(model: string): string {
-  return model.startsWith("openrouter/") ? model.slice("openrouter/".length) : model;
+/** Strip a provider prefix so NIM-side callers never see "openrouter/x", "groq/x", "mistral/x" or "zai/x". */
+export function stripProviderPrefix(model: string): string {
+  for (const p of ["openrouter/", "groq/", "mistral/", "zai/"]) {
+    if (model.startsWith(p)) return model.slice(p.length);
+  }
+  return model;
 }
 
 export const MODELS = {
@@ -38,16 +47,63 @@ export function compatClient(opts: { apiKey?: string; baseUrl?: string } = {}) {
   });
 }
 
+/** Groq client; uses their OpenAI-compatible endpoint. */
+export function groqClient(opts: { apiKey?: string; baseUrl?: string } = {}) {
+  const apiKey = opts.apiKey ?? process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("GROQ_API_KEY is not set");
+  return new OpenAI({
+    apiKey,
+    baseURL: opts.baseUrl ?? "https://api.groq.com/openai/v1",
+  });
+}
+
+/** Mistral client; uses their OpenAI-compatible endpoint. */
+export function mistralClient(opts: { apiKey?: string; baseUrl?: string } = {}) {
+  const apiKey = opts.apiKey ?? process.env.MISTRAL_API_KEY;
+  if (!apiKey) throw new Error("MISTRAL_API_KEY is not set");
+  return new OpenAI({
+    apiKey,
+    baseURL: opts.baseUrl ?? "https://api.mistral.ai/v1",
+  });
+}
+
+/** Z.ai (Zhipu) GLM models via their OpenAI-compatible endpoint. */
+export function zaiClient(opts: { apiKey?: string; baseUrl?: string } = {}) {
+  const apiKey = opts.apiKey ?? process.env.ZAI_API_KEY;
+  if (!apiKey) throw new Error("ZAI_API_KEY is not set");
+  return new OpenAI({
+    apiKey,
+    baseURL: opts.baseUrl ?? process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4",
+  });
+}
+
 /**
  * Provider selection: MODEL_PROVIDER=openrouter routes through
- * OPENROUTER_API_KEY (e.g. stealth/ox-alpha); default is NVIDIA NIM.
+ * OPENROUTER_API_KEY (e.g. stealth/ox-alpha); MODEL_PROVIDER=groq routes
+ * through GROQ_API_KEY; MODEL_PROVIDER=mistral routes through
+ * MISTRAL_API_KEY; MODEL_PROVIDER=zai routes through ZAI_API_KEY (GLM
+ * models); default is NVIDIA NIM. A "provider/" model prefix overrides the
+ * env for that call.
  */
 export function resolveClient(model?: string): OpenAI {
+  const m = model ?? "";
   const provider = process.env.MODEL_PROVIDER ?? "";
-  if (provider === "openrouter" || (model ?? "").startsWith("openrouter/")) {
-    return compatClient();
+  // An explicit "provider/" model prefix wins over the env default; the env
+  // provider only applies to unprefixed models.
+  const prefix = ["openrouter", "groq", "mistral", "zai"].find((p) => m.startsWith(`${p}/`));
+  const chosen = prefix ?? ["openrouter", "groq", "mistral", "zai"].find((p) => provider === p);
+  switch (chosen) {
+    case "openrouter":
+      return compatClient();
+    case "groq":
+      return groqClient();
+    case "mistral":
+      return mistralClient();
+    case "zai":
+      return zaiClient();
+    default:
+      return nimClient();
   }
-  return nimClient();
 }
 
 /** Provider-aware client for chat-side calls; embeddings stay on NIM. */
