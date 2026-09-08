@@ -169,7 +169,7 @@ Model routing (all via NVIDIA NIM unless overridden):
 | DB | PostgreSQL 16 + Drizzle ORM | relational integrity is non-negotiable for accounting; SQL-native migrations |
 | Vectors | pgvector | no extra infra; joins with transactional data; HNSW indexes |
 | Auth | better-auth (multi-org) | TS-first, org/team plugins, passkeys ready |
-| UI | Tailwind v4 + shadcn/ui | speed, accessibility; shared `ui/` package is a future extraction, not built |
+| UI | Tailwind v4 + in-repo primitives (`apps/web/src/components/ui.tsx`) | token-driven theme and brand shell (ADR 0015, 0030); no component-library dependency; a shared `ui/` package is a future extraction |
 | Validation | Zod 4 | shared schemas across kernel/UI/LLM function-calling |
 | Jobs | Postgres-backed durable queue (`jobs`, claimed `FOR UPDATE SKIP LOCKED`) | no extra infra; schedules advanced at claim time for at-most-once execution. Drives routines and ingestion |
 | Observability | console logging + event ledger in DB | structured pino logs and OpenTelemetry traces are planned, not wired |
