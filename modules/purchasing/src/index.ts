@@ -1,7 +1,10 @@
 import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
+  accounts,
   items,
+  journalEntries,
+  journalLines,
   poLines,
   purchaseOrders,
   purchaseRequests,
@@ -35,12 +38,22 @@ const createVendor = (deps: ModuleDeps) =>
     module: "purchasing",
     risk: "write",
     permission: "purchasing.write",
-    input: z.object({ name: z.string().min(1), email: z.string().email().optional() }),
+    input: z.object({
+      name: z.string().min(1),
+      email: z.string().email().optional(),
+      /** Net-days the vendor expects payment in; drives bill due dates (M10). */
+      paymentTermDays: z.number().int().positive().max(365).optional(),
+    }),
     output: z.object({ vendorId: z.string() }),
     execute: async (ctx, input) => {
       const [row] = await deps.db
         .insert(vendors)
-        .values({ orgId: ctx.actor.orgId, name: input.name, email: input.email ?? null })
+        .values({
+          orgId: ctx.actor.orgId,
+          name: input.name,
+          email: input.email ?? null,
+          paymentTermDays: input.paymentTermDays ?? null,
+        })
         .returning({ id: vendors.id });
       return { vendorId: row!.id };
     },
@@ -135,7 +148,7 @@ const createBill = (deps: ModuleDeps) =>
         }
 
         const [vendor] = await tx
-          .select({ id: vendors.id })
+          .select({ id: vendors.id, paymentTermDays: vendors.paymentTermDays })
           .from(vendors)
           .where(and(eq(vendors.id, input.vendorId), eq(vendors.orgId, ctx.actor.orgId)))
           .limit(1);
@@ -183,6 +196,10 @@ const createBill = (deps: ModuleDeps) =>
             vendorId: input.vendorId,
             number: billNumber,
             vendorRef: input.vendorRef ?? null,
+            dueAt:
+              vendor.paymentTermDays && vendor.paymentTermDays > 0
+                ? new Date(ctx.now.getTime() + vendor.paymentTermDays * 86_400_000)
+                : ctx.now,
             status: "open",
             totalMinor: totals.totalMinor,
             memo: input.memo ?? null,
@@ -327,6 +344,8 @@ const createPO = (deps: ModuleDeps) =>
     input: z.object({
       vendorId: z.string(),
       memo: z.string().optional(),
+      /** When the vendor promised delivery; feeds on-time-rate (M10). */
+      promisedAt: z.string().datetime().optional(),
       lines: z
         .array(
           z.object({
@@ -342,7 +361,7 @@ const createPO = (deps: ModuleDeps) =>
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [vendor] = await tx
-          .select({ id: vendors.id })
+          .select({ id: vendors.id, paymentTermDays: vendors.paymentTermDays })
           .from(vendors)
           .where(and(eq(vendors.id, input.vendorId), eq(vendors.orgId, ctx.actor.orgId)))
           .limit(1);
@@ -370,6 +389,7 @@ const createPO = (deps: ModuleDeps) =>
             status: "ordered",
             memo: input.memo ?? null,
             orderedAt: ctx.now,
+            promisedAt: input.promisedAt ? new Date(input.promisedAt) : null,
           })
           .returning({ id: purchaseOrders.id });
         await tx.insert(poLines).values(
@@ -737,6 +757,396 @@ const listPurchaseWorkflow = (deps: ModuleDeps) =>
     },
   });
 
+// ── M10: supplier memory, credit notes, returns, backorders ────────────
+
+/**
+ * AP credit note (M10, ADR 0037): the supplier conceded money — mirror of
+ * the AR credit note. Always gates; the bill document is never edited.
+ */
+const billCreditNote = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.billCreditNote",
+    title: "Credit a vendor bill",
+    intent:
+      "Record a supplier credit against an open bill — an approved reversing entry that reduces what is owed without editing the bill",
+    module: "purchasing",
+    risk: "money",
+    permission: "purchasing.write",
+    moneyAmount: () => null,
+    input: z.object({
+      billId: z.string().uuid(),
+      amountMinor: z.number().int().positive(),
+      reason: z.string().min(3).max(500),
+    }),
+    output: z.object({ entryId: z.string(), creditedMinor: z.number(), billBalanceMinor: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
+        const [bill] = await tx
+          .select()
+          .from(vendorBills)
+          .where(and(eq(vendorBills.id, input.billId), eq(vendorBills.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!bill) throw new Error("bill not found");
+        if (bill.status === "void") throw new Error("bill is void; nothing to credit");
+        const balance = bill.totalMinor - bill.paidMinor - bill.creditedMinor;
+        if (input.amountMinor > balance) {
+          throw new Error(
+            `credit ${input.amountMinor} exceeds the open balance ${balance} (total ${bill.totalMinor} − paid ${bill.paidMinor} − credited ${bill.creditedMinor})`,
+          );
+        }
+        const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `Supplier credit on bill ${bill.number}: ${input.reason}`,
+          sourceType: "vendor_credit_note",
+          sourceId: bill.id,
+          reversalOfId: bill.entryId,
+          lines: [
+            { accountCode: "2000", debitMinor: input.amountMinor, creditMinor: 0 },
+            { accountCode: "6000", debitMinor: 0, creditMinor: input.amountMinor },
+          ],
+        });
+        const credited = bill.creditedMinor + input.amountMinor;
+        await tx.update(vendorBills).set({ creditedMinor: credited }).where(eq(vendorBills.id, bill.id));
+        return { entryId, creditedMinor: credited, billBalanceMinor: bill.totalMinor - bill.paidMinor - credited };
+      });
+    },
+  });
+
+/** Received quantity for a PO line, derived from the stock ledger. */
+async function receivedForLine(tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0], lineId: string): Promise<number> {
+  const [rec] = await tx
+    .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
+    .from(stockMovements)
+    .where(and(eq(stockMovements.refType, "po_line"), eq(stockMovements.refId, lineId)));
+  return Number(rec?.total ?? 0);
+}
+
+const closePurchaseOrder = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.closePurchaseOrder",
+    title: "Close purchase order",
+    intent:
+      "Close an order that will not be fully received; if quantities are short the order is marked backordered so the shortfall stays on the vendor's record",
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    input: z.object({ poNumber: z.number().int().positive() }),
+    output: z.object({ closed: z.literal(true), backordered: z.boolean(), shortThousandths: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [po] = await tx
+          .select()
+          .from(purchaseOrders)
+          .where(and(eq(purchaseOrders.orgId, ctx.actor.orgId), eq(purchaseOrders.number, input.poNumber)))
+          .limit(1);
+        if (!po) throw new Error("purchase order not found");
+        if (po.status === "void") throw new Error("order is void");
+        if (po.status === "closed") throw new Error("order is already closed");
+        const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(poLines.id);
+        let short = 0;
+        for (const line of lines) {
+          short += Math.max(0, line.quantity - (await receivedForLine(tx, line.id)));
+        }
+        await tx
+          .update(purchaseOrders)
+          .set({ status: "closed", backordered: short > 0 })
+          .where(eq(purchaseOrders.id, po.id));
+        return { closed: true as const, backordered: short > 0, shortThousandths: short };
+      });
+    },
+  });
+
+const returnGoods = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.returnGoods",
+    title: "Return goods to vendor",
+    intent:
+      "Send received goods back to the vendor: writes negative stock legs against the purchase order so receipts, fill rates, and stock stay truthful",
+    // No inverse: a return is itself a reversal. The ledger keeps both legs;
+    // a mistaken return is corrected by receiving the goods again.
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    input: z.object({
+      poNumber: z.number().int().positive(),
+      lines: z
+        .array(
+          z.object({
+            lineNumber: z.number().int().positive(),
+            quantity: z.number().int().positive().describe("Thousandths to send back"),
+            reason: z.string().min(3).max(500),
+          }),
+        )
+        .min(1),
+    }),
+    output: z.object({ returned: z.literal(true), lines: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [po] = await tx
+          .select()
+          .from(purchaseOrders)
+          .where(and(eq(purchaseOrders.orgId, ctx.actor.orgId), eq(purchaseOrders.number, input.poNumber)))
+          .limit(1);
+        if (!po) throw new Error("purchase order not found");
+        if (po.status === "void") throw new Error("order is void");
+        const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(poLines.id);
+        for (const rl of input.lines) {
+          const line = lines[rl.lineNumber - 1];
+          if (!line) throw new Error(`no line ${rl.lineNumber} on order ${input.poNumber}`);
+          if (!line.itemId) throw new Error(`line ${rl.lineNumber} is a service line; nothing to return`);
+          const received = await receivedForLine(tx, line.id);
+          if (rl.quantity > received) {
+            throw new Error(
+              `line ${rl.lineNumber}: cannot return ${rl.quantity}; only ${received} thousandths were received`,
+            );
+          }
+          await tx.insert(stockMovements).values({
+            orgId: ctx.actor.orgId,
+            itemId: line.itemId,
+            quantityDelta: -rl.quantity,
+            reason: "purchase",
+            refType: "po_line",
+            refId: line.id,
+            note: `Return to vendor (PO ${input.poNumber}): ${rl.reason}`,
+            unitCostMinor: line.unitPriceMinor,
+            actorType: ctx.actor.type,
+            actorId: ctx.actor.id,
+          });
+        }
+        return { returned: true as const, lines: input.lines.length };
+      });
+    },
+  });
+
+const supplierPerformance = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.supplierPerformance",
+    title: "Supplier performance",
+    intent:
+      "Summarize each vendor's delivery record — average lead time from order to receipt, fill rate, backorders, and late arrivals against promised dates",
+    module: "purchasing",
+    risk: "read",
+    permission: "purchasing.read",
+    input: z.object({}),
+    output: z.object({
+      vendors: z.array(
+        z.object({
+          vendorId: z.string(),
+          vendorName: z.string(),
+          orders: z.number(),
+          avgLeadTimeDays: z.number().nullable(),
+          onTimeRate: z.number().nullable(),
+          fillRate: z.number().nullable(),
+          backorderedOrders: z.number(),
+        }),
+      ),
+    }),
+    execute: async (ctx) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const vendorRows = await tx.select({ id: vendors.id, name: vendors.name }).from(vendors).where(eq(vendors.orgId, ctx.actor.orgId));
+        const out = [] as Array<{
+          vendorId: string;
+          vendorName: string;
+          orders: number;
+          avgLeadTimeDays: number | null;
+          onTimeRate: number | null;
+          fillRate: number | null;
+          backorderedOrders: number;
+        }>;
+        for (const v of vendorRows) {
+          const pos = await tx
+            .select()
+            .from(purchaseOrders)
+            .where(and(eq(purchaseOrders.orgId, ctx.actor.orgId), eq(purchaseOrders.vendorId, v.id)));
+          const live = pos.filter((p) => p.status !== "void" && p.orderedAt);
+          let leadSum = 0;
+          let leadCount = 0;
+          let onTime = 0;
+          let promised = 0;
+          let orderedTotal = 0;
+          let receivedTotal = 0;
+          let backordered = 0;
+          for (const p of live) {
+            backordered += p.backordered ? 1 : 0;
+            const lines = await tx.select().from(poLines).where(eq(poLines.poId, p.id)).orderBy(poLines.id);
+            for (const line of lines) {
+              orderedTotal += line.quantity;
+              const rec = await receivedForLine(tx, line.id);
+              receivedTotal += Math.min(rec, line.quantity);
+              if (rec > 0) {
+                const [first] = await tx
+                  .select({ at: stockMovements.createdAt })
+                  .from(stockMovements)
+                  .where(and(eq(stockMovements.refType, "po_line"), eq(stockMovements.refId, line.id)))
+                  .orderBy(stockMovements.createdAt)
+                  .limit(1);
+                if (first && p.orderedAt) {
+                  leadSum += Math.max(0, (first.at.getTime() - p.orderedAt.getTime()) / 86_400_000);
+                  leadCount += 1;
+                  if (p.promisedAt) {
+                    promised += 1;
+                    if (first.at.getTime() <= p.promisedAt.getTime()) onTime += 1;
+                  }
+                }
+              }
+            }
+          }
+          out.push({
+            vendorId: v.id,
+            vendorName: v.name,
+            orders: live.length,
+            avgLeadTimeDays: leadCount > 0 ? Math.round((leadSum / leadCount) * 10) / 10 : null,
+            onTimeRate: promised > 0 ? Math.round((onTime / promised) * 100) : null,
+            fillRate: orderedTotal > 0 ? Math.round((Math.min(receivedTotal, orderedTotal) / orderedTotal) * 100) : null,
+            backorderedOrders: backordered,
+          });
+        }
+        return { vendors: out };
+      });
+    },
+  });
+
+const priceHistory = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.priceHistory",
+    title: "Supplier price history",
+    intent:
+      "Show what each vendor has actually charged per item across purchase orders over time, so a 'special price' can be checked against the record",
+    module: "purchasing",
+    risk: "read",
+    permission: "purchasing.read",
+    input: z.object({ sku: z.string().optional() }),
+    output: z.object({
+      rows: z.array(
+        z.object({
+          vendorName: z.string(),
+          itemSku: z.string().nullable(),
+          itemDescription: z.string(),
+          unitPriceMinor: z.number(),
+          orderedAt: z.string().nullable(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const rows = await tx
+          .select({
+            vendorName: vendors.name,
+            itemSku: items.sku,
+            description: poLines.description,
+            unitPriceMinor: poLines.unitPriceMinor,
+            orderedAt: purchaseOrders.orderedAt,
+          })
+          .from(poLines)
+          .innerJoin(purchaseOrders, eq(poLines.poId, purchaseOrders.id))
+          .innerJoin(vendors, eq(purchaseOrders.vendorId, vendors.id))
+          .leftJoin(items, eq(poLines.itemId, items.id))
+          .where(
+            input.sku
+              ? and(eq(purchaseOrders.orgId, ctx.actor.orgId), eq(items.sku, input.sku))
+              : eq(purchaseOrders.orgId, ctx.actor.orgId),
+          )
+          .orderBy(desc(purchaseOrders.orderedAt))
+          .limit(300);
+        return {
+          rows: rows.map((r) => ({
+            vendorName: r.vendorName,
+            itemSku: r.itemSku,
+            itemDescription: r.description,
+            unitPriceMinor: r.unitPriceMinor,
+            orderedAt: r.orderedAt?.toISOString() ?? null,
+          })),
+        };
+      });
+    },
+  });
+
+const supplierStatement = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.supplierStatement",
+    title: "Supplier statement",
+    intent:
+      "Render a vendor's account as a dated, running-balance statement of bills, payments, and supplier credits — what you reconcile their month-end statement against",
+    module: "purchasing",
+    risk: "read",
+    permission: "purchasing.read",
+    input: z.object({ vendorId: z.string().uuid() }),
+    output: z.object({
+      closingBalanceMinor: z.number(),
+      rows: z.array(
+        z.object({
+          date: z.string(),
+          kind: z.string(),
+          ref: z.string(),
+          amountMinor: z.number(),
+          balanceMinor: z.number(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const billRows = await tx
+          .select({
+            id: vendorBills.id,
+            number: vendorBills.number,
+            totalMinor: vendorBills.totalMinor,
+            creditedMinor: vendorBills.creditedMinor,
+            billDate: vendorBills.billDate,
+            createdAt: vendorBills.createdAt,
+            voidedAt: vendorBills.voidedAt,
+          })
+          .from(vendorBills)
+          .where(and(eq(vendorBills.orgId, ctx.actor.orgId), eq(vendorBills.vendorId, input.vendorId)));
+        const live = billRows.filter((b) => !b.voidedAt);
+        const billIds = new Set(live.map((b) => b.id));
+        const payRows = await tx
+          .select({ billId: vendorPayments.billId, amountMinor: vendorPayments.amountMinor, paidAt: vendorPayments.paidAt })
+          .from(vendorPayments)
+          .where(eq(vendorPayments.orgId, ctx.actor.orgId));
+        const creditRows = await tx
+          .select({
+            sourceId: journalEntries.sourceId,
+            postedAt: journalEntries.postedAt,
+            debitMinor: journalLines.debitMinor,
+            creditMinor: journalLines.creditMinor,
+            code: accounts.code,
+          })
+          .from(journalEntries)
+          .innerJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
+          .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+          .where(
+            and(
+              eq(journalEntries.orgId, ctx.actor.orgId),
+              eq(journalEntries.sourceType, "vendor_credit_note"),
+              eq(accounts.code, "2000"),
+            ),
+          );
+
+        type Row = { date: Date; kind: string; ref: string; amountMinor: number };
+        const rows: Row[] = [];
+        for (const b of live) {
+          // Gross: credits appear as their own statement lines below.
+          rows.push({ date: b.billDate ?? b.createdAt, kind: "bill", ref: `Bill #${b.number}`, amountMinor: b.totalMinor });
+          for (const c of creditRows) {
+            if (c.sourceId !== b.id) continue;
+            rows.push({ date: c.postedAt, kind: "credit_note", ref: `Credit on bill #${b.number}`, amountMinor: -(c.debitMinor - c.creditMinor) });
+          }
+        }
+        for (const p of payRows) {
+          if (!billIds.has(p.billId)) continue;
+          rows.push({ date: p.paidAt, kind: "payment", ref: "Payment sent", amountMinor: -p.amountMinor });
+        }
+        rows.sort((a, b) => a.date.getTime() - b.date.getTime() || a.kind.localeCompare(b.kind));
+        let running = 0;
+        const rendered = rows.map((r) => {
+          running += r.amountMinor;
+          return { date: r.date.toISOString(), kind: r.kind, ref: r.ref, amountMinor: r.amountMinor, balanceMinor: running };
+        });
+        return { closingBalanceMinor: running, rows: rendered };
+      });
+    },
+  });
+
 export function registerPurchasingCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(createVendor(deps));
   registry.register(createPO(deps));
@@ -744,6 +1154,12 @@ export function registerPurchasingCapabilities(registry: CapabilityRegistry, dep
   registry.register(createBill(deps));
   registry.register(payBill(deps));
   registry.register(apAging(deps));
+  registry.register(billCreditNote(deps));
+  registry.register(closePurchaseOrder(deps));
+  registry.register(returnGoods(deps));
+  registry.register(supplierPerformance(deps));
+  registry.register(priceHistory(deps));
+  registry.register(supplierStatement(deps));
   registry.register(createPurchaseRequest(deps));
   registry.register(decidePurchaseRequest(deps));
   registry.register(createRfq(deps));
