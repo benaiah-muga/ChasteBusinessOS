@@ -10,6 +10,10 @@ import {
   stockReservations,
 } from "@chaste/db";
 import { availableToPromise, needsReorder, replayValuation } from "@chaste/erp-core";
+import { registerItemCapabilities } from "./items";
+export { createInventorySignalProducer } from "./signals";
+import { registerTransfersCapabilities } from "./transfers";
+import { registerValuationCapabilities } from "./valuation";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import {
   getOrCreateLot,
@@ -50,6 +54,9 @@ const createItem = (deps: ModuleDeps) =>
       unitLabel: z.string().max(20).default("unit"),
       salePriceMinor: z.number().int().nonnegative().default(0),
       reorderPointThousandths: z.number().int().nonnegative().default(0),
+      imageUrl: z.string().url().max(500).optional(),
+      tags: z.array(z.string().min(1).max(30)).max(20).default([]),
+      barcode: z.string().min(3).max(64).optional(),
     }),
     output: z.object({ itemId: z.string() }),
     execute: async (ctx, input) => {
@@ -59,6 +66,14 @@ const createItem = (deps: ModuleDeps) =>
         .where(and(eq(items.orgId, ctx.actor.orgId), eq(items.sku, input.sku)))
         .limit(1);
       if (dupe) throw new Error(`SKU "${input.sku}" already exists`);
+      if (input.barcode) {
+        const [barcodeDupe] = await deps.db
+          .select({ id: items.id })
+          .from(items)
+          .where(and(eq(items.orgId, ctx.actor.orgId), eq(items.barcode, input.barcode)))
+          .limit(1);
+        if (barcodeDupe) throw new Error(`barcode "${input.barcode}" is already on another item`);
+      }
       const [row] = await deps.db
         .insert(items)
         .values({
@@ -68,6 +83,9 @@ const createItem = (deps: ModuleDeps) =>
           unitLabel: input.unitLabel,
           salePriceMinor: input.salePriceMinor,
           reorderPointThousandths: input.reorderPointThousandths,
+          imageUrl: input.imageUrl ?? null,
+          tags: input.tags,
+          barcode: input.barcode ?? null,
         })
         .returning({ id: items.id });
       return { itemId: row!.id };
@@ -189,6 +207,9 @@ const stockReport = (deps: ModuleDeps) =>
           name: z.string(),
           unitLabel: z.string(),
           salePriceMinor: z.number(),
+          imageUrl: z.string().nullable(),
+          tags: z.array(z.string()),
+          barcode: z.string().nullable(),
           onHandThousandths: z.number(),
           valueMinor: z.number(),
           avgUnitCostMinor: z.number(),
@@ -212,7 +233,11 @@ const stockReport = (deps: ModuleDeps) =>
         const level = await stockOnHand(deps.db, ctx.actor.orgId, item.id);
         const history = await movementHistory(deps.db, ctx.actor.orgId, item.id);
         const valuation = replayValuation(
-          history.map((h) => ({ quantityDelta: h.quantityDelta, unitCostMinor: h.unitCostMinor ?? undefined })),
+          history.map((h) => ({
+            quantityDelta: h.quantityDelta,
+            unitCostMinor: h.unitCostMinor ?? undefined,
+            valueNeutral: h.reason === "transfer",
+          })),
         );
         const reserved = await openReserved(deps.db, ctx.actor.orgId, item.id);
         const available = Math.max(0, level - reserved);
@@ -224,6 +249,9 @@ const stockReport = (deps: ModuleDeps) =>
           name: item.name,
           unitLabel: item.unitLabel,
           salePriceMinor: item.salePriceMinor,
+          imageUrl: item.imageUrl,
+          tags: item.tags,
+          barcode: item.barcode,
           onHandThousandths: level,
           valueMinor: valuation.totalValueMinor,
           avgUnitCostMinor:
@@ -710,4 +738,7 @@ export function registerInventoryCapabilities(registry: CapabilityRegistry, deps
   registry.register(listLocations(deps));
   registry.register(listReservations(deps));
   registry.register(listLots(deps));
+  registerValuationCapabilities(registry, deps);
+  registerTransfersCapabilities(registry, deps);
+  registerItemCapabilities(registry, deps);
 }
