@@ -1,8 +1,9 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { customers, deals } from "@chaste/db";
+import { customers, deals, invoices, payments, quotes, tasks } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
+import { findDuplicate } from "@chaste/erp-core";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -36,13 +37,26 @@ const createCustomer = (deps: ModuleDeps) =>
       name: z.string().min(1).describe("Customer display name"),
       email: z.string().email().optional(),
     }),
-    output: z.object({ customerId: z.string() }),
+    output: z.object({
+      customerId: z.string(),
+      /** Present when an existing customer looks like the same one — never a refusal. */
+      duplicateWarning: z.string().nullable(),
+    }),
     execute: async (ctx, input) => {
+      const existing = await deps.db
+        .select({ name: customers.name, email: customers.email })
+        .from(customers)
+        .where(eq(customers.orgId, ctx.actor.orgId))
+        .limit(500);
+      const dupe = findDuplicate(existing, { name: input.name, email: input.email });
       const [row] = await deps.db
         .insert(customers)
         .values({ orgId: ctx.actor.orgId, name: input.name, email: input.email ?? null })
         .returning({ id: customers.id });
-      return { customerId: row!.id };
+      return {
+        customerId: row!.id,
+        duplicateWarning: dupe.duplicate ? `Looks like existing customer "${dupe.existingName}" (matched by ${dupe.reason}). Merge or deactivate one of them.` : null,
+      };
     },
   });
 
@@ -99,6 +113,9 @@ const createDeal = (deps: ModuleDeps) =>
       title: z.string().min(1),
       customerId: z.string().optional(),
       valueMinor: z.number().int().nonnegative().default(0),
+      /** Where this deal came from (referral, website, walk-in…). */
+      source: z.string().max(200).optional(),
+      ownerUserId: z.string().uuid().optional(),
       note: z.string().max(2000).optional(),
     }),
     output: z.object({ dealId: z.string() }),
@@ -121,6 +138,8 @@ const createDeal = (deps: ModuleDeps) =>
           title: input.title,
           customerId: input.customerId ?? null,
           valueMinor: input.valueMinor,
+          source: input.source ?? null,
+          ownerUserId: input.ownerUserId ?? null,
           note: input.note ?? null,
           createdByUserId: ctx.actor.type === "human" ? ctx.actor.id : null,
         })
@@ -140,12 +159,18 @@ const moveDealStage = (deps: ModuleDeps) =>
     input: z.object({
       dealId: z.string(),
       stage: z.enum(DEAL_STAGES),
+      /** Why the deal died — feeds win/loss analysis. Stored when moving to lost. */
+      lostReason: z.string().max(500).optional(),
     }),
     output: z.object({ moved: z.boolean(), stage: z.string() }),
     execute: async (ctx, input) => {
       await deps.db
         .update(deals)
-        .set({ stage: input.stage, updatedAt: ctx.now })
+        .set({
+          stage: input.stage,
+          updatedAt: ctx.now,
+          lostReason: input.stage === "lost" ? (input.lostReason ?? null) : null,
+        })
         .where(and(eq(deals.id, input.dealId), eq(deals.orgId, ctx.actor.orgId)));
       return { moved: true, stage: input.stage };
     },
@@ -207,6 +232,258 @@ const pipelineReport = (deps: ModuleDeps) =>
     },
   });
 
+const convertLead = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "crm.convertLead",
+    title: "Convert lead",
+    intent:
+      "Promote a lead-stage deal to qualified and attach the customer it belongs to, creating the customer record on the fly when asked",
+    module: "crm",
+    risk: "write",
+    permission: "crm.write",
+    input: z.object({
+      dealId: z.string(),
+      /** Create a fresh customer record named after the deal when no id is given. */
+      createCustomer: z.boolean().optional(),
+      customerName: z.string().min(1).optional(),
+      customerId: z.string().optional(),
+    }),
+    output: z.object({ dealId: z.string(), customerId: z.string(), stage: z.literal("qualified") }),
+    execute: async (ctx, input) => {
+      const [deal] = await deps.db
+        .select()
+        .from(deals)
+        .where(and(eq(deals.id, input.dealId), eq(deals.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!deal) throw new Error("deal not found");
+      if (deal.stage !== "lead") throw new Error(`deal is ${deal.stage}; only lead-stage deals convert`);
+
+      let customerId = input.customerId ?? null;
+      if (customerId) {
+        const [owned] = await deps.db
+          .select({ id: customers.id })
+          .from(customers)
+          .where(and(eq(customers.id, customerId), eq(customers.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!owned) throw new Error("customer not found in this organization");
+      } else if (input.createCustomer || input.customerName) {
+        const name = input.customerName ?? deal.title;
+        const [created] = await deps.db
+          .insert(customers)
+          .values({ orgId: ctx.actor.orgId, name })
+          .returning({ id: customers.id });
+        customerId = created!.id;
+      }
+      if (!customerId) throw new Error("pass customerId, or createCustomer true, so the deal has a customer to attach to");
+
+      await deps.db
+        .update(deals)
+        .set({ stage: "qualified", customerId, updatedAt: ctx.now })
+        .where(and(eq(deals.id, deal.id), eq(deals.orgId, ctx.actor.orgId)));
+      return { dealId: deal.id, customerId, stage: "qualified" as const };
+    },
+  });
+
+// ── Tasks (M9.3): follow-ups with due dates; overdue ones signal ────────
+
+const createTask = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "crm.createTask",
+    title: "Create task",
+    intent:
+      "Record a follow-up task with an optional due date and back-reference so nothing promised to a customer quietly evaporates",
+    module: "crm",
+    risk: "write",
+    permission: "crm.write",
+    input: z.object({
+      title: z.string().min(1),
+      dueAt: z.string().datetime().optional(),
+      assigneeUserId: z.string().uuid().optional(),
+      refType: z.string().max(50).optional(),
+      refId: z.string().uuid().optional(),
+      note: z.string().max(2000).optional(),
+    }),
+    output: z.object({ taskId: z.string() }),
+    execute: async (ctx, input) => {
+      const [row] = await deps.db
+        .insert(tasks)
+        .values({
+          orgId: ctx.actor.orgId,
+          title: input.title,
+          dueAt: input.dueAt ? new Date(input.dueAt) : null,
+          assigneeUserId: input.assigneeUserId ?? null,
+          refType: input.refId ? (input.refType ?? "customer") : null,
+          refId: input.refId ?? null,
+          note: input.note ?? null,
+          createdByActorType: ctx.actor.type,
+          createdByActorId: ctx.actor.id,
+        })
+        .returning({ id: tasks.id });
+      return { taskId: row!.id };
+    },
+  });
+
+const completeTask = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "crm.completeTask",
+    title: "Complete task",
+    intent: "Mark a follow-up task done so it stops showing as open and overdue",
+    // No inverse: completion is the honest terminal state; reopening would
+    // need its own capability with a reason, not a silent undo.
+    module: "crm",
+    risk: "write",
+    permission: "crm.write",
+    input: z.object({ taskId: z.string() }),
+    output: z.object({ completed: z.literal(true) }),
+    execute: async (ctx, input) => {
+      const updated = await deps.db
+        .update(tasks)
+        .set({ doneAt: ctx.now })
+        .where(and(eq(tasks.id, input.taskId), eq(tasks.orgId, ctx.actor.orgId), isNull(tasks.doneAt)))
+        .returning({ id: tasks.id });
+      if (updated.length === 0) throw new Error("task not found or already completed");
+      return { completed: true as const };
+    },
+  });
+
+const listTasks = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "crm.listTasks",
+    title: "List tasks",
+    intent: "Show the organization's follow-up tasks, open or done, with due dates and what they reference",
+    module: "crm",
+    risk: "read",
+    permission: "crm.read",
+    input: z.object({ openOnly: z.boolean().optional() }),
+    output: z.object({
+      tasks: z.array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          dueAt: z.string().nullable(),
+          doneAt: z.string().nullable(),
+          refType: z.string().nullable(),
+          refId: z.string().nullable(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      const rows = await deps.db
+        .select()
+        .from(tasks)
+        .where(
+          input.openOnly
+            ? and(eq(tasks.orgId, ctx.actor.orgId), isNull(tasks.doneAt))
+            : eq(tasks.orgId, ctx.actor.orgId),
+        )
+        .orderBy(tasks.doneAt, tasks.dueAt)
+        .limit(200);
+      return {
+        tasks: rows.map((t) => ({
+          id: t.id,
+          title: t.title,
+          dueAt: t.dueAt?.toISOString() ?? null,
+          doneAt: t.doneAt?.toISOString() ?? null,
+          refType: t.refType,
+          refId: t.refId,
+        })),
+      };
+    },
+  });
+
+const customerTimeline = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "crm.customerTimeline",
+    title: "Customer timeline",
+    intent:
+      "Assemble one reverse-chronological view of everything that happened with a customer — quotes, invoices, payments, deals, and tasks — from a single read",
+    module: "crm",
+    risk: "read",
+    permission: "crm.read",
+    input: z.object({ customerId: z.string(), limit: z.number().int().positive().max(200).optional() }),
+    output: z.object({
+      entries: z.array(
+        z.object({
+          kind: z.string(),
+          date: z.string(),
+          refId: z.string(),
+          summary: z.string(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      const limit = input.limit ?? 50;
+      const [owned] = await deps.db
+        .select({ id: customers.id, name: customers.name })
+        .from(customers)
+        .where(and(eq(customers.id, input.customerId), eq(customers.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!owned) throw new Error("customer not found in this organization");
+
+      type Entry = { kind: string; date: Date; refId: string; summary: string };
+      const entries: Entry[] = [];
+
+      const invRows = await deps.db
+        .select({ id: invoices.id, number: invoices.number, status: invoices.status, totalMinor: invoices.totalMinor, issuedAt: invoices.issuedAt })
+        .from(invoices)
+        .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.customerId, owned.id)))
+        .orderBy(desc(invoices.issuedAt))
+        .limit(limit);
+      for (const i of invRows) {
+        if (!i.issuedAt) continue;
+        entries.push({ kind: "invoice", date: i.issuedAt, refId: i.id, summary: `Invoice #${i.number} (${i.status}, ${(i.totalMinor / 100).toFixed(2)})` });
+      }
+
+      const payRows = await deps.db
+        .select({ id: payments.id, amountMinor: payments.amountMinor, method: payments.method, receivedAt: payments.receivedAt })
+        .from(payments)
+        .innerJoin(invoices, eq(payments.invoiceId, invoices.id))
+        .where(and(eq(payments.orgId, ctx.actor.orgId), eq(invoices.customerId, owned.id)))
+        .orderBy(desc(payments.receivedAt))
+        .limit(limit);
+      for (const p of payRows) {
+        entries.push({ kind: "payment", date: p.receivedAt, refId: p.id, summary: `Payment ${(p.amountMinor / 100).toFixed(2)} via ${p.method}` });
+      }
+
+      const quoteRows = await deps.db
+        .select({ id: quotes.id, number: quotes.number, status: quotes.status, totalMinor: quotes.totalMinor, decidedAt: quotes.decidedAt, createdAt: quotes.createdAt })
+        .from(quotes)
+        .where(and(eq(quotes.orgId, ctx.actor.orgId), eq(quotes.customerId, owned.id)))
+        .limit(limit);
+      for (const q of quoteRows) {
+        entries.push({ kind: "quote", date: q.decidedAt ?? q.createdAt, refId: q.id, summary: `Quote #${q.number} (${q.status}, ${(q.totalMinor / 100).toFixed(2)})` });
+      }
+
+      const dealRows = await deps.db
+        .select({ id: deals.id, title: deals.title, stage: deals.stage, valueMinor: deals.valueMinor, updatedAt: deals.updatedAt })
+        .from(deals)
+        .where(and(eq(deals.orgId, ctx.actor.orgId), eq(deals.customerId, owned.id)))
+        .limit(limit);
+      for (const d of dealRows) {
+        entries.push({ kind: "deal", date: d.updatedAt, refId: d.id, summary: `Deal "${d.title}" (${d.stage}, ${(d.valueMinor / 100).toFixed(2)})` });
+      }
+
+      const taskRows = await deps.db
+        .select({ id: tasks.id, title: tasks.title, dueAt: tasks.dueAt, doneAt: tasks.doneAt, createdAt: tasks.createdAt })
+        .from(tasks)
+        .where(and(eq(tasks.orgId, ctx.actor.orgId), eq(tasks.refType, "customer"), eq(tasks.refId, owned.id)))
+        .limit(limit);
+      for (const t of taskRows) {
+        entries.push({ kind: "task", date: t.doneAt ?? t.dueAt ?? t.createdAt, refId: t.id, summary: `Task "${t.title}"${t.doneAt ? " (done)" : ""}` });
+      }
+
+      entries.sort((a, b) => b.date.getTime() - a.date.getTime());
+      return {
+        entries: entries.slice(0, limit).map((e) => ({
+          kind: e.kind,
+          date: e.date.toISOString(),
+          refId: e.refId,
+          summary: e.summary,
+        })),
+      };
+    },
+  });
+
 export function registerCrmCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(createCustomer(deps));
   registry.register(deactivateCustomer(deps));
@@ -214,4 +491,11 @@ export function registerCrmCapabilities(registry: CapabilityRegistry, deps: Modu
   registry.register(createDeal(deps));
   registry.register(moveDealStage(deps));
   registry.register(pipelineReport(deps));
+  registry.register(convertLead(deps));
+  registry.register(createTask(deps));
+  registry.register(completeTask(deps));
+  registry.register(listTasks(deps));
+  registry.register(customerTimeline(deps));
 }
+
+export { createCrmSignalProducer } from "./signals";
