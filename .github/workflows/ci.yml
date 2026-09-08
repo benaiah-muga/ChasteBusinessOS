@@ -10,6 +10,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fast, DB-free pre-flight. `verify` also installs with --frozen-lockfile,
+  # but by then you have waited on Postgres; this fails in ~30s with an
+  # actionable message instead of a bare ERR_PNPM_OUTDATED_LOCKFILE.
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Verify lockfile is in sync with the workspace manifests
+        run: |
+          if ! pnpm install --frozen-lockfile --ignore-scripts >/tmp/pnpm-install.log 2>&1; then
+            echo "::error::pnpm-lock.yaml is out of sync with the workspace package.json files."
+            echo "::error::A workspace dependency was added or bumped without regenerating the lockfile."
+            echo "::error::Fix it locally with:  pnpm install   (then commit pnpm-lock.yaml)"
+            echo "---- pnpm output ----"
+            cat /tmp/pnpm-install.log
+            exit 1
+          fi
+          echo "lockfile is in sync"
+
   verify:
     runs-on: ubuntu-latest
     services:

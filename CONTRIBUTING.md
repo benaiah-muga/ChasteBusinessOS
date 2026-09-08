@@ -56,6 +56,32 @@ pnpm dev
 5. Link an issue when applicable.
 6. For architectural changes, add or update an ADR.
 
+### Stacked pull requests
+
+Large milestones ship as a chain of PRs, one per milestone, each branching off
+the one below it. A stacked PR is **not** independently reviewable: its diff is
+the delta against its parent branch, not against `main`.
+
+Rules that keep a stack from rotting:
+
+- **Declare the stack.** In every PR body, list the full chain bottom-up and say
+  which one is the base, e.g. `main <- os-phase3 <- m7 <- m8 (this PR)`.
+- **Merge bottom-up, never out of order.** Merging a middle PR first silently
+  reparents everything above it.
+- **Re-sync after the PR below you lands.** Merge or rebase the new base into
+  your branch and re-run `pnpm lint && pnpm typecheck && pnpm test` before
+  asking for review.
+- **`pnpm-lock.yaml` must be regenerated, never hand-edited.** If you add or
+  bump a workspace dependency, run `pnpm install` and commit the lockfile in
+  the same PR. CI installs with `--frozen-lockfile` and will fail otherwise.
+- **CI passing on your branch does not mean `main` will pass.** Each PR is
+  verified against its own parent; only the tip of the stack reflects the final
+  combined state.
+
+If a stack has drifted, the fix is to rebuild it as a true linear chain
+(each branch's parent is the previous branch) rather than merging siblings
+together at the end.
+
 ## Commit style
 
 Prefer [Conventional Commits](https://www.conventionalcommits.org/):
