@@ -24,7 +24,7 @@ In this monorepo the bundled docs resolve to **`apps/web/node_modules/next/dist/
 pnpm install
 cp .env.example .env        # fill NVIDIA_API_KEY + BETTER_AUTH_SECRET
 docker start chaste-pgvector
-turbo db:migrate            # from packages/db
+pnpm --filter @chaste/db db:migrate
 pnpm dev                    # apps/web on :3000
 ```
 
@@ -42,8 +42,15 @@ pnpm dev                    # apps/web on :3000
 pnpm typecheck && pnpm lint && pnpm test
 ```
 
-Live behavior proofs: `pnpm demo:slice`, `demo:m2`, `demo:m3`, `demo:m4`, `demo:m4b`, `demo:m5`.
-A change that breaks a demo is not done.
+Live behavior proofs — one per milestone, each an executable specification:
+`demo:slice`, `demo:m2`, `demo:m3`, `demo:m4`, `demo:m4b`, `demo:m5`,
+`demo:m6`, `demo:support`, `demo:m7` … `demo:m13`. See the list in
+[README.md](README.md#demo-proofs). A change that breaks a demo is not done.
+
+Every demo needs a migrated database; several also drive the real agent and
+so need a provider key. CI skips the set when no key is configured, so a
+missing key shows up as a skipped job rather than a failure — run them
+locally before claiming a milestone works.
 
 ## For coding agents
 
@@ -60,6 +67,10 @@ A change that breaks a demo is not done.
   write it down.
 - Update `CHANGELOG.md` under `[Unreleased]` for every user-visible or
   behavioral change, Added/Changed/Fixed/Removed.
+- Adding or bumping a workspace dependency means committing a **regenerated**
+  `pnpm-lock.yaml` in the same change. CI installs with `--frozen-lockfile`,
+  so a stale lockfile fails before lint, typecheck or tests ever run — which
+  means it also hides real errors until it is fixed. Never hand-edit it.
 - Do not add comments explaining obvious code; explain *why*, not *what*.
 
 ## Next.js 16.3 agent tooling (`apps/web`)
