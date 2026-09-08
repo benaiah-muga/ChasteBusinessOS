@@ -204,6 +204,9 @@ importers:
       '@chaste/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@chaste/erp-core':
+        specifier: workspace:*
+        version: link:../../packages/erp-core
       '@chaste/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
@@ -381,6 +384,30 @@ importers:
       '@chaste/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      drizzle-orm:
+        specifier: ^0.44.5
+        version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
+      zod:
+        specifier: ^4.1.5
+        version: 4.4.3
+
+  modules/sales:
+    dependencies:
+      '@chaste/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@chaste/erp-core':
+        specifier: workspace:*
+        version: link:../../packages/erp-core
+      '@chaste/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@chaste/module-accounting':
+        specifier: workspace:*
+        version: link:../accounting
+      '@chaste/module-inventory':
+        specifier: workspace:*
+        version: link:../inventory
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)

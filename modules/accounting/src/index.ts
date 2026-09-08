@@ -107,7 +107,7 @@ const lineSchema = z.object({
  * quote acceptance, so a converted quote becomes an ordinary invoice with
  * no parallel write path.
  */
-async function insertInvoiceWithPosting(
+export async function insertInvoiceWithPosting(
   tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0],
   ctx: ActionContext,
   input: {
