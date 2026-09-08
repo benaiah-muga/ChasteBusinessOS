@@ -33,20 +33,28 @@ It cannot spend above your approval threshold without sign-off. It cannot assign
 
 | Area | What works today |
 |---|---|
-| **Accounting** | Double-entry GL with immutable postings and mirror reversals, AR/AP subledgers, period close, trial balance, P&L, balance sheet |
+| **Accounting** | Double-entry GL with immutable postings and mirror reversals, AR/AP subledgers, period close, trial balance, P&L, balance sheet, direct-method cash flow, customer and supplier statements, 13-week cash forecast |
 | **Approvals** | Human-in-the-loop gates on money above thresholds; identity and destructive actions always require a person |
 | **Audit** | Append-only hash-chained event ledger of everything humans and agents did; replayable agent session trajectories |
-| **CRM** | Customers and deals pipeline with weighted forecasting |
-| **POS** | Register sessions, atomic cash/card sales, drawer counting with variance flagging |
-| **Purchasing** | Vendors, bills, purchase orders with goods receipts and three-way matching |
-| **Inventory** | Append-only stock ledger with moving-average valuation, reorder alerts, reservations, cycle counts, locations, lots |
-| **Manufacturing** | Multi-level BOMs with scrap allowances, work orders, production runs with full reversal, lot traceability |
+| **Sales** | Reservation-anchored orders: confirming checks credit headroom and reserves stock, delivery consumes reservations and invoices exactly what shipped, oversell is refused |
+| **CRM** | Leads, deals pipeline with weighted forecasting, lead conversion, tasks with due dates, duplicate detection, and a customer 360 timeline merging invoices, payments, quotes, deals and tasks |
+| **POS** | Register sessions, atomic cash/card sales, drawer counting with variance flagging, always-gated full-sale returns, and per-register shift summaries |
+| **Purchasing** | Vendors, bills, purchase orders with goods receipts and three-way matching, payment terms, supplier price history and lead-time memory, close-with-backorder |
+| **Inventory** | Append-only stock ledger with moving-average valuation, reorder alerts, reservations, cycle counts, locations, lots, internal transfers, barcodes, and GL reconciliation |
+| **Manufacturing** | Multi-level BOMs with scrap allowances, work orders, production runs with full reversal, lot traceability, can-we-produce-N planning |
+| **People & projects** | Employee structure, attendance with late flags, derived leave balances, recruitment-lite through to hire, projects kanban, and expense claims with policy limits and duplicate detection |
+| **Marketing** | Saved deterministic segments, campaigns with opt-out honoured at send time, and the append-only send log as the analytics (no tracking pixels) |
+| **Support** | Helpdesk tickets with numbers, priority/category/SLA, canned responses, KB articles, and SLA-breach signals |
+| **Documents** | Folders, business-record links, and append-only version history with expiry signals |
+| **Understanding** | `analytics.explainChange` decomposes a revenue change into exact, property-tested contributions with drill-to-invoice; `askYourBusiness` answers from cited extracts and proposes a governed action |
+| **Signals** | Cross-module needs-attention registry: deterministic producers aggregated red-first with evidence and a suggested governed action |
+| **Routines** | The agent on a schedule in plain language, running headless under a least-privilege bundle, silent on `NO_ACTION`, triggerable by webhook |
 | **Messaging** | Team channels and DMs; the agent participates under its own authority |
 | **Creator Mode** | The agent proposes platform changes as governed artifacts; humans merge |
 
 ## Quick start
 
-Requirements: Node 22+, pnpm 11+, Docker (for Postgres 16 + pgvector), an NVIDIA API key ([build.nvidia.com](https://build.nvidia.com)).
+Requirements: Node 24+ (matches CI), pnpm 11+, Docker (for Postgres 16 + pgvector), and one model provider key — NVIDIA NIM ([build.nvidia.com](https://build.nvidia.com)) by default, or OpenRouter, Groq, Mistral, or Z.ai (GLM) via `MODEL_PROVIDER`.
 
 ```sh
 git clone https://github.com/benaiah-muga/ChasteBusinessOS.git
@@ -87,7 +95,19 @@ Each script is an executable specification. If one fails, that's a bug worth kno
 pnpm demo:slice   # customer → invoice → gated payment → approval → trial balance
 pnpm demo:m4      # vendor bill → gated payment → P&L and balance sheet prove out
 pnpm demo:m5      # register session → sales → drawer variance flagged
+pnpm demo:m7      # inventory → GL reconciliation, transfers, products
+pnpm demo:m8      # needs-attention signals, governed reorder approve/decline
+pnpm demo:m9      # quote-to-cash: fulfillment, credit guard, expiry, customer 360
+pnpm demo:m10     # cash flow, credit notes, statements, reminders, forecast
+pnpm demo:m11     # hire → project → time → expense → approve
+pnpm demo:m12     # revenue decomposition, ask-your-business, tickets, documents
+pnpm demo:m13     # POS returns, shift summaries, marketing-lite
 ```
+
+Most take a subcommand to run one proof, e.g. `pnpm demo:m9 fulfillment`.
+Every demo needs a migrated database, and several also drive the real agent
+and so need a model provider key — CI skips the whole set when no key is
+configured, so a missing key looks like a skipped job rather than a failure.
 
 ## Upgrading
 

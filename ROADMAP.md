@@ -75,7 +75,7 @@
       (@chaste/plugin-kit, ADR 0018); marketplace listings + install flow
 - [ ] Sandboxed dev container + branch-per-proposal workflow
 
-## M6.5, Manufacturing module + full surfaces (current)
+## M6.5, Manufacturing module + full surfaces (✅ shipped)
 - [x] `modules/manufacturing` as its own governed module (ADR 0026): multi-level
       BOMs with per-component scrap, work orders (draft → release → partial
       completions → close), production runs with whole-run reversal, cost
@@ -118,7 +118,7 @@
       (ADR 0021); sandboxed proposal runner (ADR 0023)
 - [ ] Pen-test pass; per-org data residency notes
 
-## M7 — Inventory integrity: books that see the warehouse (planned)
+## M7 — Inventory integrity: books that see the warehouse (✅ shipped, ADR 0033)
 Plan and gate specs: `docs/REVENUE_SUITE_PLAN.md` (external inventory audit,
 triaged against the codebase)
 - [x] Inventory → GL closure: periodic valuation summary posting with
@@ -132,7 +132,7 @@ triaged against the codebase)
       stock-term tooltips (receipt notes already carried by ledger note field)
 - Demo proof: `pnpm demo:m7`
 
-## M8 — Signals + reorder intelligence (planned)
+## M8 — Signals + reorder intelligence (✅ shipped, ADR 0034, 0035)
 - [x] Cross-module "Needs Attention" signal registry (ADR 0034): deterministic
       producers, one shape, feeding home dashboard, app overviews, routines,
       and the agent

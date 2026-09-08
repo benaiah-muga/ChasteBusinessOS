@@ -106,6 +106,15 @@ Three tiers of memory (context-rot aware):
 Embeddings: NVIDIA NIM `nvidia/nv-embedqa-e5-v5` (free tier). Retrieval = vector
 similarity + pg_trgm keyword fallback, tenant-scoped with row-level filtering.
 
+### Proactive runs
+
+The loop is not only reactive. **Routines** (ADR 0031) schedule the agent in
+plain language ("every 30 minutes", "weekdays at 9am"), fire from the durable
+job queue, and execute as headless replayable sessions under a fixed
+least-privilege bundle (org reads + `messaging.write`). They stay silent on
+`NO_ACTION` and surface findings as notifications. An external orchestrator can
+trigger the same governed path through a per-routine webhook token.
+
 ---
 
 ## 4. Creator Mode (self-development)
@@ -127,10 +136,16 @@ governed artifacts, not live patches.
 ## 5. Coding-Agent Federation
 
 Chaste detects installed coding agents (`opencode`, `codex`, `claude`, `kilocode`,
-`aider`, …) by scanning PATH + known config dirs, and exposes them as delegatable
-capabilities ("dispatch this implementation task to opencode"). Providers configured
-via API key (NVIDIA today; any OpenAI-compatible endpoint tomorrow) sit beside these.
-One abstraction: **ModelRef** = { provider: nim | openai-compat | local-cli }.
+`aider`, `gemini`, …) by scanning PATH natively plus known config dirs, and exposes
+them as delegatable capabilities ("dispatch this implementation task to opencode").
+Detection also resolves versions and flags config-only installs; it is unit-tested
+against fixture homes and fake PATHs.
+
+Hosted providers configured by API key sit beside these: NVIDIA NIM, OpenRouter,
+Groq, Mistral, and Z.ai (GLM) — all OpenAI-compatible. One abstraction:
+**ModelRef** = { provider: nim | openai-compat | local-cli }. `MODEL_PROVIDER`
+selects the default, and an explicit model prefix (`groq/…`, `zai/…`) wins over
+it, so a single process can route one call to a secondary provider.
 
 Model routing (all via NVIDIA NIM unless overridden):
 | Role | Model |
@@ -149,14 +164,14 @@ Model routing (all via NVIDIA NIM unless overridden):
 |---|---|---|
 | Repo | Turborepo + pnpm workspaces | parallel builds, shared versioning, clean package boundaries |
 | Language | TypeScript (strict) end-to-end | one type system from DB to UI; agents generate typed code |
-| Web | Next.js 15 (App Router, RSC) | server components for dense ERP grids; streaming agent UIs |
+| Web | Next.js 16 (App Router, RSC, Cache Components) | server components for dense ERP grids; streaming agent UIs (ADR 0027, 0028) |
 | API | Next.js route handlers + Zod boundaries | thin adapters over the capability kernel; tRPC considered, not needed yet |
 | DB | PostgreSQL 16 + Drizzle ORM | relational integrity is non-negotiable for accounting; SQL-native migrations |
 | Vectors | pgvector | no extra infra; joins with transactional data; HNSW indexes |
 | Auth | better-auth (multi-org) | TS-first, org/team plugins, passkeys ready |
 | UI | Tailwind v4 + shadcn/ui | speed, accessibility; shared `ui/` package is a future extraction, not built |
 | Validation | Zod 4 | shared schemas across kernel/UI/LLM function-calling |
-| Jobs | none yet (synchronous in-request) | document ingestion/OCR will move to a Postgres-backed queue before GA |
+| Jobs | Postgres-backed durable queue (`jobs`, claimed `FOR UPDATE SKIP LOCKED`) | no extra infra; schedules advanced at claim time for at-most-once execution. Drives routines and ingestion |
 | Observability | console logging + event ledger in DB | structured pino logs and OpenTelemetry traces are planned, not wired |
 | Testing | Vitest (unit + DB integration); property-based tests for ledger invariants | double-entry balance is a property, not a test case; Playwright e2e planned |
 
@@ -172,9 +187,23 @@ packages/
   erp-core/       pure domain logic: posting rules, tax, inventory math (no IO)
   plugin-kit/     signed plugin manifest format for marketplace capabilities
 modules/          ERP modules (each exports capabilities over @chaste/db)
-  accounting/ purchasing/ pos/ crm/ hr/ inventory/ manufacturing/ iam/
-  messaging/ documents/ creator/
+  money & trade   accounting/ purchasing/ sales/ pos/ inventory/
+  operations      manufacturing/ projects/ hr/ documents/
+  growth          crm/ marketing/ support/
+  platform        iam/ messaging/ creator/ skills/ routines/
+  intelligence    signals/ analytics/
 ```
+
+Two of these are cross-cutting rather than domain modules:
+
+- **`signals`** hosts the needs-attention registry (ADR 0034). Modules
+  contribute deterministic producers; `signals.list` aggregates them red-first
+  with evidence and a suggested governed action. A failing producer degrades to
+  missing signals, never a broken dashboard.
+- **`analytics`** is the understanding layer (ADR 0039): `explainChange`
+  decomposes a revenue delta with exact, property-tested contributions, and
+  `askYourBusiness` answers from cited extracts and signals, ending in a
+  *proposed* governed action rather than executing one.
 
 Domain rule: `erp-core` is pure functions; `modules/*` may touch DB via `db`;
 only `kernel` executes capabilities; only humans approve `identity/destructive`.
