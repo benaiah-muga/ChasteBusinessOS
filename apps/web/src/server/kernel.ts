@@ -4,6 +4,7 @@ import {
   KernelExecutor,
   OrgPolicyEngine,
   CapabilityRegistry,
+  type BusinessSignal,
   computeEntryHash,
   type ActionContext,
   type ApprovalFlow,
@@ -25,21 +26,25 @@ import {
   type Database,
 } from "@chaste/db";
 import { getDb } from "@chaste/db";
-import { registerAccountingCapabilities } from "@chaste/module-accounting";
+import { registerAccountingCapabilities, createAccountingSignalProducer } from "@chaste/module-accounting";
 import { registerAnalyticsCapabilities } from "@chaste/module-analytics";
-import { registerCrmCapabilities } from "@chaste/module-crm";
+import { registerCrmCapabilities, createCrmSignalProducer } from "@chaste/module-crm";
 import { registerMessagingCapabilities } from "@chaste/module-messaging";
 import { registerPurchasingCapabilities } from "@chaste/module-purchasing";
 import { registerPosCapabilities } from "@chaste/module-pos";
+import { registerProjectsCapabilities } from "@chaste/module-projects";
+import { registerMarketingCapabilities } from "@chaste/module-marketing";
 import { registerIamCapabilities } from "@chaste/module-iam";
-import { registerInventoryCapabilities } from "@chaste/module-inventory";
+import { registerInventoryCapabilities, createInventorySignalProducer } from "@chaste/module-inventory";
 import { registerManufacturingCapabilities } from "@chaste/module-manufacturing";
+import { registerSalesCapabilities } from "@chaste/module-sales";
 import { registerCreatorCapabilities } from "@chaste/module-creator";
-import { registerDocumentCapabilities } from "@chaste/module-documents";
-import { registerHrCapabilities } from "@chaste/module-hr";
-import { registerSupportCapabilities } from "@chaste/module-support";
+import { registerDocumentCapabilities, createDocumentSignalProducer } from "@chaste/module-documents";
+import { registerHrCapabilities, createHrSignalProducer } from "@chaste/module-hr";
+import { registerSupportCapabilities, createSupportSignalProducer } from "@chaste/module-support";
 import { registerSkillCapabilities } from "@chaste/module-skills";
 import { registerRoutineCapabilities } from "@chaste/module-routines";
+import { registerSignalsCapabilities } from "@chaste/module-signals";
 
 const registryCache = globalThis as unknown as {
   __chasteRegistry?: { version: string; registry: CapabilityRegistry };
@@ -60,19 +65,47 @@ export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   const registry = new CapabilityRegistry();
   registerCrmCapabilities(registry, { db });
   registerAccountingCapabilities(registry, { db });
-  registerAnalyticsCapabilities(registry, { db });
+  registerAnalyticsCapabilities(registry, {
+    db,
+    signals: async (signalOrgId, now) => {
+      const results = await Promise.all([
+        createInventorySignalProducer(db),
+        createAccountingSignalProducer(db),
+        createCrmSignalProducer(db),
+        createHrSignalProducer(db),
+      createSupportSignalProducer(db),
+      createDocumentSignalProducer(db),
+      ].map((p) => p(signalOrgId, now).catch(() => [] as BusinessSignal[])));
+      return results.flat().sort((x, y) => x.severity.localeCompare(y.severity) ? (x.severity === y.severity ? 0 : x.severity === "red" ? -1 : y.severity === "red" ? 1 : 0) : 0);
+    },
+  });
   registerMessagingCapabilities(registry, { db });
   registerPurchasingCapabilities(registry, { db });
   registerPosCapabilities(registry, { db });
+  registerProjectsCapabilities(registry, { db });
+  registerMarketingCapabilities(registry, { db });
   registerIamCapabilities(registry, { db });
   registerInventoryCapabilities(registry, { db });
   registerManufacturingCapabilities(registry, { db });
+  registerSalesCapabilities(registry, { db });
   registerCreatorCapabilities(registry, { db });
   registerDocumentCapabilities(registry, { db });
   registerHrCapabilities(registry, { db });
   registerSupportCapabilities(registry, { db });
   registerSkillCapabilities(registry);
   registerRoutineCapabilities(registry, { db });
+  // Signal producers compose here, at the app layer — modules never import
+  // each other for this (ADR 0034).
+  registerSignalsCapabilities(registry, {
+    producers: [
+      createInventorySignalProducer(db),
+      createAccountingSignalProducer(db),
+      createCrmSignalProducer(db),
+      createHrSignalProducer(db),
+      createSupportSignalProducer(db),
+      createDocumentSignalProducer(db),
+    ],
+  });
 
   // Boot-time ecosystem check: broken inverses are fatal, missing inverses
   // are surfaced debt. Never discover these at runtime.

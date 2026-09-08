@@ -77,18 +77,30 @@ importers:
       '@chaste/module-manufacturing':
         specifier: workspace:*
         version: link:../../modules/manufacturing
+      '@chaste/module-marketing':
+        specifier: workspace:*
+        version: link:../../modules/marketing
       '@chaste/module-messaging':
         specifier: workspace:*
         version: link:../../modules/messaging
       '@chaste/module-pos':
         specifier: workspace:*
         version: link:../../modules/pos
+      '@chaste/module-projects':
+        specifier: workspace:*
+        version: link:../../modules/projects
       '@chaste/module-purchasing':
         specifier: workspace:*
         version: link:../../modules/purchasing
       '@chaste/module-routines':
         specifier: workspace:*
         version: link:../../modules/routines
+      '@chaste/module-sales':
+        specifier: workspace:*
+        version: link:../../modules/sales
+      '@chaste/module-signals':
+        specifier: workspace:*
+        version: link:../../modules/signals
       '@chaste/module-skills':
         specifier: workspace:*
         version: link:../../modules/skills

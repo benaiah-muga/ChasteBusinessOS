@@ -12,6 +12,113 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **Retail & reach (M13, ADR 0040)**: `pos.returnSale` — always-gated
+  full-sale reversal that refunds through a mirrored entry, credits the
+  invoice, and restores stock; per-register shift summaries; marketing-lite
+  with saved deterministic segments, campaigns, opt-out honored at send
+  time, and the append-only send log as the analytics — no tracking pixels
+  (`pnpm demo:m13 [shifts|marketing]`).
+- **Front ends for every shipped capability**: POS page gains a Return
+  action on recent sales (202 → approvals-inbox state) and a shift-summary
+  card (takings, expected vs counted cash, variance); new Marketing page
+  (segments, campaigns, send log) at `/marketing` with `/api/marketing`;
+  new Projects board page at `/projects` with `/api/projects` plus an
+  Expenses tab on the HR page consuming the existing expense-claims API;
+  new "Cash & collections" tab on Accounting (13-week cash forecast,
+  reminder drafts, customer statements) and "Prices & statements" tab on
+  Purchasing (supplier price history, supplier statements).
+- **Understanding layer (M12, ADR 0039)**: `analytics.explainChange`
+  decomposes a revenue change across customers or products with exact,
+  property-tested contributions and drill-to-invoice ids;
+  `analytics.askYourBusiness` composes cited extracts and signals ending
+  in a proposed governed action; helpdesk tickets gain numbers,
+  priority/category/SLA fields, canned responses, KB articles, rules-first
+  category drafts, and SLA-breach signals; documents gain folders,
+  business-record links, append-only version history, and expiry signals
+  (`pnpm demo:m12 [decompose|ask|tickets|documents]`).
+- **People, projects, expenses (M11, ADR 0038)**: employee structure
+  (department/position/manager/emergency contacts), attendance clock-in/
+  clock-out on time entries with late flags and chronic-lateness signals,
+  derived leave balances and calendar; recruitment-lite (openings →
+  applicants → stages → hire converts to employee); manufacturing planning
+  lite (can-we-produce-N with BOM-explosion arithmetic and producible
+  ceiling, work centers, lead-time estimates); a standalone projects module
+  (kanban tasks/subtasks, assignment, priorities); expenses depth
+  (rules-first categories, receipts via the documents seam, per-category
+  policy limits raising signals, duplicate-claim detection)
+  (`pnpm demo:m11 [hr|projects|flow]`).
+- **Accounting & purchasing depth (M10, ADR 0037)**: direct-method cash
+  flow statement derived purely from the ledger with a built-in tie check;
+  always-gated AR/AP credit notes as reversal-style documents on immutable
+  credited columns; payment terms (net-days) driving invoice and bill due
+  dates; customer and supplier statements with running balances;
+  deterministic reminder drafting with opt-out delivered over the
+  messaging seam; supplier memory from receipts (lead time, on-time rate,
+  fill rate, price history); purchase close-with-backorder flag and
+  ledger-true returns; 13-week cash forecast; duplicate-payment signals
+  (`pnpm demo:m10 [cashflow|creditnote|statements|reminders|supplier|forecast|duplicate]`).
+- **Sales orders + fulfillment (M9, ADR 0036)**: `modules/sales` with
+  reservation-anchored orders — confirming checks the customer's credit
+  headroom (`customers.creditLimitMinor`) and reserves stock; delivery
+  consumes reservations, writes the stock leg through the shared writer,
+  and invoices exactly what shipped via the shared posting path;
+  oversell is refused, `allowBackorder` reserves what exists and flags
+  the order, cancellation releases untouched reservations
+  (`pnpm demo:m9 [fulfillment|credit]`).
+- **Quote expiry (M9)**: `quotes.expires_at` with expiry-refusing
+  acceptance, an idempotent `accounting.expireQuote` sweep, and an
+  expired-quote signal suggesting the governed decline.
+- **CRM depth (M9)**: `crm.convertLead` (creates/attaches the customer,
+  qualifies the deal), deal `source`/`ownerUserId`/`lostReason`, tasks
+  with due dates feeding red overdue-task signals, and deterministic
+  duplicate detection in `erp-core` (property-tested) that warns on
+  `crm.createCustomer` without ever refusing.
+- **Customer 360 (M9)**: `crm.customerTimeline` merges invoices,
+  payments, quotes, deals, and tasks into one reverse-chronological feed.
+- **Needs-attention signal registry (M8, ADR 0034)**: modules contribute
+  deterministic signals (inventory reorder pressure, dead stock, anomalous
+  adjustments; overdue receivables; stalled deals) through injected
+  producers; `signals.list` aggregates them red-first with evidence and
+  suggested governed actions; `/api/signals` and the home dashboard's
+  needs-you queue consume the same feed; a failing producer degrades to
+  missing signals, never a broken dashboard.
+- **Reorder intelligence (M8)**: deterministic orderpoint math in
+  `erp-core/reorder.ts` (average demand, variability, safety stock by
+  service level, reorder point, target, suggested quantity, days of
+  cover) with property and golden tests; `buildReorderPlan` composes the
+  purchase proposal; the agent narrates the arithmetic, never computes it.
+- **Governed reorder loop (M8)**: signal → plan → policy-gated PO draft →
+  human approval; decline is audited and creates nothing
+  (`pnpm demo:m8 [signals|reorder-approve|reorder-decline]`).
+- **Composition conformance (M8, ADR 0035)**: the module gate is surfaced
+  to capabilities via `ctx.services.moduleGate`; POS sales degrade
+  gracefully with Inventory disabled (money posts, no stock legs); subset
+  matrix + degradation tests guard it. Org policies now resolve by
+  specificity — the most specific matching pattern wins, ties resolve to
+  the stricter cap, so the onboarding blanket rule can be tightened per
+  module without loosening anything.
+
+
+- **Inventory → GL closure (M7, ADR 0033)**: `inventory.postValuationSummary`
+  reconciles the GL inventory account (1200) to the stock ledger's
+  moving-average value with one balanced entry against COGS; money-class
+  with fail-closed human approval, idempotent no-op when already
+  reconciled, single-use reversal via `inventory.reverseValuationSummary`.
+  Reconciliation math is pure and property-tested (`erp-core/gl.ts`).
+- **Internal stock transfers (M7)**: draft → partial/confirm → reverse
+  through governed capabilities; paired out/in legs on the shared ledger
+  (reason `transfer`) conserve quantity across locations, and transfer legs
+  are value-neutral in valuation replay so round trips cannot drift the
+  moving average. Stock tab gains a transfers panel with tooltips.
+- **Product surface (M7)**: items carry image URL, tags, and a barcode;
+  `inventory.updateItem` (snapshot-inverse) and `inventory.lookupByBarcode`
+  (honest null on miss); Products page gains image/tags/barcode inputs,
+  thumbnails in the catalog, and explanatory tooltips on stock terms.
+- **Demo proof**: `pnpm demo:m7 [reconciliation|transfers|products|all]`.
+
+
+
+### Added
 - **Z.ai (GLM) model provider**: `MODEL_PROVIDER=zai` routes agent turns
   through Z.ai's OpenAI-compatible endpoint (`ZAI_API_KEY`, `ZAI_BASE_URL`);
   `zai/` model prefixes are stripped like `groq/`. `resolveClient` now gives

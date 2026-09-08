@@ -18,10 +18,17 @@
     "demo:m5": "tsx --env-file-if-exists=.env scripts/demo-m5.ts",
     "demo:m6": "tsx --env-file-if-exists=.env scripts/demo-m6.ts",
     "demo:support": "tsx --env-file-if-exists=.env scripts/demo-support.ts",
+    "demo:m7": "tsx --env-file-if-exists=.env scripts/demo-m7.ts",
+    "demo:m8": "tsx --env-file-if-exists=.env scripts/demo-m8.ts",
     "nl:test": "tsx --env-file-if-exists=.env scripts/nl-tasks.ts",
     "test:groq": "tsx --env-file-if-exists=.env scripts/test-groq.ts",
     "bench:agents": "tsx --env-file-if-exists=.env scripts/test-groq-agents.ts",
-    "worker": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/worker.ts"
+    "worker": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/worker.ts",
+    "demo:m9": "tsx --env-file-if-exists=.env scripts/demo-m9.ts",
+    "demo:m10": "tsx --env-file-if-exists=.env scripts/demo-m10.ts",
+    "demo:m11": "tsx --env-file-if-exists=.env scripts/demo-m11.ts",
+    "demo:m12": "tsx --env-file-if-exists=.env scripts/demo-m12.ts",
+    "demo:m13": "tsx --env-file-if-exists=.env scripts/demo-m13.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
