@@ -54,7 +54,12 @@ It cannot spend above your approval threshold without sign-off. It cannot assign
 
 ## Quick start
 
-Requirements: Node 24+ (matches CI), pnpm 11+, Docker (for Postgres 16 + pgvector), and one model provider key — NVIDIA NIM ([build.nvidia.com](https://build.nvidia.com)) by default, or OpenRouter, Groq, Mistral, or Z.ai (GLM) via `MODEL_PROVIDER`.
+Requirements: Node 24+ (matches CI), pnpm 11+, Postgres 16 **with pgvector**, and — optionally — one model provider key (NVIDIA NIM ([build.nvidia.com](https://build.nvidia.com)) by default, or OpenRouter, Groq, Mistral, or Z.ai (GLM) via `MODEL_PROVIDER`).
+
+**Docker is not required.** The commands below use it for the database because
+it is the shortest path, but [docs/SETUP.md](docs/SETUP.md) covers three
+options — Docker, a hosted Postgres (Neon/Supabase/Railway, no containers at
+all), and a native Postgres install — along with a troubleshooting table.
 
 ```sh
 git clone https://github.com/benaiah-muga/ChasteBusinessOS.git
@@ -145,6 +150,7 @@ Controls and safety nets:
 
 ## Documentation
 
+- [Setup guide](docs/SETUP.md), local setup with or without Docker, plus troubleshooting
 - [Vision](VISION.md), what we're building and what we won't compromise
 - [Architecture](ARCHITECTURE.md), capability kernel, governance pipeline, memory tiers
 - [Roadmap](ROADMAP.md), milestones and standing principles
