@@ -12,7 +12,15 @@ import { IconArrowRight, IconSparkle } from "@/components/icons";
  * answering "what needs me" and "what is moving".
  */
 
+interface SignalItem {
+  id: string;
+  severity: "red" | "orange" | "green";
+  module: string;
+  subject: string;
+  detail: string;
+}
 interface DashboardPayload {
+  signals?: SignalItem[];
   money: {
     revenueMinor: number;
     expenseMinor: number;
@@ -612,6 +620,22 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
       href: "/inventory",
       cta: "restock",
     });
+  for (const signal of data.signals ?? []) {
+    const href =
+      signal.module === "inventory" ? "/inventory" :
+      signal.module === "accounting" ? "/accounting" :
+      signal.module === "crm" ? "/crm" :
+      signal.module === "pos" ? "/pos" :
+      signal.module === "hr" ? "/hr" :
+      signal.module === "purchasing" ? "/purchasing" : "/";
+    items.push({
+      key: signal.id,
+      severity: signal.severity === "red" ? "high" : signal.severity === "orange" ? "med" : "low",
+      text: <>{signal.subject}</>,
+      href,
+      cta: "review",
+    });
+  }
   if (data.ops.pendingLeave > 0)
     items.push({
       key: "leave",

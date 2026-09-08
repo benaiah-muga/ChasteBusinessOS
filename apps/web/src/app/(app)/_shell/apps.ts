@@ -49,6 +49,8 @@ export const APPS: AppInfo[] = [
   { id: "pos", name: "Point of sale", tagline: "Registers & instant sales", href: "/pos", icon: IconCart, hue: 60, moduleId: "pos" },
   { id: "inventory", name: "Inventory", tagline: "Stock, valuation, reordering", href: "/inventory", icon: IconBox, hue: 95, moduleId: "inventory" },
   { id: "products", name: "Products", tagline: "Catalog & pricing", href: "/products", icon: IconStore, hue: 85, moduleId: "inventory" },
+  { id: "marketing", name: "Marketing", tagline: "Segments, campaigns & send log", href: "/marketing", icon: IconSend, hue: 280, moduleId: "marketing" },
+  { id: "projects", name: "Projects", tagline: "Project boards & tasks", href: "/projects", icon: IconListTree, hue: 220, moduleId: "projects" },
   { id: "manufacturing", name: "Manufacturing", tagline: "BOMs & production runs", href: "/manufacturing", icon: IconFactory, hue: 40, moduleId: "manufacturing" },
   { id: "purchasing", name: "Purchasing (Procurement)", tagline: "Vendors & purchase orders", href: "/purchasing", icon: IconTruck, hue: 210, moduleId: "purchasing" },
   { id: "hr", name: "HR & Payroll", tagline: "People, leave, payroll runs", href: "/hr", icon: IconUser, hue: 330, moduleId: "hr" },

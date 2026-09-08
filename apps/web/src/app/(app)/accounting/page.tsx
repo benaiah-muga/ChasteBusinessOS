@@ -24,7 +24,7 @@ import {
   IconSparkle,
   IconUndo,
 } from "@/components/icons";
-import { cn, formatDateTime, formatMoney } from "@/lib/format";
+import { cn, formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
@@ -45,6 +45,7 @@ interface Overview {
   closedPeriods: { year: number; month: number }[];
   bills: { id: string; number: number; status: string; totalMinor: number; paidMinor: number; vendorName: string; outstandingMinor: number }[];
   filings: Filing[];
+  customers?: { id: string; name: string }[];
 }
 interface Reports {
   pnl: { revenueMinor: number; expenseMinor: number; netIncomeMinor: number; lines: { code: string; name: string; amountMinor: number }[] };
@@ -73,11 +74,45 @@ interface Banking {
     unmatchedCount: number;
   };
 }
+interface ForecastWeek {
+  weekStart: string;
+  inflowMinor: number;
+  outflowMinor: number;
+  closeMinor: number;
+}
+interface Forecast {
+  startMinor: number;
+  finalMinor: number;
+  lowestCloseMinor: number;
+  lowestWeekIndex: number;
+  weeks: ForecastWeek[];
+}
+interface ReminderDraft {
+  customerId: string;
+  customerName: string;
+  overdueCount: number;
+  oldestDaysOverdue: number;
+  totalOverdueMinor: number;
+  message: string;
+}
+interface StatementLine {
+  date: string;
+  kind: string;
+  ref: string;
+  amountMinor: number;
+  balanceMinor: number;
+}
+interface StatementView {
+  openingBalanceMinor: number;
+  closingBalanceMinor: number;
+  rows: StatementLine[];
+}
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "journal", label: "Journal" },
   { id: "receivables", label: "Receivables" },
+  { id: "cash", label: "Cash & collections" },
   { id: "payables", label: "Payables" },
   { id: "bank", label: "Bank" },
   { id: "tax", label: "Tax" },
@@ -290,6 +325,8 @@ export default function AccountingPage() {
       )}
 
       {tab === "receivables" && <ReceivablesSection a={a} agingInvoices={data.agingInvoices} />}
+
+      {tab === "cash" && <CashSection customers={data.customers ?? []} />}
 
       {tab === "payables" && (
         <PayablesSection bills={data.bills} openBills={openBills} onPay={setPayTarget} />
@@ -1353,6 +1390,226 @@ function TaxSection({
         confirmLabel="File return"
         busy={busy}
       />
+    </section>
+  );
+}
+
+/* -------------------------------------------------- cash & collections -- */
+
+/**
+ * M10 treasury + collections surfaces: 13-week cash forecast, drafted payment
+ * reminders, and per-customer statements — all read capabilities through the
+ * same governed executor.
+ */
+function CashSection({ customers }: { customers: { id: string; name: string }[] }) {
+  const [forecast, setForecast] = useState<Forecast | null>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
+  const [reminders, setReminders] = useState<ReminderDraft[] | null>(null);
+  const [remindersBusy, setRemindersBusy] = useState(false);
+  const [customerId, setCustomerId] = useState("");
+  const [statement, setStatement] = useState<StatementView | null>(null);
+  const [statementBusy, setStatementBusy] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void postApi<Forecast>("/api/accounting", { action: "cashForecast" }).then((res) => {
+      if (cancelled) return;
+      if (res.ok && res.data) setForecast(res.data);
+      else setForecastError(res.error?.title ?? "Couldn't compute the forecast");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function draftReminders() {
+    setRemindersBusy(true);
+    const res = await postApi<{ reminders: ReminderDraft[] }>("/api/accounting", { action: "buildReminders" });
+    setRemindersBusy(false);
+    if (res.ok && res.data) setReminders(res.data.reminders);
+  }
+
+  async function loadStatement() {
+    if (!customerId) return;
+    setStatementBusy(true);
+    const res = await postApi<StatementView>("/api/accounting", { action: "customerStatement", customerId });
+    setStatementBusy(false);
+    setStatement(res.ok && res.data ? res.data : null);
+  }
+
+  function copyMessage(r: ReminderDraft) {
+    void navigator.clipboard.writeText(r.message).then(() => setCopiedId(r.customerId));
+  }
+
+  return (
+    <section className="space-y-8">
+      <Card>
+        <CardTitle>13-week cash forecast</CardTitle>
+        {forecastError ? (
+          <QuietLine>{forecastError}</QuietLine>
+        ) : !forecast ? (
+          <QuietLine>Projecting thirteen weeks of cash…</QuietLine>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <StatCard label="Cash today" value={formatMoney(forecast.startMinor)} />
+              <StatCard label="Projected in 13 weeks" value={formatMoney(forecast.finalMinor)} />
+              <StatCard
+                label="Projected low point"
+                value={formatMoney(forecast.lowestCloseMinor)}
+                sub={`week ${forecast.lowestWeekIndex + 1} of 13`}
+                tone={forecast.lowestCloseMinor < 0 ? "danger" : "default"}
+              />
+            </div>
+            <table className="mt-4 w-full text-sm">
+              <thead>
+                <tr className="text-left opacity-50">
+                  <th>Week of</th>
+                  <th className="text-right">Inflow</th>
+                  <th className="text-right">Outflow</th>
+                  <th className="text-right">Closing</th>
+                </tr>
+              </thead>
+              <tbody>
+                {forecast.weeks.map((w, i) => (
+                  <tr key={w.weekStart} className={cn("border-t", i === forecast.lowestWeekIndex && "bg-amber-50/70")}>
+                    <td className="whitespace-nowrap py-1.5 text-stone-600">
+                      {formatDate(w.weekStart)}
+                      {i === forecast.lowestWeekIndex && (
+                        <span className="ml-2 text-xs font-medium text-amber-700">lowest</span>
+                      )}
+                    </td>
+                    <td className="text-right tabular-nums text-emerald-700">
+                      {w.inflowMinor ? formatMoney(w.inflowMinor) : "—"}
+                    </td>
+                    <td className="text-right tabular-nums text-stone-600">
+                      {w.outflowMinor ? formatMoney(w.outflowMinor) : "—"}
+                    </td>
+                    <td className="text-right font-medium tabular-nums">{formatMoney(w.closeMinor)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-xs text-stone-500">
+              Projected from current cash plus the due dates on open invoices and unpaid bills; anything unscheduled
+              (new sales, one-off spends) is not included.
+            </p>
+          </>
+        )}
+      </Card>
+
+      <Card>
+        <CardTitle
+          right={
+            <Button tone="ghost" size="sm" disabled={remindersBusy} onClick={() => void draftReminders()}>
+              {reminders ? "Redraft" : "Draft reminders"}
+            </Button>
+          }
+        >
+          Payment reminder drafts
+        </CardTitle>
+        {reminders === null ? (
+          <QuietLine>Draft polite chases for every overdue customer — nothing is sent automatically.</QuietLine>
+        ) : reminders.length === 0 ? (
+          <QuietLine>No overdue balances — nobody needs chasing right now.</QuietLine>
+        ) : (
+          <ul className="divide-y divide-stone-100">
+            {reminders.map((r) => (
+              <li key={r.customerId} className="py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-stone-800">{r.customerName}</span>
+                  <Badge tone={r.oldestDaysOverdue > 60 ? "red" : "amber"}>{r.oldestDaysOverdue}d overdue</Badge>
+                  <span className="text-xs text-stone-500">
+                    {r.overdueCount} invoice{r.overdueCount === 1 ? "" : "s"}
+                  </span>
+                  <span className="tnum ml-auto font-medium">{formatMoney(r.totalOverdueMinor)}</span>
+                  <Button tone="ghost" size="sm" onClick={() => copyMessage(r)}>
+                    {copiedId === r.customerId ? "Copied" : "Copy draft"}
+                  </Button>
+                </div>
+                <p className="mt-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-relaxed text-stone-700">
+                  {r.message}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card>
+        <CardTitle>Customer statement</CardTitle>
+        {customers.length === 0 ? (
+          <QuietLine>No customers yet — record an invoice first.</QuietLine>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <select
+                className="rounded border bg-transparent px-2 py-1.5"
+                value={customerId}
+                onChange={(e) => setCustomerId(e.target.value)}
+                aria-label="Customer"
+              >
+                <option value="">Customer…</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" disabled={!customerId || statementBusy} onClick={() => void loadStatement()}>
+                {statementBusy ? "Loading…" : "Load statement"}
+              </Button>
+            </div>
+            {statement &&
+              (statement.rows.length === 0 ? (
+                <QuietLine>No activity on this account yet.</QuietLine>
+              ) : (
+                <>
+                  <table className="mt-4 w-full text-sm">
+                    <thead>
+                      <tr className="text-left opacity-50">
+                        <th>Date</th>
+                        <th>Kind</th>
+                        <th>Ref</th>
+                        <th className="text-right">Amount</th>
+                        <th className="text-right">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statement.rows.map((row, i) => (
+                        <tr key={`${row.ref}-${i}`} className="border-t">
+                          <td className="whitespace-nowrap py-1.5 text-stone-600">{formatDate(row.date)}</td>
+                          <td>
+                            <Badge tone={row.kind === "payment" || row.kind === "credit_note" ? "green" : "neutral"}>
+                              {row.kind}
+                            </Badge>
+                          </td>
+                          <td className="text-stone-600">{row.ref}</td>
+                          <td
+                            className={cn(
+                              "text-right tabular-nums",
+                              row.amountMinor < 0 ? "text-emerald-700" : "text-stone-800",
+                            )}
+                          >
+                            {formatMoney(row.amountMinor)}
+                          </td>
+                          <td className="text-right font-medium tabular-nums">{formatMoney(row.balanceMinor)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-2 text-right text-sm">
+                    Closing balance{" "}
+                    <span className="tnum font-semibold text-stone-900">
+                      {formatMoney(statement.closingBalanceMinor)}
+                    </span>
+                  </p>
+                </>
+              ))}
+          </>
+        )}
+      </Card>
     </section>
   );
 }

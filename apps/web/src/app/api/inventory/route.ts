@@ -8,6 +8,8 @@ import {
   lots,
   stockLocations,
   stockReservations,
+  stockTransferLines,
+  stockTransfers,
 } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
@@ -93,6 +95,16 @@ export async function GET(req: Request) {
 
   const lotRows = await db.select().from(lots).where(eq(lots.orgId, orgId)).orderBy(desc(lots.createdAt)).limit(200);
 
+  const transferRows = await db
+    .select()
+    .from(stockTransfers)
+    .where(eq(stockTransfers.orgId, orgId))
+    .orderBy(desc(stockTransfers.createdAt))
+    .limit(50);
+  const transferIds = transferRows.map((t) => t.id);
+  const transferLineRows = transferIds.length
+    ? await db.select().from(stockTransferLines).where(inArray(stockTransferLines.transferId, transferIds))
+    : [];
   return NextResponse.json({
     items: reportItems,
     totalValueMinor: (stock.data as { totalValueMinor?: number } | undefined)?.totalValueMinor ?? 0,
@@ -115,6 +127,17 @@ export async function GET(req: Request) {
         })),
     })),
     lots: lotRows.map((l) => ({ id: l.id, lotCode: l.lotCode, sku: skuOf.get(l.itemId) ?? "", expiresAt: l.expiresAt })),
+    transfers: transferRows.map((t) => ({
+      id: t.id,
+      number: t.number,
+      status: t.status,
+      note: t.note,
+      from: locationCodeById.get(t.fromLocationId) ?? "?",
+      to: locationCodeById.get(t.toLocationId) ?? "?",
+      lines: transferLineRows
+        .filter((l) => l.transferId === t.id)
+        .map((l) => ({ sku: skuOf.get(l.itemId) ?? "", quantityThousandths: l.quantityThousandths, confirmedThousandths: l.confirmedThousandths })),
+    })),
   });
 }
 
@@ -140,6 +163,9 @@ export async function POST(req: Request) {
           unitLabel: str("unitLabel") ?? "unit",
           salePriceMinor: num("salePriceMinor") ?? 0,
           reorderPointThousandths: num("reorderPointThousandths") ?? 0,
+          imageUrl: str("imageUrl"),
+          tags: Array.isArray(body.tags) ? (body.tags as string[]) : [],
+          barcode: str("barcode"),
         }),
       );
     case "archiveItem":
@@ -203,6 +229,46 @@ export async function POST(req: Request) {
     case "createLocation":
       if (!str("code") || !str("name")) return NextResponse.json({ error: "code and name required" }, { status: 400 });
       return respond(await executor.execute("inventory.createLocation", ctx, { code: str("code")!, name: str("name")! }));
+    case "updateItem": {
+      if (!str("sku")) return NextResponse.json({ error: "sku required" }, { status: 400 });
+      const patch: Record<string, unknown> = { sku: str("sku")! };
+      for (const key of ["name", "unitLabel", "imageUrl", "barcode"] as const) {
+        if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (body.salePriceMinor !== undefined) patch.salePriceMinor = num("salePriceMinor");
+      if (Array.isArray(body.tags)) patch.tags = body.tags;
+      return respond(await executor.execute("inventory.updateItem", ctx, patch));
+    }
+    case "lookupByBarcode": {
+      if (!str("barcode")) return NextResponse.json({ error: "barcode required" }, { status: 400 });
+      return respond(await executor.execute("inventory.lookupByBarcode", ctx, { barcode: str("barcode")! }));
+    }
+    case "createTransfer": {
+      const lines = (body.lines ?? []) as { sku: string; quantityThousandths: number; lotCode?: string }[];
+      if (!str("fromLocationCode") || !str("toLocationCode") || lines.length === 0)
+        return NextResponse.json({ error: "fromLocationCode, toLocationCode and lines required" }, { status: 400 });
+      return respond(
+        await executor.execute("inventory.createTransfer", ctx, {
+          fromLocationCode: str("fromLocationCode")!,
+          toLocationCode: str("toLocationCode")!,
+          lines,
+          note: str("note"),
+        }),
+      );
+    }
+    case "confirmTransfer": {
+      if (!str("transferId")) return NextResponse.json({ error: "transferId required" }, { status: 400 });
+      const lines = (body.lines ?? undefined) as { lineId: string; quantityThousandths: number }[] | undefined;
+      return respond(await executor.execute("inventory.confirmTransfer", ctx, { transferId: str("transferId")!, lines }));
+    }
+    case "cancelTransfer":
+      if (!str("transferId")) return NextResponse.json({ error: "transferId required" }, { status: 400 });
+      return respond(await executor.execute("inventory.cancelTransfer", ctx, { transferId: str("transferId")! }));
+    case "reverseTransfer":
+      if (!str("transferId")) return NextResponse.json({ error: "transferId required" }, { status: 400 });
+      return respond(await executor.execute("inventory.reverseTransfer", ctx, { transferId: str("transferId")! }));
+    case "postValuationSummary":
+      return respond(await executor.execute("inventory.postValuationSummary", ctx, { memo: str("memo") }));
     default:
       return NextResponse.json({ error: "invalid action" }, { status: 400 });
   }

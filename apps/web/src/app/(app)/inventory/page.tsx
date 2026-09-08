@@ -79,12 +79,27 @@ interface Location {
   code: string;
   name: string;
 }
+interface TransferLine {
+  sku: string;
+  quantityThousandths: number;
+  confirmedThousandths: number;
+}
+interface TransferRow {
+  id: string;
+  number: number;
+  status: string;
+  note: string | null;
+  from: string;
+  to: string;
+  lines: TransferLine[];
+}
 interface Payload {
   items?: StockItem[];
   reorderAlerts?: ReorderAlert[];
   locations?: Location[];
   reservations?: Reservation[];
   cycleCounts?: CycleCount[];
+  transfers?: TransferRow[];
 }
 const qty = (t: number) => (t / 1000).toFixed(3);
 
@@ -108,6 +123,7 @@ export default function InventoryPage() {
   const [countEntries, setCountEntries] = useState<Record<string, string>>({});
   const [locForm, setLocForm] = useState({ code: "", name: "" });
   const [reserveForm, setReserveForm] = useState({ sku: "", qty: "", reason: "" });
+  const [transferForm, setTransferForm] = useState({ from: "", to: "", sku: "", qty: "", note: "" });
 
   const load = useCallback(async () => {
     const res = await callApi<Payload>("/api/inventory");
@@ -223,9 +239,21 @@ export default function InventoryPage() {
                     <th className="py-1.5">SKU</th>
                     <th>Name</th>
                     <th className="text-right">On hand</th>
-                    <th className="text-right">Available</th>
-                    <th className="text-right">Value</th>
-                    <th className="text-right">Avg cost</th>
+                    <th
+                      className="text-right"
+                      title="Available-to-promise: on hand minus open reservations — what you can still sell"
+                    >
+                      Available
+                    </th>
+                    <th className="text-right" title="On hand × moving average cost — what the stock is worth at cost">
+                      Value
+                    </th>
+                    <th
+                      className="text-right"
+                      title="Moving average of what inward movements cost; advances only when stock comes in"
+                    >
+                      Avg cost
+                    </th>
                     <th />
                   </tr>
                 </thead>
@@ -561,6 +589,97 @@ export default function InventoryPage() {
                 {(data.locations ?? []).map((l) => (
                   <li key={l.id} className="py-1.5">
                     <span className="font-mono">{l.code}</span> — {l.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+          <Card>
+            <CardTitle>Transfer stock</CardTitle>
+            <p
+              className="text-xs opacity-50"
+              title="Transfers relocate stock between locations; quantity is always conserved and value never changes"
+            >
+              Quantity is always conserved; value never changes.
+            </p>
+            <div className="flex flex-wrap gap-2 text-sm">
+              <input className="w-24 rounded border bg-transparent px-2 py-1.5" placeholder="From code" aria-label="Source location code" value={transferForm.from} onChange={(e) => setTransferForm({ ...transferForm, from: e.target.value.toUpperCase() })} />
+              <span className="self-center opacity-50">→</span>
+              <input className="w-24 rounded border bg-transparent px-2 py-1.5" placeholder="To code" aria-label="Destination location code" value={transferForm.to} onChange={(e) => setTransferForm({ ...transferForm, to: e.target.value.toUpperCase() })} />
+              <input className="w-32 rounded border bg-transparent px-2 py-1.5" placeholder="SKU" aria-label="Item SKU" value={transferForm.sku} onChange={(e) => setTransferForm({ ...transferForm, sku: e.target.value })} />
+              <input className="w-28 rounded border bg-transparent px-2 py-1.5 text-right" placeholder="Units" aria-label="Quantity in units" value={transferForm.qty} onChange={(e) => setTransferForm({ ...transferForm, qty: e.target.value })} />
+              <input className="flex-1 rounded border bg-transparent px-2 py-1.5" placeholder="Note (optional)" aria-label="Transfer note" value={transferForm.note} onChange={(e) => setTransferForm({ ...transferForm, note: e.target.value })} />
+              <Button
+                disabled={busy || !transferForm.from || !transferForm.to || !transferForm.sku || !Number(transferForm.qty)}
+                onClick={() =>
+                  void post(
+                    {
+                      action: "createTransfer",
+                      fromLocationCode: transferForm.from,
+                      toLocationCode: transferForm.to,
+                      sku: transferForm.sku,
+                      lines: [{ sku: transferForm.sku, quantityThousandths: Math.round(Number(transferForm.qty || "0") * 1000) }],
+                      note: transferForm.note || undefined,
+                    },
+                    `Transfer ${transferForm.sku} to ${transferForm.to}`,
+                  ).then((ok) => ok && setTransferForm({ from: "", to: "", sku: "", qty: "", note: "" }))
+                }
+              >
+                Draft transfer
+              </Button>
+            </div>
+            <p className="mt-1 text-xs opacity-50">
+              Drafts move nothing. Confirm moves the stock (partial confirms allowed); once moved, a transfer can only be reversed.
+            </p>
+          </Card>
+          <Card>
+            <CardTitle>Transfers</CardTitle>
+            {(data.transfers ?? []).length === 0 ? (
+              <EmptyState icon={<IconListTree />} title="No transfers yet" hint="Draft a transfer above to relocate stock between locations." />
+            ) : (
+              <ul className="divide-y text-sm">
+                {(data.transfers ?? []).map((t) => (
+                  <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                    <span>
+                      <span className="font-mono text-xs opacity-60">#{t.number}</span> {t.from} → {t.to}{" "}
+                      {t.lines.map((l) => `${l.sku} ${(l.confirmedThousandths / 1000).toFixed(3)}/${(l.quantityThousandths / 1000).toFixed(3)}`).join(", ")}
+                      {t.note ? <span className="text-xs opacity-50"> · {t.note}</span> : null}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Badge tone={t.status === "confirmed" ? "green" : t.status === "pending" || t.status === "partial" ? "amber" : "neutral"}>
+                        {t.status}
+                      </Badge>
+                      {(t.status === "pending" || t.status === "partial") && (
+                        <button
+                          type="button"
+                          className="cursor-pointer rounded px-1.5 py-1 text-xs opacity-70 hover:opacity-100"
+                          title="Confirm remaining quantity — this writes the paired ledger legs"
+                          onClick={() => void post({ action: "confirmTransfer", transferId: t.id }, `Confirm transfer #${t.number}`)}
+                        >
+                          confirm
+                        </button>
+                      )}
+                      {t.status === "pending" && (
+                        <button
+                          type="button"
+                          className="cursor-pointer rounded px-1.5 py-1 text-xs opacity-70 hover:opacity-100"
+                          title="Cancel a draft that has moved nothing"
+                          onClick={() => void post({ action: "cancelTransfer", transferId: t.id }, `Cancel transfer #${t.number}`)}
+                        >
+                          cancel
+                        </button>
+                      )}
+                      {(t.status === "confirmed" || t.status === "partial") && (
+                        <button
+                          type="button"
+                          className="cursor-pointer rounded px-1.5 py-1 text-xs opacity-70 hover:opacity-100"
+                          title="Move the confirmed quantities back"
+                          onClick={() => void post({ action: "reverseTransfer", transferId: t.id }, `Reverse transfer #${t.number}`)}
+                        >
+                          reverse
+                        </button>
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>

@@ -25,6 +25,9 @@ interface Item {
   name: string;
   unitLabel: string;
   salePriceMinor?: number;
+  imageUrl?: string | null;
+  tags?: string[];
+  barcode?: string | null;
   onHandThousandths: number;
   avgUnitCostMinor: number;
   valueMinor: number;
@@ -54,7 +57,7 @@ export default function ProductsPage() {
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ sku: "", name: "", unitLabel: "", salePrice: "", openingQty: "" });
+  const [form, setForm] = useState({ sku: "", name: "", unitLabel: "", salePrice: "", openingQty: "", barcode: "", imageUrl: "", tags: "" });
 
   const load = useCallback(async () => {
     const res = await callApi<Payload>("/api/inventory");
@@ -103,6 +106,9 @@ export default function ProductsPage() {
         name,
         unitLabel: form.unitLabel.trim() || undefined,
         salePriceMinor: Math.round(Number(form.salePrice || "0") * 100),
+        barcode: form.barcode.trim() || undefined,
+        imageUrl: form.imageUrl.trim() || undefined,
+        tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
       },
       `Create ${name}`,
     );
@@ -110,7 +116,7 @@ export default function ProductsPage() {
 
     const openingQty = Math.round(Number(form.openingQty || "0") * 1000);
     if (openingQty > 0) await post({ action: "adjustStock", sku, quantityDelta: openingQty, note: "Opening stock" }, "Record opening stock");
-    setForm({ sku: "", name: "", unitLabel: "", salePrice: "", openingQty: "" });
+    setForm({ sku: "", name: "", unitLabel: "", salePrice: "", openingQty: "", barcode: "", imageUrl: "", tags: "" });
   }
 
   async function archive(sku: string): Promise<void> {
@@ -212,11 +218,25 @@ export default function ProductsPage() {
               <thead>
                 <tr className="text-left opacity-50">
                   <th>SKU</th>
-                  <th>Name</th>
+                  <th
+                    title="Everything currently in the building — the sum of the stock ledger"
+                  >
+                    Name
+                  </th>
                   <th className="text-right">Sale price</th>
-                  <th className="text-right">On hand</th>
-                  <th className="text-right">Avg cost</th>
-                  <th className="text-right">Value</th>
+                  <th className="text-right" title="Physical quantity on shelves; reserved units are still included here">
+                    On hand
+                  </th>
+                  <th
+                    className="text-right"
+                    title="Moving average of what inward movements cost; advances only when stock comes in"
+                  >
+                    Avg cost
+                  </th>
+                  <th className="text-right" title="On hand × moving average cost — what the stock is worth at cost">
+                    Value
+                  </th>
+                  <th className="text-right">Barcode</th>
                   <th className="text-right">Reorder</th>
                   <th />
                 </tr>
@@ -225,11 +245,22 @@ export default function ProductsPage() {
                 {visibleItems.map((i) => (
                   <tr key={i.sku} className="border-t">
                     <td className="py-1.5 font-mono text-xs">{i.sku}</td>
-                    <td>{i.name}</td>
+                    <td>
+                      <span className="flex items-center gap-2">
+                        {i.imageUrl ? <img src={i.imageUrl} alt="" className="size-6 rounded object-cover" /> : null}
+                        {i.name}
+                        {i.tags && i.tags.length > 0 && (
+                          <span className="text-xs opacity-50" title={i.tags.join(", ")}>
+                            {i.tags.slice(0, 2).join(", ")}
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className="text-right tabular-nums">{(i.salePriceMinor ?? 0) > 0 ? formatMoney(i.salePriceMinor!) : "—"}</td>
                     <td className="text-right tabular-nums">{qty(i.onHandThousandths)}</td>
                     <td className="text-right tabular-nums">{formatMoney(i.avgUnitCostMinor)}</td>
                     <td className="text-right tabular-nums">{formatMoney(i.valueMinor)}</td>
+                    <td className="text-right font-mono text-xs opacity-70">{i.barcode ?? "—"}</td>
                     <td className="text-right">
                       {i.reorderNeeded ? <Badge tone="amber">reorder</Badge> : <Badge tone="neutral">ok</Badge>}
                     </td>
@@ -294,6 +325,27 @@ export default function ProductsPage() {
                 aria-label="Opening stock quantity in units"
                 value={form.openingQty}
                 onChange={(e) => setForm({ ...form, openingQty: e.target.value })}
+              />
+              <input
+                className="w-40 rounded border bg-transparent px-2 py-1.5"
+                placeholder="Barcode (optional)"
+                aria-label="Barcode, for example an EAN or UPC code"
+                value={form.barcode}
+                onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+              />
+              <input
+                className="w-44 rounded border bg-transparent px-2 py-1.5"
+                placeholder="Image URL (optional)"
+                aria-label="Product image URL"
+                value={form.imageUrl}
+                onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
+              />
+              <input
+                className="w-40 rounded border bg-transparent px-2 py-1.5"
+                placeholder="Tags (comma separated)"
+                aria-label="Tags, separated by commas"
+                value={form.tags}
+                onChange={(e) => setForm({ ...form, tags: e.target.value })}
               />
               <Button disabled={busy || !form.sku.trim() || !form.name.trim()} onClick={() => void createProduct()}>
                 Create product
