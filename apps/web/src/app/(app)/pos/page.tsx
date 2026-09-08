@@ -14,7 +14,7 @@ import {
   type ActionNoticeState,
   SegmentedControl,
 } from "@/components/ui";
-import { IconCard, IconCash, IconLock, IconPlus, IconTrash } from "@/components/icons";
+import { IconCard, IconCash, IconLock, IconPlus, IconTrash, IconUndo } from "@/components/icons";
 import { cn, formatMoney, statusTone, timeAgo, toMinor } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import { callApi, postApi } from "@/lib/api";
@@ -39,6 +39,24 @@ interface SaleLine {
   quantity: number;
   unitPriceMinor: number;
 }
+interface PosSale {
+  id: string;
+  number: number;
+  status: string;
+  totalMinor: number;
+  creditedMinor: number;
+  memo: string | null;
+  createdAt: string;
+}
+interface ShiftSummary {
+  register: string;
+  status: string;
+  salesCount: number;
+  takingsMinor: number;
+  expectedCashMinor: number;
+  countedCashMinor: number | null;
+  varianceMinor: number | null;
+}
 
 export default function PosPage() {
   const __enabled = useModuleEnabled("pos");
@@ -53,18 +71,36 @@ export default function PosPage() {
   const [busy, setBusy] = useState(false);
   const [closeConfirm, setCloseConfirm] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
+  const [sales, setSales] = useState<PosSale[]>([]);
+  const [summary, setSummary] = useState<ShiftSummary | null>(null);
 
   const openSession = sessions?.find((s) => s.status === "open") ?? null;
+  const openSessionId = openSession?.id ?? null;
 
   const load = useCallback(async () => {
-    const res = await callApi<{ sessions?: PosSession[] }>("/api/pos");
+    const res = await callApi<{ sessions?: PosSession[]; sales?: PosSale[] }>("/api/pos");
     setSessions(res.data?.sessions ?? []);
+    setSales(res.data?.sales ?? []);
     if (!res.ok) setNotice({ tone: "error", error: res.error! });
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadSummary = useCallback(async (sessionId: string) => {
+    const res = await postApi<{ data?: ShiftSummary }>("/api/pos", { action: "shiftSummary", sessionId });
+    setSummary(res.data?.data ?? null);
+  }, []);
+
+  // Re-derived whenever sessions reload so a fresh sale is counted immediately.
+  useEffect(() => {
+    if (!openSessionId) {
+      setSummary(null);
+      return;
+    }
+    void loadSummary(openSessionId);
+  }, [openSessionId, sessions, loadSummary]);
 
   async function post(payload: Record<string, unknown>, label: string) {
     setBusy(true);
@@ -90,6 +126,45 @@ export default function PosPage() {
         );
       } else {
         setNotice({ tone: "success", text: `${label} done.` });
+      }
+      void load();
+    } finally {
+      setBusy(false);
+      router.refresh();
+    }
+  }
+
+  async function returnSale(sale: PosSale) {
+    const reason = window.prompt(`Reason for returning sale #${sale.number} (${formatMoney(sale.totalMinor)})?`);
+    const trimmed = reason?.trim() ?? "";
+    if (!trimmed) return;
+    if (trimmed.length < 3 || trimmed.length > 500) {
+      setNotice({
+        tone: "error",
+        error: { title: "Add a short reason", hint: "A return needs a reason between 3 and 500 characters for the audit trail." },
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await postApi<{ data?: { creditedMinor: number; restockedLines: number } }>("/api/pos", {
+        action: "returnSale",
+        invoiceId: sale.id,
+        reason: trimmed,
+      });
+      if (res.status === 202) {
+        setNotice({
+          tone: "pending",
+          text: `Return of sale #${sale.number} is awaiting human approval — it posts once approved in the Approvals inbox.`,
+        });
+      } else if (!res.ok || !res.data?.data) {
+        setNotice({ tone: "error", error: res.error ?? { title: "That didn't work", hint: "Try again in a moment." } });
+      } else {
+        const d = res.data.data;
+        setNotice({
+          tone: "success",
+          text: `Return posted — ${formatMoney(d.creditedMinor)} credited, ${d.restockedLines} line${d.restockedLines === 1 ? "" : "s"} restocked.`,
+        });
       }
       void load();
     } finally {
@@ -362,6 +437,104 @@ export default function PosPage() {
             </Button>
           </Card>
         </div>
+      )}
+
+      {tab === "sell" && summary && (
+        <Card className="mt-4">
+          <CardTitle
+            right={
+              <Badge tone={summary.status === "open" ? "green" : "neutral"}>
+                {summary.register} · {summary.status}
+              </Badge>
+            }
+          >
+            Shift summary
+          </CardTitle>
+          <dl className="mb-4 space-y-2 rounded-lg bg-stone-50 p-3.5 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-stone-500">Sales taken</dt>
+              <dd className="tnum">{summary.salesCount}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-stone-500">Takings</dt>
+              <dd className="tnum">{formatMoney(summary.takingsMinor)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-stone-500">Expected cash</dt>
+              <dd className="tnum">{formatMoney(summary.expectedCashMinor)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-stone-500">Counted cash</dt>
+              <dd className="tnum">{summary.countedCashMinor !== null ? formatMoney(summary.countedCashMinor) : "—"}</dd>
+            </div>
+            <div className="flex justify-between border-t border-stone-200 pt-2 font-semibold">
+              <dt>Variance</dt>
+              <dd className={cn("tnum", summary.varianceMinor ? "text-red-700" : "")}>
+                {summary.varianceMinor !== null ? formatMoney(summary.varianceMinor) : "—"}
+              </dd>
+            </div>
+          </dl>
+          {summary.status === "open" && (
+            <p className="text-xs text-stone-500">Counted cash and variance fill in when the drawer is counted at close.</p>
+          )}
+        </Card>
+      )}
+
+      {tab === "sell" && (
+        <Card className="mt-4">
+          <CardTitle right={<Badge tone="neutral">{sales.length}</Badge>}>Recent sales</CardTitle>
+          {sales.length === 0 ? (
+            <p className="text-sm opacity-60">No register sales yet. Completed sales show up here with a Return action.</p>
+          ) : (
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Sale</th>
+                    <th>Status</th>
+                    <th>Taken</th>
+                    <th className="text-right">Total</th>
+                    <th className="text-right">Credited</th>
+                    <th className="text-right" aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {sales.map((sale) => {
+                    const returnable = sale.status !== "void" && sale.totalMinor - sale.creditedMinor > 0;
+                    return (
+                      <tr key={sale.id}>
+                        <td className="font-medium">
+                          #{sale.number}
+                          {sale.memo && <span className="block text-xs font-normal text-stone-500">{sale.memo}</span>}
+                        </td>
+                        <td>
+                          <Badge tone={statusTone(sale.status)}>{sale.status}</Badge>
+                        </td>
+                        <td className="text-xs whitespace-nowrap text-stone-500" title={new Date(sale.createdAt).toLocaleString()}>
+                          {timeAgo(sale.createdAt)}
+                        </td>
+                        <td className="num">{formatMoney(sale.totalMinor)}</td>
+                        <td className="num">{sale.creditedMinor > 0 ? formatMoney(sale.creditedMinor) : "-"}</td>
+                        <td className="text-right">
+                          <Button
+                            tone="secondary"
+                            size="sm"
+                            loading={busy}
+                            disabled={!returnable}
+                            onClick={() => void returnSale(sale)}
+                          >
+                            <IconUndo className="size-3.5" />
+                            Return
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
       )}
 
       {tab === "sessions" &&

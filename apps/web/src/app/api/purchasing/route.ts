@@ -62,6 +62,9 @@ export async function GET() {
   const aging = await executor.execute("purchasing.apAging", ctx, {});
   if (!aging.ok) return NextResponse.json({ error: aging.error }, { status: 500 });
 
+  const priceHistory = await executor.execute("purchasing.priceHistory", ctx, {});
+  if (!priceHistory.ok) return NextResponse.json({ error: priceHistory.error }, { status: 500 });
+
   // Procure-to-pay workflow: requests with their RFQ bids.
   const requestRows = await db
     .select()
@@ -88,6 +91,7 @@ export async function GET() {
       createdAt: b.createdAt,
     })),
     apAging: aging.data ?? {},
+    priceHistory: priceHistory.data ?? { rows: [] },
     requests: requestRows.map((r) => ({
       id: r.id,
       title: r.title,
@@ -230,6 +234,18 @@ export async function POST(req: Request) {
       return respond(
         await executor.execute("purchasing.selectWinningQuote", ctx, { rfqId: body.rfqId as string }),
       );
+    case "priceHistory":
+      return respond(
+        await executor.execute("purchasing.priceHistory", ctx, {
+          sku: (body.sku as string) || undefined,
+        }),
+      );
+    case "supplierStatement": {
+      if (!body.vendorId) return NextResponse.json({ error: "vendorId is required" }, { status: 400 });
+      return respond(
+        await executor.execute("purchasing.supplierStatement", ctx, { vendorId: body.vendorId as string }),
+      );
+    }
     default:
       return NextResponse.json({ error: "invalid action" }, { status: 400 });
   }
