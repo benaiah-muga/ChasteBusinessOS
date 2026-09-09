@@ -32,6 +32,21 @@ import {
   type OnboardingStepKey,
   type StepStatus,
 } from "@/lib/onboarding-plan";
+import {
+  MIN_DESCRIPTION,
+  isDescriptionReady,
+  isProfileReady,
+  networkFailure,
+  failureFromResponse,
+  deferredSteps,
+  railScreens,
+  readyInvites,
+  recoveryFor,
+  resolveBaseCurrency,
+  screensForPath,
+  type Failure,
+  type Screen,
+} from "@/lib/onboarding-flow";
 import { CsvImportPanel } from "./csv-import";
 import {
   ChoiceCard,
@@ -55,31 +70,13 @@ import {
  *     back as a checklist on the dashboard.
  */
 
-type Screen = "path" | "profile" | "data" | "team" | "done";
-
-interface Failure {
-  code: string;
-  title: string;
-  hint: string;
-  detail?: string;
-  retryAfterSec?: number;
-}
-
 /** Wraps fetch so every caller deals in data-or-failure, never in thrown JSON. */
 async function request(url: string, init: RequestInit): Promise<{ ok: true; data: unknown } | { ok: false; failure: Failure }> {
   let res: Response;
   try {
     res = await fetch(url, init);
   } catch (err) {
-    return {
-      ok: false,
-      failure: {
-        code: "network",
-        title: "Can't reach the server",
-        hint: "Check your connection and try again — nothing has been lost.",
-        detail: String(err),
-      },
-    };
+    return { ok: false, failure: networkFailure(err) };
   }
   let body: Record<string, unknown> = {};
   try {
@@ -88,34 +85,7 @@ async function request(url: string, init: RequestInit): Promise<{ ok: true; data
     /* empty bodies are fine on 204s; the shape guards below handle the rest */
   }
   if (res.ok) return { ok: true, data: body };
-
-  const code = String(body.code ?? String(res.status));
-  const known: Record<string, { title: string; hint: string }> = {
-    unauthorized: { title: "Your session ended", hint: "Sign in again and you'll pick up right here." },
-    already_onboarded: { title: "You already have a workspace", hint: "Nothing to set up — your books are open." },
-    rate_limited: { title: "Too many attempts", hint: "Wait a moment and try again." },
-    not_found: { title: "Set up your workspace first", hint: "This step needs a workspace to attach to." },
-  };
-  const message = String(body.error ?? "");
-  const friendly = known[code] ?? {
-    title: "That didn't work",
-    hint:
-      message && message.length <= 160 && !/[{}<>]/.test(message)
-        ? message
-        : "Nothing was changed. Try again in a moment.",
-  };
-  // The server's own copy already carries the countdown; don't overwrite it.
-  if (code === "rate_limited" && message) friendly.hint = message;
-  return {
-    ok: false,
-    failure: {
-      code,
-      title: friendly.title,
-      hint: friendly.hint,
-      detail: `${init.method ?? "GET"} ${url} → ${res.status}\n${JSON.stringify(body)}`,
-      retryAfterSec: typeof body.retryAfterSec === "number" ? body.retryAfterSec : undefined,
-    },
-  };
+  return { ok: false, failure: failureFromResponse(res.status, body, init.method ?? "GET", url) };
 }
 
 const CREATE_PROGRESS = [
@@ -131,8 +101,6 @@ const DESCRIPTION_STARTERS = [
   "We install and service ",
   "We run a ",
 ];
-
-const MIN_DESCRIPTION = 20;
 
 export function OnboardingWizard({ email }: { email: string }) {
   const router = useRouter();
@@ -185,17 +153,15 @@ export function OnboardingWizard({ email }: { email: string }) {
     });
   }, [screen, roles.length]);
 
-  const screens = useMemo<Screen[]>(
-    () => (path === "fresh" ? ["path", "profile", "team", "done"] : ["path", "profile", "data", "team", "done"]),
-    [path],
-  );
+  const screens = useMemo<Screen[]>(() => screensForPath(path), [path]);
   const screenIndex = screens.indexOf(screen);
-  const rail = screens
-    .filter((s) => s !== "done")
-    .map((s) => ({ key: s, label: s === "path" ? "How you'll start" : s === "profile" ? "Your business" : s === "data" ? "Your data" : "Your team" }));
+  const rail = railScreens(screens).map((s) => ({
+    key: s,
+    label: s === "path" ? "How you'll start" : s === "profile" ? "Your business" : s === "data" ? "Your data" : "Your team",
+  }));
 
-  const resolvedCurrency = currency === "other" ? customCurrency.trim().toUpperCase() : currency;
-  const descriptionReady = description.trim().length >= MIN_DESCRIPTION;
+  const resolvedCurrency = resolveBaseCurrency(currency, customCurrency);
+  const descriptionReady = isDescriptionReady(description);
 
   async function markStep(key: OnboardingStepKey, status: StepStatus) {
     setStepStatus((prev) => ({ ...prev, [key]: status }));
@@ -248,7 +214,7 @@ export function OnboardingWizard({ email }: { email: string }) {
   }
 
   async function sendInvites() {
-    const valid = invites.filter((i) => /.+@.+\..+/.test(i.email.trim()) && i.roleId);
+    const valid = readyInvites(invites);
     if (valid.length === 0) return;
     setInviting(true);
     setInviteOutcomes([]);
@@ -276,13 +242,7 @@ export function OnboardingWizard({ email }: { email: string }) {
     if (outcomes.some((o) => o.ok)) await markStep("invite_team", "done");
   }
 
-  const deferred = useMemo<OnboardingStepKey[]>(
-    () =>
-      (Object.keys(stepStatus) as OnboardingStepKey[]).filter(
-        (k) => stepStatus[k] === "pending" || stepStatus[k] === "skipped",
-      ),
-    [stepStatus],
-  );
+  const deferred = deferredSteps(stepStatus);
 
   /* ── Right-hand column: what this step does and why it is safe ────────── */
 
@@ -377,17 +337,17 @@ export function OnboardingWizard({ email }: { email: string }) {
                 <RecoverBlock title={failure.title}>
                   {failure.hint}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {failure.code === "unauthorized" && (
+                    {recoveryFor(failure.code) === "signin" && (
                       <Link href="/login" className={cn(primaryButtonClass, "h-9 w-auto px-3.5 text-[13px]")}>
                         Sign in again
                       </Link>
                     )}
-                    {failure.code === "already_onboarded" && (
+                    {recoveryFor(failure.code) === "dashboard" && (
                       <Link href="/" className={cn(primaryButtonClass, "h-9 w-auto px-3.5 text-[13px]")}>
                         Open my dashboard
                       </Link>
                     )}
-                    {failure.code !== "unauthorized" && failure.code !== "already_onboarded" && (
+                    {recoveryFor(failure.code) === "retry" && (
                       <button
                         type="button"
                         onClick={() => {
@@ -562,7 +522,7 @@ export function OnboardingWizard({ email }: { email: string }) {
                 <div className="mt-6">
                   <button
                     type="button"
-                    disabled={creating || orgName.trim().length < 2 || !descriptionReady || resolvedCurrency.length !== 3}
+                    disabled={creating || !isProfileReady(orgName, description, resolvedCurrency)}
                     onClick={() => void createWorkspace()}
                     className={primaryButtonClass}
                   >

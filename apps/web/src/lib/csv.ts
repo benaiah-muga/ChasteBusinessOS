@@ -38,7 +38,10 @@ export function parseCsv(text: string): CsvTable {
       continue;
     }
 
-    if (ch === '"') {
+    // A quote only opens a quoted field when it sits at the start of one.
+    // RFC 4180 treats a quote anywhere else as literal data, and honouring that
+    // is what keeps `6" pipe` from quietly becoming `6 pipe` on the way in.
+    if (ch === '"' && field === "") {
       quoted = true;
     } else if (ch === ",") {
       row.push(field);
@@ -105,6 +108,13 @@ const norm = (s: string) =>
     .trim();
 
 /**
+ * Shortest synonym allowed to match on a substring. Below this length the
+ * false positives outweigh the hits: "id" lives inside "paid", "ean" inside
+ * "cleaner", and a column nobody meant to import ends up as the SKU.
+ */
+const SUBSTRING_SYNONYM_MIN = 4;
+
+/**
  * Best-effort header → canonical field mapping. Returns null for a field
  * nothing looked like, so the UI can ask rather than guess wrong in silence.
  */
@@ -114,16 +124,49 @@ export function guessMapping(
 ): Record<string, string | null> {
   const mapping: Record<string, string | null> = {};
   const taken = new Set<string>();
+  const cols = headers.map((raw) => ({ raw, norm: norm(raw) }));
+  const fields = Object.keys(FIELD_SYNONYMS[entity]);
+  const wantedFor = new Map(
+    fields.map((f) => [f, (FIELD_SYNONYMS[entity][f] ?? []).map(norm)] as const),
+  );
 
-  for (const [field, synonyms] of Object.entries(FIELD_SYNONYMS[entity])) {
-    const wanted = synonyms.map(norm);
-    // Exact match first, then substring, so "Email" beats "Email (work)".
-    let hit = headers.find((h) => !taken.has(h) && wanted.includes(norm(h)));
-    if (!hit) {
-      hit = headers.find((h) => !taken.has(h) && wanted.some((w) => norm(h).includes(w)));
+  for (const field of fields) mapping[field] = null;
+
+  /* Pass 1 — exact matches, resolved for *every* field before any fuzzy match
+     runs. Doing it per-field instead is how "Unit Price" used to land on
+     `unitLabel`: that field is declared first, found no exact match, and fell
+     through to a substring match on "unit" before `salePrice` — for which
+     "unit price" is a listed synonym — was ever consulted. */
+  for (const field of fields) {
+    const wanted = wantedFor.get(field) ?? [];
+    const hit = cols.find((c) => !taken.has(c.raw) && wanted.includes(c.norm));
+    if (hit) {
+      mapping[field] = hit.raw;
+      taken.add(hit.raw);
     }
-    mapping[field] = hit ?? null;
-    if (hit) taken.add(hit);
   }
+
+  /* Pass 2 — substring matches for whatever is still unmatched, most specific
+     synonym first so a longer phrase beats the short word nested inside it. */
+  const candidates: { field: string; raw: string; score: number; fieldRank: number; colRank: number }[] = [];
+  fields.forEach((field, fieldRank) => {
+    if (mapping[field]) return;
+    const wanted = wantedFor.get(field) ?? [];
+    cols.forEach((c, colRank) => {
+      if (taken.has(c.raw)) return;
+      let best = 0;
+      for (const w of wanted) {
+        if (w.length >= SUBSTRING_SYNONYM_MIN && c.norm.includes(w)) best = Math.max(best, w.length);
+      }
+      if (best > 0) candidates.push({ field, raw: c.raw, score: best, fieldRank, colRank });
+    });
+  });
+  candidates.sort((a, b) => b.score - a.score || a.fieldRank - b.fieldRank || a.colRank - b.colRank);
+  for (const c of candidates) {
+    if (mapping[c.field] || taken.has(c.raw)) continue;
+    mapping[c.field] = c.raw;
+    taken.add(c.raw);
+  }
+
   return mapping;
 }

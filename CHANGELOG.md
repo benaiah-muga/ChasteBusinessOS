@@ -11,7 +11,25 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-09
+
+M7–M13 had been accumulating under `[Unreleased]` since 0.4.0 while
+`package.json` still read `0.2.0`, so nothing in the repository named the
+version it was actually on. This release closes that gap and, on the way,
+puts tests around the two surfaces a new business touches first: the setup
+wizard and the spreadsheet import.
+
 ### Added
+- **Tests for the CSV importer and the setup wizard**: 140 tests covering
+  `lib/csv.ts` (RFC 4180 quoting, line endings, ragged rows, header
+  guessing), `lib/onboarding-flow.ts`, `components/onboarding/wizard.tsx`,
+  and the shell app/module catalogs. The wizard's decisions — which screen
+  comes next, whether a profile may be submitted, how a failure is explained
+  — now live in `lib/onboarding-flow.ts` so they can be tested without
+  rendering React; the component tests then drive the real wizard through its
+  flows, including the one where a skipped step comes back. `jsdom` and
+  `@testing-library/react` are new `apps/web` dev dependencies, and
+  `pnpm-lock.yaml` is regenerated with them.
 - **Retail & reach (M13, ADR 0040)**: `pos.returnSale` — always-gated
   full-sale reversal that refunds through a mirrored entry, credits the
   invoice, and restores stock; per-register shift summaries; marketing-lite
@@ -115,10 +133,6 @@ The full v1 changelog is preserved at the bottom of this file.
   (honest null on miss); Products page gains image/tags/barcode inputs,
   thumbnails in the catalog, and explanatory tooltips on stock terms.
 - **Demo proof**: `pnpm demo:m7 [reconciliation|transfers|products|all]`.
-
-
-
-### Added
 - **Z.ai (GLM) model provider**: `MODEL_PROVIDER=zai` routes agent turns
   through Z.ai's OpenAI-compatible endpoint (`ZAI_API_KEY`, `ZAI_BASE_URL`);
   `zai/` model prefixes are stripped like `groq/`. `resolveClient` now gives
@@ -205,6 +219,25 @@ The full v1 changelog is preserved at the bottom of this file.
   and `CONTRIBUTING.md` documents how to keep a stack from rotting.
 
 ### Fixed
+- **Version drift**: `package.json` said `0.2.0` while the changelog's latest
+  release was `0.4.0`, so no file in the repository named the version it was
+  on. The manifest now reads `0.5.0`, matching this entry. (`0.3.0` was never
+  released — the changelog jumps from `0.2.0` to `0.4.0`. That is left as it
+  happened rather than rewritten, but it is worth knowing when reading back.)
+- **CSV: an inch mark no longer disappears**: `parseCsv` opened a quoted field
+  on any `"`, so a product named `6" pipe` was imported as `6 pipe`. RFC 4180
+  treats a quote as data unless it starts a field, and the parser now agrees.
+- **CSV: "Unit Price" maps to the price**: `guessMapping` ran its substring
+  pass per field, so `unitLabel` — declared before `salePrice` — claimed a
+  "Unit Price" column on the strength of "unit" alone and left the price
+  unmapped. Exact matches are now resolved for every field before any
+  substring match runs, and short synonyms (`id`, `ean`, `upc`) match exactly
+  only, so a "Paid" column no longer reads as an SKU nor a "Cleaner" column as
+  a barcode.
+- **Wizard: one rate limit no longer rewrites the next**: the failure mapping
+  assigned back into its shared lookup table, so the first throttled
+  request's countdown became the hint for every later `rate_limited` failure.
+  The mapping is now a pure function of the response.
 - **Provider prefix precedence**: `resolveClient` checked `MODEL_PROVIDER`
   before the model's `provider/` prefix, so e.g. `zai/model` silently routed
   to the env's provider; explicit prefixes now win.

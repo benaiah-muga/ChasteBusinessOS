@@ -7,9 +7,11 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src/", import.meta.url)),
     },
   },
+  // tsconfig sets `jsx: "preserve"` so Next can compile it; tests need it built.
+  esbuild: { jsx: "automatic" },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     testTimeout: 20_000,
   },
 });
