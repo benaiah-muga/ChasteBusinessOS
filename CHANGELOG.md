@@ -221,9 +221,10 @@ wizard and the spreadsheet import.
 ### Fixed
 - **Version drift**: `package.json` said `0.2.0` while the changelog's latest
   release was `0.4.0`, so no file in the repository named the version it was
-  on. The manifest now reads `0.5.0`, matching this entry. (`0.3.0` was never
-  released — the changelog jumps from `0.2.0` to `0.4.0`. That is left as it
-  happened rather than rewritten, but it is worth knowing when reading back.)
+  on. The manifest now reads `0.5.0`, matching this entry. One gap is recorded
+  here rather than invented: `v0.3.0` was tagged and released, but this file
+  has no `[0.3.0]` section, so whatever shipped in it is described only in
+  that release's own notes.
 - **CSV: an inch mark no longer disappears**: `parseCsv` opened a quoted field
   on any `"`, so a product named `6" pipe` was imported as `6 pipe`. RFC 4180
   treats a quote as data unless it starts a field, and the parser now agrees.
