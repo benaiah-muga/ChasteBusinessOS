@@ -221,10 +221,10 @@ wizard and the spreadsheet import.
 ### Fixed
 - **Version drift**: `package.json` said `0.2.0` while the changelog's latest
   release was `0.4.0`, so no file in the repository named the version it was
-  on. The manifest now reads `0.5.0`, matching this entry. One gap is recorded
-  here rather than invented: `v0.3.0` was tagged and released, but this file
-  has no `[0.3.0]` section, so whatever shipped in it is described only in
-  that release's own notes.
+  on. The manifest now reads `0.5.0`, matching this entry. `v0.3.0` had also
+  been tagged and released with no section of its own, leaving the history
+  to run 0.4.0 → 0.2.0 with a hole; that entry is now written up below from
+  the release's own notes rather than invented here.
 - **CSV: an inch mark no longer disappears**: `parseCsv` opened a quoted field
   on any `"`, so a product named `6" pipe` was imported as `6 pipe`. RFC 4180
   treats a quote as data unless it starts a field, and the parser now agrees.
@@ -508,6 +508,47 @@ wizard and the spreadsheet import.
   trust-spine hardening, multi-currency, ledger partitioning, creator-mode
   sandbox, support module, security audit remediation, OS navigation model,
   cache components, and Next.js agent tooling.
+
+## [0.3.0] - 2026-08-24
+
+*Reconstructed from the v0.3.0 release notes: the tag was cut and published
+without a section of its own in this file, so the history ran 0.4.0 → 0.2.0
+with a hole in it. Nothing here is invented; it is the published notes,
+reformatted to match this file.*
+
+### Added
+- **Manufacturing module (ADR 0026)**: a governed `modules/manufacturing`
+  package — multi-level BOMs with per-component scrap allowances, work orders
+  (draft → release → partial completions → close), production runs with
+  whole-run reversal, cost previews at moving-average prices, and upstream lot
+  traceability for recalls. It writes exclusively through the shared inventory
+  ledger primitives: one append-only stock ledger, many writers.
+- **Inventory depth**: stock reservations with available-to-promise and
+  overbook refusal; cycle counts (snapshot → enter → post variances, with a
+  snapshot-drift guard); stock locations and lot balances with derived on-hand
+  quantities; per-item movement history and moving-average valuation in the
+  stock report.
+- **Full human surfaces**: tabbed Inventory and Manufacturing consoles
+  covering every capability, and a new Purchasing page — vendors, purchase
+  orders with SKU-linked lines, goods receipts, three-way matched bills,
+  policy-gated payments, and AP aging. Design-system shell refresh across all
+  pages.
+- **Recurring-invoice expansion** as a new worker capability on the durable
+  job queue.
+
+### Fixed
+- **Shadow timestamp columns that broke FX rate posting** (critical).
+- Boot-time conformance failures from date schemas in the `hr` and
+  `accounting` capabilities.
+- Level-one BOM explosion bug, and work orders closing prematurely on partial
+  builds.
+
+### Changed
+- **Orgs pinning `enabled_modules` must add `"manufacturing"`** to keep the new
+  page visible.
+
+Merged via #73. Docs: ADR 0026, completed ADR index, ROADMAP M6.5, SOC2
+mapping.
 
 ## [0.2.0], 2026-08-22
 
