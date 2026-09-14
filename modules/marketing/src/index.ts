@@ -1,13 +1,21 @@
+import { createHash } from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { customers, invoices, marketingCampaigns, marketingSegments, marketingSends } from "@chaste/db";
+import {
+  customers,
+  invoices,
+  marketingCampaigns,
+  marketingDeliveries,
+  marketingSegments,
+  outboxMessages,
+} from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 /**
  * Marketing-lite (M13, ADR 0040): saved deterministic segments, campaigns
- * with an honest append-only send log, opt-out honored at send time.
+ * with recipient-bound outbox delivery, opt-out honored at queue and dispatch time.
  * Explicitly NO tracking pixels, no journeys, no landing pages — the send
  * log is the analytics.
  */
@@ -71,7 +79,7 @@ const sendCampaign = (deps: ModuleDeps) =>
     risk: "write",
     permission: "marketing.write",
     input: z.object({ campaignId: z.string().uuid() }),
-    output: z.object({ recipients: z.number(), skippedOptOut: z.number(), alreadySent: z.number() }),
+    output: z.object({ recipients: z.number(), skippedOptOut: z.number(), skippedNoAddress: z.number(), alreadySent: z.number() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [campaign] = await tx
@@ -89,7 +97,7 @@ const sendCampaign = (deps: ModuleDeps) =>
         const minSpend = segment?.minSpendMinor ?? 0;
 
         const members = await tx
-          .select({ id: customers.id, optedOut: customers.marketingOptOut })
+          .select({ id: customers.id, email: customers.email, optedOut: customers.marketingOptOut })
           .from(customers)
           .where(and(eq(customers.orgId, ctx.actor.orgId), isNull(customers.deactivatedAt)));
         // Lifetime spend per customer, RLS-safe: one grouped query over the
@@ -103,6 +111,7 @@ const sendCampaign = (deps: ModuleDeps) =>
 
         let recipients = 0;
         let skippedOptOut = 0;
+        let skippedNoAddress = 0;
         let alreadySent = 0;
         for (const m of members) {
           if ((spendByCustomer.get(m.id) ?? 0) < minSpend) continue;
@@ -111,19 +120,57 @@ const sendCampaign = (deps: ModuleDeps) =>
             continue;
           }
           const existing = await tx
-            .select({ id: marketingSends.id })
-            .from(marketingSends)
-            .where(and(eq(marketingSends.campaignId, campaign.id), eq(marketingSends.customerId, m.id)))
+            .select({ id: marketingDeliveries.id })
+            .from(marketingDeliveries)
+            .where(and(eq(marketingDeliveries.campaignId, campaign.id), eq(marketingDeliveries.customerId, m.id)))
             .limit(1);
           if (existing.length > 0) {
             alreadySent += 1;
             continue;
           }
-          await tx.insert(marketingSends).values({ orgId: ctx.actor.orgId, campaignId: campaign.id, customerId: m.id, sentAt: ctx.now });
+          if (!m.email) {
+            skippedNoAddress += 1;
+            continue;
+          }
+          const contentDigest = createHash("sha256")
+            .update(JSON.stringify({ subject: campaign.subject, body: campaign.body }))
+            .digest("hex");
+          const dedupeKey = `marketing:${campaign.id}:${m.id}`;
+          const [outbox] = await tx
+            .insert(outboxMessages)
+            .values({
+              orgId: ctx.actor.orgId,
+              kind: "email",
+              dedupeKey,
+              providerOperationId: crypto.randomUUID(),
+              payload: { to: m.email, subject: campaign.subject, text: campaign.body, customerId: m.id },
+            })
+            .onConflictDoNothing({ target: [outboxMessages.orgId, outboxMessages.dedupeKey] })
+            .returning({ id: outboxMessages.id });
+          const outboxId = outbox?.id;
+          if (!outboxId) {
+            const [existingOutbox] = await tx
+              .select({ id: outboxMessages.id })
+              .from(outboxMessages)
+              .where(and(eq(outboxMessages.orgId, ctx.actor.orgId), eq(outboxMessages.dedupeKey, dedupeKey)))
+              .limit(1);
+            if (!existingOutbox) throw new Error("campaign outbox dedupe conflict without an existing row");
+            alreadySent += 1;
+            continue;
+          }
+          await tx.insert(marketingDeliveries).values({
+            orgId: ctx.actor.orgId,
+            campaignId: campaign.id,
+            customerId: m.id,
+            outboxId,
+            emailSnapshot: m.email,
+            contentDigest,
+            queuedAt: ctx.now,
+          });
           recipients += 1;
         }
         await tx.update(marketingCampaigns).set({ sentAt: ctx.now }).where(eq(marketingCampaigns.id, campaign.id));
-        return { recipients, skippedOptOut, alreadySent };
+        return { recipients, skippedOptOut, skippedNoAddress, alreadySent };
       });
     },
   });
@@ -132,7 +179,7 @@ const campaignAnalytics = (deps: ModuleDeps) =>
   defineCapability({
     id: "marketing.campaignAnalytics",
     title: "Campaign analytics",
-    intent: "Report a campaign's delivery count straight from the send log — no pixels, no guesses",
+    intent: "Report provider-confirmed campaign delivery straight from the outbox — no pixels, no guesses",
     module: "marketing",
     risk: "read",
     permission: "marketing.read",
@@ -140,7 +187,7 @@ const campaignAnalytics = (deps: ModuleDeps) =>
     output: z.object({
       campaignName: z.string(),
       sentCount: z.number(),
-      sentAt: z.string().nullable(),
+      queuedAt: z.string().nullable(),
     }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
@@ -152,12 +199,13 @@ const campaignAnalytics = (deps: ModuleDeps) =>
         if (!campaign) throw new Error("campaign not found");
         const [agg] = await tx
           .select({ n: sql<number>`count(*)` })
-          .from(marketingSends)
-          .where(eq(marketingSends.campaignId, input.campaignId));
+          .from(marketingDeliveries)
+          .innerJoin(outboxMessages, eq(outboxMessages.id, marketingDeliveries.outboxId))
+          .where(and(eq(marketingDeliveries.campaignId, input.campaignId), eq(outboxMessages.status, "sent")));
         return {
           campaignName: campaign.name,
           sentCount: Number(agg?.n ?? 0),
-          sentAt: campaign.sentAt?.toISOString() ?? null,
+          queuedAt: campaign.sentAt?.toISOString() ?? null,
         };
       });
     },

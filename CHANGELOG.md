@@ -12,6 +12,12 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Marketing sends could claim delivery without an external operation
+  (N26).** Campaign recipients now bind to durable, idempotent email outbox
+  rows; opted-out, deactivated, missing-address, and changed-address contacts
+  are excluded or fail closed at dispatch, while analytics count only
+  provider-confirmed delivery. The Marketing UI now distinguishes queued work
+  from confirmed delivery.
 - **Outstanding balances ignored customer credits (N11).** A single
   document-balance contract (`@chaste/erp-core` `documentBalance` /
   `canAcceptPayment`) now gates `accounting.recordPayment` and

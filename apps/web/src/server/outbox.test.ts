@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { approvals, createDb, notifications, organizations, outboxMessages, type Database } from "@chaste/db";
+import { approvals, createDb, customers, notifications, organizations, outboxMessages, type Database } from "@chaste/db";
 import { logger } from "@chaste/kernel";
 import { DbApprovalFlow } from "./kernel";
 import { enqueueOutboxMessage, processOneOutbox, reconcileOutboxMessage } from "./outbox";
@@ -25,6 +25,7 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   await db.delete(outboxMessages).where(eq(outboxMessages.orgId, orgId));
+  await db.delete(customers).where(eq(customers.orgId, orgId));
   await db.delete(notifications).where(eq(notifications.orgId, orgId));
   await db.delete(approvals).where(eq(approvals.orgId, orgId));
 });
@@ -106,5 +107,29 @@ describe("durable external outbox", () => {
       .from(outboxMessages)
       .where(and(eq(outboxMessages.orgId, orgId), eq(outboxMessages.status, "pending")));
     expect(rows.map((row) => row.kind).sort()).toEqual(["email", "webhook"]);
+  });
+
+  it("rechecks a marketing recipient before dispatch and does not call SMTP after unsubscribe", async () => {
+    const [customer] = await db
+      .insert(customers)
+      .values({ orgId, name: "Unsubscribed Customer", email: "unsubscribe@example.test" })
+      .returning({ id: customers.id });
+    const id = await enqueueOutboxMessage(db, {
+      orgId,
+      kind: "email",
+      dedupeKey: "marketing:test:unsubscribe",
+      payload: {
+        to: "unsubscribe@example.test",
+        subject: "A campaign",
+        text: "This should not be delivered.",
+        customerId: customer!.id,
+      },
+    });
+    await db.update(customers).set({ marketingOptOut: true }).where(eq(customers.id, customer!.id));
+    vi.stubEnv("SMTP_HOST", "smtp.example.test");
+    await processOneOutbox(db, logger, { workerId: "outbox-test" });
+    const [row] = await db.select().from(outboxMessages).where(eq(outboxMessages.id, id));
+    expect(row!.status).toBe("failed");
+    expect(row!.lastError).toMatch(/no longer eligible/);
   });
 });

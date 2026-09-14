@@ -262,9 +262,21 @@ Proof: customer beyond row 500 is found by name/email and preserved in pickers; 
 
 ### N26 — Campaign “send” records recipients without sending (P1, source-confirmed product-contract defect)
 
-Evidence: `marketing.sendCampaign`, `modules/marketing/src/index.ts:64`, inserts `marketing_sends` and sets `sentAt` but calls no provider/outbox. `campaignAnalytics` counts these rows as sent. A unique campaign/customer index already exists; preserve it. Segment spend totals include invoices without a posted-status or credit-adjusted definition. Campaign generation may include customers with no usable delivery address because the query does not select one.
+Evidence: the original defect was `marketing.sendCampaign`, which inserted
+`marketing_sends` and set `sentAt` without a provider/outbox. The first delivery
+slice now uses `marketing_deliveries` plus `outbox_messages`, with provider
+status driving analytics and dispatch-time recipient revalidation. Existing
+`marketing_sends` rows remain legacy history. Segment spend totals still need
+N11's canonical posted/credit-adjusted definition.
 
-Implementation: make campaign state explicit: draft, audience reviewed, queued, sending, completed/partial/cancelled. Add recipient delivery rows and outbox with one provider operation ID per recipient; recheck consent and address validity just before dispatch. Record provider accepted/delivered/bounced only with the corresponding evidence. Migrate existing rows as legacy recorded recipients, never assert they were actually delivered or automatically send them retroactively. Define spend using N11's canonical metric. Separate outbound audience approval from ordinary draft-write permission.
+Implementation: first slice in ADR 0043 adds recipient delivery rows and one
+outbox operation ID per recipient; rechecks consent and address validity just
+before dispatch; and counts only provider-confirmed operations. Remaining work
+is explicit campaign state (`draft`, `audience reviewed`, `queued`, `sending`,
+`completed`/`partial`/`cancelled`), accepted/delivered/bounced evidence,
+legacy-row migration into visibly non-delivered history, N11's canonical spend
+metric, and separate outbound audience approval from ordinary draft-write
+permission.
 
 Proof: no connector yields “delivery unavailable” and preserves draft; opted-out/invalid-address contacts never dispatch; duplicate run creates no extra provider effect; mid-campaign unsubscribe is honored; failed recipient can retry independently. Useful first scope is a repeat-customer announcement with a test message and recipient preview, not a large campaign builder.
 
