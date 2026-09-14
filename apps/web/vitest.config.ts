@@ -12,6 +12,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    globalSetup: ["./vitest.global-setup.ts"],
     testTimeout: 20_000,
+    // 18 files share one fixture database per run; under parallel load a
+    // beforeAll can legitimately exceed the 10s default (products.test.ts).
+    hookTimeout: 30_000,
   },
 });

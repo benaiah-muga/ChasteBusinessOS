@@ -2079,3 +2079,52 @@ export const marketingSends = pgTable(
   },
   (t) => [uniqueIndex("marketing_send_unique_idx").on(t.campaignId, t.customerId)],
 );
+
+/**
+ * Recorded outcome of one governed action attempt (B02). Keyed by
+ * (org, intent): retries serve the stored receipt instead of re-executing,
+ * so a committed effect is never duplicated and an unproven one reconciles.
+ */
+export const actionReceipts = pgTable(
+  "action_receipts",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** `${orgId}:${intentId}` — the executor's action key. */
+    intentKey: text("intent_key").notNull(),
+    capabilityId: text("capability_id").notNull(),
+    inputHash: text("input_hash").notNull(),
+    ok: boolean("ok").notNull(),
+    /** known | unknown — unknown outcomes reconcile, never re-execute. */
+    outcome: text("outcome").notNull(),
+    data: jsonb("data"),
+    error: text("error"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("action_receipt_org_intent_idx").on(t.orgId, t.intentKey)],
+);
+
+/**
+ * Per-user read receipts for notifications (N29): the notification row is an
+ * immutable event; read state is per recipient. A broadcast read by one
+ * person never clears it for anyone else.
+ */
+export const notificationReads = pgTable(
+  "notification_reads",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    notificationId: uuid("notification_id")
+      .notNull()
+      .references(() => notifications.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("notification_read_per_user_idx").on(t.notificationId, t.userId)],
+);

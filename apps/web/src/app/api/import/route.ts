@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { customers, getDb, items } from "@chaste/db";
+import { hasPermission } from "@chaste/kernel";
 import { getResolvedUser } from "@/server/session";
 import { checkRateLimit } from "@/server/rate-limit";
 import { setOnboardingStep } from "@/server/onboarding";
@@ -43,10 +44,30 @@ function str(v: unknown): string | null {
   return s === "" ? null : s;
 }
 
-/** Decimal currency → integer minor units. Money never touches a float. */
-function toMinor(v: unknown): number | null {
-  const n = num(v);
-  return n === null ? null : Math.round(n * 100);
+/** Decimal currency → integer minor units, parsed from the raw string so a
+ * float never represents money (X15). "19.99" → 1999 exactly; "1,234.56" →
+ * 123456. More than two decimal places, malformed input and unsafe magnitudes
+ * are row errors, never silent coercion. */
+function toMinor(v: unknown): { value: number | null; error?: string } {
+  if (v === null || v === undefined) return { value: null };
+  const raw = String(v).trim();
+  if (raw === "") return { value: null };
+  const s = raw.replace(/[,\s]/g, "");
+  const m = /^(-)?(\d+)(?:\.(\d+))?$/.exec(s);
+  if (!m) return { value: null, error: `"${raw}" is not a valid amount.` };
+  const [, neg, whole, fracRaw = ""] = m;
+  if (fracRaw.length > 2) return { value: null, error: `"${raw}" has more than two decimal places.` };
+  const value = Number(whole) * 100 + Number(fracRaw.padEnd(2, "0"));
+  if (!Number.isSafeInteger(value)) return { value: null, error: `"${raw}" is too large.` };
+  return { value: neg ? -value : value };
+}
+
+/** Money fields must not be negative (credit limits, sale prices). */
+function toNonNegativeMinor(v: unknown): { value: number | null; error?: string } {
+  const parsed = toMinor(v);
+  if (parsed.error) return parsed;
+  if (parsed.value !== null && parsed.value < 0) return { value: null, error: "Amount must not be negative." };
+  return parsed;
 }
 
 export async function POST(req: Request) {
@@ -84,6 +105,15 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: "Unknown import type. Expected customers or products.", code: "invalid" },
       { status: 400 },
+    );
+  }
+  // Writing imported rows is domain authority (X15/N08), not mere session
+  // membership: customers are CRM records, products are inventory records.
+  const requiredPermission = entity === "customers" ? "crm.write" : "inventory.write";
+  if (!hasPermission({ permissions: resolved.permissions }, requiredPermission)) {
+    return NextResponse.json(
+      { error: `forbidden: missing ${requiredPermission}`, code: "forbidden" },
+      { status: 403 },
     );
   }
   if (!Array.isArray(payload.rows)) {
@@ -130,13 +160,17 @@ export async function POST(req: Request) {
       }
       seen.add(key);
 
-      const credit = toMinor(row.creditLimit ?? row.credit_limit);
+      const credit = toNonNegativeMinor(row.creditLimit ?? row.credit_limit);
+      if (credit.error) {
+        result.errors.push({ row: line, field: "creditLimit", message: credit.error });
+        return;
+      }
       const terms = num(row.paymentTermDays ?? row.payment_terms ?? row.terms);
       toInsert.push({
         orgId,
         name,
         email,
-        creditLimitMinor: credit,
+        creditLimitMinor: credit.value,
         paymentTermDays: terms === null ? null : Math.max(0, Math.trunc(terms)),
       });
     });
@@ -185,13 +219,17 @@ export async function POST(req: Request) {
       }
       seenSku.add(key);
 
-      const price = toMinor(row.salePrice ?? row.price ?? row.unit_price);
+      const price = toNonNegativeMinor(row.salePrice ?? row.price ?? row.unit_price);
+      if (price.error) {
+        result.errors.push({ row: line, field: "salePrice", message: price.error });
+        return;
+      }
       toInsert.push({
         orgId,
         sku,
         name,
         unitLabel: str(row.unit ?? row.unitLabel) ?? "unit",
-        salePriceMinor: price ?? 0,
+        salePriceMinor: price.value ?? 0,
         barcode: str(row.barcode),
       });
     });

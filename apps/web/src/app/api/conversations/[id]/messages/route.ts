@@ -7,6 +7,7 @@ import {
   getDb,
   messages,
   organizations,
+  tickets,
   users,
 } from "@chaste/db";
 import { MODELS, OpenAiCompatAdapter } from "@chaste/ai";
@@ -151,7 +152,12 @@ export async function POST(req: Request, { params }: Params) {
           userGoal: `Recent conversation:\n${transcript}\n\nRespond to the latest message as Chaste. Post your reply using messaging.sendMessage to conversation ${id}.`,
           maxSteps: 5,
         },
-        { file: async () => {} },
+        {
+          file: async (orgId, title, description) => {
+            const [created] = await db.insert(tickets).values({ orgId, title, description }).returning({ id: tickets.id });
+            return { id: created!.id };
+          },
+        },
       );
       agentReply = result.finalMessage || null;
     }

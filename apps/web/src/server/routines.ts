@@ -167,7 +167,8 @@ export async function executeRoutine(
     };
     const ticketSink: TicketSink = {
       file: async (orgId, title, description) => {
-        await db.insert(tickets).values({ orgId, title, description });
+        const [created] = await db.insert(tickets).values({ orgId, title, description }).returning({ id: tickets.id });
+        return { id: created!.id };
       },
     };
 

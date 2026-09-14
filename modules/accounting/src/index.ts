@@ -38,7 +38,9 @@ import {
   computeIncomeStatement,
   computeInvoiceTotals,
   computeYearEndClose,
+  canAcceptPayment,
   currencyMinorUnits,
+  documentBalance,
   evaluateExpensePolicy,
   fxRateFromDecimal,
   suggestExpenseCategory,
@@ -300,10 +302,10 @@ const recordPayment = (deps: ModuleDeps) =>
           .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.number, input.invoiceNumber)))
           .limit(1);
         if (!inv) throw new Error("invoice not found");
-        if (inv.status === "void") throw new Error("invoice is void");
-        if (inv.paidMinor + input.amountMinor > inv.totalMinor) {
-          throw new Error(`overpayment: outstanding is ${inv.totalMinor - inv.paidMinor}`);
-        }
+        // N11: one balance contract gates every payment — lifecycle
+        // eligibility first, then the credit-adjusted outstanding.
+        const verdict = canAcceptPayment(inv, inv.status, input.amountMinor);
+        if (!verdict.ok) throw new Error(verdict.reason);
 
         const base = await baseCurrencyOf(tx, ctx.actor.orgId);
         const foreign = inv.currency !== base;
@@ -330,10 +332,14 @@ const recordPayment = (deps: ModuleDeps) =>
           const paidMinor = inv.paidMinor + input.amountMinor;
           await tx
             .update(invoices)
-            .set({ paidMinor, status: paidMinor >= inv.totalMinor ? "paid" : inv.status })
+            .set({ paidMinor, status: documentBalance({ ...inv, paidMinor }).fullySettled ? "paid" : inv.status })
             .where(eq(invoices.id, inv.id));
 
-          return { paymentId: pay!.id, entryId, fullyPaid: paidMinor >= inv.totalMinor };
+          return {
+            paymentId: pay!.id,
+            entryId,
+            fullyPaid: documentBalance({ ...inv, paidMinor }).fullySettled,
+          };
         }
 
         // Cross-currency settlement (ADR 0021): two entries joined by an

@@ -195,16 +195,24 @@ function statMtime(path: string): number {
   }
 }
 
-export async function runMigrations(options: { url?: string } = {}): Promise<MigrationResult> {
+export async function runMigrations(options: { url?: string; backup?: boolean } = {}): Promise<MigrationResult> {
+  // Migration needs owner rights; when the runtime runs under a
+  // least-privilege role, MIGRATION_DATABASE_URL carries the owner identity.
   const url =
-    options.url ?? process.env.DATABASE_URL ?? "postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2";
+    options.url ??
+    process.env.MIGRATION_DATABASE_URL ??
+    process.env.DATABASE_URL ??
+    "postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2";
 
   const client = postgres(url, { max: 1 });
   try {
     await client.unsafe(`SELECT pg_advisory_lock(${MIGRATION_LOCK_KEY})`);
     let backupPath: string | null = null;
     let backupSkippedReason: string | null = null;
-    if (process.env.CHASTE_SKIP_MIGRATION_BACKUP === "1") {
+    if (options.backup === false) {
+      // Snapshots protect user data; a just-created test fixture has none.
+      backupSkippedReason = "pre-migration snapshot disabled for this run";
+    } else if (process.env.CHASTE_SKIP_MIGRATION_BACKUP === "1") {
       backupSkippedReason = "pre-migration snapshot disabled via CHASTE_SKIP_MIGRATION_BACKUP=1";
     } else {
       try {

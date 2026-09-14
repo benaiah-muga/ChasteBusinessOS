@@ -383,7 +383,9 @@ const listMarketplace = (deps: ModuleDeps) =>
       "List community capability packages with their verification status and version so orgs can decide what to install",
     module: "creator",
     risk: "read",
-    permission: "accounting.read",
+    // Browsing is not financial authority (N34): accounting.read gated
+    // marketplace discovery behind unrelated power.
+    permission: "platform.browse",
     input: z.object({}),
     output: z.object({
       listings: z.array(

@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/banner.png" alt="ChasteBusinessOS banner" width="900" />
+
 # ChasteBusinessOS
 
 **The agentic ERP. Describe your business, and an AI co-worker runs it under your authority.**

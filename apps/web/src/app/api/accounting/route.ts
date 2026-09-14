@@ -14,10 +14,14 @@ import {
 import { computeAging } from "@chaste/erp-core";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { missingPermission } from "@/server/route-guards";
+import { executeAtomically } from "@/server/unit-of-work";
 
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = missingPermission(resolved, "accounting.read");
+  if (denied) return denied;
   const orgId = resolved.orgId;
   const db = getDb().db;
 
@@ -147,11 +151,13 @@ export async function POST(req: Request) {
     periodTo?: string;
     taxMinor?: number;
     customerId?: string;
+    /** Client action identity (B02): stable across retries of one intended action. */
+    intentId?: string;
   };
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
 
-  const humanCtx = actorFromResolved(resolved, {});
+  const humanCtx = actorFromResolved(resolved, { intentId: body.intentId });
   if (!humanCtx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   if (body.action === "reverse" && body.entryId) {
@@ -174,11 +180,13 @@ export async function POST(req: Request) {
     return respond(result);
   }
   if (body.action === "payBill" && body.billNumber && body.amountMinor) {
-    const result = await executor.execute("purchasing.payBill", humanCtx, {
-      billNumber: body.billNumber,
-      amountMinor: body.amountMinor,
-    });
-    return respond(result);
+    const input = { billNumber: body.billNumber, amountMinor: body.amountMinor };
+    // With a client action identity the payment runs as one unit of work:
+    // bill mutation, audit fact and receipt commit or roll back together.
+    if (body.intentId) {
+      return respond(await executeAtomically({ db, orgId: resolved.orgId, ctx: humanCtx, capabilityId: "purchasing.payBill", input }));
+    }
+    return respond(await executor.execute("purchasing.payBill", humanCtx, input));
   }
   if (body.action === "salesTaxReport" && body.from && body.to) {
     const result = await executor.execute("accounting.salesTaxReport", humanCtx, {

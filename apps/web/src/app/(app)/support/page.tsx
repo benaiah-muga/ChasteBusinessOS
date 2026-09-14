@@ -568,14 +568,24 @@ export default function SupportPage() {
  * on first load, the snippet is copyable, and AI behavior is one toggle.
  */
 function ChannelsPanel() {
-  const [state, setState] = useState<{ autoReplyEnabled: boolean; greeting: string; embedToken: string } | null>(null);
+  const [state, setState] = useState<{
+    autoReplyEnabled: boolean;
+    greeting: string;
+    embedToken: string | null;
+    canManage: boolean;
+  } | null>(null);
   const [greeting, setGreeting] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     void (async () => {
-      const res = await callApi<{ autoReplyEnabled: boolean; greeting: string; embedToken: string }>("/api/support/channels");
+      const res = await callApi<{
+        autoReplyEnabled: boolean;
+        greeting: string;
+        embedToken: string | null;
+        canManage: boolean;
+      }>("/api/support/channels");
       if (res.data) {
         setState(res.data);
         setGreeting(res.data.greeting);
@@ -586,8 +596,10 @@ function ChannelsPanel() {
   if (!state) return <div className="p-4 text-sm text-stone-400">Loading channel settings…</div>;
 
   const origin = typeof window === "undefined" ? "" : window.location.origin;
-  const snippet = `<script src="${origin}/widget.js" data-chaste="${state.embedToken}" async></script>`;
-  const link = `${origin}/widget/${state.embedToken}`;
+  const snippet = state.embedToken
+    ? `<script src="${origin}/widget.js" data-chaste="${state.embedToken}" async></script>`
+    : null;
+  const link = state.embedToken ? `${origin}/widget/${state.embedToken}` : null;
 
   async function patch(body: Record<string, unknown>) {
     setBusy(true);
@@ -611,16 +623,28 @@ function ChannelsPanel() {
           Paste this into your marketing site before <code className="rounded bg-stone-100 px-1">&lt;/body&gt;</code>. A
           floating &ldquo;Chat with us&rdquo; bubble appears; conversations land in this inbox as customers.
         </p>
-        <pre className="mt-3 overflow-x-auto rounded-lg bg-stone-950 p-3 text-[12px] leading-relaxed text-stone-100">{snippet}</pre>
-        <div className="mt-2 flex items-center gap-2">
-          <Button tone="secondary" size="sm" onClick={() => copy(snippet, "snippet")}>{copied === "snippet" ? "Copied ✓" : "Copy snippet"}</Button>
-          <Button tone="ghost" size="sm" onClick={() => void patch({ regenerateToken: true })} disabled={busy}>
-            Regenerate token…
-          </Button>
-        </div>
+        {snippet ? (
+          <>
+            <pre className="mt-3 overflow-x-auto rounded-lg bg-stone-950 p-3 text-[12px] leading-relaxed text-stone-100">{snippet}</pre>
+            <div className="mt-2 flex items-center gap-2">
+              <Button tone="secondary" size="sm" onClick={() => copy(snippet, "snippet")}>{copied === "snippet" ? "Copied ✓" : "Copy snippet"}</Button>
+              {state.canManage && (
+                <Button tone="ghost" size="sm" onClick={() => void patch({ regenerateToken: true })} disabled={busy}>
+                  Regenerate token…
+                </Button>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="mt-3 rounded-lg border border-dashed border-stone-300 p-3 text-sm text-stone-500">
+            {state.canManage
+              ? "No embed token yet. Save your channel settings below to generate one."
+              : "The website channel is not configured yet — an organization admin can generate its embed token here."}
+          </p>
+        )}
         <p className="mt-3 text-xs text-stone-500">
           Prefer a plain link? Share{" "}
-          <button type="button" onClick={() => copy(link, "link")} className="font-medium text-maroon-700 underline underline-offset-2">
+          <button type="button" onClick={() => link && copy(link, "link")} className="font-medium text-maroon-700 underline underline-offset-2">
             {copied === "link" ? "copied ✓" : "the standalone chat page"}
           </button>{" "}
           anywhere — email signatures, social bios, help docs.
@@ -634,7 +658,7 @@ function ChannelsPanel() {
             type="checkbox"
             checked={state.autoReplyEnabled}
             onChange={(e) => void patch({ autoReplyEnabled: e.target.checked })}
-            disabled={busy}
+            disabled={busy || !state.canManage}
             className="mt-0.5 size-4 accent-[#9b1313]"
           />
           <span className="text-sm text-stone-700">
@@ -654,9 +678,10 @@ function ChannelsPanel() {
           value={greeting}
           maxLength={300}
           onChange={(e) => setGreeting(e.target.value)}
+          disabled={!state.canManage}
           className="mt-1 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm outline-none focus:border-stone-400"
         />
-        <Button tone="secondary" size="sm" disabled={busy || !greeting.trim() || greeting === state.greeting} onClick={() => void patch({ greeting })} className="mt-2">
+        <Button tone="secondary" size="sm" disabled={busy || !state.canManage || !greeting.trim() || greeting === state.greeting} onClick={() => void patch({ greeting })} className="mt-2">
           Save greeting
         </Button>
       </section>

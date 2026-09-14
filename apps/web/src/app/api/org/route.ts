@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { cookies } from "next/headers";
 import { memberships, organizations } from "@chaste/db";
+import { hasPermission } from "@chaste/kernel";
 import { ACTIVE_ORG_COOKIE, getResolvedUser } from "@/server/session";
 import { getDb } from "@chaste/db";
 
@@ -58,7 +59,7 @@ const soulSchema = z.object({ agentSoul: z.string().max(8000) });
 export async function PATCH(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!resolved.permissions.has("iam.admin") && !resolved.permissions.has("*")) {
+  if (!hasPermission({ permissions: resolved.permissions }, "iam.admin")) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const body = soulSchema.safeParse(await req.json().catch(() => null));

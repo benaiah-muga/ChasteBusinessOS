@@ -119,9 +119,26 @@ const listConversations = (deps: ModuleDeps) =>
       ),
     }),
     execute: async (ctx) => {
+      // The system actor has no user identity and thus no conversations.
+      if (!ctx.actor.id) return { conversations: [] };
+      // Membership-scoped (N06): the module boundary must agree with the
+      // message-read boundary — a nonmember lists neither DMs nor channels
+      // they have not joined.
       const rows = await deps.db
-        .select()
+        .select({
+          id: conversations.id,
+          kind: conversations.kind,
+          title: conversations.title,
+          agentEnabled: conversations.agentEnabled,
+        })
         .from(conversations)
+        .innerJoin(
+          conversationMembers,
+          and(
+            eq(conversationMembers.conversationId, conversations.id),
+            eq(conversationMembers.userId, ctx.actor.id),
+          ),
+        )
         .where(eq(conversations.orgId, ctx.actor.orgId))
         .orderBy(desc(conversations.createdAt))
         .limit(50);
@@ -141,7 +158,7 @@ const listConversations = (deps: ModuleDeps) =>
           lastMessageAt: last[0]?.createdAt?.toISOString() ?? null,
         });
       }
-      return { conversations: out };
+      return { conversations: out.filter((c) => c !== undefined) };
     },
   });
 

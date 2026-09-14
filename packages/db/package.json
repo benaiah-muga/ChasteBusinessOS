@@ -7,6 +7,8 @@
     ".": "./src/index.ts",
     "./schema": "./src/schema/index.ts",
     "./migrate": "./src/migrate.ts",
+    "./test-fixture": "./src/test-fixture.ts",
+    "./roles": "./src/roles.ts",
     "./package.json": "./package.json"
   },
   "scripts": {

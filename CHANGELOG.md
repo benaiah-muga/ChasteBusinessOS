@@ -11,6 +11,137 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Outstanding balances ignored customer credits (N11).** A single
+  document-balance contract (`@chaste/erp-core` `documentBalance` /
+  `canAcceptPayment`) now gates `accounting.recordPayment` and
+  `purchasing.payBill`: payments are capped at `total − credited − paid`,
+  drafts and voids refuse money, and "fully paid" accounts for credits.
+  Analytics invoice aging and the support invoice projection derive
+  outstanding through the same contract, so no surface can show a debt the
+  ledger no longer believes. Integer-exact with `RangeError` on bad money;
+  pinned by seven erp-core tests including conservation and acceptance-cap
+  sweeps.
+- **CSV import wrote domain rows on session membership alone (X15/N08) and
+  parsed money through floats.** Importing customers now requires
+  `crm.write` and products `inventory.write`; money converts exactly from
+  the raw string (`"1,234.56"` → 123456 minor units) with sub-cent
+  precision, negatives and malformed amounts returned as per-row errors
+  instead of silent float coercion.
+- **A filed ticket answered "ticket filed" with no reference (X11).** The
+  ticket sink returns the durable id and the `file_ticket` tool result now
+  carries `ticketId` across chat, conversation replies, and routines.
+- **Route read authorization (N01) and the conversation list leak (N06)**:
+  unguarded GET routes no longer return another module's records to any
+  signed-in member — hr salaries (`hr.read`), ledger payloads
+  (`accounting.read`), customers/deals (`crm.read`), marketing
+  (`marketing.read`), projects (`projects.read`), POS lists (`pos.read`),
+  accounting summaries (`accounting.read`), and the setup checklist
+  (`iam.admin`, it exposes the support embed token).
+  The agent-session list applies the detail route's visibility rule (own
+  sessions, all for admins). The conversations list is now membership-scoped
+  like the detail boundary — a nonmember sees neither titles nor message
+  previews of a DM. Owners (`*`) are unaffected; restricted roles need the
+  explicit read grants. Pinned by a six-case route matrix calling real
+  handlers with mocked sessions against a fixture database. The web suite's
+  hook timeout is raised to 30s: 18 files share one fixture database per run
+  and a 5-second `beforeAll` under parallel load legitimately exceeded the
+  10s default (the historical `products.test.ts` flake).
+- **Six org-scoped tables had no row-level security.** `bank_accounts`,
+  `bank_transactions`, `purchase_requests`, `rfqs`, `sales_tax_filings` and
+  `support_settings` were created after migration 0014's RLS pass and never
+  received policies — a tenant's rows were fully visible to any same-database
+  reader bypassing the application layer. Migration 0037 applies the standard
+  `tenant_isolation` policy, and a new mechanical conformance suite
+  (`packages/db/src/rls-conformance.test.ts`) now sweeps every org-scoped
+  table on every test run: RLS enabled, policy present, DML granted to the
+  least-privilege runtime role, fail-closed without tenant context, and no
+  cross-tenant reads under another org's context. Every fixture database also
+  provisions the `chaste_app` role automatically.
+- **Notification broadcasts were cleared for everyone by one read (N29).**
+  Notifications are now immutable events with per-user receipts
+  (`notification_reads`, migration 0036): reading a broadcast marks it read
+  only for that person, repeats are idempotent, and one user cannot mark
+  another user's personal notification.
+- **Proposal review decisions could double-apply (N34).** The review decision
+  is now compare-and-set — the status check lives in the UPDATE — so two
+  concurrent reviewers produce exactly one decision and one conflict.
+  Marketplace browsing no longer requires `accounting.read` (new
+  `platform.browse` permission).
+- **Reading support channel settings created secrets as a side effect (N08).**
+  GET no longer lazily provisions the embed token and only admins receive it;
+  changing auto-reply, greeting or rotating the token requires `iam.admin`,
+  and the settings UI reflects the unconfigured and non-admin states.
+- **Tests no longer run against the shared development database.** Every
+  Vitest project now provisions its own throwaway database (migrated from the
+  current branch's own migrations) in a `globalSetup` and drops it on
+  teardown, so a branch that reshapes the schema can no longer break tests
+  running from another branch. This is the root cause of the intermittent
+  `products.test.ts` setup timeout and of `jobs.test.ts` failing with a raw
+  SQL error against `documents`: the shared `chaste_os_v2` database had been
+  migrated by out-of-branch work (37 applied migrations vs 35 in the repo; a
+  `documents` layout with `content`/`lifecycle`/`visibility` that no migration
+  on this branch produces). Against a fixture database the whole suite is
+  green with no code changes. Opt out with `CHASTE_TEST_DB=1` to test against
+  `DATABASE_URL` directly; that path now refuses to run when the target's
+  applied-migration count does not match the branch's migration files (schema
+  drift), and `CHASTE_TEST_KEEP_DB=1` keeps a fixture for debugging.
+  (`@chaste/db` gains a `test-fixture` export and `runMigrations` accepts
+  `backup: false` for fresh fixtures.)
+
+### Added
+- **Atomic unit of work for governed payments (B02)**:
+  `executeAtomically` runs one action's mutation, audit fact and action
+  receipt inside a single transaction — modules nest via savepoints — with a
+  `failOnAuditError` executor mode so an audit failure rolls the whole unit
+  back instead of reporting an unproven outcome. `api/accounting` `payBill`
+  adopts it whenever the client sends `intentId`, and the accounting page
+  generates one identity per confirmed intent. Pinned by tests proving
+  commit+replay in one unit and full rollback on crash-after-write.
+- **Honest effect semantics and action receipts in the kernel (B02 slice)**:
+  `KernelExecutor` validates capability output against its declared schema —
+  a write returning invalid output now reports `outcome: "unknown"` instead
+  of `ok: true`, and an audit append failure after a committed write reports
+  unknown instead of a retryable failure (closing the F01/F02 reproductions
+  in the evidence register). New `EffectReceiptStore` seam +
+  `action_receipts` table (migration 0035, tenant-RLS policy included) give
+  every action an idempotent identity: with `ctx.intentId`, retries serve
+  the stored receipt — a committed effect replays its receipt instead of
+  re-executing, a reused key with a changed payload conflicts, and an
+  unproven outcome reconciles rather than double-posting. Wired through
+  `buildExecutor`; `api/accounting` mutations accept `intentId`. Pinned by
+  six kernel tests and three integration tests including the
+  payment-crash-retry money case.
+- **Least-privilege runtime database role** (`@chaste/db/roles`): `chaste_app`
+  — NOBYPASSRLS, DML-only, no DDL — provisioned idempotently with grants on
+  existing tables and default privileges for future ones, so the application
+  can stop running as the superuser migration owner (migration 0014's stated
+  intent, previously never wired up: the deployed database had a single
+  superuser role, making RLS inert). `runMigrations` accepts
+  `MIGRATION_DATABASE_URL` for separated owner credentials. The role's
+  security contract (tenant-scoped reads, fail-closed without context, no
+  cross-tenant writes, no DDL) is pinned by five tests in
+  `packages/db/src/runtime-role.test.ts`. The application's own role flip is
+  deliberately not done yet — it requires the entry-point context audit (S01).
+- **W0 evidence register** (`docs/W0_EVIDENCE_REGISTER.md`): F01–F17 and
+  N01–N10 revalidated at the current commit with executed probes where
+  possible — F01 (committed write reported as failure when the audit append
+  fails), F02 (capability output schema not enforced at the executor
+  boundary), F05 (agent-loop trajectory events silently unpersisted,
+  reproduced from test logs), N09 (no database-enforced ledger balance or
+  posted-line immutability, reproduced on a fixture database), and N11's
+  AR side (full payment accepted past credit-adjusted outstanding). The
+  remaining findings carry source-confirmed status with their named
+  reproduction still pending.
+- **The module test suites now actually run.** Nineteen module `.test.ts`
+  files across fifteen packages existed but were invisible to
+  `pnpm test` (only manufacturing and signals declared a `test` script, and
+  the web Vitest config did not discover them). Every module package now has
+  a Vitest project with per-run database fixtures, `vitest` declared as a
+  devDependency, and the lockfile regenerated; `pnpm test` executes all
+  22 module test files plus `web` and `db`. The `turbo test` task is no
+  longer cached, since results depend on live database state.
+
 ## [0.5.0] - 2026-09-09
 
 M7–M13 had been accumulating under `[Unreleased]` since 0.4.0 while

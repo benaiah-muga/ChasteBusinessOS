@@ -10,6 +10,7 @@ import {
   vendors,
 } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
+import { missingPermission } from "@/server/route-guards";
 import { detectCodingAgent } from "@/server/creator-agent";
 
 export interface SetupItem {
@@ -30,6 +31,8 @@ export interface SetupItem {
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = missingPermission(resolved, "iam.admin");
+  if (denied) return denied;
   const orgId = resolved.orgId;
   const db = getDb().db;
 

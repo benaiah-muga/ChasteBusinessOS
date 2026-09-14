@@ -15,6 +15,13 @@ export interface Actor {
 export interface ActionContext {
   actor: Actor;
   sessionId?: string;
+  /**
+   * Client-originated action identity (B02): stable across retries of one
+   * intended action. When present with a receipt store, the executor serves
+   * the prior receipt instead of re-executing; a reused key with a different
+   * payload is a conflict, never a silent second effect.
+   */
+  intentId?: string;
   now: Date;
   /** Side-channel for capabilities needing storage etc. Wired at app layer. */
   services: Record<string, unknown>;
@@ -34,6 +41,15 @@ export interface CapabilityResult<O> {
   error?: string;
   /** Present when policy demanded human sign-off before execution. */
   pendingApproval?: ApprovalRequest;
+  /**
+   * Honest effect semantics (B02/F01): "unknown" means a governed write may
+   * have committed but the result could not be proven (audit append failed,
+   * or the capability returned output violating its schema). Callers must
+   * not blindly retry an unknown outcome; they reconcile by action key.
+   */
+  outcome?: "known" | "unknown";
+  /** True when the executor served the prior receipt for the same intent key. */
+  replayed?: boolean;
 }
 
 export interface InverseSpec<I> {

@@ -93,8 +93,10 @@ function buildHarness(tickets?: { filed: { title: string; description: string }[
   });
   const ticketSink = tickets
     ? {
-        file: async (_orgId: string, title: string, description: string) =>
-          void tickets.filed.push({ title, description }),
+        file: async (_orgId: string, title: string, description: string) => {
+          tickets.filed.push({ title, description });
+          return { id: crypto.randomUUID() };
+        },
       }
     : undefined;
   return { registry, ledger, executor, ticketSink };

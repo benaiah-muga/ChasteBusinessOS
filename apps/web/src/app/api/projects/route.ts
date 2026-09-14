@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, projects } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
+import { missingPermission } from "@/server/route-guards";
 import { getResolvedUser } from "@/server/session";
 
 /**
@@ -14,6 +15,8 @@ export async function GET(req: Request) {
   const resolved = await getResolvedUser();
   const humanCtx = resolved ? actorFromResolved(resolved, {}) : null;
   if (!resolved?.orgId || !humanCtx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const projectsDenied = missingPermission(resolved, "projects.read");
+  if (projectsDenied) return projectsDenied;
 
   const db = getDb().db;
   const projectId = new URL(req.url).searchParams.get("projectId");

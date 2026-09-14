@@ -383,7 +383,14 @@ export default function AccountingPage() {
         onConfirm={async () => {
           if (!payTarget) return;
           await action(
-            { action: "payBill", billNumber: payTarget.number, amountMinor: payTarget.outstandingMinor },
+            {
+              action: "payBill",
+              billNumber: payTarget.number,
+              amountMinor: payTarget.outstandingMinor,
+              // One identity per confirmed intent (B02): a double-submit or
+              // network retry reconciles to this same receipt.
+              intentId: crypto.randomUUID(),
+            },
             `Payment of ${formatMoney(payTarget.outstandingMinor)}`,
           );
           setPayTarget(null);

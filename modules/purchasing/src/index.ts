@@ -17,6 +17,7 @@ import {
 } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import {
+  canAcceptPayment,
   computeAging,
   computeInvoiceTotals,
   matchThreeWay,
@@ -258,10 +259,9 @@ const payBill = (deps: ModuleDeps) =>
           .where(and(eq(vendorBills.orgId, ctx.actor.orgId), eq(vendorBills.number, input.billNumber)))
           .limit(1);
         if (!bill) throw new Error("bill not found");
-        if (bill.status === "void") throw new Error("bill is void");
-        if (bill.paidMinor + input.amountMinor > bill.totalMinor) {
-          throw new Error(`overpayment: outstanding is ${bill.totalMinor - bill.paidMinor}`);
-        }
+        // N11: credit-adjusted outstanding gates vendor payments too.
+        const verdict = canAcceptPayment(bill, bill.status, input.amountMinor);
+        if (!verdict.ok) throw new Error(verdict.reason);
 
         const glLines = [
           { accountCode: "2000", debitMinor: input.amountMinor, creditMinor: 0 },

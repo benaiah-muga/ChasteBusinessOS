@@ -43,16 +43,16 @@ export async function POST(req: Request) {
 
   const db = getDb().db;
   const [proposal] = await db
-    .select()
+    .select({ id: creatorProposals.id })
     .from(creatorProposals)
     .where(and(eq(creatorProposals.id, body.data.proposalId), eq(creatorProposals.orgId, resolved.orgId)))
     .limit(1);
   if (!proposal) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (proposal.status !== "in_review") {
-    return NextResponse.json({ error: `already ${proposal.status}` }, { status: 409 });
-  }
 
-  await db
+  // Compare-and-set decision (N34): the status check lives in the UPDATE, so
+  // two concurrent reviewers produce exactly one decision and one conflict —
+  // never two writes.
+  const decided = await db
     .update(creatorProposals)
     .set({
       status: body.data.decision,
@@ -60,7 +60,11 @@ export async function POST(req: Request) {
       reviewComment: body.data.comment ?? null,
       reviewedAt: new Date(),
     })
-    .where(eq(creatorProposals.id, proposal.id));
+    .where(and(eq(creatorProposals.id, proposal.id), eq(creatorProposals.status, "in_review")))
+    .returning({ id: creatorProposals.id });
+  if (decided.length === 0) {
+    return NextResponse.json({ error: "conflict: proposal already decided or no longer in review" }, { status: 409 });
+  }
 
   // Approving records the human decision; the diff itself merges through
   // version control where CI re-verifies it. The platform is never patched live.
