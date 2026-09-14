@@ -219,3 +219,8 @@ Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
    effects degrade gracefully when a sibling module is disabled; the AI is the
    connective tissue that operates the whole — never a bypass around
    governance (enforced by composition conformance, ADR 0035).
+
+
+## Proposed enterprise evolution programme
+
+The [Enterprise Evolution Plan](docs/ENTERPRISE_EVOLUTION_PLAN.md) extends the [Cordis-like engine proposal](docs/CORDIS_LIKE_ENGINE_PLAN.md) with an evidence register, integrity-first delivery order, bounded autonomy levels, enterprise operations, onboarding/UX/UI, developer setup and independently verified self-development. This programme is proposed and its implementation gates remain open; historical milestone checkmarks above are not enterprise readiness certification. See the [planning review](docs/ENTERPRISE_PLAN_REVIEW.md) for this documentation task’s verification limits.
