@@ -15,5 +15,8 @@
     "@chaste/kernel": "workspace:*",
     "drizzle-orm": "^0.44.5",
     "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
   }
 }

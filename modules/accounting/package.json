@@ -8,7 +8,8 @@
     "./posting": "./src/posting.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@chaste/db": "workspace:*",
@@ -16,5 +17,8 @@
     "@chaste/kernel": "workspace:*",
     "drizzle-orm": "^0.44.5",
     "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
   }
 }
