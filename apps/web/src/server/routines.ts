@@ -165,6 +165,17 @@ export async function executeRoutine(
     log.warn("routine vanished before run", { routineId: payload.routineId });
     return;
   }
+  if (!routine.enabled && payload.trigger === "schedule") {
+    await db.update(routines).set({ lastStatus: "cancelled", lastError: "routine disabled before execution" }).where(eq(routines.id, routine.id));
+    if (payload.occurrenceId) {
+      await db
+        .update(routineOccurrences)
+        .set({ status: "cancelled" })
+        .where(and(eq(routineOccurrences.id, payload.occurrenceId), eq(routineOccurrences.routineId, routine.id)));
+    }
+    log.info("scheduled routine cancelled before execution because it is disabled", { routineId: routine.id });
+    return;
+  }
   const finish = async (status: "ok" | "failed", error?: string) => {
     await db
       .update(routines)

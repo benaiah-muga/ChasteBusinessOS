@@ -12,6 +12,9 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Disabled routines could still execute already-queued schedule jobs (N28).**
+  Scheduled execution now rechecks the routine state and cancels the occurrence
+  before any agent work begins when the routine was disabled after enqueue.
 - **Scheduled routine claims could lose or duplicate occurrences (N28).**
   Due-routine selection, occurrence creation, rescheduling, and durable job
   enqueue now commit together, with a unique routine/scheduled-time key and
