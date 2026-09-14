@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   customers,
   getDb,
   marketingCampaigns,
+  marketingDeliveries,
   marketingSegments,
-  marketingSends,
+  outboxMessages,
 } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
@@ -43,7 +44,7 @@ export async function GET() {
       name: marketingCampaigns.name,
       subject: marketingCampaigns.subject,
       body: marketingCampaigns.body,
-      sentAt: marketingCampaigns.sentAt,
+      queuedAt: marketingCampaigns.sentAt,
       createdAt: marketingCampaigns.createdAt,
     })
     .from(marketingCampaigns)
@@ -52,35 +53,43 @@ export async function GET() {
     .limit(100);
 
   const sendCountRows = await db
-    .select({ campaignId: marketingSends.campaignId, count: sql<number>`count(*)` })
-    .from(marketingSends)
-    .where(eq(marketingSends.orgId, resolved.orgId))
-    .groupBy(marketingSends.campaignId);
+    .select({ campaignId: marketingDeliveries.campaignId, count: sql<number>`count(*)` })
+    .from(marketingDeliveries)
+    .innerJoin(outboxMessages, eq(outboxMessages.id, marketingDeliveries.outboxId))
+    .where(and(eq(marketingDeliveries.orgId, resolved.orgId), eq(outboxMessages.status, "sent")))
+    .groupBy(marketingDeliveries.campaignId);
 
-  // The send log IS the analytics: show it, honestly, with no derived guesses.
+  // The delivery log is the analytics: show queue and provider state honestly.
   const recentSendRows = await db
     .select({
-      id: marketingSends.id,
-      campaignId: marketingSends.campaignId,
+      id: marketingDeliveries.id,
+      campaignId: marketingDeliveries.campaignId,
       customerName: customers.name,
       customerEmail: customers.email,
-      sentAt: marketingSends.sentAt,
+      queuedAt: marketingDeliveries.queuedAt,
+      status: outboxMessages.status,
+      sentAt: outboxMessages.completedAt,
     })
-    .from(marketingSends)
-    .innerJoin(customers, eq(customers.id, marketingSends.customerId))
-    .where(eq(marketingSends.orgId, resolved.orgId))
-    .orderBy(desc(marketingSends.sentAt))
+    .from(marketingDeliveries)
+    .innerJoin(customers, eq(customers.id, marketingDeliveries.customerId))
+    .innerJoin(outboxMessages, eq(outboxMessages.id, marketingDeliveries.outboxId))
+    .where(eq(marketingDeliveries.orgId, resolved.orgId))
+    .orderBy(desc(marketingDeliveries.queuedAt))
     .limit(50);
 
   return NextResponse.json({
     segments: segmentRows.map((s) => ({ ...s, createdAt: s.createdAt.toISOString() })),
     campaigns: campaignRows.map((c) => ({
       ...c,
-      sentAt: c.sentAt?.toISOString() ?? null,
+      queuedAt: c.queuedAt?.toISOString() ?? null,
       createdAt: c.createdAt.toISOString(),
     })),
     sendCounts: sendCountRows.map((r) => ({ campaignId: r.campaignId, count: Number(r.count) })),
-    recentSends: recentSendRows.map((r) => ({ ...r, sentAt: r.sentAt.toISOString() })),
+    recentSends: recentSendRows.map((r) => ({
+      ...r,
+      queuedAt: r.queuedAt.toISOString(),
+      sentAt: r.sentAt?.toISOString() ?? null,
+    })),
   });
 }
 

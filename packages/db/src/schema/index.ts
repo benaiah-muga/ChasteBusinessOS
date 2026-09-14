@@ -2151,6 +2151,38 @@ export const marketingSends = pgTable(
 );
 
 /**
+ * Recipient-bound campaign delivery intent. Provider state is authoritative
+ * in the linked outbox row; this table freezes the address and content digest
+ * used when the campaign was queued.
+ */
+export const marketingDeliveries = pgTable(
+  "marketing_deliveries",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => marketingCampaigns.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    outboxId: uuid("outbox_id")
+      .notNull()
+      .references(() => outboxMessages.id, { onDelete: "restrict" }),
+    emailSnapshot: text("email_snapshot").notNull(),
+    contentDigest: text("content_digest").notNull(),
+    queuedAt: timestamp("queued_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketing_delivery_campaign_customer_idx").on(t.campaignId, t.customerId),
+    uniqueIndex("marketing_delivery_outbox_idx").on(t.outboxId),
+    index("marketing_delivery_org_idx").on(t.orgId, t.queuedAt),
+  ],
+);
+
+/**
  * Recorded outcome of one governed action attempt (B02). Keyed by
  * (org, intent): retries serve the stored receipt instead of re-executing,
  * so a committed effect is never duplicated and an unproven one reconciles.

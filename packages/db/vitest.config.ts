@@ -10,6 +10,6 @@ export default defineConfig({
     // expires while a fixture database is provisioned and migrated under
     // parallel load, which is how the RLS sweep used to fail.
     testTimeout: 20_000,
-    hookTimeout: 30_000,
+    hookTimeout: 120_000,
   },
 });

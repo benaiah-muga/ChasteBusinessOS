@@ -29,7 +29,7 @@ interface Campaign {
   name: string;
   subject: string;
   body: string;
-  sentAt: string | null;
+  queuedAt: string | null;
   createdAt: string;
 }
 interface SendCount {
@@ -41,7 +41,9 @@ interface SendLogEntry {
   campaignId: string;
   customerName: string;
   customerEmail: string | null;
-  sentAt: string;
+  queuedAt: string;
+  status: string;
+  sentAt: string | null;
 }
 interface Payload {
   segments?: Segment[];
@@ -52,12 +54,13 @@ interface Payload {
 interface SendResult {
   recipients: number;
   skippedOptOut: number;
+  skippedNoAddress: number;
   alreadySent: number;
 }
 interface AnalyticsData {
   campaignName: string;
   sentCount: number;
-  sentAt: string | null;
+  queuedAt: string | null;
 }
 type CapabilityResult = SendResult | AnalyticsData | { segmentId: string } | { campaignId: string };
 
@@ -264,7 +267,7 @@ export default function MarketingPage() {
                   <li key={c.id} className="py-2.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium">{c.name}</span>
-                      <Badge tone={c.sentAt ? "green" : "amber"}>{c.sentAt ? "sent" : "draft"}</Badge>
+                      <Badge tone={c.queuedAt ? "green" : "amber"}>{c.queuedAt ? "queued" : "draft"}</Badge>
                       <span className="text-xs text-stone-400">
                         to {segmentName(c.segmentId)} · {sendsByCampaign.get(c.id) ?? 0} in log
                       </span>
@@ -282,7 +285,7 @@ export default function MarketingPage() {
                               setSendResults((prev) => ({ ...prev, [c.id]: res as SendResult }));
                               setNotice({
                                 tone: "success",
-                                text: `Sent to ${res.recipients} recipients, ${res.skippedOptOut} opted-out skipped${
+                                text: `Queued ${res.recipients} recipients, ${res.skippedOptOut} opted-out skipped, ${res.skippedNoAddress} without an address skipped${
                                   res.alreadySent ? `, ${res.alreadySent} already sent earlier` : ""
                                 }.`,
                               });
@@ -307,14 +310,14 @@ export default function MarketingPage() {
                     </div>
                     {sent && (
                       <p className="mt-1.5 text-xs text-stone-600">
-                        Sent to {sent.recipients} recipients, {sent.skippedOptOut} opted-out skipped
+                        Queued {sent.recipients} recipients, {sent.skippedOptOut} opted-out skipped, {sent.skippedNoAddress} without an address skipped
                         {sent.alreadySent ? `, ${sent.alreadySent} already sent earlier` : ""}.
                       </p>
                     )}
                     {stats && (
                       <p className="mt-1 text-xs text-stone-500">
-                        {stats.campaignName}: {stats.sentCount} {stats.sentCount === 1 ? "send" : "sends"} logged
-                        {stats.sentAt ? ` · sent ${formatDateTime(stats.sentAt)}` : " · not sent yet"}
+                        {stats.campaignName}: {stats.sentCount} provider-confirmed {stats.sentCount === 1 ? "delivery" : "deliveries"}
+                        {stats.queuedAt ? ` · queued ${formatDateTime(stats.queuedAt)}` : " · not queued yet"}
                       </p>
                     )}
                   </li>
@@ -329,14 +332,14 @@ export default function MarketingPage() {
       <Card className="mt-6">
         <CardTitle>Send log</CardTitle>
         <Notice tone="info">
-          <span className="font-semibold">Honest analytics:</span> the append-only send log below is the only tracking.
-          No pixels, no open tracking, no click capture — &ldquo;sent&rdquo; means a row in this log, nothing more.
+          <span className="font-semibold">Honest analytics:</span> the durable delivery log below is the only tracking.
+          No pixels, no open tracking, no click capture — &ldquo;delivered&rdquo; means the provider acknowledged the outbox operation.
         </Notice>
         {recentSends.length === 0 ? (
           <EmptyState
             icon={<IconChartBar />}
             title="Nothing sent yet"
-            hint="When a campaign goes out, every delivery is recorded here — permanently and auditably."
+            hint="When a campaign is queued, every recipient operation is recorded here — permanently and auditably."
           />
         ) : (
           <ul className="divide-y text-sm">
@@ -347,7 +350,7 @@ export default function MarketingPage() {
                   {s.customerEmail ? <span className="opacity-50"> · {s.customerEmail}</span> : null}
                 </span>
                 <span className="shrink-0 text-xs whitespace-nowrap text-stone-500">
-                  {campaigns.find((c) => c.id === s.campaignId)?.name ?? "campaign"} · {timeAgo(s.sentAt)}
+                  {campaigns.find((c) => c.id === s.campaignId)?.name ?? "campaign"} · {s.status} · {timeAgo(s.queuedAt)}
                 </span>
               </li>
             ))}
