@@ -56,7 +56,7 @@ export function parseScheduleText(raw: string): ParsedSchedule {
 
   // "every N minutes/hours", "hourly", "every half/quarter hour"
   let minutes: number | null = null;
-  const interval = /^every\s+(\d+)\s*(min(?:ute)?s?|hours?|h)\b/.exec(text);
+  const interval = /^every\s+(\d+)\s*(min(?:ute)?s?|hours?|h)$/.exec(text);
   if (interval) {
     const n = Number(interval[1]);
     minutes = interval[2]!.startsWith("h") ? n * 60 : n;

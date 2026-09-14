@@ -2,7 +2,13 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { jobs, routines, type Database } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
-import { describeSchedule, nextRoutineRun, parseScheduleText } from "@chaste/erp-core";
+import {
+  describeSchedule,
+  MAX_INTERVAL_MINUTES,
+  MIN_INTERVAL_MINUTES,
+  nextRoutineRun,
+  parseScheduleText,
+} from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 export interface ModuleDeps {
@@ -17,12 +23,24 @@ const ROUTINE_LIST_LIMIT = 100;
 /** Execution job type handled by the worker (apps/web/src/server/jobs.ts). */
 export const ROUTINE_JOB_TYPE = "routines.executeRoutine";
 
-const scheduleSchema = z.object({
-  kind: z.enum(["interval", "daily", "weekdays", "weekly"]),
-  everyMinutes: z.number().int().min(1).max(10_080).optional(),
-  atTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-  dayOfWeek: z.number().int().min(0).max(6).optional(),
-});
+const validTimeSchema = z
+  .string()
+  .regex(/^\d{2}:\d{2}$/)
+  .refine((value) => {
+    const hours = Number(value.slice(0, 2));
+    const minutes = Number(value.slice(3, 5));
+    return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+  }, "time must be between 00:00 and 23:59");
+
+export const routineScheduleSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("interval"),
+    everyMinutes: z.number().int().min(MIN_INTERVAL_MINUTES).max(MAX_INTERVAL_MINUTES),
+  }),
+  z.object({ kind: z.literal("daily"), atTime: validTimeSchema }),
+  z.object({ kind: z.literal("weekdays"), atTime: validTimeSchema }),
+  z.object({ kind: z.literal("weekly"), atTime: validTimeSchema, dayOfWeek: z.number().int().min(0).max(6) }),
+]);
 
 const createRoutine = (deps: ModuleDeps) =>
   defineCapability({
@@ -37,12 +55,12 @@ const createRoutine = (deps: ModuleDeps) =>
       name: z.string().min(1).max(ROUTINE_NAME_MAX),
       prompt: z.string().min(1).max(ROUTINE_PROMPT_MAX),
       scheduleText: z.string().min(3).max(ROUTINE_SCHEDULE_TEXT_MAX).optional(),
-      schedule: scheduleSchema.optional(),
+      schedule: routineScheduleSchema.optional(),
       withWebhook: z.boolean().default(false),
     }),
     output: z.object({
       routineId: z.string(),
-      schedule: scheduleSchema,
+      schedule: routineScheduleSchema,
       scheduleLabel: z.string(),
       nextRunAt: z.string(),
       webhookToken: z.string().nullable(),
@@ -56,7 +74,7 @@ const createRoutine = (deps: ModuleDeps) =>
     execute: async (ctx, input) => {
       // Either the user's words or a pre-structured schedule must be present;
       // when both arrive the structured one wins (it is already normalized).
-      let schedule: z.infer<typeof scheduleSchema>;
+      let schedule: z.infer<typeof routineScheduleSchema>;
       const scheduleText: string | null = input.scheduleText ?? null;
       if (input.schedule) {
         schedule = input.schedule;
@@ -67,7 +85,7 @@ const createRoutine = (deps: ModuleDeps) =>
             "could not parse the schedule: try shapes like 'every 30 minutes', 'daily at 08:00', 'weekdays at 9am' or 'weekly on monday at 09:00'",
           );
         }
-        schedule = parsed.schedule as z.infer<typeof scheduleSchema>;
+        schedule = parsed.schedule as z.infer<typeof routineScheduleSchema>;
       } else {
         throw new Error("a schedule is required: pass scheduleText or a structured schedule");
       }
@@ -100,7 +118,7 @@ const createRoutine = (deps: ModuleDeps) =>
           .returning({ id: routines.id });
         return {
           routineId: row!.id,
-          schedule: schedule as z.infer<typeof scheduleSchema>,
+          schedule: schedule as z.infer<typeof routineScheduleSchema>,
           scheduleLabel: describeSchedule(schedule as never),
           nextRunAt: nextRunAt.toISOString(),
           webhookToken,
@@ -176,7 +194,7 @@ const updateRoutine = (deps: ModuleDeps) =>
       name: z.string().min(1).max(ROUTINE_NAME_MAX).optional(),
       prompt: z.string().min(1).max(ROUTINE_PROMPT_MAX).optional(),
       scheduleText: z.string().min(3).max(ROUTINE_SCHEDULE_TEXT_MAX).optional(),
-      schedule: scheduleSchema.optional(),
+      schedule: routineScheduleSchema.optional(),
       enabled: z.boolean().optional(),
     }),
     output: z.object({ routineId: z.string(), scheduleLabel: z.string(), nextRunAt: z.string().nullable() }),
@@ -192,18 +210,20 @@ const updateRoutine = (deps: ModuleDeps) =>
         if (input.name !== undefined) patch.name = input.name;
         if (input.prompt !== undefined) patch.prompt = input.prompt;
         if (input.enabled !== undefined) patch.enabled = input.enabled;
-        let schedule = row.schedule as z.infer<typeof scheduleSchema> | null;
+        let schedule = row.schedule as z.infer<typeof routineScheduleSchema> | null;
+        const scheduleChanged = input.schedule !== undefined || input.scheduleText !== undefined;
         if (input.schedule) {
           schedule = input.schedule;
           patch.schedule = input.schedule as unknown as object;
+          patch.scheduleText = null;
         } else if (input.scheduleText) {
           const parsed = parseScheduleText(input.scheduleText);
           if (!parsed.ok) throw new Error("could not parse the new schedule");
-          schedule = parsed.schedule as z.infer<typeof scheduleSchema>;
+          schedule = parsed.schedule as z.infer<typeof routineScheduleSchema>;
           patch.schedule = schedule as unknown as object;
           patch.scheduleText = input.scheduleText;
         }
-        if (schedule) {
+        if (scheduleChanged && schedule) {
           patch.nextRunAt = nextRoutineRun(schedule as never, ctx.now);
         }
         await tx.update(routines).set(patch).where(eq(routines.id, input.routineId));
@@ -230,12 +250,12 @@ const deleteRoutine = (deps: ModuleDeps) =>
       name: z.string(),
       prompt: z.string(),
       scheduleText: z.string().nullable(),
-      schedule: scheduleSchema,
+      schedule: routineScheduleSchema,
     }),
     inverse: {
       capabilityId: "routines.create",
       buildInput: (_input, output) => {
-        const o = output as { name: string; prompt: string; scheduleText: string | null; schedule: z.infer<typeof scheduleSchema> };
+        const o = output as { name: string; prompt: string; scheduleText: string | null; schedule: z.infer<typeof routineScheduleSchema> };
         return {
           name: o.name,
           prompt: o.prompt,
@@ -255,7 +275,7 @@ const deleteRoutine = (deps: ModuleDeps) =>
           name: row.name,
           prompt: row.prompt,
           scheduleText: row.scheduleText,
-          schedule: row.schedule as z.infer<typeof scheduleSchema>,
+          schedule: row.schedule as z.infer<typeof routineScheduleSchema>,
         };
       });
     },
