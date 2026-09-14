@@ -12,6 +12,10 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Routine schedule edits could silently change execution timing (N27).**
+  Structured schedules now require kind-specific fields and valid clock ranges,
+  natural-language intervals reject trailing qualifiers, and edits unrelated
+  to the schedule preserve the existing next occurrence.
 - **Marketing sends could claim delivery without an external operation
   (N26).** Campaign recipients now bind to durable, idempotent email outbox
   rows; opted-out, deactivated, missing-address, and changed-address contacts

@@ -282,9 +282,16 @@ Proof: no connector yields “delivery unavailable” and preserves draft; opted
 
 ### N27 — Routine edits and parsing change schedule meaning (P1, partly reproduced)
 
-Evidence: `modules/routines/src/index.ts:199` recomputes next run whenever an existing schedule is present, including name-only edits. Structured creation accepts `HH:MM` by shape, not range, and update does not repeat creation's required-field checks. Text parser's interval regex is not fully anchored (`erp-core/src/routines.ts:56`): a local call with `every 30 minutes on weekdays` returned an unrestricted interval. Scheduling uses server-local `setHours`/`getDay` with no org timezone. Deleting then invoking its create inverse loses enabled/trigger/token identity and can re-create a previously disabled routine as scheduled.
+Evidence: `modules/routines/src/index.ts:199` recomputed next run whenever an existing schedule was present, including name-only edits. Structured creation accepted `HH:MM` by shape, not range, and update did not repeat creation's required-field checks. Text parser's interval regex was not fully anchored (`erp-core/src/routines.ts:56`): a local call with `every 30 minutes on weekdays` returned an unrestricted interval. Scheduling uses server-local `setHours`/`getDay` with no org timezone. Deleting then invoking its create inverse loses enabled/trigger/token identity and can re-create a previously disabled routine as scheduled.
 
-Implementation: one discriminated schedule schema for create/update/text normalization; reject unconsumed qualifiers and impossible times. Store IANA timezone, wall-clock intent and missed-run/DST policy; show next three occurrences before confirmation. Rename/prompt changes preserve due time. Use reversible archive/restore for routines, preserving identifiers and enabled state; token restoration follows an explicit security policy. Preserve current workflows with migration labels identifying their old server-time basis.
+Implementation: the first schedule-contract slice in ADR 0044 adds one
+discriminated schedule schema for create/update, validates kind-specific fields
+and real clock ranges, rejects unconsumed interval qualifiers, and preserves
+the next occurrence for name/prompt/enabled-only edits. Remaining work is to
+store IANA timezone, wall-clock intent and missed-run/DST policy; show the next
+three occurrences before confirmation; use reversible archive/restore while
+preserving identifiers and enabled state; and define token restoration plus
+migration labels for the old server-time basis.
 
 Proof: rename has unchanged due time; 99:99 and incomplete weekly schedule fail; unsupported qualifier asks a targeted question; timezone/server relocation gives same intended local schedule; DST repeated/missing times follow policy; restore doesn't silently enable automation.
 
