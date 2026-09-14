@@ -1,0 +1,259 @@
+# W0 evidence register
+
+Status: living document; updated as W0 work proceeds. Baseline: branch
+`cordis-like-engine` at `1f3b078` plus the uncommitted W0 working tree.
+Scope of this pass: F01–F17 (Enterprise Evolution §2) and N01–N10 (Module
+Audit §2), per the W0 deliverable "evidence register with
+confirmed/ruled-out/open states".
+
+Status vocabulary: **reproduced** (executable proof this session, command
+cited), **source-confirmed** (cited anchor revalidated at this commit; the
+reproduction named by the finding is still pending), **resolved** (finding
+discharged), **open** (proof requires deployment, concurrency, or a
+multi-actor scenario not yet exercised). Re-validate anchors before fixing:
+source moves.
+
+## Environment facts established this session
+
+| Fact | Evidence |
+|---|---|
+| The historical red gate was environmental, not a code defect: shared dev DB `chaste_os_v2` had 37 applied migrations and a documents layout (`content`, `lifecycle`, `visibility`, `insights`, `current_version`; no `content_base64`) produced by no migration on this branch — migrated by out-of-branch work, likely `origin/feat/document-ingestion`. `jobs.test.ts:58` and the intermittent `products.test.ts` timeout both pass against a branch-migrated fixture DB. | Session diagnosis; full web suite 209/209 on fixture DB |
+| Tests now provision per-run fixture databases by default and drop them on teardown; `CHASTE_TEST_DB=1` opts into a provided DB after a migration-count drift guard. | `packages/db/src/test-fixture.ts`; `@chaste/db/test-fixture` export |
+| All 22 module test files now execute under `pnpm test` (19 were previously invisible; N36). `turbo test` is uncached. | Working tree; CHANGELOG `[Unreleased]` |
+| CI demo coverage remains slice/m4/m5 only, key-conditional. | `.github/workflows/ci.yml` |
+
+## F-register (Enterprise Evolution §2)
+
+| ID | Status at this commit | Evidence and remaining proof |
+|---|---|---|
+| F01 | **reproduced** | Probe `apps/web/.w0-probes/probe-f01.mts` (run `pnpm exec tsx apps/web/.w0-probes/probe-f01.mts`): a capability whose write commits, followed by a ledger append that throws, returns `ok:false` to the caller while the effect persists — the retry-duplicates-effect window. Structural anchor: `packages/kernel/src/executor.ts:118-124` wraps execute + audit in one try. Fix belongs to B02 (atomic effect/audit receipt). |
+| F02 | **reproduced** | Probe `probe-f02.mts`: capability returns `{"n":"not-a-number-7"}` against a declared `z.object({n: z.number()})` output; executor returns `ok:true` with the invalid data (`executor.ts:120` never parses `cap.output`). Fix belongs to B02/B05 (output validation before commit). |
+| F03 | source-confirmed | `apps/web/src/server/jobs.ts` claims by setting `processing`; no lease/heartbeat in the claim path. Open: worker-crash recovery proof (B03 fixture). |
+| F04 | source-confirmed | `jobs.ts:98` `UPDATE recurring_invoices SET last_run_at = now()` is a separate statement from due-selection and invoice creation; eligibility/advancement are not occurrence-unique. Open: two-worker race repro (B03/T03). |
+| F05 | **reproduced (in test logs)** | On a clean fixture DB, `analytics.test.ts` and `support.test.ts` drive the agent loop; its step/tool event inserts into `session_events` fail (no parent `agent_sessions` row) and are logged fire-and-forget while the run continues — silent trajectory gaps, exactly the audit/replay risk. Fix belongs to B04 (durable run log). |
+| F06 | source-confirmed | `packages/kernel/src/policy.ts` ordinal risk + amount thresholds; system actor in `jobs.ts` built from the queued capability permission. Open: delegation-ceiling and cumulative-exposure tests (A01). |
+| F07 | source-confirmed | `apps/web/src/server/approvals.ts` conditional claim present; rejection branch precedes capability-permission check. Open: restricted-member rejection repro (T05). |
+| F08 | source-confirmed | `modules/creator/src/index.ts` — four `risk: "read"` sites include proposal-inserting capabilities; render/test evidence split absent. Open: route-level proof (T04). |
+| F09 | source-confirmed | `packages/db/src/client.ts` documents the bypass-role escape hatch; creator takes direct `deps.db`. Open: runtime-role matrix (T09/S01). |
+| F10 | source-confirmed | `apps/web/src/server/kernel.ts` single constant advisory lock for the ledger chain. Open: contention measurement (ADR 0022 decision). |
+| F11 | source-confirmed | `apps/web/src/server/onboarding.ts` embedding inside the org transaction (4 anchor hits). Open: slow-provider/failure/timing repro. |
+| F12 | open | Wizard and tests exist from remote; persistence/correctness improvements not started (U02). |
+| F13 | source-confirmed | `apps/web/src/server/rate-limit.ts` process-local counters + forwarded-header IP (2 hits). Open: multi-replica/trusted-proxy proof (S02). |
+| F14 | source-confirmed | Schema uses `integer` money columns; bigint FX in JS-number mode. Open: signed-32-bit and safe-integer range tests (B06). |
+| F15 | source-confirmed | CI runs only `demo:slice`, `demo:m4`, `demo:m5`, conditional on `NVIDIA_API_KEY`; other demos unproven in CI (T11). |
+| F16 | source-confirmed | `apps/web/src/server/auth.ts` configures email/password; SSO remains storage/routing. Open: full SAML/SCIM login trace (S01). |
+| F17 | open | ADR 0023 defers executable creator sandboxing; unchanged. E03 isolation design still pending. |
+
+## N-register (Module Audit §2, security/operational)
+
+| ID | Status at this commit | Evidence and remaining proof |
+|---|---|---|
+| N01 | source-confirmed | `apps/web/src/app/api/hr/route.ts:7` GET passes session/org check only and returns `monthlySalaryMinor`/`taxRateBps` (`:49-50`) via direct `db.select()`; same shape in customers/deals/marketing/projects/pos list routes. Open: cross-role denial matrix incl. non-owner runtime role (I1/T09). |
+| N02 | source-confirmed | `modules/signals/src/index.ts` invokes all producers with org/time only (3 anchor hits); `server/kernel.ts` composes producers unconditionally. Open: cross-module disclosure repro (I1). |
+| N03 | source-confirmed | `apps/web/src/server/auth.ts` enables password sign-up without verified-email binding (anchor hit). Open: pre-provisioned-identity repro requires a running deployment (I1). |
+| N04 | source-confirmed | `api/support/public/route.ts` binds conversations from submitted email (4 anchor hits). Open: end-to-end disclosure proof against a running server (I1). |
+| N05 | source-confirmed | `modules/support/src/index.ts` `searchKnowledge` retrieves any org memory under `support.read` (3 hits). Open: retrieval repro incl. document chunks (I1). |
+| N06 | source-confirmed | `api/conversations/route.ts:10` lists every org conversation with latest-message preview `body.slice(0, 80)` and **no membership filter** (detail route checks membership — boundary contradiction confirmed at HEAD); also one query per conversation (N35 overlap). Open: two-actor browser/API proof (I1). |
+| N07 | source-confirmed | `modules/iam/src/index.ts` `assignRole` lacks last-owner check (3 hits); SCIM delete leaves `user_roles`. Open: lifecycle concurrency repro (I1). |
+| N08 | source-confirmed | `api/support/channels/route.ts` GET lazily inserts settings; POST toggles/tokens with session+module checks only (4 hits). Open: mutation-classification inventory (I1/B01). |
+| N09 | **reproduced** | Probe `probe-n09.mts` on a fixture DB migrated from this branch: 0 triggers on journal tables; only FK/PK constraints on `journal_lines`; an unbalanced entry (10000/5000) commits; UPDATE and DELETE of a posted line both succeed. Static corroboration: zero `CREATE TRIGGER`/`CREATE FUNCTION` across all 35 migration files. Fix belongs to I2/B06 (commit-time enforcement with staged rollout). |
+| N10 | source-confirmed | `packages/db/src/migrate.ts` `dockerDump` parses only user/database from the URL and falls back to the default local container (`:141-150`); snapshot-before-pending-check and last-ten retention confirmed in the same file. Open: restore drill + identity verification (S03). |
+| N11 | **reproduced (AR side)** | Probe `probe-n11.mts`: on a fixture DB, invoice total 10000 with `credited_minor` 4000 and paid 0 — `accounting.recordPayment` of the full 10000 **succeeds** (`modules/accounting/src/index.ts:304` gates on `paid + amount <= total` only), while the schema comment defines balance as `total − paid − credited`. AP/analytics/support divergence anchors unchanged. Open: AP + cross-surface reconciliation repro (I2). |
+| N12–N36 | not yet revalidated | Pending W0 continuation; treat audit anchors as starting points, revalidate at fix time per the audit's §8 contract. |
+
+## Probe reproduction
+
+Probes are untracked local evidence under `apps/web/.w0-probes/` (kept out of
+`src/` so typecheck/test ignore them). Run from the repo root:
+
+```sh
+pnpm exec tsx apps/web/.w0-probes/probe-f01.mts   # F01 committed-write/audit-failure window
+pnpm exec tsx apps/web/.w0-probes/probe-f02.mts   # F02 output schema not enforced
+pnpm exec tsx apps/web/.w0-probes/probe-n09.mts   # N09 no DB-enforced ledger invariants (fixture DB, self-dropping)
+pnpm exec tsx apps/web/.w0-probes/probe-n11.mts   # N11 credit-ignoring payment acceptance (fixture DB, self-dropping)
+```
+
+The DB probes create and drop their own fixture databases; they never touch
+the development database.
+
+## W0.4 — entry-point and runtime-role inventory
+
+Mechanical classification of all 55 files under `apps/web/src/app/api/**/route.ts`
+(executor calls vs direct `db.insert/update/select`, swept 2026-09-12). This is
+the B01 entry-point map; "ungoverned write" = a route mutating business state
+with zero `executor.execute` involvement.
+
+### Ungoverned write surface (B01 violations, with audit-finding overlap)
+
+| Route | Direct mutations | Finding | Required treatment |
+|---|---|---|---|
+| `api/chat` | agent_sessions upsert, tickets insert | X11, N08 | tickets through a governed capability returning a receipt; session upsert documented as infrastructure |
+| `api/conversations` | conversation + member inserts | N08 | governed createConversation with transactional membership |
+| `api/import` | batched customer/product inserts | X15 | governed bulk import capabilities (P0) |
+| `api/invite/[token]` | invitation claim, membership + role inserts | N07 | transactional invitation claim service |
+| `api/notifications` | shared readAt update | N29 | per-user receipt state |
+| `api/org` | persona/settings update | N08 | governed org settings capability |
+| `api/proposals` | review-decision update | N34 | compare-and-set decision service |
+| `api/scim/tokens` | token insert/update | N07 | governed credential admin |
+| `api/scim/v2/Users`, `[id]` | user/membership/role lifecycle | N07 | shared identity lifecycle service |
+| `api/support/channels` | settings lazy-insert, token rotation | N08 | governed settings capability; GET must not mutate |
+| `api/support/public` | 6 inserts, 2 updates | N04 | verified-binding intake service (P0 containment) |
+| `api/team/sso` | connection insert/update | N07/N08 | governed SSO admin |
+| `server/onboarding.ts` (via `api/onboarding`) | organization bootstrap + settings snapshot | B01, F11 | narrow documented bootstrap exception, atomic, intent-keyed |
+
+### Ungoverned read surface (N01 class; writes governed, reads not)
+
+`api/hr` (salaries, tax rates), `api/ledger` (full payload projection),
+`api/customers`, `api/deals`, `api/marketing`, `api/projects` (list default),
+`api/pos` (list), `api/sessions` (titles), `api/dashboard`, `api/approvals`
+(GET), `api/metrics`, `api/conversations` (list + previews), `api/setup`
+(org counts + embed token), `api/portal/invoice/[token]` (tokenized public
+exception — verify scope), `api/support/public` reads. Governed writes do not
+legitimize ungoverned reads; each needs an explicit permission + audience.
+
+### Governed and infrastructure entry points
+
+- Fully governed action routes: accounting, analytics, banking, customers,
+  deals, documents, email, expenses, health, hr (POST), inventory,
+  manufacturing, marketing, marketplace, modules, pos, projects, purchasing,
+  quotes, recurring, reports, routines, signals, support, team, time.
+- `api/auth/[...all]`: Better Auth handler — documented infrastructure
+  exception (S01 governs its configuration).
+- Worker (`scripts/worker.ts` → `processOneJob`) executes through the kernel
+  by a system actor scoped to the job's org — governed (F06 delegation
+  ceiling still open).
+- Server actions: only `app/(app)/_shell/actions.ts` (org switch) — no
+  domain writes.
+- Boot (`instrumentation.ts`): runs migrations — infrastructure, but see N10.
+
+### Runtime DB roles
+
+| Fact | Evidence | Consequence |
+|---|---|---|
+| Exactly one role exists in the deployed database: `chaste`, **superuser, BYPASSRLS**. | `pg_roles` inventory of the live dev database, 2026-09-12 | RLS is inert for the application; the S01 gate "runtime role must be non-owner and NOBYPASSRLS" fails by default in dev **and CI** (service defines `POSTGRES_USER: chaste`) |
+| The only NOBYPASSRLS probe role (`chaste_rls_probe`) is created and dropped ad hoc by `packages/db/src/rls.test.ts`. | test source | RLS isolation is proven only in that one test, never by the running app |
+| No migration creates application roles. | zero `CREATE ROLE` in `packages/db/drizzle/*.sql` | role provisioning is entirely manual/out-of-band — same drift class as the schema incident |
+
+Required: a least-privilege runtime role (SELECT/INSERT/UPDATE/DELETE on
+tenant tables, no DDL, NOBYPASSRLS) wired through `DATABASE_URL`, with
+separate migration credentials; CI must run the suite under it. This is the
+W1 prerequisite for every RLS-dependent gate (S01, N01, F09).
+
+## W1a — least-privilege runtime role (delivered)
+
+`chaste_app` (NOBYPASSRLS, DML-only, no DDL) is now provisioned idempotently
+by `ensureAppRole` (`@chaste/db/roles`): cluster-level role plus per-database
+grants and default privileges on the migration owner, so future tables are
+covered. `runMigrations` prefers `MIGRATION_DATABASE_URL`, separating owner
+credentials from the runtime identity when the flip happens. The contract is
+pinned by `packages/db/src/runtime-role.test.ts` (5 passing tests): sees only
+the tenant named by `app.org_id`; cross-tenant filtering returns nothing;
+no-context reads fail closed; in-context writes succeed and out-of-context
+writes are rejected; DDL is refused.
+
+Not yet flipped: the application still connects as `chaste` by default.
+Flipping `DATABASE_URL` to the runtime role requires the codebase-wide
+audit of context-setting paths (better-auth handlers, bootstrap, SCIM,
+background jobs) — that is the I1/S01 matrix work. The floor is now
+executable instead of aspirational, and migration 0014's stated intent
+("the app connects as a role that does NOT bypass RLS") has a supported path.
+
+## W1c — atomic receipts and honest outcomes (B02 first slice, delivered)
+
+The executor now enforces honest effect semantics at the trust boundary:
+
+- **F01 discharged** (`packages/kernel/src/executor.ts`): an audit append
+  failure after a committed write returns `{ok: false, outcome: "unknown"}`
+  instead of a plainly retryable failure. `CapabilityResult` gains
+  `outcome: "known" | "unknown"` and `replayed`.
+- **F02 discharged**: capability output is validated against its declared
+  schema after execution. A write returning invalid output reports
+  `outcome: "unknown"`; a read reports a plain failure. Invalid output can
+  no longer cross as `ok: true`.
+- **Action receipts**: `EffectReceiptStore` (kernel interface) +
+  `action_receipts` table (migration 0035, RLS policy included) +
+  `pgEffectReceiptStore` wired into `buildExecutor`. With `ctx.intentId`
+  (client action identity), retries serve the prior receipt; key reuse with
+  a different payload is a conflict; an unknown outcome persists so the
+  retry reconciles instead of re-executing. Probes `probe-f01`/`probe-f02`
+  now verify the discharged behavior.
+
+Pinned by `packages/kernel/src/executor.receipts.test.ts` (6 tests) and
+`apps/web/src/server/effect-receipts.test.ts` (3 integration tests on the
+real store, including the money case: crash-after-commit + retry yields one
+posting, not two).
+
+Residual gaps, tracked for later slices: the receipt write and audit append
+are two statements (the full B02 unit of work — one transaction spanning
+mutation, audit and receipt — still requires injecting the transaction into
+module repositories); `intentId` is adopted only by the accounting route's
+mutations (UIs do not yet send it); `accounting.recordPayment` has **no
+route caller at all** — a capability-discovery gap (X04), recorded here.
+
+## W1b — route read guards and the N06 list fix (first slice, delivered)
+
+- **N01 (route surface) discharged for the audit's listed reads**: a
+  `missingPermission` guard (`apps/web/src/server/route-guards.ts`) now gates
+  hr salaries (`hr.read`), the ledger payload projection (`accounting.read`),
+  customers/deals (`crm.read`), marketing (`marketing.read`), projects list
+  (`projects.read`), POS lists (`pos.read`), and the setup checklist
+  (`iam.admin` — it exposes the support embed token and org counts). The
+  sessions list applies the detail route's visibility predicate (own sessions,
+  everything for `iam.admin`). Pinned by a six-case route matrix
+  (`apps/web/src/server/route-guards.test.ts`) calling the real handlers with
+  mocked session resolution against the fixture database — including the
+  negative assertions that denied responses contain no sensitive values.
+- **N06 route side fixed**: the conversations list now inner-joins
+  conversation membership (`messaging.read` + member filter) and fetches
+  previews only for visible conversations — a nonmember no longer sees titles,
+  previews, or activity for a DM. Covered in the same matrix.
+- Still open on these findings: exports/search/attachments authorization,
+  cache-aware checks, and the module-side `messaging.listConversations`
+  capability (same leak inside the module, per N06); the remaining ungoverned
+  write routes from the W0.4 inventory; `approvals`/`metrics` GET policy.
+- Infrastructure: `hookTimeout: 30_000` for the web suite — 18 files contend
+  for one fixture database per run and a 5-second `beforeAll` under parallel
+  load legitimately exceeded the 10s default (the historical
+  `products.test.ts` flake, reproduced and resolved honestly).
+
+## Slices A–C (delivered in one pass)
+
+**Slice A — W1b remainder (write boundaries):**
+- **N06 module side fixed**: `messaging.listConversations` now membership-scoped like the route; the system actor lists nothing.
+- **N29 fixed**: notifications are immutable events with per-user receipts (`notification_reads`, migration 0036, RLS included). One person's read of a broadcast leaves it unread for everyone else; repeats are idempotent; another user's personal notification is a 404. The broadcast row's `readAt` is never rewritten.
+- **N34 fixed (review race)**: proposal decisions are compare-and-set — the status check lives in the UPDATE, so concurrent reviewers produce exactly one decision and one 409. Marketplace browsing moved from `accounting.read` to a dedicated `platform.browse` permission.
+- **N08 fixed (channels)**: GET never creates the settings row and hands the embed token only to `iam.admin`; POST (provision/rotate/toggle) requires `iam.admin`; the support settings UI handles the unconfigured state and non-admin read-only view.
+
+**Slice B — W1d (B02 unit of work + adoption):**
+- `executeAtomically` (`apps/web/src/server/unit-of-work.ts`): opens one transaction; a transaction-scoped registry and executor run mutation, audit fact and receipt **in the same unit**. Modules nest via savepoints (their `withOrgContext(deps.db, …)` accepts the tx).
+- `failOnAuditError` executor mode: inside a unit of work, an audit failure rethrows — rolling back the whole effect — instead of the no-shared-transaction "unknown" outcome. The executor's outer catch no longer conflates audit failures with domain failures.
+- Adoption: `api/accounting` `payBill` runs atomically whenever the client sends `intentId`; the accounting page generates one identity per confirmed intent. Proven by `unit-of-work.test.ts`: commit+replay in one unit; audit failure after the write rolls back payments, ledger and receipts together; the retry then starts clean and commits once.
+
+**Slice C — S01 floor (mechanical RLS conformance):**
+- Every fixture database now provisions `chaste_app` (drop `CHASTE_TEST_NO_APP_ROLE=1` to skip), so RLS conformance is testable anywhere.
+- `packages/db/src/rls-conformance.test.ts` sweeps every org-scoped table (38 tables) and asserts: RLS enabled, `tenant_isolation` policy present, DML granted to the runtime role, zero rows without tenant context, and zero cross-tenant rows under the other org's context.
+- **The sweep found real drift on its first run**: `bank_accounts`, `bank_transactions`, `purchase_requests`, `rfqs`, `sales_tax_filings`, `support_settings` — added after 0014's RLS pass — had no policies. Fixed in migration 0037; the suite now prevents recurrence.
+
+Still open (unchanged scope): remaining ungoverned write routes (import, scim, invite, sso, public support, chat tickets, onboarding bootstrap — I1/I2 design work), the application-wide role flip (now far safer: the conformance sweep proves the policy floor), and intentId adoption in the remaining UI surfaces.
+
+## Slices D–E (delivered)
+
+**Slice D — import boundaries and ticket receipts:**
+- **X15 (import) fixed at the boundary**: importing customers now requires `crm.write`, products `inventory.write` — writing domain rows is domain authority, not session membership. Money parsing is exact (`toMinor` from the raw string): `"1,234.56"` → 123456, `"19.99"` → 1999, and sub-cent precision, negatives and malformed values are row errors — the float `Math.round(n * 100)` path is gone.
+- **X11 (ticket receipts)**: `TicketSink.file` returns the durable ticket id and the loop's `file_ticket` tool result carries `ticketId` — chat no longer answers "ticket filed" with no reference. Implemented in the chat route, the messages route, and the routine runner sinks.
+- Verified already-gated (no change needed): `api/org` PATCH (normalized to `hasPermission`), `api/team/sso`, `api/scim/tokens` — all `iam.admin`.
+
+**Slice E — N11 discharged (one balance contract):**
+- `packages/erp-core/src/document-balance.ts`: `documentBalance` (credit-adjusted outstanding, over-allocation, settled flag) and `canAcceptPayment` (lifecycle eligibility — drafts and voids refuse money — plus the outstanding cap), integer-exact, RangeError on bad money.
+- Adopted at every divergence the audit named: `accounting.recordPayment` and `purchasing.payBill` now gate on the credit-adjusted outstanding and refuse drafts (previously only voids were refused and credits ignored); analytics invoice aging and the support invoice projection compute outstanding the same way.
+- Probes: `probe-n11` now asserts DISCHARGED — the full 10000 payment against a 4000-credited invoice is refused with "outstanding is 6000". Contract pinned by 7 erp-core tests including conservation and acceptance-cap sweeps.
+
+## Remaining W0 work
+
+- Revalidate and reproduce N12–N36 anchors on demand, prioritized by wave (I1/I2 items first).
+- Pilot segment/workflow selection (W0.5).
+- F04 two-worker race repro and F03 crash fixture (feeds T03/T06).
+
+Feeding W1, in dependency order: least-privilege runtime role; B01 route
+guards + bootstrap exception; B02 atomic effect/audit receipt (discharges
+F01/F02); N09 commit-time ledger enforcement; N11 unified document balance.
