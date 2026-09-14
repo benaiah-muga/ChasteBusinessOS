@@ -28,8 +28,8 @@ source moves.
 |---|---|---|
 | F01 | **reproduced** | Probe `apps/web/.w0-probes/probe-f01.mts` (run `pnpm exec tsx apps/web/.w0-probes/probe-f01.mts`): a capability whose write commits, followed by a ledger append that throws, returns `ok:false` to the caller while the effect persists — the retry-duplicates-effect window. Structural anchor: `packages/kernel/src/executor.ts:118-124` wraps execute + audit in one try. Fix belongs to B02 (atomic effect/audit receipt). |
 | F02 | **reproduced** | Probe `probe-f02.mts`: capability returns `{"n":"not-a-number-7"}` against a declared `z.object({n: z.number()})` output; executor returns `ok:true` with the invalid data (`executor.ts:120` never parses `cap.output`). Fix belongs to B02/B05 (output validation before commit). |
-| F03 | source-confirmed | `apps/web/src/server/jobs.ts` claims by setting `processing`; no lease/heartbeat in the claim path. Open: worker-crash recovery proof (B03 fixture). |
-| F04 | source-confirmed | `jobs.ts:98` `UPDATE recurring_invoices SET last_run_at = now()` is a separate statement from due-selection and invoice creation; eligibility/advancement are not occurrence-unique. Open: two-worker race repro (B03/T03). |
+| F03 | **resolved (T06 first queue slice)** | Jobs now claim with expiring leases, heartbeat the matching owner/fencing token, reclaim stale processing rows, back off retryable failures and fence late acknowledgements. `apps/web/src/server/jobs.test.ts` proves an expired claim is reclaimed and a stale worker's acknowledgement is rejected. Full worker-kill timing and external-effect recovery remain B03 follow-up evidence. |
+| F04 | **resolved (T03)** | Recurring expansion now runs only through `accounting.generateDueInvoices`; due templates are row-locked and each scheduled instant is persisted in `recurring_invoice_runs` under a unique `(org_id, recurring_invoice_id, scheduled_for)` key. `modules/accounting/src/recurring.test.ts` proves a repeated occurrence creates one invoice and one completed run. DST/outage policy and broader scheduled-work occurrence sharing remain follow-up work. |
 | F05 | **reproduced (in test logs)** | On a clean fixture DB, `analytics.test.ts` and `support.test.ts` drive the agent loop; its step/tool event inserts into `session_events` fail (no parent `agent_sessions` row) and are logged fire-and-forget while the run continues — silent trajectory gaps, exactly the audit/replay risk. Fix belongs to B04 (durable run log). |
 | F06 | source-confirmed | `packages/kernel/src/policy.ts` ordinal risk + amount thresholds; system actor in `jobs.ts` built from the queued capability permission. Open: delegation-ceiling and cumulative-exposure tests (A01). |
 | F07 | source-confirmed | `apps/web/src/server/approvals.ts` conditional claim present; rejection branch precedes capability-permission check. Open: restricted-member rejection repro (T05). |
@@ -252,7 +252,9 @@ Still open (unchanged scope): remaining ungoverned write routes (import, scim, i
 
 - Revalidate and reproduce N12–N36 anchors on demand, prioritized by wave (I1/I2 items first).
 - Pilot segment/workflow selection (W0.5).
-- F04 two-worker race repro and F03 crash fixture (feeds T03/T06).
+- Extend the first queue slice with a worker-kill fixture and complete B03's
+  external-effect reconciliation proof; the local lease/fencing boundary is
+  now implemented and covered.
 
 Feeding W1, in dependency order: least-privilege runtime role; B01 route
 guards + bootstrap exception; B02 atomic effect/audit receipt (discharges

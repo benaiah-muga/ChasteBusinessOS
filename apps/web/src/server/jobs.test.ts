@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { createDb, type Database } from "@chaste/db";
 import { jobs, ledgerEvents, organizations } from "@chaste/db";
 import { logger } from "@chaste/kernel";
-import { enqueueCapabilityJob, processOneJob } from "./jobs";
+import { claimJob, enqueueCapabilityJob, finalizeJob, processOneJob } from "./jobs";
 
 /**
  * Proves the durable queue: a job carrying a capability id + input is claimed
@@ -56,9 +56,10 @@ describe("capability job queue", () => {
     expect(row!.status).toBe("pending");
     expect(row!.attempts).toBe(1);
     expect(row!.lastError).toContain("no document");
+    expect(row!.availableAt.getTime()).toBeGreaterThan(Date.now());
 
     // Exhaust retries; the queue must land on failed, not loop forever.
-    await db.execute(sql`UPDATE jobs SET attempts = max_attempts - 1 WHERE id = ${jobId}`);
+    await db.execute(sql`UPDATE jobs SET attempts = max_attempts - 1, available_at = now() WHERE id = ${jobId}`);
     await processOneJob(db, logger);
     [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(row!.status).toBe("failed");
@@ -78,6 +79,26 @@ describe("capability job queue", () => {
     expect(actor.permissions.has("documents.write")).toBe(true);
     expect(actor.permissions.has("*")).toBe(false);
     expect(actor.permissions.size).toBe(1);
+  });
+
+  it("reclaims expired leases and fences the late worker's acknowledgement", async () => {
+    const jobId = await enqueueCapabilityJob(db, { orgId, type: "nonexistent.doesNotExist", payload: {} });
+    const now = new Date("2026-09-14T12:00:00.000Z");
+    await db
+      .update(jobs)
+      .set({ status: "processing", attempts: 1, leaseOwner: "dead-worker", leaseExpiresAt: new Date(now.getTime() - 1_000), availableAt: now })
+      .where(eq(jobs.id, jobId));
+
+    const claimed = await claimJob(db, "replacement-worker", 30_000, now);
+    expect(claimed?.id).toBe(jobId);
+    expect(claimed?.fencingToken).toBeGreaterThan(0);
+
+    const lateAck = await finalizeJob(db, { ...claimed!, workerId: "dead-worker", fencingToken: claimed!.fencingToken - 1 }, { status: "done" });
+    expect(lateAck).toBe(false);
+    const currentAck = await finalizeJob(db, claimed!, { status: "done" });
+    expect(currentAck).toBe(true);
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(row!.status).toBe("done");
   });
 
   it("an unknown job type fails permanently instead of retrying forever", async () => {

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, gt, gte, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   accounts,
@@ -16,6 +16,7 @@ import {
   quoteLines,
   quotes,
   recurringInvoices,
+  recurringInvoiceRuns,
   salesTaxFilings,
   journalEntries,
   journalLines,
@@ -45,6 +46,7 @@ import {
   fxRateFromDecimal,
   suggestExpenseCategory,
   toBaseMinor,
+  nextRunAfter,
   type AccountBalance,
   type FxRate,
 } from "@chaste/erp-core";
@@ -1654,32 +1656,58 @@ const generateDueInvoices = (deps: ModuleDeps) =>
     output: z.object({ generated: z.number() }),
     execute: async (ctx) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        const due = await tx
-          .select()
-          .from(recurringInvoices)
-          .where(
-            and(
-              eq(recurringInvoices.orgId, ctx.actor.orgId),
-              eq(recurringInvoices.active, true),
-              lte(recurringInvoices.nextRunAt, ctx.now),
-            ),
-          );
+        const result = (await tx.execute(sql`
+          SELECT
+            id,
+            org_id AS "orgId",
+            customer_id AS "customerId",
+            memo,
+            frequency,
+            lines,
+            next_run_at AS "nextRunAt"
+          FROM recurring_invoices
+          WHERE org_id = ${ctx.actor.orgId}
+            AND active = true
+            AND next_run_at <= ${ctx.now.toISOString()}::timestamptz
+          ORDER BY next_run_at, id
+          FOR UPDATE SKIP LOCKED
+        `)) as unknown as Record<string, unknown>[] | { rows: Record<string, unknown>[] };
+        const due = Array.isArray(result) ? result : (result.rows ?? []);
         let generated = 0;
         for (const t of due) {
-          await insertInvoiceWithPosting(tx, ctx, {
-            customerId: t.customerId,
-            memo: t.memo ?? `Recurring (${t.frequency})`,
+          const templateId = String(t.id);
+          const scheduledFor = t.nextRunAt instanceof Date ? new Date(t.nextRunAt) : new Date(String(t.nextRunAt));
+          const [occurrence] = await tx
+            .insert(recurringInvoiceRuns)
+            .values({
+              orgId: ctx.actor.orgId,
+              recurringInvoiceId: templateId,
+              scheduledFor,
+            })
+            .onConflictDoNothing({
+              target: [
+                recurringInvoiceRuns.orgId,
+                recurringInvoiceRuns.recurringInvoiceId,
+                recurringInvoiceRuns.scheduledFor,
+              ],
+            })
+            .returning({ id: recurringInvoiceRuns.id });
+          if (!occurrence) continue;
+
+          const created = await insertInvoiceWithPosting(tx, ctx, {
+            customerId: String(t.customerId),
+            memo: t.memo ? String(t.memo) : `Recurring (${String(t.frequency)})`,
             lines: t.lines as Array<{ description: string; quantity: number; unitPriceMinor: number; taxMinor?: number }>,
           });
-          const base = new Date(t.nextRunAt);
-          if (t.frequency === "weekly") base.setUTCDate(base.getUTCDate() + 7);
-          else if (t.frequency === "monthly") base.setUTCMonth(base.getUTCMonth() + 1);
-          else if (t.frequency === "quarterly") base.setUTCMonth(base.getUTCMonth() + 3);
-          else throw new Error(`unknown frequency "${t.frequency}" on template ${t.id}`);
+          const nextRunAt = nextRunAfter(String(t.frequency) as "weekly" | "monthly" | "quarterly", scheduledFor);
           await tx
             .update(recurringInvoices)
-            .set({ nextRunAt: base, lastRunAt: ctx.now })
-            .where(eq(recurringInvoices.id, t.id));
+            .set({ nextRunAt, lastRunAt: ctx.now })
+            .where(and(eq(recurringInvoices.id, templateId), eq(recurringInvoices.orgId, ctx.actor.orgId)));
+          await tx
+            .update(recurringInvoiceRuns)
+            .set({ invoiceId: created.invoiceId, status: "completed", completedAt: ctx.now })
+            .where(eq(recurringInvoiceRuns.id, occurrence.id));
           generated += 1;
         }
         return { generated };
