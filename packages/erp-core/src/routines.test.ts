@@ -61,6 +61,8 @@ describe("parseScheduleText", () => {
     expect(parseScheduleText("whenever I feel like it").ok).toBe(false);
     expect(parseScheduleText("daily at 25:00").ok).toBe(false);
     expect(parseScheduleText("weekly on someday at 9am").ok).toBe(false);
+    expect(parseScheduleText("every 30 minutes on weekdays").ok).toBe(false);
+    expect(parseScheduleText("every 2 hours with reminders").ok).toBe(false);
     expect(parseScheduleText("").ok).toBe(false);
   });
 
