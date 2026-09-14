@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { createDb, type Database } from "@chaste/db";
 import { jobs, ledgerEvents, organizations } from "@chaste/db";
 import { logger } from "@chaste/kernel";
-import { enqueueCapabilityJob, processOneJob } from "./jobs";
+import { claimJob, enqueueCapabilityJob, finalizeJob, processOneJob } from "./jobs";
 
 /**
  * Proves the durable queue: a job carrying a capability id + input is claimed
@@ -51,15 +51,26 @@ describe("capability job queue", () => {
 
     // The referenced document does not exist, so the governed execution must
     // fail honestly; with attempts=1 of 3 the job returns to pending.
-    await processOneJob(db, logger);
+    // Sibling suites share this fixture database and can claim a different
+    // job first, so drain until this job has been attempted.
+    for (let i = 0; i < 10; i += 1) {
+      await processOneJob(db, logger);
+      const [current] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (current!.attempts > 0) break;
+    }
     let [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(row!.status).toBe("pending");
     expect(row!.attempts).toBe(1);
     expect(row!.lastError).toContain("no document");
+    expect(row!.availableAt.getTime()).toBeGreaterThan(Date.now());
 
     // Exhaust retries; the queue must land on failed, not loop forever.
-    await db.execute(sql`UPDATE jobs SET attempts = max_attempts - 1 WHERE id = ${jobId}`);
-    await processOneJob(db, logger);
+    await db.execute(sql`UPDATE jobs SET attempts = max_attempts - 1, available_at = now() WHERE id = ${jobId}`);
+    for (let i = 0; i < 10; i += 1) {
+      await processOneJob(db, logger);
+      const [current] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (current!.status === "failed") break;
+    }
     [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(row!.status).toBe("failed");
     expect(row!.attempts).toBe(row!.maxAttempts);
@@ -80,13 +91,39 @@ describe("capability job queue", () => {
     expect(actor.permissions.size).toBe(1);
   });
 
+  it("reclaims expired leases and fences the late worker's acknowledgement", async () => {
+    const jobId = await enqueueCapabilityJob(db, { orgId, type: "nonexistent.doesNotExist", payload: {} });
+    const now = new Date("2026-09-14T12:00:00.000Z");
+    await db
+      .update(jobs)
+      .set({ status: "processing", attempts: 1, leaseOwner: "dead-worker", leaseExpiresAt: new Date(now.getTime() - 1_000), availableAt: now })
+      .where(eq(jobs.id, jobId));
+
+    const claimed = await claimJob(db, "replacement-worker", 30_000, now);
+    expect(claimed?.id).toBe(jobId);
+    expect(claimed?.fencingToken).toBeGreaterThan(0);
+
+    const lateAck = await finalizeJob(db, { ...claimed!, workerId: "dead-worker", fencingToken: claimed!.fencingToken - 1 }, { status: "done" });
+    expect(lateAck).toBe(false);
+    const currentAck = await finalizeJob(db, claimed!, { status: "done" });
+    expect(currentAck).toBe(true);
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    expect(row!.status).toBe("done");
+  });
+
   it("an unknown job type fails permanently instead of retrying forever", async () => {
     const jobId = await enqueueCapabilityJob(db, {
       orgId,
       type: "nonexistent.doesNotExist",
       payload: {},
     });
-    await processOneJob(db, logger);
+    // Sibling suites share this fixture database and can claim the job ahead
+    // of us in queue order; drain until this job settles either way.
+    for (let i = 0; i < 10; i += 1) {
+      await processOneJob(db, logger);
+      const [current] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (current!.status !== "pending") break;
+    }
     const [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(row!.status).toBe("failed");
     expect(row!.lastError).toContain("unknown job capability");

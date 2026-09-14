@@ -90,6 +90,16 @@ The full v1 changelog is preserved at the bottom of this file.
   `backup: false` for fresh fixtures.)
 
 ### Added
+- **Recoverable queue leases and recurring occurrence receipts (T03/T06).**
+  Capability jobs now have availability timestamps, expiring worker leases,
+  fencing tokens, heartbeat renewal and capped exponential retry backoff;
+  stale workers cannot finalize reclaimed rows, and queued capability retries
+  reuse the job's governed action intent. Recurring invoices now persist a
+  unique `(org, template, scheduled instant)` occurrence and create the
+  invoice plus schedule advancement transactionally, so the same occurrence
+  cannot bill twice. Covered by queue lease/fencing and recurring-invoice
+  integration tests; external provider delivery remains a separate outbox
+  concern.
 - **Atomic unit of work for governed payments (B02)**:
   `executeAtomically` runs one action's mutation, audit fact and action
   receipt inside a single transaction — modules nest via savepoints — with a
