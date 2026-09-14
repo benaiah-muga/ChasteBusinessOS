@@ -109,12 +109,12 @@ export async function extractInvoiceAging(deps: AnalyticsDeps, ctx: ActionContex
            COALESCE(SUM(balance_minor), 0)::int AS balance_minor
     FROM (
       SELECT EXTRACT(DAY FROM now() - COALESCE(issued_at, created_at))::int AS age,
-             total_minor - paid_minor AS balance_minor
+             total_minor - credited_minor - paid_minor AS balance_minor
       FROM invoices
       WHERE org_id = ${ctx.actor.orgId}
         AND status IN ('sent', 'paid')
         AND voided_at IS NULL
-        AND total_minor > paid_minor
+        AND total_minor > credited_minor + paid_minor
     ) open
     GROUP BY 1 ORDER BY 1
   `)) as unknown as { bucket: string; count: number; balance_minor: number }[];

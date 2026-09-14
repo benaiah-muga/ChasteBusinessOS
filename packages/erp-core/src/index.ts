@@ -12,6 +12,7 @@ export * from "./reorder";
 export * from "./credit";
 export * from "./duplicates";
 export * from "./cashflow";
+export * from "./document-balance";
 export * from "./cashforecast";
 export * from "./moneyintel";
 export * from "./planning";

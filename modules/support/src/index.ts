@@ -12,6 +12,7 @@ import {
   supportKbArticles,
 } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
+import { documentBalance } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 export interface ModuleDeps {
@@ -299,23 +300,27 @@ const lookupOrderStatus = (deps: ModuleDeps) =>
             status: invoices.status,
             totalMinor: invoices.totalMinor,
             paidMinor: invoices.paidMinor,
+            creditedMinor: invoices.creditedMinor,
             issuedAt: invoices.issuedAt,
           })
           .from(invoices)
           .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.customerId, conv.customerId)))
           .orderBy(desc(invoices.issuedAt))
           .limit(10);
+        // N11: outstanding is credit-adjusted via the shared contract, so
+        // support never reads a debt the ledger no longer believes.
+        const balances = rows.map((r) => documentBalance(r));
         return {
           customerName: conv.customerName,
-          invoices: rows.map((r) => ({
+          invoices: rows.map((r, i) => ({
             number: r.number,
             status: r.status,
             totalMinor: r.totalMinor,
             paidMinor: r.paidMinor,
-            outstandingMinor: Math.max(0, r.totalMinor - r.paidMinor),
+            outstandingMinor: balances[i]!.outstandingMinor,
             issuedAt: r.issuedAt,
           })),
-          totalOutstandingMinor: Math.max(0, rows.reduce((s, r) => s + r.totalMinor - r.paidMinor, 0)),
+          totalOutstandingMinor: balances.reduce((s, b) => s + b.outstandingMinor, 0),
         };
       });
     },
