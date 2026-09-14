@@ -7,10 +7,12 @@ import postgres from "postgres";
  * only, and receives grants on future tables through default privileges on
  * the migration owner.
  *
- * Provisioning is idempotent and safe to run from concurrent processes
- * (concurrent CREATE ROLE races resolve through the duplicate-object
- * handler). The role is cluster-level; grants and default privileges are
- * per-database and applied to the database of `databaseUrl`.
+ * Provisioning is idempotent and safe to run from concurrent processes:
+ * CREATE ROLE is serialized on a transaction-scoped advisory lock, because
+ * concurrent CREATE ROLE against one cluster fails with "tuple concurrently
+ * updated" rather than a duplicate-object error, so the duplicate-object
+ * handler cannot absorb it. The role is cluster-level; grants and default
+ * privileges are per-database, applied to the database of `databaseUrl`.
  */
 
 export const APP_ROLE_NAME = "chaste_app";
@@ -64,10 +66,19 @@ export async function ensureAppRole(options: EnsureAppRoleOptions = {}): Promise
   const admin = postgres(adminUrl, { max: 1 });
   let created = false;
   try {
-    await admin.unsafe(
-      `CREATE ROLE ${APP_ROLE_NAME} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD ${sqlString(password)}`,
-    );
-    created = true;
+    await admin.begin(async (tx) => {
+      // Hold the lock for the transaction: the check and the CREATE then
+      // cannot interleave with another process doing the same.
+      await tx.unsafe(`SELECT pg_advisory_xact_lock(hashtext('chaste_ensure_app_role'), hashtext('role'))`);
+      const [existing] = await tx.unsafe<{ present: boolean }[]>(
+        `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${sqlString(APP_ROLE_NAME)}) AS present`,
+      );
+      if (existing?.present) return;
+      await tx.unsafe(
+        `CREATE ROLE ${APP_ROLE_NAME} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD ${sqlString(password)}`,
+      );
+      created = true;
+    });
   } catch (err) {
     if (!isDuplicateObject(err)) throw err;
   } finally {
@@ -77,6 +88,13 @@ export async function ensureAppRole(options: EnsureAppRoleOptions = {}): Promise
   const db = postgres(databaseUrl, { max: 1 });
   try {
     await db.begin(async (tx) => {
+      // Grants and default privileges update the same catalog rows, so
+      // concurrent provisioning against one database fails with "tuple
+      // concurrently updated". Keyed on the database: suites that share a
+      // fixture database serialize, unrelated databases still run parallel.
+      await tx.unsafe(
+        `SELECT pg_advisory_xact_lock(hashtext('chaste_ensure_app_role'), hashtext(current_database()))`,
+      );
       await tx.unsafe(`GRANT USAGE ON SCHEMA public TO ${APP_ROLE_NAME}`);
       await tx.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE_NAME}`);
       await tx.unsafe(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${APP_ROLE_NAME}`);

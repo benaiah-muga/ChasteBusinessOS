@@ -47,12 +47,24 @@ beforeAll(async () => {
     { orgId: orgA, code: "1000", name: "Cash A", type: "asset" },
     { orgId: orgB, code: "1000", name: "Cash B", type: "asset" },
   ]);
-  await admin.client.unsafe(`
-    DROP ROLE IF EXISTS chaste_rls_probe;
-    CREATE ROLE chaste_rls_probe LOGIN PASSWORD '${PROBE_PASSWORD}' NOBYPASSRLS;
-    GRANT USAGE ON SCHEMA public TO chaste_rls_probe;
-    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO chaste_rls_probe;
-  `);
+  // Cluster-level role DDL races the role provisioning that every fixture
+  // database now performs concurrently (see roles.ts). "tuple concurrently
+  // updated" is transient here, so retry instead of failing the suite.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await admin.client.unsafe(`
+        DROP ROLE IF EXISTS chaste_rls_probe;
+        CREATE ROLE chaste_rls_probe LOGIN PASSWORD '${PROBE_PASSWORD}' NOBYPASSRLS;
+        GRANT USAGE ON SCHEMA public TO chaste_rls_probe;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO chaste_rls_probe;
+      `);
+      break;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (attempt >= 4 || !/tuple concurrently updated/i.test(message)) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
   probe = asProbeRole();
 });
 
