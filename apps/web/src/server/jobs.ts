@@ -1,6 +1,5 @@
-import { and, eq, lte, sql } from "drizzle-orm";
-import { jobs, recurringInvoices, type Database } from "@chaste/db";
-import { nextRunAfter, type RecurringFrequency } from "@chaste/erp-core";
+import { sql } from "drizzle-orm";
+import { jobs, type Database } from "@chaste/db";
 import type { ActionContext, Actor, Logger } from "@chaste/kernel";
 import { buildExecutor, buildRegistry } from "@/server/kernel";
 import { executeRoutine } from "@/server/routines";
@@ -20,7 +19,21 @@ export interface ClaimedJob {
   payload: unknown;
   attempts: number;
   maxAttempts: number;
+  workerId: string;
+  fencingToken: number;
 }
+
+export interface ProcessJobOptions {
+  /** Stable worker identity used by the lease and fencing predicates. */
+  workerId?: string;
+  /** Short lease keeps crashed work reclaimable without delaying recovery. */
+  leaseMs?: number;
+  /** Injectable clock makes expiry/reclaim behavior deterministic in tests. */
+  now?: Date;
+}
+
+const DEFAULT_LEASE_MS = 60_000;
+const MAX_BACKOFF_MS = 5 * 60_000;
 
 export async function enqueueCapabilityJob(
   db: Database["db"],
@@ -55,17 +68,48 @@ export function systemActorFor(orgId: string, permission: string): Actor {
   return { type: "system", id: null, orgId, permissions: new Set([permission]) };
 }
 
-async function claimJob(db: Database["db"]): Promise<ClaimedJob | null> {
+async function reapExhaustedLeases(db: Database["db"], now: Date): Promise<void> {
+  await db
+    .update(jobs)
+    .set({
+      status: "failed",
+      lastError: "job lease expired after maximum attempts",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: now,
+    })
+    .where(
+      sql`${jobs.status} = 'processing' AND ${jobs.leaseExpiresAt} <= ${now.toISOString()}::timestamptz AND ${jobs.attempts} >= ${jobs.maxAttempts}`,
+    );
+}
+
+export async function claimJob(
+  db: Database["db"],
+  workerId: string,
+  leaseMs: number,
+  now: Date,
+): Promise<ClaimedJob | null> {
+  const leaseExpiresAt = new Date(now.getTime() + leaseMs);
   const result = (await db.execute(sql`
-    UPDATE jobs SET status = 'processing', attempts = attempts + 1, updated_at = now()
+    UPDATE jobs
+    SET status = 'processing',
+        attempts = attempts + 1,
+        lease_owner = ${workerId},
+        lease_expires_at = ${leaseExpiresAt.toISOString()}::timestamptz,
+        fencing_token = fencing_token + 1,
+        updated_at = ${now.toISOString()}::timestamptz
     WHERE id = (
       SELECT id FROM jobs
-      WHERE status = 'pending' AND attempts < max_attempts
-      ORDER BY created_at
+      WHERE (
+        status = 'pending' AND attempts < max_attempts AND available_at <= ${now.toISOString()}::timestamptz
+      ) OR (
+        status = 'processing' AND lease_expires_at <= ${now.toISOString()}::timestamptz AND attempts < max_attempts
+      )
+      ORDER BY available_at, created_at
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, org_id, type, payload, attempts, max_attempts
+    RETURNING id, org_id, type, payload, attempts, max_attempts, fencing_token
   `)) as unknown as { rows?: Record<string, unknown>[] } | Record<string, unknown>[];
   // postgres-js returns a plain array; other drivers wrap it in { rows }.
   const list = Array.isArray(result) ? result : (result.rows ?? []);
@@ -78,121 +122,87 @@ async function claimJob(db: Database["db"]): Promise<ClaimedJob | null> {
     payload: row.payload,
     attempts: Number(row.attempts),
     maxAttempts: Number(row.max_attempts),
+    workerId,
+    fencingToken: Number(row.fencing_token),
   };
 }
 
-/**
- * Expands due recurring templates into real invoices through the governed
- * executor (system actor scoped to accounting.write). Templates are claimed
- * with FOR UPDATE SKIP LOCKED so parallel workers never double-bill. The
- * handler re-enqueues itself while work remains, giving cron-like behavior
- * from the one-shot durable queue.
- */
-async function processRecurringBatch(
-  db: Database["db"],
-  log: Logger,
-  executor: ReturnType<typeof buildExecutor>,
-): Promise<number> {
-  const now = new Date();
-  const due = (await db.execute(sql`
-    UPDATE recurring_invoices SET last_run_at = now()
-    WHERE id IN (
-      SELECT id FROM recurring_invoices
-      WHERE active = true AND next_run_at <= now()
-      ORDER BY next_run_at
-      LIMIT 25
-      FOR UPDATE SKIP LOCKED
-    )
-    RETURNING id, org_id AS "orgId", customer_id AS "customerId", memo, frequency, lines
-  `)) as unknown as Record<string, unknown>[] | { rows: Record<string, unknown>[] };
-  const list: Record<string, unknown>[] = Array.isArray(due) ? due : (due.rows ?? []);
-  let processed = 0;
-  for (const t of list) {
-    const orgId = String(t.orgId);
-    const templateId = String(t.id);
-    const log2 = log.child({ templateId, orgId });
-    try {
-      const lines = Array.isArray(t.lines) ? (t.lines as unknown[]) : [];
-      const result = await executor.execute(
-        "accounting.createInvoice",
-        {
-          actor: systemActorFor(orgId, "accounting.write"),
-          now,
-          services: {},
-        },
-        {
-          customerId: String(t.customerId),
-          memo: `Recurring${t.memo ? `: ${String(t.memo)}` : ""}`.slice(0, 300),
-          lines,
-        },
-      );
-      if (!result.ok) throw new Error(result.error ?? "invoice creation failed");
-      const frequency = String(t.frequency) as RecurringFrequency;
-      await db
-        .update(recurringInvoices)
-        .set({ nextRunAt: nextRunAfter(frequency, now) })
-        .where(eq(recurringInvoices.id, templateId));
-      processed += 1;
-      log2.info("recurring invoice generated", {
-        invoiceNumber: (result.data as { invoiceNumber?: number })?.invoiceNumber,
-      });
-    } catch (err) {
-      // One bad template must not block the batch; deactivate after repeated
-      // failures is future work — for now the error surfaces in job state.
-      log2.warn("recurring expansion failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-  return processed;
-}
-
-async function hasMoreDue(db: Database["db"]): Promise<boolean> {
+async function renewLease(db: Database["db"], job: ClaimedJob, leaseMs: number): Promise<boolean> {
   const [row] = await db
-    .select({ id: recurringInvoices.id })
-    .from(recurringInvoices)
-    .where(and(eq(recurringInvoices.active, true), lte(recurringInvoices.nextRunAt, new Date())))
-    .limit(1);
+    .update(jobs)
+    .set({ leaseExpiresAt: new Date(Date.now() + leaseMs), updatedAt: new Date() })
+    .where(
+      sql`${jobs.id} = ${job.id} AND ${jobs.status} = 'processing' AND ${jobs.leaseOwner} = ${job.workerId} AND ${jobs.fencingToken} = ${job.fencingToken}`,
+    )
+    .returning({ id: jobs.id });
   return Boolean(row);
 }
 
+export async function finalizeJob(
+  db: Database["db"],
+  job: ClaimedJob,
+  patch: { status: string; lastError?: string | null; availableAt?: Date },
+): Promise<boolean> {
+  const values: {
+    status: string;
+    lastError: string | null;
+    leaseOwner: null;
+    leaseExpiresAt: null;
+    updatedAt: Date;
+    availableAt?: Date;
+  } = {
+    status: patch.status,
+    lastError: patch.lastError ?? null,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    updatedAt: new Date(),
+  };
+  if (patch.availableAt) values.availableAt = patch.availableAt;
+  const [row] = await db
+    .update(jobs)
+    .set(values)
+    .where(
+      sql`${jobs.id} = ${job.id} AND ${jobs.status} = 'processing' AND ${jobs.leaseOwner} = ${job.workerId} AND ${jobs.fencingToken} = ${job.fencingToken}`,
+    )
+    .returning({ id: jobs.id });
+  return Boolean(row);
+}
+
+function retryDelayMs(attempts: number): number {
+  return Math.min(1_000 * 2 ** Math.max(0, attempts - 1), MAX_BACKOFF_MS);
+}
+
 /** Claims and runs at most one job. Returns false when the queue was empty. */
-export async function processOneJob(db: Database["db"], log: Logger): Promise<boolean> {
-  const job = await claimJob(db);
+export async function processOneJob(
+  db: Database["db"],
+  log: Logger,
+  options: ProcessJobOptions = {},
+): Promise<boolean> {
+  const now = options.now ?? new Date();
+  const workerId = options.workerId ?? `${process.pid}:${crypto.randomUUID()}`;
+  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  await reapExhaustedLeases(db, now);
+  const job = await claimJob(db, workerId, leaseMs, now);
   if (!job) return false;
 
   const log2 = log.child({ jobId: job.id, capabilityId: job.type, orgId: job.orgId });
+  let leaseLost = false;
+  const heartbeat = setInterval(() => {
+    void renewLease(db, job, leaseMs)
+      .then((owned) => {
+        if (!owned) leaseLost = true;
+      })
+      .catch(() => undefined);
+  }, Math.max(100, Math.floor(leaseMs / 3)));
+  heartbeat.unref?.();
 
   try {
-    if (job.type === "accounting.generateRecurringInvoices") {
-      const registry = buildRegistry(db);
-      const executor = buildExecutor(db, registry);
-      const processed = await processRecurringBatch(db, log, executor);
-      const more = await hasMoreDue(db);
-      await db
-        .update(jobs)
-        .set({
-          status: more ? "pending" : "done",
-          attempts: 0,
-          lastError: null,
-          updatedAt: new Date(),
-        })
-        .where(sql`${jobs.id} = ${job.id}`);
-      log2.info(more ? "recurring batch partial; rescheduled" : "recurring batch complete", {
-        processed,
-        more,
-      });
-      return true;
-    }
-
     if (job.type === "routines.executeRoutine") {
       // Scheduling happened at claim time (tickRoutines); the run itself
       // goes through the governed executor inside executeRoutine.
       await executeRoutine(db, log2, job.payload as { routineId: string; trigger: string });
-      await db
-        .update(jobs)
-        .set({ status: "done", lastError: null, updatedAt: new Date() })
-        .where(sql`${jobs.id} = ${job.id}`);
+      const finalized = !leaseLost && (await finalizeJob(db, job, { status: "done" }));
+      if (!finalized) log2.warn("job completed after lease was lost; acknowledgement fenced");
       return true;
     }
 
@@ -203,32 +213,35 @@ export async function processOneJob(db: Database["db"], log: Logger): Promise<bo
     if (!cap) throw new Error(`unknown job capability: ${job.type}`);
     const ctx: ActionContext = {
       actor: systemActorFor(job.orgId, cap.permission),
+      // A redelivery of one queue row must replay its governed receipt rather
+      // than create a second business effect.
+      intentId: job.id,
       now: new Date(),
       services: {},
     };
     const executor = buildExecutor(db, registry);
     const result = await executor.execute(job.type, ctx, job.payload);
     if (!result.ok) throw new Error(result.error ?? "capability failed");
-    await db
-      .update(jobs)
-      .set({ status: "done", lastError: null, updatedAt: new Date() })
-      .where(sql`${jobs.id} = ${job.id}`);
+    const finalized = !leaseLost && (await finalizeJob(db, job, { status: "done" }));
+    if (!finalized) log2.warn("job completed after lease was lost; acknowledgement fenced");
     log2.info("job done", { attempts: job.attempts });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const exhausted = job.attempts >= job.maxAttempts || message.startsWith("unknown job capability:");
-    await db
-      .update(jobs)
-      .set({
+    const finalized =
+      !leaseLost &&
+      (await finalizeJob(db, job, {
         status: exhausted ? "failed" : "pending",
         lastError: message,
-        updatedAt: new Date(),
-      })
-      .where(sql`${jobs.id} = ${job.id}`);
+        availableAt: exhausted ? undefined : new Date(Date.now() + retryDelayMs(job.attempts)),
+      }));
+    if (!finalized) log2.warn("job failure after lease was lost; acknowledgement fenced", { error: message });
     log2.warn(exhausted ? "job failed permanently" : "job attempt failed; will retry", {
       attempts: job.attempts,
       error: message,
     });
+  } finally {
+    clearInterval(heartbeat);
   }
   return true;
 }

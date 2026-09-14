@@ -1671,6 +1671,32 @@ export const recurringInvoices = pgTable(
   (t) => [index("recurring_due_idx").on(t.orgId, t.active, t.nextRunAt)],
 );
 
+/**
+ * One immutable business occurrence per recurring template and scheduled
+ * instant. The unique key is the idempotency boundary for worker retries.
+ */
+export const recurringInvoiceRuns = pgTable(
+  "recurring_invoice_runs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    recurringInvoiceId: uuid("recurring_invoice_id")
+      .notNull()
+      .references(() => recurringInvoices.id, { onDelete: "cascade" }),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    invoiceId: uuid("invoice_id").references(() => invoices.id, { onDelete: "restrict" }),
+    status: text("status").notNull().default("completed"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("recurring_invoice_run_occurrence_idx").on(t.orgId, t.recurringInvoiceId, t.scheduledFor),
+    index("recurring_invoice_run_org_idx").on(t.orgId, t.createdAt),
+  ],
+);
+
 /** Employee timesheets: submitted minutes, supervisor-approved. */
 export const timeEntries = pgTable(
   "time_entries",
@@ -1880,13 +1906,21 @@ export const jobs = pgTable(
     status: text("status").notNull().default("pending"), // pending | processing | done | failed
     attempts: integer("attempts").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fencingToken: integer("fencing_token").notNull().default(0),
     lastError: text("last_error"),
     createdByActorType: text("created_by_actor_type").notNull().default("system"),
     createdByActorId: uuid("created_by_actor_id"),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("job_status_idx").on(t.status, t.createdAt), index("job_org_idx").on(t.orgId)],
+  (t) => [
+    index("job_status_idx").on(t.status, t.createdAt),
+    index("job_org_idx").on(t.orgId),
+    index("job_available_idx").on(t.status, t.availableAt, t.createdAt),
+  ],
 );
 
 // ── Banking (feeds & reconciliation) ────────────────────────────────────
