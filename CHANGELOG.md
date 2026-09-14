@@ -98,8 +98,12 @@ The full v1 changelog is preserved at the bottom of this file.
   unique `(org, template, scheduled instant)` occurrence and create the
   invoice plus schedule advancement transactionally, so the same occurrence
   cannot bill twice. Covered by queue lease/fencing and recurring-invoice
-  integration tests; external provider delivery remains a separate outbox
-  concern.
+  integration tests; external provider delivery is handled by the B03 outbox
+  slice below.
+- **Durable outbound notification outbox (B03).** Approval and support
+  notification intents now commit before webhook/SMTP delivery, carry stable
+  provider operation IDs, and preserve uncertain provider outcomes for
+  explicit reconciliation instead of automatic duplicate sends.
 - **Atomic unit of work for governed payments (B02)**:
   `executeAtomically` runs one action's mutation, audit fact and action
   receipt inside a single transaction — modules nest via savepoints — with a
