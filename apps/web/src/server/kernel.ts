@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   GENESIS,
@@ -25,7 +26,6 @@ import {
   userRoles,
   type Database,
 } from "@chaste/db";
-import { getDb } from "@chaste/db";
 import { registerAccountingCapabilities, createAccountingSignalProducer } from "@chaste/module-accounting";
 import { registerAnalyticsCapabilities } from "@chaste/module-analytics";
 import { registerCrmCapabilities, createCrmSignalProducer } from "@chaste/module-crm";
@@ -46,6 +46,7 @@ import { registerSkillCapabilities } from "@chaste/module-skills";
 import { registerRoutineCapabilities } from "@chaste/module-routines";
 import { registerSignalsCapabilities } from "@chaste/module-signals";
 import { pgEffectReceiptStore } from "./effect-receipts";
+import { enqueueOutboxMessage } from "./outbox";
 
 const registryCache = globalThis as unknown as {
   __chasteRegistry?: { version: string; registry: CapabilityRegistry };
@@ -191,6 +192,7 @@ export interface NotificationSink {
  * insert must never block the governed action that produced the event.
  */
 async function recordNotification(
+  db: Database["db"],
   orgId: string | null,
   kind: string,
   title: string,
@@ -198,7 +200,7 @@ async function recordNotification(
 ): Promise<void> {
   try {
     if (!orgId) return;
-    await getDb().db.insert(notificationsTable).values({
+    await db.insert(notificationsTable).values({
       orgId,
       userId: null,
       kind,
@@ -211,24 +213,85 @@ async function recordNotification(
 }
 
 export const consoleNotifications: NotificationSink = {
-  async approvalRequested(req, orgId) {
+  async approvalRequested(req, _orgId) {
     console.info(`[approval-requested] ${req.capabilityId}: ${req.rationale}`);
-    await postWebhook({ event: "approval.requested", capabilityId: req.capabilityId, risk: req.riskClass, rationale: req.rationale });
-    await sendApprovalEmail(req);
-    await recordNotification(
-      orgId,
-      "approval.requested",
-      `${req.capabilityId} needs approval — ${req.rationale}`.slice(0, 200),
-      "/approvals",
-    );
   },
-  async ticketFiled(title, orgId) {
+  async ticketFiled(title, _orgId) {
     console.info(`[ticket] ${title}`);
-    await postWebhook({ event: "ticket.filed", title });
-    await sendTicketEmail(title);
-    await recordNotification(orgId ?? null, "ticket.filed", title);
   },
 };
+
+function notificationDedupeKey(kind: string, value: unknown): string {
+  return `notification:${kind}:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
+}
+
+/**
+ * Durable notification sink. It only records provider intent; the worker
+ * performs external IO after the transaction that created the event commits.
+ */
+export function createNotificationSink(db: Database["db"]): NotificationSink {
+  return {
+    async approvalRequested(req, orgId) {
+      const body = {
+        event: "approval.requested",
+        capabilityId: req.capabilityId,
+        risk: req.riskClass,
+        rationale: req.rationale,
+      };
+      if (process.env.NOTIFICATION_WEBHOOK_URL) {
+        await enqueueOutboxMessage(db, {
+          orgId,
+          kind: "webhook",
+          dedupeKey: notificationDedupeKey("approval.webhook", { req, orgId }),
+          payload: { url: process.env.NOTIFICATION_WEBHOOK_URL, body },
+        });
+      }
+      if (process.env.SMTP_HOST && process.env.SMTP_TO) {
+        await enqueueOutboxMessage(db, {
+          orgId,
+          kind: "email",
+          dedupeKey: notificationDedupeKey("approval.email", { req, orgId }),
+          payload: {
+            to: process.env.SMTP_TO,
+            subject: `[Chaste] Approval needed: ${req.capabilityId}`,
+            text: `An action is waiting for human approval.\n\nCapability: ${req.capabilityId}\nRisk class: ${req.riskClass}\nRationale: ${req.rationale}\n\nOpen the Approvals inbox to decide.`,
+          },
+        });
+      }
+      await recordNotification(
+        db,
+        orgId,
+        "approval.requested",
+        `${req.capabilityId} needs approval — ${req.rationale}`.slice(0, 200),
+        "/approvals",
+      );
+    },
+    async ticketFiled(title, orgId) {
+      const body = { event: "ticket.filed", title };
+      if (process.env.NOTIFICATION_WEBHOOK_URL) {
+        await enqueueOutboxMessage(db, {
+          orgId,
+          kind: "webhook",
+          dedupeKey: notificationDedupeKey("ticket.webhook", { title, orgId }),
+          payload: { url: process.env.NOTIFICATION_WEBHOOK_URL, body },
+        });
+      }
+      if (process.env.SMTP_HOST && process.env.SMTP_TO) {
+        await enqueueOutboxMessage(db, {
+          orgId,
+          kind: "email",
+          dedupeKey: notificationDedupeKey("ticket.email", { title, orgId }),
+          payload: {
+            to: process.env.SMTP_TO,
+            subject: `[Chaste] Ticket filed: ${title}`,
+            text: `A ticket was filed: ${title}`,
+          },
+        });
+      }
+      await recordNotification(db, orgId, "ticket.filed", title);
+    },
+  };
+}
 
 async function mailer() {
   const nodemailer = (await import("nodemailer")).default;
@@ -255,12 +318,6 @@ function headerSafe(text: string): string {
     out += code < 32 || code === 127 ? " " : ch;
   }
   return out.trim();
-}
-
-async function sendMail(subject: string, text: string): Promise<void> {
-  const to = process.env.SMTP_TO;
-  if (!process.env.SMTP_HOST || !to) return;
-  await sendOrgMail({ to, subject, text });
 }
 
 interface OutboundMail {
@@ -293,40 +350,15 @@ export async function sendOrgMail(mail: OutboundMail): Promise<{ sent: boolean; 
   }
 }
 
-async function sendApprovalEmail(req: ApprovalRequest): Promise<void> {
-  await sendMail(
-    `[Chaste] Approval needed: ${req.capabilityId}`,
-    `An action is waiting for human approval.\n\nCapability: ${req.capabilityId}\nRisk class: ${req.riskClass}\nRationale: ${req.rationale}\n\nOpen the Approvals inbox to decide.`,
-  );
-}
-
-async function sendTicketEmail(title: string): Promise<void> {
-  await sendMail(`[Chaste] Ticket filed: ${title}`, `A ticket was filed: ${title}`);
-}
-
-async function postWebhook(payload: Record<string, unknown>): Promise<void> {
-  const url = process.env.NOTIFICATION_WEBHOOK_URL;
-  if (!url) return;
-  try {
-    await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...payload, at: new Date().toISOString() }),
-      signal: AbortSignal.timeout(5000),
-    });
-  } catch (err) {
-    console.warn("[webhook] delivery failed:", err instanceof Error ? err.message : err);
-  }
-}
-
 /** Pending gates older than this expire instead of waiting forever. */
 const APPROVAL_TTL_MS = 7 * 86_400_000;
 
 export class DbApprovalFlow implements ApprovalFlow {
-  constructor(
-    private readonly db: Database["db"],
-    private readonly notifications: NotificationSink = consoleNotifications,
-  ) {}
+  private readonly notifications: NotificationSink;
+
+  constructor(private readonly db: Database["db"], notifications?: NotificationSink) {
+    this.notifications = notifications ?? createNotificationSink(db);
+  }
 
   async submit(request: ApprovalRequest, ctx: ActionContext): Promise<boolean> {
     await this.db.insert(approvals).values({

@@ -8,7 +8,7 @@ import {
   supportMessages,
 } from "@chaste/db";
 import { hasPermission as hasPermissionFor } from "@chaste/kernel";
-import { actorFromResolved, buildExecutor, buildRegistry, consoleNotifications } from "@/server/kernel";
+import { actorFromResolved, buildExecutor, buildRegistry, createNotificationSink } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 import { checkRateLimit } from "@/server/rate-limit";
 import { SupportDraftError, draftSupportReply } from "@/server/support-agent";
@@ -177,7 +177,7 @@ export async function POST(req: Request) {
       if (result.ok) {
         // Escalation is a human-handoff signal; reuse the ticket sink so
         // webhook and email subscribers hear about it like any other gap.
-        void consoleNotifications.ticketFiled(
+        void createNotificationSink(db).ticketFiled(
           `Support escalation: thread ${input.conversationId.slice(0, 8)} — ${input.reason.slice(0, 120)}`,
           resolved.orgId,
         );

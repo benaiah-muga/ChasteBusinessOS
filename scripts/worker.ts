@@ -2,6 +2,7 @@ import { getDb } from "@chaste/db";
 import { logger } from "@chaste/kernel";
 import { loadRepoEnv } from "./gates/env";
 import { processOneJob } from "../apps/web/src/server/jobs";
+import { processOneOutbox } from "../apps/web/src/server/outbox";
 import { tickRoutines } from "../apps/web/src/server/routines";
 
 /**
@@ -29,7 +30,8 @@ async function main(): Promise<void> {
       // job is enqueued in the same tick that advances its schedule.
       await tickRoutines(db, logger);
       const worked = await processOneJob(db, logger);
-      if (!worked) await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      const outboundWorked = await processOneOutbox(db, logger);
+      if (!worked && !outboundWorked) await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     } catch (err) {
       logger.error("worker loop error", { error: err instanceof Error ? err.message : String(err) });
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));

@@ -1923,6 +1923,42 @@ export const jobs = pgTable(
   ],
 );
 
+/**
+ * Durable external delivery intent. The payload is committed before any
+ * provider call; an unknown result is retained for reconciliation instead of
+ * being retried as if the provider definitely did nothing.
+ */
+export const outboxMessages = pgTable(
+  "outbox_messages",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // webhook | email
+    dedupeKey: text("dedupe_key").notNull(),
+    providerOperationId: uuid("provider_operation_id").notNull().unique(),
+    payload: jsonb("payload").notNull(),
+    status: text("status").notNull().default("pending"), // pending | processing | sent | unknown | failed
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fencingToken: integer("fencing_token").notNull().default(0),
+    providerReceipt: jsonb("provider_receipt"),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("outbox_org_dedupe_idx").on(t.orgId, t.dedupeKey),
+    index("outbox_dispatch_idx").on(t.status, t.availableAt, t.createdAt),
+    index("outbox_org_idx").on(t.orgId, t.createdAt),
+  ],
+);
+
 // ── Banking (feeds & reconciliation) ────────────────────────────────────
 
 /**
