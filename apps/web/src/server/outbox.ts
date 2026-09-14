@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { outboxMessages, type Database } from "@chaste/db";
+import { customers, outboxMessages, type Database } from "@chaste/db";
 import type { Logger } from "@chaste/kernel";
 
 const webhookPayload = z.object({
@@ -13,6 +13,7 @@ const emailPayload = z.object({
   to: z.string().email(),
   subject: z.string().min(1).max(998),
   text: z.string(),
+  customerId: z.string().uuid().optional(),
 });
 
 export type OutboxInput =
@@ -261,6 +262,23 @@ async function dispatchEmail(
   return { status: "sent", receipt: { messageId: info.messageId ?? message.providerOperationId } };
 }
 
+async function marketingRecipientError(
+  db: Database["db"],
+  message: ClaimedOutboxMessage,
+  payload: z.infer<typeof emailPayload>,
+): Promise<string | null> {
+  if (!payload.customerId) return null;
+  const [customer] = await db
+    .select({ email: customers.email, marketingOptOut: customers.marketingOptOut, deactivatedAt: customers.deactivatedAt })
+    .from(customers)
+    .where(and(eq(customers.id, payload.customerId), eq(customers.orgId, message.orgId)))
+    .limit(1);
+  if (!customer || customer.deactivatedAt || customer.marketingOptOut || customer.email !== payload.to) {
+    return "marketing recipient is no longer eligible at dispatch time";
+  }
+  return null;
+}
+
 export async function processOneOutbox(
   db: Database["db"],
   log: Logger,
@@ -294,7 +312,9 @@ export async function processOneOutbox(
     if (message.kind === "webhook") {
       result = await dispatchWebhook(message, webhookPayload.parse(message.payload));
     } else if (message.kind === "email") {
-      result = await dispatchEmail(message, emailPayload.parse(message.payload));
+      const payload = emailPayload.parse(message.payload);
+      const eligibilityError = await marketingRecipientError(db, message, payload);
+      result = eligibilityError ? { status: "failed", error: eligibilityError } : await dispatchEmail(message, payload);
     } else {
       result = { status: "failed", error: `unknown outbox kind: ${message.kind}` };
     }

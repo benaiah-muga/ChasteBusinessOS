@@ -6,5 +6,6 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     globalSetup: ["./vitest.global-setup.ts"],
     passWithNoTests: true,
+    hookTimeout: 120_000,
   },
 });
