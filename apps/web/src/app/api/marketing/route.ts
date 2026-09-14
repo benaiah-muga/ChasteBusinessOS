@@ -10,6 +10,7 @@ import {
 } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { missingPermission } from "@/server/route-guards";
 
 /**
  * Marketing-lite (M13). Reads are direct org-scoped drizzle queries; every
@@ -19,6 +20,8 @@ import { getResolvedUser } from "@/server/session";
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = missingPermission(resolved, "marketing.read");
+  if (denied) return denied;
   const db = getDb().db;
 
   const segmentRows = await db

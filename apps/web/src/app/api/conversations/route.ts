@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { conversations, conversationMembers, getDb, messages } from "@chaste/db";
 import { hasPermissionFor } from "@/server/kernel";
+import { missingPermission } from "@/server/route-guards";
 import { getResolvedUser } from "@/server/session";
 
 export async function GET() {
@@ -10,9 +11,26 @@ export async function GET() {
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const db = getDb().db;
 
+  // Membership-scoped (N06): the list boundary must agree with the detail
+  // boundary — a nonmember sees neither titles nor previews of a DM.
+  const denied = missingPermission(resolved, "messaging.read");
+  if (denied) return denied;
+
   const rows = await db
-    .select()
+    .select({
+      id: conversations.id,
+      kind: conversations.kind,
+      title: conversations.title,
+      agentEnabled: conversations.agentEnabled,
+    })
     .from(conversations)
+    .innerJoin(
+      conversationMembers,
+      and(
+        eq(conversationMembers.conversationId, conversations.id),
+        eq(conversationMembers.userId, resolved.userId),
+      ),
+    )
     .where(eq(conversations.orgId, resolved.orgId))
     .orderBy(desc(conversations.createdAt));
 

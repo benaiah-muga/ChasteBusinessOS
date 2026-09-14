@@ -3,10 +3,13 @@ import { desc, eq } from "drizzle-orm";
 import { getDb, employees, leaveRequests, payrollRuns } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
+import { missingPermission } from "@/server/route-guards";
 
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = missingPermission(resolved, "hr.read");
+  if (denied) return denied;
   const db = getDb().db;
   const orgId = resolved.orgId;
 

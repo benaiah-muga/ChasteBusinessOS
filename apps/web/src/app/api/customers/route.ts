@@ -4,6 +4,7 @@ import { z } from "zod";
 import { customers, getDb } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { missingPermission } from "@/server/route-guards";
 
 /**
  * Customer directory. Reads power pickers across the app; writes go through
@@ -13,6 +14,8 @@ import { getResolvedUser } from "@/server/session";
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = missingPermission(resolved, "crm.read");
+  if (denied) return denied;
   const rows = await getDb()
     .db.select({
       id: customers.id,
