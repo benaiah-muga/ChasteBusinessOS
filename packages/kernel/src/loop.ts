@@ -42,7 +42,9 @@ export interface LoopMessage {
 }
 
 export interface TicketSink {
-  file(orgId: string, title: string, description: string): Promise<void>;
+  /** Files the ticket and returns its durable id, so the tool result can
+   * hand the user a real reference instead of "ticket filed" (X11). */
+  file(orgId: string, title: string, description: string): Promise<{ id: string }>;
 }
 
 export interface AskQuestion {
@@ -253,12 +255,12 @@ export async function runAgentLoop(
         // notifications; bound it so a runaway or injected loop cannot bloat
         // rows or emails.
         const t = call.args as { title?: string; description?: string };
-        await tickets?.file(
+        const ticket = await tickets?.file(
           ctx.actor.orgId,
           String(t.title ?? "").slice(0, TICKET_TITLE_MAX),
           String(t.description ?? "").slice(0, TICKET_BODY_MAX),
         );
-        result = JSON.stringify({ ok: true, note: "ticket filed" });
+        result = JSON.stringify({ ok: true, note: "ticket filed", ticketId: ticket?.id ?? null });
       } else if (capId === "ask_user" && opts.ask) {
         // Clamp model-controlled question text: it is rendered in the UI and
         // persisted in the trajectory.

@@ -45,6 +45,7 @@ import { registerSupportCapabilities, createSupportSignalProducer } from "@chast
 import { registerSkillCapabilities } from "@chaste/module-skills";
 import { registerRoutineCapabilities } from "@chaste/module-routines";
 import { registerSignalsCapabilities } from "@chaste/module-signals";
+import { pgEffectReceiptStore } from "./effect-receipts";
 
 const registryCache = globalThis as unknown as {
   __chasteRegistry?: { version: string; registry: CapabilityRegistry };
@@ -61,8 +62,22 @@ export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   if (registryCache.__chasteRegistry?.version === version) {
     return registryCache.__chasteRegistry.registry;
   }
+  const registry = composeRegistry(db);
+  const versioned = registry;
 
+  registryCache.__chasteRegistry = { version, registry: versioned };
+  return versioned;
+}
+
+/**
+ * Uncached registry composition (B02 unit of work): a transaction-scoped
+ * executor needs capabilities whose repositories run on the SAME
+ * transaction, which a module-scoped cache would defeat.
+ */
+export function composeRegistry(db: Database["db"]): CapabilityRegistry {
   const registry = new CapabilityRegistry();
+  const version = process.env.REGISTRY_VERSION ?? "1";
+  void version;
   registerCrmCapabilities(registry, { db });
   registerAccountingCapabilities(registry, { db });
   registerAnalyticsCapabilities(registry, {
@@ -117,7 +132,6 @@ export function buildRegistry(db: Database["db"]): CapabilityRegistry {
   if (issues.some((i) => i.level === "error")) {
     throw new Error("capability registry failed conformance; refusing to boot");
   }
-  registryCache.__chasteRegistry = { version, registry };
   return registry;
 }
 
@@ -405,13 +419,15 @@ export function createDbModuleGate(db: Database["db"]) {
 export function buildExecutor(
   db: Database["db"],
   registry: CapabilityRegistry,
-  opts: { enabledModules?: string[] | null } = {},
+  opts: { enabledModules?: string[] | null; failOnAuditError?: boolean } = {},
 ): KernelExecutor {
   return new KernelExecutor({
     registry,
     policy: buildPolicyEngine(db),
     approvals: new DbApprovalFlow(db),
     ledger: new PgLedgerStore(db),
+    receipts: pgEffectReceiptStore(db),
+    failOnAuditError: opts.failOnAuditError,
     modules: opts.enabledModules
       ? { isEnabled: (orgId, moduleId) => opts.enabledModules!.includes(moduleId) }
       : createDbModuleGate(db),
@@ -511,7 +527,10 @@ export async function resolveForOrg(
   };
 }
 
-export function actorFromResolved(resolved: ResolvedUser, opts: { asAgent?: boolean; sessionId?: string } = {}): ActionContext | null {
+export function actorFromResolved(
+  resolved: ResolvedUser,
+  opts: { asAgent?: boolean; sessionId?: string; intentId?: string } = {},
+): ActionContext | null {
   if (!resolved.orgId) return null;
   return {
     actor: {
@@ -521,6 +540,7 @@ export function actorFromResolved(resolved: ResolvedUser, opts: { asAgent?: bool
       permissions: resolved.permissions,
     },
     sessionId: opts.sessionId,
+    intentId: opts.intentId,
     now: new Date(),
     services: {},
   };

@@ -2,6 +2,7 @@ import type { ActionContext, ApprovalRequest, Capability, CapabilityResult } fro
 import { ledgerEventFor, type LedgerStore } from "./ledger";
 import { approvalRequestFor, DefaultPolicyEngine, type PolicyEngine } from "./policy";
 import type { CapabilityRegistry } from "./registry";
+import { logger } from "./logger";
 
 /**
  * How pending approvals surface. Apps implement this: persist an approval row,
@@ -32,10 +33,63 @@ export interface ExecutorDeps {
    * lists, and the job queue alike.
    */
   modules?: ModuleGate;
+  /**
+   * Action receipts (B02). When provided together with `ctx.intentId`,
+   * retries of one intended action serve the prior receipt instead of
+   * re-executing; key reuse with a different payload is a conflict.
+   */
+  receipts?: EffectReceiptStore;
+  /**
+   * For transaction-backed callers (B02 unit of work): rethrow audit append
+   * failures after a committed write so the caller's transaction rolls back
+   * everything atomically, instead of returning outcome "unknown" (which is
+   * the honest semantics when audit and effect cannot share a transaction).
+   */
+  failOnAuditError?: boolean;
 }
 
 export interface ModuleGate {
   isEnabled(orgId: string, moduleId: string): boolean | Promise<boolean>;
+}
+
+/**
+ * Recorded outcome of one action attempt (B02). Stored by the app under the
+ * action key `(orgId, intentId)`; the executor serves it on retry instead of
+ * re-executing, so a committed effect is never duplicated and an unproven one
+ * is never silently repeated.
+ */
+export interface EffectReceipt {
+  capabilityId: string;
+  /** Canonical-input digest; a reused key with a different payload is a conflict. */
+  inputHash: string;
+  ok: boolean;
+  data?: unknown;
+  error?: string;
+  outcome: "known" | "unknown";
+  recordedAt: string;
+}
+
+export interface EffectReceiptStore {
+  get(key: string): Promise<EffectReceipt | null>;
+  put(key: string, receipt: EffectReceipt): Promise<void>;
+}
+
+/** Stable JSON digest for payload-conflict detection (canonical key order). */
+export async function canonicalInputHash(input: unknown): Promise<string> {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([k, v]) => [k, canonical(v)]),
+      );
+    }
+    return value;
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(canonical(input)));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export class KernelExecutor {
@@ -108,6 +162,32 @@ export class KernelExecutor {
       await this.audit(ctx, "approval.granted", cap.id, { capabilityId: cap.id });
     }
 
+    // Idempotent action identity (B02): consulted only after authorization,
+    // so a stored receipt can never leak to a caller who is not currently
+    // permitted to execute the capability themselves.
+    const receipts = this.deps.receipts;
+    const actionKey =
+      ctx.intentId && receipts ? `${ctx.actor.orgId}:${ctx.intentId}` : null;
+    if (actionKey && receipts) {
+      const prior = await receipts.get(actionKey).catch(() => null);
+      if (prior) {
+        if (prior.capabilityId !== cap.id) {
+          return { ok: false, error: `action intent conflict: key already used for ${prior.capabilityId}` };
+        }
+        const priorHash = await canonicalInputHash(parsed.data);
+        if (prior.inputHash !== priorHash) {
+          return { ok: false, error: "action intent conflict: same action key used with a different payload" };
+        }
+        return { ok: prior.ok, data: prior.data as O | undefined, error: prior.error, outcome: prior.outcome, replayed: true };
+      }
+    }
+    const inputHash = actionKey ? await canonicalInputHash(parsed.data) : null;
+
+    // Only the capability's own execution is treated as "the action failed";
+    // audit and receipt handling live outside this try so their failures can
+    // propagate to transaction-backed callers (failOnAuditError) instead of
+    // being misread as a domain failure.
+    let data: O;
     try {
       // Surface the module gate to capabilities whose cross-module effects
       // must degrade gracefully (ADR 0035): an enabled capability can ask
@@ -115,13 +195,92 @@ export class KernelExecutor {
       if (this.deps.modules) {
         ctx.services.moduleGate = this.deps.modules;
       }
-      const data = await cap.execute(ctx, parsed.data);
-      await this.audit(ctx, "capability.executed", cap.id, { input: parsed.data });
-      return { ok: true, data };
+      data = await cap.execute(ctx, parsed.data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.audit(ctx, "capability.failed", cap.id, { input: parsed.data, error: message });
       return { ok: false, error: message };
+    }
+
+    // Output conformance at the trust boundary (F02): a write whose output
+    // violates its declared schema may have committed an effect that cannot
+    // be trusted or blindly retried — report unknown, never a retryable
+    // plain failure. Read-class capabilities have no effect to orphan.
+    const outputCheck = cap.output.safeParse(data);
+    if (!outputCheck.success) {
+      const message = `capability returned invalid output: ${outputCheck.error.message}`;
+      if (cap.risk === "read") {
+        await this.auditBestEffort(ctx, "capability.failed", cap.id, { input: parsed.data, error: message });
+        return { ok: false, error: message };
+      }
+      // A transaction-backed caller rolls the effect back entirely.
+      if (this.deps.failOnAuditError) throw new Error(message);
+      await this.recordReceipt(actionKey, {
+        capabilityId: cap.id,
+        inputHash: inputHash ?? "",
+        ok: false,
+        error: message,
+        outcome: "unknown",
+        recordedAt: new Date().toISOString(),
+      });
+      await this.auditBestEffort(ctx, "capability.failed", cap.id, { input: parsed.data, error: message, outcome: "unknown" });
+      return { ok: false, outcome: "unknown", error: message };
+    }
+
+    try {
+      await this.audit(ctx, "capability.executed", cap.id, { input: parsed.data });
+    } catch (err) {
+      // The write committed but the audit append failed. Without a shared
+      // transaction the honest answer is "unknown" (F01). A transaction-
+      // backed caller (failOnAuditError) takes the throw instead, so its
+      // unit of work rolls the whole effect back and a retry starts clean.
+      if (this.deps.failOnAuditError) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      await this.recordReceipt(actionKey, {
+        capabilityId: cap.id,
+        inputHash: inputHash ?? "",
+        ok: false,
+        error: message,
+        outcome: "unknown",
+        recordedAt: new Date().toISOString(),
+      });
+      return { ok: false, outcome: "unknown", error: `effect committed but audit failed: ${message}` };
+    }
+
+    // Receipt persistence follows the authoritative audit; a failed put
+    // degrades idempotency for this intent but never falsifies the result.
+    await this.recordReceipt(actionKey, {
+      capabilityId: cap.id,
+      inputHash: inputHash ?? "",
+      ok: true,
+      data,
+      outcome: "known",
+      recordedAt: new Date().toISOString(),
+    });
+    return { ok: true, data, outcome: "known" };
+  }
+
+  /** Receipt persistence is an idempotency aid, never a result authority. */
+  private async recordReceipt(key: string | null, receipt: EffectReceipt): Promise<void> {
+    if (!key || !this.deps.receipts) return;
+    try {
+      await this.deps.receipts.put(key, receipt);
+    } catch (err) {
+      logger.warn("failed to persist action receipt", {
+        capabilityId: receipt.capabilityId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async auditBestEffort(ctx: ActionContext, kind: string, capabilityId: string | null, payload: unknown) {
+    try {
+      await this.audit(ctx, kind, capabilityId, payload);
+    } catch (err) {
+      logger.warn("audit append failed for an already-unproven outcome", {
+        capabilityId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
