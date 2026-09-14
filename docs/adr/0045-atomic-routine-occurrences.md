@@ -16,8 +16,10 @@ occurrence identity to reconcile.
 Store each scheduled occurrence in `routine_occurrences`, unique by routine and
 scheduled instant. In one database transaction, lock due routines with
 `SKIP LOCKED`, create the occurrence and job, link them, advance the routine,
-and return the claimed work. Execution updates the linked occurrence to `done`
-or `failed` together with the routine's last-run status.
+and return the claimed work. Before scheduled agent work begins, execution
+rechecks that the routine is still enabled; if not, it cancels the occurrence
+without invoking the agent. Otherwise execution updates the linked occurrence
+to `done` or `failed` together with the routine's last-run status.
 
 ## Consequences
 
