@@ -1,9 +1,10 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   agentSessions,
   jobs,
   notifications,
   organizations,
+  routineOccurrences,
   routines,
   tickets,
   type Database,
@@ -53,37 +54,74 @@ export interface DueRoutine {
   name: string;
   prompt: string;
   schedule: unknown;
+  occurrenceId: string;
+  jobId: string;
+  scheduledAt: Date;
 }
 
 /**
- * Claims due routines with SKIP LOCKED, marks them running, and advances
- * their schedule immediately (at-most-once semantics: a crashed worker can
- * skip a beat, but two workers can never double-fire a routine).
+ * Claims due routines and creates their occurrence/job in one transaction.
+ * Row locks prevent competing ticks from selecting the same routine, while
+ * the occurrence key makes the scheduled boundary explicit and replay-safe.
  */
 export async function claimDueRoutines(db: Database["db"], limit = 10): Promise<DueRoutine[]> {
-  const result = (await db.execute(sql`
-    UPDATE routines SET last_run_at = now(), last_status = 'running'
-    WHERE id IN (
-      SELECT id FROM routines
+  return db.transaction(async (tx) => {
+    const result = (await tx.execute(sql`
+      SELECT id, org_id AS "orgId", name, prompt, schedule, next_run_at AS "scheduledAt"
+      FROM routines
       WHERE enabled = true AND trigger_type = 'schedule' AND next_run_at <= now()
       ORDER BY next_run_at
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
-    )
-    RETURNING id, org_id AS "orgId", name, prompt, schedule
-  `)) as unknown as Record<string, unknown>[] | { rows: Record<string, unknown>[] };
-  const list: Record<string, unknown>[] = Array.isArray(result) ? result : (result.rows ?? []);
-  const claimed: DueRoutine[] = list.map((r) => ({
-    id: String(r.id),
-    orgId: String(r.orgId),
-    name: String(r.name),
-    prompt: String(r.prompt),
-    schedule: r.schedule,
-  }));
-  for (const r of claimed) {
-    await rescheduleRoutine(db, r.id, r.schedule, new Date());
-  }
-  return claimed;
+    `)) as unknown as Record<string, unknown>[] | { rows: Record<string, unknown>[] };
+    const list: Record<string, unknown>[] = Array.isArray(result) ? result : (result.rows ?? []);
+    const claimed: DueRoutine[] = [];
+    const now = new Date();
+    for (const row of list) {
+      const scheduledAt = row.scheduledAt instanceof Date ? row.scheduledAt : new Date(String(row.scheduledAt));
+      if (Number.isNaN(scheduledAt.getTime())) throw new Error("routine has an invalid scheduled occurrence");
+      const [occurrence] = await tx
+        .insert(routineOccurrences)
+        .values({
+          orgId: String(row.orgId),
+          routineId: String(row.id),
+          scheduledAt,
+        })
+        .onConflictDoNothing({ target: [routineOccurrences.routineId, routineOccurrences.scheduledAt] })
+        .returning({ id: routineOccurrences.id });
+      if (!occurrence) continue;
+      const nextRunAt = nextRoutineRun(row.schedule as never, now);
+      const [job] = await tx
+        .insert(jobs)
+        .values({
+          orgId: String(row.orgId),
+          type: "routines.executeRoutine",
+          payload: {
+            routineId: String(row.id),
+            trigger: "schedule",
+            occurrenceId: occurrence.id,
+            scheduledAt: scheduledAt.toISOString(),
+          },
+        })
+        .returning({ id: jobs.id });
+      await tx.update(routineOccurrences).set({ jobId: job!.id }).where(eq(routineOccurrences.id, occurrence.id));
+      await tx
+        .update(routines)
+        .set({ lastRunAt: now, lastStatus: "running", nextRunAt })
+        .where(eq(routines.id, String(row.id)));
+      claimed.push({
+        id: String(row.id),
+        orgId: String(row.orgId),
+        name: String(row.name),
+        prompt: String(row.prompt),
+        schedule: row.schedule,
+        occurrenceId: occurrence.id,
+        jobId: job!.id,
+        scheduledAt,
+      });
+    }
+    return claimed;
+  });
 }
 
 export async function enqueueRoutineRun(
@@ -120,7 +158,7 @@ Rules for routine runs:
 export async function executeRoutine(
   db: Database["db"],
   log: Logger,
-  payload: { routineId: string; trigger: string },
+  payload: { routineId: string; trigger: string; occurrenceId?: string },
 ): Promise<void> {
   const [routine] = await db.select().from(routines).where(eq(routines.id, payload.routineId)).limit(1);
   if (!routine) {
@@ -132,6 +170,12 @@ export async function executeRoutine(
       .update(routines)
       .set({ lastStatus: status, lastError: error ?? null })
       .where(eq(routines.id, routine.id));
+    if (payload.occurrenceId) {
+      await db
+        .update(routineOccurrences)
+        .set({ status: status === "ok" ? "done" : "failed" })
+        .where(and(eq(routineOccurrences.id, payload.occurrenceId), eq(routineOccurrences.routineId, routine.id)));
+    }
   };
 
   let session: { id: string } | undefined;
@@ -219,8 +263,7 @@ export async function executeRoutine(
 export async function tickRoutines(db: Database["db"], log: Logger): Promise<number> {
   const due = await claimDueRoutines(db);
   for (const r of due) {
-    await enqueueRoutineRun(db, r, "schedule");
-    log.info("routine due; enqueued run", { routineId: r.id, name: r.name });
+    log.info("routine due; occurrence and job enqueued", { routineId: r.id, name: r.name, jobId: r.jobId });
   }
   return due.length;
 }

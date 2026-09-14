@@ -1924,6 +1924,33 @@ export const jobs = pgTable(
 );
 
 /**
+ * One scheduled occurrence and its durable execution job. The unique
+ * routine/scheduledAt key prevents two scheduler ticks from representing the
+ * same due occurrence twice.
+ */
+export const routineOccurrences = pgTable(
+  "routine_occurrences",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    routineId: uuid("routine_id")
+      .notNull()
+      .references(() => routines.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    status: text("status").notNull().default("queued"), // queued | running | done | failed | cancelled
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("routine_occurrence_unique_idx").on(t.routineId, t.scheduledAt),
+    index("routine_occurrence_org_idx").on(t.orgId, t.scheduledAt),
+    index("routine_occurrence_job_idx").on(t.jobId),
+  ],
+);
+
+/**
  * Durable external delivery intent. The payload is committed before any
  * provider call; an unknown result is retained for reconciliation instead of
  * being retried as if the provider definitely did nothing.

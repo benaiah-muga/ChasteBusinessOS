@@ -12,6 +12,10 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Scheduled routine claims could lose or duplicate occurrences (N28).**
+  Due-routine selection, occurrence creation, rescheduling, and durable job
+  enqueue now commit together, with a unique routine/scheduled-time key and
+  linked run status updates.
 - **Routine schedule edits could silently change execution timing (N27).**
   Structured schedules now require kind-specific fields and valid clock ranges,
   natural-language intervals reject trailing qualifiers, and edits unrelated
