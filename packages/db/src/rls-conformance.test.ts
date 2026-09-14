@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, withOrgContext, type Database } from "./client";
-import { dropFixtureDatabase, provisionFixtureDatabase } from "./test-fixture";
+import { ensureAppRole } from "./roles";
 
 /**
  * S01 floor, swept mechanically over every org-scoped table of a fresh
@@ -16,24 +16,26 @@ const APP_ROLE = "chaste_app";
 
 let admin: Database;
 let app: Database;
-let fixture: { url: string; database: string };
 const orgA = crypto.randomUUID();
 const orgB = crypto.randomUUID();
 
+/**
+ * Both handles address the same database: the one globalSetup provisioned
+ * and migrated for this run. Seeding the orgs into one database while the
+ * runtime role read another made every leak assertion below pass on empty
+ * tables, so the sweep could not have caught a missing RLS policy.
+ */
 beforeAll(async () => {
-  fixture = await provisionFixtureDatabase({ database: `chaste_test_rls_sweep_${crypto.randomUUID().slice(0, 8)}` });
   admin = createDb(url);
   await admin.db.execute(`INSERT INTO organizations (id, name, slug) VALUES ('${orgA}', 'Sweep A', 'sweep-a'), ('${orgB}', 'Sweep B', 'sweep-b')`);
-  const u = new URL(fixture.url);
-  u.username = APP_ROLE;
-  u.password = "chaste_app_dev_only";
-  app = createDb(u.toString());
+  // Idempotent, and yields the runtime URL for the very database just seeded.
+  const { runtimeUrl } = await ensureAppRole({ databaseUrl: url });
+  app = createDb(runtimeUrl);
 });
 
 afterAll(async () => {
-  await app.client.end();
-  await admin.client.end();
-  await dropFixtureDatabase({ database: fixture.database });
+  await app?.client.end();
+  await admin?.client.end();
 });
 
 type TableRow = { table_name: string; rls_enabled: boolean; policy: string | null };
@@ -58,6 +60,27 @@ describe("RLS conformance sweep (S01 floor)", () => {
     `);
     tables = res as unknown as TableRow[];
     expect(tables.length).toBeGreaterThan(30);
+  });
+
+  // Positive control: the orgs must exist in the database the runtime role
+  // reads. Without this, a wiring mistake that points the two handles at
+  // different databases makes every "no rows leaked" assertion below pass on
+  // empty tables and the sweep stops being able to fail.
+  it("the runtime role reads the same database the sweep seeds (positive control)", async () => {
+    const seedRes = await admin.db.execute<{ n: number }>(
+      `SELECT count(*)::int AS n FROM organizations WHERE id IN ('${orgA}', '${orgB}')`,
+    );
+    const seeded = Number((seedRes[0] as unknown as { n: number })?.n ?? 0);
+    expect(seeded, "the sweep must seed its orgs before testing for leaks").toBe(2);
+
+    // The invariant whose violation made this suite unable to fail: two
+    // handles on two different databases mean every leak check below counts
+    // rows in a database that was never seeded.
+    const adminDb = await admin.db.execute<{ name: string }>(`SELECT current_database() AS name`);
+    const appDb = await app.db.execute<{ name: string }>(`SELECT current_database() AS name`);
+    expect((appDb[0] as unknown as { name: string })?.name).toBe(
+      (adminDb[0] as unknown as { name: string })?.name,
+    );
   });
 
   it("every org-scoped table has RLS enabled and a tenant_isolation policy", () => {
