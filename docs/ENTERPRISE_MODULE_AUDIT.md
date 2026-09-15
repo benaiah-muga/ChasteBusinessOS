@@ -267,7 +267,18 @@ Proof: nested assemblies, shared component reached by different paths, unrelated
 
 Evidence: `recordStockMovement`, `modules/inventory/src/shared.ts:34`, is currently an insertion helper, not an invariant-enforcing service. Reservations, transfers and cycle counts perform read/check/write without a common lock. Transfer feasibility checks item/location quantity; lot movement needs the corresponding lot availability check. Cycle-count drift guard compares total on-hand (`modules/inventory/src/index.ts:511`), so equal net stock after intervening movements is not detected. POS/purchasing bypass even the shared insert helper.
 
-Implementation: one inventory command service owns org/item/location/lot validation, quantity semantics, available-to-promise, ordered locking and unique operation effects. Use item+location+lot projections with movement watermarks; cycle counts retain the observation's scope and watermark. Distinguish uncounted lines from counted zero, allow safe rebase with explicit review, and never apply a global count to a specific bin. Define one numbering allocator rather than repeated MAX+1 per module. Keep lots and reservations usable without manufacturing enabled.
+Implementation: the first slice (ADR 0050) puts one command service between
+every writer and the ledger — items locked in stable id order, lot-to-item
+binding enforced, non-negative balances org-wide and per location, and
+cycle-count lines snapshot a movement-count watermark so any intervening
+movement (even net-zero) invalidates the sheet at post time. POS, purchasing,
+sales, and manufacturing all route through the service, so concurrent
+commands serialize on the same locks. Remaining work: item+location+lot
+projections so reports stop summing the whole ledger per read, cycle-count
+scope/observation semantics beyond the watermark (uncounted vs counted-zero,
+rebase with explicit review, bin-scoped counts), one numbering allocator
+instead of repeated MAX+1 per module, and a lock-duration/query-plan review
+against seeded history.
 
 Proof: concurrent reserve/sell/transfer/count operations cannot produce impossible balances; item A's lot cannot move item B; full quantity and valuation replay matches projections; a receipt+sale during counting is detected even if net quantity is unchanged. Seed enough history to assess lock duration and query plans.
 

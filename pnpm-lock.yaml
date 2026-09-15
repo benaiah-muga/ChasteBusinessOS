@@ -417,6 +417,9 @@ importers:
       '@chaste/module-accounting':
         specifier: workspace:*
         version: link:../accounting
+      '@chaste/module-inventory':
+        specifier: workspace:*
+        version: link:../inventory
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)
@@ -461,6 +464,9 @@ importers:
       '@chaste/module-accounting':
         specifier: workspace:*
         version: link:../accounting
+      '@chaste/module-inventory':
+        specifier: workspace:*
+        version: link:../inventory
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(kysely@0.29.5)(postgres@3.4.9)

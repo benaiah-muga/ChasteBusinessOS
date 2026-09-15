@@ -1265,6 +1265,8 @@ export const cycleCountLines = pgTable(
       .notNull()
       .references(() => items.id, { onDelete: "restrict" }),
     expectedThousandths: integer("expected_thousandths").notNull(),
+    /** Movements recorded for this item when the sheet was drawn (N22 watermark). */
+    expectedMovementCount: integer("expected_movement_count").notNull().default(0),
     countedThousandths: integer("counted_thousandths"),
     createdAt: createdAt(),
   },

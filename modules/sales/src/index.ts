@@ -6,7 +6,7 @@ import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import { computeInvoiceTotals, evaluateCredit } from "@chaste/erp-core";
 import { insertInvoiceWithPosting } from "@chaste/module-accounting";
-import { itemBySku, openReserved, recordStockMovement, stockOnHand } from "@chaste/module-inventory";
+import { applyStockDelta, itemBySku, openReserved, stockOnHand } from "@chaste/module-inventory";
 
 /**
  * Sales orders (M9, ADR 0036): the contract between sales and inventory.
@@ -367,7 +367,7 @@ const orderDeliver = (deps: ModuleDeps) =>
           }
           if (remaining > 0) throw new Error(`reservation for line "${line.description}" vanished; refusing to oversell`);
 
-          await recordStockMovement(tx, {
+          await applyStockDelta(tx, {
             orgId: ctx.actor.orgId,
             itemId: line.itemId!,
             quantityDelta: -deliver,

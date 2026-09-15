@@ -15,6 +15,7 @@ import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import { postEntry } from "@chaste/module-accounting/posting";
+import { applyStockDelta, lockStockItems } from "@chaste/module-inventory";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -254,9 +255,10 @@ const completeSale = (deps: ModuleDeps) =>
         });
 
         // Stock leaves the ledger in the same transaction as the money —
-        // only when the inventory module is enabled (ADR 0035).
+        // only when the inventory module is enabled (ADR 0035). N22: through
+        // the shared command service, so the ledger guards hold here too.
         for (const sl of inventoryEnabled ? stockLines : []) {
-          await tx.insert(stockMovements).values({
+          await applyStockDelta(tx, {
             orgId: ctx.actor.orgId,
             itemId: sl.itemId,
             quantityDelta: -sl.quantity,
@@ -401,16 +403,20 @@ const returnSale = (deps: ModuleDeps) =>
           .from(stockMovements)
           .where(and(eq(stockMovements.orgId, ctx.actor.orgId), eq(stockMovements.refType, "invoice"), eq(stockMovements.refId, inv.id)));
         let restockedLines = 0;
+        await lockStockItems(
+          tx,
+          saleLegs.filter((l) => l.quantityDelta < 0).map((l) => l.itemId),
+        );
         for (const leg of saleLegs) {
           if (leg.quantityDelta >= 0) continue;
-          await tx.insert(stockMovements).values({
+          await applyStockDelta(tx, {
             orgId: ctx.actor.orgId,
             itemId: leg.itemId,
             quantityDelta: -leg.quantityDelta,
             reason: "sale",
             refType: "pos_return",
             refId: inv.id,
-            unitCostMinor: leg.unitCostMinor,
+            unitCostMinor: leg.unitCostMinor ?? undefined,
             note: `POS return on sale ${inv.number}: ${input.reason}`,
             actorType: ctx.actor.type,
             actorId: ctx.actor.id,

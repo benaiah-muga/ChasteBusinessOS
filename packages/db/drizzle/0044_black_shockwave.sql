@@ -1,0 +1,1 @@
+ALTER TABLE "cycle_count_lines" ADD COLUMN "expected_movement_count" integer DEFAULT 0 NOT NULL;

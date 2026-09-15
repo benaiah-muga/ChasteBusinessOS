@@ -78,12 +78,14 @@ export default tseslint.config(
         "error",
         {
           // Exact names so "@chaste/module-accounting/posting" stays allowed.
+          // "@chaste/module-inventory" stays allowed too: its stock command
+          // service is the sanctioned ledger seam for POS and purchasing
+          // (ADR 0050), same as sales/manufacturing consume it already.
           paths: [
             "@chaste/module-accounting",
             "@chaste/module-crm",
             "@chaste/module-messaging",
             "@chaste/module-iam",
-            "@chaste/module-inventory",
             "@chaste/module-documents",
             "@chaste/module-creator",
             "@chaste/module-pos",
@@ -91,7 +93,8 @@ export default tseslint.config(
             "@chaste/module-hr",
           ].map((name) => ({
             name,
-            message: "the only allowed cross-module import is @chaste/module-accounting/posting",
+            message:
+              "the only allowed cross-module imports are @chaste/module-accounting/posting and @chaste/module-inventory (ADR 0050)",
           })),
         },
       ],

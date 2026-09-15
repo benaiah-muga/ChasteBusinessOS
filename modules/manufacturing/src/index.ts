@@ -14,10 +14,11 @@ import {
 } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import {
+  applyStockDelta,
   getOrCreateLot,
   itemBySku,
+  lockStockItems,
   movementHistory,
-  recordStockMovement,
   stockOnHand,
   withOrgContext,
 } from "@chaste/module-inventory";
@@ -234,6 +235,12 @@ async function postRun(
     const allItems = await tx.select({ id: items.id, sku: items.sku }).from(items).where(eq(items.orgId, actor.orgId));
     const bySku = new Map(allItems.map((r) => [r.id, r.sku]));
 
+    // N22: lock every item this run touches (stable id order) before the
+    // availability check, so a concurrent sale cannot spend the same units.
+    await lockStockItems(
+      tx,
+      prepared.requirements.map((r) => r.itemId).concat(opts.assemblyItemId),
+    );
     const onHandByItem = new Map<string, number>();
     for (const r of prepared.requirements) {
       onHandByItem.set(r.itemId, await stockOnHand(tx, actor.orgId, r.itemId));
@@ -253,7 +260,7 @@ async function postRun(
     for (const req of prepared.requirements) {
       const unitCost = await avgUnitCost(tx, actor.orgId, req.itemId);
       valueConsumedMinor += Math.round((req.quantityThousandths * unitCost) / 1000);
-      await recordStockMovement(tx, {
+      await applyStockDelta(tx, {
         orgId: actor.orgId,
         itemId: req.itemId,
         quantityDelta: -req.quantityThousandths,
@@ -270,7 +277,7 @@ async function postRun(
 
     const rolledUnitCost =
       opts.quantityThousandths > 0 ? Math.round((valueConsumedMinor * 1000) / opts.quantityThousandths) : 0;
-    await recordStockMovement(tx, {
+    await applyStockDelta(tx, {
       orgId: actor.orgId,
       itemId: opts.assemblyItemId,
       quantityDelta: opts.quantityThousandths,
@@ -420,11 +427,14 @@ const reverseProductionRun = (deps: ModuleDeps) =>
           const onHand = await stockOnHand(tx, ctx.actor.orgId, itemId);
           if (net > onHand) throw new Error("cannot reverse: produced units have already been consumed or sold");
         }
+        // N22: reversal legs are outbound for produced items — lock before
+        // writing so a concurrent sale cannot race the feasibility check.
+        await lockStockItems(tx, [...netByItem.keys()]);
 
         const restored: { sku: string; quantityThousandths: number }[] = [];
         const removed: { sku: string; quantityThousandths: number }[] = [];
         for (const m of [...runMovements].reverse()) {
-          await recordStockMovement(tx, {
+          await applyStockDelta(tx, {
             orgId: ctx.actor.orgId,
             itemId: m.itemId,
             quantityDelta: -m.quantityDelta,
@@ -1043,7 +1053,12 @@ const produceFromBom = (deps: ModuleDeps) =>
         const prepared = await scrapAdjustedRequirements(tx, ctx.actor.orgId, assembly.id, input.quantityThousandths);
         if (!prepared) throw new Error(`${input.assemblySku} has no bill of materials; define one first`);
 
+        // N22: lock every item this run touches before the availability check.
         const onHandByItem = new Map<string, number>();
+        await lockStockItems(
+          tx,
+          prepared.requirements.map((r) => r.itemId).concat(assembly.id),
+        );
         for (const r of prepared.requirements) {
           onHandByItem.set(r.itemId, await stockOnHand(tx, ctx.actor.orgId, r.itemId));
         }
@@ -1065,7 +1080,7 @@ const produceFromBom = (deps: ModuleDeps) =>
         for (const req of prepared.requirements) {
           const unitCost = await avgUnitCost(tx, ctx.actor.orgId, req.itemId);
           valueConsumedMinor += Math.round((req.quantityThousandths * unitCost) / 1000);
-          await recordStockMovement(tx, {
+          await applyStockDelta(tx, {
             orgId: ctx.actor.orgId,
             itemId: req.itemId,
             quantityDelta: -req.quantityThousandths,
@@ -1082,7 +1097,7 @@ const produceFromBom = (deps: ModuleDeps) =>
 
         const rolledUnitCost =
           input.quantityThousandths > 0 ? Math.round((valueConsumedMinor * 1000) / input.quantityThousandths) : 0;
-        await recordStockMovement(tx, {
+        await applyStockDelta(tx, {
           orgId: ctx.actor.orgId,
           itemId: assembly.id,
           quantityDelta: input.quantityThousandths,

@@ -12,6 +12,21 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Stock commands raced each other and trusted unvalidated lots (N22).**
+  One inventory command service now owns every quantity change: all writers
+  (inventory, POS, purchasing receipts/returns, sales delivery,
+  manufacturing production) lock the item rows in stable order and move
+  quantity through shared guards, so concurrent commands serialize instead
+  of each passing the same check and driving stock negative. A lot can no
+  longer move another item's stock, the balance can no longer go negative
+  org-wide or at a named location, and cycle counts snapshot a movement
+  watermark — a receipt plus a sale during counting is caught at post time
+  even when net quantity landed back where it started (a drifted sheet is
+  refused permanently; re-count). POS and purchasing import the inventory
+  command service directly — the sanctioned stock-ledger seam now matches
+  the one every writer actually uses (ADR 0050). Pinned by seven live-DB
+  inventory tests; manufacturing's cycle-count suite asserts the stricter
+  watermark semantics.
 - **Receiving, returns, and bills ignored ordered quantities and each other
   (N16).** Every purchasing command now spends one budget per order line:
   receipts refuse quantities beyond what was ordered (overreceipt needs an

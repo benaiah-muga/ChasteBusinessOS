@@ -25,6 +25,7 @@ import {
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import { postEntry } from "@chaste/module-accounting/posting";
+import { applyStockDelta, lockStockItems } from "@chaste/module-inventory";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -460,6 +461,7 @@ const receivePO = (deps: ModuleDeps) =>
           wanted.set(rl.lineNumber, (wanted.get(rl.lineNumber) ?? 0) + rl.quantity);
         }
 
+        const itemLineWrites: { line: (typeof lines)[number]; quantity: number }[] = [];
         for (const [lineNumber, quantity] of wanted) {
           const line = lines[lineNumber - 1];
           if (!line) throw new Error(`no line ${lineNumber} on order ${input.poNumber}`);
@@ -472,18 +474,7 @@ const receivePO = (deps: ModuleDeps) =>
                   `overreceipt needs an amended order, not a bigger receipt`,
               );
             }
-            await tx.insert(stockMovements).values({
-              orgId: ctx.actor.orgId,
-              itemId: line.itemId,
-              quantityDelta: quantity,
-              reason: "purchase",
-              refType: "po_line",
-              refId: line.id,
-              note: `Receipt against PO ${input.poNumber}`,
-              unitCostMinor: line.unitPriceMinor,
-              actorType: ctx.actor.type,
-              actorId: ctx.actor.id,
-            });
+            itemLineWrites.push({ line, quantity });
           } else {
             // Service acceptance: record the delivered milestone without
             // faking stock, so service-only and mixed orders can complete.
@@ -496,6 +487,25 @@ const receivePO = (deps: ModuleDeps) =>
             }
             await tx.update(poLines).set({ serviceAcceptedThousandths: accepted + quantity }).where(eq(poLines.id, line.id));
           }
+        }
+
+        // N22: write the stock movements through the shared inventory command
+        // service — items locked in stable id order first, so a receipt and a
+        // concurrent sale/production of the same item serialize.
+        await lockStockItems(tx, itemLineWrites.map((w) => w.line.itemId!));
+        for (const { line, quantity } of itemLineWrites) {
+          await applyStockDelta(tx, {
+            orgId: ctx.actor.orgId,
+            itemId: line.itemId!,
+            quantityDelta: quantity,
+            reason: "purchase",
+            refType: "po_line",
+            refId: line.id,
+            note: `Receipt against PO ${input.poNumber}`,
+            unitCostMinor: line.unitPriceMinor,
+            actorType: ctx.actor.type,
+            actorId: ctx.actor.id,
+          });
         }
 
         const fully = await orderFullyReceived(tx, po.id);
@@ -956,6 +966,7 @@ const returnGoods = (deps: ModuleDeps) =>
           });
         }
 
+        const returnWrites: { lineId: string; itemId: string; quantity: number; note: string; unitCostMinor: number }[] = [];
         for (const [lineNumber, { quantity, reason }] of wanted) {
           const line = lines[lineNumber - 1];
           if (!line) throw new Error(`no line ${lineNumber} on order ${input.poNumber}`);
@@ -979,15 +990,29 @@ const returnGoods = (deps: ModuleDeps) =>
               `line ${lineNumber}: only ${onHand} thousandths of this item are on hand; goods already shipped need a customer return, not a vendor return`,
             );
           }
-          await tx.insert(stockMovements).values({
-            orgId: ctx.actor.orgId,
+          returnWrites.push({
+            lineId: line.id,
             itemId: line.itemId,
-            quantityDelta: -quantity,
-            reason: "purchase",
-            refType: "po_line",
-            refId: line.id,
+            quantity,
             note: `Return to vendor (PO ${input.poNumber}): ${reason}`,
             unitCostMinor: line.unitPriceMinor,
+          });
+        }
+
+        // N22: the outbound legs go through the shared inventory command
+        // service — items locked in stable id order, non-negative balance
+        // re-checked against the serialized state.
+        await lockStockItems(tx, returnWrites.map((w) => w.itemId));
+        for (const w of returnWrites) {
+          await applyStockDelta(tx, {
+            orgId: ctx.actor.orgId,
+            itemId: w.itemId,
+            quantityDelta: -w.quantity,
+            reason: "purchase",
+            refType: "po_line",
+            refId: w.lineId,
+            note: w.note,
+            unitCostMinor: w.unitCostMinor,
             actorType: ctx.actor.type,
             actorId: ctx.actor.id,
           });

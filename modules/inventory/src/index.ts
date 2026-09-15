@@ -19,12 +19,12 @@ import {
   getOrCreateLot,
   itemBySku,
   movementHistory,
-  recordStockMovement,
   stockOnHand,
   withOrgContext,
   type DbLike,
   type ModuleDeps,
 } from "./shared";
+import { applyStockDelta, itemMovementCount, lockStockItems, movementCountsByItem } from "./service";
 
 // Public surface other modules import — this is the sanctioned integration
 // seam: the manufacturing module writes to THIS ledger through these helpers
@@ -38,6 +38,7 @@ export {
   withOrgContext,
 } from "./shared";
 export type { ModuleDeps, MovementInput, Tx, DbLike } from "./shared";
+export { applyStockDelta, lockStockItems, itemMovementCount, movementCountsByItem } from "./service";
 
 const createItem = (deps: ModuleDeps) =>
   defineCapability({
@@ -152,12 +153,6 @@ const adjustStock = (deps: ModuleDeps) =>
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const item = await itemBySku(tx, ctx.actor.orgId, input.sku);
         if (!item) throw new Error(`no item with SKU ${input.sku}`);
-        if (input.quantityDelta < 0) {
-          const current = await stockOnHand(tx, ctx.actor.orgId, item.id);
-          if (-input.quantityDelta > current) {
-            throw new Error(`cannot go negative: only ${current} thousandths on hand`);
-          }
-        }
         if (input.lotCode && input.quantityDelta < 0) {
           throw new Error("lotCode applies only to inward corrections");
         }
@@ -172,7 +167,8 @@ const adjustStock = (deps: ModuleDeps) =>
           if (!loc) throw new Error(`no location with code ${input.locationCode}`);
           locationId = loc.id;
         }
-        await recordStockMovement(tx, {
+        // N22: the guard (and the write) live in the shared command service.
+        const { onHandThousandths } = await applyStockDelta(tx, {
           orgId: ctx.actor.orgId,
           itemId: item.id,
           quantityDelta: input.quantityDelta,
@@ -183,8 +179,7 @@ const adjustStock = (deps: ModuleDeps) =>
           lotId: lotId ?? undefined,
           locationId: locationId ?? undefined,
         });
-        const newLevel = await stockOnHand(tx, ctx.actor.orgId, item.id);
-        return { onHandThousandths: newLevel };
+        return { onHandThousandths };
       });
     },
   });
@@ -300,6 +295,9 @@ const reserveStock = (deps: ModuleDeps) =>
       withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const item = await itemBySku(tx, ctx.actor.orgId, input.sku);
         if (!item) throw new Error(`no item with SKU ${input.sku}`);
+        // N22: serialize the availability read against concurrent sellers —
+        // a reservation and a sale of the same last unit cannot both succeed.
+        await lockStockItems(tx, [item.id]);
         const onHand = await stockOnHand(tx, ctx.actor.orgId, item.id);
         const reserved = await openReserved(tx, ctx.actor.orgId, item.id);
         const available = availableToPromise(onHand, reserved);
@@ -418,6 +416,15 @@ const startCycleCount = (deps: ModuleDeps) =>
             createdByActorId: ctx.actor.id,
           })
           .returning({ id: cycleCounts.id });
+        // N22: each line also snapshots how many movements its item has — the
+        // watermark the drift guard compares against at post time, so a
+        // receipt+sale during counting is caught even when net quantity lands
+        // back where it started.
+        const counts = await movementCountsByItem(
+          tx,
+          ctx.actor.orgId,
+          activeItems.map((i) => i.id),
+        );
         const lines = [];
         for (const it of activeItems) {
           lines.push({
@@ -425,6 +432,7 @@ const startCycleCount = (deps: ModuleDeps) =>
             countId: count!.id,
             itemId: it.id,
             expectedThousandths: await stockOnHand(tx, ctx.actor.orgId, it.id),
+            expectedMovementCount: counts.get(it.id) ?? 0,
           });
         }
         await tx.insert(cycleCountLines).values(lines);
@@ -503,24 +511,35 @@ const postCycleCount = (deps: ModuleDeps) =>
         if (!lines.some((l) => l.countedThousandths !== null)) {
           throw new Error("no counted quantity recorded on any line; enter counts before posting");
         }
-        // Snapshot drift guard: a count sheet is only valid against the stock
-        // it was snapshotted from. If anything moved since, the variance would
-        // silently absorb an unrelated movement — force a fresh count instead.
+        // N22 watermark drift guard: a count sheet is only valid against the
+        // stock it was snapshotted from. Any movement on a counted item since
+        // the snapshot invalidates the sheet — even one whose net quantity
+        // landed back where it started — because the variance could silently
+        // absorb an unrelated movement. Force a fresh count instead.
         for (const line of lines) {
-          const current = await stockOnHand(tx, ctx.actor.orgId, line.itemId);
-          if (current !== line.expectedThousandths) {
+          if (line.countedThousandths === null) continue;
+          const movements = await itemMovementCount(tx, ctx.actor.orgId, line.itemId);
+          if (movements !== line.expectedMovementCount) {
             throw new Error(
-              `stock for one of the counted items moved since the snapshot (expected ${line.expectedThousandths}, now ${current}); start a fresh count`,
+              `stock for one of the counted items moved since the snapshot ` +
+                `(${movements - line.expectedMovementCount} movements since); start a fresh count`,
             );
           }
         }
+        // N22: post under the item lock so nothing slips in between the guard
+        // and the variance writes; the snapshot guarantee holds because the
+        // watermark check above ran against a serialized state.
+        await lockStockItems(
+          tx,
+          lines.filter((l) => l.countedThousandths !== null).map((l) => l.itemId),
+        );
         let adjustments = 0;
         let netVariance = 0;
         for (const line of lines) {
           if (line.countedThousandths === null) continue;
           const delta = line.countedThousandths - line.expectedThousandths;
           if (delta === 0) continue;
-          await recordStockMovement(tx, {
+          await applyStockDelta(tx, {
             orgId: ctx.actor.orgId,
             itemId: line.itemId,
             quantityDelta: delta,

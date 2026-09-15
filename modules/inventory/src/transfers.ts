@@ -3,14 +3,8 @@ import { z } from "zod";
 import { items, stockLocations, stockTransferLines, stockTransfers } from "@chaste/db";
 import { assertTransferFeasible, transferLegs } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
-import {
-  getOrCreateLot,
-  recordStockMovement,
-  stockOnHand,
-  withOrgContext,
-  type DbLike,
-  type ModuleDeps,
-} from "./shared";
+import { applyStockDelta, lockStockItems } from "./service";
+import { getOrCreateLot, stockOnHand, withOrgContext, type DbLike, type ModuleDeps } from "./shared";
 
 /**
  * Internal transfers (M7.2). Quantity is conserved by construction — every
@@ -129,7 +123,9 @@ async function confirmLine(
   const atSource = await stockOnHand(tx, orgId, line.itemId, transfer.fromLocationId);
   assertTransferFeasible(atSource, quantityThousandths);
   const legs = transferLegs(quantityThousandths);
-  await recordStockMovement(tx, {
+  // N22: both legs go through the command service — the out-leg is guarded
+  // at the source location, the in-leg org-wide.
+  await applyStockDelta(tx, {
     orgId,
     itemId: line.itemId,
     quantityDelta: legs.out,
@@ -141,7 +137,7 @@ async function confirmLine(
     actorType: actor.type,
     actorId: actor.id,
   });
-  await recordStockMovement(tx, {
+  await applyStockDelta(tx, {
     orgId,
     itemId: line.itemId,
     quantityDelta: legs.inn,
@@ -201,6 +197,10 @@ const confirmTransfer = (deps: ModuleDeps) =>
           .select()
           .from(stockTransferLines)
           .where(eq(stockTransferLines.transferId, transfer.id));
+        // N22: lock every item this confirmation touches in stable id order
+        // before any feasibility check, so a concurrent sale, receipt, or
+        // second transfer serializes instead of racing.
+        await lockStockItems(tx, lines.map((l) => l.itemId));
         const overrides = new Map((input.lines ?? []).map((l) => [l.lineId, l.quantityThousandths]));
         let confirmedNow = 0;
         for (const line of lines) {
@@ -306,6 +306,7 @@ const reverseTransfer = (deps: ModuleDeps) =>
           .where(eq(stockTransferLines.transferId, transfer.id));
         const moved = lines.filter((l) => l.confirmedThousandths > 0);
         if (moved.length === 0) throw new Error("nothing was confirmed; cancel the draft instead");
+        await lockStockItems(tx, moved.map((l) => l.itemId));
 
         const number = await nextTransferNumber(tx, ctx.actor.orgId);
         const [mirror] = await tx

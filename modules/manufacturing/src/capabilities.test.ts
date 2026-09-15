@@ -292,7 +292,19 @@ describe("cycle counts", () => {
     await expect(run("inventory.postCycleCount", { countId: count.countId })).rejects.toThrow(/moved since the snapshot/);
     await run("inventory.adjustStock", { sku: "RIM", quantityDelta: 100, note: "undo drift inducer" });
 
-    const posted = (await run("inventory.postCycleCount", { countId: count.countId })) as {
+    // N22 watermark: even with the net back where it started, the sheet saw
+    // movements it must not absorb — the refusal is permanent, not net-based.
+    await expect(run("inventory.postCycleCount", { countId: count.countId })).rejects.toThrow(/moved since the snapshot/);
+
+    // A fresh snapshot taken after the dust settles posts cleanly.
+    const fresh = (await run("inventory.createCycleCount", { skus: ["RIM"], note: "fresh after drift" })) as {
+      countId: string;
+    };
+    await run("inventory.recordCycleCounts", {
+      countId: fresh.countId,
+      counts: [{ sku: "RIM", countedThousandths: base - 200 }],
+    });
+    const posted = (await run("inventory.postCycleCount", { countId: fresh.countId })) as {
       postedVariances: number;
       netVarianceThousandths: number;
     };
@@ -304,7 +316,10 @@ describe("cycle counts", () => {
     };
     expect(hist.movements.some((m) => m.refType === "cycle_count" && m.quantityDelta === -200)).toBe(true);
 
-    await expect(run("inventory.cancelCycleCount", { countId: count.countId })).rejects.toThrow(/only open counts/);
+    // The drift-invalidated sheet stays open forever (it can never post) but
+    // can be cancelled; the posted fresh count cannot.
+    await run("inventory.cancelCycleCount", { countId: count.countId });
+    await expect(run("inventory.cancelCycleCount", { countId: fresh.countId })).rejects.toThrow(/only open counts/);
   });
 });
 
