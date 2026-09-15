@@ -51,6 +51,7 @@ the next number; superseded ones get a Status update, never deletion.
 | 0044 | Routine schedule contract | accepted |
 | 0045 | Atomic routine occurrences | accepted |
 | 0046 | The shared posting service owns the closed-period guard | accepted |
+| 0047 | One availability budget per item identity, serialized on item rows | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

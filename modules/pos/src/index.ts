@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   customers,
@@ -7,6 +7,7 @@ import {
   payments,
   posSessions,
   stockMovements,
+  stockReservations,
   journalEntries,
   journalLines,
 } from "@chaste/db";
@@ -140,6 +141,13 @@ const completeSale = (deps: ModuleDeps) =>
         // Resolve stocked lines first so oversell fails before any posting.
         const stockLines: { itemId: string; sku: string; quantity: number }[] = [];
         if (inventoryEnabled) {
+          // Resolve SKUs, then aggregate demand by item identity (N15):
+          // repeated lines spend one running availability budget, not one
+          // each. Item rows are locked in a stable order so a concurrent
+          // sales-order confirm (or register) cannot claim the same stock.
+          // Available means on hand minus open reservations — stock promised
+          // to an order is not sellable at the register.
+          const resolved: { itemId: string; sku: string; quantity: number }[] = [];
           for (const l of input.lines) {
             if (!l.sku) continue;
             const [item] = await tx
@@ -148,14 +156,44 @@ const completeSale = (deps: ModuleDeps) =>
               .where(and(eq(items.orgId, ctx.actor.orgId), eq(items.sku, l.sku)))
               .limit(1);
             if (!item) throw new Error(`no stocked item with SKU ${l.sku}`);
+            resolved.push({ itemId: item.id, sku: l.sku, quantity: l.quantity });
+          }
+          const itemIds = [...new Set(resolved.map((r) => r.itemId))].sort();
+          if (itemIds.length > 0) {
+            await tx
+              .select({ id: items.id })
+              .from(items)
+              .where(and(eq(items.orgId, ctx.actor.orgId), inArray(items.id, itemIds)))
+              .orderBy(items.id)
+              .for("update");
+          }
+          const budget = new Map<string, number>();
+          for (const id of itemIds) {
             const [mov] = await tx
               .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
               .from(stockMovements)
-              .where(and(eq(stockMovements.orgId, ctx.actor.orgId), eq(stockMovements.itemId, item.id)));
-            if (Number(mov?.total ?? 0) < l.quantity) {
-              throw new Error(`insufficient stock for ${l.sku}: ${Number(mov?.total ?? 0)} thousandths on hand`);
+              .where(and(eq(stockMovements.orgId, ctx.actor.orgId), eq(stockMovements.itemId, id)));
+            const [res] = await tx
+              .select({ total: sql<number>`coalesce(sum(${stockReservations.quantityThousandths}), 0)` })
+              .from(stockReservations)
+              .where(
+                and(
+                  eq(stockReservations.orgId, ctx.actor.orgId),
+                  eq(stockReservations.itemId, id),
+                  eq(stockReservations.status, "open"),
+                ),
+              );
+            budget.set(id, Number(mov?.total ?? 0) - Number(res?.total ?? 0));
+          }
+          for (const r of resolved) {
+            const available = budget.get(r.itemId) ?? 0;
+            if (available < r.quantity) {
+              throw new Error(
+                `insufficient stock for ${r.sku}: ${available} thousandths available (on hand minus open reservations)`,
+              );
             }
-            stockLines.push({ itemId: item.id, sku: l.sku, quantity: l.quantity });
+            budget.set(r.itemId, available - r.quantity);
+            stockLines.push(r);
           }
         }
 

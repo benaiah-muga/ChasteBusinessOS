@@ -183,9 +183,17 @@ Proof: matching 100 bank inflow to 10 payment is rejected; two lines cannot each
 
 ### N15 — Repeated items can exceed available stock within one order (P0 for fulfillment, source-confirmed)
 
-Evidence: `sales.confirmOrder`, `modules/sales/src/index.ts:202`, plans all reservations before inserting them, rereading the same available quantity for each line. Two lines for the same item can each reserve the same availability. POS checks stock per line before inserting movements in a similar shape. Cross-request races add a separate investigation; a single repeated-item request already exposes the planning error.
+Evidence: `sales.confirmOrder`, `modules/sales/src/index.ts:202`, plans all reservations before inserting them, rereading the same available quantity for each line. Two lines for the same item can each reserve the same availability. POS checks stock per line before inserting movements in a similar shape.
 
-Implementation: aggregate demand by inventory identity, consume a running available budget, then allocate back to stable order-line IDs. Lock stock/reservation identities in a stable order before checking and writing. Customer credit exposure must include the chosen definition of outstanding commitments, not merely currently invoiced AR. Reservation links must identify the originating line and the fulfilled/released quantity.
+Implementation: the first slice (ADR 0047) aggregates demand by inventory
+identity and spends one running availability budget per item, allocating back
+to stable line order; sales and the register lock touched item rows in
+ascending id order before checking, so concurrent readers serialize and the
+loser of a race re-reads and refuses. The register's availability is now
+on-hand minus open reservations. Remaining work is the shared inventory
+command service for locations/lots and cycle-count watermarks (N22),
+reservation rows that identify the originating order line, and customer
+credit exposure counting outstanding commitments.
 
 Proof: stock 10 with repeated lines 7+7 reserves at most 10; all-or-nothing mode refuses and partial mode records exactly 4 backordered. Two buyers racing for the last unit cannot both win. Delivery, cancellation and partial delivery conserve allocated quantities; disable/reenable inventory cannot silently turn a stocked line into a service.
 

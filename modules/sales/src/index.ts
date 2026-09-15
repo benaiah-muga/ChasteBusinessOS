@@ -1,6 +1,6 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { customers, invoices, salesOrderLines, salesOrders, stockReservations } from "@chaste/db";
+import { customers, invoices, items, salesOrderLines, salesOrders, stockReservations } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
@@ -196,17 +196,42 @@ const orderConfirm = (deps: ModuleDeps) =>
           );
         }
 
-        // Plan every reservation before writing any, so availability math
-        // never sees our own partial claims.
+        // N15: lock every item identity this order touches, in a stable
+        // order, before checking availability. Two concurrent confirms (or
+        // a POS sale) serialize on the item rows instead of both reading
+        // the same availability and double-claiming the last unit.
+        const itemIds = [...new Set(lines.filter((l) => l.itemId).map((l) => l.itemId!))].sort();
+        if (itemIds.length > 0) {
+          await tx
+            .select({ id: items.id })
+            .from(items)
+            .where(and(eq(items.orgId, ctx.actor.orgId), inArray(items.id, itemIds)))
+            .orderBy(items.id)
+            .for("update");
+        }
+
+        // Aggregate demand by inventory identity, then spend one running
+        // availability budget per item — repeated lines can no longer each
+        // claim the same stock (N15).
+        const demand = new Map<string, number>();
+        for (const line of lines) {
+          if (!line.itemId) continue;
+          demand.set(line.itemId, (demand.get(line.itemId) ?? 0) + line.quantity);
+        }
+        const budget = new Map<string, number>();
+        for (const id of demand.keys()) {
+          budget.set(id, (await stockOnHand(tx, ctx.actor.orgId, id)) - (await openReserved(tx, ctx.actor.orgId, id)));
+        }
+
         const plan: Array<{ line: (typeof lines)[number]; take: number }> = [];
         let reservedTotal = 0;
         let wantedTotal = 0;
         for (const line of lines) {
           if (!line.itemId) continue;
           wantedTotal += line.quantity;
-          const available =
-            (await stockOnHand(tx, ctx.actor.orgId, line.itemId)) - (await openReserved(tx, ctx.actor.orgId, line.itemId));
+          const available = budget.get(line.itemId) ?? 0;
           const take = Math.max(0, Math.min(line.quantity, available));
+          budget.set(line.itemId, available - take);
           plan.push({ line, take });
           reservedTotal += take;
         }

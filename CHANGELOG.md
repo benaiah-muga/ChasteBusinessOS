@@ -12,6 +12,17 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Repeated order lines could over-reserve the same stock (N15).** Stock
+  checks now aggregate demand by item identity and spend one running
+  availability budget — 7 + 7 against 10 reserves 10, never 14 — and readers
+  lock the touched item rows in stable id order, so two concurrent orders (or
+  an order and a register sale) can no longer both claim the last unit: the
+  loser re-reads the budget and refuses. The register now also sells only
+  available-to-promise (on hand minus open reservations), so stock promised
+  to a confirmed order is no longer sellable over the counter, and a refused
+  sale leaves no invoice or stock movement behind. Pinned by sales tests for
+  repeated/mixed-line budgeting and a two-buyer last-unit race, plus POS
+  tests for the shared budget and reservation honoring (ADR 0047).
 - **Every `demo:*` script failed to start with `Cannot find module '@/…'`.**
   The onboarding wizard's `@/lib/onboarding-plan` import was the first alias
   import in the demos' server chain, and tsx running from the repo root never
