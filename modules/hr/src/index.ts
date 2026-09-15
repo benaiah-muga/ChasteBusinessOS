@@ -19,7 +19,7 @@ import {
   workedFractionThousandths,
 } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
-import { assertPeriodOpen, postEntry } from "@chaste/module-accounting/posting";
+import { postEntry } from "@chaste/module-accounting/posting";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -344,9 +344,6 @@ const executePayrollRun = (deps: ModuleDeps) =>
         if (input.expectedTotalNetMinor !== run.totalNetMinor) {
           throw new Error(`total mismatch: draft says ${run.totalNetMinor}, caller expected ${input.expectedTotalNetMinor}`);
         }
-        // Mid-month date representing the run's payroll period; the shared
-        // guard rejects posting when that month has been sealed.
-        await assertPeriodOpen(tx, ctx.actor.orgId, new Date(Date.UTC(run.year, run.month - 1, 15)));
 
         const summary = {
           totalGrossMinor: run.totalGrossMinor,
@@ -358,6 +355,7 @@ const executePayrollRun = (deps: ModuleDeps) =>
           memo: `payroll ${run.year}-${String(run.month).padStart(2, "0")}`,
           sourceType: "payroll_run",
           sourceId: run.id,
+          postedAt: ctx.now,
           lines: buildPayrollEntryLines(PAYROLL_ACCOUNTS, summary),
         });
 

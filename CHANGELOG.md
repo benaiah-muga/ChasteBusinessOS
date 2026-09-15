@@ -12,6 +12,24 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Every `demo:*` script failed to start with `Cannot find module '@/…'`.**
+  The onboarding wizard's `@/lib/onboarding-plan` import was the first alias
+  import in the demos' server chain, and tsx running from the repo root never
+  saw the web app's path mapping. Demo scripts now pass
+  `--tsconfig apps/web/tsconfig.json`, restoring all live demo proofs.
+- **Some postings could land in a closed accounting period (N13).** The
+  shared posting service now owns the guard: every entry carries a mandatory
+  effective posting time, the service checks it under a per-org lock shared
+  with period close/reopen, and close/reopen commit transactionally — so a
+  post and a close always finish in one serial order. Expense reimbursement
+  and the inventory valuation reversal (previously unguarded) refuse sealed
+  months along with every other producer; payroll posts at execution time
+  instead of a mid-month guess. With one clock basis, same-instant statement
+  rows order by business sequence (invoice → payment → credit note) and
+  payment timestamps come from the actor's `now`, not a second database
+  clock. Pinned by five live-DB tests: guarded reimbursement, direct-posting
+  refusal, year-end seal holding, close-behind-post serialization, and a
+  synchronized close/post race with one serial order (ADR 0046).
 - **Disabled routines could still execute already-queued schedule jobs (N28).**
   Scheduled execution now rechecks the routine state and cancels the occurrence
   before any agent work begins when the routine was disabled after enqueue.

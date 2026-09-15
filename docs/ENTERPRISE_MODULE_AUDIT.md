@@ -158,9 +158,20 @@ Proof: pay→reverse→pay produces correct GL, invoice balance, bank reconcilia
 
 Evidence: `accounting.payExpenseClaim`, `modules/accounting/src/index.ts:1490`, calls `postEntry` without `assertPeriodOpen`. `modules/accounting/src/posting.ts:80` does not perform that guard despite its introductory description. Other callers do, making correctness dependent on remembering an extra step. A check followed by posting also needs coordination with a simultaneous period close.
 
-Implementation: make effective posting time mandatory in the shared posting command; validate closed-period state there under a lock shared with close/reopen. Model exceptional year-end closing entries explicitly so a guard cannot be bypassed with an arbitrary flag. Use one clock/date basis. Validate pre-resolved account IDs against org and posting eligibility. Capability-level previews remain useful, but the transaction owns final validation.
+Implementation: the first slice (ADR 0046) moves the guard into the shared
+posting service itself — `postEntry` takes a mandatory effective posting time,
+checks it under a per-org advisory lock shared with transactional
+close/reopen, and stamps the same instant it guarded. Expense reimbursement
+and the valuation reversal are covered with the rest; payroll posts at
+execution time; statements order same-instant rows by business sequence.
+Remaining work is modeling exceptional year-end entries explicitly (the
+closing entry currently precedes the seal inside one transaction), validating
+pre-resolved account IDs against posting eligibility in the service, and a
+backdated-correction path that carries its approved open-period date
+separately from the original business date.
 
-Proof: every posting producer, including expenses, POS, payroll, valuation and FX, refuses a closed period. A synchronized close/post test commits one valid serial order. An allowed historical correction uses its approved open-period date and retains the original business date separately.
+Proof: every posting producer, including expenses, POS, payroll, valuation
+and FX, refuses a closed period. A synchronized close/post test commits one valid serial order. An allowed historical correction uses its approved open-period date and retains the original business date separately.
 
 ### N14 — Bank matching checks identity, not economic equivalence (P0/P1, source-confirmed)
 

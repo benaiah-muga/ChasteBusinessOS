@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { accounts, journalEntries, journalLines, organizations, periods } from "@chaste/db";
 import { assertBalanced, isPeriodOpen } from "@chaste/erp-core";
 import type { Database, Tx } from "@chaste/db";
@@ -8,11 +8,12 @@ import type { Database, Tx } from "@chaste/db";
  *
  * Every money-moving capability across every module composes this service
  * instead of hand-rolling entry+line inserts. It owns the invariants that
- * used to be copy-pasted (and had already drifted): period-open guard with
- * consistent semantics, chart-of-accounts resolution, balance assertion,
- * and the immutable two-row posting pattern. Cross-module imports of this
- * file are deliberate: posting IS accounting's bounded context; other
- * modules hold business events, never GL internals of their own.
+ * used to be copy-pasted (and had already drifted): the closed-period guard
+ * under a lock shared with close/reopen, chart-of-accounts resolution,
+ * balance assertion, and the immutable two-row posting pattern.
+ * Cross-module imports of this file are deliberate: posting IS accounting's
+ * bounded context; other modules hold business events, never GL internals
+ * of their own.
  */
 
 export interface PostEntryCmd {
@@ -20,8 +21,12 @@ export interface PostEntryCmd {
   sourceType: string;
   sourceId?: string | null;
   reversalOfId?: string | null;
-  /** Override the posting timestamp (e.g. year-end close posts Dec 31). */
-  postedAt?: Date;
+  /**
+   * The entry's effective posting time. Mandatory: the closed-period guard
+   * and the stored column read this same instant, so a caller can never
+   * guard one date and silently post under another (N13).
+   */
+  postedAt: Date;
   /**
    * One currency per entry (ADR 0021). Omitted = this org's base currency,
    * resolved here so callers cannot accidentally post unlabeled foreign
@@ -39,6 +44,22 @@ export interface PostEntryCmd {
 }
 
 export type ActorStamp = { type: string; id: string | null };
+
+/**
+ * Distinct key class from the ledger chain lock (kernel 7_214_811) so the
+ * two never collide; hashtext(orgId) scopes one lock lane per tenant.
+ */
+const PERIOD_LOCK_CLASS = 7_362_911;
+
+/**
+ * Serializes posting against period close/reopen for one org. Transaction-
+ * scoped: whoever acquires it first defines the serial order — a close that
+ * commits before a posting makes the posting refuse; a posting that commits
+ * first is already on the books when the close seals the month.
+ */
+export async function lockPeriodsForOrg(tx: Tx, orgId: string): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${PERIOD_LOCK_CLASS}, hashtext(${orgId}))`);
+}
 
 /** Posting into a closed period is rejected; books are sealed, not edited. */
 export async function assertPeriodOpen(tx: Tx | Database["db"], orgId: string, date: Date): Promise<void> {
@@ -65,9 +86,10 @@ export function accountIdOf(map: Map<string, string>, code: string): string {
 }
 
 /**
- * Asserts balance, resolves account codes, and inserts the entry + its
- * lines atomically inside the caller's transaction. Returns the entry id
- * so callers can link their subledger row and declare inverses.
+ * Asserts the period is open under the close/reopen lock, asserts balance,
+ * resolves account codes, and inserts the entry + its lines inside the
+ * caller's transaction. Returns the entry id so callers can link their
+ * subledger row and declare inverses.
  */
 export async function postEntry(
   tx: Tx,
@@ -75,6 +97,8 @@ export async function postEntry(
   actor: ActorStamp,
   cmd: PostEntryCmd,
 ): Promise<string> {
+  await lockPeriodsForOrg(tx, orgId);
+  await assertPeriodOpen(tx, orgId, cmd.postedAt);
   assertBalanced({ memo: cmd.memo, lines: cmd.lines });
   const map = await loadCoaMap(tx, orgId);
   const accountIds = cmd.lines.map((l) => {

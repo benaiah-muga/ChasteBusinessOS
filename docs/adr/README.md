@@ -45,6 +45,12 @@ the next number; superseded ones get a Status update, never deletion.
 | 0038 | People, planning, and expense decisions | accepted (M11) |
 | 0039 | The understanding layer | accepted (M12) |
 | 0040 | Retail & reach | accepted (M13) |
+| 0041 | Durable jobs: leases, fencing, recurring occurrence receipts | accepted |
+| 0042 | Durable outbound notification outbox | accepted |
+| 0043 | Marketing delivery through the provider-aware outbox | accepted |
+| 0044 | Routine schedule contract | accepted |
+| 0045 | Atomic routine occurrences | accepted |
+| 0046 | The shared posting service owns the closed-period guard | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

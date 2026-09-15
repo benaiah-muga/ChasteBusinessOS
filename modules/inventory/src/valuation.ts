@@ -3,7 +3,7 @@ import { z } from "zod";
 import { accounts, items, journalEntries, journalLines } from "@chaste/db";
 import { replayValuation, valuationAdjustmentLines } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
-import { assertPeriodOpen, postEntry } from "@chaste/module-accounting/posting";
+import { postEntry } from "@chaste/module-accounting/posting";
 import { movementHistory, withOrgContext, type DbLike, type ModuleDeps } from "./shared";
 
 /**
@@ -90,10 +90,10 @@ export const postValuationSummary = (deps: ModuleDeps) =>
         if (varianceMinor === 0) {
           return { posted: false, entryId: null, varianceMinor, ledgerValueMinor, glBalanceMinor };
         }
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const entryId = await postEntry(tx, ctx.actor.orgId, { type: ctx.actor.type, id: ctx.actor.id }, {
           memo: input.memo,
           sourceType: "inventory-valuation",
+          postedAt: ctx.now,
           lines: valuationAdjustmentLines(varianceMinor, {
             inventoryCode: INVENTORY_ACCOUNT_CODE,
             cogsCode: COGS_ACCOUNT_CODE,
@@ -146,6 +146,7 @@ export const reverseValuationSummary = (deps: ModuleDeps) =>
           memo: `Reversal: ${entry.memo}`,
           sourceType: "inventory-valuation-reversal",
           reversalOfId: input.entryId,
+          postedAt: ctx.now,
           lines: lines.map((l) => ({
             accountId: l.accountId,
             debitMinor: l.creditMinor,

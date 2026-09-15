@@ -46,6 +46,7 @@ async function injectDrift(amountMinor: number, memo: string): Promise<void> {
     await postEntry(tx, orgId, { type: "human", id: null }, {
       memo,
       sourceType: "manual",
+      postedAt: new Date(),
       lines: [
         { accountId: inv[0]!.id, debitMinor: amountMinor, creditMinor: 0 },
         { accountId: cogs[0]!.id, debitMinor: 0, creditMinor: amountMinor },

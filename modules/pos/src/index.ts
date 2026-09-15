@@ -13,7 +13,7 @@ import {
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
-import { assertPeriodOpen, postEntry } from "@chaste/module-accounting/posting";
+import { postEntry } from "@chaste/module-accounting/posting";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -119,7 +119,6 @@ const completeSale = (deps: ModuleDeps) =>
     }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const [session] = await tx
           .select()
           .from(posSessions)
@@ -184,6 +183,7 @@ const completeSale = (deps: ModuleDeps) =>
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `POS sale #${invoiceNumber} (${input.method})`,
           sourceType: "pos_sale",
+          postedAt: ctx.now,
           lines: glLines,
         });
 
@@ -316,7 +316,6 @@ const returnSale = (deps: ModuleDeps) =>
     output: z.object({ refundEntryId: z.string(), creditedMinor: z.number(), restockedLines: z.number() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const [inv] = await tx
           .select()
           .from(invoices)
@@ -352,6 +351,7 @@ const returnSale = (deps: ModuleDeps) =>
           sourceType: "pos_return",
           sourceId: inv.id,
           reversalOfId: origEntry?.id ?? null,
+          postedAt: ctx.now,
           lines: mirrorLines,
         });
         await tx.update(invoices).set({ creditedMinor: inv.creditedMinor + refund }).where(eq(invoices.id, inv.id));

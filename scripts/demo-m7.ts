@@ -96,6 +96,7 @@ async function reconciliationScenario(): Promise<string> {
     await postEntry(tx, orgId, { type: "human", id: owner.id }, {
       memo: "wrong manual inventory entry",
       sourceType: "manual",
+      postedAt: new Date(),
       lines: [
         { accountCode: "1200", debitMinor: 2_000_000, creditMinor: 0 },
         { accountCode: "6000", debitMinor: 0, creditMinor: 2_000_000 },

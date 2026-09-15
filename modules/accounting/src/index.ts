@@ -26,7 +26,7 @@ import {
   vendorBills,
 } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
-import { assertPeriodOpen, baseCurrencyOf, postEntry } from "./posting";
+import { baseCurrencyOf, lockPeriodsForOrg, postEntry } from "./posting";
 import {
   buildCashFlowStatement,
   buildInvoiceEntryLines,
@@ -131,7 +131,6 @@ export async function insertInvoiceWithPosting(
     dueAt?: Date;
   },
 ): Promise<{ invoiceId: string; invoiceNumber: number; totalMinor: number; entryId: string; currency: string }> {
-  await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
   const cust = await tx
     .select({ id: customers.id, paymentTermDays: customers.paymentTermDays })
     .from(customers)
@@ -210,6 +209,7 @@ export async function insertInvoiceWithPosting(
     sourceType: "invoice",
     sourceId: inv!.id,
     currency,
+    postedAt: ctx.now,
     lines,
   });
 
@@ -297,7 +297,6 @@ const recordPayment = (deps: ModuleDeps) =>
     }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const [inv] = await tx
           .select()
           .from(invoices)
@@ -317,6 +316,7 @@ const recordPayment = (deps: ModuleDeps) =>
           entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
             memo: `Payment for invoice ${inv.number} (${input.method})`,
             sourceType: "payment",
+            postedAt: ctx.now,
             lines: buildPaymentEntryLines({ cash: "1000", ar: "1100" }, input.amountMinor),
           });
 
@@ -328,6 +328,7 @@ const recordPayment = (deps: ModuleDeps) =>
               amountMinor: input.amountMinor,
               method: input.method,
               entryId,
+              receivedAt: ctx.now,
             })
             .returning({ id: payments.id });
 
@@ -390,6 +391,7 @@ const recordPayment = (deps: ModuleDeps) =>
           memo: `Settlement of invoice ${inv.number} (${inv.currency} ${input.amountMinor}) @ ${settleRate.num}/${settleRate.den}`,
           sourceType: "payment",
           currency: base,
+          postedAt: ctx.now,
           lines: baseLines,
         });
 
@@ -398,6 +400,7 @@ const recordPayment = (deps: ModuleDeps) =>
           sourceType: "payment",
           sourceId: inv.id,
           currency: inv.currency,
+          postedAt: ctx.now,
           lines: [
             { accountId: clearingId, debitMinor: input.amountMinor, creditMinor: 0 },
             { accountCode: "1100", debitMinor: 0, creditMinor: input.amountMinor },
@@ -413,6 +416,7 @@ const recordPayment = (deps: ModuleDeps) =>
             amountMinor: input.amountMinor,
             method: input.method,
             entryId: baseEntryId,
+            receivedAt: ctx.now,
           })
           .returning({ id: payments.id });
 
@@ -465,7 +469,6 @@ const reverseEntry = (deps: ModuleDeps) =>
     output: z.object({ reversalEntryId: z.string() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const [orig] = await tx
           .select()
           .from(journalEntries)
@@ -483,6 +486,7 @@ const reverseEntry = (deps: ModuleDeps) =>
           memo: `Reversal of: ${orig.memo}`,
           sourceType: "reversal",
           reversalOfId: orig.id,
+          postedAt: ctx.now,
           lines: origLines.map((l) => ({
             accountId: l.accountId,
             debitMinor: l.creditMinor,
@@ -751,11 +755,17 @@ const closePeriod = (deps: ModuleDeps) =>
     input: z.object({ year: z.number().int().min(2000).max(2100), month: z.number().int().min(1).max(12) }),
     output: z.object({ closed: z.boolean() }),
     execute: async (ctx, input) => {
-      await deps.db
-        .insert(periods)
-        .values({ orgId: ctx.actor.orgId, year: input.year, month: input.month, closedByActorId: ctx.actor.id })
-        .onConflictDoNothing();
-      return { closed: true };
+      // The close/reopen lock is the same one postEntry holds, so a posting
+      // and a close always commit in one serial order (N13): either the
+      // posting landed first or it refuses the sealed month.
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await lockPeriodsForOrg(tx, ctx.actor.orgId);
+        await tx
+          .insert(periods)
+          .values({ orgId: ctx.actor.orgId, year: input.year, month: input.month, closedByActorId: ctx.actor.id })
+          .onConflictDoNothing();
+        return { closed: true };
+      });
     },
   });
 
@@ -770,10 +780,13 @@ const reopenPeriod = (deps: ModuleDeps) =>
     input: closePeriodInput,
     output: z.object({ reopened: z.boolean() }),
     execute: async (ctx, input) => {
-      await deps.db.delete(periods).where(
-        and(eq(periods.orgId, ctx.actor.orgId), eq(periods.year, input.year), eq(periods.month, input.month)),
-      );
-      return { reopened: true };
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await lockPeriodsForOrg(tx, ctx.actor.orgId);
+        await tx.delete(periods).where(
+          and(eq(periods.orgId, ctx.actor.orgId), eq(periods.year, input.year), eq(periods.month, input.month)),
+        );
+        return { reopened: true };
+      });
     },
   });
 
@@ -1525,6 +1538,7 @@ const expensePay = (deps: ModuleDeps) =>
           sourceType: "expense_claim",
           sourceId: claim.id,
           currency: claim.currency,
+          postedAt: ctx.now,
           lines: [
             { accountCode: claim.accountCode ?? "6900", debitMinor: claim.amountMinor, creditMinor: 0 },
             { accountCode: "1000", debitMinor: 0, creditMinor: claim.amountMinor },
@@ -2170,8 +2184,6 @@ const fileSalesTaxReturn = (deps: ModuleDeps) =>
     output: z.object({ filingId: z.string(), entryId: z.string(), taxMinor: z.number() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
-
         const { start, end } = dateWindow(input.periodFrom, input.periodTo);
         const overlapping = await tx
           .select({ id: salesTaxFilings.id })
@@ -2197,6 +2209,7 @@ const fileSalesTaxReturn = (deps: ModuleDeps) =>
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Sales tax filing ${input.periodFrom} → ${input.periodTo}`,
           sourceType: "sales_tax_filing",
+          postedAt: ctx.now,
           lines: [
             { accountCode: "2100", debitMinor: input.taxMinor, creditMinor: 0 },
             { accountCode: "1000", debitMinor: 0, creditMinor: input.taxMinor },
@@ -2248,7 +2261,6 @@ const creditNote = (deps: ModuleDeps) =>
     output: z.object({ entryId: z.string(), creditedMinor: z.number(), invoiceBalanceMinor: z.number() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const [inv] = await tx
           .select()
           .from(invoices)
@@ -2287,6 +2299,7 @@ const creditNote = (deps: ModuleDeps) =>
           sourceType: "invoice_credit_note",
           sourceId: inv.id,
           reversalOfId: origEntry?.id ?? null,
+          postedAt: ctx.now,
           lines: mirrorLines,
         });
         const credited = inv.creditedMinor + input.amountMinor;
@@ -2383,7 +2396,16 @@ const customerStatement = (deps: ModuleDeps) =>
           if (!invoiceIds.has(p.invoiceId)) continue;
           rows.push({ date: p.receivedAt, kind: "payment", ref: "Payment received", amountMinor: -p.amountMinor });
         }
-        rows.sort((a, b) => a.date.getTime() - b.date.getTime() || a.kind.localeCompare(b.kind));
+        // One clock basis (N13) means same-instant rows are normal — the
+        // statement orders them by business sequence, not wall-clock luck:
+        // the invoice exists before money or credit can touch it.
+        const KIND_ORDER: Record<string, number> = { invoice: 0, payment: 1, credit_note: 2 };
+        rows.sort(
+          (a, b) =>
+            a.date.getTime() - b.date.getTime() ||
+            (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9) ||
+            a.kind.localeCompare(b.kind),
+        );
         let running = 0;
         const rendered = rows.map((r) => {
           running += r.amountMinor;

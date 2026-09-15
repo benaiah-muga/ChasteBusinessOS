@@ -24,7 +24,7 @@ import {
 } from "@chaste/erp-core";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
-import { assertPeriodOpen, postEntry } from "@chaste/module-accounting/posting";
+import { postEntry } from "@chaste/module-accounting/posting";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -105,8 +105,6 @@ const createBill = (deps: ModuleDeps) =>
     output: z.object({ billNumber: z.number(), totalMinor: z.number(), entryId: z.string() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
-
         // Three-way match when the bill references an order: order ↔ receipts ↔ bill.
         if (input.poNumber !== undefined) {
           const [po] = await tx
@@ -187,6 +185,7 @@ const createBill = (deps: ModuleDeps) =>
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Vendor bill ${billNumber}${input.vendorRef ? ` (${input.vendorRef})` : ""}`,
           sourceType: "vendor_bill",
+          postedAt: ctx.now,
           lines: glLines,
         });
 
@@ -252,7 +251,6 @@ const payBill = (deps: ModuleDeps) =>
     output: z.object({ paymentId: z.string(), entryId: z.string(), fullyPaid: z.boolean() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const [bill] = await tx
           .select()
           .from(vendorBills)
@@ -270,6 +268,7 @@ const payBill = (deps: ModuleDeps) =>
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Vendor payment for bill ${bill.number} (${input.method})`,
           sourceType: "vendor_payment",
+          postedAt: ctx.now,
           lines: glLines,
         });
 
@@ -281,6 +280,7 @@ const payBill = (deps: ModuleDeps) =>
             amountMinor: input.amountMinor,
             method: input.method,
             entryId,
+            paidAt: ctx.now,
           })
           .returning({ id: vendorPayments.id });
 
@@ -781,7 +781,6 @@ const billCreditNote = (deps: ModuleDeps) =>
     output: z.object({ entryId: z.string(), creditedMinor: z.number(), billBalanceMinor: z.number() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        await assertPeriodOpen(tx, ctx.actor.orgId, ctx.now);
         const [bill] = await tx
           .select()
           .from(vendorBills)
@@ -800,6 +799,7 @@ const billCreditNote = (deps: ModuleDeps) =>
           sourceType: "vendor_credit_note",
           sourceId: bill.id,
           reversalOfId: bill.entryId,
+          postedAt: ctx.now,
           lines: [
             { accountCode: "2000", debitMinor: input.amountMinor, creditMinor: 0 },
             { accountCode: "6000", debitMinor: 0, creditMinor: input.amountMinor },
