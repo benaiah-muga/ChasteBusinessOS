@@ -49,7 +49,7 @@ const createDocument = (deps: ModuleDeps) =>
     permission: "documents.write",
     inverse: {
       capabilityId: "documents.deleteDocument",
-      buildInput: (_input, output) => ({ documentId: (output as { documentId?: string }).documentId ?? "" }),
+      buildInput: (_input, output) => ({ documentId: output.documentId ?? "" }),
     },
     input: z
       .object({

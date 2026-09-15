@@ -12,6 +12,20 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **A generic journal reversal was offered as a complete business undo
+  (N12).** Reversing a payment's GL entry left the invoice collecting on
+  money already returned, reversing a payroll posting left the run marked
+  executed with its ledger leg gone, and a POS sale's declared inverse read
+  an output key that never existed. Source types that own subledger or
+  lifecycle state now undo through domain compensations: payments mirror
+  every entry in its original currency (FX settlements as a coherent pair)
+  and release the invoice balance; payroll reversals repair the run
+  lifecycle; register sales undo through returns that restore stock, drawer
+  and money together; invoices route to credit notes. The generic path
+  refuses protected entries and names the workflow that actually undoes
+  the thing, preserves the original currency, and the kernel now types
+  inverse builders against the real output so a phantom key is a compile
+  error (ADR 0051). Pinned by live-DB tests across accounting, POS and HR.
 - **Stock commands raced each other and trusted unvalidated lots (N22).**
   One inventory command service now owns every quantity change: all writers
   (inventory, POS, purchasing receipts/returns, sales delivery,

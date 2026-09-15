@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, gt, gte, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   accounts,
@@ -225,10 +225,11 @@ const createInvoice = (deps: ModuleDeps) =>
     module: "accounting",
     risk: "write",
     permission: "accounting.write",
-    inverse: {
-      capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: (output as { entryId?: string }).entryId ?? "" }),
-    },
+    // No mechanical inverse: undoing an invoice is a business decision —
+    // how much to concede goes through accounting.creditNote, whose amount
+    // cannot be derived from the invoice's output. Reversing the posting
+    // alone would leave the invoice collecting money the GL says reversed,
+    // so the generic path refuses it (N12, ADR 0051).
     input: z.object({
       customerId: z.string(),
       memo: z.string().optional(),
@@ -277,7 +278,7 @@ const recordPayment = (deps: ModuleDeps) =>
     moneyAmount: (input) => input.amountMinor,
     inverse: {
       capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: (output as { entryId: string }).entryId }),
+      buildInput: (_input, output) => ({ entryId: output.entryId }),
     },
     input: z.object({
       invoiceNumber: z.number().int().positive(),
@@ -452,6 +453,140 @@ const recordPayment = (deps: ModuleDeps) =>
     },
   });
 
+/**
+ * N12 (ADR 0051): the domain compensation for recordPayment. A payment is
+ * an allocation on an invoice — and for cross-currency settlements a *pair*
+ * of entries joined by an fx_settlements row — so the generic journal
+ * mirror is not a complete undo. Reversing a payment means mirroring every
+ * entry in its original currency, releasing the amount from the invoice's
+ * paid balance through the one balance contract (N11), and refusing a
+ * second reversal of the same payment.
+ */
+const reversePayment = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.reversePayment",
+    title: "Reverse payment",
+    intent:
+      "Undo a recorded customer payment: mirror its journal entries in their original currencies, release the amount from the invoice balance, and refuse if the payment was already reversed. The invoice can then receive a corrected payment",
+    module: "accounting",
+    risk: "money",
+    permission: "accounting.post",
+    // The refunded amount lives in the payment, not the input: null means
+    // the policy engine always gates reversals for human approval.
+    moneyAmount: () => null,
+    input: z.object({
+      paymentId: z.string().uuid(),
+      reason: z.string().min(3).max(500),
+    }),
+    output: z.object({
+      reversalEntryIds: z.array(z.string()),
+      refundedMinor: z.number(),
+      invoiceNumber: z.number(),
+      outstandingMinor: z.number(),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [payment] = await tx
+          .select()
+          .from(payments)
+          .where(and(eq(payments.id, input.paymentId), eq(payments.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!payment) throw new Error("payment not found");
+        const [inv] = await tx
+          .select()
+          .from(invoices)
+          .where(and(eq(invoices.id, payment.invoiceId), eq(invoices.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!inv) throw new Error("payment's invoice not found");
+        if (inv.status === "void") throw new Error("invoice is void; a void compensates its payments");
+        if (!payment.entryId) throw new Error("payment has no journal entry to reverse");
+
+        const [saleEntry] = await tx
+          .select({ sourceType: journalEntries.sourceType })
+          .from(journalEntries)
+          .where(eq(journalEntries.id, payment.entryId))
+          .limit(1);
+        if (saleEntry?.sourceType === "pos_sale") {
+          throw new Error("register sales are undone with pos.returnSale, not a payment reversal");
+        }
+
+        const [settlement] = await tx
+          .select()
+          .from(fxSettlements)
+          .where(and(eq(fxSettlements.paymentId, payment.id), eq(fxSettlements.orgId, ctx.actor.orgId)))
+          .limit(1);
+
+        // Unique at the business-operation level: retries and replays find
+        // the same reversal row and refuse instead of refunding twice.
+        const entryIds = [payment.entryId, ...(settlement ? [settlement.foreignEntryId] : [])];
+        const [already] = await tx
+          .select({ id: journalEntries.id })
+          .from(journalEntries)
+          .where(and(eq(journalEntries.orgId, ctx.actor.orgId), inArray(journalEntries.reversalOfId, entryIds)))
+          .limit(1);
+        if (already) throw new Error("payment has already been reversed");
+
+        const memo = `Payment reversal for invoice ${inv.number}: ${input.reason}`;
+        const mirrorOf = async (entryId: string): Promise<string> => {
+          const [entry] = await tx
+            .select()
+            .from(journalEntries)
+            .where(eq(journalEntries.id, entryId))
+            .limit(1);
+          if (!entry) throw new Error(`journal entry ${entryId} not found`);
+          const lines = await tx
+            .select({
+              accountId: journalLines.accountId,
+              debitMinor: journalLines.debitMinor,
+              creditMinor: journalLines.creditMinor,
+            })
+            .from(journalLines)
+            .where(eq(journalLines.entryId, entryId));
+          // The mirror keeps the original's currency: a foreign-currency
+          // payment reverses in that currency, never the base (ADR 0021).
+          return postEntry(tx, ctx.actor.orgId, ctx.actor, {
+            memo,
+            sourceType: "payment-reversal",
+            sourceId: inv!.id,
+            reversalOfId: entryId,
+            currency: entry.currency,
+            postedAt: ctx.now,
+            lines: lines.map((l) => ({
+              accountId: l.accountId,
+              debitMinor: l.creditMinor,
+              creditMinor: l.debitMinor,
+            })),
+          });
+        };
+
+        const reversalEntryIds = [await mirrorOf(payment.entryId)];
+        if (settlement) {
+          // Paired FX entries reverse as one coherent settlement: without
+          // the foreign clearing mirror, AR keeps the charge while the cash
+          // has already gone back out.
+          reversalEntryIds.push(await mirrorOf(settlement.foreignEntryId));
+        }
+
+        const paidMinor = inv.paidMinor - payment.amountMinor;
+        const balance = documentBalance({ ...inv, paidMinor });
+        await tx
+          .update(invoices)
+          .set({
+            paidMinor,
+            status: balance.fullySettled ? "paid" : inv.status === "paid" ? "sent" : inv.status,
+          })
+          .where(eq(invoices.id, inv.id));
+
+        return {
+          reversalEntryIds,
+          refundedMinor: payment.amountMinor,
+          invoiceNumber: inv.number,
+          outstandingMinor: balance.outstandingMinor,
+        };
+      });
+    },
+  });
+
 const reverseEntry = (deps: ModuleDeps) =>
   defineCapability({
     id: "accounting.reverseEntry",
@@ -475,17 +610,40 @@ const reverseEntry = (deps: ModuleDeps) =>
           .where(and(eq(journalEntries.id, input.entryId), eq(journalEntries.orgId, ctx.actor.orgId)))
           .limit(1);
         if (!orig) throw new Error("entry not found");
-        if (orig.sourceType === "reversal") throw new Error("cannot reverse a reversal");
+        if (orig.sourceType === "reversal" || orig.sourceType === "payment-reversal") {
+          throw new Error("cannot reverse a reversal");
+        }
+
+        // N12 (ADR 0051): a journal mirror alone is not a business undo for
+        // source types that own subledger state — those have domain
+        // compensations, and the generic path must route there instead of
+        // silently leaving the document, drawer or run unrepaired.
+        const domainRoutes: Record<string, string> = {
+          payment: "accounting.reversePayment on the payment",
+          pos_sale: "pos.returnSale on the sale invoice",
+          payroll_run: "hr.reversePayrollPosting on the payroll run",
+          invoice: "accounting.creditNote against the invoice",
+          "inventory-valuation": "inventory.reverseValuationSummary on the summary",
+        };
+        if (orig.sourceType && domainRoutes[orig.sourceType]) {
+          throw new Error(
+            `a ${orig.sourceType} entry is undone by its domain workflow: use ${domainRoutes[orig.sourceType]}`,
+          );
+        }
 
         const origLines = await tx
           .select({ accountId: journalLines.accountId, debitMinor: journalLines.debitMinor, creditMinor: journalLines.creditMinor })
           .from(journalLines)
           .where(eq(journalLines.entryId, orig.id));
 
+        // One currency per entry (ADR 0021): the mirror keeps the original's
+        // currency — reversing a foreign-currency entry in the base currency
+        // double-counted it in FX exposure.
         const reversalEntryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Reversal of: ${orig.memo}`,
           sourceType: "reversal",
           reversalOfId: orig.id,
+          currency: orig.currency,
           postedAt: ctx.now,
           lines: origLines.map((l) => ({
             accountId: l.accountId,
@@ -869,7 +1027,7 @@ const closeYear = (deps: ModuleDeps) =>
     permission: "accounting.admin",
     inverse: {
       capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: (output as { closingEntryId: string }).closingEntryId }),
+      buildInput: (_input, output) => ({ entryId: output.closingEntryId }),
     },
     input: z.object({ year: z.number().int().min(2000).max(2100) }),
     output: z.object({
@@ -1032,7 +1190,7 @@ const quoteCreate = (deps: ModuleDeps) =>
     output: z.object({ quoteId: z.string(), quoteNumber: z.number(), totalMinor: z.number() }),
     inverse: {
       capabilityId: "accounting.declineQuote",
-      buildInput: (_input, output) => ({ quoteId: (output as { quoteId: string }).quoteId }),
+      buildInput: (_input, output) => ({ quoteId: output.quoteId }),
     },
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
@@ -1276,7 +1434,7 @@ const accountingCreateTemplate = (deps: ModuleDeps) =>
     inverse: {
       capabilityId: "accounting.pauseRecurringTemplate",
       buildInput: (_input, output) => ({
-        templateId: (output as { templateId: string }).templateId,
+        templateId: output.templateId,
       }),
     },
     execute: async (ctx, input) => {
@@ -1429,7 +1587,7 @@ const expenseSubmit = (deps: ModuleDeps) =>
     inverse: {
       capabilityId: "accounting.decideExpenseClaim",
       buildInput: (_input, output) => ({
-        claimId: (output as { claimId: string }).claimId,
+        claimId: output.claimId,
         decision: "rejected" as unknown as string,
         reason: "withdrawn by submitter inverse",
       }),
@@ -2246,7 +2404,7 @@ const fileSalesTaxReturn = (deps: ModuleDeps) =>
     moneyAmount: () => null,
     inverse: {
       capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: (output as { entryId?: string }).entryId ?? "" }),
+      buildInput: (_input, output) => ({ entryId: output.entryId ?? "" }),
     },
     input: z.object({
       periodFrom: isoDate,
@@ -2752,6 +2910,7 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(createInvoice(deps));
   registry.register(listInvoices(deps));
   registry.register(recordPayment(deps));
+  registry.register(reversePayment(deps));
   registry.register(reverseEntry(deps));
   registry.register(creditNote(deps));
   registry.register(customerStatement(deps));

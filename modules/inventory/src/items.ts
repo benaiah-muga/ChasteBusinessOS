@@ -71,7 +71,7 @@ const updateItem = (deps: ModuleDeps) =>
     permission: "inventory.write",
     inverse: {
       capabilityId: "inventory.restoreItem",
-      buildInput: (_input, output) => (output as { prior: unknown }).prior as Record<string, unknown>,
+      buildInput: (_input, output) => output.prior,
     },
     input: patchSchema,
     output: z.object({ sku: z.string(), prior: priorSchema }),

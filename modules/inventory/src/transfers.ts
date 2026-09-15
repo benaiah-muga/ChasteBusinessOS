@@ -49,7 +49,7 @@ const createTransfer = (deps: ModuleDeps) =>
     permission: "inventory.write",
     inverse: {
       capabilityId: "inventory.cancelTransfer",
-      buildInput: (_input, output) => ({ transferId: (output as { transferId: string }).transferId }),
+      buildInput: (_input, output) => ({ transferId: output.transferId }),
     },
     input: z.object({
       fromLocationCode: z.string().min(1).max(20),
@@ -166,7 +166,7 @@ const confirmTransfer = (deps: ModuleDeps) =>
     permission: "inventory.write",
     inverse: {
       capabilityId: "inventory.reverseTransfer",
-      buildInput: (_input, output) => ({ transferId: (output as { transferId: string }).transferId }),
+      buildInput: (_input, output) => ({ transferId: output.transferId }),
     },
     input: z.object({
       transferId: z.string().uuid(),

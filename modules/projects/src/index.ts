@@ -29,7 +29,7 @@ const createProject = (deps: ModuleDeps) =>
     permission: "projects.write",
     inverse: {
       capabilityId: "projects.archiveProject",
-      buildInput: (_input, output) => ({ projectId: (output as { projectId: string }).projectId }),
+      buildInput: (_input, output) => ({ projectId: output.projectId }),
     },
     input: z.object({ name: z.string().min(1).max(120), dueAt: z.string().datetime().optional() }),
     output: z.object({ projectId: z.string() }),

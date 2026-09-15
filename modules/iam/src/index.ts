@@ -286,7 +286,7 @@ const setModules = (deps: ModuleDeps) =>
     inverse: {
       capabilityId: "iam.restoreModules",
       buildInput: (_input, output) => ({
-        modules: (output as { previousModules: string[] }).previousModules,
+        modules: output.previousModules,
       }),
     },
     execute: async (ctx, input) => {

@@ -87,7 +87,7 @@ const createBill = (deps: ModuleDeps) =>
     permission: "purchasing.write",
     inverse: {
       capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: (output as { entryId?: string }).entryId ?? "" }),
+      buildInput: (_input, output) => ({ entryId: output.entryId ?? "" }),
     },
     input: z.object({
       vendorId: z.string(),
@@ -254,7 +254,7 @@ const payBill = (deps: ModuleDeps) =>
     moneyAmount: (input) => input.amountMinor,
     inverse: {
       capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: (output as { entryId: string }).entryId }),
+      buildInput: (_input, output) => ({ entryId: output.entryId }),
     },
     input: z.object({
       billNumber: z.number().int().positive(),

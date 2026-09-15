@@ -31,7 +31,7 @@ const createCustomer = (deps: ModuleDeps) =>
     permission: "crm.write",
     inverse: {
       capabilityId: "crm.deactivateCustomer",
-      buildInput: (_input, output) => ({ customerId: (output as { customerId: string }).customerId }),
+      buildInput: (_input, output) => ({ customerId: output.customerId }),
     },
     input: z.object({
       name: z.string().min(1).describe("Customer display name"),

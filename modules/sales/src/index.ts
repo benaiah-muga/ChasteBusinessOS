@@ -78,7 +78,7 @@ const orderCreate = (deps: ModuleDeps) =>
     output: z.object({ orderId: z.string(), orderNumber: z.number() }),
     inverse: {
       capabilityId: "sales.cancelOrder",
-      buildInput: (_input, output) => ({ orderId: (output as { orderId: string }).orderId }),
+      buildInput: (_input, output) => ({ orderId: output.orderId }),
     },
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {

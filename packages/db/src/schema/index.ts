@@ -975,7 +975,7 @@ export const payrollRuns = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     year: integer("year").notNull(),
     month: integer("month").notNull(), // 1-12
-    status: text("status").notNull().default("draft"), // draft | executed | voided
+    status: text("status").notNull().default("draft"), // draft | executed | voided | reversed
     totalGrossMinor: integer("total_gross_minor").notNull().default(0),
     totalTaxMinor: integer("total_tax_minor").notNull().default(0),
     totalNetMinor: integer("total_net_minor").notNull().default(0),
@@ -985,6 +985,8 @@ export const payrollRuns = pgTable(
     executedByActorId: uuid("executed_by_actor_id"),
     executedAt: timestamp("executed_at", { withTimezone: true }),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
+    /** Set when the posting is compensated by hr.reversePayrollPosting (N12). */
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("payroll_run_org_period_idx").on(t.orgId, t.year, t.month)],

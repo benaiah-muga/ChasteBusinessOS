@@ -74,7 +74,7 @@ const startConversation = (deps: ModuleDeps) =>
     inverse: {
       capabilityId: "support.resolveConversation",
       buildInput: (_input, output) => ({
-        conversationId: (output as { conversationId: string }).conversationId,
+        conversationId: output.conversationId,
       }),
     },
     execute: async (ctx, input) => {

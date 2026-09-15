@@ -55,6 +55,7 @@ the next number; superseded ones get a Status update, never deletion.
 | 0048 | Bank matching reconciles money, not identities | accepted |
 | 0049 | Order-line budgets for receipts, returns, and bills | accepted |
 | 0050 | One inventory command service with item locks and count watermarks | accepted |
+| 0051 | Domain compensations, not generic journal reversal | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

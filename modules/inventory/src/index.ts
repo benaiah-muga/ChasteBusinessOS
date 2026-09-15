@@ -283,7 +283,7 @@ const reserveStock = (deps: ModuleDeps) =>
     permission: "inventory.write",
     inverse: {
       capabilityId: "inventory.releaseReservation",
-      buildInput: (_input, output) => ({ reservationId: (output as { reservationId: string }).reservationId }),
+      buildInput: (_input, output) => ({ reservationId: output.reservationId }),
     },
     input: z.object({
       sku: z.string(),
@@ -391,7 +391,7 @@ const startCycleCount = (deps: ModuleDeps) =>
     module: "inventory",
     risk: "write",
     permission: "inventory.write",
-    inverse: { capabilityId: "inventory.cancelCycleCount", buildInput: (_input, output) => ({ countId: (output as { countId: string }).countId }) },
+    inverse: { capabilityId: "inventory.cancelCycleCount", buildInput: (_input, output) => ({ countId: output.countId }) },
     input: z.object({
       note: z.string().max(200).optional(),
       skus: z.array(z.string().min(1).max(40)).max(500).optional().describe("count only these SKUs; default is every active item"),

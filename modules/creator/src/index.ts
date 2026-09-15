@@ -209,7 +209,7 @@ const publishListing = (deps: ModuleDeps) =>
     permission: "platform.creator",
     inverse: {
       capabilityId: "creator.retractListing",
-      buildInput: (_input, output) => ({ slug: (output as { slug: string }).slug }),
+      buildInput: (_input, output) => ({ slug: output.slug }),
     },
     input: z.object({
       manifest: pluginManifestSchema,

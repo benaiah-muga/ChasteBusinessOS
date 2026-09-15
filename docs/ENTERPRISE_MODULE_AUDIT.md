@@ -150,7 +150,25 @@ Proof: partial/full credit before and after payment; overpayment; refund; void; 
 
 Evidence: `accounting.reverseEntry`, `modules/accounting/src/index.ts:445`, mirrors journal lines but does not pass the original currency, reject a second reversal of the same original, or compensate payment/document balances. Payment declares it as its inverse. POS declares an inverse using an `entryId` absent from its returned output (`modules/pos/src/index.ts:111`, `:122`, `:244`). Payroll void guidance also directs executed runs toward journal reversal without a payroll lifecycle repair.
 
-Implementation: separate manual-journal reversal from `reversePayment`, `refundSale`, `reversePayrollPosting` and other domain compensations. They preserve currency, update/append subledger allocation state, link original effect IDs, and are unique/idempotent at the business-operation level. Paired FX entries must reverse as a coherent settlement. Block generic reversal for protected source types or route it to their domain workflow. Render exactly what can be undone, what has downstream dependencies and what requires a correcting document.
+Implementation: the first slice (ADR 0051) separates manual-journal reversal
+from the domain compensations. `accounting.reversePayment` mirrors the
+payment's entries — base plus foreign clearing leg as one coherent FX
+settlement — in their original currencies, releases the invoice's paid
+amount through the N11 balance contract, and refuses a second reversal at
+the business-operation level. `hr.reversePayrollPosting` mirrors the posting
+and repairs the run lifecycle (`reversed`). `pos.completeSale`'s inverse is
+now `pos.returnSale`, which restores stock, the drawer (cash refunds drop
+expected cash on open sessions) and money together. `reverseEntry` keeps
+manual and unsupported entries, preserves the original currency, and
+refuses protected source types with named routing (`payment`,
+`pos_sale`, `payroll_run`, `invoice` → credit note, `inventory-valuation`).
+The kernel types inverse `buildInput` against the real output, so a phantom
+key is a compile error — the POS bug class is closed structurally. Remaining
+work: purchasing compensations (`reverseVendorPayment`, bill-state repair —
+their declared inverses still target the generic path), paired FX
+reversal renderings in the web UI, and surfacing "what can be undone /
+what has downstream dependencies / what needs a correcting document" per
+document in the journal view.
 
 Proof: pay→reverse→pay produces correct GL, invoice balance, bank reconciliation and receipt; foreign reversal retains currency; second/replayed reversal has no second effect; POS inverse input is valid and undoes stock, drawer and money together. Conformance must exercise inverse input generation against actual outputs, not only check that a named capability exists.
 

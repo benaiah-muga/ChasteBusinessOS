@@ -64,7 +64,7 @@ export const postValuationSummary = (deps: ModuleDeps) =>
     moneyAmount: () => null,
     inverse: {
       capabilityId: "inventory.reverseValuationSummary",
-      buildInput: (_input, output) => ({ entryId: (output as { entryId: string | null }).entryId }),
+      buildInput: (_input, output) => ({ entryId: output.entryId }),
     },
     input: z.object({
       memo: z

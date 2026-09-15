@@ -4,6 +4,8 @@ import {
   employees,
   jobApplicants,
   jobOpenings,
+  journalEntries,
+  journalLines,
   leaveRequests,
   payrollRuns,
   payslips,
@@ -44,7 +46,7 @@ const hireEmployee = (deps: ModuleDeps) =>
     permission: "hr.write",
     inverse: {
       capabilityId: "hr.deactivateEmployee",
-      buildInput: (_input, output) => ({ employeeId: (output as { employeeId?: string }).employeeId ?? "" }),
+      buildInput: (_input, output) => ({ employeeId: output.employeeId ?? "" }),
     },
     input: z.object({
       name: z.string().min(1).max(120),
@@ -106,7 +108,7 @@ const requestLeave = (deps: ModuleDeps) =>
     permission: "hr.write",
     inverse: {
       capabilityId: "hr.cancelLeave",
-      buildInput: (_input, output) => ({ requestId: (output as { requestId?: string }).requestId ?? "" }),
+      buildInput: (_input, output) => ({ requestId: output.requestId ?? "" }),
     },
     input: z.object({
       employeeId: z.string(),
@@ -218,7 +220,7 @@ const createPayrollRun = (deps: ModuleDeps) =>
     permission: "hr.write",
     inverse: {
       capabilityId: "hr.voidPayrollRun",
-      buildInput: (_input, output) => ({ runId: (output as { runId?: string }).runId ?? "" }),
+      buildInput: (_input, output) => ({ runId: output.runId ?? "" }),
     },
     input: z.object({
       year: z.number().int().min(2020).max(2100),
@@ -323,9 +325,16 @@ const executePayrollRun = (deps: ModuleDeps) =>
     // Caller-asserted total must match the drafted run (execution refuses
     // mismatches), so it is the honest gating amount.
     moneyAmount: (input) => input.expectedTotalNetMinor,
+    // N12 (ADR 0051): the undo of an executed run is the payroll
+    // compensation — it mirrors the posting AND repairs the run lifecycle.
+    // buildInput is typed against this capability's output, so a key the
+    // output never returns is a compile error.
     inverse: {
-      capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: (output as { entryId?: string }).entryId ?? "" }),
+      capabilityId: "hr.reversePayrollPosting",
+      buildInput: (input) => ({
+        runId: input.runId,
+        reason: `undo of payroll posting ${input.runId.slice(0, 8)}`,
+      }),
     },
     input: z.object({
       runId: z.string(),
@@ -398,8 +407,105 @@ const voidPayrollRun = (deps: ModuleDeps) =>
           ),
         )
         .returning({ id: payrollRuns.id });
-      if (updated.length === 0) throw new Error("no draft payroll run with that id (executed runs reverse via accounting.reverseEntry)");
+      if (updated.length === 0) {
+        const [run] = await deps.db
+          .select({ id: payrollRuns.id, status: payrollRuns.status })
+          .from(payrollRuns)
+          .where(and(eq(payrollRuns.orgId, ctx.actor.orgId), eq(payrollRuns.id, input.runId)))
+          .limit(1);
+        if (run?.status === "executed") {
+          throw new Error("executed payroll runs are undone with hr.reversePayrollPosting, which reverses the posting and repairs the run lifecycle");
+        }
+        throw new Error(`no draft payroll run with that id${run ? ` (run is ${run.status})` : ""}`);
+      }
       return { voided: true };
+    },
+  });
+
+/**
+ * N12 (ADR 0051): the domain compensation for executePayrollRun. The generic
+ * journal mirror left the run marked "executed" — the lifecycle and the
+ * ledger disagreed. Reversing an executed run mirrors its posting in the
+ * original currency, flips the run to "reversed", and refuses a second
+ * reversal. Payslips and time entries are history: they stay as they were.
+ */
+const reversePayrollPosting = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.reversePayrollPosting",
+    title: "Reverse payroll posting",
+    intent:
+      "Undo an executed payroll run: mirror its general-ledger posting in the original currency and mark the run reversed, so the lifecycle and the ledger agree. The run cannot be reversed twice",
+    module: "hr",
+    risk: "destructive",
+    permission: "hr.write",
+    // The posted amount lives in the run, not the input.
+    moneyAmount: () => null,
+    input: z.object({
+      runId: z.string(),
+      reason: z.string().min(3).max(500),
+    }),
+    output: z.object({
+      reversalEntryId: z.string(),
+      reversedNetMinor: z.number(),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [run] = await tx
+          .select()
+          .from(payrollRuns)
+          .where(and(eq(payrollRuns.orgId, ctx.actor.orgId), eq(payrollRuns.id, input.runId)))
+          .limit(1);
+        if (!run) throw new Error(`no payroll run ${input.runId}`);
+        if (run.status !== "executed") {
+          throw new Error(`run is ${run.status}; only executed runs can be reversed`);
+        }
+        if (!run.entryId) throw new Error("run has no posting to reverse");
+
+        // Unique at the business-operation level: a replay finds the same
+        // reversal row and refuses instead of posting payroll twice.
+        const [already] = await tx
+          .select({ id: journalEntries.id })
+          .from(journalEntries)
+          .where(and(eq(journalEntries.orgId, ctx.actor.orgId), eq(journalEntries.reversalOfId, run.entryId)))
+          .limit(1);
+        if (already) throw new Error("payroll run has already been reversed");
+
+        const [orig] = await tx
+          .select()
+          .from(journalEntries)
+          .where(eq(journalEntries.id, run.entryId))
+          .limit(1);
+        if (!orig) throw new Error(`posting ${run.entryId} not found`);
+        const origLines = await tx
+          .select({
+            accountId: journalLines.accountId,
+            debitMinor: journalLines.debitMinor,
+            creditMinor: journalLines.creditMinor,
+          })
+          .from(journalLines)
+          .where(eq(journalLines.entryId, run.entryId));
+
+        const reversalEntryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `Reversal of payroll ${run.year}-${String(run.month).padStart(2, "0")}: ${input.reason}`,
+          sourceType: "payroll_reversal",
+          sourceId: run.id,
+          reversalOfId: run.entryId,
+          currency: orig.currency,
+          postedAt: ctx.now,
+          lines: origLines.map((l) => ({
+            accountId: l.accountId,
+            debitMinor: l.creditMinor,
+            creditMinor: l.debitMinor,
+          })),
+        });
+
+        await tx
+          .update(payrollRuns)
+          .set({ status: "reversed", reversedAt: ctx.now })
+          .where(eq(payrollRuns.id, run.id));
+
+        return { reversalEntryId, reversedNetMinor: run.totalNetMinor };
+      });
     },
   });
 
@@ -838,7 +944,7 @@ const createOpening = (deps: ModuleDeps) =>
     output: z.object({ openingId: z.string() }),
     inverse: {
       capabilityId: "hr.closeOpening",
-      buildInput: (_input, output) => ({ openingId: (output as { openingId: string }).openingId }),
+      buildInput: (_input, output) => ({ openingId: output.openingId }),
     },
     execute: async (ctx, input) => {
       const [row] = await deps.db
@@ -1031,6 +1137,7 @@ export function registerHrCapabilities(registry: CapabilityRegistry, deps: Modul
   registry.register(decideLeave(deps));
   registry.register(createPayrollRun(deps));
   registry.register(executePayrollRun(deps));
+  registry.register(reversePayrollPosting(deps));
   registry.register(voidPayrollRun(deps));
   registry.register(listEmployees(deps));
   registry.register(updateEmployeeStructure(deps));

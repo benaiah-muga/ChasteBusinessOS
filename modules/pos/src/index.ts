@@ -105,9 +105,16 @@ const completeSale = (deps: ModuleDeps) =>
         (sum, l) => sum + Math.round((l.quantity * l.unitPriceMinor) / 1000) + l.taxMinor,
         0,
       ),
+    // N12 (ADR 0051): the undo of a register sale is a register return —
+    // it restores stock, the drawer and the money together. buildInput is
+    // typed against completeSale's output, so a key the sale never returns
+    // is a compile error.
     inverse: {
-      capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: (output as { entryId: string }).entryId }),
+      capabilityId: "pos.returnSale",
+      buildInput: (_input, output) => ({
+        invoiceId: output.invoiceId,
+        reason: `undo of POS sale #${output.invoiceNumber}`,
+      }),
     },
     input: z.object({
       sessionId: z.string(),
@@ -115,6 +122,7 @@ const completeSale = (deps: ModuleDeps) =>
       method: z.enum(["cash", "card"]).default("cash"),
     }),
     output: z.object({
+      invoiceId: z.string(),
       invoiceNumber: z.number(),
       totalMinor: z.number(),
       changeGivenMinor: z.number(),
@@ -281,7 +289,7 @@ const completeSale = (deps: ModuleDeps) =>
             .where(eq(posSessions.id, session.id));
         }
 
-        return { invoiceNumber, totalMinor: total, changeGivenMinor: 0 };
+        return { invoiceId: inv!.id, invoiceNumber, totalMinor: total, changeGivenMinor: 0 };
       });
     },
   });
@@ -395,6 +403,31 @@ const returnSale = (deps: ModuleDeps) =>
           lines: mirrorLines,
         });
         await tx.update(invoices).set({ creditedMinor: inv.creditedMinor + refund }).where(eq(invoices.id, inv.id));
+
+        // N12 (ADR 0051): a cash refund physically leaves the drawer, so the
+        // session's expected cash drops with it — otherwise closeSession
+        // would flag an "overage" that is really money already handed back.
+        // A closed session's count is frozen history; its variance was
+        // recorded when it closed and is not rewritten by later returns.
+        const [salePayment] = await tx
+          .select({ method: payments.method })
+          .from(payments)
+          .innerJoin(journalEntries, eq(journalEntries.id, payments.entryId))
+          .where(and(eq(payments.orgId, ctx.actor.orgId), eq(payments.invoiceId, inv.id)))
+          .limit(1);
+        if (salePayment?.method === "cash" && inv.posSessionId) {
+          const [session] = await tx
+            .select({ id: posSessions.id, status: posSessions.status })
+            .from(posSessions)
+            .where(and(eq(posSessions.id, inv.posSessionId), eq(posSessions.orgId, ctx.actor.orgId)))
+            .limit(1);
+          if (session && session.status === "open") {
+            await tx
+              .update(posSessions)
+              .set({ expectedCashMinor: sql`${posSessions.expectedCashMinor} - ${refund}` })
+              .where(eq(posSessions.id, session.id));
+          }
+        }
 
         // Stock back: the sale took items out with negative legs referencing
         // the invoice; the return mirrors each one positively.

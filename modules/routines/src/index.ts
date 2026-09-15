@@ -68,7 +68,7 @@ const createRoutine = (deps: ModuleDeps) =>
     inverse: {
       capabilityId: "routines.delete",
       buildInput: (_input, output) => ({
-        routineId: (output as { routineId: string }).routineId,
+        routineId: output.routineId,
       }),
     },
     execute: async (ctx, input) => {
@@ -254,15 +254,12 @@ const deleteRoutine = (deps: ModuleDeps) =>
     }),
     inverse: {
       capabilityId: "routines.create",
-      buildInput: (_input, output) => {
-        const o = output as { name: string; prompt: string; scheduleText: string | null; schedule: z.infer<typeof routineScheduleSchema> };
-        return {
-          name: o.name,
-          prompt: o.prompt,
-          schedule: o.schedule,
-          withWebhook: false,
-        };
-      },
+      buildInput: (_input, output) => ({
+        name: output.name,
+        prompt: output.prompt,
+        schedule: output.schedule,
+        withWebhook: false,
+      }),
     },
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {

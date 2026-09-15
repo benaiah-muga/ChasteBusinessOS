@@ -106,7 +106,7 @@ const createWorkOrder = (deps: ModuleDeps) =>
     permission: "manufacturing.write",
     inverse: {
       capabilityId: "manufacturing.cancelWorkOrder",
-      buildInput: (_input, output) => ({ workOrderId: (output as { workOrderId: string }).workOrderId }),
+      buildInput: (_input, output) => ({ workOrderId: output.workOrderId }),
     },
     input: z.object({
       assemblySku: z.string(),
@@ -311,7 +311,7 @@ const completeWorkOrder = (deps: ModuleDeps) =>
     permission: "manufacturing.write",
     inverse: {
       capabilityId: "manufacturing.reverseProductionRun",
-      buildInput: (_input, output) => ({ runRef: (output as { runRef: string }).runRef }),
+      buildInput: (_input, output) => ({ runRef: output.runRef }),
     },
     input: z.object({
       workOrderId: z.string().uuid(),
@@ -1033,7 +1033,7 @@ const produceFromBom = (deps: ModuleDeps) =>
     permission: "manufacturing.write",
     inverse: {
       capabilityId: "manufacturing.reverseProductionRun",
-      buildInput: (_input, output) => ({ runRef: (output as { runRef: string }).runRef }),
+      buildInput: (_input, output) => ({ runRef: output.runRef }),
     },
     input: z.object({
       assemblySku: z.string(),

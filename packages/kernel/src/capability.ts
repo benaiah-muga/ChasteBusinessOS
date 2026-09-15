@@ -52,9 +52,9 @@ export interface CapabilityResult<O> {
   replayed?: boolean;
 }
 
-export interface InverseSpec<I> {
+export interface InverseSpec<I, O = unknown> {
   /** Builds the input for the inverse capability from the original input+output. */
-  buildInput(input: I, output: unknown): Record<string, unknown>;
+  buildInput(input: I, output: O): Record<string, unknown>;
 }
 
 export interface Capability<I = unknown, O = unknown> {
@@ -81,7 +81,12 @@ export interface Capability<I = unknown, O = unknown> {
    * input types (bivariance), matching execute().
    */
   moneyAmount?(input: I): number | null;
-  inverse?: { capabilityId: string } & InverseSpec<I>;
+  /**
+   * The inverse's buildInput is typed against THIS capability's validated
+   * input and output, so an inverse that reads a key the output never
+   * returns is a compile error, not a silent runtime undefined (N12).
+   */
+  inverse?: { capabilityId: string } & InverseSpec<I, O>;
   execute(ctx: ActionContext, input: I): Promise<O>;
 }
 
