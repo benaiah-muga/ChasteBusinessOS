@@ -210,7 +210,16 @@ Proof: stock 10 with repeated lines 7+7 reserves at most 10; all-or-nothing mode
 
 Evidence: `purchasing.receiveGoods`, `modules/purchasing/src/index.ts:409`, indexes lines ordered by UUID as a human “line number,” inserts stock only for item-linked lines, and derives receipt completion solely from stock movements. Non-stock service lines cannot progress through this receiving contract. It does not limit receipt quantity to remaining ordered quantity. `createBill` (`:107`) checks each input line against prior bills before inserting this bill, so repeated references within the new bill do not consume each other's allowance; it also does not establish that the bill's vendor matches the referenced PO's vendor. `returnGoods` (`:859`) limits by historically received quantity, not current stock/lot availability, and leaves order status unrecomputed.
 
-Implementation: stable line IDs plus explicit positions; receipt header/lines with accepted, rejected, returned and remaining quantities. Tangible receipt writes stock through the shared service; service acceptance records a milestone/quantity without fake stock. Aggregate bill allocations per PO line within a command, validate vendor/currency and lifecycle, and reserve remaining billable quantity under lock. Overreceipt requires configured tolerance and explicit authority. Returns link the original receipt, current location/lot and supplier credit follow-up.
+Implementation: the first slice (ADR 0049) spends one budget per order line
+inside receipts, returns, and bills — overreceipt is refused, repeated
+in-command references consume each other's allowance, bills must come from
+the order's vendor, service lines complete through an accepted milestone on
+the order line, returns require the goods to be on hand, and returns demote
+a fully-received order to partial. Remaining work is the receipt header/line
+model with accepted/rejected/returned/remaining quantities and explicit
+stable positions, overreceipt tolerance with explicit authority, returns
+linked to their original receipt with lot/location, and display line numbers
+that survive reordering.
 
 Proof: service-only and mixed POs can complete; repeat line references cannot overbill; wrong vendor fails; partial receipts/returns/bills reconcile; returned consumed stock is rejected or follows an explicit exception; display line 1 always identifies the same line. This is an implementation deepening of X06, not a second goods/services model.
 

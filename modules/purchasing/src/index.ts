@@ -113,13 +113,23 @@ const createBill = (deps: ModuleDeps) =>
             .where(and(eq(purchaseOrders.orgId, ctx.actor.orgId), eq(purchaseOrders.number, input.poNumber)))
             .limit(1);
           if (!po) throw new Error(`purchase order ${input.poNumber} not found`);
+          // N16: a bill arrives from the vendor who took the order; a bill
+          // from anyone else is not this order's bill, whatever its numbers.
+          if (po.vendorId !== input.vendorId) {
+            throw new Error(`vendor mismatch: order ${input.poNumber} belongs to a different vendor`);
+          }
           const poLineRows = await tx.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(poLines.id);
+          // N16: repeated references to one order line inside this bill
+          // consume each other's allowance — the aggregate is what the
+          // three-way match validates, not each row against full stock.
+          const consumed = new Map<string, number>();
           for (const bl of input.lines) {
             if (!bl.poLineNumber) {
               throw new Error(`line "${bl.description}" must reference a purchase-order line number`);
             }
             const pol = poLineRows[bl.poLineNumber - 1];
             if (!pol) throw new Error(`no line ${bl.poLineNumber} on order ${input.poNumber}`);
+            const alreadyInThisBill = consumed.get(pol.id) ?? 0;
             const [rec] = await tx
               .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
               .from(stockMovements)
@@ -129,7 +139,8 @@ const createBill = (deps: ModuleDeps) =>
               .from(vendorBillLines)
               .where(eq(vendorBillLines.poLineId, pol.id));
             // quantities still available on this line after earlier bills
-            const priorBilled = Number(prev?.total ?? 0);
+            // and after this bill's own earlier lines
+            const priorBilled = Number(prev?.total ?? 0) + alreadyInThisBill;
             const violations = matchThreeWay({
               orderedQty: pol.quantity - priorBilled,
               receivedQty: Number(rec?.total ?? 0) - priorBilled,
@@ -143,6 +154,7 @@ const createBill = (deps: ModuleDeps) =>
                   violations.map((v) => `${v.kind} (${v.detail})`).join("; "),
               );
             }
+            consumed.set(pol.id, alreadyInThisBill + bl.quantity);
           }
         }
 
@@ -439,14 +451,31 @@ const receivePO = (deps: ModuleDeps) =>
 
         const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(poLines.id);
 
+        // N16: aggregate this receipt's demand per line first — repeated
+        // references to the same line spend one budget, not one each.
+        const wanted = new Map<number, number>();
         for (const rl of input.lines) {
           const line = lines[rl.lineNumber - 1];
           if (!line) throw new Error(`no line ${rl.lineNumber} on order ${input.poNumber}`);
+          wanted.set(rl.lineNumber, (wanted.get(rl.lineNumber) ?? 0) + rl.quantity);
+        }
+
+        for (const [lineNumber, quantity] of wanted) {
+          const line = lines[lineNumber - 1];
+          if (!line) throw new Error(`no line ${lineNumber} on order ${input.poNumber}`);
           if (line.itemId) {
+            const priorReceived = await receivedForLine(tx, line.id);
+            if (priorReceived + quantity > line.quantity) {
+              throw new Error(
+                `line ${lineNumber}: receiving ${quantity} would exceed the ordered quantity ` +
+                  `(ordered ${line.quantity}, already received ${priorReceived}); ` +
+                  `overreceipt needs an amended order, not a bigger receipt`,
+              );
+            }
             await tx.insert(stockMovements).values({
               orgId: ctx.actor.orgId,
               itemId: line.itemId,
-              quantityDelta: rl.quantity,
+              quantityDelta: quantity,
               reason: "purchase",
               refType: "po_line",
               refId: line.id,
@@ -455,18 +484,21 @@ const receivePO = (deps: ModuleDeps) =>
               actorType: ctx.actor.type,
               actorId: ctx.actor.id,
             });
+          } else {
+            // Service acceptance: record the delivered milestone without
+            // faking stock, so service-only and mixed orders can complete.
+            const accepted = line.serviceAcceptedThousandths ?? 0;
+            if (accepted + quantity > line.quantity) {
+              throw new Error(
+                `line ${lineNumber}: accepting ${quantity} would exceed the ordered quantity ` +
+                  `(ordered ${line.quantity}, already accepted ${accepted})`,
+              );
+            }
+            await tx.update(poLines).set({ serviceAcceptedThousandths: accepted + quantity }).where(eq(poLines.id, line.id));
           }
         }
 
-        // status: partial until every line's received qty reaches ordered qty
-        let fully = true;
-        for (const line of lines) {
-          const [rec] = await tx
-            .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
-            .from(stockMovements)
-            .where(and(eq(stockMovements.refType, "po_line"), eq(stockMovements.refId, line.id)));
-          if (Number(rec?.total ?? 0) < line.quantity) fully = false;
-        }
+        const fully = await orderFullyReceived(tx, po.id);
         await tx
           .update(purchaseOrders)
           .set({ status: fully ? "received" : "partial" })
@@ -475,6 +507,27 @@ const receivePO = (deps: ModuleDeps) =>
       });
     },
   });
+
+/**
+ * True when every line has its full ordered quantity — through stock
+ * movements for item lines, accepted milestones for service lines (N16).
+ * Returns after returns demote a "received" order back to "partial".
+ */
+async function orderFullyReceived(
+  tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0],
+  poId: string,
+): Promise<boolean> {
+  const lines = await tx.select().from(poLines).where(eq(poLines.poId, poId));
+  for (const line of lines) {
+    if (line.itemId) {
+      const received = await receivedForLine(tx, line.id);
+      if (received < line.quantity) return false;
+    } else if ((line.serviceAcceptedThousandths ?? 0) < line.quantity) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // ── Purchasing workflow: request → review → RFQ → quotes → award ───────
 
@@ -890,28 +943,60 @@ const returnGoods = (deps: ModuleDeps) =>
         if (!po) throw new Error("purchase order not found");
         if (po.status === "void") throw new Error("order is void");
         const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(poLines.id);
+
+        // N16: one budget per line, so repeated references cannot double-return.
+        const wanted = new Map<number, { quantity: number; reason: string }>();
         for (const rl of input.lines) {
           const line = lines[rl.lineNumber - 1];
           if (!line) throw new Error(`no line ${rl.lineNumber} on order ${input.poNumber}`);
-          if (!line.itemId) throw new Error(`line ${rl.lineNumber} is a service line; nothing to return`);
-          const received = await receivedForLine(tx, line.id);
-          if (rl.quantity > received) {
+          const prior = wanted.get(rl.lineNumber);
+          wanted.set(rl.lineNumber, {
+            quantity: (prior?.quantity ?? 0) + rl.quantity,
+            reason: prior ? `${prior.reason}; ${rl.reason}` : rl.reason,
+          });
+        }
+
+        for (const [lineNumber, { quantity, reason }] of wanted) {
+          const line = lines[lineNumber - 1];
+          if (!line) throw new Error(`no line ${lineNumber} on order ${input.poNumber}`);
+          if (!line.itemId) throw new Error(`line ${lineNumber} is a service line; nothing to return`);
+          const netReceived = await receivedForLine(tx, line.id);
+          if (quantity > netReceived) {
             throw new Error(
-              `line ${rl.lineNumber}: cannot return ${rl.quantity}; only ${received} thousandths were received`,
+              `line ${lineNumber}: cannot return ${quantity}; only ${netReceived} thousandths were received net of prior returns`,
+            );
+          }
+          // Goods already shipped to customers are not in the warehouse to
+          // send back; a return of consumed stock needs a customer return,
+          // not a vendor one.
+          const [oh] = await tx
+            .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
+            .from(stockMovements)
+            .where(and(eq(stockMovements.orgId, ctx.actor.orgId), eq(stockMovements.itemId, line.itemId)));
+          const onHand = Number(oh?.total ?? 0);
+          if (onHand < quantity) {
+            throw new Error(
+              `line ${lineNumber}: only ${onHand} thousandths of this item are on hand; goods already shipped need a customer return, not a vendor return`,
             );
           }
           await tx.insert(stockMovements).values({
             orgId: ctx.actor.orgId,
             itemId: line.itemId,
-            quantityDelta: -rl.quantity,
+            quantityDelta: -quantity,
             reason: "purchase",
             refType: "po_line",
             refId: line.id,
-            note: `Return to vendor (PO ${input.poNumber}): ${rl.reason}`,
+            note: `Return to vendor (PO ${input.poNumber}): ${reason}`,
             unitCostMinor: line.unitPriceMinor,
             actorType: ctx.actor.type,
             actorId: ctx.actor.id,
           });
+        }
+
+        // A return can undo full receipt: a "received" order with a line
+        // back below its ordered quantity is partially received again.
+        if (po.status === "received" && !(await orderFullyReceived(tx, po.id))) {
+          await tx.update(purchaseOrders).set({ status: "partial" }).where(eq(purchaseOrders.id, po.id));
         }
         return { returned: true as const, lines: input.lines.length };
       });

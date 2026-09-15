@@ -686,6 +686,12 @@ export const poLines = pgTable(
     quantity: integer("quantity").notNull(), // thousandths
     unitPriceMinor: integer("unit_price_minor").notNull(),
     itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+    /**
+     * Accepted quantity for service lines (no item, so no stock movements):
+     * the milestone/quantity the vendor actually delivered (N16). Item lines
+     * track receipt through the stock ledger instead.
+     */
+    serviceAcceptedThousandths: integer("service_accepted_thousandths"),
   },
   (t) => [index("po_line_po_idx").on(t.poId)],
 );

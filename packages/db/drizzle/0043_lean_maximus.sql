@@ -1,0 +1,1 @@
+ALTER TABLE "po_lines" ADD COLUMN "service_accepted_thousandths" integer;

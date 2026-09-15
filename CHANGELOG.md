@@ -12,6 +12,17 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Receiving, returns, and bills ignored ordered quantities and each other
+  (N16).** Every purchasing command now spends one budget per order line:
+  receipts refuse quantities beyond what was ordered (overreceipt needs an
+  amended order), repeated line references inside one receipt, return, or
+  bill consume each other's allowance instead of each seeing full stock, and
+  a vendor bill is only valid from the vendor who holds the order. Service
+  lines join the receiving contract through an explicit accepted milestone
+  on the order line — no fake stock — so mixed and service-only orders can
+  complete. Returns require the goods to still be on hand (shipped goods
+  need a customer return) and demote a fully-received order back to
+  partial. Pinned by six live-DB purchasing tests (ADR 0049).
 - **Bank matching reconciled identities, not money (N14).** A statement line
   can now claim a payment or entry only when it is economically equivalent:
   same amount (100 banked refuses to explain a 10 payment), same direction
