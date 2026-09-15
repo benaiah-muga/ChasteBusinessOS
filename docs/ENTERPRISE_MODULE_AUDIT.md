@@ -177,7 +177,16 @@ and FX, refuses a closed period. A synchronized close/post test commits one vali
 
 Evidence: `accounting.matchBankTransaction`, `modules/accounting/src/index.ts:1840`, verifies referenced rows belong to the org and conditionally claims an unmatched statement line. It does not compare amount, currency, direction, bank account or prior allocation of the payment. The conditional claim is valuable and should remain. It prevents two decisions on one line; it does not establish that the decision reconciles the bank.
 
-Implementation: add reconciliation allocations and remaining amounts. Start with exact one-to-one matches in the same currency/account; expose fees, splits, grouped settlements, transfers and FX differences as explicit reviewed alternatives. Prevent a payment being fully allocated twice. Match suggestions carry evidence and confidence, but deterministic conservation governs final application. “Reconciled” requires an as-of statement opening/closing balance and unexplained difference of zero, not simply zero unmatched rows.
+Implementation: the first slice (ADR 0048) makes a match require economic
+equivalence — payment matches compare amount, direction and currency;
+entry matches require the entry's cash-account net to equal the line's
+signed amount; and one payment/entry belongs to exactly one statement line,
+enforced by unique indexes on the claim columns with unmatch releasing the
+claim. Remaining work is the allocation model with remaining amounts
+(allowing reviewed fees, splits, grouped settlements, transfers and FX
+differences as explicit alternatives rather than refusals), statement
+opening/closing balances with a zero unexplained difference as the actual
+"reconciled" definition, and the human workflow (P03).
 
 Proof: matching 100 bank inflow to 10 payment is rejected; two lines cannot each consume the same full payment; opposite direction/currency mismatches fail; split allocations conserve amounts; unmatch restores availability. P03 provides the human workflow.
 

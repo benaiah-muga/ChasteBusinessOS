@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "bank_tx_payment_claim_idx" ON "bank_transactions" USING btree ("matched_payment_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "bank_tx_entry_claim_idx" ON "bank_transactions" USING btree ("matched_entry_id");

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, gt, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, lt, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   accounts,
@@ -1884,6 +1884,9 @@ const deleteBankTransaction = (deps: ModuleDeps) =>
     },
   });
 
+/** The org's cash account; bank matching reconciles statement lines against it. */
+const CASH_ACCOUNT_CODE = "1000";
+
 const matchBankTransaction = (deps: ModuleDeps) =>
   defineCapability({
     id: "accounting.matchBankTransaction",
@@ -1910,27 +1913,96 @@ const matchBankTransaction = (deps: ModuleDeps) =>
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [bt] = await tx
-          .select({ id: bankTransactions.id })
+          .select({
+            id: bankTransactions.id,
+            amountMinor: bankTransactions.amountMinor,
+            status: bankTransactions.status,
+            accountCurrency: bankAccounts.currencyCode,
+          })
           .from(bankTransactions)
+          .innerJoin(bankAccounts, eq(bankAccounts.id, bankTransactions.bankAccountId))
           .where(and(eq(bankTransactions.id, input.transactionId), eq(bankTransactions.orgId, ctx.actor.orgId)))
           .limit(1);
         if (!bt) throw new Error("bank transaction not found");
 
         if (input.paymentId) {
+          // N14: a match must reconcile the bank, not just name a row that
+          // exists. The statement line must be the same money: same amount,
+          // same direction (customer payments are receipts, i.e. money in),
+          // same currency as the account, and not already explained by
+          // another statement line.
           const [p] = await tx
-            .select({ id: payments.id })
+            .select({ id: payments.id, amountMinor: payments.amountMinor, currency: invoices.currency })
             .from(payments)
+            .innerJoin(invoices, eq(invoices.id, payments.invoiceId))
             .where(and(eq(payments.id, input.paymentId), eq(payments.orgId, ctx.actor.orgId)))
-            .limit(1);
+            .for("update");
           if (!p) throw new Error("payment not found");
+          if (bt.amountMinor <= 0) {
+            throw new Error(
+              `direction mismatch: a customer payment is money in, but this statement line is money out (${bt.amountMinor})`,
+            );
+          }
+          if (p.amountMinor !== bt.amountMinor) {
+            throw new Error(
+              `amount mismatch: statement line is ${bt.amountMinor}, payment is ${p.amountMinor}; bank fees, splits and grouped settlements need explicit review, not a loose match`,
+            );
+          }
+          if (p.currency !== bt.accountCurrency) {
+            throw new Error(`currency mismatch: statement account is ${bt.accountCurrency}, payment is ${p.currency}`);
+          }
+          const [already] = await tx
+            .select({ id: bankTransactions.id })
+            .from(bankTransactions)
+            .where(
+              and(
+                eq(bankTransactions.matchedPaymentId, p.id),
+                eq(bankTransactions.status, "matched"),
+                ne(bankTransactions.id, bt.id),
+              ),
+            )
+            .limit(1);
+          if (already) {
+            throw new Error("payment is already reconciled by another statement line; unmatch that line first");
+          }
         }
         if (input.entryId) {
           const [e] = await tx
-            .select({ id: journalEntries.id })
+            .select({ id: journalEntries.id, currency: journalEntries.currency })
             .from(journalEntries)
             .where(and(eq(journalEntries.id, input.entryId), eq(journalEntries.orgId, ctx.actor.orgId)))
-            .limit(1);
+            .for("update");
           if (!e) throw new Error("journal entry not found");
+          if (e.currency !== bt.accountCurrency) {
+            throw new Error(`currency mismatch: statement account is ${bt.accountCurrency}, entry is ${e.currency}`);
+          }
+          // The entry must move this account's cash by exactly the line's
+          // signed amount: net debit for money in, net credit for money out.
+          const cashLines = await tx
+            .select({ debitMinor: journalLines.debitMinor, creditMinor: journalLines.creditMinor })
+            .from(journalLines)
+            .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+            .where(and(eq(journalLines.entryId, e.id), eq(accounts.code, CASH_ACCOUNT_CODE)));
+          const cashNet = cashLines.reduce((sum, l) => sum + l.debitMinor - l.creditMinor, 0);
+          if (cashNet !== bt.amountMinor) {
+            throw new Error(
+              `cash effect mismatch: entry nets ${cashNet} on account ${CASH_ACCOUNT_CODE}, statement line is ${bt.amountMinor}`,
+            );
+          }
+          const [already] = await tx
+            .select({ id: bankTransactions.id })
+            .from(bankTransactions)
+            .where(
+              and(
+                eq(bankTransactions.matchedEntryId, e.id),
+                eq(bankTransactions.status, "matched"),
+                ne(bankTransactions.id, bt.id),
+              ),
+            )
+            .limit(1);
+          if (already) {
+            throw new Error("entry is already reconciled by another statement line; unmatch that line first");
+          }
         }
 
         // Conditional claim so two racers cannot both claim one statement line.

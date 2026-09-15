@@ -2037,6 +2037,12 @@ export const bankTransactions = pgTable(
   (t) => [
     index("bank_tx_org_account_posted_idx").on(t.orgId, t.bankAccountId, t.postedAt),
     index("bank_tx_org_status_idx").on(t.orgId, t.status),
+    // N14: one statement line per reconciled payment/entry. NULLs (unmatched
+    // or excluded lines) never conflict under a unique index, so the claim
+    // is enforced in data — two lines, or two racing matches, cannot each
+    // consume the same payment however they arrive.
+    uniqueIndex("bank_tx_payment_claim_idx").on(t.matchedPaymentId),
+    uniqueIndex("bank_tx_entry_claim_idx").on(t.matchedEntryId),
   ],
 );
 

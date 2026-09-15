@@ -12,6 +12,18 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Bank matching reconciled identities, not money (N14).** A statement line
+  can now claim a payment or entry only when it is economically equivalent:
+  same amount (100 banked refuses to explain a 10 payment), same direction
+  (a customer payment is money in), same currency as the statement account,
+  and — for entries — the entry must move the cash account by the line's
+  signed amount. One reconciled payment or entry belongs to exactly one
+  statement line, enforced by unique indexes in data (unmatched lines carry
+  NULL and never conflict) with readable refusals for racing claims, and
+  unmatching restores availability. Fees, splits and grouped settlements
+  stay explicit-review work: they refuse as mismatches instead of matching
+  loosely. Pinned by six live-DB tests including a data-level duplicate
+  claim rejection (ADR 0048).
 - **Repeated order lines could over-reserve the same stock (N15).** Stock
   checks now aggregate demand by item identity and spend one running
   availability budget — 7 + 7 against 10 reserves 10, never 14 — and readers
