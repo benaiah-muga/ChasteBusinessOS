@@ -227,13 +227,10 @@ const completeSale = (deps: ModuleDeps) =>
           { accountCode: "4000", debitMinor: 0, creditMinor: subtotal },
           ...(tax > 0 ? [{ accountCode: "2100", debitMinor: 0, creditMinor: tax }] : []),
         ];
-        const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
-          memo: `POS sale #${invoiceNumber} (${input.method})`,
-          sourceType: "pos_sale",
-          postedAt: ctx.now,
-          lines: glLines,
-        });
 
+        // The invoice row exists before posting so the entry carries its
+        // source link at insert time — posted journal rows are immutable
+        // (N09), so there is no post-hoc patch of the GL header.
         const [inv] = await tx
           .insert(invoices)
           .values({
@@ -251,8 +248,13 @@ const completeSale = (deps: ModuleDeps) =>
           })
           .returning({ id: invoices.id });
 
-        // Link the sale entry to the invoice so returns can mirror it.
-        await tx.update(journalEntries).set({ sourceId: inv!.id }).where(eq(journalEntries.id, entryId));
+        const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `POS sale #${invoiceNumber} (${input.method})`,
+          sourceType: "pos_sale",
+          sourceId: inv!.id,
+          postedAt: ctx.now,
+          lines: glLines,
+        });
 
         await tx.insert(payments).values({
           orgId: ctx.actor.orgId,

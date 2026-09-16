@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, withOrgContext, type Database } from "./client";
-import { ensureAppRole } from "./roles";
+import { APPEND_ONLY_TABLES, ensureAppRole } from "./roles";
 
 /**
  * S01 floor, swept mechanically over every org-scoped table of a fresh
@@ -9,6 +9,10 @@ import { ensureAppRole } from "./roles";
  * and that role provably fail-closed — no rows visible without tenant
  * context, and no cross-tenant rows even when filtering by the other org's
  * id. Any new tenant table that skips its RLS policy fails this suite.
+ *
+ * N09: the append-only financial tables (journal, event ledger) are swept
+ * for reads/inserts like every other table but must LACK mutation rights —
+ * the runtime role appends to history, it never rewrites it.
  */
 
 const url = process.env.DATABASE_URL ?? "postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2";
@@ -88,7 +92,7 @@ describe("RLS conformance sweep (S01 floor)", () => {
     expect(violations).toEqual([]);
   });
 
-  it("the runtime role holds DML on every org-scoped table", async () => {
+  it("the runtime role holds DML on every org-scoped table (append-only tables: reads and inserts)", async () => {
     const missing: string[] = [];
     for (const t of tables) {
       const res = await admin.db.execute<{ sel: boolean; ins: boolean; upd: boolean; del: boolean }>(
@@ -98,9 +102,25 @@ describe("RLS conformance sweep (S01 floor)", () => {
                 has_table_privilege('${APP_ROLE}', 'public."${t.table_name}"', 'DELETE') AS del`,
       );
       const row = res[0] as unknown as { sel: boolean; ins: boolean; upd: boolean; del: boolean };
-      if (!row?.sel || !row?.ins || !row?.upd || !row?.del) missing.push(t.table_name);
+      const appendOnly = (APPEND_ONLY_TABLES as readonly string[]).includes(t.table_name);
+      if (!row?.sel || !row?.ins) missing.push(t.table_name);
+      if (!appendOnly && (!row?.upd || !row?.del)) missing.push(t.table_name);
     }
     expect(missing).toEqual([]);
+  });
+
+  it("the runtime role cannot mutate the append-only financial tables (N09)", async () => {
+    const mutating: string[] = [];
+    for (const t of APPEND_ONLY_TABLES) {
+      const res = await admin.db.execute<{ upd: boolean; del: boolean; trunc: boolean }>(
+        `SELECT has_table_privilege('${APP_ROLE}', '${t}', 'UPDATE') AS upd,
+                has_table_privilege('${APP_ROLE}', '${t}', 'DELETE') AS del,
+                has_table_privilege('${APP_ROLE}', '${t}', 'TRUNCATE') AS trunc`,
+      );
+      const row = res[0] as unknown as { upd: boolean; del: boolean; trunc: boolean };
+      if (row?.upd || row?.del || row?.trunc) mutating.push(t);
+    }
+    expect(mutating).toEqual([]);
   });
 
   it("the runtime role sees nothing without tenant context (fail closed)", async () => {

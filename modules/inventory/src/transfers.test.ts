@@ -4,13 +4,12 @@ import {
   accounts,
   createDb,
   items,
-  journalEntries,
-  journalLines,
   organizations,
   stockLocations,
   stockMovements,
   stockTransferLines,
   type Database,
+  purgeTenantFinancials,
 } from "@chaste/db";
 import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerInventoryCapabilities } from "./index";
@@ -52,14 +51,7 @@ async function purgeProbeOrgs(): Promise<void> {
     .from(organizations)
     .where(eq(organizations.name, "Transfer Probe"));
   for (const o of orgs) {
-    const entries = await db.db
-      .select({ id: journalEntries.id })
-      .from(journalEntries)
-      .where(eq(journalEntries.orgId, o.id));
-    for (const e of entries) {
-      await db.db.delete(journalLines).where(eq(journalLines.entryId, e.id));
-    }
-    await db.db.delete(journalEntries).where(eq(journalEntries.orgId, o.id));
+    await purgeTenantFinancials(db.db, o.id);
     await db.db.delete(organizations).where(eq(organizations.id, o.id));
   }
 }

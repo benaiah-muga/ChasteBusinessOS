@@ -5,12 +5,11 @@ import {
   createDb,
   customers,
   invoices,
-  journalEntries,
-  journalLines,
   organizations,
   recurringInvoiceRuns,
   recurringInvoices,
   type Database,
+  purgeTenantFinancials,
 } from "@chaste/db";
 import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerAccountingCapabilities, type ModuleDeps } from "./index";
@@ -49,11 +48,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  const entries = await db.db.select({ id: journalEntries.id }).from(journalEntries).where(eq(journalEntries.orgId, orgId));
-  for (const entry of entries) {
-    await db.db.delete(journalLines).where(eq(journalLines.entryId, entry.id));
-  }
-  await db.db.delete(journalEntries).where(eq(journalEntries.orgId, orgId));
+  await purgeTenantFinancials(db.db, orgId);
   await db.db.delete(organizations).where(eq(organizations.id, orgId));
   await db.client.end();
 });

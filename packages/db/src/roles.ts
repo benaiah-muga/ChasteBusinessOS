@@ -21,6 +21,15 @@ export const APP_ROLE_PASSWORD_ENV = "CHASTE_APP_DB_PASSWORD";
 export const DEFAULT_APP_ROLE_PASSWORD = "chaste_app_dev_only";
 export const DEFAULT_DATABASE_URL = "postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2";
 
+/**
+ * Append-only financial records (N09): the runtime role inserts and reads
+ * these but never mutates them. Revoked here after the broad grant because
+ * `GRANT ... ON ALL TABLES` would otherwise re-confer mutation rights on
+ * every provisioning run; migration 0046 enforces the same boundary with
+ * triggers for roles that hold the privilege.
+ */
+export const APPEND_ONLY_TABLES = ["journal_entries", "journal_lines", "ledger_events"] as const;
+
 export interface EnsureAppRoleOptions {
   /** Database whose tables receive the grants (defaults DATABASE_URL / dev default). */
   databaseUrl?: string;
@@ -98,6 +107,9 @@ export async function ensureAppRole(options: EnsureAppRoleOptions = {}): Promise
       await tx.unsafe(`GRANT USAGE ON SCHEMA public TO ${APP_ROLE_NAME}`);
       await tx.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE_NAME}`);
       await tx.unsafe(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${APP_ROLE_NAME}`);
+      for (const table of APPEND_ONLY_TABLES) {
+        await tx.unsafe(`REVOKE UPDATE, DELETE, TRUNCATE ON ${table} FROM ${APP_ROLE_NAME}`);
+      }
       await tx.unsafe(
         `ALTER DEFAULT PRIVILEGES FOR ROLE ${sqlIdent(owner)} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${APP_ROLE_NAME}`,
       );

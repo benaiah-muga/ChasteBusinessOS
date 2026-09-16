@@ -3,11 +3,9 @@ import { eq } from "drizzle-orm";
 import {
   accounts,
   createDb,
-  journalEntries,
-  journalLines,
-  ledgerEvents,
   organizations,
   type Database,
+  purgeTenantFinancials,
 } from "@chaste/db";
 import { buildExecutor, buildRegistry } from "./kernel";
 
@@ -34,15 +32,7 @@ async function purge(): Promise<void> {
     .from(organizations)
     .where(eq(organizations.name, "Composition Probe"));
   for (const probe of probes) {
-    const entries = await db
-      .select({ id: journalEntries.id })
-      .from(journalEntries)
-      .where(eq(journalEntries.orgId, probe.id));
-    for (const e of entries) {
-      await db.delete(journalLines).where(eq(journalLines.entryId, e.id));
-    }
-    await db.delete(journalEntries).where(eq(journalEntries.orgId, probe.id));
-    await db.delete(ledgerEvents).where(eq(ledgerEvents.orgId, probe.id));
+    await purgeTenantFinancials(db, probe.id);
     await db.delete(organizations).where(eq(organizations.id, probe.id));
   }
 }

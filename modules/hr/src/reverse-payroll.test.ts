@@ -9,6 +9,7 @@ import {
   organizations,
   payrollRuns,
   type Database,
+  purgeTenantFinancials,
 } from "@chaste/db";
 import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerHrCapabilities, type ModuleDeps } from "./index";
@@ -45,9 +46,7 @@ async function purgeProbeOrgs(): Promise<void> {
     .from(organizations)
     .where(eq(organizations.name, "Payroll Reversal Probe"));
   for (const o of orgs) {
-    const es = await db.db.select({ id: journalEntries.id }).from(journalEntries).where(eq(journalEntries.orgId, o.id));
-    for (const e of es) await db.db.delete(journalLines).where(eq(journalLines.entryId, e.id));
-    await db.db.delete(journalEntries).where(eq(journalEntries.orgId, o.id));
+    await purgeTenantFinancials(db.db, o.id);
     await db.db.delete(organizations).where(eq(organizations.id, o.id));
   }
 }

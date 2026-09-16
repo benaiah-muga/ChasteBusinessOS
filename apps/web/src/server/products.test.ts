@@ -20,7 +20,7 @@ import {
   type Database,
 } from "@chaste/db";
 import type { KernelExecutor, ActionContext } from "@chaste/kernel";
-import { createDb } from "@chaste/db";
+import { createDb, purgeTenantFinancials } from "@chaste/db";
 
 /**
  * Products & sales surface, end to end against real Postgres: item catalog
@@ -90,10 +90,7 @@ afterAll(async () => {
   );
   await db.delete(invoices).where(eq(invoices.orgId, orgId));
   await db.delete(quotes).where(eq(quotes.orgId, orgId));
-  await db.delete(journalLines).where(
-    sql`${journalLines.entryId} IN (SELECT id FROM journal_entries WHERE org_id = ${orgId})`,
-  );
-  await db.delete(journalEntries).where(eq(journalEntries.orgId, orgId));
+  await purgeTenantFinancials(db, orgId);
   await db.delete(customers).where(eq(customers.orgId, orgId));
   await db.delete(items).where(eq(items.orgId, orgId));
   await db.delete(userRoles).where(eq(userRoles.orgId, orgId));

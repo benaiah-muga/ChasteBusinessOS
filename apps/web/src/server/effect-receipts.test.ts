@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, invoices, journalEntries, payments, organizations, accounts, customers, type Database } from "@chaste/db";
+import { createDb, invoices, payments, organizations, accounts, customers, type Database, purgeTenantFinancials } from "@chaste/db";
 import { CapabilityRegistry, KernelExecutor, type NewLedgerEntry } from "@chaste/kernel";
 import { registerAccountingCapabilities } from "@chaste/module-accounting";
 import { pgEffectReceiptStore } from "./effect-receipts";
@@ -68,7 +68,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.delete(payments).where(eq(payments.orgId, orgId));
   await db.delete(invoices).where(eq(invoices.orgId, orgId));
-  await db.delete(journalEntries).where(eq(journalEntries.orgId, orgId));
+  await purgeTenantFinancials(db, orgId);
   await db.delete(accounts).where(eq(accounts.orgId, orgId));
   await db.delete(customers).where(eq(customers.orgId, orgId));
   await db.delete(organizations).where(eq(organizations.id, orgId));

@@ -11,6 +11,7 @@ import {
   organizations,
   payments,
   type Database,
+  purgeTenantFinancials,
 } from "@chaste/db";
 import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerAccountingCapabilities, type ModuleDeps } from "./index";
@@ -49,9 +50,7 @@ async function purgeProbeOrgs(): Promise<void> {
     .from(organizations)
     .where(eq(organizations.name, "Reversal Probe"));
   for (const o of orgs) {
-    const es = await db.db.select({ id: journalEntries.id }).from(journalEntries).where(eq(journalEntries.orgId, o.id));
-    for (const e of es) await db.db.delete(journalLines).where(eq(journalLines.entryId, e.id));
-    await db.db.delete(journalEntries).where(eq(journalEntries.orgId, o.id));
+    await purgeTenantFinancials(db.db, o.id);
     await db.db.delete(organizations).where(eq(organizations.id, o.id));
   }
 }
@@ -193,23 +192,26 @@ describe("N12 payment compensation", () => {
 
   it("reversing a foreign-currency manual entry keeps that currency", async () => {
     const [ar] = await db.db.select().from(accounts).where(and(eq(accounts.orgId, orgId), eq(accounts.code, "4000")));
-    const [entry] = await db.db
-      .insert(journalEntries)
-      .values({
-        orgId,
-        memo: "EUR adjustment",
-        sourceType: "manual",
-        currency: "EUR",
-        postedAt: ctx.now,
-        postedByActorType: "human",
-      })
-      .returning({ id: journalEntries.id });
-    await db.db.insert(journalLines).values([
-      { entryId: entry!.id, accountId: ar!.id, debitMinor: 5000, creditMinor: 0 },
-      { entryId: entry!.id, accountId: ar!.id, debitMinor: 0, creditMinor: 5000 },
-    ]);
+    const entryId = await db.db.transaction(async (tx) => {
+      const [entry] = await tx
+        .insert(journalEntries)
+        .values({
+          orgId,
+          memo: "EUR adjustment",
+          sourceType: "manual",
+          currency: "EUR",
+          postedAt: ctx.now,
+          postedByActorType: "human",
+        })
+        .returning({ id: journalEntries.id });
+      await tx.insert(journalLines).values([
+        { entryId: entry!.id, accountId: ar!.id, debitMinor: 5000, creditMinor: 0 },
+        { entryId: entry!.id, accountId: ar!.id, debitMinor: 0, creditMinor: 5000 },
+      ]);
+      return entry!.id;
+    });
 
-    const rev = await run("accounting.reverseEntry", { entryId: entry!.id });
+    const rev = await run("accounting.reverseEntry", { entryId });
     const [mirror] = await db.db.select().from(journalEntries).where(eq(journalEntries.id, rev.reversalEntryId));
     expect(mirror!.currency).toBe("EUR");
   });
@@ -238,20 +240,23 @@ describe("N12 generic reversal routing", () => {
     // the entry's declared source, so the rows are stamped directly.
     const [revenue] = await db.db.select().from(accounts).where(and(eq(accounts.orgId, orgId), eq(accounts.code, "4000")));
     for (const sourceType of ["payroll_run", "pos_sale", "inventory-valuation"]) {
-      const [e] = await db.db
-        .insert(journalEntries)
-        .values({
-          orgId,
-          memo: `routing probe ${sourceType}`,
-          sourceType,
-          postedAt: ctx.now,
-          postedByActorType: "human",
-        })
-        .returning({ id: journalEntries.id });
-      await db.db.insert(journalLines).values([
-        { entryId: e!.id, accountId: revenue!.id, debitMinor: 100, creditMinor: 0 },
-        { entryId: e!.id, accountId: revenue!.id, debitMinor: 0, creditMinor: 100 },
-      ]);
+      const e = await db.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(journalEntries)
+          .values({
+            orgId,
+            memo: `routing probe ${sourceType}`,
+            sourceType,
+            postedAt: ctx.now,
+            postedByActorType: "human",
+          })
+          .returning({ id: journalEntries.id });
+        await tx.insert(journalLines).values([
+          { entryId: row!.id, accountId: revenue!.id, debitMinor: 100, creditMinor: 0 },
+          { entryId: row!.id, accountId: revenue!.id, debitMinor: 0, creditMinor: 100 },
+        ]);
+        return row!;
+      });
       await expect(run("accounting.reverseEntry", { entryId: e!.id })).rejects.toThrow(
         /domain workflow/,
       );
@@ -264,17 +269,25 @@ describe("N12 generic reversal routing", () => {
       lines: [{ description: "pos routing", quantity: 1000, unitPriceMinor: 20_000 }],
     });
     // A register sale's payment row points at the pos_sale entry.
-    const [posEntry] = await db.db
-      .insert(journalEntries)
-      .values({
-        orgId,
-        memo: "POS sale routing probe",
-        sourceType: "pos_sale",
-        sourceId: inv.invoiceId,
-        postedAt: ctx.now,
-        postedByActorType: "human",
-      })
-      .returning({ id: journalEntries.id });
+    const [cash] = await db.db.select().from(accounts).where(and(eq(accounts.orgId, orgId), eq(accounts.code, "1000")));
+    const posEntry = await db.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(journalEntries)
+        .values({
+          orgId,
+          memo: "POS sale routing probe",
+          sourceType: "pos_sale",
+          sourceId: inv.invoiceId,
+          postedAt: ctx.now,
+          postedByActorType: "human",
+        })
+        .returning({ id: journalEntries.id });
+      await tx.insert(journalLines).values([
+        { entryId: row!.id, accountId: cash!.id, debitMinor: 20000, creditMinor: 0 },
+        { entryId: row!.id, accountId: cash!.id, debitMinor: 0, creditMinor: 20000 },
+      ]);
+      return row!;
+    });
     const [payment] = await db.db
       .insert(payments)
       .values({ orgId, invoiceId: inv.invoiceId, amountMinor: 20_000, method: "cash", entryId: posEntry!.id })

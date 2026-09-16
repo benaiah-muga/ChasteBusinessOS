@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { createDb, withOrgContext, type Database } from "./client";
+import { beginLedgerMaintenance, purgeTenantFinancials } from "./ledger-maintenance";
 import {
   accounts,
   cycleCountLines,
@@ -69,6 +70,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // Declared maintenance purge: even a mid-test failure must not strand
+  // journal rows that the org cascade below could not remove (N09).
+  await purgeTenantFinancials(admin.db, orgA);
+  await purgeTenantFinancials(admin.db, orgB);
   await admin.db.delete(memberships).where(sql`org_id in (${orgA}, ${orgB})`);
   await admin.db.delete(accounts).where(sql`org_id in (${orgA}, ${orgB})`);
   await admin.db.delete(organizations).where(sql`id in (${orgA}, ${orgB})`);
@@ -96,22 +101,30 @@ describe("row-level security", () => {
       .from(accounts)
       .where(sql`${accounts.orgId} = ${orgA}`)
       .limit(1);
-    const [entry] = await admin.db
-      .insert(journalEntries)
-      .values({ orgId: orgA, memo: "rls probe", postedByActorType: "system" })
-      .returning({ id: journalEntries.id });
-    await admin.db.insert(journalLines).values({
-      entryId: entry!.id,
-      accountId: acct!.id,
-      debitMinor: 1,
+    // A balanced vehicle entry posted in one transaction: commit-time guards
+    // (N09) are unconditional, so even an RLS probe may not persist broken
+    // state.
+    const entry = await admin.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(journalEntries)
+        .values({ orgId: orgA, memo: "rls probe", postedByActorType: "system" })
+        .returning({ id: journalEntries.id });
+      await tx.insert(journalLines).values([
+        { entryId: row!.id, accountId: acct!.id, debitMinor: 1, creditMinor: 0 },
+        { entryId: row!.id, accountId: acct!.id, debitMinor: 0, creditMinor: 1 },
+      ]);
+      return row!;
     });
     try {
       const seenFromB = await withOrgContext(probe.db, orgB, (tx) => tx.select().from(journalLines));
       expect(seenFromB).toHaveLength(0);
       const seenFromA = await withOrgContext(probe.db, orgA, (tx) => tx.select().from(journalLines));
-      expect(seenFromA).toHaveLength(1);
+      expect(seenFromA).toHaveLength(2);
     } finally {
-      await admin.db.delete(journalEntries).where(sql`id = ${entry!.id}`);
+      await beginLedgerMaintenance(admin.db, async (tx) => {
+        await tx.delete(journalLines).where(sql`entry_id = ${entry.id}`);
+        await tx.delete(journalEntries).where(sql`id = ${entry.id}`);
+      });
     }
   });
 

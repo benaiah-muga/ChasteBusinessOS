@@ -6,12 +6,11 @@ import {
   createDb,
   customers,
   invoices,
-  journalEntries,
-  ledgerEvents,
   organizations,
   payments,
   withOrgContext,
   type Database,
+  purgeTenantFinancials,
 } from "@chaste/db";
 import { KernelExecutor } from "@chaste/kernel";
 import { pgEffectReceiptStore } from "./effect-receipts";
@@ -70,8 +69,8 @@ afterAll(async () => {
   await db.delete(actionReceipts).where(eq(actionReceipts.orgId, orgId));
   await db.delete(payments).where(eq(payments.orgId, orgId));
   await db.delete(invoices).where(eq(invoices.orgId, orgId));
-  await db.delete(journalEntries).where(eq(journalEntries.orgId, orgId));
-  await db.delete(ledgerEvents).where(eq(ledgerEvents.orgId, orgId));
+await purgeTenantFinancials(db, orgId);
+  await purgeTenantFinancials(db, orgId);
   await db.delete(accounts).where(eq(accounts.orgId, orgId));
   await db.delete(customers).where(eq(customers.orgId, orgId));
   await db.delete(organizations).where(eq(organizations.id, orgId));

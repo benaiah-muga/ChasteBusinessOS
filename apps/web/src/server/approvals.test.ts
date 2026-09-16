@@ -9,10 +9,9 @@ import {
   defineCapability,
   type ActionContext,
 } from "@chaste/kernel";
-import { createDb, type Database } from "@chaste/db";
+import { createDb, type Database, purgeTenantFinancials } from "@chaste/db";
 import {
   approvals,
-  ledgerEvents,
   memberships,
   organizations,
   rolePermissions,
@@ -102,7 +101,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await db.delete(ledgerEvents).where(eq(ledgerEvents.orgId, orgId));
+  await purgeTenantFinancials(db, orgId);
   await db.delete(approvals).where(eq(approvals.orgId, orgId));
   await db.delete(userRoles).where(eq(userRoles.orgId, orgId));
   await db.delete(rolePermissions).where(eq(rolePermissions.orgId, orgId));

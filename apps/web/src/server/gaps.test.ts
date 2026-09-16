@@ -10,7 +10,6 @@ import {
   jobs,
   journalEntries,
   journalLines,
-  ledgerEvents,
   memberships,
   notifications,
   payments,
@@ -26,7 +25,7 @@ import {
   type Database,
 } from "@chaste/db";
 import type { KernelExecutor, ActionContext } from "@chaste/kernel";
-import { createDb } from "@chaste/db";
+import { createDb, purgeTenantFinancials } from "@chaste/db";
 import { logger } from "@chaste/kernel";
 import { enqueueCapabilityJob, processOneJob } from "./jobs";
 
@@ -118,14 +117,10 @@ afterAll(async () => {
   await db.delete(invoices).where(eq(invoices.orgId, orgId));
   await db.delete(fxRates).where(eq(fxRates.orgId, orgId));
   await db.delete(customers).where(eq(customers.orgId, orgId));
-  await db.delete(journalLines).where(
-    sql`${journalLines.entryId} IN (SELECT id FROM journal_entries WHERE org_id = ${orgId})`,
-  );
-  await db.delete(journalEntries).where(eq(journalEntries.orgId, orgId));
+  await purgeTenantFinancials(db, orgId);
   await db.delete(userRoles).where(eq(userRoles.orgId, orgId));
   await db.delete(rolePermissions).where(eq(rolePermissions.orgId, orgId));
   await db.delete(roles).where(eq(roles.orgId, orgId));
-  await db.delete(ledgerEvents).where(eq(ledgerEvents.orgId, orgId));
   await db.delete(jobs).where(eq(jobs.orgId, orgId));
   await db.delete(memberships).where(eq(memberships.orgId, orgId));
   await db.delete(users).where(eq(users.id, userId));

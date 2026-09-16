@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb, withOrgContext, type Database } from "./client";
 import { customers, organizations } from "./schema/index";
-import { ensureAppRole } from "./roles";
+import { APPEND_ONLY_TABLES, ensureAppRole } from "./roles";
 
 /**
  * Executable S01 baseline: the least-privilege runtime role (chaste_app,
@@ -79,5 +79,41 @@ describe("least-privilege runtime role", () => {
 
   it("has no DDL rights", async () => {
     await expect(app.db.execute("CREATE TABLE role_escalation_probe (id int)")).rejects.toThrow();
+  });
+
+  it("cannot mutate the append-only financial tables (N09)", async () => {
+    for (const table of APPEND_ONLY_TABLES) {
+      await expect(app.db.execute(`DELETE FROM ${table}`), `${table} DELETE`).rejects.toThrow();
+      await expect(app.db.execute(`TRUNCATE ${table}`), `${table} TRUNCATE`).rejects.toThrow();
+    }
+    await expect(app.db.execute(`UPDATE journal_entries SET memo = 'x'`)).rejects.toThrow();
+    await expect(app.db.execute(`UPDATE ledger_events SET kind = 'x'`)).rejects.toThrow();
+  });
+
+  it("keeps insert and read rights on the append-only tables", async () => {
+    for (const table of APPEND_ONLY_TABLES) {
+      const res = await admin.db.execute<{ sel: boolean; ins: boolean }>(
+        `SELECT has_table_privilege('chaste_app', '${table}', 'SELECT') AS sel,
+                has_table_privilege('chaste_app', '${table}', 'INSERT') AS ins`,
+      );
+      const row = res[0] as unknown as { sel: boolean; ins: boolean };
+      expect(row.sel, `${table} SELECT`).toBe(true);
+      expect(row.ins, `${table} INSERT`).toBe(true);
+    }
+  });
+
+  it("the append-only revocation survives an ensureAppRole re-grant (N09)", async () => {
+    await ensureAppRole({ databaseUrl: url });
+    for (const table of APPEND_ONLY_TABLES) {
+      const res = await admin.db.execute<{ upd: boolean; del: boolean; trunc: boolean }>(
+        `SELECT has_table_privilege('chaste_app', '${table}', 'UPDATE') AS upd,
+                has_table_privilege('chaste_app', '${table}', 'DELETE') AS del,
+                has_table_privilege('chaste_app', '${table}', 'TRUNCATE') AS trunc`,
+      );
+      const row = res[0] as unknown as { upd: boolean; del: boolean; trunc: boolean };
+      expect(row.upd, `${table} UPDATE revoked`).toBe(false);
+      expect(row.del, `${table} DELETE revoked`).toBe(false);
+      expect(row.trunc, `${table} TRUNCATE revoked`).toBe(false);
+    }
   });
 });

@@ -8,7 +8,7 @@ import {
   type AgentTurn,
   type ModelAdapter,
 } from "@chaste/kernel";
-import { createDb, agentSessions, type Database } from "@chaste/db";
+import { createDb, agentSessions, type Database, purgeTenantFinancials } from "@chaste/db";
 import { customers, invoices, ledgerEvents, memberships, organizations, rolePermissions, roles, supportConversations, supportMessages, userRoles, users } from "@chaste/db";
 import { registerSupportCapabilities } from "@chaste/module-support";
 import { draftSupportReply } from "./support-agent";
@@ -134,7 +134,7 @@ afterAll(async () => {
   await db.delete(supportConversations).where(eq(supportConversations.orgId, orgId));
   await db.delete(invoices).where(eq(invoices.orgId, orgId));
   await db.delete(customers).where(eq(customers.orgId, orgId));
-  await db.delete(ledgerEvents).where(eq(ledgerEvents.orgId, orgId));
+  await purgeTenantFinancials(db, orgId);
   // Draft turns persist replay sessions owned by the test user.
   await db.delete(agentSessions).where(eq(agentSessions.userId, ownerId));
   await db.delete(userRoles).where(eq(userRoles.orgId, orgId));

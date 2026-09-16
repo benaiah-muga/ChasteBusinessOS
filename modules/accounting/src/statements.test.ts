@@ -5,10 +5,9 @@ import {
   createDb,
   customers,
   invoices,
-  journalEntries,
-  journalLines,
   organizations,
   type Database,
+  purgeTenantFinancials,
 } from "@chaste/db";
 import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerAccountingCapabilities, type ModuleDeps } from "./index";
@@ -43,11 +42,7 @@ async function run<I>(id: string, input: I): Promise<any> {
 async function purgeProbeOrgs(): Promise<void> {
   const orgs = await db.db.select({ id: organizations.id }).from(organizations).where(eq(organizations.name, "Statement Probe"));
   for (const o of orgs) {
-    const entries = await db.db.select({ id: journalEntries.id }).from(journalEntries).where(eq(journalEntries.orgId, o.id));
-    for (const e of entries) {
-      await db.db.delete(journalLines).where(eq(journalLines.entryId, e.id));
-    }
-    await db.db.delete(journalEntries).where(eq(journalEntries.orgId, o.id));
+    await purgeTenantFinancials(db.db, o.id);
     await db.db.delete(organizations).where(eq(organizations.id, o.id));
   }
 }

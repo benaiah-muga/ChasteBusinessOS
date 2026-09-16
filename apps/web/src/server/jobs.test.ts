@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { createDb, type Database } from "@chaste/db";
-import { jobs, ledgerEvents, organizations } from "@chaste/db";
+import { createDb, type Database, purgeTenantFinancials } from "@chaste/db";
+import { jobs, organizations } from "@chaste/db";
 import { logger } from "@chaste/kernel";
 import { claimJob, enqueueCapabilityJob, finalizeJob, processOneJob } from "./jobs";
 
@@ -29,7 +29,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db.delete(ledgerEvents).where(eq(ledgerEvents.orgId, orgId));
+  await purgeTenantFinancials(db, orgId);
   await db.delete(jobs).where(eq(jobs.orgId, orgId));
   await db.delete(organizations).where(eq(organizations.id, orgId));
   await pg.client.end();
