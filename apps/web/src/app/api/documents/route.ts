@@ -65,8 +65,6 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const ctx = actorFromResolved(resolved, {});
-  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
@@ -78,8 +76,12 @@ export async function POST(req: Request) {
     mimeType?: string;
     documentId?: string;
     sync?: boolean;
+    intentId?: string;
     lines?: { description: string; quantityThousandths?: number; unitPriceMinor?: number }[];
   };
+  const intentId = typeof body.intentId === "string" ? body.intentId : undefined;
+  const ctx = actorFromResolved(resolved, { intentId });
+  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   switch (body.action) {
     case "create": {

@@ -93,7 +93,9 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const parsed = sendSchema.safeParse(await req.json());
+  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const intentId = typeof raw?.intentId === "string" ? raw.intentId : undefined;
+  const parsed = sendSchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
   const db = getDb().db;
@@ -101,7 +103,7 @@ export async function POST(req: Request, { params }: Params) {
   const executor = buildExecutor(db, registry);
 
   // Human posts through the same capability pipeline as the agent.
-  const humanCtx = actorFromResolved(resolved, {});
+  const humanCtx = actorFromResolved(resolved, { intentId });
   if (!humanCtx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
   const sent = await executor.execute("messaging.sendMessage", humanCtx, {
     conversationId: id,

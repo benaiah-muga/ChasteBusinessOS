@@ -33,11 +33,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "forbidden: missing permission: iam.admin" }, { status: 403 });
   }
 
-  const parsed = bodySchema.safeParse(await req.json().catch(() => null));
+  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const intentId = typeof raw?.intentId === "string" ? raw.intentId : undefined;
+  const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
   const db = getDb().db;
-  const ctx = actorFromResolved(resolved, {});
+  const ctx = actorFromResolved(resolved, { intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   const executor = buildExecutor(db, buildRegistry(db));

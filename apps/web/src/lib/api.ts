@@ -118,6 +118,18 @@ export function postApi<T = unknown>(url: string, body: unknown): Promise<ApiRes
   return callApi<T>(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(withIntentId(body)),
   });
+}
+
+/**
+ * Client action identity (B02): every mutating request carries an intentId so
+ * a retried intent reconciles to the same server-side receipt instead of
+ * executing twice. Callers that need one identity across several submissions
+ * of the same logical action (confirm dialogs) pass their own and win.
+ */
+function withIntentId(body: unknown): unknown {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return body;
+  if ("intentId" in body) return body;
+  return { ...(body as Record<string, unknown>), intentId: crypto.randomUUID() };
 }

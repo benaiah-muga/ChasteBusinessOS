@@ -12,6 +12,15 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **intent action identity on every mutating UI request (B02 adoption).**
+  The UI's single API seam now stamps each POST with a per-call `intentId`
+  (callers can pass their own to span retries of one logical action), and
+  every mutating API route threads it into the actor context. A request
+  that is retried — double-click, flaky network, proxy replay — now
+  reconciles to the original server-side receipt instead of executing
+  twice, and reusing an identity with a different payload is refused.
+  Agent loops are excluded by design (one context spans many tool steps;
+  scheduled runs already key receipts by job id).
 - **identity lifecycle and public-widget containment (N03/N04/N07/N08,
   ADR 0053).** Invitation acceptance is now a row-locked, compare-and-set
   transaction — a concurrent double accept yields exactly one winner, an

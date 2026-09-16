@@ -65,12 +65,14 @@ export async function POST(req: Request) {
   if (!resolved?.orgId || !hasPermissionFor(resolved, "messaging.write")) {
     return NextResponse.json({ error: "you lack authority over messaging" }, { status: 403 });
   }
-  const body = createSchema.safeParse(await req.json());
+  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const intentId = typeof raw?.intentId === "string" ? raw.intentId : undefined;
+  const body = createSchema.safeParse(raw);
   if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
   // N08: governed creation — the capability inserts the header and the
   // creator's membership in one audited unit instead of two route statements.
-  const ctx = actorFromResolved(resolved);
+  const ctx = actorFromResolved(resolved, { intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
   const executor = buildExecutor(getDb().db, buildRegistry(getDb().db));
   const result = await executor.execute("messaging.createConversation", ctx, {

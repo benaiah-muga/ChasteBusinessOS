@@ -40,8 +40,6 @@ export async function GET() {
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const ctx = actorFromResolved(resolved, {});
-  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   const body = (await req.json()) as {
     action?: string;
@@ -49,7 +47,12 @@ export async function POST(req: Request) {
     signatureBase64?: string;
     publisherPublicKeyBase64?: string;
     listingId?: string;
+    intentId?: string;
   };
+  const intentId = typeof body.intentId === "string" ? body.intentId : undefined;
+  const ctx = actorFromResolved(resolved, { intentId });
+  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
 

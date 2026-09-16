@@ -165,7 +165,9 @@ export async function POST(req: Request) {
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   if (!supportEnabled(resolved)) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const parsed = actionSchema.safeParse(await req.json().catch(() => null));
+  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const intentId = typeof raw?.intentId === "string" ? raw.intentId : undefined;
+  const parsed = actionSchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
   const input = parsed.data;
 
@@ -194,7 +196,7 @@ export async function POST(req: Request) {
   const registry = buildRegistry(db);
   const executor = buildExecutor(db, registry);
   const executorNeedsActor = input.action !== "draft";
-  const ctx = executorNeedsActor ? actorFromResolved(resolved, { asAgent: false }) : null;
+  const ctx = executorNeedsActor ? actorFromResolved(resolved, { asAgent: false, intentId }) : null;
   if (executorNeedsActor && !ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   switch (input.action) {

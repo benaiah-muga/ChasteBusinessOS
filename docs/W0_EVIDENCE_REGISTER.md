@@ -276,6 +276,29 @@ bootstrap:
   T08 — intent-keyed atomic bootstrap receipt); N03's full verified-binding
   matrix (deployment-level proof); SCIM token expiry/rotation policy.
 
+## B02 client action identity — intentId adoption across UI surfaces (delivered)
+
+Every mutating UI request now carries a client action identity, closing the
+B02 adoption gap (the kernel receipts existed; most surfaces never sent an
+id):
+
+- `postApi` (the single UI/API seam) injects a fresh per-call `intentId`
+  into any object body that lacks one; callers with one identity across
+  several submissions of the same logical action pass their own and win
+  (`api.test.ts` pins all three behaviors).
+- Every mutating POST route extracts the optional `intentId` from its body
+  and threads it into the actor context, so the kernel receipt store can
+  replay a retried intent and refuse a conflicting reuse. Declared
+  exceptions: SCIM (machine API, no client identity), invite claim
+  (state-guarded CAS that answers retries honestly), chat and the messages
+  agent reply (one actor context is shared across every step of an agent
+  loop — a single request-scoped id would false-conflict; job-driven agent
+  runs already key receipts by job id), notifications (idempotent read
+  receipt on a conflict-protected table, not a domain write).
+- Pinned by `GATES-INTENT.md`: postApi unit test, the route-threading sweep
+  across 26 routes, the effect-receipts replay/conflict suite, and the repo
+  verification gate.
+
 ## Remaining W0 work
 
 - Revalidate and reproduce N12–N36 anchors on demand, prioritized by wave (I1/I2 items first).

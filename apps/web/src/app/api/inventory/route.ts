@@ -144,10 +144,12 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const ctx = actorFromResolved(resolved, {});
-  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   const body = (await req.json()) as Record<string, unknown>;
+  const intentId = typeof body.intentId === "string" ? body.intentId : undefined;
+  const ctx = actorFromResolved(resolved, { intentId });
+  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
   const str = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : undefined);

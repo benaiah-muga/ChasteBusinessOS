@@ -118,8 +118,6 @@ export async function GET() {
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const ctx = actorFromResolved(resolved, {});
-  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   const executor = buildExecutor(getDb().db, buildRegistry(getDb().db));
   const body = (await req.json()) as {
@@ -149,8 +147,12 @@ export async function POST(req: Request) {
     applicantId?: string;
     stage?: string;
     note?: string;
+    intentId?: string;
   };
   if (!body.action) return NextResponse.json({ error: "action required" }, { status: 400 });
+  const intentId = typeof body.intentId === "string" ? body.intentId : undefined;
+  const ctx = actorFromResolved(resolved, { intentId });
+  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   // Dispatch explicitly so each capability gets exactly the input its schema declares.
   switch (body.action) {

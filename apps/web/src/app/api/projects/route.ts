@@ -84,10 +84,12 @@ const actionSchema = z.discriminatedUnion("action", [
 
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
-  const humanCtx = resolved ? actorFromResolved(resolved, {}) : null;
+  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const intentId = typeof raw?.intentId === "string" ? raw.intentId : undefined;
+  const humanCtx = resolved ? actorFromResolved(resolved, { intentId }) : null;
   if (!resolved?.orgId || !humanCtx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const body = actionSchema.safeParse(await req.json().catch(() => null));
+  const body = actionSchema.safeParse(raw);
   if (!body.success) return NextResponse.json({ error: "invalid body", detail: body.error.issues }, { status: 400 });
 
   const executor = buildExecutor(getDb().db, buildRegistry(getDb().db));

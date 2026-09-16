@@ -4,12 +4,12 @@ import { bomLines, getDb, items, lots, stockMovements, workOrders } from "@chast
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 
-async function guard(): Promise<
+async function guard(intentId?: string): Promise<
   { error: NextResponse } | { ctx: NonNullable<ReturnType<typeof actorFromResolved>>; executor: ReturnType<typeof buildExecutor> }
 > {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
-  const ctx = actorFromResolved(resolved, {});
+  const ctx = actorFromResolved(resolved, { intentId });
   if (!ctx) return { error: NextResponse.json({ error: "onboarding required" }, { status: 428 }) };
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
@@ -190,7 +190,7 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
-  const g = await guard();
+  const g = await guard(typeof body.intentId === "string" ? body.intentId : undefined);
   if ("error" in g) return g.error;
   const { ctx, executor } = g;
 

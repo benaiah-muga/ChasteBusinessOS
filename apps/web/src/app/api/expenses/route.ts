@@ -54,10 +54,12 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const parsed = actionSchema.safeParse(await req.json().catch(() => null));
+  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const intentId = typeof raw?.intentId === "string" ? raw.intentId : undefined;
+  const parsed = actionSchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
   const db = getDb().db;
-  const ctx = actorFromResolved(resolved, {});
+  const ctx = actorFromResolved(resolved, { intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   const capId =
