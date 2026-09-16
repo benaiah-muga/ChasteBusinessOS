@@ -336,6 +336,27 @@ id):
 
 - Revalidate and reproduce N12–N36 anchors on demand, prioritized by wave (I1/I2 items first).
 - Pilot segment/workflow selection (W0.5).
+
+## B03 — worker-kill fixture and external-effect reconciliation (delivered)
+
+`worker-kill.test.ts` kills a worker mid-flight while it holds the lease and
+pins what the surviving system owes, per kill window:
+
+- **Killed after the effect and receipt, before the acknowledgement**: the
+  replacement worker replays the stored receipt — exactly one effect and one
+  audit row, the job completes done, and the revived worker's late
+  acknowledgement is fenced by its stale fencing token.
+- **Killed mid-execution, before the effect**: the replacement runs fresh and
+  completes; when the corpse un-freezes it commits a duplicate effect but its
+  acknowledgement is still fenced. The queue's honest promise is
+  **at-least-once plus fencing** — mid-flight exactly-once requires
+  capability-level idempotency, which external effects get from dedupe keys
+  and idempotency-key headers.
+- **External webhook whose acknowledgement died in transit**: the provider
+  received exactly one call; the next worker pass converges the row to
+  `unknown` (never a blind re-fire), the corpse's ack is fenced, and
+  `reconcileOutboxMessage` settles it from the provider receipt exactly once.
+  A duplicate enqueue of the same dedupe key collapses onto the settled row.
 - Extend the first queue slice with a worker-kill fixture and complete B03's
   external-effect reconciliation proof; the local lease/fencing boundary is
   now implemented and covered.

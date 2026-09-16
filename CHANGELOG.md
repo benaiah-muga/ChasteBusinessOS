@@ -12,6 +12,14 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **worker-kill proof for the queue and outbox (B03).** A new fixture kills
+  a worker mid-flight while it holds the lease and pins the recovery
+  contract for three windows: killed after the effect (the replacement
+  replays the receipt — exactly one effect), killed mid-execution
+  (at-least-once redelivery, the dead worker's acknowledgement stays
+  fenced), and an external webhook whose acknowledgement died in transit
+  (the delivery converges to an honest "unknown", never auto re-fires, and
+  reconciliation settles it from the provider receipt exactly once).
 - **the stock ledger is append-only at the database (ADR 0052 extension).**
   Stock movements can no longer be edited or deleted by any code path:
   corrections are compensating movements — reversal runs, transfer
