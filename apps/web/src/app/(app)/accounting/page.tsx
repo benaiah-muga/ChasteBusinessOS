@@ -38,6 +38,24 @@ interface Entry {
   actorType: string;
   amountMinor: number;
 }
+interface InvoiceRow {
+  id: string;
+  number: number;
+  customerId: string;
+  customerName: string;
+  status: string;
+  totalMinor: number;
+  paidMinor: number;
+  outstandingMinor: number;
+  issuedAt: string | null;
+}
+interface PaymentRow {
+  id: string;
+  invoiceNumber: number;
+  amountMinor: number;
+  method: string;
+  receivedAt: string;
+}
 interface Overview {
   entries: Entry[];
   aging: { current: number; d30: number; d60: number; d90plus: number; totalOutstanding: number };
@@ -46,10 +64,24 @@ interface Overview {
   bills: { id: string; number: number; status: string; totalMinor: number; paidMinor: number; vendorName: string; outstandingMinor: number }[];
   filings: Filing[];
   customers?: { id: string; name: string }[];
+  invoices?: InvoiceRow[];
+  payments?: PaymentRow[];
 }
 interface Reports {
   pnl: { revenueMinor: number; expenseMinor: number; netIncomeMinor: number; lines: { code: string; name: string; amountMinor: number }[] };
   balanceSheet: { assetsMinor: number; liabilitiesMinor: number; equityMinor: number; retainedResultMinor: number; balanced: boolean };
+  cashFlow?: CashFlow | null;
+  fxExposure?: { exposures: { currency: string; outstandingForeignMinor: number; latestRateNum: number | null; latestRateDen: number | null; outstandingBaseMinor: number | null }[] } | null;
+}
+interface CashFlow {
+  openingMinor: number;
+  closingMinor: number;
+  netMinor: number;
+  cashBalanceMinor: number;
+  ties: boolean;
+  operating: { inflowMinor: number; outflowMinor: number; netMinor: number; entries: number };
+  investing: { inflowMinor: number; outflowMinor: number; netMinor: number; entries: number };
+  financing: { inflowMinor: number; outflowMinor: number; netMinor: number; entries: number };
 }
 interface CashBasis {
   cashInMinor: number;
@@ -68,6 +100,8 @@ interface Filing {
 interface Banking {
   accounts: { id: string; name: string; currencyCode: string; last4: string | null; balanceMinor: number }[];
   unmatched: { id: string; bankAccountId: string; postedAt: string; amountMinor: number; description: string }[];
+  matched?: { id: string; postedAt: string; amountMinor: number; description: string }[];
+  excluded?: { id: string; postedAt: string; amountMinor: number; description: string }[];
   payments: { id: string; invoiceNumber: number | null; customerName: string; amountMinor: number; receivedAt: string }[];
   summary: {
     accounts: { bankAccountId: string; name: string; count: number; moneyInMinor: number; moneyOutMinor: number }[];
@@ -324,7 +358,17 @@ export default function AccountingPage() {
         />
       )}
 
-      {tab === "receivables" && <ReceivablesSection a={a} agingInvoices={data.agingInvoices} />}
+      {tab === "receivables" && (
+        <ReceivablesSection
+          a={a}
+          agingInvoices={data.agingInvoices}
+          invoices={data.invoices ?? []}
+          payments={data.payments ?? []}
+          customers={data.customers ?? []}
+          busy={busy}
+          onAction={action}
+        />
+      )}
 
       {tab === "cash" && <CashSection customers={data.customers ?? []} />}
 
@@ -336,13 +380,16 @@ export default function AccountingPage() {
 
       {tab === "tax" && <TaxSection filings={data.filings} busy={busy} onAction={action} />}
 
-      {tab === "reports" && reports?.pnl && <ReportsSection reports={reports} cash={cash} year={new Date().getUTCFullYear()} />}
+      {tab === "reports" && reports?.pnl && (
+        <ReportsSection reports={reports} cash={cash} year={new Date().getUTCFullYear()} busy={busy} onAction={action} />
+      )}
 
       {tab === "periods" && (
         <PeriodsSection
           closedPeriods={data.closedPeriods}
           onOpenClose={() => setCloseOpen(true)}
           onCloseYear={(year) => action({ action: "closeYear", year }, `Year-end close ${year}`)}
+          onReopen={(year, month) => action({ action: "reopenPeriod", year, month }, `Reopen ${year}-${String(month).padStart(2, "0")}`)}
           busy={busy}
         />
       )}
@@ -721,11 +768,46 @@ function JournalSection({
 
 /* ------------------------------------------------------- receivables/payables */
 
-function ReceivablesSection({ a, agingInvoices }: { a: Overview["aging"]; agingInvoices: Overview["agingInvoices"] }) {
+function ReceivablesSection({
+  a,
+  agingInvoices,
+  invoices,
+  payments,
+  customers,
+  busy,
+  onAction,
+}: {
+  a: Overview["aging"];
+  agingInvoices: Overview["agingInvoices"];
+  invoices: InvoiceRow[];
+  payments: PaymentRow[];
+  customers: { id: string; name: string }[];
+  busy: boolean;
+  onAction: (payload: Record<string, unknown>, label: string) => Promise<void>;
+}) {
   const [emailFor, setEmailFor] = useState<number | null>(null);
   const [emailTo, setEmailTo] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailNote, setEmailNote] = useState<string | null>(null);
+
+  // New invoice
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [invoiceForm, setInvoiceForm] = useState({
+    customerId: "",
+    memo: "",
+    lines: [{ description: "", quantity: "1", unitPrice: "0.00", tax: "0.00" }],
+    currency: "",
+    dueAt: "",
+  });
+
+  // Pay / credit / reverse
+  const [payFor, setPayFor] = useState<InvoiceRow | null>(null);
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState<"bank_transfer" | "cash" | "card">("bank_transfer");
+  const [creditFor, setCreditFor] = useState<InvoiceRow | null>(null);
+  const [creditForm, setCreditForm] = useState({ amount: "", reason: "" });
+  const [reverseFor, setReverseFor] = useState<PaymentRow | null>(null);
+  const [reverseReason, setReverseReason] = useState("");
 
   async function sendInvoice(number: number) {
     setEmailBusy(true);
@@ -745,6 +827,34 @@ function ReceivablesSection({ a, agingInvoices }: { a: Overview["aging"]; agingI
     }
   }
 
+  function createInvoice() {
+    const lines = invoiceForm.lines
+      .map((l) => ({
+        description: l.description.trim(),
+        quantity: Math.round(Number(l.quantity || "0") * 1000),
+        unitPriceMinor: Math.round(Number(l.unitPrice || "0") * 100),
+        taxMinor: Math.round(Number(l.tax || "0") * 100),
+      }))
+      .filter((l) => l.description.length > 0 && l.quantity > 0);
+    if (!invoiceForm.customerId || lines.length === 0) return;
+    void onAction(
+      {
+        action: "createInvoice",
+        customerId: invoiceForm.customerId,
+        memo: invoiceForm.memo.trim() || undefined,
+        lines,
+        currency: invoiceForm.currency.trim().toUpperCase() || undefined,
+        dueAt: invoiceForm.dueAt ? new Date(`${invoiceForm.dueAt}T12:00:00Z`).toISOString() : undefined,
+      },
+      "Invoice posted",
+    ).then(() => {
+      setInvoiceOpen(false);
+      setInvoiceForm({ customerId: "", memo: "", lines: [{ description: "", quantity: "1", unitPrice: "0.00", tax: "0.00" }], currency: "", dueAt: "" });
+    });
+  }
+
+  const outstanding = invoices.filter((i) => i.outstandingMinor > 0 && i.status !== "void");
+
   return (
     <section>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
@@ -755,7 +865,79 @@ function ReceivablesSection({ a, agingInvoices }: { a: Overview["aging"]; agingI
         <StatCard label="Total outstanding" value={formatMoney(a.totalOutstanding)} tone="accent" className="col-span-2 sm:col-span-1" />
       </div>
 
-      {agingInvoices.length > 0 ? (
+      <div className="mt-4 flex justify-end">
+        <Button onClick={() => setInvoiceOpen(true)}>New invoice…</Button>
+      </div>
+
+      {/* Full invoice ledger */}
+      {invoices.length === 0 ? (
+        <QuietLine>No invoices yet — issue your first one above, or accept a quote in Sales.</QuietLine>
+      ) : (
+        <div className="table-shell mt-4">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Customer</th>
+                <th>Status</th>
+                <th className="text-right">Total</th>
+                <th className="text-right">Outstanding</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.slice(0, 30).map((inv) => {
+                const age = agingInvoices.find((x) => x.number === inv.number);
+                return (
+                  <tr key={inv.id}>
+                    <td className="tnum">{inv.number}</td>
+                    <td className="font-medium text-stone-800">{inv.customerName}</td>
+                    <td>
+                      <Badge tone={inv.status === "paid" ? "green" : inv.status === "void" ? "red" : "amber"}>{inv.status}</Badge>
+                      {age && inv.status === "sent" && (
+                        <span className="ml-1.5 text-xs text-stone-400">{age.ageDays}d</span>
+                      )}
+                    </td>
+                    <td className="num">{formatMoney(inv.totalMinor)}</td>
+                    <td className="num font-medium">{formatMoney(inv.outstandingMinor)}</td>
+                    <td className="text-right whitespace-nowrap">
+                      {inv.outstandingMinor > 0 && inv.status !== "void" && (
+                        <span className="inline-flex gap-1.5">
+                          <Button
+                            tone="secondary"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => {
+                              setPayFor(inv);
+                              setPayAmount((inv.outstandingMinor / 100).toFixed(2));
+                            }}
+                          >
+                            Pay
+                          </Button>
+                          <Button
+                            tone="ghost"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => {
+                              setCreditFor(inv);
+                              setCreditForm({ amount: (inv.outstandingMinor / 100).toFixed(2), reason: "" });
+                            }}
+                          >
+                            Credit
+                          </Button>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Overdue aging list */}
+      {agingInvoices.length > 0 && (
         <ul className="mt-4 divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-4 shadow-xs">
           {agingInvoices.map((inv) => (
             <li key={inv.number} className="py-2.5 text-sm">
@@ -791,10 +973,331 @@ function ReceivablesSection({ a, agingInvoices }: { a: Overview["aging"]; agingI
             </li>
           ))}
         </ul>
-      ) : (
-        <QuietLine>No outstanding invoices — receivables are clear.</QuietLine>
       )}
+
+      {/* Payments received */}
+      <Card className="mt-6">
+        <CardTitle right={<span className="text-xs text-stone-500">{outstanding.length} invoice{outstanding.length === 1 ? "" : "s"} open</span>}>
+          Payments received
+        </CardTitle>
+        {payments.length === 0 ? (
+          <QuietLine>No payments recorded yet — hit Pay on an invoice above.</QuietLine>
+        ) : (
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Invoice</th>
+                  <th>Method</th>
+                  <th className="text-right">Amount</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map((p) => (
+                  <tr key={p.id}>
+                    <td className="text-xs whitespace-nowrap text-stone-500" title={formatDateTime(p.receivedAt)}>
+                      {formatDate(p.receivedAt)}
+                    </td>
+                    <td className="tnum">#{p.invoiceNumber}</td>
+                    <td className="font-mono text-xs text-stone-500">{p.method}</td>
+                    <td className="num font-medium">{formatMoney(p.amountMinor)}</td>
+                    <td className="text-right">
+                      <Button
+                        tone="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => {
+                          setReverseFor(p);
+                          setReverseReason("");
+                        }}
+                      >
+                        Reverse
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-xs text-stone-500">Reversals mirror the payment&apos;s entries and release the invoice balance — always approval-gated.</p>
+      </Card>
       {emailNote && <p className="mt-2 text-xs text-stone-500">{emailNote}</p>}
+
+      {/* New invoice dialog */}
+      <Dialog
+        open={invoiceOpen}
+        onClose={() => setInvoiceOpen(false)}
+        title="New invoice"
+        description="Posts the receivable and revenue to the ledger immediately — posted documents are immutable, corrections go through credit notes."
+        width="max-w-2xl"
+        footer={
+          <>
+            <Button tone="secondary" onClick={() => setInvoiceOpen(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button loading={busy} disabled={!invoiceForm.customerId || invoiceForm.lines.every((l) => !l.description.trim())} onClick={createInvoice}>
+              Post invoice
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <select
+              className="rounded border bg-transparent px-2 py-1.5"
+              aria-label="Customer"
+              value={invoiceForm.customerId}
+              onChange={(e) => setInvoiceForm({ ...invoiceForm, customerId: e.target.value })}
+            >
+              <option value="">Customer…</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <input
+              className="min-w-40 flex-1 rounded border bg-transparent px-2 py-1.5"
+              placeholder="Memo (optional)"
+              aria-label="Memo"
+              value={invoiceForm.memo}
+              onChange={(e) => setInvoiceForm({ ...invoiceForm, memo: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs text-stone-500">
+            <label className="flex items-center gap-1">
+              Currency
+              <input
+                className="w-16 rounded border bg-transparent px-1.5 py-1"
+                placeholder="USD"
+                aria-label="Currency code (blank for base)"
+                value={invoiceForm.currency}
+                onChange={(e) => setInvoiceForm({ ...invoiceForm, currency: e.target.value })}
+              />
+            </label>
+            <label className="flex items-center gap-1">
+              Due
+              <input
+                type="date"
+                className="rounded border bg-transparent px-1.5 py-1"
+                aria-label="Due date"
+                value={invoiceForm.dueAt}
+                onChange={(e) => setInvoiceForm({ ...invoiceForm, dueAt: e.target.value })}
+              />
+            </label>
+          </div>
+          {invoiceForm.lines.map((l, i) => {
+            const setLine = (patch: Partial<typeof l>) =>
+              setInvoiceForm({ ...invoiceForm, lines: invoiceForm.lines.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <input
+                  className="min-w-40 flex-1 rounded border bg-transparent px-2 py-1.5"
+                  placeholder={`Line ${i + 1} description`}
+                  aria-label={`Line ${i + 1} description`}
+                  value={l.description}
+                  onChange={(e) => setLine({ description: e.target.value })}
+                />
+                <input
+                  className="w-20 rounded border bg-transparent px-2 py-1.5 text-right"
+                  placeholder="Qty"
+                  aria-label={`Line ${i + 1} quantity`}
+                  value={l.quantity}
+                  onChange={(e) => setLine({ quantity: e.target.value })}
+                />
+                <input
+                  className="w-24 rounded border bg-transparent px-2 py-1.5 text-right"
+                  placeholder="Unit price"
+                  aria-label={`Line ${i + 1} unit price`}
+                  value={l.unitPrice}
+                  onChange={(e) => setLine({ unitPrice: e.target.value })}
+                />
+                <input
+                  className="w-20 rounded border bg-transparent px-2 py-1.5 text-right"
+                  placeholder="Tax"
+                  aria-label={`Line ${i + 1} tax`}
+                  value={l.tax}
+                  onChange={(e) => setLine({ tax: e.target.value })}
+                />
+                <Button
+                  tone="ghost"
+                  size="sm"
+                  aria-label={`Remove line ${i + 1}`}
+                  onClick={() => setInvoiceForm({ ...invoiceForm, lines: invoiceForm.lines.filter((_, j) => j !== i) })}
+                >
+                  ✕
+                </Button>
+              </div>
+            );
+          })}
+          <Button tone="ghost" size="sm" onClick={() => setInvoiceForm({ ...invoiceForm, lines: [...invoiceForm.lines, { description: "", quantity: "1", unitPrice: "0.00", tax: "0.00" }] })}>
+            + Line
+          </Button>
+        </div>
+      </Dialog>
+
+      {/* Record payment dialog */}
+      <Dialog
+        open={payFor !== null}
+        onClose={() => setPayFor(null)}
+        title={`Record payment — invoice #${payFor?.number ?? ""}`}
+        description="Posts cash to the ledger and settles the invoice balance. Payments above the policy threshold wait for approval."
+        footer={
+          <>
+            <Button tone="secondary" onClick={() => setPayFor(null)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              loading={busy}
+              disabled={!Number(payAmount)}
+              onClick={() => {
+                if (!payFor) return;
+                void onAction(
+                  {
+                    action: "recordPayment",
+                    invoiceNumber: payFor.number,
+                    amountMinor: Math.round(Number(payAmount || "0") * 100),
+                    method: payMethod,
+                  },
+                  `Payment on invoice #${payFor.number}`,
+                ).then(() => setPayFor(null));
+              }}
+            >
+              Record payment
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-wrap items-end gap-3 text-sm">
+          <div>
+            <label htmlFor="pay-amount" className="label">
+              Amount received
+            </label>
+            <input
+              id="pay-amount"
+              inputMode="decimal"
+              className="input tnum w-32"
+              value={payAmount}
+              onChange={(e) => setPayAmount(e.target.value)}
+            />
+          </div>
+          <div>
+            <label htmlFor="pay-method" className="label">
+              Method
+            </label>
+            <select id="pay-method" className="select" value={payMethod} onChange={(e) => setPayMethod(e.target.value as typeof payMethod)}>
+              <option value="bank_transfer">Bank transfer</option>
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+            </select>
+          </div>
+          {payFor && <span className="pb-2 text-xs text-stone-500">outstanding {formatMoney(payFor.outstandingMinor)}</span>}
+        </div>
+      </Dialog>
+
+      {/* Credit note dialog */}
+      <Dialog
+        open={creditFor !== null}
+        onClose={() => setCreditFor(null)}
+        title={`Credit invoice #${creditFor?.number ?? ""} — ${creditFor?.customerName ?? ""}`}
+        description="Concedes part of the invoice through an approved reversing entry; the invoice itself is never edited."
+        footer={
+          <>
+            <Button tone="secondary" onClick={() => setCreditFor(null)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              tone="danger"
+              loading={busy}
+              disabled={!Number(creditForm.amount) || creditForm.reason.trim().length < 3}
+              onClick={() => {
+                if (!creditFor) return;
+                void onAction(
+                  {
+                    action: "creditNote",
+                    invoiceId: creditFor.id,
+                    amountMinor: Math.round(Number(creditForm.amount || "0") * 100),
+                    reason: creditForm.reason.trim(),
+                  },
+                  `Credit on invoice #${creditFor.number}`,
+                ).then(() => setCreditFor(null));
+              }}
+            >
+              Apply credit
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm">
+          <div>
+            <label htmlFor="credit-amount" className="label">
+              Amount to credit
+            </label>
+            <input
+              id="credit-amount"
+              inputMode="decimal"
+              className="input tnum w-32"
+              value={creditForm.amount}
+              onChange={(e) => setCreditForm({ ...creditForm, amount: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="credit-reason" className="label">
+              Reason
+            </label>
+            <input
+              id="credit-reason"
+              className="input"
+              placeholder="e.g. goodwill for late delivery"
+              value={creditForm.reason}
+              onChange={(e) => setCreditForm({ ...creditForm, reason: e.target.value })}
+            />
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Reverse payment dialog */}
+      <Dialog
+        open={reverseFor !== null}
+        onClose={() => setReverseFor(null)}
+        title={`Reverse payment on invoice #${reverseFor?.invoiceNumber ?? ""}`}
+        description="Mirrors the payment's journal entries, releases the invoice balance, and lets you record a corrected payment."
+        footer={
+          <>
+            <Button tone="secondary" onClick={() => setReverseFor(null)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              tone="danger"
+              loading={busy}
+              disabled={reverseReason.trim().length < 3}
+              onClick={() => {
+                if (!reverseFor) return;
+                void onAction(
+                  { action: "reversePayment", paymentId: reverseFor.id, reason: reverseReason.trim() },
+                  `Reverse payment on invoice #${reverseFor.invoiceNumber}`,
+                ).then(() => setReverseFor(null));
+              }}
+            >
+              Reverse (needs approval)
+            </Button>
+          </>
+        }
+      >
+        <div>
+          <label htmlFor="reverse-reason" className="label">
+            Reason
+          </label>
+          <input
+            id="reverse-reason"
+            className="input"
+            placeholder="e.g. customer paid twice"
+            value={reverseReason}
+            onChange={(e) => setReverseReason(e.target.value)}
+          />
+        </div>
+      </Dialog>
     </section>
   );
 }
@@ -855,7 +1358,36 @@ function PayablesSection({
 
 /* ----------------------------------------------------------------- reports -- */
 
-function ReportsSection({ reports, cash, year }: { reports: Reports; cash: CashBasis | null; year: number }) {
+function ReportsSection({
+  reports,
+  cash,
+  year,
+  busy,
+  onAction,
+}: {
+  reports: Reports;
+  cash: CashBasis | null;
+  year: number;
+  busy: boolean;
+  onAction: (payload: Record<string, unknown>, label: string) => Promise<void>;
+}) {
+  const [fxForm, setFxForm] = useState({ quoteCurrency: "", rate: "", effectiveAt: "" });
+  const cf = reports.cashFlow ?? null;
+  const exposures = reports.fxExposure?.exposures ?? [];
+
+  function recordRate() {
+    if (!fxForm.quoteCurrency.trim() || !Number(fxForm.rate)) return;
+    void onAction(
+      {
+        action: "recordFxRate",
+        quoteCurrency: fxForm.quoteCurrency.trim().toUpperCase(),
+        rate: fxForm.rate.trim(),
+        effectiveAt: fxForm.effectiveAt ? new Date(`${fxForm.effectiveAt}T12:00:00Z`).toISOString() : undefined,
+      },
+      `Record ${fxForm.quoteCurrency.toUpperCase()} rate`,
+    ).then(() => setFxForm({ quoteCurrency: "", rate: "", effectiveAt: "" }));
+  }
+
   return (
     <section className="space-y-6">
       <div className="grid gap-4 lg:grid-cols-2">
@@ -943,6 +1475,121 @@ function ReportsSection({ reports, cash, year }: { reports: Reports; cash: CashB
           <StatCard label="Booked but uncollected" value={formatMoney(cash.uncollectedMinor)} tone={cash.uncollectedMinor > 0 ? "warn" : "default"} />
         </div>
       )}
+
+      {cf && (
+        <Card>
+          <CardTitle
+            right={cf.ties ? <Badge tone="green">ties to cash</Badge> : <Badge tone="red">doesn&apos;t tie — investigate</Badge>}
+          >
+            Cash flow statement · direct method
+          </CardTitle>
+          <table className="w-full text-sm">
+            <tbody>
+              {(
+                [
+                  ["Operating", cf.operating],
+                  ["Investing", cf.investing],
+                  ["Financing", cf.financing],
+                ] as const
+              ).map(([label, b]) => (
+                <tr key={label}>
+                  <td className="py-1.5 text-stone-600">{label}</td>
+                  <td className="num py-1.5 text-emerald-700">{b.inflowMinor ? `+${formatMoney(b.inflowMinor)}` : "—"}</td>
+                  <td className="num py-1.5 text-stone-600">{b.outflowMinor ? `−${formatMoney(b.outflowMinor)}` : "—"}</td>
+                  <td className="num py-1.5 font-medium">{formatMoney(b.netMinor)}</td>
+                </tr>
+              ))}
+              <tr className="border-t border-stone-200">
+                <td className="pt-2.5 font-semibold text-stone-900">Net change in cash</td>
+                <td colSpan={2} />
+                <td className={cn("num pt-2.5 font-semibold", cf.netMinor >= 0 ? "text-stone-900" : "text-red-700")}>
+                  {formatMoney(cf.netMinor)}
+                </td>
+              </tr>
+              <tr>
+                <td className="py-1.5 text-stone-600">Cash balance now</td>
+                <td colSpan={2} />
+                <td className="num py-1.5 font-semibold text-stone-900">{formatMoney(cf.cashBalanceMinor)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      <Card>
+        <CardTitle>FX exposure &amp; rates</CardTitle>
+        {exposures.length === 0 ? (
+          <QuietLine>No foreign-currency receivables outstanding — no unrealized exposure.</QuietLine>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left opacity-50">
+                <th>Currency</th>
+                <th className="text-right">Outstanding (foreign)</th>
+                <th className="text-right">Latest rate</th>
+                <th className="text-right">Value in base</th>
+              </tr>
+            </thead>
+            <tbody>
+              {exposures.map((e) => (
+                <tr key={e.currency} className="border-t">
+                  <td className="py-1.5 font-medium">{e.currency}</td>
+                  <td className="num text-right">{formatMoney(e.outstandingForeignMinor)}</td>
+                  <td className="num text-right">
+                    {e.latestRateNum !== null && e.latestRateDen !== null ? (e.latestRateNum / e.latestRateDen).toFixed(4) : "no rate yet"}
+                  </td>
+                  <td className="num text-right font-medium">
+                    {e.outstandingBaseMinor === null ? "—" : formatMoney(e.outstandingBaseMinor)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-stone-100 pt-4 text-sm">
+          <div>
+            <label htmlFor="fx-currency" className="label">
+              Currency
+            </label>
+            <input
+              id="fx-currency"
+              className="input w-20 uppercase"
+              placeholder="EUR"
+              maxLength={3}
+              value={fxForm.quoteCurrency}
+              onChange={(e) => setFxForm({ ...fxForm, quoteCurrency: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="fx-rate" className="label">
+              Rate (1 unit in base)
+            </label>
+            <input
+              id="fx-rate"
+              inputMode="decimal"
+              className="input tnum w-28"
+              placeholder="1.0875"
+              value={fxForm.rate}
+              onChange={(e) => setFxForm({ ...fxForm, rate: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="fx-date" className="label">
+              Effective <span className="opacity-50">(optional)</span>
+            </label>
+            <input
+              id="fx-date"
+              type="date"
+              className="input w-36"
+              value={fxForm.effectiveAt}
+              onChange={(e) => setFxForm({ ...fxForm, effectiveAt: e.target.value })}
+            />
+          </div>
+          <Button tone="secondary" disabled={busy || !fxForm.quoteCurrency.trim() || !Number(fxForm.rate)} onClick={recordRate}>
+            Record rate
+          </Button>
+        </div>
+      </Card>
     </section>
   );
 }
@@ -953,16 +1600,19 @@ function PeriodsSection({
   closedPeriods,
   onOpenClose,
   onCloseYear,
+  onReopen,
   busy,
 }: {
   closedPeriods: Overview["closedPeriods"];
   onOpenClose: () => void;
   onCloseYear: (year: number) => Promise<void>;
+  onReopen: (year: number, month: number) => Promise<void>;
   busy: boolean;
 }) {
   const year = new Date().getUTCFullYear();
   const [yearInput, setYearInput] = useState(String(year));
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [reopenTarget, setReopenTarget] = useState<{ year: number; month: number } | null>(null);
   return (
     <section className="max-w-xl space-y-8">
       <div>
@@ -976,14 +1626,21 @@ function PeriodsSection({
           Close period…
         </Button>
         {closedPeriods.length > 0 && (
-          <p className="mt-4 flex flex-wrap items-center gap-1.5 text-xs text-stone-500">
+          <div className="mt-4 text-xs text-stone-500">
             Sealed:
-            {closedPeriods.map((p) => (
-              <Badge key={`${p.year}-${p.month}`}>
-                {p.year}-{String(p.month).padStart(2, "0")}
-              </Badge>
-            ))}
-          </p>
+            <ul className="mt-1.5 space-y-1">
+              {closedPeriods.map((p) => (
+                <li key={`${p.year}-${p.month}`} className="flex items-center gap-2">
+                  <Badge>
+                    {p.year}-{String(p.month).padStart(2, "0")}
+                  </Badge>
+                  <Button tone="ghost" size="sm" disabled={busy} onClick={() => setReopenTarget(p)}>
+                    Reopen
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 
@@ -1022,6 +1679,20 @@ function PeriodsSection({
           </>
         }
         confirmLabel={`Close ${yearInput}`}
+        busy={busy}
+      />
+
+      <ConfirmDialog
+        open={reopenTarget !== null}
+        onClose={() => setReopenTarget(null)}
+        onConfirm={async () => {
+          if (!reopenTarget) return;
+          await onReopen(reopenTarget.year, reopenTarget.month);
+          setReopenTarget(null);
+        }}
+        title={`Reopen ${reopenTarget ? `${reopenTarget.year}-${String(reopenTarget.month).padStart(2, "0")}` : ""}?`}
+        body="Unseals the month so corrective postings land in the right period. This is a destructive-class action and requires approval."
+        confirmLabel="Reopen period"
         busy={busy}
       />
     </section>
@@ -1257,6 +1928,70 @@ function BankSection({
           </ul>
         )}
       </div>
+
+      {(banking.matched?.length ?? 0) > 0 && (
+        <div className="border-t border-stone-200 pt-6">
+          <h2 className="text-sm font-semibold text-stone-800">Matched transactions</h2>
+          <ul className="mt-3 divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
+            {banking.matched!.map((t) => (
+              <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-sm">
+                <time className="w-20 shrink-0 text-xs text-stone-400">{t.postedAt.slice(0, 10)}</time>
+                <span className="min-w-0 flex-1 truncate text-stone-800" title={t.description}>
+                  {t.description}
+                </span>
+                <span className={cn("tnum shrink-0 font-medium", t.amountMinor < 0 && "text-red-700")}>
+                  {formatMoney(t.amountMinor)}
+                </span>
+                <Button
+                  tone="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void onAction({ action: "unmatchBankTransaction", transactionId: t.id }, "Unmatch")}
+                >
+                  Unmatch
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-stone-500">A mistaken match releases the line back to unmatched — nothing is ever deleted.</p>
+        </div>
+      )}
+
+      {(banking.excluded?.length ?? 0) > 0 && (
+        <div className="border-t border-stone-200 pt-6">
+          <h2 className="text-sm font-semibold text-stone-800">Excluded transactions</h2>
+          <ul className="mt-3 divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
+            {banking.excluded!.map((t) => (
+              <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-sm">
+                <time className="w-20 shrink-0 text-xs text-stone-400">{t.postedAt.slice(0, 10)}</time>
+                <span className="min-w-0 flex-1 truncate text-stone-500" title={t.description}>
+                  {t.description}
+                </span>
+                <span className={cn("tnum shrink-0 font-medium", t.amountMinor < 0 && "text-red-700")}>
+                  {formatMoney(t.amountMinor)}
+                </span>
+                <Button
+                  tone="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void onAction({ action: "unexcludeBankTransaction", transactionId: t.id }, "Restore")}
+                >
+                  Restore
+                </Button>
+                <Button
+                  tone="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void onAction({ action: "deleteBankTransaction", transactionId: t.id }, "Delete")}
+                >
+                  Delete
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-stone-500">Restore puts a line back into matching; delete removes it entirely (e.g. a duplicate import).</p>
+        </div>
+      )}
     </section>
   );
 }

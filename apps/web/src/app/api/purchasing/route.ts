@@ -65,6 +65,9 @@ export async function GET() {
   const priceHistory = await executor.execute("purchasing.priceHistory", ctx, {});
   if (!priceHistory.ok) return NextResponse.json({ error: priceHistory.error }, { status: 500 });
 
+  const supplierPerformance = await executor.execute("purchasing.supplierPerformance", ctx, {});
+  if (!supplierPerformance.ok) return NextResponse.json({ error: supplierPerformance.error }, { status: 500 });
+
   // Procure-to-pay workflow: requests with their RFQ bids.
   const requestRows = await db
     .select()
@@ -81,17 +84,21 @@ export async function GET() {
     vendors: vendorRows,
     orders: ordersUi,
     bills: billRows.map((b) => ({
+      id: b.id,
       number: b.number,
       vendorName: vendorName.get(b.vendorId) ?? "",
       vendorRef: b.vendorRef,
       memo: b.memo,
       totalMinor: b.totalMinor,
       paidMinor: b.paidMinor,
-      dueMinor: b.totalMinor - b.paidMinor,
+      creditedMinor: b.creditedMinor,
+      status: b.status,
+      dueMinor: b.totalMinor - b.paidMinor - b.creditedMinor,
       createdAt: b.createdAt,
     })),
     apAging: aging.data ?? {},
     priceHistory: priceHistory.data ?? { rows: [] },
+    supplierPerformance: supplierPerformance.data ?? { vendors: [] },
     requests: requestRows.map((r) => ({
       id: r.id,
       title: r.title,
@@ -244,6 +251,30 @@ export async function POST(req: Request) {
       if (!body.vendorId) return NextResponse.json({ error: "vendorId is required" }, { status: 400 });
       return respond(
         await executor.execute("purchasing.supplierStatement", ctx, { vendorId: body.vendorId as string }),
+      );
+    }
+    case "billCreditNote": {
+      if (!body.billId || !body.amountMinor || !body.reason)
+        return NextResponse.json({ error: "billId, amountMinor and reason are required" }, { status: 400 });
+      return respond(
+        await executor.execute("purchasing.billCreditNote", ctx, {
+          billId: body.billId as string,
+          amountMinor: body.amountMinor as number,
+          reason: body.reason as string,
+        }),
+      );
+    }
+    case "closePurchaseOrder":
+      if (!body.poNumber) return NextResponse.json({ error: "poNumber is required" }, { status: 400 });
+      return respond(
+        await executor.execute("purchasing.closePurchaseOrder", ctx, { poNumber: body.poNumber as number }),
+      );
+    case "returnGoods": {
+      const lines = body.lines as { lineNumber: number; quantity: number; reason: string }[] | undefined;
+      if (!body.poNumber || !lines?.length)
+        return NextResponse.json({ error: "poNumber and lines are required" }, { status: 400 });
+      return respond(
+        await executor.execute("purchasing.returnGoods", ctx, { poNumber: body.poNumber as number, lines }),
       );
     }
     default:

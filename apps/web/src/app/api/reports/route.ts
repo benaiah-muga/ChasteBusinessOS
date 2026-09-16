@@ -18,5 +18,12 @@ export async function GET() {
   if (!pnl.ok || !bs.ok) {
     return NextResponse.json({ error: pnl.error ?? bs.error }, { status: 500 });
   }
-  return NextResponse.json({ pnl: pnl.data, balanceSheet: bs.data });
+  const cashFlow = await executor.execute("accounting.cashFlow", humanCtx, {});
+  const fxExposure = await executor.execute("accounting.unrealizedFxExposure", humanCtx, {});
+  return NextResponse.json({
+    pnl: pnl.data,
+    balanceSheet: bs.data,
+    cashFlow: cashFlow.ok ? cashFlow.data : null,
+    fxExposure: fxExposure.ok ? fxExposure.data : null,
+  });
 }

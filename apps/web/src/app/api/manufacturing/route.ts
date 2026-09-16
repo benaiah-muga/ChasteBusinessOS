@@ -201,6 +201,10 @@ export async function POST(req: Request) {
       return exec(executor, ctx, "manufacturing.deleteBom", body);
     case "bomReport":
       return exec(executor, ctx, "manufacturing.bomReport", body);
+    case "bomTree":
+      return exec(executor, ctx, "manufacturing.bomTree", body);
+    case "checkProductionFeasibility":
+      return exec(executor, ctx, "manufacturing.checkProductionFeasibility", body);
     case "costPreview":
       return exec(executor, ctx, "manufacturing.costPreview", body);
     case "produceFromBom":

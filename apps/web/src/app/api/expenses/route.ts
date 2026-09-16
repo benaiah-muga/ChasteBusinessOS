@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getDb } from "@chaste/db";
+import { expensePolicies, getDb } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 
@@ -22,6 +23,11 @@ const actionSchema = z.discriminatedUnion("action", [
     claimId: z.string().uuid(),
     amountMinor: z.number().int().positive(),
   }),
+  z.object({
+    action: z.literal("setPolicy"),
+    category: z.string().min(2).max(40),
+    limitMinor: z.number().int().nonnegative(),
+  }),
 ]);
 
 export async function GET(req: Request) {
@@ -36,7 +42,13 @@ export async function GET(req: Request) {
       status && ["submitted", "approved", "rejected", "paid"].includes(status) ? status : undefined,
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 });
-  return NextResponse.json(result.data);
+  // Policy limits have no list capability; the current caps are a plain read.
+  const policies = await db
+    .select({ category: expensePolicies.category, limitMinor: expensePolicies.limitMinor })
+    .from(expensePolicies)
+    .where(eq(expensePolicies.orgId, resolved.orgId))
+    .orderBy(desc(expensePolicies.limitMinor));
+  return NextResponse.json({ ...(result.data as Record<string, unknown>), policies });
 }
 
 export async function POST(req: Request) {
@@ -53,7 +65,9 @@ export async function POST(req: Request) {
       ? "accounting.submitExpenseClaim"
       : parsed.data.action === "decide"
         ? "accounting.decideExpenseClaim"
-        : "accounting.payExpenseClaim";
+        : parsed.data.action === "pay"
+          ? "accounting.payExpenseClaim"
+          : "accounting.setExpensePolicy";
   const input =
     parsed.data.action === "submit"
       ? {
@@ -63,7 +77,9 @@ export async function POST(req: Request) {
         }
       : parsed.data.action === "decide"
         ? { claimId: parsed.data.claimId, decision: parsed.data.decision, reason: parsed.data.reason }
-        : { claimId: parsed.data.claimId, amountMinor: parsed.data.amountMinor };
+        : parsed.data.action === "pay"
+          ? { claimId: parsed.data.claimId, amountMinor: parsed.data.amountMinor }
+          : { category: parsed.data.category, limitMinor: parsed.data.limitMinor };
 
   const result = await buildExecutor(db, buildRegistry(db)).execute(capId, ctx, input);
   if (!result.ok) {

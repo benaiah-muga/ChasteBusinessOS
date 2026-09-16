@@ -8,8 +8,9 @@ import { callApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { postApi } from "@/lib/api";
 import { AppFrame } from "../_shell/app-frame";
+import { LibraryTab } from "./library-tab";
 
-type Tab = "overview" | "inbox" | "widget";
+type Tab = "overview" | "inbox" | "widget" | "library";
 
 interface ConversationRow {
   id: string;
@@ -19,6 +20,15 @@ interface ConversationRow {
   status: string;
   lastMessageAt: string | null;
   lastMessagePreview: string;
+  priority?: string | null;
+  category?: string | null;
+  assignedUserId?: string | null;
+  slaDueAt?: string | null;
+}
+interface Member {
+  userId: string;
+  name: string | null;
+  email: string;
 }
 interface SupportMessage {
   id: string;
@@ -63,6 +73,10 @@ export default function SupportPage() {
   const [customerOptions, setCustomerOptions] = useState<CustomerOption[]>([]);
   const [newCustomerId, setNewCustomerId] = useState("");
   const [quickCustomer, setQuickCustomer] = useState({ open: false, name: "", email: "" });
+  const [showTicket, setShowTicket] = useState(false);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [ticket, setTicket] = useState({ priority: "normal", category: "", assigneeUserId: "", slaDueAt: "" });
+  const [ticketSaved, setTicketSaved] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
 
   const loadConvs = useCallback(async () => {
@@ -87,7 +101,20 @@ export default function SupportPage() {
     if (res.ok && res.data) {
       setConv(res.data.conversation);
       setMsgs(res.data.messages);
+      setTicket({
+        priority: res.data.conversation.priority ?? "normal",
+        category: res.data.conversation.category ?? "",
+        assigneeUserId: res.data.conversation.assignedUserId ?? "",
+        slaDueAt: res.data.conversation.slaDueAt ? res.data.conversation.slaDueAt.slice(0, 16) : "",
+      });
+      setTicketSaved(false);
     }
+  }, []);
+
+  useEffect(() => {
+    void callApi<{ members?: Member[] }>("/api/team").then((res) => {
+      if (res.ok && res.data) setMembers(res.data.members ?? []);
+    });
   }, []);
 
   useEffect(() => {
@@ -149,7 +176,7 @@ export default function SupportPage() {
     await loadConvs();
   }
 
-  async function transition(action: "escalate" | "resolve") {
+  async function transition(action: "escalate" | "resolve" | "reopen") {
     if (!activeId) return;
     const reason =
       action === "escalate"
@@ -169,6 +196,38 @@ export default function SupportPage() {
     }
     await loadThread(activeId);
     await loadConvs();
+  }
+
+  async function saveTicket(): Promise<void> {
+    if (!activeId) return;
+    setBusy(true);
+    const res = await act({
+      action: "updateTicket",
+      conversationId: activeId,
+      priority: ticket.priority,
+      category: ticket.category.trim() || undefined,
+      assigneeUserId: ticket.assigneeUserId || undefined,
+      slaDueAt: ticket.slaDueAt ? new Date(ticket.slaDueAt).toISOString() : undefined,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error?.hint ?? res.error?.title ?? "Couldn't save ticket details");
+      return;
+    }
+    setTicketSaved(true);
+    await loadThread(activeId);
+    await loadConvs();
+  }
+
+  async function suggestCategory(): Promise<void> {
+    const lastCustomer = [...msgs].reverse().find((m) => m.senderType === "customer");
+    const text = lastCustomer?.body ?? conv?.subject ?? "";
+    if (!text) return;
+    const res = await act({ action: "suggestCategory", text });
+    if (res.ok && res.data) {
+      const category = (res.data as { category?: string }).category;
+      if (category) setTicket((t) => ({ ...t, category }));
+    }
   }
 
   async function openNewConversation() {
@@ -235,6 +294,7 @@ export default function SupportPage() {
         { id: "overview", label: "Overview" },
         { id: "inbox", label: "Inbox", count: openCount + escalatedCount || undefined },
         { id: "widget", label: "Website widget" },
+        { id: "library", label: "Library" },
       ]}
       activeTab={tab}
       onTabChange={(id) => setTab(id as Tab)}
@@ -314,6 +374,8 @@ export default function SupportPage() {
 
       {tab === "widget" && <ChannelsPanel />}
 
+      {tab === "library" && <LibraryTab />}
+
       {tab === "inbox" && (
         <>
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 pt-0 lg:grid-cols-[320px_1fr]">
@@ -370,32 +432,88 @@ export default function SupportPage() {
                   <Badge tone={STATUS_TONE[conv.status] ?? "neutral"}>{conv.status}</Badge>
                 </div>
                 <div className="flex shrink-0 gap-2">
-                  <Button
-                    size="sm"
-                    onClick={makeDraft}
-                    loading={drafting}
-                    disabled={conv.status === "resolved"}
-                    title="AI drafts; you decide"
-                  >
+                  <Button size="sm" onClick={makeDraft} loading={drafting} disabled={conv.status === "resolved"} title="AI drafts; you decide">
                     <IconBot className="size-4" />
                     Draft reply
                   </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => transition("escalate")}
-                    disabled={busy || conv.status !== "open"}
-                  >
+                  <Button size="sm" tone="secondary" onClick={() => setShowTicket(!showTicket)} title="Priority, category, assignee, SLA">
+                    Ticket
+                  </Button>
+                  <Button size="sm" onClick={() => transition("escalate")} disabled={busy || conv.status !== "open"}>
                     Escalate
                   </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => transition("resolve")}
-                    disabled={busy || conv.status === "resolved"}
-                  >
+                  <Button size="sm" onClick={() => transition("resolve")} disabled={busy || conv.status === "resolved"}>
                     Resolve
                   </Button>
+                  {conv.status !== "open" && (
+                    <Button size="sm" onClick={() => transition("reopen")} disabled={busy}>
+                      Reopen
+                    </Button>
+                  )}
                 </div>
               </header>
+
+              {showTicket && (
+                <div className="border-b border-stone-100 bg-stone-50/70 px-5 py-3">
+                  <div className="flex flex-wrap items-end gap-2 text-sm">
+                    <label className="flex flex-col gap-1">
+                      <span className="label">Priority</span>
+                      <select
+                        className="select w-28"
+                        value={ticket.priority}
+                        onChange={(e) => setTicket({ ...ticket, priority: e.target.value })}
+                      >
+                        <option value="low">Low</option>
+                        <option value="normal">Normal</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="label">Category</span>
+                      <span className="flex items-center gap-1">
+                        <input
+                          className="input w-32"
+                          placeholder="e.g. billing"
+                          value={ticket.category}
+                          onChange={(e) => setTicket({ ...ticket, category: e.target.value })}
+                        />
+                        <Button tone="ghost" size="sm" disabled={busy} onClick={() => void suggestCategory()} title="Rule-based suggestion from the thread">
+                          Suggest
+                        </Button>
+                      </span>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="label">Assignee</span>
+                      <select
+                        className="select w-44"
+                        value={ticket.assigneeUserId}
+                        onChange={(e) => setTicket({ ...ticket, assigneeUserId: e.target.value })}
+                      >
+                        <option value="">Unassigned</option>
+                        {members.map((m) => (
+                          <option key={m.userId} value={m.userId}>
+                            {m.name ?? m.email}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="label">SLA due</span>
+                      <input
+                        type="datetime-local"
+                        className="input"
+                        value={ticket.slaDueAt}
+                        onChange={(e) => setTicket({ ...ticket, slaDueAt: e.target.value })}
+                      />
+                    </label>
+                    <Button size="sm" disabled={busy} loading={busy} onClick={() => void saveTicket()}>
+                      Save
+                    </Button>
+                    {ticketSaved && <span className="pb-2 text-xs text-emerald-700">saved</span>}
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <p className="border-b border-red-100 bg-red-50 px-5 py-2 text-xs text-red-700">{error}</p>

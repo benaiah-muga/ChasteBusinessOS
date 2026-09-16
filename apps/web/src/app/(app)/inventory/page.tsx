@@ -124,6 +124,8 @@ export default function InventoryPage() {
   const [locForm, setLocForm] = useState({ code: "", name: "" });
   const [reserveForm, setReserveForm] = useState({ sku: "", qty: "", reason: "" });
   const [transferForm, setTransferForm] = useState({ from: "", to: "", sku: "", qty: "", note: "" });
+  const [barcode, setBarcode] = useState("");
+  const [scannedSku, setScannedSku] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await callApi<Payload>("/api/inventory");
@@ -166,6 +168,26 @@ export default function InventoryPage() {
     if (!history[sku]) {
       const res = await callApi<{ movements: Movement[] }>(`/api/inventory?sku=${encodeURIComponent(sku)}`);
       if (res.data?.movements) setHistory((h) => ({ ...h, [sku]: res.data!.movements }));
+    }
+  }
+
+  /** Scan-at-receiving: resolves a barcode to an item or an honest null. */
+  async function lookupBarcode(): Promise<void> {
+    if (barcode.trim().length < 3) return;
+    const res = await postApi<{ data?: { item: { sku: string; name: string } | null } }>("/api/inventory", {
+      action: "lookupByBarcode",
+      barcode: barcode.trim(),
+    });
+    const item = res.ok ? res.data?.data?.item ?? null : null;
+    if (item) {
+      setScannedSku(item.sku);
+      setNotice({ tone: "success", text: `${item.name} (${item.sku}) — highlighted below.` });
+    } else {
+      setScannedSku(null);
+      setNotice({
+        tone: "error",
+        error: { title: res.ok ? "No item carries that barcode" : "Lookup failed", hint: res.ok ? "Check the code, or add the barcode to the product in the Products app." : res.error?.hint ?? "Try again." },
+      });
     }
   }
 
@@ -226,10 +248,39 @@ export default function InventoryPage() {
         <>
           <Card>
             <CardTitle
-              right={<Badge tone="blue">total value {formatMoney(totalValue)}</Badge>}
+              right={
+                <div className="flex items-center gap-2">
+                  <Badge tone="blue">total value {formatMoney(totalValue)}</Badge>
+                  <Button
+                    tone="secondary"
+                    size="sm"
+                    disabled={busy || totalValue === 0}
+                    onClick={() => void post({ action: "postValuationSummary", memo: `Valuation summary ${new Date().toISOString().slice(0, 10)}` }, "Post valuation summary")}
+                    title="Posts the inventory value to the ledger as a summary entry — approval-gated"
+                  >
+                    Post valuation summary
+                  </Button>
+                </div>
+              }
             >
               Stock on hand
             </CardTitle>
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+              <input
+                className="w-56 rounded border bg-transparent px-2 py-1.5"
+                placeholder="Scan or type a barcode…"
+                aria-label="Barcode lookup"
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void lookupBarcode();
+                }}
+              />
+              <Button tone="secondary" size="sm" disabled={busy || barcode.trim().length < 3} onClick={() => void lookupBarcode()}>
+                Look up
+              </Button>
+              {scannedSku && <Badge tone="green">scanned: {scannedSku}</Badge>}
+            </div>
             {items.length === 0 ? (
               <EmptyState icon={<IconListTree />} title="No items yet" hint="Create a stocked item below to start tracking quantities." />
             ) : (
@@ -260,7 +311,7 @@ export default function InventoryPage() {
                 <tbody>
                   {items.map((i) => (
                     <Fragment key={i.sku}>
-                      <tr className="border-t">
+                      <tr className={`border-t ${scannedSku === i.sku ? "bg-emerald-50/70" : ""}`}>
                         <td className="py-1.5 font-mono">{i.sku}</td>
                         <td>{i.name}</td>
                         <td className="text-right tabular-nums">

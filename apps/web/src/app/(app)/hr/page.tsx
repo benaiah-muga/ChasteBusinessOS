@@ -9,6 +9,7 @@ import {
   Card,
   CardTitle,
   ConfirmDialog,
+  Dialog,
   EmptyState,
   LoadingPage,
   StatCard,
@@ -22,18 +23,23 @@ import {
   IconInbox,
   IconUsers,
 } from "@/components/icons";
-import { cn, formatDate, formatMoney, formatMoneyWhole, statusTone } from "@/lib/format";
+import { cn, formatDate, formatDateTime, formatMoney, formatMoneyWhole, statusTone } from "@/lib/format";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { HiringTab, type ApplicantRow, type OpeningRow } from "./hiring-tab";
 
-type TabId = "overview" | "people" | "leave" | "time" | "payroll" | "expenses";
+type TabId = "overview" | "people" | "hiring" | "leave" | "time" | "payroll" | "expenses";
 
 interface Employee {
   id: string;
   name: string;
   email: string | null;
   title: string | null;
+  department: string | null;
+  managerEmployeeId: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
   monthlySalaryMinor: number;
   taxRateBps: number;
   active: boolean;
@@ -64,6 +70,39 @@ interface HrPayload {
   employees?: Employee[];
   leave?: LeaveRow[];
   runs?: Run[];
+  openings?: OpeningRow[];
+  applicants?: ApplicantRow[];
+  attendance?: AttendanceRow[];
+}
+
+interface AttendanceRow {
+  employeeId: string;
+  clockedInAt: string;
+  late: boolean;
+}
+
+interface PendingEntry {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  workDate: string;
+  minutes: number;
+  note: string | null;
+  late: boolean;
+}
+
+interface LeaveBalance {
+  entitlementDays: number;
+  takenDays: number;
+  remainingDays: number;
+}
+
+interface CalendarEntry {
+  employeeName: string;
+  kind: string;
+  startDate: string;
+  endDate: string;
+  days: number;
 }
 
 interface TimeRow {
@@ -123,6 +162,26 @@ export default function HrPage() {
   // Time
   const [range, setRange] = useState(monthBounds());
   const [logForm, setLogForm] = useState({ employeeId: "", workDate: isoDate(new Date()), hours: "", note: "" });
+  const [pendingEntries, setPendingEntries] = useState<PendingEntry[] | null>(null);
+
+  // Structure edit
+  const [structureTarget, setStructureTarget] = useState<Employee | null>(null);
+  const [structureForm, setStructureForm] = useState({
+    department: "",
+    position: "",
+    managerEmployeeId: "",
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+  });
+
+  // Leave balance + team calendar
+  const [balanceEmployeeId, setBalanceEmployeeId] = useState("");
+  const [balance, setBalance] = useState<LeaveBalance | null>(null);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  });
+  const [calendar, setCalendar] = useState<CalendarEntry[] | null>(null);
 
   // Payroll
   const [runPeriod, setRunPeriod] = useState(() => {
@@ -135,6 +194,7 @@ export default function HrPage() {
   const employees = useMemo(() => data?.employees ?? [], [data]);
   const leave = useMemo(() => data?.leave ?? [], [data]);
   const runs = useMemo(() => data?.runs ?? [], [data]);
+  const attendance = useMemo(() => data?.attendance ?? [], [data]);
 
   const loadHr = useCallback(async (): Promise<HrPayload | null> => {
     const res = await callApi<HrPayload>("/api/hr");
@@ -153,11 +213,36 @@ export default function HrPage() {
     setTime({ from, to, rows: res.data.rows ?? [] });
   }, []);
 
+  const loadPending = useCallback(async () => {
+    const res = await callApi<{ entries?: PendingEntry[] }>("/api/time?pending=1");
+    if (res.ok && res.data) setPendingEntries(res.data.entries ?? []);
+  }, []);
+
+  const loadBalance = useCallback(async (employeeId: string) => {
+    if (!employeeId) {
+      setBalance(null);
+      return;
+    }
+    const res = await callApi<LeaveBalance>(`/api/hr?view=balance&employeeId=${encodeURIComponent(employeeId)}`);
+    setBalance(res.ok && res.data ? res.data : null);
+  }, []);
+
+  const loadCalendar = useCallback(async (month: string) => {
+    const [y, m] = month.split("-").map(Number);
+    if (!y || !m) return;
+    const res = await callApi<{ entries?: CalendarEntry[] }>(`/api/hr?view=calendar&year=${y}&month=${m}`);
+    setCalendar(res.ok && res.data ? res.data.entries ?? [] : null);
+  }, []);
+
   useEffect(() => {
     if (!__enabled) return;
     const b = monthBounds();
-    void Promise.all([loadHr(), loadTime(b.from, b.to)]);
-  }, [__enabled, loadHr, loadTime]);
+    void Promise.all([loadHr(), loadTime(b.from, b.to), loadPending()]);
+  }, [__enabled, loadHr, loadTime, loadPending]);
+
+  useEffect(() => {
+    if (calendarMonth) void loadCalendar(calendarMonth);
+  }, [calendarMonth, loadCalendar]);
 
   function changeTab(id: string) {
     setTab(id as TabId);
@@ -272,6 +357,50 @@ export default function HrPage() {
     if (ok) await loadHr();
   }
 
+  async function decideEntry(entry: PendingEntry, decision: "approved" | "rejected"): Promise<void> {
+    const ok = await post(
+      "/api/time",
+      { action: "decide", entryId: entry.id, decision },
+      `${decision === "approved" ? "Approve" : "Reject"} ${entry.employeeName}'s entry`,
+    );
+    if (ok) await Promise.all([loadPending(), loadTime(range.from, range.to)]);
+  }
+
+  async function clock(employee: Employee, kind: "clockIn" | "clockOut"): Promise<void> {
+    const ok = await post("/api/hr", { action: kind, employeeId: employee.id }, `${kind === "clockIn" ? "Clock in" : "Clock out"} ${employee.name}`);
+    if (ok) await loadHr();
+  }
+
+  function openStructure(emp: Employee): void {
+    setStructureForm({
+      department: emp.department ?? "",
+      position: emp.title ?? "",
+      managerEmployeeId: emp.managerEmployeeId ?? "",
+      emergencyContactName: emp.emergencyContactName ?? "",
+      emergencyContactPhone: emp.emergencyContactPhone ?? "",
+    });
+    setStructureTarget(emp);
+  }
+
+  async function saveStructure(): Promise<void> {
+    if (!structureTarget) return;
+    const ok = await post(
+      "/api/hr",
+      {
+        action: "updateStructure",
+        employeeId: structureTarget.id,
+        department: structureForm.department.trim() || undefined,
+        position: structureForm.position.trim() || undefined,
+        managerEmployeeId: structureForm.managerEmployeeId || undefined,
+        emergencyContactName: structureForm.emergencyContactName.trim() || undefined,
+        emergencyContactPhone: structureForm.emergencyContactPhone.trim() || undefined,
+      },
+      `Update ${structureTarget.name}'s details`,
+    );
+    setStructureTarget(null);
+    if (ok) await loadHr();
+  }
+
   async function draftRun(): Promise<void> {
     const [y, m] = runPeriod.split("-").map(Number);
     if (!y || !m) return;
@@ -324,6 +453,7 @@ export default function HrPage() {
       tabs={[
         { id: "overview", label: "Overview" },
         { id: "people", label: "People", count: activeStaff.length || undefined },
+        { id: "hiring", label: "Hiring", count: (data.openings ?? []).filter((o) => o.status === "open").length || undefined },
         { id: "leave", label: "Leave", count: pendingLeave.length || undefined },
         { id: "time", label: "Time", count: time.rows.filter((r) => r.pendingMinutes > 0).length || undefined },
         { id: "payroll", label: "Payroll", count: runs.filter((r) => r.status === "draft").length || undefined },
@@ -466,11 +596,16 @@ export default function HrPage() {
                         <td>
                           <Badge tone={emp.active ? "green" : "neutral"}>{emp.active ? "active" : "inactive"}</Badge>
                         </td>
-                        <td className="text-right">
+                        <td className="text-right whitespace-nowrap">
                           {emp.active && (
-                            <Button tone="ghost" size="sm" disabled={busy} onClick={() => setDeactivateTarget(emp)}>
-                              Deactivate
-                            </Button>
+                            <span className="inline-flex gap-1.5">
+                              <Button tone="ghost" size="sm" disabled={busy} onClick={() => openStructure(emp)}>
+                                Edit
+                              </Button>
+                              <Button tone="ghost" size="sm" disabled={busy} onClick={() => setDeactivateTarget(emp)}>
+                                Deactivate
+                              </Button>
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -481,6 +616,16 @@ export default function HrPage() {
             )}
           </Card>
         </>
+      )}
+
+      {tab === "hiring" && (
+        <HiringTab
+          openings={data.openings ?? []}
+          applicants={data.applicants ?? []}
+          busy={busy}
+          post={(payload, label) => post("/api/hr", payload, label)}
+          onChanged={loadHr}
+        />
       )}
 
       {tab === "leave" && (
@@ -650,6 +795,77 @@ export default function HrPage() {
               </div>
             )}
           </Card>
+
+          <Card>
+            <CardTitle>Balance & team calendar</CardTitle>
+            <div className="flex flex-wrap items-end gap-3 text-sm">
+              <div className="min-w-44">
+                <label htmlFor="balance-employee" className="label">
+                  Leave balance
+                </label>
+                <select
+                  id="balance-employee"
+                  className="select"
+                  value={balanceEmployeeId}
+                  onChange={(e) => {
+                    setBalanceEmployeeId(e.target.value);
+                    void loadBalance(e.target.value);
+                  }}
+                >
+                  <option value="">Choose employee…</option>
+                  {activeStaff.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {balance && (
+                <p className="tnum pb-1.5 text-sm text-stone-600">
+                  <strong className="text-stone-900">{balance.remainingDays}</strong> of {balance.entitlementDays} days left ·{" "}
+                  {balance.takenDays} taken this year
+                </p>
+              )}
+              <div className="ml-auto">
+                <label htmlFor="calendar-month" className="label">
+                  Team calendar
+                </label>
+                <input
+                  id="calendar-month"
+                  type="month"
+                  className="input"
+                  value={calendarMonth}
+                  onChange={(e) => setCalendarMonth(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              {calendar === null ? (
+                <p className="text-sm text-stone-400">Approved leave for the chosen month appears here.</p>
+              ) : calendar.length === 0 ? (
+                <p className="flex items-center gap-2 text-sm text-stone-400">
+                  <IconCalendar className="size-4" /> No approved leave this month.
+                </p>
+              ) : (
+                <ul className="divide-y text-sm">
+                  {calendar.map((c, i) => (
+                    <li key={i} className="flex items-center justify-between gap-3 py-1.5">
+                      <span className="min-w-0 truncate">
+                        <span className="font-medium text-stone-900">{c.employeeName}</span>
+                        <span className="ml-2 capitalize text-stone-500">{c.kind}</span>
+                      </span>
+                      <span className="shrink-0 text-stone-500">
+                        {formatDate(c.startDate)} → {formatDate(c.endDate)} ·{" "}
+                        <span className="tnum">
+                          {c.days} day{c.days === 1 ? "" : "s"}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Card>
         </>
       )}
 
@@ -809,10 +1025,90 @@ export default function HrPage() {
               </div>
             )}
             {time.rows.some((r) => r.pendingMinutes > 0) && (
-              <p className="mt-2 text-xs text-stone-400">
-                Pending entries wait for a decision through the workspace assistant or API before they count anywhere.
-              </p>
+              <p className="mt-2 text-xs text-stone-400">Submitted entries below need a decision before the hours count anywhere.</p>
             )}
+          </Card>
+
+          <Card>
+            <CardTitle>Pending approvals</CardTitle>
+            {pendingEntries === null ? (
+              <p className="text-sm text-stone-400">Loading…</p>
+            ) : pendingEntries.length === 0 ? (
+              <p className="flex items-center gap-2 text-sm text-stone-400">
+                <IconInbox className="size-4" /> No submitted entries waiting — everything is decided.
+              </p>
+            ) : (
+              <ul className="divide-y text-sm">
+                {pendingEntries.map((e) => (
+                  <li key={e.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2">
+                    <span className="text-stone-700">
+                      <strong className="text-stone-900">{e.employeeName}</strong> ·{" "}
+                      <span className="tnum">{fmtHours(e.minutes)}</span> · {formatDate(e.workDate)}
+                      {e.late && <Badge tone="amber" className="ml-2">late</Badge>}
+                      {e.note && <span className="ml-2 text-stone-500">{e.note}</span>}
+                    </span>
+                    <span className="flex gap-2">
+                      <Button size="sm" loading={busy} onClick={() => void decideEntry(e, "approved")}>
+                        Approve
+                      </Button>
+                      <Button size="sm" tone="secondary" loading={busy} onClick={() => void decideEntry(e, "rejected")}>
+                        Reject
+                      </Button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card>
+            <CardTitle>Attendance</CardTitle>
+            {activeStaff.length === 0 ? (
+              <p className="text-sm text-stone-500">No active employees yet.</p>
+            ) : (
+              <div className="table-shell">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th>
+                      <th>Open entry</th>
+                      <th aria-label="Actions" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeStaff.map((emp) => {
+                      const open = attendance.find((a) => a.employeeId === emp.id);
+                      return (
+                        <tr key={emp.id}>
+                          <td className="font-medium text-stone-900">{emp.name}</td>
+                          <td>
+                            {open ? (
+                              <span className="flex items-center gap-2 text-sm text-stone-600">
+                                in since {formatDateTime(open.clockedInAt)}
+                                {open.late && <Badge tone="amber">late</Badge>}
+                              </span>
+                            ) : (
+                              <span className="text-sm text-stone-400">—</span>
+                            )}
+                          </td>
+                          <td className="text-right">
+                            <Button
+                              size="sm"
+                              tone={open ? "secondary" : "primary"}
+                              disabled={busy}
+                              onClick={() => void clock(emp, open ? "clockOut" : "clockIn")}
+                            >
+                              {open ? "Clock out" : "Clock in"}
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="mt-2 text-xs text-stone-400">Clock-ins after 09:00 are flagged late; clocking out settles the minutes worked.</p>
           </Card>
         </>
       )}
@@ -909,6 +1205,92 @@ export default function HrPage() {
       )}
 
       {tab === "expenses" && <ExpensesTab />}
+
+      {/* Structure edit — where someone sits and who to call */}
+      <Dialog
+        open={structureTarget !== null}
+        onClose={() => setStructureTarget(null)}
+        title={`Edit ${structureTarget?.name ?? ""}`}
+        description="Department, position and reporting line feed the directory; the emergency contact is who gets called."
+        width="max-w-lg"
+        footer={
+          <>
+            <Button tone="secondary" onClick={() => setStructureTarget(null)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button onClick={() => void saveStructure()} loading={busy}>
+              Save
+            </Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <label htmlFor="struct-dept" className="label">
+              Department
+            </label>
+            <input
+              id="struct-dept"
+              className="input"
+              value={structureForm.department}
+              onChange={(e) => setStructureForm({ ...structureForm, department: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="struct-position" className="label">
+              Position
+            </label>
+            <input
+              id="struct-position"
+              className="input"
+              value={structureForm.position}
+              onChange={(e) => setStructureForm({ ...structureForm, position: e.target.value })}
+            />
+          </div>
+          <div className="col-span-2">
+            <label htmlFor="struct-manager" className="label">
+              Reports to
+            </label>
+            <select
+              id="struct-manager"
+              className="select"
+              value={structureForm.managerEmployeeId}
+              onChange={(e) => setStructureForm({ ...structureForm, managerEmployeeId: e.target.value })}
+            >
+              <option value="">Nobody</option>
+              {activeStaff
+                .filter((e) => e.id !== structureTarget?.id)
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="struct-ec-name" className="label">
+              Emergency contact
+            </label>
+            <input
+              id="struct-ec-name"
+              className="input"
+              value={structureForm.emergencyContactName}
+              onChange={(e) => setStructureForm({ ...structureForm, emergencyContactName: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="struct-ec-phone" className="label">
+              Emergency phone
+            </label>
+            <input
+              id="struct-ec-phone"
+              className="input"
+              value={structureForm.emergencyContactPhone}
+              onChange={(e) => setStructureForm({ ...structureForm, emergencyContactPhone: e.target.value })}
+            />
+          </div>
+        </div>
+      </Dialog>
 
       {/* Deactivate employee */}
       <ConfirmDialog
@@ -1180,17 +1562,20 @@ interface ExpenseClaim {
 function ExpensesTab() {
   const router = useRouter();
   const [claims, setClaims] = useState<ExpenseClaim[] | null>(null);
+  const [policies, setPolicies] = useState<{ category: string; limitMinor: number }[]>([]);
+  const [policyForm, setPolicyForm] = useState({ category: "", limit: "" });
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ amount: "", memo: "", accountCode: "" });
 
   const loadClaims = useCallback(async (): Promise<boolean> => {
-    const res = await callApi<{ claims?: ExpenseClaim[] }>("/api/expenses");
+    const res = await callApi<{ claims?: ExpenseClaim[]; policies?: { category: string; limitMinor: number }[] }>("/api/expenses");
     if (!res.ok || !res.data) {
       setNotice({ tone: "error", error: res.error! });
       return false;
     }
     setClaims(res.data.claims ?? []);
+    setPolicies(res.data.policies ?? []);
     return true;
   }, []);
 
@@ -1241,6 +1626,19 @@ function ExpensesTab() {
   async function payClaim(claim: ExpenseClaim): Promise<void> {
     const ok = await post({ action: "pay", claimId: claim.id, amountMinor: claim.amountMinor }, "Reimbursement");
     if (ok) await loadClaims();
+  }
+
+  async function setPolicy(): Promise<void> {
+    const limitMinor = Math.round(Number(policyForm.limit || "0") * 100);
+    if (!policyForm.category.trim() || !Number.isFinite(limitMinor) || limitMinor < 0) return;
+    const ok = await post(
+      { action: "setPolicy", category: policyForm.category.trim(), limitMinor },
+      `Set ${policyForm.category.trim()} limit`,
+    );
+    if (ok) {
+      setPolicyForm({ category: "", limit: "" });
+      await loadClaims();
+    }
   }
 
   const pendingCount = claims?.filter((c) => c.status === "submitted").length ?? 0;
@@ -1303,6 +1701,61 @@ function ExpensesTab() {
         <p className="mt-3 text-xs text-stone-400">
           The spend category is suggested from your explanation. A claim waits for a decision before any money moves, and reimbursements above
           the policy threshold need a second approval.
+        </p>
+      </Card>
+
+      <Card>
+        <CardTitle right={<span className="text-xs text-stone-500">{policies.length} cap{policies.length === 1 ? "" : "s"} set</span>}>
+          Expense policy limits
+        </CardTitle>
+        <form
+          className="flex flex-wrap items-end gap-2 text-sm"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void setPolicy();
+          }}
+        >
+          <div className="w-40">
+            <label htmlFor="policy-category" className="label">
+              Category
+            </label>
+            <input
+              id="policy-category"
+              className="input"
+              placeholder="e.g. travel"
+              value={policyForm.category}
+              onChange={(e) => setPolicyForm({ ...policyForm, category: e.target.value })}
+            />
+          </div>
+          <div className="w-36">
+            <label htmlFor="policy-limit" className="label">
+              Scrutiny limit
+            </label>
+            <input
+              id="policy-limit"
+              inputMode="decimal"
+              className="input tnum"
+              placeholder="250.00"
+              value={policyForm.limit}
+              onChange={(e) => setPolicyForm({ ...policyForm, limit: e.target.value })}
+            />
+          </div>
+          <Button type="submit" loading={busy} disabled={!policyForm.category.trim() || !policyForm.limit}>
+            Set limit
+          </Button>
+        </form>
+        {policies.length > 0 && (
+          <ul className="mt-3 divide-y text-sm">
+            {policies.map((p) => (
+              <li key={p.category} className="flex items-center justify-between py-1.5">
+                <span className="capitalize text-stone-700">{p.category}</span>
+                <span className="tnum text-stone-500">over {formatMoney(p.limitMinor)} gets a harder look</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-xs text-stone-400">
+          Claims over a category&apos;s limit stay visible as signals until decided — the cap doesn&apos;t block, it scrutinizes.
         </p>
       </Card>
 

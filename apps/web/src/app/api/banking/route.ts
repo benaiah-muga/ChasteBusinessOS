@@ -56,6 +56,31 @@ export async function GET() {
     .orderBy(desc(payments.receivedAt))
     .limit(50);
 
+  // Matched and excluded lines so a human can undo a mistaken match/exclusion.
+  const matchedRows = await db
+    .select({
+      id: bankTransactions.id,
+      postedAt: bankTransactions.postedAt,
+      amountMinor: bankTransactions.amountMinor,
+      description: bankTransactions.description,
+    })
+    .from(bankTransactions)
+    .where(and(eq(bankTransactions.orgId, orgId), eq(bankTransactions.status, "matched")))
+    .orderBy(desc(bankTransactions.postedAt))
+    .limit(100);
+
+  const excludedRows = await db
+    .select({
+      id: bankTransactions.id,
+      postedAt: bankTransactions.postedAt,
+      amountMinor: bankTransactions.amountMinor,
+      description: bankTransactions.description,
+    })
+    .from(bankTransactions)
+    .where(and(eq(bankTransactions.orgId, orgId), eq(bankTransactions.status, "excluded")))
+    .orderBy(desc(bankTransactions.postedAt))
+    .limit(100);
+
   const summary = await executor.execute("accounting.bankSummary", ctx, {});
   if (!summary.ok) return NextResponse.json({ error: summary.error }, { status: 500 });
 
@@ -68,6 +93,8 @@ export async function GET() {
       balanceMinor: Number(a.balanceMinor),
     })),
     unmatched: unmatchedRows.map((t) => ({ ...t, postedAt: t.postedAt.toISOString() })),
+    matched: matchedRows.map((t) => ({ ...t, postedAt: t.postedAt.toISOString() })),
+    excluded: excludedRows.map((t) => ({ ...t, postedAt: t.postedAt.toISOString() })),
     payments: paymentRows.map((p) => ({
       id: p.id,
       invoiceNumber: p.invoiceNumber,

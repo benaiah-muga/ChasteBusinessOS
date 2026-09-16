@@ -11,6 +11,30 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+- **The web UI now reaches backend capability sets that had no human
+  surface.** Sales orders got their full lifecycle (draft → confirm with
+  credit check and stock reservation → deliver-and-invoice → cancel) plus
+  an orders tab in the Sales app. HR gained the recruitment pipeline
+  (openings, applicants, stage moves, hire-to-employee), attendance clock
+  in/out with late flagging, leave balances, the team leave calendar,
+  employee structure editing, and per-entry timesheet approvals. CRM
+  exposed lead conversion, follow-up tasks, and per-customer timelines.
+  Purchasing reached supplier credit notes, purchase-order closing with
+  backorder marking, vendor goods returns, and the supplier performance
+  report. Accounting gained human paths to issue invoices, record and
+  reverse payments, credit invoices, reopen sealed periods, record FX
+  rates, and read the cash-flow statement and unrealized FX exposure,
+  plus undo controls for matched/excluded bank transactions. Support
+  gained ticket reopen, priority/category/assignee/SLA editing, rule-based
+  category suggestions, canned responses, and knowledge-base authoring.
+  Manufacturing exposed BOM tree, production feasibility, and BOM report
+  surfaces. Inventory reached item editing, barcode lookup, and posting
+  valuation summaries; the Marketplace gained the plugin verify/publish
+  surface. Money-gated actions route through the existing approvals flow
+  (202 → Approvals inbox); everything else executes the same governed
+  capabilities the agent uses.
+
 ### Fixed
 - **A generic journal reversal was offered as a complete business undo
   (N12).** Reversing a payment's GL entry left the invoice collecting on

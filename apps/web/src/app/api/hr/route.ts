@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
-import { getDb, employees, leaveRequests, payrollRuns } from "@chaste/db";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { getDb, employees, leaveRequests, payrollRuns, jobOpenings, timeEntries } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { missingPermission } from "@/server/route-guards";
@@ -43,12 +43,51 @@ export async function GET() {
     .orderBy(desc(payrollRuns.year), desc(payrollRuns.month))
     .limit(24);
 
+  // Recruitment + attendance surface (M11 capabilities; no org-wide list
+  // capability exists for openings, so the opening index is a plain read and
+  // each open opening's pipeline goes through the governed read).
+  const openings = await db
+    .select()
+    .from(jobOpenings)
+    .where(eq(jobOpenings.orgId, orgId))
+    .orderBy(desc(jobOpenings.createdAt))
+    .limit(50);
+
+  const ctx = actorFromResolved(resolved, {});
+  const executor = ctx ? buildExecutor(db, buildRegistry(db)) : null;
+  const applicants: Array<{ id: string; openingId: string; name: string; stage: string; note: string | null }> = [];
+  if (executor && ctx) {
+    for (const opening of openings.filter((o) => o.status === "open")) {
+      const result = await executor.execute("hr.listApplicants", ctx, { openingId: opening.id });
+      const data = result.data as { applicants: { id: string; name: string; stage: string; note: string | null }[] } | undefined;
+      if (result.ok && data) {
+        for (const a of data.applicants) applicants.push({ ...a, openingId: opening.id });
+      }
+    }
+  }
+
+  const openClocks = await db
+    .select({
+      employeeId: timeEntries.employeeId,
+      clockedInAt: timeEntries.clockedInAt,
+      late: timeEntries.late,
+    })
+    .from(timeEntries)
+    .where(
+      and(eq(timeEntries.orgId, orgId), isNull(timeEntries.clockedOutAt), sql`${timeEntries.clockedInAt} is not null`),
+    )
+    .limit(200);
+
   return NextResponse.json({
     employees: staff.map((e) => ({
       id: e.id,
       name: e.name,
       email: e.email,
       title: e.title,
+      department: e.department,
+      managerEmployeeId: e.managerEmployeeId,
+      emergencyContactName: e.emergencyContactName,
+      emergencyContactPhone: e.emergencyContactPhone,
       monthlySalaryMinor: e.monthlySalaryMinor,
       taxRateBps: e.taxRateBps,
       active: e.deactivatedAt === null,
@@ -59,6 +98,20 @@ export async function GET() {
       endDate: l.endDate.toISOString(),
     })),
     runs,
+    openings: openings.map((o) => ({
+      id: o.id,
+      title: o.title,
+      department: o.department,
+      note: o.note,
+      status: o.status,
+      createdAt: o.createdAt.toISOString(),
+    })),
+    applicants,
+    attendance: openClocks.map((c) => ({
+      employeeId: c.employeeId,
+      clockedInAt: c.clockedInAt!.toISOString(),
+      late: c.late,
+    })),
   });
 }
 
@@ -87,6 +140,15 @@ export async function POST(req: Request) {
     month?: number;
     runId?: string;
     expectedTotalNetMinor?: number;
+    department?: string;
+    position?: string;
+    managerEmployeeId?: string;
+    emergencyContactName?: string;
+    emergencyContactPhone?: string;
+    openingId?: string;
+    applicantId?: string;
+    stage?: string;
+    note?: string;
   };
   if (!body.action) return NextResponse.json({ error: "action required" }, { status: 400 });
 
@@ -136,6 +198,58 @@ export async function POST(req: Request) {
     case "voidPayrollRun":
       if (!body.runId) break;
       return respond(await executor.execute("hr.voidPayrollRun", ctx, { runId: body.runId }));
+    case "clockIn":
+      if (!body.employeeId) break;
+      return respond(await executor.execute("hr.clockIn", ctx, { employeeId: body.employeeId }));
+    case "clockOut":
+      if (!body.employeeId) break;
+      return respond(await executor.execute("hr.clockOut", ctx, { employeeId: body.employeeId }));
+    case "updateStructure":
+      if (!body.employeeId) break;
+      return respond(
+        await executor.execute("hr.updateEmployeeStructure", ctx, {
+          employeeId: body.employeeId,
+          department: body.department,
+          position: body.position,
+          managerEmployeeId: body.managerEmployeeId,
+          emergencyContactName: body.emergencyContactName,
+          emergencyContactPhone: body.emergencyContactPhone,
+        }),
+      );
+    case "createOpening":
+      if (!body.title) break;
+      return respond(
+        await executor.execute("hr.createOpening", ctx, {
+          title: body.title,
+          department: body.department || undefined,
+          note: body.note || undefined,
+        }),
+      );
+    case "closeOpening":
+      if (!body.openingId) break;
+      return respond(await executor.execute("hr.closeOpening", ctx, { openingId: body.openingId }));
+    case "addApplicant":
+      if (!body.openingId || !body.name) break;
+      return respond(
+        await executor.execute("hr.addApplicant", ctx, {
+          openingId: body.openingId,
+          name: body.name,
+          email: body.email || undefined,
+          note: body.note || undefined,
+        }),
+      );
+    case "moveApplicant":
+      if (!body.applicantId || !body.stage) break;
+      return respond(await executor.execute("hr.moveApplicant", ctx, { applicantId: body.applicantId, stage: body.stage }));
+    case "hireApplicant":
+      if (!body.applicantId || !body.monthlySalaryMinor) break;
+      return respond(
+        await executor.execute("hr.hireApplicant", ctx, {
+          applicantId: body.applicantId,
+          monthlySalaryMinor: body.monthlySalaryMinor,
+          annualLeaveDays: body.annualLeaveDays,
+        }),
+      );
     default:
       return NextResponse.json({ error: "invalid action" }, { status: 400 });
   }

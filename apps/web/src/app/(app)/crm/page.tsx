@@ -6,6 +6,7 @@ import {
   type ActionNoticeState,
   Badge,
   Button,
+  Dialog,
   EmptyState,
   LoadingPage,
   StatCard,
@@ -19,10 +20,11 @@ import {
   IconUser,
   IconX,
 } from "@/components/icons";
-import { cn, formatMoneyWhole, timeAgo, toMinor } from "@/lib/format";
+import { cn, formatDate, formatMoneyWhole, timeAgo, toMinor } from "@/lib/format";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { TasksTab } from "./tasks-tab";
 
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"] as const;
 type Stage = (typeof STAGES)[number];
@@ -56,6 +58,26 @@ const stageMeta: Record<Stage, { dot: string; bar: string; label: string }> = {
 
 const weights: Record<Stage, number> = { lead: 0.1, qualified: 0.3, proposal: 0.5, negotiation: 0.7, won: 1, lost: 0 };
 
+const timelineKindTone: Record<string, "neutral" | "amber" | "blue" | "violet" | "green"> = {
+  quote: "neutral",
+  invoice: "blue",
+  payment: "green",
+  deal: "violet",
+  task: "amber",
+};
+
+interface TimelineEntry {
+  kind: string;
+  date: string;
+  refId: string;
+  summary: string;
+}
+interface TimelineState {
+  customerId: string;
+  name: string;
+  entries?: TimelineEntry[];
+}
+
 // __MAIN__
 export default function CrmPage() {
   const __enabled = useModuleEnabled("crm");
@@ -71,6 +93,13 @@ export default function CrmPage() {
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<TimelineState | null>(null);
+
+  async function openTimeline(customerId: string, name: string): Promise<void> {
+    setTimeline({ customerId, name });
+    const res = await callApi<{ entries?: TimelineEntry[] }>(`/api/crm?timeline=${encodeURIComponent(customerId)}`);
+    setTimeline(res.ok && res.data ? { customerId, name, entries: res.data.entries ?? [] } : { customerId, name, entries: [] });
+  }
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -203,6 +232,7 @@ export default function CrmPage() {
           { id: "overview", label: "Overview" },
           { id: "pipeline", label: "Pipeline", count: deals.length },
           { id: "customers", label: "Customers", count: activeCustomers.length },
+          { id: "tasks", label: "Tasks" },
         ]}
         activeTab={tab}
         onTabChange={setTab}
@@ -221,6 +251,8 @@ export default function CrmPage() {
             onCustomerChange={setNewCustomerId}
             onCreate={(e) => void createDeal(e)}
             onMove={(id, stage) => void move(id, stage)}
+            onNotice={setNotice}
+            onReload={load}
           />
         )}
         {tab === "customers" && (
@@ -233,9 +265,35 @@ export default function CrmPage() {
             onEmailChange={setNewCustomerEmail}
             onCreate={(e) => void createCustomer(e)}
             onDeactivate={(id) => void deactivate(id)}
+            onTimeline={(customerId, name) => void openTimeline(customerId, name)}
           />
         )}
+        {tab === "tasks" && <TasksTab notice={setNotice} />}
       </AppFrame>
+
+      <Dialog
+        open={timeline !== null}
+        onClose={() => setTimeline(null)}
+        title={timeline ? `History — ${timeline.name}` : "History"}
+        description="Everything that happened with this customer, newest first."
+        width="max-w-xl"
+      >
+        {timeline?.entries === undefined ? (
+          <p className="py-4 text-sm text-stone-400">Loading…</p>
+        ) : timeline.entries.length === 0 ? (
+          <p className="py-4 text-sm text-stone-500">Nothing recorded yet — quotes, invoices, payments, deals and tasks will appear here.</p>
+        ) : (
+          <ul className="max-h-96 divide-y overflow-auto text-sm">
+            {timeline.entries.map((e, i) => (
+              <li key={i} className="flex items-center gap-3 py-2">
+                <Badge tone={timelineKindTone[e.kind] ?? "neutral"}>{e.kind}</Badge>
+                <span className="min-w-0 flex-1 truncate text-stone-700">{e.summary}</span>
+                <span className="shrink-0 text-xs whitespace-nowrap text-stone-400">{formatDate(e.date)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Dialog>
 
       {/* KPIs stay reachable for screen readers regardless of tab */}
       <p className="sr-only">
@@ -360,6 +418,8 @@ function DealsTab(props: {
   onCustomerChange: (v: string) => void;
   onCreate: (e: React.FormEvent) => void;
   onMove: (dealId: string, stage: Stage) => void;
+  onNotice: (n: ActionNoticeState) => void;
+  onReload: () => Promise<void> | void;
 }) {
   const { deals, busy } = props;
   const openDeals = deals.filter((d) => d.stage !== "won" && d.stage !== "lost");
@@ -370,6 +430,40 @@ function DealsTab(props: {
   // Drag state lives at board level: one dragged card, one hovered column.
   const [dragging, setDragging] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<Stage | null>(null);
+
+  // Convert lead
+  const [convertTarget, setConvertTarget] = useState<Deal | null>(null);
+  const [convertMode, setConvertMode] = useState<"new" | "existing">("new");
+  const [convertCustomerId, setConvertCustomerId] = useState("");
+  const [convertCustomerName, setConvertCustomerName] = useState("");
+  const [converting, setConverting] = useState(false);
+
+  async function convert(): Promise<void> {
+    if (!convertTarget) return;
+    if (convertMode === "existing" && !convertCustomerId) return;
+    if (convertMode === "new" && !convertCustomerName.trim()) return;
+    setConverting(true);
+    try {
+      const res = await postApi("/api/crm", {
+        action: "convertLead",
+        dealId: convertTarget.id,
+        ...(convertMode === "existing"
+          ? { customerId: convertCustomerId }
+          : { createCustomer: true, customerName: convertCustomerName.trim() }),
+      });
+      if (res.status === 202) props.onNotice({ tone: "pending", text: "Converting the lead needs approval." });
+      else if (!res.ok && res.error) props.onNotice({ tone: "error", error: res.error });
+      else {
+        props.onNotice({ tone: "success", text: `“${convertTarget.title}” is now qualified.` });
+        setConvertTarget(null);
+        setConvertCustomerId("");
+        setConvertCustomerName("");
+        await props.onReload();
+      }
+    } finally {
+      setConverting(false);
+    }
+  }
 
   function onDrop(stage: Stage) {
     if (dragging) props.onMove(dragging, stage);
@@ -507,6 +601,23 @@ function DealsTab(props: {
                           </button>
                         </div>
                       )}
+                      {stage === "lead" && (
+                        <div className="mt-2 border-t border-stone-100 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConvertTarget(deal);
+                              setConvertMode(deal.customerId ? "existing" : "new");
+                              setConvertCustomerId(deal.customerId ?? "");
+                              setConvertCustomerName("");
+                            }}
+                            disabled={busy}
+                            className="inline-flex w-full cursor-pointer items-center justify-center gap-1 rounded-md bg-stone-50 px-2 py-1 text-[11px] font-medium text-stone-600 transition-colors duration-150 hover:bg-emerald-50 hover:text-emerald-700 disabled:pointer-events-none disabled:opacity-40"
+                          >
+                            <IconArrowRight className="size-3" /> Convert lead
+                          </button>
+                        </div>
+                      )}
                       {(stage === "lost" || stage === "won") && (
                         <div className="mt-2.5 border-t border-stone-100 pt-2">
                           <button
@@ -547,6 +658,59 @@ function DealsTab(props: {
         Drag a card to any stage — every move is recorded in the ledger and reversible. Keyboard: use Advance, Mark
         lost, or Reopen on each card.
       </p>
+
+      <Dialog
+        open={convertTarget !== null}
+        onClose={() => setConvertTarget(null)}
+        title={`Convert “${convertTarget?.title ?? ""}”`}
+        description="Promotes the deal to qualified and attaches the customer it belongs to — creating one on the fly when asked."
+        footer={
+          <>
+            <Button tone="secondary" onClick={() => setConvertTarget(null)} disabled={converting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void convert()}
+              loading={converting}
+              disabled={convertMode === "existing" ? !convertCustomerId : !convertCustomerName.trim()}
+            >
+              Convert
+            </Button>
+          </>
+        }
+      >
+        <div className="mb-3 flex gap-2 text-sm">
+          <Button tone={convertMode === "new" ? "primary" : "secondary"} size="sm" onClick={() => setConvertMode("new")}>
+            New customer
+          </Button>
+          <Button tone={convertMode === "existing" ? "primary" : "secondary"} size="sm" onClick={() => setConvertMode("existing")}>
+            Existing
+          </Button>
+        </div>
+        {convertMode === "new" ? (
+          <input
+            className="input"
+            placeholder={`Customer name (defaults to “${convertTarget?.title ?? ""}”)`}
+            aria-label="New customer name"
+            value={convertCustomerName}
+            onChange={(e) => setConvertCustomerName(e.target.value)}
+          />
+        ) : (
+          <select
+            className="input"
+            aria-label="Attach to existing customer"
+            value={convertCustomerId}
+            onChange={(e) => setConvertCustomerId(e.target.value)}
+          >
+            <option value="">Choose customer…</option>
+            {props.customers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </Dialog>
     </div>
   );
 }
@@ -560,6 +724,7 @@ function CustomersTab(props: {
   onEmailChange: (v: string) => void;
   onCreate: (e: React.FormEvent) => void;
   onDeactivate: (customerId: string) => void;
+  onTimeline: (customerId: string, name: string) => void;
 }) {
   const active = props.customers.filter((c) => !c.deactivatedAt);
   const deactivated = props.customers.filter((c) => c.deactivatedAt);
@@ -612,7 +777,15 @@ function CustomersTab(props: {
                   <td className="px-4 py-2.5">
                     {c.deactivatedAt ? <Badge tone="neutral">Inactive</Badge> : <Badge tone="green">Active</Badge>}
                   </td>
-                  <td className="px-4 py-2.5 text-right">
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => props.onTimeline(c.id, c.name)}
+                      disabled={props.busy}
+                      className="mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-stone-400 transition-colors duration-150 hover:bg-stone-100 hover:text-stone-700 disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      <IconHistory className="size-3" /> Timeline
+                    </button>
                     {!c.deactivatedAt && (
                       <button
                         type="button"

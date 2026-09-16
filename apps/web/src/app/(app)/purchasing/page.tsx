@@ -7,6 +7,8 @@ import {
   Button,
   Card,
   CardTitle,
+  ConfirmDialog,
+  Dialog,
   EmptyState,
   LoadingPage,
   StatCard,
@@ -36,12 +38,15 @@ interface PurchaseOrder {
   lines: PoLine[];
 }
 interface Bill {
+  id: string;
   number: number;
   vendorName: string;
   vendorRef: string | null;
   memo: string | null;
   totalMinor: number;
   paidMinor: number;
+  creditedMinor: number;
+  status: string;
   dueMinor: number;
   createdAt: string;
 }
@@ -71,6 +76,16 @@ interface Payload {
   apAging?: Aging;
   requests?: PurchaseRequest[];
   priceHistory?: { rows: PriceHistoryRow[] };
+  supplierPerformance?: { vendors: SupplierPerformanceRow[] };
+}
+interface SupplierPerformanceRow {
+  vendorId: string;
+  vendorName: string;
+  orders: number;
+  avgLeadTimeDays: number | null;
+  onTimeRate: number | null;
+  fillRate: number | null;
+  backorderedOrders: number;
 }
 interface PriceHistoryRow {
   vendorName: string;
@@ -124,6 +139,11 @@ export default function PurchasingPage() {
     lines: [{ description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "" }],
   });
   const [payAmount, setPayAmount] = useState<Record<string, string>>({});
+  const [creditTarget, setCreditTarget] = useState<Bill | null>(null);
+  const [creditForm, setCreditForm] = useState({ amount: "", reason: "" });
+  const [closeTarget, setCloseTarget] = useState<PurchaseOrder | null>(null);
+  const [returnTarget, setReturnTarget] = useState<PurchaseOrder | null>(null);
+  const [returnLines, setReturnLines] = useState<Record<number, { qty: string; reason: string }>>({});
   const [products, setProducts] = useState<Product[]>([]);
   const [quickVendor, setQuickVendor] = useState<{ open: boolean; name: string; email: string }>({
     open: false,
@@ -648,24 +668,44 @@ export default function PurchasingPage() {
                     ))}
                   </tbody>
                 </table>
-                {(o.status === "ordered" || o.status === "partial") && (
-                  <div className="mt-2 flex justify-end">
-                    <Button
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => {
-                        const lines = o.lines
-                          .map((l) => ({
-                            lineNumber: l.lineNumber,
-                            quantity: Math.round(Number(receipts[`${o.id}:${l.lineNumber}`] || "0") * 1000),
-                          }))
-                          .filter((l) => l.quantity > 0);
-                        if (!lines.length) return;
-                        void post({ action: "receiveGoods", poNumber: o.number, lines }, "Receive goods");
-                      }}
-                    >
-                      Record receipt
-                    </Button>
+                {o.status !== "void" && o.status !== "closed" && (
+                  <div className="mt-2 flex flex-wrap justify-end gap-2">
+                    {(o.status === "received" || o.status === "partial") && (
+                      <Button
+                        size="sm"
+                        tone="secondary"
+                        disabled={busy}
+                        onClick={() => {
+                          setReturnTarget(o);
+                          setReturnLines({});
+                        }}
+                      >
+                        Return goods
+                      </Button>
+                    )}
+                    {(o.status === "ordered" || o.status === "partial") && (
+                      <>
+                        <Button size="sm" tone="secondary" disabled={busy} onClick={() => setCloseTarget(o)}>
+                          Close
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => {
+                            const lines = o.lines
+                              .map((l) => ({
+                                lineNumber: l.lineNumber,
+                                quantity: Math.round(Number(receipts[`${o.id}:${l.lineNumber}`] || "0") * 1000),
+                              }))
+                              .filter((l) => l.quantity > 0);
+                            if (!lines.length) return;
+                            void post({ action: "receiveGoods", poNumber: o.number, lines }, "Receive goods");
+                          }}
+                        >
+                          Record receipt
+                        </Button>
+                      </>
+                    )}
                   </div>
                 )}
               </Card>
@@ -869,7 +909,20 @@ export default function PurchasingPage() {
                             >
                               Pay
                             </Button>
+                            <Button
+                              size="sm"
+                              tone="secondary"
+                              disabled={busy}
+                              onClick={() => {
+                                setCreditTarget(b);
+                                setCreditForm({ amount: (b.dueMinor / 100).toFixed(2), reason: "" });
+                              }}
+                            >
+                              Credit
+                            </Button>
                           </span>
+                        ) : b.creditedMinor > 0 ? (
+                          <Badge tone="green">settled</Badge>
                         ) : (
                           <Badge tone="green">paid</Badge>
                         )}
@@ -935,7 +988,197 @@ export default function PurchasingPage() {
         </>
       )}
 
-      {tab === "intel" && <VendorIntelSection vendors={vendors} initialRows={data.priceHistory?.rows ?? []} />}
+      {tab === "intel" && (
+        <>
+          <VendorIntelSection vendors={vendors} initialRows={data.priceHistory?.rows ?? []} />
+          <Card>
+            <CardTitle>Supplier performance</CardTitle>
+            {(data.supplierPerformance?.vendors ?? []).length === 0 ? (
+              <EmptyState icon={<IconListTree />} title="No vendor history yet" hint="Lead times, fill rates and on-time arrivals appear once orders are received." />
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left opacity-50">
+                    <th>Vendor</th>
+                    <th className="text-right">Orders</th>
+                    <th className="text-right">Avg lead time</th>
+                    <th className="text-right">On-time</th>
+                    <th className="text-right">Fill rate</th>
+                    <th className="text-right">Backordered</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.supplierPerformance?.vendors ?? []).map((v) => (
+                    <tr key={v.vendorId} className="border-t">
+                      <td className="py-1.5 font-medium">{v.vendorName}</td>
+                      <td className="text-right tabular-nums">{v.orders}</td>
+                      <td className="text-right tabular-nums">{v.avgLeadTimeDays === null ? "—" : `${v.avgLeadTimeDays} d`}</td>
+                      <td className="text-right tabular-nums">{v.onTimeRate === null ? "—" : `${v.onTimeRate}%`}</td>
+                      <td className="text-right tabular-nums">{v.fillRate === null ? "—" : `${v.fillRate}%`}</td>
+                      <td className="text-right tabular-nums">{v.backorderedOrders}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <p className="mt-2 text-xs opacity-50">Lead time is order → first receipt; on-time needs a promised date on the order.</p>
+          </Card>
+        </>
+      )}
+
+      {/* Credit a vendor bill */}
+      <Dialog
+        open={creditTarget !== null}
+        onClose={() => setCreditTarget(null)}
+        title={`Credit bill #${creditTarget?.number ?? ""} — ${creditTarget?.vendorName ?? ""}`}
+        description="A supplier credit reduces what you owe through a reversing entry; the bill itself is never edited."
+        footer={
+          <>
+            <Button tone="secondary" onClick={() => setCreditTarget(null)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              loading={busy}
+              disabled={!Number(creditForm.amount) || creditForm.reason.trim().length < 3}
+              onClick={() => {
+                if (!creditTarget) return;
+                void post(
+                  {
+                    action: "billCreditNote",
+                    billId: creditTarget.id,
+                    amountMinor: Math.round(Number(creditForm.amount || "0") * 100),
+                    reason: creditForm.reason.trim(),
+                  },
+                  `Credit bill #${creditTarget.number}`,
+                ).then((ok) => ok && setCreditTarget(null));
+              }}
+            >
+              Apply credit
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm">
+          <div>
+            <label htmlFor="credit-amount" className="label">
+              Amount
+            </label>
+            <input
+              id="credit-amount"
+              inputMode="decimal"
+              className="input tnum"
+              value={creditForm.amount}
+              onChange={(e) => setCreditForm({ ...creditForm, amount: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="credit-reason" className="label">
+              Reason
+            </label>
+            <input
+              id="credit-reason"
+              className="input"
+              placeholder="e.g. damaged goods on delivery"
+              value={creditForm.reason}
+              onChange={(e) => setCreditForm({ ...creditForm, reason: e.target.value })}
+            />
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Close a purchase order */}
+      <ConfirmDialog
+        open={closeTarget !== null}
+        onClose={() => setCloseTarget(null)}
+        onConfirm={() => {
+          if (!closeTarget) return;
+          void post({ action: "closePurchaseOrder", poNumber: closeTarget.number }, `Close PO #${closeTarget.number}`).then(
+            (ok) => ok && setCloseTarget(null),
+          );
+        }}
+        title={`Close PO #${closeTarget?.number ?? ""}?`}
+        body="Closes the order for anything not yet received. If quantities are short the order is marked backordered so the shortfall stays on the vendor's record."
+        confirmLabel="Close order"
+        busy={busy}
+      />
+
+      {/* Return goods to vendor */}
+      <Dialog
+        open={returnTarget !== null}
+        onClose={() => setReturnTarget(null)}
+        title={`Return goods — PO #${returnTarget?.number ?? ""} (${returnTarget?.vendorName ?? ""})`}
+        description="Writes the outbound stock legs against this order so receipts, fill rates and stock stay truthful."
+        width="max-w-xl"
+        footer={
+          <>
+            <Button tone="secondary" onClick={() => setReturnTarget(null)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              tone="danger"
+              loading={busy}
+              onClick={() => {
+                if (!returnTarget) return;
+                const lines = returnTarget.lines
+                  .map((l) => ({
+                    lineNumber: l.lineNumber,
+                    quantity: Math.round(Number(returnLines[l.lineNumber]?.qty || "0") * 1000),
+                    reason: returnLines[l.lineNumber]?.reason?.trim() ?? "",
+                  }))
+                  .filter((l) => l.quantity > 0 && l.reason.length >= 3);
+                if (!lines.length) return;
+                void post({ action: "returnGoods", poNumber: returnTarget.number, lines }, `Return goods on PO #${returnTarget.number}`).then(
+                  (ok) => ok && setReturnTarget(null),
+                );
+              }}
+            >
+              Return
+            </Button>
+          </>
+        }
+      >
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left opacity-50">
+              <th>#</th>
+              <th>Description</th>
+              <th className="text-right">Return qty</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {returnTarget?.lines.map((l) => (
+              <tr key={l.lineNumber} className="border-t">
+                <td className="py-1.5">{l.lineNumber}</td>
+                <td>{l.description}</td>
+                <td className="text-right">
+                  <input
+                    className="w-16 rounded border bg-transparent px-1 py-0.5 text-right"
+                    placeholder={qty(l.quantity)}
+                    aria-label={`Return quantity for line ${l.lineNumber}`}
+                    value={returnLines[l.lineNumber]?.qty ?? ""}
+                    onChange={(e) =>
+                      setReturnLines({ ...returnLines, [l.lineNumber]: { qty: e.target.value, reason: returnLines[l.lineNumber]?.reason ?? "" } })
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="w-40 rounded border bg-transparent px-1 py-0.5"
+                    placeholder="why it goes back"
+                    aria-label={`Reason for line ${l.lineNumber}`}
+                    value={returnLines[l.lineNumber]?.reason ?? ""}
+                    onChange={(e) =>
+                      setReturnLines({ ...returnLines, [l.lineNumber]: { qty: returnLines[l.lineNumber]?.qty ?? "", reason: e.target.value } })
+                    }
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-2 text-xs opacity-50">Quantities are in whole units; a return larger than what was received is refused.</p>
+      </Dialog>
     </AppFrame>
   );
 }

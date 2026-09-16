@@ -4,7 +4,9 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   customers,
   getDb,
+  supportCannedResponses,
   supportConversations,
+  supportKbArticles,
   supportMessages,
 } from "@chaste/db";
 import { hasPermission as hasPermissionFor } from "@chaste/kernel";
@@ -34,6 +36,28 @@ const actionSchema = z.discriminatedUnion("action", [
     reason: z.string().min(3).max(4000),
   }),
   z.object({ action: z.literal("resolve"), conversationId: z.string().uuid() }),
+  z.object({ action: z.literal("reopen"), conversationId: z.string().uuid() }),
+  z.object({
+    action: z.literal("updateTicket"),
+    conversationId: z.string().uuid(),
+    priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+    category: z.string().max(40).optional(),
+    assigneeUserId: z.string().uuid().optional(),
+    slaDueAt: z.string().datetime().optional(),
+  }),
+  z.object({ action: z.literal("suggestCategory"), text: z.string().min(1).max(2000) }),
+  z.object({
+    action: z.literal("createCannedResponse"),
+    shortcut: z.string().min(1).max(40),
+    title: z.string().min(1).max(120),
+    body: z.string().min(1).max(4000),
+  }),
+  z.object({
+    action: z.literal("createKbArticle"),
+    title: z.string().min(1).max(200),
+    body: z.string().min(1).max(20000),
+    category: z.string().max(40).optional(),
+  }),
 ]);
 
 /** Conversation list with customer names and last activity. */
@@ -47,6 +71,27 @@ export async function GET(req: Request) {
   const db = getDb().db;
   const conversationId = new URL(req.url).searchParams.get("id");
 
+  // Canned responses + knowledge base: no list capabilities exist, so the
+  // library surface is a plain read (writes stay governed).
+  if (new URL(req.url).searchParams.get("library")) {
+    const canned = await db
+      .select()
+      .from(supportCannedResponses)
+      .where(eq(supportCannedResponses.orgId, resolved.orgId))
+      .orderBy(supportCannedResponses.shortcut)
+      .limit(100);
+    const articles = await db
+      .select()
+      .from(supportKbArticles)
+      .where(eq(supportKbArticles.orgId, resolved.orgId))
+      .orderBy(supportKbArticles.title)
+      .limit(100);
+    return NextResponse.json({
+      canned: canned.map((c) => ({ id: c.id, shortcut: c.shortcut, title: c.title, body: c.body })),
+      articles: articles.map((a) => ({ id: a.id, title: a.title, body: a.body, category: a.category })),
+    });
+  }
+
   if (conversationId) {
     const [conv] = await db
       .select({
@@ -55,6 +100,10 @@ export async function GET(req: Request) {
         customerName: customers.name,
         subject: supportConversations.subject,
         status: supportConversations.status,
+        priority: supportConversations.priority,
+        category: supportConversations.category,
+        assignedUserId: supportConversations.assignedUserId,
+        slaDueAt: supportConversations.slaDueAt,
       })
       .from(supportConversations)
       .innerJoin(customers, eq(customers.id, supportConversations.customerId))
@@ -69,7 +118,13 @@ export async function GET(req: Request) {
       .where(eq(supportMessages.conversationId, conversationId))
       .orderBy(supportMessages.createdAt)
       .limit(200);
-    return NextResponse.json({ conversation: conv, messages });
+    return NextResponse.json({
+      conversation: {
+        ...conv,
+        slaDueAt: conv.slaDueAt ? conv.slaDueAt.toISOString() : null,
+      },
+      messages,
+    });
   }
 
   const rows = (await db.execute(sql`
@@ -114,11 +169,12 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
   const input = parsed.data;
 
-  const needsWrite = input.action !== "draft";
+  // Drafting and category suggestion are read-class; everything else writes.
+  const needsWrite = !["draft", "suggestCategory"].includes(input.action);
   if (needsWrite && !hasPermissionFor({ permissions: resolved.permissions }, "support.write")) {
     return NextResponse.json({ error: "forbidden: missing permission: support.write" }, { status: 403 });
   }
-  if (input.action === "draft" && !hasPermissionFor({ permissions: resolved.permissions }, "support.read")) {
+  if (!needsWrite && !hasPermissionFor({ permissions: resolved.permissions }, "support.read")) {
     return NextResponse.json({ error: "forbidden: missing permission: support.read" }, { status: 403 });
   }
 
@@ -187,6 +243,42 @@ export async function POST(req: Request) {
     case "resolve": {
       const result = await executor.execute("support.resolveConversation", ctx!, {
         conversationId: input.conversationId,
+      });
+      return respond(result);
+    }
+    case "reopen": {
+      const result = await executor.execute("support.reopenConversation", ctx!, {
+        conversationId: input.conversationId,
+      });
+      return respond(result);
+    }
+    case "updateTicket": {
+      const result = await executor.execute("support.updateTicket", ctx!, {
+        conversationId: input.conversationId,
+        priority: input.priority,
+        category: input.category,
+        assigneeUserId: input.assigneeUserId,
+        slaDueAt: input.slaDueAt,
+      });
+      return respond(result);
+    }
+    case "suggestCategory": {
+      const result = await executor.execute("support.suggestCategory", ctx!, { text: input.text });
+      return respond(result);
+    }
+    case "createCannedResponse": {
+      const result = await executor.execute("support.createCannedResponse", ctx!, {
+        shortcut: input.shortcut,
+        title: input.title,
+        body: input.body,
+      });
+      return respond(result);
+    }
+    case "createKbArticle": {
+      const result = await executor.execute("support.createKbArticle", ctx!, {
+        title: input.title,
+        body: input.body,
+        category: input.category,
       });
       return respond(result);
     }

@@ -18,8 +18,9 @@ import { IconFileText, IconListTree, IconPlus, IconTrash } from "@/components/ic
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { NewOrderTab, OrdersListTab, type OrderRow } from "./orders-tab";
 
-type Tab = "overview" | "quotes" | "new";
+type Tab = "overview" | "quotes" | "new" | "orders" | "new-order";
 
 interface Quote {
   id: string;
@@ -81,7 +82,12 @@ const emptyLine = { description: "", quantity: "1", unitPrice: "0.00", tax: "0.0
 
 export default function SalesPage() {
   const enabled = useModuleEnabled("sales");
-  const [data, setData] = useState<{ quotes: Quote[]; customers: Customer[]; deals: Deal[] } | null>(null);
+  const [data, setData] = useState<{
+    quotes: Quote[];
+    customers: Customer[];
+    deals: Deal[];
+    orders: OrderRow[];
+  } | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -96,16 +102,18 @@ export default function SalesPage() {
   const [quickCustomer, setQuickCustomer] = useState({ open: false, name: "", email: "" });
 
   const load = useCallback(async () => {
-    const [q, c, d, inv] = await Promise.all([
+    const [q, c, d, inv, so] = await Promise.all([
       callApi<{ quotes?: Quote[] }>("/api/quotes"),
       callApi<{ customers?: Customer[] }>("/api/customers"),
       callApi<{ deals?: Deal[] }>("/api/deals"),
       callApi<{ items?: Product[] }>("/api/inventory"),
+      callApi<{ orders?: OrderRow[] }>("/api/sales"),
     ]);
     setData({
       quotes: q.data?.quotes ?? [],
       customers: c.data?.customers ?? [],
       deals: d.data?.deals ?? [],
+      orders: so.data?.orders ?? [],
     });
     setProducts(inv.data?.items ?? []);
     if (q.error) setNotice({ tone: "error", error: q.error });
@@ -197,9 +205,10 @@ export default function SalesPage() {
   if (!enabled) return <ModuleDisabled label="Sales" />;
   if (!data) return <LoadingPage />;
 
-  const { quotes, customers, deals } = data;
+  const { quotes, customers, deals, orders } = data;
   const activeCustomers = customers.filter((c) => !c.deactivatedAt);
   const customerName = new Map(customers.map((c) => [c.id, c.name]));
+  const openOrders = orders.filter((o) => o.status === "draft" || o.status === "confirmed");
 
   const openQuotes = quotes.filter((q) => q.status === "draft" || q.status === "sent");
   const openValueMinor = openQuotes.reduce((s, q) => s + q.totalMinor, 0);
@@ -224,6 +233,8 @@ export default function SalesPage() {
         { id: "overview", label: "Overview" },
         { id: "quotes", label: "Quotes" },
         { id: "new", label: "New quote" },
+        { id: "orders", label: "Orders", count: openOrders.length || undefined },
+        { id: "new-order", label: "New order" },
       ]}
       activeTab={tab}
       onTabChange={(id) => setTab(id as Tab)}
@@ -247,6 +258,12 @@ export default function SalesPage() {
               sub={`${openDeals.length} open deal${openDeals.length === 1 ? "" : "s"} from CRM`}
             />
             <StatCard label="Weighted forecast" value={formatMoneyWhole(weightedForecastMinor)} sub="Stage-probability weighted" />
+            <StatCard
+              label="Open orders"
+              value={openOrders.length}
+              sub={`${formatMoneyWhole(openOrders.reduce((s, o) => s + o.totalMinor, 0))} committed`}
+              tone={openOrders.length > 0 ? "success" : "default"}
+            />
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
@@ -299,15 +316,25 @@ export default function SalesPage() {
 
       {tab === "quotes" && (
         <>
-          <SegmentedControl
-            ariaLabel="Filter quotes by status"
-            value={filter}
-            onChange={setFilter}
-            options={[
-              { value: "all", label: "All" },
-              ...QUOTE_STATUSES.map((s) => ({ value: s, label: s[0]!.toUpperCase() + s.slice(1) })),
-            ]}
-          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <SegmentedControl
+              ariaLabel="Filter quotes by status"
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "all", label: "All" },
+                ...QUOTE_STATUSES.map((s) => ({ value: s, label: s[0]!.toUpperCase() + s.slice(1) })),
+              ]}
+            />
+            <Button
+              tone="secondary"
+              size="sm"
+              disabled={busy || quotes.every((q) => q.status !== "sent")}
+              onClick={() => void post("/api/quotes", { action: "expire" }, "Expire lapsed quotes")}
+            >
+              Expire lapsed
+            </Button>
+          </div>
           {visibleQuotes.length === 0 ? (
             <EmptyState
               icon={<IconFileText />}
@@ -492,6 +519,13 @@ export default function SalesPage() {
             </p>
           </div>
         </Card>
+      )}
+      {tab === "orders" && (
+        <OrdersListTab orders={orders} customers={customers} products={products} busy={busy} post={post} />
+      )}
+
+      {tab === "new-order" && (
+        <NewOrderTab orders={orders} customers={customers} products={products} busy={busy} post={post} />
       )}
 
     </AppFrame>

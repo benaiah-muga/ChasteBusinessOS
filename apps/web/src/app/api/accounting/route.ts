@@ -6,6 +6,7 @@ import {
   invoices,
   journalEntries,
   journalLines,
+  payments,
   periods,
   salesTaxFilings,
   vendorBills,
@@ -24,6 +25,8 @@ export async function GET() {
   if (denied) return denied;
   const orgId = resolved.orgId;
   const db = getDb().db;
+  const ctx = actorFromResolved(resolved, {});
+  const executor = ctx ? buildExecutor(db, buildRegistry(db)) : null;
 
   const entries = await db
     .select({
@@ -109,6 +112,25 @@ export async function GET() {
     .where(eq(customers.orgId, orgId))
     .orderBy(asc(customers.name));
 
+  // Governed invoice read + payment history (no list capability for payments).
+  const invoiceList =
+    executor && ctx
+      ? await executor.execute("accounting.listInvoices", ctx, { limit: 50 })
+      : { ok: false as const, data: undefined };
+  const paymentRows = await db
+    .select({
+      id: payments.id,
+      invoiceNumber: invoices.number,
+      amountMinor: payments.amountMinor,
+      method: payments.method,
+      receivedAt: payments.receivedAt,
+    })
+    .from(payments)
+    .innerJoin(invoices, eq(invoices.id, payments.invoiceId))
+    .where(eq(payments.orgId, orgId))
+    .orderBy(desc(payments.receivedAt))
+    .limit(50);
+
   return NextResponse.json({
     entries: entries.map((e) => ({
       ...e,
@@ -131,6 +153,11 @@ export async function GET() {
       filedAt: f.createdAt.toISOString(),
     })),
     customers: customerRows,
+    invoices:
+      invoiceList.ok && invoiceList.data
+        ? (invoiceList.data as { invoices: unknown[] }).invoices
+        : [],
+    payments: paymentRows.map((p) => ({ ...p, receivedAt: p.receivedAt.toISOString() })),
   });
 }
 
@@ -153,6 +180,19 @@ export async function POST(req: Request) {
     customerId?: string;
     /** Client action identity (B02): stable across retries of one intended action. */
     intentId?: string;
+    memo?: string;
+    lines?: { description: string; quantity: number; unitPriceMinor: number; taxMinor?: number }[];
+    currency?: string;
+    fxRate?: string;
+    dueAt?: string;
+    invoiceNumber?: number;
+    method?: "cash" | "bank_transfer" | "card";
+    paymentId?: string;
+    invoiceId?: string;
+    reason?: string;
+    quoteCurrency?: string;
+    rate?: string;
+    effectiveAt?: string;
   };
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
@@ -216,6 +256,56 @@ export async function POST(req: Request) {
   if (body.action === "cashForecast") {
     const result = await executor.execute("accounting.cashForecast", humanCtx, {});
     return respond(result);
+  }
+  if (body.action === "createInvoice" && body.customerId) {
+    const lines = body.lines;
+    if (!lines?.length) return NextResponse.json({ error: "lines are required" }, { status: 400 });
+    return respond(
+      await executor.execute("accounting.createInvoice", humanCtx, {
+        customerId: body.customerId,
+        memo: body.memo || undefined,
+        lines,
+        currency: body.currency || undefined,
+        fxRate: body.fxRate || undefined,
+        dueAt: body.dueAt || undefined,
+      }),
+    );
+  }
+  if (body.action === "recordPayment" && body.invoiceNumber && body.amountMinor) {
+    return respond(
+      await executor.execute("accounting.recordPayment", humanCtx, {
+        invoiceNumber: body.invoiceNumber,
+        amountMinor: body.amountMinor,
+        method: body.method ?? "bank_transfer",
+        settleFxRate: body.fxRate || undefined,
+      }),
+    );
+  }
+  if (body.action === "reversePayment" && body.paymentId && body.reason && body.reason.length >= 3) {
+    return respond(
+      await executor.execute("accounting.reversePayment", humanCtx, { paymentId: body.paymentId, reason: body.reason }),
+    );
+  }
+  if (body.action === "creditNote" && body.invoiceId && body.amountMinor && body.reason && body.reason.length >= 3) {
+    return respond(
+      await executor.execute("accounting.creditNote", humanCtx, {
+        invoiceId: body.invoiceId,
+        amountMinor: body.amountMinor,
+        reason: body.reason,
+      }),
+    );
+  }
+  if (body.action === "reopenPeriod" && body.year && body.month) {
+    return respond(await executor.execute("accounting.reopenPeriod", humanCtx, { year: body.year, month: body.month }));
+  }
+  if (body.action === "recordFxRate" && body.quoteCurrency && body.rate) {
+    return respond(
+      await executor.execute("accounting.recordFxRate", humanCtx, {
+        quoteCurrency: body.quoteCurrency,
+        rate: body.rate,
+        effectiveAt: body.effectiveAt || undefined,
+      }),
+    );
   }
   return NextResponse.json({ error: "invalid action" }, { status: 400 });
 }

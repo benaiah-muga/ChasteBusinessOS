@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   CardTitle,
+  Dialog,
   EmptyState,
   LoadingPage,
   StatCard,
@@ -58,6 +59,8 @@ export default function ProductsPage() {
   const [tab, setTab] = useState<Tab>("overview");
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({ sku: "", name: "", unitLabel: "", salePrice: "", openingQty: "", barcode: "", imageUrl: "", tags: "" });
+  const [editTarget, setEditTarget] = useState<Item | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", unitLabel: "", salePrice: "", barcode: "", imageUrl: "", tags: "" });
 
   const load = useCallback(async () => {
     const res = await callApi<Payload>("/api/inventory");
@@ -122,6 +125,36 @@ export default function ProductsPage() {
   async function archive(sku: string): Promise<void> {
     if (!window.confirm(`Archive ${sku}? Past quotes and invoices keep their history.`)) return;
     await post({ action: "archiveItem", sku, archive: true }, `Archive ${sku}`);
+  }
+
+  function openEdit(item: Item): void {
+    setEditForm({
+      name: item.name,
+      unitLabel: item.unitLabel ?? "",
+      salePrice: item.salePriceMinor ? (item.salePriceMinor / 100).toFixed(2) : "",
+      barcode: item.barcode ?? "",
+      imageUrl: item.imageUrl ?? "",
+      tags: (item.tags ?? []).join(", "),
+    });
+    setEditTarget(item);
+  }
+
+  async function saveEdit(): Promise<void> {
+    if (!editTarget || !editForm.name.trim()) return;
+    const ok = await post(
+      {
+        action: "updateItem",
+        sku: editTarget.sku,
+        name: editForm.name.trim(),
+        unitLabel: editForm.unitLabel.trim() || undefined,
+        salePriceMinor: Math.round(Number(editForm.salePrice || "0") * 100),
+        barcode: editForm.barcode.trim() || null,
+        imageUrl: editForm.imageUrl.trim() || null,
+        tags: editForm.tags.split(",").map((t) => t.trim()).filter(Boolean),
+      },
+      `Update ${editTarget.sku}`,
+    );
+    if (ok) setEditTarget(null);
   }
 
   if (!enabled) return <ModuleDisabled label="Products" />;
@@ -265,15 +298,26 @@ export default function ProductsPage() {
                       {i.reorderNeeded ? <Badge tone="amber">reorder</Badge> : <Badge tone="neutral">ok</Badge>}
                     </td>
                     <td className="text-right">
-                      <button
-                        type="button"
-                        aria-label={`Archive ${i.sku}`}
-                        title="Archive — hides from pickers, keeps history"
-                        onClick={() => void archive(i.sku)}
-                        className="cursor-pointer rounded px-1.5 py-1 text-stone-400 transition-colors hover:bg-red-50 hover:text-red-700"
-                      >
-                        ✕
-                      </button>
+                      <span className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label={`Edit ${i.sku}`}
+                          title="Edit name, price, barcode, image, tags"
+                          onClick={() => openEdit(i)}
+                          className="cursor-pointer rounded px-1.5 py-1 text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Archive ${i.sku}`}
+                          title="Archive — hides from pickers, keeps history"
+                          onClick={() => void archive(i.sku)}
+                          className="cursor-pointer rounded px-1.5 py-1 text-stone-400 transition-colors hover:bg-red-50 hover:text-red-700"
+                        >
+                          ✕
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -358,6 +402,99 @@ export default function ProductsPage() {
           </div>
         </Card>
       )}
+
+      {/* Edit item — identity beyond the SKU */}
+      <Dialog
+        open={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        title={`Edit ${editTarget?.sku ?? ""}`}
+        description="Clearing the barcode or image removes it; the prior values are snapshotted so the edit can be undone."
+        footer={
+          <>
+            <Button tone="secondary" onClick={() => setEditTarget(null)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button loading={busy} disabled={!editForm.name.trim()} onClick={() => void saveEdit()}>
+              Save
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <div className="min-w-40 flex-1">
+              <label htmlFor="edit-name" className="label">
+                Name
+              </label>
+              <input
+                id="edit-name"
+                className="input"
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+              />
+            </div>
+            <div className="w-24">
+              <label htmlFor="edit-unit" className="label">
+                Unit
+              </label>
+              <input
+                id="edit-unit"
+                className="input"
+                placeholder="kg"
+                value={editForm.unitLabel}
+                onChange={(e) => setEditForm({ ...editForm, unitLabel: e.target.value })}
+              />
+            </div>
+            <div className="w-28">
+              <label htmlFor="edit-price" className="label">
+                Sale price
+              </label>
+              <input
+                id="edit-price"
+                inputMode="decimal"
+                className="input tnum"
+                value={editForm.salePrice}
+                onChange={(e) => setEditForm({ ...editForm, salePrice: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <div className="min-w-40 flex-1">
+              <label htmlFor="edit-barcode" className="label">
+                Barcode
+              </label>
+              <input
+                id="edit-barcode"
+                className="input"
+                value={editForm.barcode}
+                onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
+              />
+            </div>
+            <div className="min-w-44 flex-1">
+              <label htmlFor="edit-image" className="label">
+                Image URL
+              </label>
+              <input
+                id="edit-image"
+                className="input"
+                value={editForm.imageUrl}
+                onChange={(e) => setEditForm({ ...editForm, imageUrl: e.target.value })}
+              />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="edit-tags" className="label">
+              Tags (comma separated)
+            </label>
+            <input
+              id="edit-tags"
+              className="input"
+              value={editForm.tags}
+              onChange={(e) => setEditForm({ ...editForm, tags: e.target.value })}
+            />
+          </div>
+        </div>
+      </Dialog>
 
     </AppFrame>
   );

@@ -98,6 +98,22 @@ export default function ManufacturingPage() {
   const [preview, setPreview] = useState<CostPreview | null>(null);
   const [reverseRunId, setReverseRunId] = useState("");
 
+  // Feasibility + BOM report, per assembly
+  const [unitsInput, setUnitsInput] = useState("1");
+  const [feasibility, setFeasibility] = useState<{
+    asm: string;
+    producible: boolean;
+    maxProducibleThousandths: number;
+    estimatedLeadTimeDays: number | null;
+    lines: { itemId: string; requiredThousandths: number; onHandThousandths: number; shortfallThousandths: number }[];
+  } | null>(null);
+  const [bomReport, setBomReport] = useState<{
+    asm: string;
+    producible: boolean;
+    totalShortfallThousandths: number;
+    lines: { sku: string; name: string; requiredThousandths: number; onHandThousandths: number; shortfallThousandths: number }[];
+  } | null>(null);
+
   const [woForm, setWoForm] = useState({ assemblySku: "", plannedQty: "10", yieldPct: "100", note: "" });
   const [woCompletion, setWoCompletion] = useState<Record<string, string>>({});
 
@@ -142,6 +158,49 @@ export default function ManufacturingPage() {
     } else {
       setPreview(res.data?.data ?? null);
     }
+  }
+
+  async function checkFeasibility(asm: string) {
+    const res = await postApi<{
+      data?: {
+        producible: boolean;
+        maxProducibleThousandths: number;
+        estimatedLeadTimeDays: number | null;
+        lines: { itemId: string; requiredThousandths: number; onHandThousandths: number; shortfallThousandths: number }[];
+      };
+    }>("/api/manufacturing", {
+      action: "checkProductionFeasibility",
+      assemblySku: asm,
+      desiredUnitsThousandths: Math.round(Number(unitsInput || "0") * 1000),
+    });
+    if (!res.ok) {
+      setNotice({ tone: "error", error: res.error! });
+      setFeasibility(null);
+      return;
+    }
+    const d = res.data?.data;
+    if (d) setFeasibility({ asm, ...d });
+  }
+
+  async function runBomReport(asm: string) {
+    const res = await postApi<{
+      data?: {
+        producible: boolean;
+        totalShortfallThousandths: number;
+        lines: { sku: string; name: string; requiredThousandths: number; onHandThousandths: number; shortfallThousandths: number }[];
+      };
+    }>("/api/manufacturing", {
+      action: "bomReport",
+      assemblySku: asm,
+      quantityThousandths: Math.round(Number(unitsInput || "0") * 1000),
+    });
+    if (!res.ok) {
+      setNotice({ tone: "error", error: res.error! });
+      setBomReport(null);
+      return;
+    }
+    const d = res.data?.data;
+    if (d) setBomReport({ asm, ...d });
   }
 
   /** Builds the nested tree for an assembly from flat edges (client-side). */
@@ -353,6 +412,101 @@ export default function ManufacturingPage() {
                         </li>
                       ))}
                   </ul>
+                )}
+
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-stone-100 pt-2.5 text-sm">
+                  <label className="flex items-center gap-1 text-xs opacity-60">
+                    Build
+                    <input
+                      className="w-16 rounded border bg-transparent px-1 py-0.5 text-right"
+                      aria-label={`Units to build for ${asm}`}
+                      value={unitsInput}
+                      onChange={(e) => setUnitsInput(e.target.value)}
+                    />
+                    units
+                  </label>
+                  <Button tone="ghost" size="sm" disabled={busy} onClick={() => void checkFeasibility(asm)}>
+                    Check feasibility
+                  </Button>
+                  <Button tone="ghost" size="sm" disabled={busy} onClick={() => void runBomReport(asm)}>
+                    BOM report
+                  </Button>
+                </div>
+
+                {feasibility?.asm === asm && (
+                  <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50/70 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge tone={feasibility.producible ? "green" : "red"}>
+                        {feasibility.producible ? "producible now" : "short of parts"}
+                      </Badge>
+                      <span className="text-xs opacity-70">
+                        max producible: {qty(feasibility.maxProducibleThousandths)} units
+                        {feasibility.estimatedLeadTimeDays !== null &&
+                          ` · est. lead time ${feasibility.estimatedLeadTimeDays} d (from past work orders)`}
+                      </span>
+                    </div>
+                    <table className="mt-2 w-full text-xs">
+                      <thead>
+                        <tr className="text-left opacity-60">
+                          <th className="py-1">Component</th>
+                          <th className="text-right">Required</th>
+                          <th className="text-right">On hand</th>
+                          <th className="text-right">Shortfall</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {feasibility.lines.map((l) => (
+                          <tr key={l.itemId} className="border-t">
+                            <td className="py-1 font-mono">{l.itemId.slice(0, 8)}</td>
+                            <td className="text-right tabular-nums">{qty(l.requiredThousandths)}</td>
+                            <td className="text-right tabular-nums">{qty(l.onHandThousandths)}</td>
+                            <td className={`text-right tabular-nums ${l.shortfallThousandths > 0 ? "font-medium text-red-700" : "opacity-50"}`}>
+                              {l.shortfallThousandths > 0 ? qty(l.shortfallThousandths) : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {bomReport?.asm === asm && (
+                  <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50/70 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge tone={bomReport.producible ? "green" : "red"}>
+                        {bomReport.producible ? "producible now" : "short of parts"}
+                      </Badge>
+                      <span className="text-xs opacity-70">
+                        scrap-adjusted requirements for {unitsInput} unit{unitsInput === "1" ? "" : "s"} · total shortfall{" "}
+                        {qty(bomReport.totalShortfallThousandths)}
+                      </span>
+                    </div>
+                    <table className="mt-2 w-full text-xs">
+                      <thead>
+                        <tr className="text-left opacity-60">
+                          <th className="py-1">Component</th>
+                          <th className="text-right">Required (incl. scrap)</th>
+                          <th className="text-right">On hand</th>
+                          <th className="text-right">Shortfall</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bomReport.lines.map((l) => (
+                          <tr key={l.sku} className="border-t">
+                            <td className="py-1">
+                              <span className="font-mono">{l.sku}</span>
+                              <span className="ml-1.5 opacity-70">{l.name}</span>
+                            </td>
+                            <td className="text-right tabular-nums">{qty(l.requiredThousandths)}</td>
+                            <td className="text-right tabular-nums">{qty(l.onHandThousandths)}</td>
+                            <td className={`text-right tabular-nums ${l.shortfallThousandths > 0 ? "font-medium text-red-700" : "opacity-50"}`}>
+                              {l.shortfallThousandths > 0 ? qty(l.shortfallThousandths) : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </Card>
             ))
