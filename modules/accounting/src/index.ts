@@ -626,6 +626,7 @@ const reverseEntry = (deps: ModuleDeps) =>
         // silently leaving the document, drawer or run unrepaired.
         const domainRoutes: Record<string, string> = {
           payment: "accounting.reversePayment on the payment",
+          vendor_payment: "purchasing.reverseVendorPayment on the vendor payment",
           pos_sale: "pos.returnSale on the sale invoice",
           payroll_run: "hr.reversePayrollPosting on the payroll run",
           invoice: "accounting.creditNote against the invoice",

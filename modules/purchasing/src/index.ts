@@ -20,6 +20,7 @@ import {
   canAcceptPayment,
   computeAging,
   computeInvoiceTotals,
+  documentBalance,
   matchThreeWay,
 } from "@chaste/erp-core";
 import type { Database } from "@chaste/db";
@@ -253,8 +254,11 @@ const payBill = (deps: ModuleDeps) =>
     moneyThresholdMinor: 50_000,
     moneyAmount: (input) => input.amountMinor,
     inverse: {
-      capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: output.entryId }),
+      capabilityId: "purchasing.reverseVendorPayment",
+      buildInput: (_input, output) => ({
+        vendorPaymentId: output.paymentId,
+        reason: "undo vendor payment",
+      }),
     },
     input: z.object({
       billNumber: z.number().int().positive(),
@@ -301,12 +305,117 @@ const payBill = (deps: ModuleDeps) =>
           .returning({ id: vendorPayments.id });
 
         const paidMinor = bill.paidMinor + input.amountMinor;
+        // N11/N12: settle and flag status through the one balance contract —
+        // a bill fully covered by credits is settled without payments.
+        const balance = documentBalance({ ...bill, paidMinor });
         await tx
           .update(vendorBills)
-          .set({ paidMinor, status: paidMinor >= bill.totalMinor ? "paid" : bill.status })
+          .set({ paidMinor, status: balance.fullySettled ? "paid" : bill.status })
           .where(eq(vendorBills.id, bill.id));
 
-        return { paymentId: pay!.id, entryId, fullyPaid: paidMinor >= bill.totalMinor };
+        return { paymentId: pay!.id, entryId, fullyPaid: balance.fullySettled };
+      });
+    },
+  });
+
+const reverseVendorPayment = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.reverseVendorPayment",
+    title: "Reverse vendor payment",
+    intent:
+      "Undo a recorded vendor payment: mirror its journal entry in the original currency, release the amount from the bill balance, and refuse if the payment was already reversed. The bill can then receive a corrected payment",
+    module: "purchasing",
+    risk: "money",
+    permission: "purchasing.post",
+    // The refunded amount lives in the payment, not the input: null means
+    // the policy engine always gates reversals for human approval.
+    // No inverse: reversing a reversal is refused in execute.
+    moneyAmount: () => null,
+    input: z.object({
+      vendorPaymentId: z.string().uuid(),
+      reason: z.string().min(3).max(500),
+    }),
+    output: z.object({
+      reversalEntryId: z.string(),
+      refundedMinor: z.number(),
+      billNumber: z.number(),
+      outstandingMinor: z.number(),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [payment] = await tx
+          .select()
+          .from(vendorPayments)
+          .where(and(eq(vendorPayments.id, input.vendorPaymentId), eq(vendorPayments.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!payment) throw new Error("vendor payment not found");
+        if (!payment.entryId) throw new Error("vendor payment has no journal entry to reverse");
+
+        // Unique at the business-operation level: retries and replays find
+        // the same reversal row and refuse instead of refunding twice.
+        const [already] = await tx
+          .select({ id: journalEntries.id })
+          .from(journalEntries)
+          .where(and(eq(journalEntries.orgId, ctx.actor.orgId), eq(journalEntries.reversalOfId, payment.entryId)))
+          .limit(1);
+        if (already) throw new Error("vendor payment has already been reversed");
+
+        const [bill] = await tx
+          .select()
+          .from(vendorBills)
+          .where(eq(vendorBills.id, payment.billId))
+          .limit(1)
+          // N11: releasing paidMinor mutates the bill under the same
+          // document lock the payment path holds.
+          .for("update");
+        if (!bill) throw new Error("vendor payment's bill not found");
+
+        const [entry] = await tx
+          .select()
+          .from(journalEntries)
+          .where(eq(journalEntries.id, payment.entryId))
+          .limit(1);
+        if (!entry) throw new Error("vendor payment's journal entry not found");
+        const lines = await tx
+          .select({
+            accountId: journalLines.accountId,
+            debitMinor: journalLines.debitMinor,
+            creditMinor: journalLines.creditMinor,
+          })
+          .from(journalLines)
+          .where(eq(journalLines.entryId, entry.id));
+
+        // The mirror keeps the original's currency (ADR 0021) — a vendor
+        // payment settles in the currency it was posted in.
+        const reversalEntryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `Vendor payment reversal for bill ${bill.number}: ${input.reason}`,
+          sourceType: "vendor-payment-reversal",
+          sourceId: bill.id,
+          reversalOfId: entry.id,
+          currency: entry.currency,
+          postedAt: ctx.now,
+          lines: lines.map((l) => ({
+            accountId: l.accountId,
+            debitMinor: l.creditMinor,
+            creditMinor: l.debitMinor,
+          })),
+        });
+
+        const paidMinor = bill.paidMinor - payment.amountMinor;
+        // Bill-state repair (N12): releasing the payment demotes a paid bill
+        // back to open through the one balance contract.
+        const released = documentBalance({ ...bill, paidMinor });
+        await tx
+          .update(vendorBills)
+          .set({ paidMinor, status: released.fullySettled ? "paid" : "open" })
+          .where(eq(vendorBills.id, bill.id));
+
+        return {
+          reversalEntryId,
+          refundedMinor: payment.amountMinor,
+          billNumber: bill.number,
+          outstandingMinor: documentBalance({ ...bill, paidMinor }).outstandingMinor,
+        };
       });
     },
   });
@@ -1266,6 +1375,7 @@ export function registerPurchasingCapabilities(registry: CapabilityRegistry, dep
   registry.register(receivePO(deps));
   registry.register(createBill(deps));
   registry.register(payBill(deps));
+  registry.register(reverseVendorPayment(deps));
   registry.register(apAging(deps));
   registry.register(billCreditNote(deps));
   registry.register(closePurchaseOrder(deps));
