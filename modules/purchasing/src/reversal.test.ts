@@ -14,7 +14,6 @@ import {
 } from "@chaste/db";
 import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerPurchasingCapabilities, type ModuleDeps } from "./index";
-import { registerAccountingCapabilities } from "@chaste/module-accounting";
 
 /**
  * N12 (ADR 0051 extension): a vendor payment is undone by its own domain
@@ -36,7 +35,6 @@ let vendorId: string;
 function makeRegistry(): CapabilityRegistry {
   const registry = new CapabilityRegistry();
   registerPurchasingCapabilities(registry, deps);
-  registerAccountingCapabilities(registry, deps);
   return registry;
 }
 
@@ -163,16 +161,5 @@ describe("N12 vendor payment reversal", () => {
     const [row] = await db.db.select({ status: vendorBills.status, creditedMinor: vendorBills.creditedMinor }).from(vendorBills).where(eq(vendorBills.number, bill.billNumber));
     expect(row!.creditedMinor).toBe(20_000);
     expect(row!.status).toBe("open");
-  });
-
-  it("the generic journal reversal routes vendor payments to the domain workflow", async () => {
-    const bill = await run("purchasing.createBill", {
-      vendorId,
-      lines: [{ description: "Routing case", quantity: 1_000, unitPriceMinor: 10_000, expenseAccountCode: "6000" }],
-    });
-    const paid = await run("purchasing.payBill", { billNumber: bill.billNumber, amountMinor: 10_000 });
-    await expect(run("accounting.reverseEntry", { entryId: paid.entryId })).rejects.toThrow(
-      /vendor_payment.*purchasing\.reverseVendorPayment/s,
-    );
   });
 });

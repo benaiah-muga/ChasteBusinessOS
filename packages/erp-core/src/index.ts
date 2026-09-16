@@ -5,6 +5,7 @@ export * from "./posting";
 export * from "./gl";
 export * from "./invoice";
 export * from "./aging";
+export * from "./bankrec";
 export * from "./reports";
 export * from "./inventory";
 export * from "./transfer";

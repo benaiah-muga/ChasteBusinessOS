@@ -118,7 +118,7 @@ describe("bank matching equivalence (N14)", () => {
   it("refuses an amount mismatch: 100 banked does not reconcile a 10 payment", async () => {
     const lineId = await feedLine(10_000, "wire from buyer small");
     await expect(run("accounting.matchBankTransaction", { transactionId: lineId, paymentId })).rejects.toThrow(
-      /amount mismatch: statement line is 10000, payment is 100000/,
+      /amount mismatch: line has 10000 unexplained, payment is 100000/,
     );
   });
 
@@ -140,37 +140,31 @@ describe("bank matching equivalence (N14)", () => {
     );
   });
 
-  it("two statement lines cannot each claim the same payment; unmatch restores availability", async () => {
+  it("a payment's remaining amount caps its claims; unmatch restores availability (N14 splits)", async () => {
     const firstId = await feedLine(100_000, "duplicate wire A");
     const secondId = await feedLine(100_000, "duplicate wire B");
     await run("accounting.matchBankTransaction", { transactionId: firstId, paymentId });
+    // The first claim consumed the whole payment: the duplicate line cannot
+    // claim it again under any path.
     await expect(run("accounting.matchBankTransaction", { transactionId: secondId, paymentId })).rejects.toThrow(
-      /already reconciled by another statement line/,
+      /over-allocated/,
     );
 
-    // The unique claim lives in data, not just the guard clause: a second
-    // line pointing at the same payment cannot be matched by any path.
-    let accepted = false;
-    try {
-      await db.db.insert(bankTransactions).values({
-        orgId,
-        bankAccountId: usdAccountId,
-        postedAt: new Date("2026-09-15T00:00:00Z"),
-        amountMinor: 100_000,
-        description: "rogue claim",
-        status: "matched",
-        matchedPaymentId: paymentId,
-      });
-      accepted = true;
-    } catch (error) {
-      // drizzle wraps the driver error; the unique violation is its cause.
-      const cause = String((error as { cause?: unknown }).cause ?? error);
-      expect(cause).toMatch(/duplicate key|unique constraint|bank_tx_payment_claim_idx/i);
-    }
-    expect(accepted).toBe(false);
-
+    // A partial claim leaves a remainder other lines can consume: a 60,000
+    // slice explains 60% of a line and leaves the payment 40,000 available.
+    const partialId = await feedLine(60_000, "split wire C");
     await run("accounting.unmatchBankTransaction", { transactionId: firstId });
-    const again = await run("accounting.matchBankTransaction", { transactionId: secondId, paymentId });
+    await run("accounting.matchBankTransaction", { transactionId: partialId, paymentId, amountMinor: 60_000 });
+    await expect(run("accounting.matchBankTransaction", { transactionId: firstId, paymentId })).rejects.toThrow(
+      /over-allocated/,
+    );
+    const remainderId = await feedLine(40_000, "split wire D");
+    const rest = await run("accounting.matchBankTransaction", { transactionId: remainderId, paymentId, amountMinor: 40_000 });
+    expect(rest).toMatchObject({ status: "matched", allocatedMinor: 40_000, lineUnexplainedMinor: 0 });
+
+    // Releasing a slice returns the money to the payment's available pool.
+    await run("accounting.unmatchBankTransaction", { transactionId: remainderId });
+    const again = await run("accounting.matchBankTransaction", { transactionId: remainderId, paymentId, amountMinor: 40_000 });
     expect(again.status).toBe("matched");
   });
 
@@ -195,7 +189,7 @@ describe("bank matching equivalence (N14)", () => {
 
     const wrongId = await feedLine(30_000, "misc receipt wrong amount");
     await expect(run("accounting.matchBankTransaction", { transactionId: wrongId, entryId: entry!.id })).rejects.toThrow(
-      /cash effect mismatch: entry nets 25000 on account 1000, statement line is 30000/,
+      /cash effect mismatch: entry nets 25000 on account 1000, statement line has 30000 unexplained/,
     );
 
     const rightId = await feedLine(25_000, "misc receipt exact");
@@ -205,7 +199,7 @@ describe("bank matching equivalence (N14)", () => {
     // The entry claim is exclusive too: another line cannot claim it.
     const otherId = await feedLine(25_000, "misc receipt second claim");
     await expect(run("accounting.matchBankTransaction", { transactionId: otherId, entryId: entry!.id })).rejects.toThrow(
-      /already reconciled by another statement line/,
+      /entry over-allocated/,
     );
   });
 });

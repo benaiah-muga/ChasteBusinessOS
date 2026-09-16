@@ -351,6 +351,13 @@
       "when": 1789573000000,
       "tag": "0049_stock_ledger_immutability",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1789574000000,
+      "tag": "0050_bank_allocations",
+      "breakpoints": true
     }
   ]
 }

@@ -297,6 +297,36 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
+## N12 purchasing compensations — vendor payments undo through their own domain (delivered, ADR 0051 extension)
+
+`purchasing.reverseVendorPayment` mirrors the payment entry in its original
+currency, releases the bill's paid amount through the balance contract,
+demotes a paid bill back to open (bill-state repair), and refuses a second
+or replayed reversal at the business-operation level. `payBill` declares it
+as its real inverse — the kernel types inverse input against actual output —
+and settles bills through `documentBalance`, so a bill fully covered by
+vendor credits is paid without a payment. The generic `accounting.reverseEntry`
+refuses `vendor_payment` entries with named routing. Pinned by
+`modules/purchasing/src/reversal.test.ts` (pay→reverse→pay consistency,
+replay refusal, credit-aware outstanding) and a routing case in the
+accounting reversal suite.
+
+## N14 allocation model — bank reconciliation with remaining amounts and a real reconciled definition (delivered, ADR 0048 extension)
+
+Migration 0050 introduces `bank_allocations` (tenant-isolated, backfilled
+from existing single-claim matches) and retires the claim columns and their
+unique indexes. A statement line is explained by explicit allocations that
+share its sign and fit inside its amount: a payment — whole, partial split,
+or grouped with other payments — a journal entry (transfers included), a
+reviewed fee, or an FX difference. Claims are enforced transactionally by
+row locks and remaining-amount budgets (`paymentRemaining`,
+entry cash-effect budget), not unique indexes. `accounting.bankReconciliation`
+reports per-line and per-period allocations and the unexplained difference;
+reconciled means that difference is exactly zero. Pure math in
+`packages/erp-core/src/bankrec.ts` pinned by property tests; live behavior
+pinned by `bank-matching.test.ts` (equivalence floor) and `bankrec.test.ts`
+(fees, FX, grouped settlements, the reconciled flip).
+
 ## N11 completion — one balance contract everywhere, locked money application (delivered)
 
 Slice E built the pure contract and the payment gate; this slice closes the

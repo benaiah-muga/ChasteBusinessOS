@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, gt, gte, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   accounts,
   bankAccounts,
+  bankAllocations,
   bankTransactions,
   customers,
   expenseClaims,
@@ -44,10 +45,16 @@ import {
   documentBalance,
   evaluateExpensePolicy,
   fxRateFromDecimal,
+  lineUnexplained,
+  paymentRemaining,
+  planLineAllocations,
+  reconciliationTotals,
   suggestExpenseCategory,
   toBaseMinor,
   nextRunAfter,
   type AccountBalance,
+  type AllocationKind,
+  type BankStatementLine,
   type FxRate,
 } from "@chaste/erp-core";
 import type { Database } from "@chaste/db";
@@ -2075,7 +2082,7 @@ const matchBankTransaction = (deps: ModuleDeps) =>
     id: "accounting.matchBankTransaction",
     title: "Match bank transaction",
     intent:
-      "Link a bank statement line to the payment or ledger entry that explains it, closing it out of the unmatched queue",
+      "Explain a bank statement line with explicit allocations — a payment (whole or partial), a journal entry, a reviewed fee, or an FX difference — so the line's money is fully accounted for",
     module: "accounting",
     risk: "write",
     permission: "accounting.write",
@@ -2088,11 +2095,31 @@ const matchBankTransaction = (deps: ModuleDeps) =>
         transactionId: z.string().uuid(),
         paymentId: z.string().uuid().optional(),
         entryId: z.string().uuid().optional(),
+        /** Portion of the line the payment explains; defaults to the full line (minus reviewed differences). Splits allocate the rest on other lines. */
+        amountMinor: z.number().int().positive().optional(),
+        /** Reviewed bank fee the statement line includes on top of the payment. */
+        feeMinor: z.number().int().positive().optional(),
+        /** Reviewed FX difference between the payment and the statement line. */
+        fxGainLossMinor: z.number().int().optional(),
+        note: z.string().max(500).optional(),
       })
       .refine((v) => (v.paymentId !== undefined) !== (v.entryId !== undefined), {
         message: "pass exactly one of paymentId or entryId",
+      })
+      .refine((v) => v.feeMinor === undefined || v.paymentId !== undefined, {
+        message: "feeMinor requires paymentId",
+      })
+      .refine((v) => v.fxGainLossMinor === undefined || v.paymentId !== undefined, {
+        message: "fxGainLossMinor requires paymentId",
+      })
+      .refine((v) => v.amountMinor === undefined || (v.feeMinor === undefined && v.fxGainLossMinor === undefined), {
+        message: "amountMinor (partial split) cannot be combined with feeMinor or fxGainLossMinor",
       }),
-    output: z.object({ status: z.literal("matched") }),
+    output: z.object({
+      status: z.literal("matched"),
+      allocatedMinor: z.number(),
+      lineUnexplainedMinor: z.number(),
+    }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [bt] = await tx
@@ -2105,15 +2132,24 @@ const matchBankTransaction = (deps: ModuleDeps) =>
           .from(bankTransactions)
           .innerJoin(bankAccounts, eq(bankAccounts.id, bankTransactions.bankAccountId))
           .where(and(eq(bankTransactions.id, input.transactionId), eq(bankTransactions.orgId, ctx.actor.orgId)))
-          .limit(1);
+          .limit(1)
+          // N14: the line is the race anchor for its own remaining amount.
+          .for("update");
         if (!bt) throw new Error("bank transaction not found");
+        if (bt.status === "excluded") throw new Error("transaction is excluded; unexclude it before matching");
+
+        const existingRows = await tx
+          .select({ amountMinor: bankAllocations.amountMinor })
+          .from(bankAllocations)
+          .where(and(eq(bankAllocations.orgId, ctx.actor.orgId), eq(bankAllocations.transactionId, bt.id)));
+        const existingAllocated = existingRows.reduce((s, r) => s + r.amountMinor, 0);
+
+        let proposed: { kind: AllocationKind; amountMinor: number; paymentId?: string; entryId?: string; note?: string }[];
 
         if (input.paymentId) {
-          // N14: a match must reconcile the bank, not just name a row that
-          // exists. The statement line must be the same money: same amount,
-          // same direction (customer payments are receipts, i.e. money in),
-          // same currency as the account, and not already explained by
-          // another statement line.
+          // N14: a customer payment is money in; the statement line must be
+          // the same money in the same currency. The payment row is the race
+          // anchor for its own remaining amount, so splits cannot overdraw it.
           const [p] = await tx
             .select({ id: payments.id, amountMinor: payments.amountMinor, currency: invoices.currency })
             .from(payments)
@@ -2126,80 +2162,124 @@ const matchBankTransaction = (deps: ModuleDeps) =>
               `direction mismatch: a customer payment is money in, but this statement line is money out (${bt.amountMinor})`,
             );
           }
-          if (p.amountMinor !== bt.amountMinor) {
-            throw new Error(
-              `amount mismatch: statement line is ${bt.amountMinor}, payment is ${p.amountMinor}; bank fees, splits and grouped settlements need explicit review, not a loose match`,
-            );
-          }
           if (p.currency !== bt.accountCurrency) {
             throw new Error(`currency mismatch: statement account is ${bt.accountCurrency}, payment is ${p.currency}`);
           }
-          const [already] = await tx
-            .select({ id: bankTransactions.id })
-            .from(bankTransactions)
-            .where(
-              and(
-                eq(bankTransactions.matchedPaymentId, p.id),
-                eq(bankTransactions.status, "matched"),
-                ne(bankTransactions.id, bt.id),
-              ),
-            )
-            .limit(1);
-          if (already) {
-            throw new Error("payment is already reconciled by another statement line; unmatch that line first");
+
+          const claimedRows = await tx
+            .select({ allocated: sql<number>`coalesce(sum(${bankAllocations.amountMinor}), 0)` })
+            .from(bankAllocations)
+            .where(and(eq(bankAllocations.orgId, ctx.actor.orgId), eq(bankAllocations.paymentId, p.id)));
+          const paymentAllocated = Number(claimedRows[0]?.allocated ?? 0);
+
+          if (input.amountMinor !== undefined) {
+            // Explicit split: claim exactly the caller's slice of the line.
+            proposed = [{ kind: "payment", amountMinor: input.amountMinor, paymentId: p.id, note: input.note }];
+          } else {
+            // Whole-line claim: the line must decompose exactly into the
+            // payment plus any reviewed fee / FX difference.
+            const fee = input.feeMinor ?? 0;
+            const fx = input.fxGainLossMinor ?? 0;
+            if (p.amountMinor + fee + fx !== bt.amountMinor - existingAllocated) {
+              throw new Error(
+                `amount mismatch: line has ${bt.amountMinor - existingAllocated} unexplained, payment is ${p.amountMinor}${fee ? `, fee ${fee}` : ""}${fx ? `, fx ${fx}` : ""}; pass feeMinor, fxGainLossMinor or a partial amountMinor to review the difference explicitly`,
+              );
+            }
+            proposed = [{ kind: "payment", amountMinor: p.amountMinor, paymentId: p.id, note: input.note }];
+            if (fee > 0) proposed.push({ kind: "fee", amountMinor: fee, note: input.note ?? "reviewed bank fee" });
+            if (fx !== 0) proposed.push({ kind: "fx_difference", amountMinor: fx, note: input.note ?? "reviewed FX difference" });
           }
-        }
-        if (input.entryId) {
+
+          const planned = planLineAllocations(
+            { id: bt.id, amountMinor: bt.amountMinor, status: bt.status as BankStatementLine["status"] },
+            existingAllocated,
+            proposed.map((a) => ({ kind: a.kind, amountMinor: a.amountMinor })),
+          );
+          // Only the payment-kind slice consumes the payment's budget — the
+          // fee and FX allocations explain the bank's side of the gap.
+          const paymentSlices = planned
+            .filter((a) => a.kind === "payment")
+            .reduce((s, a) => s + a.amountMinor, 0);
+          paymentRemaining(p.amountMinor, paymentAllocated, paymentSlices);
+
+          await tx.insert(bankAllocations).values(
+            proposed.map((a) => ({
+              orgId: ctx.actor.orgId,
+              transactionId: bt.id,
+              kind: a.kind,
+              paymentId: a.paymentId ?? null,
+              entryId: null,
+              amountMinor: a.amountMinor,
+              note: a.note ?? null,
+            })),
+          );
+        } else {
+          // Entry path: the entry must move this account's cash by exactly
+          // the line's still-unexplained signed amount (transfers included).
           const [e] = await tx
             .select({ id: journalEntries.id, currency: journalEntries.currency })
             .from(journalEntries)
-            .where(and(eq(journalEntries.id, input.entryId), eq(journalEntries.orgId, ctx.actor.orgId)))
+            .where(and(eq(journalEntries.id, input.entryId!), eq(journalEntries.orgId, ctx.actor.orgId)))
             .for("update");
           if (!e) throw new Error("journal entry not found");
           if (e.currency !== bt.accountCurrency) {
             throw new Error(`currency mismatch: statement account is ${bt.accountCurrency}, entry is ${e.currency}`);
           }
-          // The entry must move this account's cash by exactly the line's
-          // signed amount: net debit for money in, net credit for money out.
           const cashLines = await tx
             .select({ debitMinor: journalLines.debitMinor, creditMinor: journalLines.creditMinor })
             .from(journalLines)
             .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
             .where(and(eq(journalLines.entryId, e.id), eq(accounts.code, CASH_ACCOUNT_CODE)));
           const cashNet = cashLines.reduce((sum, l) => sum + l.debitMinor - l.creditMinor, 0);
-          if (cashNet !== bt.amountMinor) {
+          const unexplained = lineUnexplained(
+            { id: bt.id, amountMinor: bt.amountMinor, status: bt.status as BankStatementLine["status"] },
+            existingAllocated,
+          );
+          if (cashNet !== unexplained) {
             throw new Error(
-              `cash effect mismatch: entry nets ${cashNet} on account ${CASH_ACCOUNT_CODE}, statement line is ${bt.amountMinor}`,
+              `cash effect mismatch: entry nets ${cashNet} on account ${CASH_ACCOUNT_CODE}, statement line has ${unexplained} unexplained`,
             );
           }
-          const [already] = await tx
-            .select({ id: bankTransactions.id })
-            .from(bankTransactions)
-            .where(
-              and(
-                eq(bankTransactions.matchedEntryId, e.id),
-                eq(bankTransactions.status, "matched"),
-                ne(bankTransactions.id, bt.id),
-              ),
-            )
-            .limit(1);
-          if (already) {
-            throw new Error("entry is already reconciled by another statement line; unmatch that line first");
+          // The entry's cash effect is its remaining-amount budget: prior
+          // allocations (splits of one receipt across lines) consume it.
+          const entryClaimed = await tx
+            .select({ allocated: sql<number>`coalesce(sum(${bankAllocations.amountMinor}), 0)` })
+            .from(bankAllocations)
+            .where(and(eq(bankAllocations.orgId, ctx.actor.orgId), eq(bankAllocations.entryId, e.id)));
+          const entryAllocated = Number(entryClaimed[0]?.allocated ?? 0);
+          if (entryAllocated + unexplained > cashNet) {
+            throw new Error(
+              `entry over-allocated: entry nets ${cashNet} on account ${CASH_ACCOUNT_CODE}, allocations already explain ${entryAllocated}`,
+            );
           }
+          proposed = [{ kind: "entry", amountMinor: unexplained, entryId: e.id, note: input.note }];
+          await tx.insert(bankAllocations).values({
+            orgId: ctx.actor.orgId,
+            transactionId: bt.id,
+            kind: "entry",
+            paymentId: null,
+            entryId: e.id,
+            amountMinor: unexplained,
+            note: input.note ?? null,
+          });
         }
 
-        // Conditional claim so two racers cannot both claim one statement line.
-        const claimed = await tx
+        const allocatedMinor =
+          existingAllocated + proposed.reduce((s, a) => s + a.amountMinor, 0);
+        const updated = await tx
           .update(bankTransactions)
-          .set({
-            status: "matched",
-            matchedPaymentId: input.paymentId ?? null,
-            matchedEntryId: input.entryId ?? null,
-          })
-          .where(and(eq(bankTransactions.id, bt.id), eq(bankTransactions.status, "unmatched")))
+          .set({ status: "matched" })
+          .where(and(eq(bankTransactions.id, bt.id), sql`${bankTransactions.status} <> 'excluded'`))
           .returning({ id: bankTransactions.id });
-        if (claimed.length === 0) throw new Error("transaction was just matched by someone else");
-        return { status: "matched" as const };
+        if (updated.length === 0) throw new Error("transaction was just excluded by someone else");
+        return {
+          status: "matched" as const,
+          allocatedMinor,
+          lineUnexplainedMinor: lineUnexplained(
+            { id: bt.id, amountMinor: bt.amountMinor, status: "matched" },
+            allocatedMinor,
+          ),
+        };
       });
     },
   });
@@ -2209,28 +2289,113 @@ const unmatchBankTransaction = (deps: ModuleDeps) =>
     id: "accounting.unmatchBankTransaction",
     title: "Unmatch bank transaction",
     intent:
-      "Undo a mistaken reconciliation by releasing a matched statement line back into the unmatched queue",
+      "Undo a mistaken reconciliation by releasing a matched statement line's allocations back into the unmatched queue",
     module: "accounting",
     risk: "write",
     permission: "accounting.write",
     input: z.object({ transactionId: z.string().uuid() }),
-    output: z.object({ status: z.literal("unmatched") }),
+    output: z.object({ status: z.literal("unmatched"), releasedMinor: z.number() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        const updated = await tx
-          .update(bankTransactions)
-          .set({ status: "unmatched", matchedPaymentId: null, matchedEntryId: null })
-          .where(
-            and(
-              eq(bankTransactions.id, input.transactionId),
-              eq(bankTransactions.orgId, ctx.actor.orgId),
-              eq(bankTransactions.status, "matched"),
-            ),
-          )
-          .returning({ id: bankTransactions.id });
-        if (updated.length === 0) throw new Error("transaction not found or not matched");
-        return { status: "unmatched" as const };
+        const [bt] = await tx
+          .select({ id: bankTransactions.id, status: bankTransactions.status })
+          .from(bankTransactions)
+          .where(and(eq(bankTransactions.id, input.transactionId), eq(bankTransactions.orgId, ctx.actor.orgId)))
+          .limit(1)
+          .for("update");
+        if (!bt || bt.status !== "matched") throw new Error("transaction not found or not matched");
+        const removed = await tx
+          .delete(bankAllocations)
+          .where(and(eq(bankAllocations.orgId, ctx.actor.orgId), eq(bankAllocations.transactionId, bt.id)))
+          .returning({ amountMinor: bankAllocations.amountMinor });
+        const releasedMinor = removed.reduce((s, r) => s + r.amountMinor, 0);
+        await tx.update(bankTransactions).set({ status: "unmatched" }).where(eq(bankTransactions.id, bt.id));
+        return { status: "unmatched" as const, releasedMinor };
       });
+    },
+  });
+
+const bankReconciliation = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.bankReconciliation",
+    title: "Bank reconciliation",
+    intent:
+      "Show a bank account's statement lines with their allocations and the unexplained difference — reconciled means that difference is exactly zero",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({
+      bankAccountId: z.string().uuid(),
+      from: isoDate.optional(),
+      to: isoDate.optional(),
+    }),
+    output: z.object({
+      totals: z.object({
+        linesMinor: z.number(),
+        allocatedMinor: z.number(),
+        unexplainedMinor: z.number(),
+        reconciled: z.boolean(),
+      }),
+      lines: z.array(
+        z.object({
+          id: z.string(),
+          postedAt: z.string(),
+          amountMinor: z.number(),
+          allocatedMinor: z.number(),
+          unexplainedMinor: z.number(),
+          status: z.string(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      const conditions = [eq(bankTransactions.orgId, ctx.actor.orgId), eq(bankTransactions.bankAccountId, input.bankAccountId)];
+      if (input.from && input.to) {
+        const { start, end } = dateWindow(input.from, input.to);
+        conditions.push(gte(bankTransactions.postedAt, start), lt(bankTransactions.postedAt, end));
+      }
+      const lines = await deps.db
+        .select({
+          id: bankTransactions.id,
+          amountMinor: bankTransactions.amountMinor,
+          status: bankTransactions.status,
+          postedAt: bankTransactions.postedAt,
+        })
+        .from(bankTransactions)
+        .where(and(...conditions))
+        .orderBy(bankTransactions.postedAt)
+        .limit(500);
+      const allocRows = await deps.db
+        .select({
+          transactionId: bankAllocations.transactionId,
+          allocated: sql<number>`coalesce(sum(${bankAllocations.amountMinor}), 0)`,
+        })
+        .from(bankAllocations)
+        .where(
+          and(
+            eq(bankAllocations.orgId, ctx.actor.orgId),
+            inArray(
+              bankAllocations.transactionId,
+              lines.map((l) => l.id).length > 0 ? lines.map((l) => l.id) : [crypto.randomUUID()],
+            ),
+          ),
+        )
+        .groupBy(bankAllocations.transactionId);
+      const allocatedByLine = new Map(allocRows.map((r) => [r.transactionId, Number(r.allocated)]));
+      const { totals, lines: detailed } = reconciliationTotals(
+        lines.map((l) => ({ id: l.id, amountMinor: l.amountMinor, status: l.status as BankStatementLine["status"] })),
+        allocatedByLine,
+      );
+      return {
+        totals,
+        lines: detailed.map((l, i) => ({
+          id: l.id,
+          postedAt: lines[i]!.postedAt.toISOString(),
+          amountMinor: l.amountMinor,
+          allocatedMinor: l.allocatedMinor,
+          unexplainedMinor: l.unexplainedMinor,
+          status: l.status,
+        })),
+      };
     },
   });
 
@@ -2914,6 +3079,7 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(unmatchBankTransaction(deps));
   registry.register(excludeBankTransaction(deps));
   registry.register(unexcludeBankTransaction(deps));
+  registry.register(bankReconciliation(deps));
   registry.register(bankSummary(deps));
   registry.register(salesTaxReport(deps));
   registry.register(fileSalesTaxReturn(deps));

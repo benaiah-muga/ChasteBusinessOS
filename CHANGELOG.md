@@ -12,6 +12,26 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **vendor payments undo through their own domain compensation (N12).**
+  Reversing a vendor payment with the generic journal mirror used to leave
+  the bill marked paid and its paid amount consumed — the books balanced
+  while the payable lied. The new `purchasing.reverseVendorPayment` mirrors
+  the payment entry in its original currency, releases the bill's paid
+  amount, demotes a paid bill back to open, and refuses a second or
+  replayed reversal. `payBill` declares it as the real inverse and now
+  settles bills through the balance contract, so vendor credits alone can
+  mark a bill paid.
+- **bank matching grows an allocation model with a real reconciled
+  definition (N14).** A statement line is explained by explicit
+  allocations — a payment (whole, split across lines, or grouped with other
+  payments on one line), a journal entry, a reviewed bank fee, or an FX
+  difference — that share the line's sign and fit inside its amount.
+  Payment and entry claims are enforced by row locks and remaining-amount
+  budgets instead of single-claim unique indexes, so splits and grouped
+  settlements are expressible without loose matches. New
+  `accounting.bankReconciliation` reports per-line and per-period
+  allocations and the unexplained difference; a statement period is
+  reconciled when that difference is exactly zero.
 - **one credit-adjusted balance everywhere, with locked money application
   (N11).** Every surface that shows an outstanding amount — invoice lists,
   AR aging, the dashboard's receivables and payables, vendor bill due

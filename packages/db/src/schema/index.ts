@@ -2071,19 +2071,45 @@ export const bankTransactions = pgTable(
     amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
     description: text("description").notNull(),
     status: text("status").notNull().default("unmatched"), // unmatched | matched | excluded
-    matchedPaymentId: uuid("matched_payment_id").references(() => payments.id, { onDelete: "set null" }),
-    matchedEntryId: uuid("matched_entry_id"),
     createdAt: createdAt(),
   },
   (t) => [
     index("bank_tx_org_account_posted_idx").on(t.orgId, t.bankAccountId, t.postedAt),
     index("bank_tx_org_status_idx").on(t.orgId, t.status),
-    // N14: one statement line per reconciled payment/entry. NULLs (unmatched
-    // or excluded lines) never conflict under a unique index, so the claim
-    // is enforced in data — two lines, or two racing matches, cannot each
-    // consume the same payment however they arrive.
-    uniqueIndex("bank_tx_payment_claim_idx").on(t.matchedPaymentId),
-    uniqueIndex("bank_tx_entry_claim_idx").on(t.matchedEntryId),
+  ],
+);
+
+/**
+ * N14: a statement line is explained by explicit allocations that share its
+ * sign and fit inside its amount — a payment (whole or split across lines),
+ * a journal entry, a reviewed fee, or an FX difference. The period is
+ * reconciled when the unexplained difference is zero. Payment/entry claims
+ * are enforced transactionally (row locks + remaining-amount checks), not
+ * by unique indexes, so splits and grouped settlements are expressible.
+ */
+export const bankAllocations = pgTable(
+  "bank_allocations",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id")
+      .notNull()
+      .references(() => bankTransactions.id, { onDelete: "cascade" }),
+    /** payment | entry | fee | fx_difference */
+    kind: text("kind").notNull(),
+    paymentId: uuid("payment_id").references(() => payments.id, { onDelete: "set null" }),
+    entryId: uuid("entry_id"),
+    /** Signed portion of the line's amount this allocation explains. */
+    amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("bank_allocation_tx_idx").on(t.orgId, t.transactionId),
+    index("bank_allocation_payment_idx").on(t.orgId, t.paymentId),
+    index("bank_allocation_entry_idx").on(t.orgId, t.entryId),
   ],
 );
 

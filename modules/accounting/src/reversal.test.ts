@@ -263,6 +263,30 @@ describe("N12 generic reversal routing", () => {
     }
   });
 
+  it("a vendor payment entry routes to purchasing.reverseVendorPayment", async () => {
+    const [revenue] = await db.db.select().from(accounts).where(and(eq(accounts.orgId, orgId), eq(accounts.code, "4000")));
+    const e = await db.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(journalEntries)
+        .values({
+          orgId,
+          memo: "routing probe vendor_payment",
+          sourceType: "vendor_payment",
+          postedAt: ctx.now,
+          postedByActorType: "human",
+        })
+        .returning({ id: journalEntries.id });
+      await tx.insert(journalLines).values([
+        { entryId: row!.id, accountId: revenue!.id, debitMinor: 100, creditMinor: 0 },
+        { entryId: row!.id, accountId: revenue!.id, debitMinor: 0, creditMinor: 100 },
+      ]);
+      return row!;
+    });
+    await expect(run("accounting.reverseEntry", { entryId: e!.id })).rejects.toThrow(
+      /vendor_payment.*purchasing\.reverseVendorPayment/s,
+    );
+  });
+
   it("a payment on a POS sale routes to pos.returnSale, and void invoices refuse reversal", async () => {
     const inv = await run("accounting.createInvoice", {
       customerId,
