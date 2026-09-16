@@ -3,6 +3,7 @@ import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, poLines, purchaseOrders, purchaseRequests, rfqs, vendorBills, vendors } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { documentOutstanding } from "@/server/balances";
 
 /**
  * Full human surface for the purchasing module: vendors, orders, receipts,
@@ -93,7 +94,7 @@ export async function GET() {
       paidMinor: b.paidMinor,
       creditedMinor: b.creditedMinor,
       status: b.status,
-      dueMinor: b.totalMinor - b.paidMinor - b.creditedMinor,
+      dueMinor: documentOutstanding(b),
       createdAt: b.createdAt,
     })),
     apAging: aging.data ?? {},

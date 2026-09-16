@@ -302,7 +302,10 @@ const recordPayment = (deps: ModuleDeps) =>
           .select()
           .from(invoices)
           .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.number, input.invoiceNumber)))
-          .limit(1);
+          .limit(1)
+          // N11: serialize money application per document — the outstanding
+          // verdict must see every committed payment, not a stale snapshot.
+          .for("update");
         if (!inv) throw new Error("invoice not found");
         // N11: one balance contract gates every payment — lifecycle
         // eligibility first, then the credit-adjusted outstanding.
@@ -496,7 +499,10 @@ const reversePayment = (deps: ModuleDeps) =>
           .select()
           .from(invoices)
           .where(and(eq(invoices.id, payment.invoiceId), eq(invoices.orgId, ctx.actor.orgId)))
-          .limit(1);
+          .limit(1)
+          // N11: the reversal mutates paidMinor under the same document lock
+          // the payment path holds, so a concurrent payment serializes.
+          .for("update");
         if (!inv) throw new Error("payment's invoice not found");
         if (inv.status === "void") throw new Error("invoice is void; a void compensates its payments");
         if (!payment.entryId) throw new Error("payment has no journal entry to reverse");
@@ -806,6 +812,7 @@ const listInvoices = (deps: ModuleDeps) =>
           status: z.string(),
           totalMinor: z.number(),
           paidMinor: z.number(),
+          creditedMinor: z.number(),
           outstandingMinor: z.number(),
           issuedAt: z.string().nullable(),
         }),
@@ -821,6 +828,7 @@ const listInvoices = (deps: ModuleDeps) =>
           status: invoices.status,
           totalMinor: invoices.totalMinor,
           paidMinor: invoices.paidMinor,
+          creditedMinor: invoices.creditedMinor,
           issuedAt: invoices.issuedAt,
         })
         .from(invoices)
@@ -839,7 +847,9 @@ const listInvoices = (deps: ModuleDeps) =>
         invoices: rows.map((r) => ({
           ...r,
           issuedAt: r.issuedAt?.toISOString() ?? null,
-          outstandingMinor: r.totalMinor - r.paidMinor,
+          // N11: the list shows the same credit-adjusted outstanding the
+          // payment gate enforces, never a phantom receivable.
+          outstandingMinor: documentBalance(r).outstandingMinor,
         })),
       };
     },
@@ -850,7 +860,7 @@ const arAging = (deps: ModuleDeps) =>
     id: "accounting.arAging",
     title: "AR aging report",
     intent:
-      "Show outstanding customer invoices bucketed by age (current, 30, 60, 90+ days) so collections can be prioritized",
+      "Show outstanding customer invoices bucketed by days past due (current, 30, 60, 90+) so collections can be prioritized",
     module: "accounting",
     risk: "read",
     permission: "accounting.read",
@@ -873,19 +883,33 @@ const arAging = (deps: ModuleDeps) =>
           number: invoices.number,
           totalMinor: invoices.totalMinor,
           paidMinor: invoices.paidMinor,
+          creditedMinor: invoices.creditedMinor,
           issuedAt: invoices.issuedAt,
+          dueAt: invoices.dueAt,
         })
         .from(invoices)
-        .where(and(eq(invoices.orgId, ctx.actor.orgId), gt(invoices.totalMinor, invoices.paidMinor)));
+        .where(
+          and(
+            eq(invoices.orgId, ctx.actor.orgId),
+            sql`${invoices.status} in ('sent', 'paid')`,
+            sql`${invoices.voidedAt} is null`,
+          ),
+        );
+      const DAY = 86_400_000;
       const receivables = rows
         .filter((r) => r.issuedAt !== null)
-        .map((r) => ({
-          invoiceNumber: r.number,
-          outstandingMinor: r.totalMinor - r.paidMinor,
-          issuedAt: r.issuedAt as Date,
-        }));
+        .map((r) => {
+          // N11: one balance contract — credits reduce what collections chases.
+          const outstanding = documentBalance(r).outstandingMinor;
+          return {
+            invoiceNumber: r.number,
+            outstandingMinor: outstanding,
+            issuedAt: r.issuedAt as Date,
+            dueAt: r.dueAt,
+          };
+        })
+        .filter((r) => r.outstandingMinor > 0);
       const buckets = computeAging(receivables, ctx.now);
-      const DAY = 86_400_000;
       return {
         buckets,
         invoices: receivables.map((r) => ({
@@ -1140,7 +1164,7 @@ const unrealizedFxExposure = (deps: ModuleDeps) =>
         const rows = await tx
           .select({
             currency: invoices.currency,
-            outstanding: sql<number>`coalesce(sum(${invoices.totalMinor} - ${invoices.paidMinor}), 0)`,
+            outstanding: sql<number>`coalesce(sum(greatest(${invoices.totalMinor} - ${invoices.creditedMinor} - ${invoices.paidMinor}, 0)), 0)`,
           })
           .from(invoices)
           .where(
@@ -2495,7 +2519,10 @@ const creditNote = (deps: ModuleDeps) =>
           .select()
           .from(invoices)
           .where(and(eq(invoices.id, input.invoiceId), eq(invoices.orgId, ctx.actor.orgId)))
-          .limit(1);
+          .limit(1)
+          // N11: creditedMinor mutates here under the same document lock the
+          // payment path holds — a payment and a credit can't race the balance.
+          .for("update");
         if (!inv) throw new Error("invoice not found");
         if (inv.status === "void") throw new Error("invoice is void; nothing to credit");
         const balance = inv.totalMinor - inv.paidMinor - inv.creditedMinor;

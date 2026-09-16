@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { customers, getDb, invoiceLines, invoiceShares, invoices } from "@chaste/db";
+import { documentOutstanding } from "@/server/balances";
 import { inviteAttemptLimit, requestIp } from "@/server/rate-limit";
 
 type Params = { params: Promise<{ token: string }> };
@@ -34,6 +35,7 @@ export async function GET(req: Request, { params }: Params) {
       status: invoices.status,
       currency: invoices.currency,
       totalMinor: invoices.totalMinor,
+      creditedMinor: invoices.creditedMinor,
       paidMinor: invoices.paidMinor,
       issuedAt: invoices.issuedAt,
       customerName: customers.name,
@@ -65,8 +67,10 @@ export async function GET(req: Request, { params }: Params) {
       status: row.status,
       currency: row.currency,
       totalMinor: row.totalMinor,
+      creditedMinor: row.creditedMinor,
       paidMinor: row.paidMinor,
-      outstandingMinor: Math.max(0, row.totalMinor - row.paidMinor),
+      // N11: credit-adjusted, so the customer sees the true remaining amount.
+      outstandingMinor: documentOutstanding(row),
       issuedAt: row.issuedAt,
       customerName: row.customerName,
       lines,

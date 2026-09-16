@@ -14,6 +14,7 @@ import {
 } from "@chaste/db";
 import { computeAging } from "@chaste/erp-core";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
+import { documentOutstanding } from "@/server/balances";
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
 import { executeAtomically } from "@/server/unit-of-work";
@@ -49,26 +50,28 @@ export async function GET() {
     .select({
       number: invoices.number,
       totalMinor: invoices.totalMinor,
+      creditedMinor: invoices.creditedMinor,
       paidMinor: invoices.paidMinor,
       issuedAt: invoices.issuedAt,
+      dueAt: invoices.dueAt,
     })
     .from(invoices)
-    .where(and(eq(invoices.orgId, orgId), sql`${invoices.totalMinor} > ${invoices.paidMinor}`))
+    .where(and(eq(invoices.orgId, orgId), sql`${invoices.status} <> 'void'`, sql`${invoices.voidedAt} is null`))
     // Bounded: an org with thousands of open invoices must not drag the
     // dashboard; the aging buckets below aggregate what we fetched.
     .orderBy(desc(invoices.issuedAt))
     .limit(200);
 
   const now = new Date();
-  const outstanding = openRows.filter(
-    (r): r is typeof r & { issuedAt: Date } =>
-      r.issuedAt !== null && r.totalMinor - r.paidMinor > 0,
-  );
+  const outstanding = openRows
+    .map((r) => ({ ...r, outstandingMinor: documentOutstanding(r) }))
+    .filter((r) => r.outstandingMinor > 0 && r.issuedAt !== null);
   const buckets = computeAging(
     outstanding.map((r) => ({
       invoiceNumber: r.number,
-      outstandingMinor: r.totalMinor - r.paidMinor,
-      issuedAt: r.issuedAt,
+      outstandingMinor: r.outstandingMinor,
+      issuedAt: r.issuedAt as Date,
+      dueAt: r.dueAt,
     })),
     now,
   );
@@ -84,6 +87,7 @@ export async function GET() {
       number: vendorBills.number,
       status: vendorBills.status,
       totalMinor: vendorBills.totalMinor,
+      creditedMinor: vendorBills.creditedMinor,
       paidMinor: vendorBills.paidMinor,
       vendorName: vendors.name,
     })
@@ -140,11 +144,11 @@ export async function GET() {
     aging: buckets,
     agingInvoices: outstanding.map((r) => ({
       number: r.number,
-      outstandingMinor: r.totalMinor - r.paidMinor,
-      ageDays: Math.floor((now.getTime() - r.issuedAt.getTime()) / 86_400_000),
+      outstandingMinor: r.outstandingMinor,
+      ageDays: Math.floor((now.getTime() - (r.dueAt ?? (r.issuedAt as Date)).getTime()) / 86_400_000),
     })),
     closedPeriods,
-    bills: bills.map((b) => ({ ...b, outstandingMinor: b.totalMinor - b.paidMinor })),
+    bills: bills.map((b) => ({ ...b, outstandingMinor: documentOutstanding(b) })),
     filings: filings.map((f) => ({
       id: f.id,
       periodFrom: f.periodFrom.toISOString().slice(0, 10),

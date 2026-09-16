@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, count, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import {
   accounts,
   approvals,
@@ -20,6 +20,7 @@ import {
 } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { documentOutstanding, sumOutstanding } from "@/server/balances";
 
 /**
  * One call feeding the home dashboard: money position, working capital,
@@ -55,27 +56,37 @@ export async function GET() {
     cashMinor = lines.filter((l) => l.code === "1000").reduce((s, l) => s + l.debitMinor - l.creditMinor, 0);
   }
 
-  // Receivables: open invoices and their aging.
+  // Receivables: open invoices and their aging, credit-adjusted (N11).
   const arRows = await db
     .select({
       total: invoices.totalMinor,
+      credited: invoices.creditedMinor,
       paid: invoices.paidMinor,
       issuedAt: invoices.issuedAt,
+      dueAt: invoices.dueAt,
     })
     .from(invoices)
-    .where(and(eq(invoices.orgId, orgId), ne(invoices.status, "void"), gt(invoices.totalMinor, invoices.paidMinor)));
+    .where(and(eq(invoices.orgId, orgId), ne(invoices.status, "void"), isNull(invoices.voidedAt)));
   const now = Date.now();
   const DAY = 86_400_000;
-  const arOutstanding = arRows.reduce((s, r) => s + r.total - r.paid, 0);
-  const overdueRows = arRows.filter((r) => r.issuedAt && now - r.issuedAt.getTime() > 30 * DAY);
-  const overdueAmount = overdueRows.reduce((s, r) => s + r.total - r.paid, 0);
+  const toMoney = (r: { total: number; credited: number; paid: number }) => ({
+    totalMinor: r.total,
+    creditedMinor: r.credited,
+    paidMinor: r.paid,
+  });
+  const arOutstanding = sumOutstanding(arRows.map(toMoney));
+  const overdueRows = arRows.filter((r) => {
+    const ref = r.dueAt ?? r.issuedAt;
+    return ref && now - ref.getTime() > 30 * DAY && documentOutstanding(toMoney(r)) > 0;
+  });
+  const overdueAmount = sumOutstanding(overdueRows.map(toMoney));
 
   // Payables: open vendor bills.
   const apRows = await db
-    .select({ total: vendorBills.totalMinor, paid: vendorBills.paidMinor })
+    .select({ total: vendorBills.totalMinor, credited: vendorBills.creditedMinor, paid: vendorBills.paidMinor })
     .from(vendorBills)
     .where(and(eq(vendorBills.orgId, orgId), ne(vendorBills.status, "void")));
-  const apOutstanding = apRows.reduce((s, r) => s + r.total - r.paid, 0);
+  const apOutstanding = sumOutstanding(apRows.map(toMoney));
 
   // CRM pipeline: stage counts plus the weighted forecast model.
   const dealRows = await db

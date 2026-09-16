@@ -58,7 +58,7 @@ source moves.
 | N08 | source-confirmed | `api/support/channels/route.ts` GET lazily inserts settings; POST toggles/tokens with session+module checks only (4 hits). Open: mutation-classification inventory (I1/B01). |
 | N09 | **resolved (N09/ADR 0052, migration 0046)** | Commit-time enforcement delivered: line CHECKs (nonnegative, single-sided, nonzero), deferred balance/completeness/cross-org constraint triggers, and UPDATE/DELETE/TRUNCATE refusal on `journal_entries`/`journal_lines`/`ledger_events` — with one declared maintenance context (`app.ledger_maintenance`) for teardown/repair that the balance guards ignore. The runtime role additionally lost mutation rights on the append-only set (`APPEND_ONLY_TABLES`, re-revoked on every `ensureAppRole` grant; conformance sweep asserts it). `probe-n09` now asserts DISCHARGED on a fresh fixture: 8 triggers present, unbalanced commit refused, posted-line UPDATE/DELETE refused. `journal-guards.test.ts` pins the audit's full negative/positive proof list. POS's post-insert `sourceId` patch is gone (invoice inserted before posting). Stock-ledger immutability (`stock_movements`) remains open as a follow-up slice. |
 | N10 | source-confirmed | `packages/db/src/migrate.ts` `dockerDump` parses only user/database from the URL and falls back to the default local container (`:141-150`); snapshot-before-pending-check and last-ten retention confirmed in the same file. Open: restore drill + identity verification (S03). |
-| N11 | **reproduced (AR side)** | Probe `probe-n11.mts`: on a fixture DB, invoice total 10000 with `credited_minor` 4000 and paid 0 — `accounting.recordPayment` of the full 10000 **succeeds** (`modules/accounting/src/index.ts:304` gates on `paid + amount <= total` only), while the schema comment defines balance as `total − paid − credited`. AP/analytics/support divergence anchors unchanged. Open: AP + cross-surface reconciliation repro (I2). |
+| N11 | **resolved (Slice E + N11 completion)** | The credit-adjusted balance contract is now the only outstanding computation: `recordPayment`/`payBill` gate and mutate under a per-document `FOR UPDATE` lock (simultaneous overpays serialize — exactly one commits), `reversePayment`/`creditNote` share the lock; `listInvoices`, `arAging`, `unrealizedFxExposure`, overdue signals, the accounting/dashboard/purchasing pages and the customer portal all show `documentBalance`'s credit-adjusted outstanding; aging and overdue signals run from `dueAt` with an explicit as-of. `n11-reconciliation.test.ts` pins one invoice's identical outstanding across contract, aging, analytics, support and portal; `balance-reconciliation.test.ts` pins the lock race. Open: none for the core; historical-disagreement audit for pre-existing rows remains a migration-time task. |
 | N12–N36 | not yet revalidated | Pending W0 continuation; treat audit anchors as starting points, revalidate at fix time per the audit's §8 contract. |
 
 ## Probe reproduction
@@ -296,6 +296,33 @@ honesty is now mechanical:
   clear-on-success).
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
+
+## N11 completion — one balance contract everywhere, locked money application (delivered)
+
+Slice E built the pure contract and the payment gate; this slice closes the
+remaining divergence the audit named:
+
+- **Locked money application**: `recordPayment`, `payBill`,
+  `reversePayment`, and `creditNote` read the document `FOR UPDATE` inside
+  the capability transaction, so the outstanding verdict sees every
+  committed movement. Two simultaneous payments that are each valid alone
+  but not together serialize: exactly one commits, the loser is refused
+  with the exact outstanding (`balance-reconciliation.test.ts` race case).
+- **Cross-surface reconciliation**: `listInvoices`, `arAging`,
+  `unrealizedFxExposure`, the accounting-module overdue signal producer,
+  the accounting/dashboard/purchasing pages, and the customer portal all
+  compute outstanding through `documentBalance` (web surfaces via the
+  shared `server/balances.ts` helper) — credits reduce what is chased,
+  over-allocation clamps at zero instead of hiding credit behind a
+  negative, and the portal shows credited amounts explicitly.
+- **Due-date collections basis**: `computeAging` buckets days past due
+  (`dueAt ?? issuedAt`, explicit as-of `now`); not-yet-due invoices stay
+  current. arAging, the analytics aging SQL, the dashboard overdue split,
+  and overdue signals share the basis.
+- Pinned by `n11-reconciliation.test.ts`: one seeded invoice (credited and
+  partially paid) shows the identical outstanding from the pure contract,
+  arAging, the analytics aging capability, the support invoice lookup, and
+  the portal handler.
 
 ## Stock-ledger immutability — quantity truth is append-only (delivered, ADR 0052 extension)
 

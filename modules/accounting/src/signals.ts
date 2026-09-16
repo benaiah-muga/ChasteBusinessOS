@@ -2,7 +2,7 @@ import { and, eq, isNull, lt } from "drizzle-orm";
 import { expenseClaims, expensePolicies, invoices, payments, quotes } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import type { BusinessSignal, SignalProducer } from "@chaste/kernel";
-import { evaluateExpensePolicy, findDuplicateExpenseClaims, findDuplicatePayments } from "@chaste/erp-core";
+import { documentBalance, evaluateExpensePolicy, findDuplicateExpenseClaims, findDuplicatePayments } from "@chaste/erp-core";
 
 /**
  * Receivables signals (ADR 0034): invoices that are out with money owed and
@@ -25,8 +25,10 @@ export function createAccountingSignalProducer(db: Database["db"]): SignalProduc
         id: invoices.id,
         number: invoices.number,
         issuedAt: invoices.issuedAt,
+        dueAt: invoices.dueAt,
         totalMinor: invoices.totalMinor,
         paidMinor: invoices.paidMinor,
+        creditedMinor: invoices.creditedMinor,
       })
       .from(invoices)
       .where(and(eq(invoices.orgId, orgId), eq(invoices.status, "sent"), isNull(invoices.voidedAt)))
@@ -34,16 +36,19 @@ export function createAccountingSignalProducer(db: Database["db"]): SignalProduc
 
     const signals: BusinessSignal[] = [];
     for (const inv of rows) {
-      const balance = inv.totalMinor - inv.paidMinor;
+      // N11: chase the credit-adjusted balance; overdue runs from the due
+      // date when the invoice carries one, not the issue date.
+      const balance = documentBalance(inv).outstandingMinor;
       if (balance <= 0 || !inv.issuedAt) continue;
-      const ageDays = Math.floor((now.getTime() - inv.issuedAt.getTime()) / 86_400_000);
+      const ref = inv.dueAt ?? inv.issuedAt;
+      const ageDays = Math.floor((now.getTime() - ref.getTime()) / 86_400_000);
       if (ageDays < 30) continue;
       signals.push({
         id: `accounting.overdue:${inv.id}`,
         severity: ageDays >= 60 ? "red" : "orange",
         module: "accounting",
-        subject: `Invoice #${inv.number} is ${ageDays} days overdue`,
-        detail: `${(balance / 100).toFixed(2)} minor-major units outstanding of ${(inv.totalMinor / 100).toFixed(2)} — issued ${ageDays} days ago.`,
+        subject: `Invoice #${inv.number} is ${ageDays} days past due`,
+        detail: `${(balance / 100).toFixed(2)} minor-major units outstanding of ${(inv.totalMinor / 100).toFixed(2)} — due ${ageDays} days ago.`,
         evidence: { refType: "invoice", refId: inv.id },
         suggestedAction: {
           capabilityId: "accounting.recordPayment",

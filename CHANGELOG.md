@@ -12,6 +12,16 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **one credit-adjusted balance everywhere, with locked money application
+  (N11).** Every surface that shows an outstanding amount — invoice lists,
+  AR aging, the dashboard's receivables and payables, vendor bill due
+  amounts, the customer portal, support invoice lookup, FX exposure and
+  overdue signals — now nets credits against the total, so a credited
+  invoice no longer looks collectible in one place and settled in another.
+  Overdue aging and signals run from the due date rather than the issue
+  date, and not-yet-due invoices stay current. Payments and credits
+  serialize on a per-document row lock, so two simultaneous payments that
+  would jointly overpay are refused instead of racing past the cap.
 - **worker-kill proof for the queue and outbox (B03).** A new fixture kills
   a worker mid-flight while it holds the lease and pins the recovery
   contract for three windows: killed after the effect (the replacement

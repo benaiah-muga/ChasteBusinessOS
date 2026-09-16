@@ -268,7 +268,10 @@ const payBill = (deps: ModuleDeps) =>
           .select()
           .from(vendorBills)
           .where(and(eq(vendorBills.orgId, ctx.actor.orgId), eq(vendorBills.number, input.billNumber)))
-          .limit(1);
+          .limit(1)
+          // N11: serialize money application per document — the outstanding
+          // verdict must see every committed payment, not a stale snapshot.
+          .for("update");
         if (!bill) throw new Error("bill not found");
         // N11: credit-adjusted outstanding gates vendor payments too.
         const verdict = canAcceptPayment(bill, bill.status, input.amountMinor);
