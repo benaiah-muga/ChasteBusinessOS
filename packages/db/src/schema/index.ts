@@ -1493,6 +1493,29 @@ export const marketplaceListings = pgTable(
   (t) => [index("listing_status_idx").on(t.status)],
 );
 
+// ── Bootstrap (B01/T08) ─────────────────────────────────────────────────
+
+/**
+ * One row per tenant-creation attempt, committed in the same transaction as
+ * the organization it created (B01): a wizard retry after a lost response
+ * replays the receipt keyed by (user, intent) instead of creating a second
+ * org, and the payload hash refuses a conflicting reuse of an intent id.
+ */
+export const bootstrapIntents = pgTable(
+  "bootstrap_intents",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    intentId: text("intent_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("bootstrap_intents_user_intent_uq").on(t.userId, t.intentId)],
+);
+
 // ── Customer care (support desk) ────────────────────────────────────────
 
 /**

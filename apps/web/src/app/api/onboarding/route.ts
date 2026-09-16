@@ -21,6 +21,7 @@ import { checkRateLimit } from "@/server/rate-limit";
 type ErrorCode =
   | "unauthorized"
   | "already_onboarded"
+  | "intent_conflict"
   | "rate_limited"
   | "invalid"
   | "not_found"
@@ -38,6 +39,8 @@ const createSchema = z.object({
   baseCurrency: z.string().length(3).optional(),
   path: z.enum(["fresh", "import", "connect"]).optional(),
   deferredSteps: z.array(z.string()).optional(),
+  /** Client action identity (B01/T08): one bootstrap intent, replayable. */
+  intentId: z.string().min(8).max(100).optional(),
 });
 
 const updateSchema = z.object({
@@ -50,21 +53,6 @@ export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved) {
     return fail("unauthorized", "Your session has expired. Sign in again to continue.", 401);
-  }
-  if (resolved.orgId) {
-    return fail("already_onboarded", "This account already has a workspace.", 409);
-  }
-
-  // Onboarding seeds an org, chart of accounts, and embeddings; a burst from
-  // one account would multiply provider calls and rows.
-  const limit = checkRateLimit(`onboarding:${resolved.userId}`, { max: 5, windowMs: 10 * 60_000 });
-  if (!limit.allowed) {
-    return fail(
-      "rate_limited",
-      `Too many attempts. Try again in ${limit.retryAfterSec}s.`,
-      429,
-      { retryAfterSec: limit.retryAfterSec },
-    );
   }
 
   let raw: unknown;
@@ -88,6 +76,25 @@ export async function POST(req: Request) {
     });
   }
 
+  // A retry carrying its intent id may pass even though the session now
+  // resolves an org: the receipt replay in the service answers it. Only a
+  // fresh create from an onboarded account is refused here.
+  if (resolved.orgId && !body.data.intentId) {
+    return fail("already_onboarded", "This account already has a workspace.", 409);
+  }
+
+  // Onboarding seeds an org, chart of accounts, and embeddings; a burst from
+  // one account would multiply provider calls and rows.
+  const limit = checkRateLimit(`onboarding:${resolved.userId}`, { max: 5, windowMs: 10 * 60_000 });
+  if (!limit.allowed) {
+    return fail(
+      "rate_limited",
+      `Too many attempts. Try again in ${limit.retryAfterSec}s.`,
+      429,
+      { retryAfterSec: limit.retryAfterSec },
+    );
+  }
+
   try {
     const result = await runOnboarding(getDb().db, {
       userId: resolved.userId,
@@ -97,12 +104,19 @@ export async function POST(req: Request) {
       baseCurrency: body.data.baseCurrency,
       path: body.data.path,
       deferredSteps: body.data.deferredSteps,
+      intentId: body.data.intentId,
     });
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("unsupported base currency")) {
       return fail("invalid", `We don't support ${body.data.baseCurrency} as a base currency yet.`, 422);
+    }
+    if (message.includes("intent conflict")) {
+      return fail("intent_conflict", "This setup was already started with different details.", 409);
+    }
+    if (message.includes("already belongs")) {
+      return fail("already_onboarded", "This account already has a workspace.", 409);
     }
     return fail("server_error", message, 422);
   }

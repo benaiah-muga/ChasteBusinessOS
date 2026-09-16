@@ -253,6 +253,48 @@ describe("OnboardingWizard — when it fails", () => {
   });
 });
 
+describe("OnboardingWizard — a lost response must not create two workspaces", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("stamps the create with an intent id and retries the same one after a failure", async () => {
+    let attempt = 0;
+    respond = (call) => {
+      if (call.method === "POST" && call.url === "/api/onboarding") {
+        attempt += 1;
+        if (attempt === 1) return { status: 502, body: { code: "server_error" } };
+      }
+      return { status: 200, body: {} };
+    };
+    renderWizard();
+    await choosePath(/Start from scratch/i);
+    await fillProfile();
+    fireEvent.click(buttonNamed(/Open my books/i));
+    await screen.findByRole("alert");
+
+    // The response was lost, but the intent was not: the retry reuses it.
+    fireEvent.click(buttonNamed(/Open my books/i));
+    await screen.findByText("Who else works here?");
+
+    const creates = calls.filter((c) => c.method === "POST" && c.url === "/api/onboarding");
+    expect(creates).toHaveLength(2);
+    const ids = creates.map((c) => String(c.body?.intentId));
+    expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids[1]).toBe(ids[0]);
+  });
+
+  it("clears the intent once the workspace exists, so a later setup gets its own", async () => {
+    renderWizard();
+    await choosePath(/Start from scratch/i);
+    await fillProfile();
+    fireEvent.click(buttonNamed(/Open my books/i));
+
+    await screen.findByText("Who else works here?");
+    expect(window.localStorage.getItem("chaste:onboarding-intent")).toBeNull();
+  });
+});
+
 describe("OnboardingWizard — skipping is remembered, not dropped", () => {
   it("brings deferred steps back on the done screen", async () => {
     renderWizard();

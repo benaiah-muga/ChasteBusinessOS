@@ -12,6 +12,15 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **intent-keyed, honest bootstrap (B01/T08).** Workspace creation now
+  commits a receipt atomically with the organization, keyed by the browser's
+  intent id: if the response is lost, a retry replays the original result
+  instead of creating a second company, and reusing an intent id with
+  different details is refused. Slug collisions are settled by the database
+  inside the transaction, and the AI embedding of the business description
+  is upgraded after commit so a slow or failing provider can never stall or
+  break setup. The setup wizard remembers its intent across retries and
+  clears it once the workspace exists.
 - **intent action identity on every mutating UI request (B02 adoption).**
   The UI's single API seam now stamps each POST with a per-call `intentId`
   (callers can pass their own to span retries of one logical action), and

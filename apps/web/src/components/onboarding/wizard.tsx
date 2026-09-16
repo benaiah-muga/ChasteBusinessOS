@@ -177,6 +177,32 @@ export function OnboardingWizard({ email }: { email: string }) {
     }
   }
 
+  /**
+   * One bootstrap intent per setup attempt (B01/T08): the id is created once
+   * and persisted until the workspace exists, so a retry after a lost
+   * response replays the server's receipt instead of creating a second org.
+   */
+  function bootstrapIntentId(): string {
+    const KEY = "chaste:onboarding-intent";
+    try {
+      const existing = window.localStorage.getItem(KEY);
+      if (existing) return existing;
+      const id = crypto.randomUUID();
+      window.localStorage.setItem(KEY, id);
+      return id;
+    } catch {
+      return crypto.randomUUID();
+    }
+  }
+
+  function clearBootstrapIntent(): void {
+    try {
+      window.localStorage.removeItem("chaste:onboarding-intent");
+    } catch {
+      // Private mode: the in-flight identity still covers this page's retries.
+    }
+  }
+
   async function createWorkspace() {
     setCreating(true);
     setFailure(null);
@@ -189,6 +215,7 @@ export function OnboardingWizard({ email }: { email: string }) {
         baseCurrency: resolvedCurrency,
         path: path ?? "fresh",
         deferredSteps: path ? PATH_META[path].steps : [],
+        intentId: bootstrapIntentId(),
       }),
     });
     setCreating(false);
@@ -196,6 +223,7 @@ export function OnboardingWizard({ email }: { email: string }) {
       setFailure(res.failure);
       return;
     }
+    clearBootstrapIntent();
     await markStep("business_profile", "done");
     setScreen(path === "fresh" ? "team" : "data");
     window.scrollTo({ top: 0, behavior: "smooth" });

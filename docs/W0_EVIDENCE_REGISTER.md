@@ -272,9 +272,30 @@ bootstrap:
   account on file" for unbound threads. Knowing a customer's email plus the
   public token reveals nothing about them. Pinned by
   `support-public.test.ts`.
-- Still open by design: `server/onboarding.ts` bootstrap (B01 exception,
-  T08 — intent-keyed atomic bootstrap receipt); N03's full verified-binding
-  matrix (deployment-level proof); SCIM token expiry/rotation policy.
+
+## B01/T08 — intent-keyed bootstrap (delivered; the I1 standing exception is discharged)
+
+`runOnboarding` remains the one declared bootstrap exception to the governed
+command path (tenant creation cannot require an existing tenant), but its
+honesty is now mechanical:
+
+- **Intent receipt (T08/B01)**: migration 0048 adds `bootstrap_intents`,
+  committed in the same transaction as the organization. A retry after a
+  lost response replays the receipt (even once the session resolves the
+  org); a conflicting reuse of an intent id with a different payload hash is
+  refused; the wizard persists its intent id in localStorage until the
+  workspace exists and clears it on success.
+- **Slug uniqueness in-transaction**: the suffix walk retries under
+  savepoints against the unique constraint instead of a racy pre-flight
+  check.
+- **Async embedding (T08)**: the transaction commits a zero vector so the
+  business profile is never lost; the real embedding upgrades it
+  post-commit. No provider call holds the bootstrap transaction open.
+- Pinned by `onboarding-bootstrap.test.ts` (5 live-DB cases) and the
+  extended wizard tests (19 cases incl. retry-with-same-intent and
+  clear-on-success).
+- Still open by design: N03's full verified-binding matrix (deployment-level
+  proof); SCIM token expiry/rotation policy.
 
 ## B02 client action identity — intentId adoption across UI surfaces (delivered)
 

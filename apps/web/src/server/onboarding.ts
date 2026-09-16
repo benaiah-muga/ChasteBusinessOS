@@ -1,5 +1,6 @@
-import { eq } from "drizzle-orm";
-import { accounts, type Database } from "@chaste/db";
+import { createHash } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import { accounts, bootstrapIntents, type Database } from "@chaste/db";
 import { currencyMinorUnits, DEFAULT_CHART_OF_ACCOUNTS } from "@chaste/erp-core";
 import { embed } from "@chaste/ai";
 import { ledgerEventFor } from "@chaste/kernel";
@@ -28,6 +29,8 @@ function slugify(name: string): string {
 
 export interface OnboardingResult {
   orgId: string;
+  /** True when this call replayed a receipt from an earlier identical intent. */
+  replayed?: boolean;
 }
 
 /**
@@ -80,6 +83,14 @@ export function parseOnboardingState(settings: unknown): OnboardingState | null 
  * The plain-language → working-ERP pipeline:
  * profile description is embedded into org memory; a standard chart of
  * accounts is seeded; the creator gets an owner role with full authority.
+ *
+ * B01: tenant creation cannot require an existing tenant, so this is the one
+ * declared bootstrap exception to the governed command path — it is
+ * session-authenticated, seeds only the caller's own membership, and is
+ * intent-keyed: a retry after a lost response replays the receipt committed
+ * with the organization instead of creating a second tenant, and reusing an
+ * intent id with a different payload is refused. Subsequent setup changes go
+ * through ordinary governed capabilities.
  */
 export async function runOnboarding(
   db: Database["db"],
@@ -94,42 +105,73 @@ export async function runOnboarding(
     path?: "fresh" | "import" | "connect";
     /** Steps the user chose to defer; recorded so the app can offer them again. */
     deferredSteps?: string[];
+    /** Client action identity (B02 semantics): stable across retries of one intended bootstrap. */
+    intentId?: string;
   },
 ): Promise<OnboardingResult> {
   const baseCurrency = (params.baseCurrency ?? "USD").toUpperCase();
   if (!/^[A-Z]{3}$/.test(baseCurrency) || currencyMinorUnits(baseCurrency) === null) {
     throw new Error(`unsupported base currency: ${baseCurrency}`);
   }
+  const payloadHash = bootstrapPayloadHash(params);
+
+  // Replay before anything else: after a lost response the session may
+  // already resolve an org, and the caller still needs the original receipt.
+  if (params.intentId) {
+    const [receipt] = await db
+      .select({ orgId: bootstrapIntents.orgId, payloadHash: bootstrapIntents.payloadHash })
+      .from(bootstrapIntents)
+      .where(and(eq(bootstrapIntents.userId, params.userId), eq(bootstrapIntents.intentId, params.intentId)))
+      .limit(1);
+    if (receipt) {
+      if (receipt.payloadHash !== payloadHash) {
+        throw new Error("bootstrap intent conflict: this intent id was used with a different payload");
+      }
+      if (receipt.orgId) return { orgId: receipt.orgId, replayed: true };
+    }
+  }
+
   const existing = await db.select().from(memberships).where(eq(memberships.userId, params.userId)).limit(1);
   if (existing.length > 0) throw new Error("user already belongs to an organization");
 
-  const base = slugify(params.orgName);
-  let slug = base;
-  for (let i = 2; ; i++) {
-    const clash = await db.select({ id: organizations.id }).from(organizations).where(eq(organizations.slug, slug)).limit(1);
-    if (clash.length === 0) break;
-    slug = `${base}-${i}`;
-  }
-
   const result = await db.transaction(async (tx) => {
-    const [org] = await tx
-      .insert(organizations)
-      .values({
-        name: params.orgName,
-        slug,
-        profileDescription: params.businessDescription,
-        baseCurrency,
-        settings: {
-          onboarding: {
-            path: params.path ?? "fresh",
-            steps: Object.fromEntries(
-              (params.deferredSteps ?? []).filter(isStepKey).map((k) => [k, "pending"]),
-            ),
-            startedAt: new Date().toISOString(),
-          } satisfies OnboardingState,
-        },
-      })
-      .returning({ id: organizations.id });
+    // Slug uniqueness settles inside the transaction: a pre-flight check
+    // races concurrent bootstraps, the unique constraint does not. Each
+    // attempt runs under a savepoint so a clash rolls back only the org
+    // insert and the suffix walk retries against committed state.
+    const base = slugify(params.orgName);
+    let slug = base;
+    let org: { id: string } | undefined;
+    for (let attempt = 0; attempt < 5 && !org; attempt++) {
+      try {
+        org = await tx.transaction(async (nested) => {
+          const [row] = await nested
+            .insert(organizations)
+            .values({
+              name: params.orgName,
+              slug,
+              profileDescription: params.businessDescription,
+              baseCurrency,
+              settings: {
+                onboarding: {
+                  path: params.path ?? "fresh",
+                  steps: Object.fromEntries(
+                    (params.deferredSteps ?? []).filter(isStepKey).map((k) => [k, "pending"]),
+                  ),
+                  startedAt: new Date().toISOString(),
+                } satisfies OnboardingState,
+              },
+            })
+            .returning({ id: organizations.id });
+          return row;
+        });
+      } catch (err) {
+        const code =
+          (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
+        if (code !== "23505") throw err;
+        slug = `${base}-${attempt + 2}`;
+      }
+    }
     if (!org) throw new Error("failed to create organization");
 
     await tx.insert(accounts).values(
@@ -155,13 +197,26 @@ export async function runOnboarding(
       { orgId: org.id, capabilityPattern: "*", maxRiskAutonomous: "write", moneyThresholdMinor: 50_000 },
     ]);
 
+    // The zero vector commits with the org so the business profile is never
+    // lost to a provider hiccup; the real embedding upgrades it post-commit
+    // (T08: no provider call inside the transaction).
     await tx.insert(memories).values({
       orgId: org.id,
       kind: "business_profile",
       source: "onboarding",
       content: params.businessDescription,
-      embedding: await getEmbedding(params.businessDescription),
+      embedding: ZERO_VECTOR,
     });
+
+    // The receipt commits atomically with the org it describes (T08).
+    if (params.intentId) {
+      await tx.insert(bootstrapIntents).values({
+        userId: params.userId,
+        intentId: params.intentId,
+        payloadHash,
+        orgId: org.id,
+      });
+    }
 
     return { orgId: org.id };
   });
@@ -175,7 +230,45 @@ export async function runOnboarding(
   };
   await ledger.append(ledgerEventFor(ctx as never, "organization.created", null, { orgId: result.orgId, name: params.orgName }));
 
+  // Best-effort embedding upgrade, outside the transaction (T08).
+  void upgradeEmbedding(db, result.orgId, params.businessDescription);
+
   return result;
+}
+
+function bootstrapPayloadHash(params: {
+  orgName: string;
+  businessDescription: string;
+  baseCurrency?: string;
+  path?: "fresh" | "import" | "connect";
+  deferredSteps?: string[];
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        orgName: params.orgName,
+        businessDescription: params.businessDescription,
+        baseCurrency: (params.baseCurrency ?? "USD").toUpperCase(),
+        path: params.path ?? "fresh",
+        deferredSteps: [...(params.deferredSteps ?? [])].sort(),
+      }),
+    )
+    .digest("hex");
+}
+
+const ZERO_VECTOR = new Array(Number(process.env.EMBEDDING_DIMENSIONS ?? 1024)).fill(0);
+
+async function upgradeEmbedding(db: Database["db"], orgId: string, text: string): Promise<void> {
+  try {
+    const [vec] = await embed([text], { inputType: "passage" });
+    if (!vec) return;
+    await db
+      .update(memories)
+      .set({ embedding: vec })
+      .where(eq(memories.orgId, orgId));
+  } catch {
+    // Retrieval degrades gracefully on the zero vector; retry is harmless.
+  }
 }
 
 /**
@@ -250,14 +343,4 @@ export async function completeOnboarding(
     .where(eq(organizations.id, orgId));
 
   return state;
-}
-
-async function getEmbedding(text: string): Promise<number[]> {
-  try {
-    const [vec] = await embed([text], { inputType: "passage" });
-    return vec ?? new Array(Number(process.env.EMBEDDING_DIMENSIONS ?? 1024)).fill(0);
-  } catch {
-    // Embeddings are best-effort at onboarding; retrieval degrades gracefully.
-    return new Array(Number(process.env.EMBEDDING_DIMENSIONS ?? 1024)).fill(0);
-  }
 }
