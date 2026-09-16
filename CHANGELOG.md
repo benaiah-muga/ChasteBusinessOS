@@ -12,6 +12,13 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **the stock ledger is append-only at the database (ADR 0052 extension).**
+  Stock movements can no longer be edited or deleted by any code path:
+  corrections are compensating movements — reversal runs, transfer
+  reversals, cycle-count postings — exactly like financial corrections.
+  Database triggers refuse mutations outside a declared maintenance
+  context used only by teardown and repair, and the runtime role holds the
+  same append-only privilege shape as the journal tables.
 - **intent-keyed, honest bootstrap (B01/T08).** Workspace creation now
   commits a receipt atomically with the organization, keyed by the browser's
   intent id: if the response is lost, a retry replays the original result

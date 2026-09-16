@@ -28,7 +28,7 @@ export const DEFAULT_DATABASE_URL = "postgresql://chaste:chaste_dev@localhost:54
  * every provisioning run; migration 0046 enforces the same boundary with
  * triggers for roles that hold the privilege.
  */
-export const APPEND_ONLY_TABLES = ["journal_entries", "journal_lines", "ledger_events"] as const;
+export const APPEND_ONLY_TABLES = ["journal_entries", "journal_lines", "ledger_events", "stock_movements"] as const;
 
 export interface EnsureAppRoleOptions {
   /** Database whose tables receive the grants (defaults DATABASE_URL / dev default). */

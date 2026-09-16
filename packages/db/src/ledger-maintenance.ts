@@ -23,10 +23,11 @@ export async function beginLedgerMaintenance<T>(
 }
 
 /**
- * Removes a tenant's financial facts (journal lines/entries and event-ledger
- * rows) inside one declared maintenance transaction. Call it before deleting
- * the organization row: the org cascade would otherwise fire the immutability
- * guards, and ledger_events restrict-deletes on a surviving org reference.
+ * Removes a tenant's immutable history — journal lines/entries, event-ledger
+ * rows, and stock movements — inside one declared maintenance transaction.
+ * Call it before deleting the organization row: the org cascade would
+ * otherwise fire the immutability guards, and ledger_events restrict-deletes
+ * on a surviving org reference.
  */
 export async function purgeTenantFinancials(db: Database["db"], orgId: string): Promise<void> {
   await beginLedgerMaintenance(db, async (tx) => {
@@ -35,5 +36,6 @@ export async function purgeTenantFinancials(db: Database["db"], orgId: string): 
     );
     await tx.execute(sql`DELETE FROM journal_entries WHERE org_id = ${orgId}`);
     await tx.execute(sql`DELETE FROM ledger_events WHERE org_id = ${orgId}`);
+    await tx.execute(sql`DELETE FROM stock_movements WHERE org_id = ${orgId}`);
   });
 }

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { bomLines, createDb, items, organizations, stockMovements, workOrders, type Database } from "@chaste/db";
+import { bomLines, createDb, items, organizations, purgeTenantFinancials, stockMovements, workOrders, type Database } from "@chaste/db";
 import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerManufacturingCapabilities, type ModuleDeps } from "./index";
 
@@ -32,7 +32,10 @@ async function run<I>(id: string, input: I): Promise<any> {
 
 async function purgeProbeOrgs(): Promise<void> {
   const orgs = await db.db.select({ id: organizations.id }).from(organizations).where(eq(organizations.name, "Planning Probe"));
-  for (const o of orgs) await db.db.delete(organizations).where(eq(organizations.id, o.id));
+  for (const o of orgs) {
+    await purgeTenantFinancials(db.db, o.id);
+    await db.db.delete(organizations).where(eq(organizations.id, o.id));
+  }
 }
 
 beforeAll(async () => {

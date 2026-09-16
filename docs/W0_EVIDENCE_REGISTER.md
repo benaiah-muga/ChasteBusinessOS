@@ -297,6 +297,18 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
+## Stock-ledger immutability — quantity truth is append-only (delivered, ADR 0052 extension)
+
+Migration 0049 extends the commit-time immutability pattern to
+`stock_movements`: corrections are compensating movements (production and
+transfer reversals, cycle-count postings) — never edits to history. UPDATE,
+DELETE, and TRUNCATE refuse outside the declared maintenance context;
+`purgeTenantFinancials` now clears stock history alongside journal and
+ledger rows; the runtime role holds the append-only privilege shape. Pinned
+by `stock-guards.test.ts` (3 live-DB cases) plus the runtime-role and
+RLS-conformance sweeps; inventory and seeded analytics/degradation suites
+run on purge-through-maintenance teardowns.
+
 ## B02 client action identity — intentId adoption across UI surfaces (delivered)
 
 Every mutating UI request now carries a client action identity, closing the

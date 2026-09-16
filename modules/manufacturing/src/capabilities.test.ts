@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, organizations, type Database } from "@chaste/db";
+import { createDb, organizations, purgeTenantFinancials, type Database } from "@chaste/db";
 import {
   CapabilityRegistry,
   type ActionContext,
@@ -46,6 +46,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await purgeTenantFinancials(db.db, orgId);
   await db.db.delete(organizations).where(eq(organizations.id, orgId));
   await db.client.end();
 });

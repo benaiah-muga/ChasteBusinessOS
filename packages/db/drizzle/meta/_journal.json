@@ -344,6 +344,13 @@
       "when": 1789572000000,
       "tag": "0048_bootstrap_intents",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1789573000000,
+      "tag": "0049_stock_ledger_immutability",
+      "breakpoints": true
     }
   ]
 }

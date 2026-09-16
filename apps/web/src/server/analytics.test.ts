@@ -10,6 +10,7 @@ import {
   invoices,
   memberships,
   organizations,
+  purgeTenantFinancials,
   stockMovements,
   users,
   type Database,
@@ -129,7 +130,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const org of [orgId, otherOrgId]) {
-    await db.delete(stockMovements).where(eq(stockMovements.orgId, org));
+    await purgeTenantFinancials(db, org);
     await db.delete(items).where(eq(items.orgId, org));
     await db.delete(deals).where(eq(deals.orgId, org));
     await db.delete(invoices).where(eq(invoices.orgId, org));

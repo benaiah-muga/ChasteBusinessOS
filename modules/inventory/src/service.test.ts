@@ -7,6 +7,7 @@ import {
   items,
   lots,
   organizations,
+  purgeTenantFinancials,
   stockMovements,
   type Database,
 } from "@chaste/db";
@@ -58,7 +59,10 @@ async function run<I>(id: string, input: I): Promise<any> {
 
 async function purgeProbeOrgs(): Promise<void> {
   const orgs = await db.db.select({ id: organizations.id }).from(organizations).where(eq(organizations.name, "Inventory Service Probe"));
-  for (const o of orgs) await db.db.delete(organizations).where(eq(organizations.id, o.id));
+  for (const o of orgs) {
+    await purgeTenantFinancials(db.db, o.id);
+    await db.db.delete(organizations).where(eq(organizations.id, o.id));
+  }
 }
 
 async function seedStock(sku: string, itemId: string, quantity: number): Promise<void> {
