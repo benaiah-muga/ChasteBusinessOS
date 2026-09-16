@@ -318,6 +318,10 @@ importers:
       zod:
         specifier: ^4.1.5
         version: 4.4.3
+    devDependencies:
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.32.0)(tsx@4.23.12)
 
   modules/inventory:
     dependencies:
@@ -402,6 +406,10 @@ importers:
       zod:
         specifier: ^4.1.5
         version: 4.4.3
+    devDependencies:
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.32.0)(tsx@4.23.12)
 
   modules/pos:
     dependencies:

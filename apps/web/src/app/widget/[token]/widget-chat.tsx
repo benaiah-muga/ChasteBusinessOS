@@ -23,6 +23,7 @@ const SENDER_STYLE: Record<string, CSSProperties> = {
 export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const [conversationId, setId] = useState<string | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -35,8 +36,11 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
     try {
       const saved = localStorage.getItem(`chaste-widget:${token}`);
       if (saved) {
-        const s = JSON.parse(saved) as { conversationId?: string };
-        if (s.conversationId) setId(s.conversationId);
+        const s = JSON.parse(saved) as { conversationId?: string; secret?: string };
+        if (s.conversationId && s.secret) {
+          setId(s.conversationId);
+          setSecret(s.secret);
+        }
       }
     } catch {
       /* fresh visitor */
@@ -44,12 +48,12 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
   }, [token]);
 
   useEffect(() => {
-    if (!conversationId) return;
+    if (!conversationId || !secret) return;
     let stop = false;
     const poll = async () => {
       try {
         const res = await fetch(
-          `/api/support/public?token=${encodeURIComponent(token)}&conversationId=${conversationId}`,
+          `/api/support/public?token=${encodeURIComponent(token)}&conversationId=${conversationId}&secret=${secret}`,
         );
         if (res.ok && !stop) {
           const data = (await res.json()) as { status: string; messages: Msg[] };
@@ -66,7 +70,7 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
       stop = true;
       clearInterval(t);
     };
-  }, [conversationId, token]);
+  }, [conversationId, secret, token]);
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
@@ -81,9 +85,16 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
         body: JSON.stringify({ action: "start", token, email, name: name || undefined }),
       });
       if (res.ok) {
-        const data = (await res.json()) as { conversationId: string };
+        const data = (await res.json()) as { conversationId: string; secret: string };
         setId(data.conversationId);
-        localStorage.setItem(`chaste-widget:${token}`, JSON.stringify({ conversationId: data.conversationId }));
+        setSecret(data.secret);
+        // The thread secret lives only in this browser; the server keeps its
+        // hash. Losing it means starting a new conversation, never reading
+        // someone else's.
+        localStorage.setItem(
+          `chaste-widget:${token}`,
+          JSON.stringify({ conversationId: data.conversationId, secret: data.secret }),
+        );
       }
     } finally {
       setBusy(false);
@@ -91,17 +102,17 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
   }, [email, name, token]);
 
   const send = useCallback(async () => {
-    if (!conversationId || !text.trim()) return;
+    if (!conversationId || !secret || !text.trim()) return;
     setBusy(true);
     try {
       await fetch("/api/support/public", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "message", token, conversationId, body: text.trim() }),
+        body: JSON.stringify({ action: "message", token, conversationId, secret, body: text.trim() }),
       });
       setText("");
       const res = await fetch(
-        `/api/support/public?token=${encodeURIComponent(token)}&conversationId=${conversationId}`,
+        `/api/support/public?token=${encodeURIComponent(token)}&conversationId=${conversationId}&secret=${secret}`,
       );
       if (res.ok) {
         const data = (await res.json()) as { status: string; messages: Msg[] };
@@ -111,16 +122,16 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
     } finally {
       setBusy(false);
     }
-  }, [conversationId, text, token]);
+  }, [conversationId, secret, text, token]);
 
   const callHuman = useCallback(async () => {
-    if (!conversationId) return;
+    if (!conversationId || !secret) return;
     await fetch("/api/support/public", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "human", token, conversationId }),
+      body: JSON.stringify({ action: "human", token, conversationId, secret }),
     });
-  }, [conversationId, token]);
+  }, [conversationId, secret, token]);
 
   return (
     <div className="flex h-screen flex-col bg-white">

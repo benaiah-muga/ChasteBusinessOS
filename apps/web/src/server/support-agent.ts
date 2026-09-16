@@ -113,16 +113,22 @@ async function buildCustomerTranscript(
     (m) => `${speaker[m.senderType] ?? "UNKNOWN"}: ${cleanTranscriptText(m.body)}`,
   );
 
-  const [customer] = await db
-    .select({ name: customers.name })
-    .from(customers)
-    .where(and(eq(customers.id, conv.customerId), eq(customers.orgId, orgId)))
-    .limit(1);
+  // N04: widget threads start unbound — the draft sees the transcript only,
+  // named for the visitor contact, never a customer's account identity.
+  let customerName = "the customer";
+  if (conv.customerId) {
+    const [customer] = await db
+      .select({ name: customers.name })
+      .from(customers)
+      .where(and(eq(customers.id, conv.customerId), eq(customers.orgId, orgId)))
+      .limit(1);
+    customerName = customer?.name ?? customerName;
+  }
 
   return {
     transcript: lines.join("\n"),
     subject: conv.subject,
-    customerName: customer?.name ?? "the customer",
+    customerName,
   };
 }
 

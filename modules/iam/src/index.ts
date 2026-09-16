@@ -13,6 +13,9 @@ import {
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
+import { assertNotLastOwner } from "./last-owner";
+
+export { assertNotLastOwner } from "./last-owner";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -123,6 +126,8 @@ const assignRole = (deps: ModuleDeps) =>
           .where(and(eq(roles.id, input.roleId), eq(roles.orgId, ctx.actor.orgId)))
           .limit(1);
         if (!role) throw new Error("role not found");
+        // N07: replacing roles must never strand the org without an owner.
+        if (role.key !== "owner") await assertNotLastOwner(tx, ctx.actor.orgId, input.userId);
         await tx
           .delete(userRoles)
           .where(and(eq(userRoles.userId, input.userId), eq(userRoles.orgId, ctx.actor.orgId)));

@@ -1508,9 +1508,17 @@ export const supportConversations = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    customerId: uuid("customer_id")
-      .notNull()
-      .references(() => customers.id, { onDelete: "restrict" }),
+    /**
+     * The customer this thread concerns, once verified. Widget-originated
+     * conversations start UNBOUND (N04): a visitor's email alone must never
+     * attach an existing customer's account facts. Staff bind a customer
+     * through verified desk actions.
+     */
+    customerId: uuid("customer_id").references(() => customers.id, { onDelete: "restrict" }),
+    /** Visitor-supplied contact for unbound widget conversations (N04). */
+    visitorEmail: text("visitor_email"),
+    /** SHA-256 of the per-conversation secret issued once at start (N04). */
+    visitorSecretHash: text("visitor_secret_hash"),
     subject: text("subject").notNull(),
     status: text("status").notNull().default("open"), // open | escalated | resolved
     assignedUserId: uuid("assigned_user_id").references(() => users.id, { onDelete: "set null" }),

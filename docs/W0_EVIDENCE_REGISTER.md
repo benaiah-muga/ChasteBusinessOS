@@ -56,7 +56,7 @@ source moves.
 | N06 | source-confirmed | `api/conversations/route.ts:10` lists every org conversation with latest-message preview `body.slice(0, 80)` and **no membership filter** (detail route checks membership — boundary contradiction confirmed at HEAD); also one query per conversation (N35 overlap). Open: two-actor browser/API proof (I1). |
 | N07 | source-confirmed | `modules/iam/src/index.ts` `assignRole` lacks last-owner check (3 hits); SCIM delete leaves `user_roles`. Open: lifecycle concurrency repro (I1). |
 | N08 | source-confirmed | `api/support/channels/route.ts` GET lazily inserts settings; POST toggles/tokens with session+module checks only (4 hits). Open: mutation-classification inventory (I1/B01). |
-| N09 | **reproduced** | Probe `probe-n09.mts` on a fixture DB migrated from this branch: 0 triggers on journal tables; only FK/PK constraints on `journal_lines`; an unbalanced entry (10000/5000) commits; UPDATE and DELETE of a posted line both succeed. Static corroboration: zero `CREATE TRIGGER`/`CREATE FUNCTION` across all 35 migration files. Fix belongs to I2/B06 (commit-time enforcement with staged rollout). |
+| N09 | **resolved (N09/ADR 0052, migration 0046)** | Commit-time enforcement delivered: line CHECKs (nonnegative, single-sided, nonzero), deferred balance/completeness/cross-org constraint triggers, and UPDATE/DELETE/TRUNCATE refusal on `journal_entries`/`journal_lines`/`ledger_events` — with one declared maintenance context (`app.ledger_maintenance`) for teardown/repair that the balance guards ignore. The runtime role additionally lost mutation rights on the append-only set (`APPEND_ONLY_TABLES`, re-revoked on every `ensureAppRole` grant; conformance sweep asserts it). `probe-n09` now asserts DISCHARGED on a fresh fixture: 8 triggers present, unbalanced commit refused, posted-line UPDATE/DELETE refused. `journal-guards.test.ts` pins the audit's full negative/positive proof list. POS's post-insert `sourceId` patch is gone (invoice inserted before posting). Stock-ledger immutability (`stock_movements`) remains open as a follow-up slice. |
 | N10 | source-confirmed | `packages/db/src/migrate.ts` `dockerDump` parses only user/database from the URL and falls back to the default local container (`:141-150`); snapshot-before-pending-check and last-ten retention confirmed in the same file. Open: restore drill + identity verification (S03). |
 | N11 | **reproduced (AR side)** | Probe `probe-n11.mts`: on a fixture DB, invoice total 10000 with `credited_minor` 4000 and paid 0 — `accounting.recordPayment` of the full 10000 **succeeds** (`modules/accounting/src/index.ts:304` gates on `paid + amount <= total` only), while the schema comment defines balance as `total − paid − credited`. AP/analytics/support divergence anchors unchanged. Open: AP + cross-surface reconciliation repro (I2). |
 | N12–N36 | not yet revalidated | Pending W0 continuation; treat audit anchors as starting points, revalidate at fix time per the audit's §8 contract. |
@@ -248,6 +248,34 @@ Still open (unchanged scope): remaining ungoverned write routes (import, scim, i
 - Adopted at every divergence the audit named: `accounting.recordPayment` and `purchasing.payBill` now gate on the credit-adjusted outstanding and refuse drafts (previously only voids were refused and credits ignored); analytics invoice aging and the support invoice projection compute outstanding the same way.
 - Probes: `probe-n11` now asserts DISCHARGED — the full 10000 payment against a 4000-credited invoice is refused with "outstanding is 6000". Contract pinned by 7 erp-core tests including conservation and acceptance-cap sweeps.
 
+## I1 write boundaries — remaining ungoverned writes (delivered, ADR 0053)
+
+The W0.4 ungoverned-write inventory is now closed except onboarding
+bootstrap:
+
+- **N07 lifecycle**: `server/identity-lifecycle.ts` owns invitation claims
+  (row-locked, compare-and-set, verified-email required — the N03
+  containment) and member deactivation (membership + user_roles + pending
+  invitations cleared in one transaction; last-owner refused with zero
+  partial effects; SCIM DELETE uses it). `iam.assignRole` shares the
+  last-owner guard. Pinned by `identity-lifecycle.test.ts` (8 cases incl. a
+  concurrent double-accept race) and `last-owner.test.ts`.
+- **N08 conversation/ticket paths**: `messaging.createConversation` and
+  `support.createTicket` replace route-side inserts; the chat `file_ticket`
+  sink executes through the kernel and reports refusal honestly
+  (`TicketSink.file → { id: null, error }`). The routine runner's sink is a
+  documented system-actor exception pending F06/A01 delegation work.
+- **N04 containment**: widget conversations start unbound — visitor email
+  lives on the thread (migration 0047: nullable `customer_id`,
+  `visitor_email`, hashed `visitor_secret_hash`), a per-conversation secret
+  issued once gates read/write/escalate, and the care agent reports "no
+  account on file" for unbound threads. Knowing a customer's email plus the
+  public token reveals nothing about them. Pinned by
+  `support-public.test.ts`.
+- Still open by design: `server/onboarding.ts` bootstrap (B01 exception,
+  T08 — intent-keyed atomic bootstrap receipt); N03's full verified-binding
+  matrix (deployment-level proof); SCIM token expiry/rotation policy.
+
 ## Remaining W0 work
 
 - Revalidate and reproduce N12–N36 anchors on demand, prioritized by wave (I1/I2 items first).
@@ -258,4 +286,5 @@ Still open (unchanged scope): remaining ungoverned write routes (import, scim, i
 
 Feeding W1, in dependency order: least-privilege runtime role; B01 route
 guards + bootstrap exception; B02 atomic effect/audit receipt (discharges
-F01/F02); N09 commit-time ledger enforcement; N11 unified document balance.
+F01/F02); N09 commit-time ledger enforcement (delivered, ADR 0052); N11
+unified document balance.

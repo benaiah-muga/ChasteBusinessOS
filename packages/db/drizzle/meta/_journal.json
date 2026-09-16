@@ -330,6 +330,13 @@
       "when": 1789548021524,
       "tag": "0046_steady_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1789566480483,
+      "tag": "0047_support_visitor_identity",
+      "breakpoints": true
     }
   ]
 }

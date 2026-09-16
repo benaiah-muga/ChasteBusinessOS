@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { conversations, conversationMembers, getDb, messages } from "@chaste/db";
-import { hasPermissionFor } from "@/server/kernel";
+import { actorFromResolved, buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
 import { missingPermission } from "@/server/route-guards";
 import { getResolvedUser } from "@/server/session";
 
@@ -68,17 +68,19 @@ export async function POST(req: Request) {
   const body = createSchema.safeParse(await req.json());
   if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
-  const db = getDb().db;
-  const [conv] = await db
-    .insert(conversations)
-    .values({
-      orgId: resolved.orgId,
-      kind: body.data.kind,
-      title: body.data.title,
-      agentEnabled: body.data.agentEnabled,
-      createdByUserId: resolved.userId,
-    })
-    .returning();
-  await db.insert(conversationMembers).values({ conversationId: conv!.id, userId: resolved.userId });
-  return NextResponse.json({ conversation: conv });
+  // N08: governed creation — the capability inserts the header and the
+  // creator's membership in one audited unit instead of two route statements.
+  const ctx = actorFromResolved(resolved);
+  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  const executor = buildExecutor(getDb().db, buildRegistry(getDb().db));
+  const result = await executor.execute("messaging.createConversation", ctx, {
+    title: body.data.title,
+    kind: body.data.kind,
+    agentEnabled: body.data.agentEnabled,
+  });
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
+  // The shared executor types outputs loosely; the capability's declared
+  // schema guarantees this shape (packages/kernel executor.ts).
+  const conversationId = (result.data as { conversationId: string }).conversationId;
+  return NextResponse.json({ conversationId }, { status: 201 });
 }

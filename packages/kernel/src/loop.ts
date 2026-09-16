@@ -43,8 +43,10 @@ export interface LoopMessage {
 
 export interface TicketSink {
   /** Files the ticket and returns its durable id, so the tool result can
-   * hand the user a real reference instead of "ticket filed" (X11). */
-  file(orgId: string, title: string, description: string): Promise<{ id: string }>;
+   * hand the user a real reference instead of "ticket filed" (X11). A
+   * governed refusal returns id: null with the reason — filing honestly
+   * includes reporting honestly when filing itself is refused (N08). */
+  file(orgId: string, title: string, description: string): Promise<{ id: string | null; error?: string }>;
 }
 
 export interface AskQuestion {
@@ -260,7 +262,11 @@ export async function runAgentLoop(
           String(t.title ?? "").slice(0, TICKET_TITLE_MAX),
           String(t.description ?? "").slice(0, TICKET_BODY_MAX),
         );
-        result = JSON.stringify({ ok: true, note: "ticket filed", ticketId: ticket?.id ?? null });
+        result = JSON.stringify(
+          ticket?.id != null
+            ? { ok: true, note: "ticket filed", ticketId: ticket.id }
+            : { ok: false, note: "ticket filing refused", error: ticket?.error ?? "ticket sink unavailable" },
+        );
       } else if (capId === "ask_user" && opts.ask) {
         // Clamp model-controlled question text: it is rendered in the UI and
         // persisted in the trajectory.

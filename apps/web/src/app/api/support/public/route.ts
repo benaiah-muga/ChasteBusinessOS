@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, asc, eq, gt } from "drizzle-orm";
 import {
-  customers,
   getDb,
   memberships,
   supportConversations,
@@ -14,9 +14,14 @@ import { checkRateLimit } from "@/server/rate-limit";
 import { SupportDraftError, draftSupportReply } from "@/server/support-agent";
 
 /**
- * Public boundary for the embeddable customer-care widget. Auth is the
- * per-org embed token; behavior is fixed server code, never model-driven
- * input. Only this conversation's own messages are ever readable.
+ * Public boundary for the embeddable customer-care widget (N04).
+ *
+ * Identity containment: a visitor-supplied email never binds a customer.
+ * Widget conversations start UNBOUND — the email is stored on the thread
+ * with a per-conversation secret (hashed, issued once), and only verified
+ * staff action may attach a real customer. Knowing a former customer's
+ * email plus the public token therefore reveals nothing about them: no
+ * account facts, no invoice history, no drafts bound to their record.
  */
 
 const MESSAGE_MAX = 2000;
@@ -32,14 +37,25 @@ const bodySchema = z.discriminatedUnion("action", [
     action: z.literal("message"),
     token: z.string().min(16),
     conversationId: z.string().uuid(),
+    secret: z.string().min(16),
     body: z.string().min(1).max(MESSAGE_MAX),
   }),
   z.object({
     action: z.literal("human"),
     token: z.string().min(16),
     conversationId: z.string().uuid(),
+    secret: z.string().min(16),
   }),
 ]);
+
+const hashSecret = (secret: string) => createHash("sha256").update(secret).digest("hex");
+
+function secretMatches(stored: string | null | undefined, presented: string): boolean {
+  if (!stored) return false;
+  const a = Buffer.from(hashSecret(presented), "hex");
+  const b = Buffer.from(stored, "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 async function loadOrgByToken(token: string) {
   const db = getDb().db;
@@ -59,6 +75,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";
   const conversationId = url.searchParams.get("conversationId") ?? "";
+  const secret = url.searchParams.get("secret") ?? "";
   const after = url.searchParams.get("after") ?? "";
   const org = await loadOrgByToken(token);
   if (!org) return NextResponse.json({ error: "unknown widget" }, { status: 404 });
@@ -66,11 +83,14 @@ export async function GET(req: Request) {
   if (!limit.allowed) return NextResponse.json({ error: "slow down" }, { status: 429 });
   const db = getDb().db;
   const [conv] = await db
-    .select({ status: supportConversations.status })
+    .select({ status: supportConversations.status, visitorSecretHash: supportConversations.visitorSecretHash })
     .from(supportConversations)
     .where(and(eq(supportConversations.id, conversationId), eq(supportConversations.orgId, org.orgId)))
     .limit(1);
-  if (!conv) return NextResponse.json({ error: "conversation not found" }, { status: 404 });
+  // The thread address is guessable (a uuid in client hands); the secret is
+  // what makes the thread the visitor's. No match, no messages.
+  if (!conv || !secretMatches(conv.visitorSecretHash, secret))
+    return NextResponse.json({ error: "conversation not found" }, { status: 404 });
   const rows = await db
     .select({
       id: supportMessages.id,
@@ -101,28 +121,18 @@ export async function POST(req: Request) {
   const db = getDb().db;
 
   if (data.action === "start") {
-    // Find-or-create the visitor as a customer so the whole desk pipeline
-    // (binding, order lookup, history) works unchanged for widget traffic.
-    let [customer] = await db
-      .select({ id: customers.id })
-      .from(customers)
-      .where(and(eq(customers.orgId, org.orgId), eq(customers.email, data.email)))
-      .limit(1);
-    if (!customer) {
-      [customer] = await db
-        .insert(customers)
-        .values({
-          orgId: org.orgId,
-          name: data.name?.trim() || data.email.split("@")[0] || "Website visitor",
-          email: data.email,
-        })
-        .returning({ id: customers.id });
-    }
+    // N04 containment: the conversation starts UNBOUND. The email is contact
+    // information on the thread, never a customer binding — a visitor naming
+    // an existing customer's address cannot see or touch that customer's
+    // account. Verified staff bind a customer later, on the record.
+    const secret = randomBytes(24).toString("hex");
     const [conv] = await db
       .insert(supportConversations)
       .values({
         orgId: org.orgId,
-        customerId: customer!.id,
+        customerId: null,
+        visitorEmail: data.email.toLowerCase(),
+        visitorSecretHash: hashSecret(secret),
         subject: (data.subject?.trim() || "Website chat").slice(0, 200),
         createdByActorType: "widget",
       })
@@ -138,17 +148,23 @@ export async function POST(req: Request) {
       senderType: "system",
       body: settings?.greeting ?? "Hello! How can we help?",
     });
-    return NextResponse.json({ conversationId: conv!.id });
+    // The secret is returned exactly once; only its hash is stored.
+    return NextResponse.json({ conversationId: conv!.id, secret });
   }
 
-  // Both remaining actions address an existing conversation: verify it
-  // belongs to the token's org before anything else.
+  // Both remaining actions address an existing conversation: the org token
+  // narrows the tenant, the visitor secret proves the thread.
   const [conv] = await db
-    .select({ id: supportConversations.id, status: supportConversations.status })
+    .select({
+      id: supportConversations.id,
+      status: supportConversations.status,
+      visitorSecretHash: supportConversations.visitorSecretHash,
+    })
     .from(supportConversations)
     .where(and(eq(supportConversations.id, data.conversationId), eq(supportConversations.orgId, org.orgId)))
     .limit(1);
-  if (!conv) return NextResponse.json({ error: "conversation not found" }, { status: 404 });
+  if (!conv || !secretMatches(conv.visitorSecretHash, data.secret))
+    return NextResponse.json({ error: "conversation not found" }, { status: 404 });
 
   if (data.action === "human") {
     await db
@@ -177,7 +193,10 @@ export async function POST(req: Request) {
     .set({ updatedAt: new Date() })
     .where(eq(supportConversations.id, conv.id));
 
-  // Auto-reply only while open: escalated threads belong to humans.
+  // Auto-reply only while open: escalated threads belong to humans. For an
+  // unbound thread the care agent's order tool honestly reports "no account
+  // on file", so replies can lean on published knowledge, never account
+  // facts (N04).
   let replied = false;
   if (org.autoReply && conv.status === "open") {
     try {

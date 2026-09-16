@@ -12,6 +12,40 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **identity lifecycle and public-widget containment (N03/N04/N07/N08,
+  ADR 0053).** Invitation acceptance is now a row-locked, compare-and-set
+  transaction — a concurrent double accept yields exactly one winner, an
+  unverified mailbox cannot claim a pre-provisioned binding, and expired or
+  mismatched invitations fail honestly. Member deactivation (SCIM DELETE)
+  removes membership, every role grant, and pending invitations in one
+  transaction, and neither it nor role reassignment can strip the
+  organization's last owner. The customer widget no longer binds a customer
+  from a visitor's email: threads start unbound with a per-conversation
+  secret (issued once, stored hashed) gating every later read, message, and
+  escalation, so knowing someone's email plus the public token reveals
+  nothing about them. Conversation and ticket creation go through governed
+  kernel capabilities — chat's honesty path files audited tickets with a
+  real id in the receipt and reports refusals honestly.
+
+- **The database now enforces the ledger's defining invariants (N09,
+  ADR 0052).** Migration 0046 makes the books' guarantees commit-time facts
+  instead of application-code assertions: journal lines are CHECKed
+  nonnegative, single-sided and nonzero; deferred triggers refuse any entry
+  that would commit unbalanced, incomplete (fewer than two lines), with a
+  zero total, or with a line whose account belongs to another organization;
+  posted journal rows and event-ledger rows refuse UPDATE, DELETE and
+  TRUNCATE — corrections are reversal entries. Teardowns and out-of-band
+  repairs use one declared maintenance context
+  (`beginLedgerMaintenance`/`purgeTenantFinancials` in @chaste/db) that the
+  immutability guards honor but the balance guards ignore, so nothing broken
+  can ever commit. The runtime role (`chaste_app`) additionally lost
+  mutation rights on the append-only tables, re-revoked on every role
+  provisioning run and asserted by the RLS conformance sweep. A dirty legacy
+  database fails the migration naming the offending entries — reconcile
+  first, never silently rewrite history. Pinned by `journal-guards.test.ts`
+  (the audit's full negative/positive proof list), the runtime-role suite,
+  the conformance sweep, and a discharged `probe-n09`.
+
 - **The web UI now reaches backend capability sets that had no human
   surface.** Sales orders got their full lifecycle (draft → confirm with
   credit check and stock reservation → deliver-and-invoice → cancel) plus
@@ -36,6 +70,12 @@ The full v1 changelog is preserved at the bottom of this file.
   capabilities the agent uses.
 
 ### Fixed
+- **POS sales patched their journal entry after posting (N09).** The sale
+  entry was inserted before the invoice row existed, so the register code
+  reached back to stamp `source_id` on a posted ledger row. The invoice is
+  now created first and the entry posts with its source link at insert time
+  — the only legitimate post-insert journal mutation is gone, and returns
+  find the sale entry exactly as before.
 - **A generic journal reversal was offered as a complete business undo
   (N12).** Reversing a payment's GL entry left the invoice collecting on
   money already returned, reversing a payroll posting left the run marked

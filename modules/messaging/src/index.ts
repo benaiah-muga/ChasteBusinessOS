@@ -1,6 +1,6 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { conversationMembers, conversations, memberships, messages, notifications, users } from "@chaste/db";
+import { conversationMembers, conversations, memberships, messages, notifications, users, withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
@@ -246,9 +246,50 @@ const listPeople = (deps: ModuleDeps) =>
     },
   });
 
+/**
+ * N08: conversation creation is a governed action, not a route-side insert.
+ * The header and the creator's membership commit in one unit — a failed
+ * member insert can no longer strand an unusable header.
+ */
+const createConversation = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "messaging.createConversation",
+    title: "Create internal conversation",
+    intent:
+      "Open a new internal team channel or direct message in this organization with the actor as its first member, so colleagues can be added and messaged",
+    module: "messaging",
+    risk: "write",
+    permission: "messaging.write",
+    input: z.object({
+      title: z.string().min(1).max(80),
+      kind: z.enum(["channel", "dm"]).default("channel"),
+      agentEnabled: z.boolean().default(false),
+    }),
+    output: z.object({ conversationId: z.string() }),
+    execute: async (ctx, input) => {
+      const creatorId = ctx.actor.id;
+      if (!creatorId) throw new Error("conversation creation needs a named member");
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [conv] = await tx
+          .insert(conversations)
+          .values({
+            orgId: ctx.actor.orgId,
+            kind: input.kind,
+            title: input.title,
+            agentEnabled: input.agentEnabled,
+            createdByUserId: creatorId,
+          })
+          .returning({ id: conversations.id });
+        await tx.insert(conversationMembers).values({ conversationId: conv!.id, userId: creatorId });
+        return { conversationId: conv!.id };
+      });
+    },
+  });
+
 export function registerMessagingCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(sendMessage(deps));
   registry.register(listConversations(deps));
   registry.register(readMessages(deps));
   registry.register(listPeople(deps));
+  registry.register(createConversation(deps));
 }

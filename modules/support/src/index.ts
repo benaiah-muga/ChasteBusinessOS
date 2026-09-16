@@ -7,6 +7,7 @@ import {
   memories,
   supportConversations,
   supportMessages,
+  tickets,
   type Database,
   supportCannedResponses,
   supportKbArticles,
@@ -47,14 +48,21 @@ async function loadBoundConversation(
       subject: supportConversations.subject,
       customerName: customers.name,
       customerEmail: customers.email,
+      visitorEmail: supportConversations.visitorEmail,
     })
     .from(supportConversations)
-    .innerJoin(customers, eq(customers.id, supportConversations.customerId))
+    // N04: widget conversations start unbound; the desk still renders them.
+    .leftJoin(customers, eq(customers.id, supportConversations.customerId))
     .where(
       and(eq(supportConversations.id, conversationId), eq(supportConversations.orgId, orgId)),
     )
     .limit(1);
-  return row ?? null;
+  if (!row) return null;
+  return {
+    ...row,
+    customerName: row.customerName ?? (row.visitorEmail ? "Website visitor" : "Unbound"),
+    customerEmail: row.customerEmail ?? row.visitorEmail ?? null,
+  };
 }
 
 const startConversation = (deps: ModuleDeps) =>
@@ -182,12 +190,12 @@ const listConversations = (deps: ModuleDeps) =>
       // Latest message per conversation via DISTINCT ON keeps previews honest
       // without N+1 queries; everything stays inside one org scope.
       const rows = (await deps.db.execute(sql`
-        SELECT c.id, c.customer_id AS "customerId", cu.name AS "customerName",
+        SELECT c.id, c.customer_id AS "customerId", coalesce(cu.name, c.visitor_email, 'Website visitor') AS "customerName",
                c.subject, c.status,
                m.created_at AS "lastMessageAt",
                left(m.body, 140) AS "lastMessagePreview"
         FROM support_conversations c
-        JOIN customers cu ON cu.id = c.customer_id AND cu.org_id = ${ctx.actor.orgId}
+        LEFT JOIN customers cu ON cu.id = c.customer_id AND cu.org_id = ${ctx.actor.orgId}
         LEFT JOIN LATERAL (
           SELECT body, created_at FROM support_messages sm
           WHERE sm.conversation_id = c.id ORDER BY created_at DESC LIMIT 1
@@ -201,7 +209,7 @@ const listConversations = (deps: ModuleDeps) =>
       return {
         conversations: list.map((r) => ({
           id: String(r.id),
-          customerId: String(r.customerId),
+          customerId: r.customerId == null ? "" : String(r.customerId),
           customerName: String(r.customerName),
           subject: String(r.subject),
           status: String(r.status),
@@ -294,6 +302,15 @@ const lookupOrderStatus = (deps: ModuleDeps) =>
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const conv = await loadBoundConversation(tx, ctx.actor.orgId, input.conversationId);
         if (!conv) throw new Error("conversation not found");
+        // N04: an unverified widget thread has no account behind it. The
+        // honest answer is "no account on file", never a guessed projection.
+        if (!conv.customerId) {
+          return {
+            customerName: conv.customerName,
+            invoices: [],
+            totalOutstandingMinor: 0,
+          };
+        }
         const rows = await tx
           .select({
             number: invoices.number,
@@ -489,6 +506,46 @@ const suggestTicketCategory = (memo: string): string => {
   return "general";
 };
 
+/**
+ * N08: the chat loop's honesty path — "file a ticket when a request cannot
+ * be handled honestly" — is a governed action like any other write: one
+ * contract, one audited append, a durable id in the receipt. Chat's sink
+ * executes this as the acting user; a member without support authority gets
+ * an honest refusal instead of a silent side-channel insert.
+ */
+const createTicket = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "support.createTicket",
+    title: "File support ticket",
+    intent:
+      "Record a ticket for something that cannot be handled honestly right now — a capability gap, a bug, or an explicit request — so a human picks it up on the record",
+    module: "support",
+    risk: "write",
+    permission: "support.write",
+    input: z.object({
+      title: z.string().min(1).max(200),
+      description: z.string().min(1).max(8000),
+      origin: z.enum(["capability_gap", "bug", "request"]).default("request"),
+      sessionId: z.string().uuid().optional(),
+    }),
+    output: z.object({ ticketId: z.string() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [created] = await tx
+          .insert(tickets)
+          .values({
+            orgId: ctx.actor.orgId,
+            sessionId: input.sessionId ?? null,
+            title: input.title,
+            description: input.description,
+            origin: input.origin,
+          })
+          .returning({ id: tickets.id });
+        return { ticketId: created!.id };
+      });
+    },
+  });
+
 const updateTicket = (deps: ModuleDeps) =>
   defineCapability({
     id: "support.updateTicket",
@@ -589,6 +646,7 @@ export function registerSupportCapabilities(registry: CapabilityRegistry, deps: 
   registry.register(resolveConversation(deps));
   registry.register(updateTicket(deps));
   registry.register(suggestCategory(deps));
+  registry.register(createTicket(deps));
   registry.register(createCannedResponse(deps));
   registry.register(createKbArticle(deps));
   registry.register(reopenConversation(deps));

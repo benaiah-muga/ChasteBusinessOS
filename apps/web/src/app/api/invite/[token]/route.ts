@@ -1,14 +1,8 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
-import {
-  getDb,
-  invitations,
-  memberships,
-  organizations,
-  roles,
-  userRoles,
-} from "@chaste/db";
+import { eq } from "drizzle-orm";
+import { organizations, roles, invitations, getDb } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
+import { claimInvitation } from "@/server/identity-lifecycle";
 import { inviteAttemptLimit, requestIp } from "@/server/rate-limit";
 
 type Params = { params: Promise<{ token: string }> };
@@ -42,7 +36,7 @@ export async function GET(req: Request, { params }: Params) {
   });
 }
 
-/** Accept: must be signed in as the invited email. Grants the role directly. */
+/** Accept: must be signed in as the invited email, mailbox verified. */
 export async function POST(req: Request, { params }: Params) {
   const limit = inviteAttemptLimit(requestIp(req));
   if (!limit.allowed) {
@@ -54,41 +48,24 @@ export async function POST(req: Request, { params }: Params) {
   const resolved = await getResolvedUser();
   if (!resolved) return NextResponse.json({ error: "sign in first" }, { status: 401 });
   const { token } = await params;
-  const db = getDb().db;
 
-  const [inv] = await db.select().from(invitations).where(eq(invitations.token, token)).limit(1);
-  if (!inv || inv.status !== "pending") {
-    return NextResponse.json({ error: "invitation is not valid" }, { status: 404 });
-  }
-  if (inv.expiresAt < new Date()) {
-    await db.update(invitations).set({ status: "expired" }).where(eq(invitations.id, inv.id));
-    return NextResponse.json({ error: "invitation expired" }, { status: 410 });
-  }
-  // Case-insensitive on both sides: invitations are stored lowercased, but
-  // the authenticated address keeps whatever case the IdP returned.
-  if (resolved.email.toLowerCase() !== inv.email.toLowerCase()) {
-    return NextResponse.json({ error: `this invitation was sent to ${inv.email}` }, { status: 403 });
-  }
-
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(memberships)
-      .values({ orgId: inv.orgId, userId: resolved.userId })
-      .onConflictDoNothing();
-    await tx
-      .delete(userRoles)
-      .where(and(eq(userRoles.userId, resolved.userId), eq(userRoles.orgId, inv.orgId)));
-    await tx.insert(userRoles).values({
-      userId: resolved.userId,
-      roleId: inv.roleId,
-      orgId: inv.orgId,
-      assignedBy: inv.invitedByUserId,
-    });
-    await tx
-      .update(invitations)
-      .set({ status: "accepted", acceptedAt: new Date() })
-      .where(eq(invitations.id, inv.id));
+  // The whole claim is one row-locked transaction in the shared identity
+  // lifecycle (N07): membership, role grant, and the accepted transition
+  // commit together; a concurrent claimer gets exactly one winner.
+  const result = await claimInvitation({
+    token,
+    userId: resolved.userId,
+    email: resolved.email,
+    emailVerified: resolved.emailVerified,
   });
-
+  if (!result.ok) {
+    const status =
+      result.reason === "expired"
+        ? 410
+        : result.reason === "not_found" || result.reason === "revoked" || result.reason === "already_accepted"
+          ? 404
+          : 403;
+    return NextResponse.json({ error: result.message }, { status });
+  }
   return NextResponse.json({ ok: true });
 }

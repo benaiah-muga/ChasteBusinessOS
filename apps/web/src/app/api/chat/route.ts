@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { agentSessions, getDb, organizations, tickets } from "@chaste/db";
+import { agentSessions, getDb, organizations } from "@chaste/db";
 import { hasPermission as hasPermissionFor, logger, runAgentLoop, type TicketSink } from "@chaste/kernel";
 import { OpenAiCompatAdapter, MODELS, nimClient, resolveClient } from "@chaste/ai";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
@@ -128,10 +128,23 @@ export async function POST(req: Request) {
     .where(eq(organizations.id, ctx.actor.orgId))
     .limit(1);
 
+  // N08: the honesty path is governed too — tickets are filed through the
+  // kernel as the acting user, so the append is audited and the tool receipt
+  // carries the durable ticket id. The registry is unscoped here on purpose:
+  // filing a ticket must not depend on which modules this org enabled.
+  const ticketExecutor = buildExecutor(db, buildRegistry(db));
   const ticketSink: TicketSink = {
     file: async (orgId, title, description) => {
-      const [created] = await db.insert(tickets).values({ orgId, title, description }).returning({ id: tickets.id });
-      return { id: created!.id };
+      const result = await ticketExecutor.execute("support.createTicket", ctx, {
+        title,
+        description,
+        origin: "capability_gap",
+        sessionId,
+      });
+      return result.ok
+        ? // The capability's declared output schema guarantees the ticket id.
+          { id: (result.data as { ticketId: string }).ticketId }
+        : { id: null, error: result.error ?? "ticket filing refused" };
     },
   };
 

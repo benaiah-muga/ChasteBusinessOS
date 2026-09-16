@@ -220,6 +220,11 @@ export async function executeRoutine(
       now: new Date(),
       services: {},
     };
+    // Documented infrastructure exception (N08/F06): the routine runner acts
+    // as a system actor whose delegated permission set (F06) does not include
+    // support authority; routing this insert through a user-class capability
+    // would break the honesty path for queued work. Governing system-work
+    // delegation is A01 territory, tracked in the W0 register.
     const ticketSink: TicketSink = {
       file: async (orgId, title, description) => {
         const [created] = await db.insert(tickets).values({ orgId, title, description }).returning({ id: tickets.id });
