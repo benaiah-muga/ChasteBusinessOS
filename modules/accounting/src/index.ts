@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   accounts,
@@ -638,10 +638,22 @@ const reverseEntry = (deps: ModuleDeps) =>
           payroll_run: "hr.reversePayrollPosting on the payroll run",
           invoice: "accounting.creditNote against the invoice",
           "inventory-valuation": "inventory.reverseValuationSummary on the summary",
+          // A roll must be replaced inside its own reopened December, not
+          // mirrored into the current period — that would restore closed-year
+          // income on the wrong books. closeYear does the replace-and-roll.
+          year_end_close: "accounting.closeYear (reopen December first): it replaces the closing entry",
         };
         if (orig.sourceType && domainRoutes[orig.sourceType]) {
           throw new Error(
             `a ${orig.sourceType} entry is undone by its domain workflow: use ${domainRoutes[orig.sourceType]}`,
+          );
+        }
+        // The year-end roll is identified by kind, not source type: mirroring
+        // it into the current period would restore closed-year income on the
+        // wrong books. Re-closing replaces it inside the reopened December.
+        if (orig.entryKind === "year_end_close") {
+          throw new Error(
+            "a year-end closing entry is replaced by accounting.closeYear (reopen December first), not mirrored",
           );
         }
 
@@ -653,10 +665,15 @@ const reverseEntry = (deps: ModuleDeps) =>
         // One currency per entry (ADR 0021): the mirror keeps the original's
         // currency — reversing a foreign-currency entry in the base currency
         // double-counted it in FX exposure.
+        // N13 correction provenance: the mirror lands in the approved open
+        // period (postedAt = now) but carries the original business date, so
+        // a backdated fix never pretends it happened there.
         const reversalEntryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Reversal of: ${orig.memo}`,
           sourceType: "reversal",
           reversalOfId: orig.id,
+          entryKind: "correction",
+          businessAt: orig.postedAt,
           currency: orig.currency,
           postedAt: ctx.now,
           lines: origLines.map((l) => ({
@@ -711,7 +728,11 @@ const trialBalance = (deps: ModuleDeps) =>
 // ── helpers ─────────────────────────────────────────────────────────────
 
 
-async function accountBalances(deps: ModuleDeps, orgId: string): Promise<AccountBalance[]> {
+async function accountBalances(
+  deps: ModuleDeps,
+  orgId: string,
+  opts: { excludeClosing?: boolean; excludeClosingInYear?: number } = {},
+): Promise<AccountBalance[]> {
   // Base-currency reporting (ADR 0021 §4): foreign-currency entries are
   // reported through FX exposure/settlement capabilities, never summed into
   // base totals silently.
@@ -721,6 +742,15 @@ async function accountBalances(deps: ModuleDeps, orgId: string): Promise<Account
     .where(eq(organizations.id, orgId))
     .limit(1);
   const baseCode = base[0]?.code ?? "USD";
+  // Year-end rolls are bookkeeping machinery, not operations (N13):
+  // excludeClosing drops the whole close family (rolls and their in-year
+  // reversals) from operating results; excludeClosingInYear keeps other
+  // years' rolls included so closing year Y zeroes only year Y.
+  const closingFilter = opts.excludeClosing
+    ? sql`${journalEntries.entryKind} <> 'year_end_close'`
+    : opts.excludeClosingInYear !== undefined
+      ? sql`NOT (${journalEntries.entryKind} = 'year_end_close' AND extract(year from ${journalEntries.postedAt}) = ${opts.excludeClosingInYear})`
+      : sql`true`;
   const rows = await deps.db
     .select({
       code: accounts.code,
@@ -737,6 +767,7 @@ async function accountBalances(deps: ModuleDeps, orgId: string): Promise<Account
         eq(accounts.orgId, orgId),
         sql`${journalEntries.orgId} = ${orgId}`,
         sql`(${journalEntries.currency} IS NULL OR ${journalEntries.currency} = ${baseCode})`,
+        closingFilter,
       ),
     )
     .groupBy(accounts.code, accounts.name, accounts.type)
@@ -762,7 +793,10 @@ const incomeStatement = (deps: ModuleDeps) =>
       lines: z.array(z.object({ code: z.string(), name: z.string(), amountMinor: z.number() })),
     }),
     execute: async (ctx) => {
-      const balances = await accountBalances(deps, ctx.actor.orgId);
+      // The year-end roll must not erase history: closing a period zeroes
+      // the income accounts on the books, but the P&L report still shows
+      // the operating results those books recorded.
+      const balances = await accountBalances(deps, ctx.actor.orgId, { excludeClosing: true });
       return computeIncomeStatement(balances);
     },
   });
@@ -1064,11 +1098,15 @@ const closeYear = (deps: ModuleDeps) =>
     input: z.object({ year: z.number().int().min(2000).max(2100) }),
     output: z.object({
       closingEntryId: z.string(),
+      replacedEntryId: z.string().nullable(),
       netIncomeMinor: z.number(),
       retainedEarningsMinor: z.number(),
     }),
     execute: async (ctx, input) => {
-      const balances = await accountBalances(deps, ctx.actor.orgId);
+      // Rolls of the year being closed are excluded (full-year operating
+      // result, one live roll), other years' rolls stay included so a
+      // re-close never re-rolls income a prior close already zeroed.
+      const balances = await accountBalances(deps, ctx.actor.orgId, { excludeClosingInYear: input.year });
       const close = computeYearEndClose(balances, "3100");
 
       if (close.closingLines.length === 0 && close.netIncomeMinor === 0) {
@@ -1076,10 +1114,56 @@ const closeYear = (deps: ModuleDeps) =>
       }
 
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        // The roll is an exceptional entry with an explicit kind: at most
+        // one live roll per sealed year — live means not itself referenced
+        // by a replacement reversal, or a second re-close would undo a
+        // stale roll twice. Re-closing after a reopen replaces the live
+        // roll — reversed in the reopened December, never in the current
+        // period — before the fresh roll lands, so retained earnings is
+        // rolled once, not twice.
+        const [liveRoll] = await tx
+          .select({ id: journalEntries.id, postedAt: journalEntries.postedAt })
+          .from(journalEntries)
+          .where(
+            and(
+              eq(journalEntries.orgId, ctx.actor.orgId),
+              eq(journalEntries.entryKind, "year_end_close"),
+              isNull(journalEntries.reversalOfId),
+              sql`extract(year from ${journalEntries.postedAt}) = ${input.year}`,
+              sql`NOT EXISTS (
+                SELECT 1 FROM journal_entries prior
+                WHERE prior.reversal_of_id = ${journalEntries.id}
+                  AND prior.entry_kind = 'year_end_close'
+              )`,
+            ),
+          )
+          .limit(1);
+        let replacedEntryId: string | null = null;
+        if (liveRoll) {
+          const priorLines = await tx
+            .select({ accountId: journalLines.accountId, debitMinor: journalLines.debitMinor, creditMinor: journalLines.creditMinor })
+            .from(journalLines)
+            .where(eq(journalLines.entryId, liveRoll.id));
+          await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+            memo: `Reversal of year-end close ${input.year} (replaced by re-close)`,
+            sourceType: "reversal",
+            reversalOfId: liveRoll.id,
+            entryKind: "year_end_close",
+            postedAt: liveRoll.postedAt,
+            lines: priorLines.map((l) => ({
+              accountId: l.accountId,
+              debitMinor: l.creditMinor,
+              creditMinor: l.debitMinor,
+            })),
+          });
+          replacedEntryId = liveRoll.id;
+        }
+
         const allLines = [...close.closingLines, close.retainedEarningsLine];
         const closingEntryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Year-end close ${input.year}: net income ${(close.netIncomeMinor / 100).toFixed(2)} rolled to retained earnings`,
           sourceType: "manual",
+          entryKind: "year_end_close",
           postedAt: new Date(Date.UTC(input.year, 11, 31, 23, 59, 59)),
           lines: allLines.map((l) => ({
             accountCode: l.accountCode,
@@ -1094,6 +1178,7 @@ const closeYear = (deps: ModuleDeps) =>
           .onConflictDoNothing();
         return {
           closingEntryId,
+          replacedEntryId,
           netIncomeMinor: close.netIncomeMinor,
           retainedEarningsMinor: Math.abs(close.netIncomeMinor),
         };

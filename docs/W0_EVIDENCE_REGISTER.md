@@ -297,6 +297,24 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
+## N13 completion — exceptional year-end entries, posting eligibility, backdated corrections (delivered)
+
+The year-end roll is now an explicit exceptional entry (`journal_entries.entry_kind
+= 'year_end_close'`, migration 0051), not a manual entry that happens to zero
+the P&L: at most one live roll exists per sealed year, and re-closing a
+reopened year replaces the live roll — reversed inside the reopened December,
+never mirrored into the current period — before the fresh roll lands, so
+retained earnings is rolled once, not twice. `accounting.incomeStatement`
+excludes the close family, so a sealed year keeps its operating history (an
+all-time operating view) instead of silently reporting zero revenue. Generic
+reversals are corrections: they post into the approved open period while
+carrying the original business date in `business_at`. The posting service
+validates every pre-resolved account id against posting eligibility — same
+org, not archived — closing the cross-tenant and behind-the-chart posting
+holes. Pinned by `modules/accounting/src/year-end.test.ts` (eligibility
+refusals, correction provenance, roll survival of the P&L, double-close
+refusal, replace-and-reclose with one live roll).
+
 ## N12 purchasing compensations — vendor payments undo through their own domain (delivered, ADR 0051 extension)
 
 `purchasing.reverseVendorPayment` mirrors the payment entry in its original

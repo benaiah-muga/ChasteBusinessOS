@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, and, sql } from "drizzle-orm";
 import { accounts, journalEntries, journalLines, organizations, periods } from "@chaste/db";
 import { assertBalanced, isPeriodOpen } from "@chaste/erp-core";
 import type { Database, Tx } from "@chaste/db";
@@ -21,6 +21,18 @@ export interface PostEntryCmd {
   sourceType: string;
   sourceId?: string | null;
   reversalOfId?: string | null;
+  /**
+   * Bookkeeping machinery marker. Only the year-end roll and corrections
+   * set a non-operational kind; operating reports exclude both, and at most
+   * one live year_end_close roll exists per sealed year.
+   */
+  entryKind?: "operational" | "year_end_close" | "correction";
+  /**
+   * For corrections: the original business date whose activity this entry
+   * reverses, kept separately from postedAt (the approved open period the
+   * correction lands in). A backdated fix must never lie about either.
+   */
+  businessAt?: Date | null;
   /**
    * The entry's effective posting time. Mandatory: the closed-period guard
    * and the stored column read this same instant, so a caller can never
@@ -106,6 +118,20 @@ export async function postEntry(
     if (l.accountCode) return accountIdOf(map, l.accountCode);
     throw new Error("posting line needs an accountCode or accountId");
   });
+  // Pre-resolved ids (reversals mirror the original's accounts) are validated
+  // against posting eligibility here, in the one door to the ledger: an id
+  // from another org would cross the tenant boundary, an archived account
+  // would post behind the chart of accounts' back.
+  const known = await tx
+    .select({ id: accounts.id, code: accounts.code, archivedAt: accounts.archivedAt })
+    .from(accounts)
+    .where(and(inArray(accounts.id, accountIds), eq(accounts.orgId, orgId)));
+  const byId = new Map(known.map((a) => [a.id, a]));
+  for (const id of accountIds) {
+    const acct = byId.get(id);
+    if (!acct) throw new Error(`account ${id} does not belong to this organization or does not exist`);
+    if (acct.archivedAt) throw new Error(`account ${acct.code} is archived; reopen it before posting`);
+  }
   const [entry] = await tx
     .insert(journalEntries)
     .values({
@@ -114,6 +140,8 @@ export async function postEntry(
       sourceType: cmd.sourceType,
       sourceId: cmd.sourceId ?? null,
       reversalOfId: cmd.reversalOfId ?? null,
+      entryKind: cmd.entryKind ?? "operational",
+      businessAt: cmd.businessAt ?? null,
       currency: cmd.currency ?? (await baseCurrencyOf(tx, orgId)),
       postedAt: cmd.postedAt,
       postedByActorType: actor.type,

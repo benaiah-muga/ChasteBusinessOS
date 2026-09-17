@@ -12,6 +12,19 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **year-end closes are explicit exceptional entries, with eligible posting
+  and dated corrections (N13).** The closing roll used to be an
+  indistinguishable manual entry: it zeroed income accounts inside the year
+  it sealed, so the P&L report silently showed zero revenue for every
+  closed year, closing twice double-rolled retained earnings, reversals
+  were indistinguishable from fresh postings, and any caller holding a
+  pre-resolved account id could post through an archived or foreign
+  account. The roll now carries `entry_kind = 'year_end_close'`, is
+  replaced inside its own reopened December on re-close (one live roll per
+  sealed year), the P&L report excludes the close family so operating
+  history survives the seal, reversals post in the approved open period
+  while carrying the original business date (`business_at`), and the
+  posting service validates every account id against posting eligibility.
 - **vendor payments undo through their own domain compensation (N12).**
   Reversing a vendor payment with the generic journal mirror used to leave
   the bill marked paid and its paid amount consumed — the books balanced

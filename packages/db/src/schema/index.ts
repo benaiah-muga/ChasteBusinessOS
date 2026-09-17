@@ -389,6 +389,15 @@ export const journalEntries = pgTable(
      * service stamps the org's base currency unless told otherwise.
      */
     currency: text("currency").notNull().default("USD"),
+    /**
+     * Entry kind separates bookkeeping machinery from operations: the
+     * year-end roll and its in-year reversal are excluded from operating
+     * reports, corrections are reversals carrying the original business
+     * date. Everything a capability posts defaults to operational.
+     */
+    entryKind: text("entry_kind").notNull().default("operational"),
+    /** For corrections: the original business date being reversed. */
+    businessAt: timestamp("business_at", { withTimezone: true }),
     postedAt: timestamp("posted_at", { withTimezone: true }).notNull().defaultNow(),
     postedByActorType: text("posted_by_actor_type").notNull(),
     postedByActorId: uuid("posted_by_actor_id"),
