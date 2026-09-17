@@ -701,8 +701,72 @@ export const poLines = pgTable(
      * track receipt through the stock ledger instead.
      */
     serviceAcceptedThousandths: integer("service_accepted_thousandths"),
+    /**
+     * Stable display position, assigned once at creation and never
+     * renumbered: "line 1" identifies the same line for the order's whole
+     * life, whatever the storage order of rows does (N16).
+     */
+    position: integer("position").notNull(),
   },
-  (t) => [index("po_line_po_idx").on(t.poId)],
+  (t) => [index("po_line_po_idx").on(t.poId), uniqueIndex("po_line_po_position_idx").on(t.poId, t.position)],
+);
+
+/**
+ * Receipt headers: who received, when, against which order. The order's
+ * acceptance story is a sequence of receipts, not an ambient quantity
+ * inferred back out of the stock ledger (N16).
+ */
+export const goodsReceipts = pgTable(
+  "goods_receipts",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    poId: uuid("po_id")
+      .notNull()
+      .references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    receivedByActorType: text("received_by_actor_type").notNull(),
+    receivedByActorId: uuid("received_by_actor_id"),
+    note: text("note"),
+  },
+  (t) => [
+    uniqueIndex("goods_receipt_org_number_idx").on(t.orgId, t.number),
+    index("goods_receipt_po_idx").on(t.orgId, t.poId),
+  ],
+);
+
+/**
+ * Receipt lines: what arrived against each order line, split into accepted
+ * (goes to stock, is billed) and rejected (recorded, never stocked), plus
+ * the running returned quantity linked back from vendor returns (N16).
+ */
+export const goodsReceiptLines = pgTable(
+  "goods_receipt_lines",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    receiptId: uuid("receipt_id")
+      .notNull()
+      .references(() => goodsReceipts.id, { onDelete: "cascade" }),
+    poLineId: uuid("po_line_id")
+      .notNull()
+      .references(() => poLines.id, { onDelete: "restrict" }),
+    /** 1-based position of this line within its receipt. */
+    position: integer("position").notNull(),
+    acceptedThousandths: integer("accepted_thousandths").notNull(),
+    rejectedThousandths: integer("rejected_thousandths").notNull().default(0),
+    returnedThousandths: integer("returned_thousandths").notNull().default(0),
+    rejectionNote: text("rejection_note"),
+  },
+  (t) => [
+    index("goods_receipt_line_receipt_idx").on(t.orgId, t.receiptId),
+    index("goods_receipt_line_po_line_idx").on(t.orgId, t.poLineId),
+  ],
 );
 
 // ── Periods (soft close; posting into a closed period is rejected) ─────

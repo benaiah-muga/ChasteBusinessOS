@@ -297,6 +297,25 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
+## N16 deepening — receipt documents, stable positions, authoritative overreceipt (delivered, ADR 0049 extension)
+
+Receiving now writes a first-class document: `goods_receipts` headers (who
+received, when, against which order) with lines that split arrivals into
+accepted and rejected quantities — rejected goods need a stated reason,
+never stock, but still complete the vendor's delivery duty. Migration 0052
+gives every `po_lines` row a stable `position` assigned once at creation:
+"line 1" identifies the same line for the order's whole life, in the
+module, in bills, and in the human API surface, whatever row storage does.
+Overreceipt tolerance is an explicit authority (`overreceiptTolerancePct`
+paired with `authorityReason`), never an accident. Returns draw from
+concrete receipts — a named receipt or oldest-first FIFO — and update each
+receipt line's returned quantity, while three-way bill matching stays on
+accepted-net-of-returns. `purchasing.listReceipts` reports
+accepted/rejected/returned/remaining per receipt line and per order line.
+Pinned by `modules/purchasing/src/receipts.test.ts` (rejection recording,
+authority pairing, reorder-surviving addressing, receipt-linked returns)
+and the standing equivalence floor in `receiving.test.ts`.
+
 ## N13 completion — exceptional year-end entries, posting eligibility, backdated corrections (delivered)
 
 The year-end roll is now an explicit exceptional entry (`journal_entries.entry_kind

@@ -32,7 +32,7 @@ export async function GET() {
     .limit(100);
   const orderIds = orderRows.map((o) => o.id);
   const lines = orderIds.length
-    ? await db.select().from(poLines).where(inArray(poLines.poId, orderIds)).orderBy(poLines.id)
+    ? await db.select().from(poLines).where(inArray(poLines.poId, orderIds)).orderBy(poLines.position)
     : [];
   const ordersUi = orderRows.map((o) => {
     const ol = lines.filter((l) => l.poId === o.id);
@@ -44,8 +44,9 @@ export async function GET() {
       status: o.status,
       memo: o.memo,
       orderedMinor: ordered,
-      lines: ol.map((l, i) => ({
-        lineNumber: i + 1,
+      lines: ol.map((l) => ({
+        // N16: the stable display position, not row storage order.
+        lineNumber: l.position,
         description: l.description,
         quantity: l.quantity,
         unitPriceMinor: l.unitPriceMinor,

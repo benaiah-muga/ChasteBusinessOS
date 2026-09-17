@@ -70,19 +70,20 @@ async function orderStatus(poNumber: number): Promise<string> {
 }
 
 /**
- * Line positions are id-ordered (stable for the life of the order, but not
- * insertion order), so tests discover positions the way humans must.
+ * Lines are addressed by their stable display position, so tests must
+ * resolve positions the way humans do — by looking at the order, not row
+ * storage.
  */
 async function lineNumberFor(poNumber: number, description: string): Promise<number> {
   const rows = await db.db
-    .select({ id: poLines.id, description: poLines.description })
+    .select({ position: poLines.position, description: poLines.description })
     .from(poLines)
     .innerJoin(purchaseOrders, eq(purchaseOrders.id, poLines.poId))
     .where(and(eq(purchaseOrders.orgId, orgId), eq(purchaseOrders.number, poNumber)))
-    .orderBy(poLines.id);
-  const idx = rows.findIndex((r) => r.description === description);
-  if (idx === -1) throw new Error(`no line "${description}" on order ${poNumber}`);
-  return idx + 1;
+    .orderBy(poLines.position);
+  const row = rows.find((r) => r.description === description);
+  if (!row) throw new Error(`no line "${description}" on order ${poNumber}`);
+  return row.position;
 }
 
 async function itemIdBySku(sku: string): Promise<string> {
@@ -120,7 +121,7 @@ describe("receiving and billing conservation (N16)", () => {
     const poNumber = await nextPo([{ description: "Widgets", quantity: 10_000, unitPriceMinor: 200_00, sku: "RC-WIDGET" }]);
     await expect(
       run("purchasing.receiveGoods", { poNumber, lines: [{ lineNumber: 1, quantity: 15_000 }] }),
-    ).rejects.toThrow(/would exceed the ordered quantity \(ordered 10000, already received 0\)/);
+    ).rejects.toThrow(/would exceed the ordered quantity \(ordered 10000, already accepted 0\)/);
     expect(await orderStatus(poNumber)).toBe("ordered");
   });
 
@@ -134,7 +135,7 @@ describe("receiving and billing conservation (N16)", () => {
           { lineNumber: 1, quantity: 6_000 },
         ],
       }),
-    ).rejects.toThrow(/would exceed the ordered quantity \(ordered 10000, already received 0\)/);
+    ).rejects.toThrow(/would exceed the ordered quantity \(ordered 10000, already accepted 0\)/);
     const done = await run("purchasing.receiveGoods", {
       poNumber,
       lines: [
@@ -241,6 +242,6 @@ describe("receiving and billing conservation (N16)", () => {
     expect(await orderStatus(poNumber)).toBe("partial");
     await expect(
       run("purchasing.returnGoods", { poNumber, lines: [{ lineNumber: 1, quantity: 7_000, reason: "second attempt" }] }),
-    ).rejects.toThrow(/only 6000 thousandths were received net of prior returns/);
+    ).rejects.toThrow(/only 6000 thousandths were received and not already returned/);
   });
 });

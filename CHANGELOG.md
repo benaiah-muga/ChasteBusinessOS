@@ -12,6 +12,15 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **goods receipts are documents with stable line positions and explicit
+  authority (N16).** Receiving used to be inferred back out of the stock
+  ledger: no record of who received or when, no home for refused goods,
+  no way to say which receipt a return undid, and "line 1" meant whatever
+  row the database happened to return first. Receiving now writes receipt
+  documents — accepted versus rejected quantities per line, returns drawn
+  from concrete receipts, overreceipt only with paired tolerance and
+  authority reason — and order lines carry stable display positions that
+  survive reordering across the module and the human API.
 - **year-end closes are explicit exceptional entries, with eligible posting
   and dated corrections (N13).** The closing roll used to be an
   indistinguishable manual entry: it zeroed income accounts inside the year

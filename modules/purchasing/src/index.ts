@@ -1,7 +1,9 @@
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   accounts,
+  goodsReceiptLines,
+  goodsReceipts,
   items,
   journalEntries,
   journalLines,
@@ -120,7 +122,9 @@ const createBill = (deps: ModuleDeps) =>
           if (po.vendorId !== input.vendorId) {
             throw new Error(`vendor mismatch: order ${input.poNumber} belongs to a different vendor`);
           }
-          const poLineRows = await tx.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(poLines.id);
+          const poLineRows = await tx.select().from(poLines).where(eq(poLines.poId, po.id));
+          // N16: addressing is by stable position, never by storage order.
+          const poLineAt = (position: number) => poLineRows.find((r) => r.position === position);
           // N16: repeated references to one order line inside this bill
           // consume each other's allowance — the aggregate is what the
           // three-way match validates, not each row against full stock.
@@ -129,23 +133,22 @@ const createBill = (deps: ModuleDeps) =>
             if (!bl.poLineNumber) {
               throw new Error(`line "${bl.description}" must reference a purchase-order line number`);
             }
-            const pol = poLineRows[bl.poLineNumber - 1];
+            const pol = poLineAt(bl.poLineNumber);
             if (!pol) throw new Error(`no line ${bl.poLineNumber} on order ${input.poNumber}`);
             const alreadyInThisBill = consumed.get(pol.id) ?? 0;
-            const [rec] = await tx
-              .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
-              .from(stockMovements)
-              .where(and(eq(stockMovements.refType, "po_line"), eq(stockMovements.refId, pol.id)));
+            const accepted = await acceptedForLine(tx, pol.id);
+            const returned = await returnedForLine(tx, pol.id);
             const [prev] = await tx
               .select({ total: sql<number>`coalesce(sum(${vendorBillLines.quantity}), 0)` })
               .from(vendorBillLines)
               .where(eq(vendorBillLines.poLineId, pol.id));
             // quantities still available on this line after earlier bills
-            // and after this bill's own earlier lines
+            // and after this bill's own earlier lines; only accepted goods,
+            // net of returns, are billable
             const priorBilled = Number(prev?.total ?? 0) + alreadyInThisBill;
             const violations = matchThreeWay({
               orderedQty: pol.quantity - priorBilled,
-              receivedQty: Number(rec?.total ?? 0) - priorBilled,
+              receivedQty: accepted - returned - priorBilled,
               billedQty: bl.quantity,
               poUnitPriceMinor: pol.unitPriceMinor,
               billUnitPriceMinor: bl.unitPriceMinor,
@@ -184,8 +187,8 @@ const createBill = (deps: ModuleDeps) =>
             .from(purchaseOrders)
             .where(and(eq(purchaseOrders.orgId, ctx.actor.orgId), eq(purchaseOrders.number, input.poNumber)))
             .limit(1);
-          const rows = await tx.select().from(poLines).where(eq(poLines.poId, poRow!.id)).orderBy(poLines.id);
-          poLineRowsForLink = new Map(rows.map((r, i) => [`${input.poNumber}:${i + 1}`, r.id]));
+          const rows = await tx.select().from(poLines).where(eq(poLines.poId, poRow!.id));
+          poLineRowsForLink = new Map(rows.map((r) => [`${input.poNumber}:${r.position}`, r.id]));
         }
 
         const glLines = [
@@ -518,12 +521,15 @@ const createPO = (deps: ModuleDeps) =>
           })
           .returning({ id: purchaseOrders.id });
         await tx.insert(poLines).values(
-          input.lines.map((l) => ({
+          input.lines.map((l, i) => ({
             poId: po!.id,
             description: l.description,
             quantity: l.quantity,
             unitPriceMinor: l.unitPriceMinor,
             itemId: l.sku ? (itemMap.get(l.sku) ?? null) : null,
+            // N16: stable display position, fixed at creation and never
+            // renumbered — "line 1" means this line forever.
+            position: i + 1,
           })),
         );
         return { poNumber };
@@ -545,14 +551,31 @@ const receivePO = (deps: ModuleDeps) =>
       lines: z
         .array(
           z.object({
-            lineNumber: z.number().int().positive().describe("1-based position on the order"),
-            quantity: z.number().int().positive(),
+            lineNumber: z.number().int().positive().describe("stable 1-based position on the order"),
+            quantity: z.number().int().positive().describe("accepted thousandths — the only quantity that stocks and bills"),
+            rejected: z.number().int().nonnegative().default(0).describe("arrived but refused; recorded, never stocked"),
+            rejectionNote: z.string().max(500).optional(),
           }),
         )
         .min(1),
+      /**
+       * N16: overreceipt tolerance is an explicit authority, not an accident —
+       * accepting more than ordered (within pct of the ordered quantity)
+       * requires the paired reason naming who authorized it.
+       */
+      overreceiptTolerancePct: z.number().int().min(0).max(10).optional(),
+      authorityReason: z.string().min(10).max(500).optional(),
+      note: z.string().max(500).optional(),
     }),
-    output: z.object({ received: z.boolean(), fullyReceived: z.boolean() }),
+    output: z.object({
+      received: z.literal(true),
+      fullyReceived: z.boolean(),
+      receiptNumber: z.number(),
+    }),
     execute: async (ctx, input) => {
+      if ((input.overreceiptTolerancePct ?? 0) > 0 !== (input.authorityReason !== undefined)) {
+        throw new Error("overreceipt tolerance needs an authorityReason naming who authorized it, and nothing else may set one");
+      }
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [po] = await tx
           .select()
@@ -562,58 +585,116 @@ const receivePO = (deps: ModuleDeps) =>
         if (!po) throw new Error("purchase order not found");
         if (po.status === "void" || po.status === "closed") throw new Error(`order is ${po.status}`);
 
-        const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(poLines.id);
+        const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id));
+        // N16: addressing is by stable position, never by storage order.
+        const lineAt = (position: number) => lines.find((l) => l.position === position);
 
         // N16: aggregate this receipt's demand per line first — repeated
         // references to the same line spend one budget, not one each.
-        const wanted = new Map<number, number>();
+        const wanted = new Map<number, { accepted: number; rejected: number; rejectionNote?: string }>();
         for (const rl of input.lines) {
-          const line = lines[rl.lineNumber - 1];
-          if (!line) throw new Error(`no line ${rl.lineNumber} on order ${input.poNumber}`);
-          wanted.set(rl.lineNumber, (wanted.get(rl.lineNumber) ?? 0) + rl.quantity);
+          if (!lineAt(rl.lineNumber)) throw new Error(`no line ${rl.lineNumber} on order ${input.poNumber}`);
+          const rejected = rl.rejected ?? 0;
+          if (rejected > 0 && !rl.rejectionNote) {
+            throw new Error(`line ${rl.lineNumber}: rejected goods need a rejectionNote saying why`);
+          }
+          const prior = wanted.get(rl.lineNumber);
+          wanted.set(rl.lineNumber, {
+            accepted: (prior?.accepted ?? 0) + rl.quantity,
+            rejected: (prior?.rejected ?? 0) + rejected,
+            rejectionNote: [prior?.rejectionNote, rl.rejectionNote].filter(Boolean).join("; ") || undefined,
+          });
         }
 
-        const itemLineWrites: { line: (typeof lines)[number]; quantity: number }[] = [];
-        for (const [lineNumber, quantity] of wanted) {
-          const line = lines[lineNumber - 1];
-          if (!line) throw new Error(`no line ${lineNumber} on order ${input.poNumber}`);
+        const receiptWrites: { line: (typeof lines)[number]; accepted: number; rejected: number; rejectionNote?: string }[] = [];
+        for (const [lineNumber, { accepted, rejected, rejectionNote }] of wanted) {
+          const line = lineAt(lineNumber)!;
+          if (accepted === 0 && rejected === 0) {
+            throw new Error(`line ${lineNumber}: a receipt line must accept or reject something`);
+          }
           if (line.itemId) {
-            const priorReceived = await receivedForLine(tx, line.id);
-            if (priorReceived + quantity > line.quantity) {
+            const priorAccepted = await acceptedForLine(tx, line.id);
+            const priorRejected = await rejectedForLine(tx, line.id);
+            const tolerance = Math.floor((line.quantity * (input.overreceiptTolerancePct ?? 0)) / 100);
+            if (priorAccepted + accepted > line.quantity + tolerance) {
               throw new Error(
-                `line ${lineNumber}: receiving ${quantity} would exceed the ordered quantity ` +
-                  `(ordered ${line.quantity}, already received ${priorReceived}); ` +
-                  `overreceipt needs an amended order, not a bigger receipt`,
+                `line ${lineNumber}: receiving ${accepted} would exceed the ordered quantity ` +
+                  `(ordered ${line.quantity}, already accepted ${priorAccepted}` +
+                  (tolerance > 0 ? `, tolerance ${tolerance}` : "") +
+                  `); overreceipt needs explicit authority (overreceiptTolerancePct + authorityReason) or an amended order`,
               );
             }
-            itemLineWrites.push({ line, quantity });
+            if (priorAccepted + priorRejected + accepted + rejected > line.quantity + tolerance) {
+              throw new Error(
+                `line ${lineNumber}: delivered ${accepted + rejected} exceeds what was ordered ` +
+                  `(ordered ${line.quantity}, already delivered ${priorAccepted + priorRejected})`,
+              );
+            }
           } else {
             // Service acceptance: record the delivered milestone without
             // faking stock, so service-only and mixed orders can complete.
-            const accepted = line.serviceAcceptedThousandths ?? 0;
-            if (accepted + quantity > line.quantity) {
+            const acceptedPrior = line.serviceAcceptedThousandths ?? 0;
+            if (acceptedPrior + accepted > line.quantity) {
               throw new Error(
-                `line ${lineNumber}: accepting ${quantity} would exceed the ordered quantity ` +
-                  `(ordered ${line.quantity}, already accepted ${accepted})`,
+                `line ${lineNumber}: accepting ${accepted} would exceed the ordered quantity ` +
+                  `(ordered ${line.quantity}, already accepted ${acceptedPrior})`,
               );
             }
-            await tx.update(poLines).set({ serviceAcceptedThousandths: accepted + quantity }).where(eq(poLines.id, line.id));
+            await tx.update(poLines).set({ serviceAcceptedThousandths: acceptedPrior + accepted }).where(eq(poLines.id, line.id));
           }
+          receiptWrites.push({ line, accepted, rejected, rejectionNote });
+        }
+
+        const [numRow] = await tx
+          .select({ maxNum: sql<number>`coalesce(max(${goodsReceipts.number}), 0)` })
+          .from(goodsReceipts)
+          .where(eq(goodsReceipts.orgId, ctx.actor.orgId));
+        const receiptNumber = Number(numRow?.maxNum ?? 0) + 1;
+        const [receipt] = await tx
+          .insert(goodsReceipts)
+          .values({
+            orgId: ctx.actor.orgId,
+            poId: po.id,
+            number: receiptNumber,
+            receivedAt: ctx.now,
+            receivedByActorType: ctx.actor.type,
+            receivedByActorId: ctx.actor.id,
+            note: input.note ?? (input.authorityReason ? `Overreceipt authorized: ${input.authorityReason}` : null),
+          })
+          .returning({ id: goodsReceipts.id });
+        const receiptLineIds = new Map<number, string>();
+        for (const [i, { line, accepted, rejected, rejectionNote }] of receiptWrites.entries()) {
+          const [rl] = await tx
+            .insert(goodsReceiptLines)
+            .values({
+              orgId: ctx.actor.orgId,
+              receiptId: receipt!.id,
+              poLineId: line.id,
+              position: i + 1,
+              acceptedThousandths: accepted,
+              rejectedThousandths: rejected,
+              rejectionNote: rejectionNote ?? null,
+            })
+            .returning({ id: goodsReceiptLines.id });
+          receiptLineIds.set(receiptWrites[i]!.line.position, rl!.id);
         }
 
         // N22: write the stock movements through the shared inventory command
         // service — items locked in stable id order first, so a receipt and a
-        // concurrent sale/production of the same item serialize.
+        // concurrent sale/production of the same item serialize. Only accepted
+        // goods stock; rejected goods are recorded on the receipt and stop
+        // there.
+        const itemLineWrites = receiptWrites.filter((w) => w.line.itemId && w.accepted > 0);
         await lockStockItems(tx, itemLineWrites.map((w) => w.line.itemId!));
-        for (const { line, quantity } of itemLineWrites) {
+        for (const { line, accepted } of itemLineWrites) {
           await applyStockDelta(tx, {
             orgId: ctx.actor.orgId,
             itemId: line.itemId!,
-            quantityDelta: quantity,
+            quantityDelta: accepted,
             reason: "purchase",
-            refType: "po_line",
-            refId: line.id,
-            note: `Receipt against PO ${input.poNumber}`,
+            refType: "goods_receipt_line",
+            refId: receiptLineIds.get(line.position)!,
+            note: `Receipt ${receiptNumber} against PO ${input.poNumber}`,
             unitCostMinor: line.unitPriceMinor,
             actorType: ctx.actor.type,
             actorId: ctx.actor.id,
@@ -625,15 +706,42 @@ const receivePO = (deps: ModuleDeps) =>
           .update(purchaseOrders)
           .set({ status: fully ? "received" : "partial" })
           .where(eq(purchaseOrders.id, po.id));
-        return { received: true, fullyReceived: fully };
+        return { received: true as const, fullyReceived: fully, receiptNumber };
       });
     },
   });
 
 /**
- * True when every line has its full ordered quantity — through stock
- * movements for item lines, accepted milestones for service lines (N16).
- * Returns after returns demote a "received" order back to "partial".
+ * Delivered-basis helpers (N16): acceptance and rejection live on the
+ * receipt lines; the stock ledger keeps netting returns out of acceptance
+ * for legacy rows posted before receipts existed.
+ */
+async function acceptedForLine(tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0], lineId: string): Promise<number> {
+  const [rec] = await tx
+    .select({ total: sql<number>`coalesce(sum(${goodsReceiptLines.acceptedThousandths}), 0)` })
+    .from(goodsReceiptLines)
+    .where(eq(goodsReceiptLines.poLineId, lineId));
+  const [legacy] = await tx
+    .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
+    .from(stockMovements)
+    .where(and(eq(stockMovements.refType, "po_line"), eq(stockMovements.refId, lineId)));
+  return Number(rec?.total ?? 0) + Math.max(0, Number(legacy?.total ?? 0));
+}
+
+async function rejectedForLine(tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0], lineId: string): Promise<number> {
+  const [rec] = await tx
+    .select({ total: sql<number>`coalesce(sum(${goodsReceiptLines.rejectedThousandths}), 0)` })
+    .from(goodsReceiptLines)
+    .where(eq(goodsReceiptLines.poLineId, lineId));
+  return Number(rec?.total ?? 0);
+}
+
+/**
+ * True when every line has its full ordered quantity delivered — through
+ * accepted receipts (stock movements for item lines, accepted milestones
+ * for service lines) plus recorded rejections, net of returns: goods sent
+ * back are owed again, so a return demotes a "received" order to partial
+ * (N16).
  */
 async function orderFullyReceived(
   tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0],
@@ -642,8 +750,9 @@ async function orderFullyReceived(
   const lines = await tx.select().from(poLines).where(eq(poLines.poId, poId));
   for (const line of lines) {
     if (line.itemId) {
-      const received = await receivedForLine(tx, line.id);
-      if (received < line.quantity) return false;
+      const delivered =
+        (await acceptedForLine(tx, line.id)) - (await returnedForLine(tx, line.id)) + (await rejectedForLine(tx, line.id));
+      if (delivered < line.quantity) return false;
     } else if ((line.serviceAcceptedThousandths ?? 0) < line.quantity) {
       return false;
     }
@@ -858,6 +967,7 @@ const selectWinningQuote = (deps: ModuleDeps) =>
           description: req.title,
           quantity: 1000,
           unitPriceMinor: winner.quoteAmountMinor ?? 0,
+          position: 1,
         });
 
         await tx
@@ -988,12 +1098,21 @@ const billCreditNote = (deps: ModuleDeps) =>
   });
 
 /** Received quantity for a PO line, derived from the stock ledger. */
-async function receivedForLine(tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0], lineId: string): Promise<number> {
+/**
+ * Returns recorded against a line: modern returns update the receipt line's
+ * returned quantity; legacy returns are the negative refType='po_line'
+ * movements posted before receipts existed.
+ */
+async function returnedForLine(tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0], lineId: string): Promise<number> {
   const [rec] = await tx
+    .select({ total: sql<number>`coalesce(sum(${goodsReceiptLines.returnedThousandths}), 0)` })
+    .from(goodsReceiptLines)
+    .where(eq(goodsReceiptLines.poLineId, lineId));
+  const [legacy] = await tx
     .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
     .from(stockMovements)
     .where(and(eq(stockMovements.refType, "po_line"), eq(stockMovements.refId, lineId)));
-  return Number(rec?.total ?? 0);
+  return Number(rec?.total ?? 0) + Math.max(0, -Number(legacy?.total ?? 0));
 }
 
 const closePurchaseOrder = (deps: ModuleDeps) =>
@@ -1017,10 +1136,16 @@ const closePurchaseOrder = (deps: ModuleDeps) =>
         if (!po) throw new Error("purchase order not found");
         if (po.status === "void") throw new Error("order is void");
         if (po.status === "closed") throw new Error("order is already closed");
-        const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(poLines.id);
+        const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id));
         let short = 0;
         for (const line of lines) {
-          short += Math.max(0, line.quantity - (await receivedForLine(tx, line.id)));
+          // N16: the shortfall still owed is ordered minus what remains
+          // accepted net of returns — rejections were delivered (refused,
+          // not owed), returns are owed again.
+          const delivered = line.itemId
+            ? (await acceptedForLine(tx, line.id)) - (await returnedForLine(tx, line.id)) + (await rejectedForLine(tx, line.id))
+            : (line.serviceAcceptedThousandths ?? 0);
+          short += Math.max(0, line.quantity - delivered);
         }
         await tx
           .update(purchaseOrders)
@@ -1044,10 +1169,12 @@ const returnGoods = (deps: ModuleDeps) =>
     permission: "purchasing.write",
     input: z.object({
       poNumber: z.number().int().positive(),
+      /** N16: when given, the return consumes that receipt's acceptance. */
+      receiptNumber: z.number().int().positive().optional(),
       lines: z
         .array(
           z.object({
-            lineNumber: z.number().int().positive(),
+            lineNumber: z.number().int().positive().describe("stable 1-based position on the order"),
             quantity: z.number().int().positive().describe("Thousandths to send back"),
             reason: z.string().min(3).max(500),
           }),
@@ -1064,13 +1191,13 @@ const returnGoods = (deps: ModuleDeps) =>
           .limit(1);
         if (!po) throw new Error("purchase order not found");
         if (po.status === "void") throw new Error("order is void");
-        const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(poLines.id);
+        const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id));
+        const lineAt = (position: number) => lines.find((l) => l.position === position);
 
         // N16: one budget per line, so repeated references cannot double-return.
         const wanted = new Map<number, { quantity: number; reason: string }>();
         for (const rl of input.lines) {
-          const line = lines[rl.lineNumber - 1];
-          if (!line) throw new Error(`no line ${rl.lineNumber} on order ${input.poNumber}`);
+          if (!lineAt(rl.lineNumber)) throw new Error(`no line ${rl.lineNumber} on order ${input.poNumber}`);
           const prior = wanted.get(rl.lineNumber);
           wanted.set(rl.lineNumber, {
             quantity: (prior?.quantity ?? 0) + rl.quantity,
@@ -1078,15 +1205,31 @@ const returnGoods = (deps: ModuleDeps) =>
           });
         }
 
-        const returnWrites: { lineId: string; itemId: string; quantity: number; note: string; unitCostMinor: number }[] = [];
+        // The receipts this return draws from: one named receipt, or the
+        // order's receipts in receipt-number order (oldest acceptance first).
+        const receiptScope = input.receiptNumber
+          ? await tx
+              .select()
+              .from(goodsReceipts)
+              .where(and(eq(goodsReceipts.orgId, ctx.actor.orgId), eq(goodsReceipts.poId, po.id), eq(goodsReceipts.number, input.receiptNumber)))
+          : await tx
+              .select()
+              .from(goodsReceipts)
+              .where(and(eq(goodsReceipts.orgId, ctx.actor.orgId), eq(goodsReceipts.poId, po.id)))
+              .orderBy(goodsReceipts.number);
+        if (input.receiptNumber && receiptScope.length === 0) {
+          throw new Error(`receipt ${input.receiptNumber} does not belong to order ${input.poNumber}`);
+        }
+        const scopeIds = new Set(receiptScope.map((r) => r.id));
+
+        const returnWrites: { lineId: string; itemId: string; quantity: number; note: string; unitCostMinor: number; draws: { receiptLineId: string; qty: number }[] }[] = [];
         for (const [lineNumber, { quantity, reason }] of wanted) {
-          const line = lines[lineNumber - 1];
-          if (!line) throw new Error(`no line ${lineNumber} on order ${input.poNumber}`);
+          const line = lineAt(lineNumber)!;
           if (!line.itemId) throw new Error(`line ${lineNumber} is a service line; nothing to return`);
-          const netReceived = await receivedForLine(tx, line.id);
-          if (quantity > netReceived) {
+          const netAvailable = (await acceptedForLine(tx, line.id)) - (await returnedForLine(tx, line.id));
+          if (quantity > netAvailable) {
             throw new Error(
-              `line ${lineNumber}: cannot return ${quantity}; only ${netReceived} thousandths were received net of prior returns`,
+              `line ${lineNumber}: cannot return ${quantity}; only ${netAvailable} thousandths were received and not already returned`,
             );
           }
           // Goods already shipped to customers are not in the warehouse to
@@ -1102,13 +1245,53 @@ const returnGoods = (deps: ModuleDeps) =>
               `line ${lineNumber}: only ${onHand} thousandths of this item are on hand; goods already shipped need a customer return, not a vendor return`,
             );
           }
+          // N16: draw the return from concrete receipt lines, oldest first,
+          // so each receipt line's returned quantity stays exact.
+          const receiptLines = (await tx
+            .select()
+            .from(goodsReceiptLines)
+            .where(and(eq(goodsReceiptLines.orgId, ctx.actor.orgId), eq(goodsReceiptLines.poLineId, line.id)))
+            .orderBy(goodsReceiptLines.receiptId, goodsReceiptLines.position)).filter((rl) => scopeIds.has(rl.receiptId));
+          let remaining = quantity;
+          const draws: { receiptLineId: string; qty: number }[] = [];
+          for (const rl of receiptLines) {
+            if (remaining === 0) break;
+            const available = rl.acceptedThousandths - rl.returnedThousandths;
+            if (available <= 0) continue;
+            const take = Math.min(available, remaining);
+            draws.push({ receiptLineId: rl.id, qty: take });
+            remaining -= take;
+          }
+          if (remaining > 0 && receiptLines.length > 0) {
+            throw new Error(
+              input.receiptNumber
+                ? `line ${lineNumber}: receipt ${input.receiptNumber} does not carry ${quantity} thousandths available to return on this line`
+                : `line ${lineNumber}: no receipt carries ${quantity} thousandths available to return on this line`,
+            );
+          }
+          // Legacy line — received before receipts existed, so the return
+          // can only draw from the historical net and points at the line.
+          const legacy = receiptLines.length === 0;
+          const scopeNote = input.receiptNumber ? `receipt ${input.receiptNumber}` : "receipts";
           returnWrites.push({
             lineId: line.id,
             itemId: line.itemId,
             quantity,
-            note: `Return to vendor (PO ${input.poNumber}): ${reason}`,
+            note: legacy
+              ? `Return to vendor (PO ${input.poNumber}): ${reason}`
+              : `Return to vendor (PO ${input.poNumber}, ${scopeNote}): ${reason}`,
             unitCostMinor: line.unitPriceMinor,
+            draws,
           });
+        }
+
+        for (const w of returnWrites) {
+          for (const d of w.draws) {
+            await tx
+              .update(goodsReceiptLines)
+              .set({ returnedThousandths: sql`${goodsReceiptLines.returnedThousandths} + ${d.qty}` })
+              .where(eq(goodsReceiptLines.id, d.receiptLineId));
+          }
         }
 
         // N22: the outbound legs go through the shared inventory command
@@ -1121,8 +1304,8 @@ const returnGoods = (deps: ModuleDeps) =>
             itemId: w.itemId,
             quantityDelta: -w.quantity,
             reason: "purchase",
-            refType: "po_line",
-            refId: w.lineId,
+            refType: w.draws.length > 0 ? "goods_receipt_line" : "po_line",
+            refId: w.draws.length > 0 ? w.draws[0]!.receiptLineId : w.lineId,
             note: w.note,
             unitCostMinor: w.unitCostMinor,
             actorType: ctx.actor.type,
@@ -1136,6 +1319,136 @@ const returnGoods = (deps: ModuleDeps) =>
           await tx.update(purchaseOrders).set({ status: "partial" }).where(eq(purchaseOrders.id, po.id));
         }
         return { returned: true as const, lines: input.lines.length };
+      });
+    },
+  });
+
+const listReceipts = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.listReceipts",
+    title: "List goods receipts for a purchase order",
+    intent:
+      "Show each receipt an order produced — per line what was accepted, rejected, returned, and what remains outstanding — so receiving and three-way matching can be checked by hand",
+    module: "purchasing",
+    risk: "read",
+    permission: "purchasing.read",
+    input: z.object({ poNumber: z.number().int().positive() }),
+    output: z.object({
+      receipts: z.array(
+        z.object({
+          number: z.number(),
+          receivedAt: z.string(),
+          note: z.string().nullable(),
+          lines: z.array(
+            z.object({
+              position: z.number(),
+              description: z.string(),
+              acceptedThousandths: z.number(),
+              rejectedThousandths: z.number(),
+              returnedThousandths: z.number(),
+              rejectionNote: z.string().nullable(),
+            }),
+          ),
+        }),
+      ),
+      orderLines: z.array(
+        z.object({
+          position: z.number(),
+          description: z.string(),
+          orderedThousandths: z.number(),
+          acceptedThousandths: z.number(),
+          rejectedThousandths: z.number(),
+          returnedThousandths: z.number(),
+          remainingThousandths: z.number(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [po] = await tx
+          .select()
+          .from(purchaseOrders)
+          .where(and(eq(purchaseOrders.orgId, ctx.actor.orgId), eq(purchaseOrders.number, input.poNumber)))
+          .limit(1);
+        if (!po) throw new Error("purchase order not found");
+        const lines = await tx.select().from(poLines).where(eq(poLines.poId, po.id));
+        const lineById = new Map(lines.map((l) => [l.id, l]));
+
+        const receipts = await tx
+          .select()
+          .from(goodsReceipts)
+          .where(and(eq(goodsReceipts.orgId, ctx.actor.orgId), eq(goodsReceipts.poId, po.id)))
+          .orderBy(goodsReceipts.number);
+        const receiptRows = receipts.length
+          ? await tx
+              .select({
+                receiptId: goodsReceiptLines.receiptId,
+                position: goodsReceiptLines.position,
+                poLineId: goodsReceiptLines.poLineId,
+                acceptedThousandths: goodsReceiptLines.acceptedThousandths,
+                rejectedThousandths: goodsReceiptLines.rejectedThousandths,
+                returnedThousandths: goodsReceiptLines.returnedThousandths,
+                rejectionNote: goodsReceiptLines.rejectionNote,
+              })
+              .from(goodsReceiptLines)
+              .where(
+                and(
+                  eq(goodsReceiptLines.orgId, ctx.actor.orgId),
+                  inArray(
+                    goodsReceiptLines.receiptId,
+                    receipts.map((r) => r.id),
+                  ),
+                ),
+              )
+              .orderBy(goodsReceiptLines.receiptId, goodsReceiptLines.position)
+          : [];
+        // Legacy lines delivered before receipts existed contribute to the
+        // order-line roll-up through the stock ledger instead.
+        const outReceipts: Array<{
+          number: number;
+          receivedAt: string;
+          note: string | null;
+          lines: Array<{
+            position: number;
+            description: string;
+            acceptedThousandths: number;
+            rejectedThousandths: number;
+            returnedThousandths: number;
+            rejectionNote: string | null;
+          }>;
+        }> = [];
+        for (const r of receipts) {
+          const rl = receiptRows.filter((row) => row.receiptId === r.id);
+          outReceipts.push({
+            number: r.number,
+            receivedAt: r.receivedAt.toISOString(),
+            note: r.note,
+            lines: rl.map((row) => ({
+              position: row.position,
+              description: lineById.get(row.poLineId)?.description ?? "",
+              acceptedThousandths: row.acceptedThousandths,
+              rejectedThousandths: row.rejectedThousandths,
+              returnedThousandths: row.returnedThousandths,
+              rejectionNote: row.rejectionNote,
+            })),
+          });
+        }
+        const orderLines = [];
+        for (const line of [...lines].sort((a, b) => a.position - b.position)) {
+          const accepted = await acceptedForLine(tx, line.id);
+          const rejected = await rejectedForLine(tx, line.id);
+          const returned = await returnedForLine(tx, line.id);
+          orderLines.push({
+            position: line.position,
+            description: line.description,
+            orderedThousandths: line.quantity,
+            acceptedThousandths: accepted,
+            rejectedThousandths: rejected,
+            returnedThousandths: returned,
+            remainingThousandths: Math.max(0, line.quantity - accepted - rejected),
+          });
+        }
+        return { receipts: outReceipts, orderLines };
       });
     },
   });
@@ -1193,23 +1506,34 @@ const supplierPerformance = (deps: ModuleDeps) =>
             const lines = await tx.select().from(poLines).where(eq(poLines.poId, p.id)).orderBy(poLines.id);
             for (const line of lines) {
               orderedTotal += line.quantity;
-              const rec = await receivedForLine(tx, line.id);
+              const rec = Math.max(0, (await acceptedForLine(tx, line.id)) - (await returnedForLine(tx, line.id)));
               receivedTotal += Math.min(rec, line.quantity);
-              if (rec > 0) {
-                const [first] = await tx
-                  .select({ at: stockMovements.createdAt })
-                  .from(stockMovements)
-                  .where(and(eq(stockMovements.refType, "po_line"), eq(stockMovements.refId, line.id)))
-                  .orderBy(stockMovements.createdAt)
-                  .limit(1);
-                if (first && p.orderedAt) {
-                  leadSum += Math.max(0, (first.at.getTime() - p.orderedAt.getTime()) / 86_400_000);
-                  leadCount += 1;
-                  if (p.promisedAt) {
-                    promised += 1;
-                    if (first.at.getTime() <= p.promisedAt.getTime()) onTime += 1;
-                  }
-                }
+            }
+            // Lead time runs from order to first receipt — the receipt
+            // header when receipts exist, the first legacy movement
+            // otherwise (N16).
+            let firstAt: Date | null = null;
+            const [firstReceipt] = await tx
+              .select({ at: sql<Date>`min(${goodsReceipts.receivedAt})` })
+              .from(goodsReceipts)
+              .where(and(eq(goodsReceipts.orgId, ctx.actor.orgId), eq(goodsReceipts.poId, p.id)));
+            if (firstReceipt?.at) firstAt = new Date(firstReceipt.at);
+            if (!firstAt) {
+              const [first] = await tx
+                .select({ at: stockMovements.createdAt })
+                .from(stockMovements)
+                .where(and(eq(stockMovements.refType, "po_line"), eq(stockMovements.refId, lines[0]?.id ?? "")))
+                .orderBy(stockMovements.createdAt)
+                .limit(1);
+              firstAt = first?.at ?? null;
+            }
+            const touched = lines.some((line) => line.itemId) ? true : lines.some((l) => (l.serviceAcceptedThousandths ?? 0) > 0);
+            if (firstAt && p.orderedAt && touched) {
+              leadSum += Math.max(0, (firstAt.getTime() - p.orderedAt.getTime()) / 86_400_000);
+              leadCount += 1;
+              if (p.promisedAt) {
+                promised += 1;
+                if (firstAt.getTime() <= p.promisedAt.getTime()) onTime += 1;
               }
             }
           }
@@ -1380,6 +1704,7 @@ export function registerPurchasingCapabilities(registry: CapabilityRegistry, dep
   registry.register(billCreditNote(deps));
   registry.register(closePurchaseOrder(deps));
   registry.register(returnGoods(deps));
+  registry.register(listReceipts(deps));
   registry.register(supplierPerformance(deps));
   registry.register(priceHistory(deps));
   registry.register(supplierStatement(deps));
