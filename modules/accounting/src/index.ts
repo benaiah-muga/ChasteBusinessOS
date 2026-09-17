@@ -26,6 +26,7 @@ import {
   periods,
   vendorBills,
 } from "@chaste/db";
+import { nextDocNumber } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import { baseCurrencyOf, lockPeriodsForOrg, postEntry } from "./posting";
 import {
@@ -168,11 +169,7 @@ export async function insertInvoiceWithPosting(
     }
   }
 
-  const [numRow] = await tx
-    .select({ maxNum: sql<number>`coalesce(max(${invoices.number}), 0)` })
-    .from(invoices)
-    .where(eq(invoices.orgId, ctx.actor.orgId));
-  const number = Number(numRow?.maxNum ?? 0) + 1;
+  const number = await nextDocNumber(tx, ctx.actor.orgId, "invoice");
 
   const [inv] = await tx
     .insert(invoices)
@@ -1318,11 +1315,7 @@ const quoteCreate = (deps: ModuleDeps) =>
           .limit(1);
         if (cust.length === 0) throw new Error("customer not found");
         const totals = computeInvoiceTotals(input.lines.map((l) => ({ ...l, taxMinor: l.taxMinor ?? 0 })));
-        const [numRow] = await tx
-          .select({ maxNum: sql<number>`coalesce(max(${quotes.number}), 0)` })
-          .from(quotes)
-          .where(eq(quotes.orgId, ctx.actor.orgId));
-        const number = Number(numRow?.maxNum ?? 0) + 1;
+        const number = await nextDocNumber(tx, ctx.actor.orgId, "quote");
         const [q] = await tx
           .insert(quotes)
           .values({

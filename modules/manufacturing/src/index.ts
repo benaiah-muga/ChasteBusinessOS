@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { bomLines, items, lots, stockMovements, workOrders, type Database } from "@chaste/db";
+import { nextDocNumber } from "@chaste/db";
 import {
   checkAvailability,
   maxProducibleUnits,
@@ -124,11 +125,7 @@ const createWorkOrder = (deps: ModuleDeps) =>
         const prepared = await scrapAdjustedRequirements(tx, ctx.actor.orgId, assembly.id, input.plannedQtyThousandths);
         if (!prepared) throw new Error(`${input.assemblySku} has no bill of materials; define one first`);
 
-        const [maxRow] = await tx
-          .select({ maxNumber: sql<number>`coalesce(max(${workOrders.number}), 0)` })
-          .from(workOrders)
-          .where(eq(workOrders.orgId, ctx.actor.orgId));
-        const number = Number(maxRow?.maxNumber ?? 0) + 1;
+        const number = await nextDocNumber(tx, ctx.actor.orgId, "work_order");
         const [row] = await tx
           .insert(workOrders)
           .values({

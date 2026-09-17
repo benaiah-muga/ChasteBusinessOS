@@ -17,6 +17,7 @@ import {
   vendorPayments,
   vendors,
 } from "@chaste/db";
+import { nextDocNumber } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import {
   canAcceptPayment,
@@ -174,11 +175,7 @@ const createBill = (deps: ModuleDeps) =>
           input.lines.map((l) => ({ quantity: l.quantity, unitPriceMinor: l.unitPriceMinor, taxMinor: 0 })),
         );
 
-        const [numRow] = await tx
-          .select({ maxNum: sql<number>`coalesce(max(${vendorBills.number}), 0)` })
-          .from(vendorBills)
-          .where(eq(vendorBills.orgId, ctx.actor.orgId));
-        const billNumber = Number(numRow?.maxNum ?? 0) + 1;
+        const billNumber = await nextDocNumber(tx, ctx.actor.orgId, "vendor_bill");
 
         let poLineRowsForLink = new Map<string, string>();
         if (input.poNumber !== undefined) {
@@ -495,11 +492,7 @@ const createPO = (deps: ModuleDeps) =>
           .limit(1);
         if (!vendor) throw new Error("vendor not found");
 
-        const [numRow] = await tx
-          .select({ maxNum: sql<number>`coalesce(max(${purchaseOrders.number}), 0)` })
-          .from(purchaseOrders)
-          .where(eq(purchaseOrders.orgId, ctx.actor.orgId));
-        const poNumber = Number(numRow?.maxNum ?? 0) + 1;
+        const poNumber = await nextDocNumber(tx, ctx.actor.orgId, "purchase_order");
 
         const itemSkus = input.lines.filter((l) => l.sku).map((l) => l.sku!);
         const itemMap = new Map<string, string>();
@@ -645,11 +638,7 @@ const receivePO = (deps: ModuleDeps) =>
           receiptWrites.push({ line, accepted, rejected, rejectionNote });
         }
 
-        const [numRow] = await tx
-          .select({ maxNum: sql<number>`coalesce(max(${goodsReceipts.number}), 0)` })
-          .from(goodsReceipts)
-          .where(eq(goodsReceipts.orgId, ctx.actor.orgId));
-        const receiptNumber = Number(numRow?.maxNum ?? 0) + 1;
+        const receiptNumber = await nextDocNumber(tx, ctx.actor.orgId, "goods_receipt");
         const [receipt] = await tx
           .insert(goodsReceipts)
           .values({
@@ -946,11 +935,7 @@ const selectWinningQuote = (deps: ModuleDeps) =>
         );
         await tx.update(rfqs).set({ status: "won" }).where(eq(rfqs.id, winner.id));
 
-        const [numRow] = await tx
-          .select({ maxNum: sql<number>`coalesce(max(${purchaseOrders.number}), 0)` })
-          .from(purchaseOrders)
-          .where(eq(purchaseOrders.orgId, ctx.actor.orgId));
-        const poNumber = Number(numRow?.maxNum ?? 0) + 1;
+        const poNumber = await nextDocNumber(tx, ctx.actor.orgId, "purchase_order");
         const [po] = await tx
           .insert(purchaseOrders)
           .values({

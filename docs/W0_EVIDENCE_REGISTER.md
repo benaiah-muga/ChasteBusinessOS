@@ -297,6 +297,28 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
+## N22 completion — stock projections, bin-scoped counts, one number allocator (delivered, ADR 0050 extension)
+
+Migration 0053 adds `stock_balances` — one row per org+item+location+lot —
+maintained by the `stock_balances_apply` trigger on `stock_movements`, so
+the read model is consistent with the ledger by construction whatever wrote
+the movement. Every on-hand read (inventory, transfers, manufacturing, POS,
+purchasing, sales) now reads the projection instead of re-summing the
+ledger. `inventory.rebuildStockProjections` replays the ledger into the
+projection under the command locks; the review script
+(`scripts/n22-projection-review.ts`) seeds 40k movements across 200 items
+and shows the projection read hitting one balance row through
+`stock_balance_item_idx` (constant, ~0.09 ms) while the ledger sum grows
+with history (200 movement rows scanned at this seed size). Cycle counts
+scope to one location: expected quantities snapshot per bin and posting
+adjusts that bin only, while the movement watermark stays item-global —
+stricter is safe; a false invalidation forces a recount, never a bad
+adjustment. Document numbers come from one per-org allocator
+(`nextDocNumber` over `doc_counters`, seeded from existing maxima),
+replacing per-module MAX+1 across purchasing, accounting, sales, POS,
+manufacturing and support. Pinned by
+`modules/inventory/src/projections.test.ts`.
+
 ## N16 deepening — receipt documents, stable positions, authoritative overreceipt (delivered, ADR 0049 extension)
 
 Receiving now writes a first-class document: `goods_receipts` headers (who

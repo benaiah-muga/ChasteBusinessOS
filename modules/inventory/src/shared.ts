@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
-import { items, lots, stockMovements, type Database, withOrgContext } from "@chaste/db";
+import { items, lots, stockBalances, stockMovements, type Database, withOrgContext } from "@chaste/db";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -45,13 +45,18 @@ export async function recordStockMovement(tx: Tx | ModuleDeps["db"], m: Movement
   });
 }
 
-/** Current on-hand thousandths for one item (optionally at one location). */
+/**
+ * Current on-hand thousandths for one item (optionally at one location).
+ * N22: reads the stock_balances projection the command service maintains
+ * transactionally, so a report never re-sums the whole ledger; the ledger
+ * itself stays the source of truth (rebuild replays it).
+ */
 export async function stockOnHand(db: DbLike, orgId: string, itemId: string, locationId?: string): Promise<number> {
-  const conditions = [eq(stockMovements.orgId, orgId), eq(stockMovements.itemId, itemId)];
-  if (locationId) conditions.push(eq(stockMovements.locationId, locationId));
+  const conditions = [eq(stockBalances.orgId, orgId), eq(stockBalances.itemId, itemId)];
+  if (locationId) conditions.push(eq(stockBalances.locationId, locationId));
   const [row] = await db
-    .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
-    .from(stockMovements)
+    .select({ total: sql<number>`coalesce(sum(${stockBalances.quantity}), 0)` })
+    .from(stockBalances)
     .where(and(...conditions));
   return Number(row?.total ?? 0);
 }

@@ -658,6 +658,48 @@ export const stockMovements = pgTable(
   (t) => [index("stock_movement_org_item_idx").on(t.orgId, t.itemId), index("stock_movement_ref_idx").on(t.refType, t.refId)],
 );
 
+/**
+ * N22 projection of the stock ledger: one row per (org, item, location,
+ * lot) with the running quantity. Maintained by the stock_balances_apply
+ * trigger on stock_movements, so it is consistent with the ledger by
+ * construction whatever wrote the movement; the ledger stays the source of
+ * truth and a rebuild replays it into here.
+ */
+export const stockBalances = pgTable(
+  "stock_balances",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "cascade" }),
+    lotId: uuid("lot_id").references(() => lots.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("stock_balance_item_idx").on(t.orgId, t.itemId)],
+);
+
+/**
+ * One per-org document-number allocator. The `kind` names the sequence
+ * ("purchase_order", "vendor_bill", "invoice", ...); the first allocation
+ * seeds from the existing MAX(number) so legacy documents are honored.
+ */
+export const docCounters = pgTable(
+  "doc_counters",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    next: integer("next").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.kind] })],
+);
+
 // ── Purchase orders ─────────────────────────────────────────────────────
 
 export const purchaseOrders = pgTable(
@@ -1314,8 +1356,7 @@ export const cycleCounts = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "set null" }),
-    status: text("status").notNull().default("open"), // open | posted | cancelled
+    locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "set null" }),    status: text("status").notNull().default("open"), // open | posted | cancelled
     note: text("note"),
     postedAt: timestamp("posted_at", { withTimezone: true }),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),

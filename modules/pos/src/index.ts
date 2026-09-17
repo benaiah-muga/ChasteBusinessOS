@@ -11,6 +11,7 @@ import {
   journalEntries,
   journalLines,
 } from "@chaste/db";
+import { nextDocNumber } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
@@ -216,11 +217,7 @@ const completeSale = (deps: ModuleDeps) =>
         if (total <= 0) throw new Error("sale must have a non-zero total");
 
         const customerId = await walkInCustomerId(tx, ctx.actor.orgId);
-        const [numRow] = await tx
-          .select({ maxNum: sql<number>`coalesce(max(${invoices.number}), 0)` })
-          .from(invoices)
-          .where(eq(invoices.orgId, ctx.actor.orgId));
-        const invoiceNumber = Number(numRow?.maxNum ?? 0) + 1;
+        const invoiceNumber = await nextDocNumber(tx, ctx.actor.orgId, "invoice");
 
         const glLines = [
           { accountCode: "1000", debitMinor: total, creditMinor: 0 },

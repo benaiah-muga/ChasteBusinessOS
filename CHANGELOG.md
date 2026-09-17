@@ -12,6 +12,15 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **stock reads hit a maintained projection; one number allocator; bin-scoped
+  counts (N22).** Every stock report used to re-sum the entire movement
+  ledger, cycle counts could only count the whole warehouse at once, and
+  each module rolled its own `max(number)+1` document numbering that could
+  race under two concurrent creators. The ledger now projects into
+  `stock_balances` via a database trigger — consistent by construction,
+  repairable by replay — so on-hand reads are constant-cost; cycle counts
+  scope to a single location with per-bin adjustments; and document numbers
+  come from one per-org allocator seeded from existing maxima.
 - **goods receipts are documents with stable line positions and explicit
   authority (N16).** Receiving used to be inferred back out of the stock
   ledger: no record of who received or when, no home for refused goods,

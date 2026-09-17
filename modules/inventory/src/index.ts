@@ -24,7 +24,7 @@ import {
   type DbLike,
   type ModuleDeps,
 } from "./shared";
-import { applyStockDelta, itemMovementCount, lockStockItems, movementCountsByItem } from "./service";
+import { applyStockDelta, itemMovementCount, lockStockItems, movementCountsByItem, rebuildStockBalances } from "./service";
 
 // Public surface other modules import — this is the sanctioned integration
 // seam: the manufacturing module writes to THIS ledger through these helpers
@@ -395,10 +395,19 @@ const startCycleCount = (deps: ModuleDeps) =>
     input: z.object({
       note: z.string().max(200).optional(),
       skus: z.array(z.string().min(1).max(40)).max(500).optional().describe("count only these SKUs; default is every active item"),
+      locationId: z.string().uuid().optional().describe("count one location's stock (bin-scoped sheet); default is org-wide"),
     }),
     output: z.object({ countId: z.string(), lineCount: z.number() }),
     execute: async (ctx, input) =>
       withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        if (input.locationId) {
+          const [loc] = await tx
+            .select({ id: stockLocations.id })
+            .from(stockLocations)
+            .where(and(eq(stockLocations.orgId, ctx.actor.orgId), eq(stockLocations.id, input.locationId)))
+            .limit(1);
+          if (!loc) throw new Error("location not found");
+        }
         const allActive = await tx
           .select({ id: items.id, sku: items.sku })
           .from(items)
@@ -411,6 +420,7 @@ const startCycleCount = (deps: ModuleDeps) =>
           .insert(cycleCounts)
           .values({
             orgId: ctx.actor.orgId,
+            locationId: input.locationId ?? null,
             note: input.note ?? null,
             createdByActorType: ctx.actor.type,
             createdByActorId: ctx.actor.id,
@@ -419,7 +429,9 @@ const startCycleCount = (deps: ModuleDeps) =>
         // N22: each line also snapshots how many movements its item has — the
         // watermark the drift guard compares against at post time, so a
         // receipt+sale during counting is caught even when net quantity lands
-        // back where it started.
+        // back where it started. The watermark stays item-global even on a
+        // bin-scoped sheet: stricter is safe, a false invalidation forces a
+        // recount, never a bad adjustment.
         const counts = await movementCountsByItem(
           tx,
           ctx.actor.orgId,
@@ -431,7 +443,7 @@ const startCycleCount = (deps: ModuleDeps) =>
             orgId: ctx.actor.orgId,
             countId: count!.id,
             itemId: it.id,
-            expectedThousandths: await stockOnHand(tx, ctx.actor.orgId, it.id),
+            expectedThousandths: await stockOnHand(tx, ctx.actor.orgId, it.id, input.locationId),
             expectedMovementCount: counts.get(it.id) ?? 0,
           });
         }
@@ -544,9 +556,12 @@ const postCycleCount = (deps: ModuleDeps) =>
             itemId: line.itemId,
             quantityDelta: delta,
             reason: "adjustment",
-            note: `cycle count ${count.id.slice(0, 8)} variance`,
+            note: count.locationId
+              ? `cycle count ${count.id.slice(0, 8)} variance (bin-scoped)`
+              : `cycle count ${count.id.slice(0, 8)} variance`,
             refType: "cycle_count",
             refId: count.id,
+            locationId: count.locationId ?? undefined,
             actorType: ctx.actor.type,
             actorId: ctx.actor.id,
           });
@@ -575,6 +590,30 @@ const cancelCycleCount = (deps: ModuleDeps) =>
         if (count.status !== "open") throw new Error(`cycle count is ${count.status}; only open counts can be cancelled`);
         await tx.update(cycleCounts).set({ status: "cancelled", cancelledAt: new Date() }).where(eq(cycleCounts.id, count.id));
         return { cancelled: true };
+      }),
+  });
+
+const rebuildStockProjections = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "inventory.rebuildStockProjections",
+    title: "Rebuild stock balance projections",
+    intent:
+      "Replay the append-only stock ledger into the stock_balances read projection for this organization, repairing any drift between what reports read and what the ledger says",
+    module: "inventory",
+    risk: "write",
+    permission: "inventory.admin",
+    // No inverse: the projection is derived state; the rebuild is itself the
+    // repair, and the ledger is never touched.
+    input: z.object({}),
+    output: z.object({ rows: z.number(), totalQuantityThousandths: z.number() }),
+    execute: async (ctx) =>
+      withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        // N22: hold the ledger's command locks while replaying, so no
+        // movement lands between the delete and the re-read.
+        const itemRows = await tx.select({ id: items.id }).from(items).where(eq(items.orgId, ctx.actor.orgId));
+        await lockStockItems(tx, itemRows.map((i) => i.id));
+        const { rows, totalQuantity } = await rebuildStockBalances(tx, ctx.actor.orgId);
+        return { rows, totalQuantityThousandths: totalQuantity };
       }),
   });
 
@@ -754,6 +793,7 @@ export function registerInventoryCapabilities(registry: CapabilityRegistry, deps
   registry.register(recordCycleCounts(deps));
   registry.register(postCycleCount(deps));
   registry.register(cancelCycleCount(deps));
+  registry.register(rebuildStockProjections(deps));
   registry.register(listLocations(deps));
   registry.register(listReservations(deps));
   registry.register(listLots(deps));

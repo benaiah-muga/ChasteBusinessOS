@@ -12,6 +12,7 @@ import {
   supportCannedResponses,
   supportKbArticles,
 } from "@chaste/db";
+import { nextDocNumber } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import { documentBalance } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
@@ -103,7 +104,7 @@ const startConversation = (deps: ModuleDeps) =>
             status: "open",
             createdByActorType: ctx.actor.type,
             createdByActorId: ctx.actor.id,
-            ticketNumber: ((await deps.db.select({ n: sql<number>`coalesce(max(${supportConversations.ticketNumber}), 0)` }).from(supportConversations).where(eq(supportConversations.orgId, ctx.actor.orgId)))[0]?.n ?? 0) + 1,})
+            ticketNumber: await nextDocNumber(tx, ctx.actor.orgId, "support_ticket"),})
           .returning({ id: supportConversations.id });
         await tx.insert(supportMessages).values({
           orgId: ctx.actor.orgId,

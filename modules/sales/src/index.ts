@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { customers, invoices, items, salesOrderLines, salesOrders, stockReservations } from "@chaste/db";
+import { nextDocNumber } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
@@ -36,11 +37,7 @@ const lineInput = z.object({
 });
 
 const orderNumber = async (tx: Tx, orgId: string) => {
-  const [row] = await tx
-    .select({ maxNum: sql<number>`coalesce(max(${salesOrders.number}), 0)` })
-    .from(salesOrders)
-    .where(eq(salesOrders.orgId, orgId));
-  return Number(row?.maxNum ?? 0) + 1;
+  return nextDocNumber(tx, orgId, "sales_order");
 };
 
 /** Open (unpaid) receivables for one customer — the credit guard's baseline. */
