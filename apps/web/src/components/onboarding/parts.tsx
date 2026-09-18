@@ -15,6 +15,17 @@ export function Spinner({ className = "size-4" }: { className?: string }) {
   );
 }
 
+export function BrandMark({ compact = false }: { compact?: boolean }) {
+  return (
+    <span className={cn("chaste-mark", compact ? "size-9" : "size-11")} aria-hidden="true">
+      <span className="chaste-mark__orbit chaste-mark__orbit--one" />
+      <span className="chaste-mark__orbit chaste-mark__orbit--two" />
+      <span className="chaste-mark__orbit chaste-mark__orbit--three" />
+      <span className="chaste-mark__core">C</span>
+    </span>
+  );
+}
+
 /**
  * The same app chrome as the sign-in page. The avatar carries the user's real
  * initial — during setup there is nothing else on screen telling them they are
@@ -23,25 +34,23 @@ export function Spinner({ className = "size-4" }: { className?: string }) {
 export function OnboardingHeader({ email }: { email: string }) {
   const initial = (email.trim()[0] ?? "N").toUpperCase();
   return (
-    <header className="sticky top-0 z-10 border-b border-sand-200 bg-sand-50/85 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
+    <header className="relative z-10 border-b border-white/10 bg-[#111416] text-[#f7f1e8]">
+      <div className="mx-auto flex h-[4.5rem] max-w-[1440px] items-center justify-between px-5 sm:px-8">
         <div className="flex items-center gap-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gold-500 text-sm font-bold text-white">
-            C
-          </span>
+          <BrandMark compact />
           <span className="text-sm leading-tight">
-            <span className="font-semibold">Chaste Business OS</span>
-            <span className="hidden text-ink-muted md:inline">
-              {" "}
-              — The operating system for your business
+            <span className="block font-semibold tracking-[-0.02em]">Chaste Business OS</span>
+            <span className="hidden text-[11px] tracking-[0.12em] text-[#a9a39b] uppercase md:block">
+              Open source · built for everyone
             </span>
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <IconSearch className="size-4 text-ink-muted" aria-hidden="true" />
+          <span className="hidden text-[11px] tracking-[0.16em] text-[#a9a39b] uppercase sm:inline">Secure setup</span>
+          <IconSearch className="size-4 text-[#c9a05f]" aria-hidden="true" />
           <span
             title={email}
-            className="flex size-8 items-center justify-center rounded-full bg-sand-200 text-sm font-semibold text-ink"
+            className="flex size-8 items-center justify-center rounded-full border border-[#c9a05f]/45 bg-[#c9a05f]/15 text-sm font-semibold text-[#f7f1e8]"
           >
             {initial}
           </span>
@@ -59,7 +68,7 @@ export interface RailStep {
 /** Progress rail. Completed steps show a check, the current one is gold. */
 export function StepRail({ steps, current }: { steps: RailStep[]; current: number }) {
   return (
-    <ol className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[13px]">
+    <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-[12px]">
       {steps.map((s, i) => {
         const done = i < current;
         const active = i === current;
@@ -69,16 +78,16 @@ export function StepRail({ steps, current }: { steps: RailStep[]; current: numbe
               aria-current={active ? "step" : undefined}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium transition-colors",
-                active && "bg-gold-500/14 text-gold-700",
-                done && "text-ink-muted",
-                !active && !done && "text-ink-muted/60",
+                active && "bg-[#111416] text-[#f7f1e8] shadow-[0_5px_18px_rgba(17,20,22,0.15)]",
+                done && "text-ink",
+                !active && !done && "text-ink-muted/70",
               )}
             >
               <span
                 className={cn(
                   "flex size-5 items-center justify-center rounded-full text-[11px] font-semibold",
-                  active && "bg-gold-500 text-white",
-                  done && "bg-gold-700/15 text-gold-700",
+                  active && "bg-[#c49a5a] text-[#111416]",
+                  done && "bg-[#c49a5a]/20 text-[#85632f]",
                   !active && !done && "bg-sand-200 text-ink-muted",
                 )}
               >
@@ -91,6 +100,41 @@ export function StepRail({ steps, current }: { steps: RailStep[]; current: numbe
         );
       })}
     </ol>
+  );
+}
+
+export function ProgressBar({
+  value,
+  label,
+  status,
+}: {
+  value: number;
+  label: string;
+  status: string;
+}) {
+  const safeValue = Math.max(0, Math.min(100, value));
+  return (
+    <div className="rounded-2xl border border-[#c7bca9] bg-[#fbf8f1] px-4 py-3 shadow-[0_14px_38px_rgba(31,25,17,0.06)] sm:px-5">
+      <div className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold tracking-[0.18em] text-[#9a7135] uppercase">{status}</p>
+          <p className="mt-1 truncate text-sm font-semibold text-ink">{label}</p>
+        </div>
+        <output className="shrink-0 text-2xl font-semibold tracking-[-0.06em] text-[#111416]" aria-live="polite">
+          {Math.round(safeValue)}%
+        </output>
+      </div>
+      <div
+        className="chaste-progress mt-3"
+        role="progressbar"
+        aria-label={status}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(safeValue)}
+      >
+        <span className="chaste-progress__fill" style={{ width: `${safeValue}%` }} />
+      </div>
+    </div>
   );
 }
 
@@ -199,10 +243,10 @@ export function RecoverBlock({
 }
 
 export const primaryButtonClass =
-  "inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-gold-500 px-4 text-sm font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-gold-600 focus-visible:ring-[3px] focus-visible:ring-gold-500/30 focus-visible:outline-none active:bg-gold-700 disabled:cursor-not-allowed disabled:opacity-55";
+  "group inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#171a1b] px-4 text-sm font-semibold text-[#f8f1e6] shadow-[0_10px_24px_rgba(23,26,27,0.14)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#2b2e2e] focus-visible:ring-[3px] focus-visible:ring-[#c59b5e]/35 focus-visible:outline-none active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55";
 
 export const secondaryButtonClass =
-  "inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-sand-300 bg-cream px-4 text-sm font-medium text-ink transition-colors hover:bg-sand-100 focus-visible:ring-[3px] focus-visible:ring-gold-500/25 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#cfc1ae] bg-[#fffdf7] px-4 text-sm font-medium text-ink transition-all hover:-translate-y-0.5 hover:bg-[#f4ede1] focus-visible:ring-[3px] focus-visible:ring-[#c59b5e]/25 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55";
 
 export const ghostButtonClass =
   "inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink focus-visible:ring-[3px] focus-visible:ring-gold-500/25 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55";
