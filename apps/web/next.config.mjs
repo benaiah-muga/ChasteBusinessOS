@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // The Docker image ships Next's traced standalone server and only the
+  // runtime files it needs, rather than the full workspace node_modules.
+  output: "standalone",
   // Cache Components (ADR 0028): routes validate for instant navigation;
   // segments not yet converted opt out via `export const instant = false`.
   cacheComponents: true,

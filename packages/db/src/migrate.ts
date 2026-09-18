@@ -60,6 +60,8 @@ function packageRoot(): string {
 }
 
 export function migrationsFolder(): string {
+  const configured = process.env.CHASTE_MIGRATIONS_FOLDER?.trim();
+  if (configured) return configured;
   return resolve(packageRoot(), "drizzle");
 }
 

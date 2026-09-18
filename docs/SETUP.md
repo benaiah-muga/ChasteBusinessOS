@@ -63,13 +63,30 @@ docker stop chaste-pgvector && docker start chaste-pgvector   # pause/resume
 docker rm -f chaste-pgvector                                  # throw it away
 ```
 
-A `docker-compose.yml` is included if you prefer Compose:
+A `docker-compose.yml` is included if you prefer Compose. It can run the
+database alone for host-side development:
 
 ```sh
 docker compose up -d      # start
 docker compose down       # stop (data persists in a named volume)
 docker compose down -v    # stop and delete the data
 ```
+
+To run the production-shaped web image and database together:
+
+```sh
+cp .env.example .env      # set BETTER_AUTH_SECRET
+docker compose up -d --build
+docker compose ps          # app and db should be healthy
+curl http://localhost:3000/api/health
+docker compose logs -f app
+```
+
+The web container applies pending migrations before serving in production.
+The app uses `db:5432` inside Compose while host-side commands continue to use
+`localhost:5433`. Set `CHASTE_WEB_PORT` or `CHASTE_DB_PORT` when those host
+ports are already in use. `node scripts/verify-docker.mjs` runs an isolated
+build/start/health smoke test and removes its temporary containers and volume.
 
 ### Path B — Hosted Postgres (no Docker at all)
 

@@ -1,25 +1,30 @@
-# Local development database only.
+# Full local stack: Postgres 16 + pgvector, and the Next.js web app.
 #
-# The app itself runs on the host (`pnpm dev`); this just provides Postgres 16
-# with pgvector. If you would rather not run containers at all, see the hosted
-# and native Postgres paths in docs/SETUP.md.
+#   docker compose up -d --build   start everything (builds the app image)
+#   docker compose logs -f app     watch boot (migrations run on boot)
+#   docker compose down            stop (data survives in the named volume)
+#   docker compose down -v         stop and delete the data
+#   docker compose up -d db        database only (host-side `pnpm dev` flow)
 #
-#   docker compose up -d      start
-#   docker compose down       stop (data survives in the named volume)
-#   docker compose down -v    stop and delete the data
+# The app container talks to Postgres over compose networking (`db:5432`).
+# Your shell/.env DATABASE_URL (localhost:5433) stays correct for host-side
+# commands (psql, pnpm demo:*, pnpm test fixtures); only the container gets
+# the internal hostname, hardcoded below on purpose.
 #
-# Host port is 5433 so it does not collide with a Postgres you already run.
+# BETTER_AUTH_SECRET is required: compose refuses to start the app without
+# it (`cp .env.example .env` and fill it, same as the host quickstart).
+# NVIDIA_API_KEY / OPENROUTER_API_KEY / MODEL_* are optional — the app
+# degrades honestly without a model key (no AI briefs, no agent runs).
 
 services:
   db:
     image: pgvector/pgvector:pg16
-    container_name: chaste-pgvector
     environment:
       POSTGRES_USER: chaste
       POSTGRES_PASSWORD: chaste_dev
       POSTGRES_DB: chaste_os_v2
     ports:
-      - "5433:5432"
+      - "${CHASTE_DB_PORT:-5433}:5432"
     volumes:
       - chaste-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -28,6 +33,62 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${CHASTE_WEB_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://chaste:chaste_dev@db:5432/chaste_os_v2
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-postgresql://chaste:chaste_dev@db:5432/chaste_os_v2}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required — copy .env.example to .env and fill it}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NIM_BASE_URL: ${NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      ZAI_API_KEY: ${ZAI_API_KEY:-}
+      ZAI_BASE_URL: ${ZAI_BASE_URL:-https://api.z.ai/api/paas/v4}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-}
+      MODEL_PRIMARY: ${MODEL_PRIMARY:-}
+      MODEL_FAST: ${MODEL_FAST:-}
+      MODEL_REASONING: ${MODEL_REASONING:-}
+      MODEL_EMBEDDINGS: ${MODEL_EMBEDDINGS:-}
+      MODEL_OCR: ${MODEL_OCR:-}
+      MODEL_NL: ${MODEL_NL:-}
+      MODEL_NL_FALLBACK: ${MODEL_NL_FALLBACK:-}
+      CHASTE_MIGRATIONS_FOLDER: /app/apps/web/node_modules/@chaste/db/drizzle
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      AUTO_MIGRATE_ON_BOOT: ${AUTO_MIGRATE_ON_BOOT:-1}
+      CHASTE_STRICT_MIGRATION_BACKUP: ${CHASTE_STRICT_MIGRATION_BACKUP:-0}
+      CHASTE_SKIP_MIGRATION_BACKUP: ${CHASTE_SKIP_MIGRATION_BACKUP:-0}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NOTIFICATION_WEBHOOK_URL: ${NOTIFICATION_WEBHOOK_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-chaste@localhost}
+      SMTP_TO: ${SMTP_TO:-}
+    healthcheck:
+      # No curl in the slim runtime; the anonymous health route also verifies
+      # that the app can reach the database after boot migrations.
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(async r=>{const b=await r.json();if(r.status!==200||b.status!=='ok'||b.db!=='connected')process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
     restart: unless-stopped
 
 volumes:

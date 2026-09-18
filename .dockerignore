@@ -1,0 +1,22 @@
+# Keep the build context small and secret-free. The image must never
+# contain credentials: runtime secrets arrive via compose environment,
+# never via files baked into layers.
+#
+# NOTE: unlike .gitignore, a bare name here matches only the context root,
+# so nested copies need the **/ prefix (apps/web/.next is 3GB+).
+**/node_modules
+**/.next
+**/.turbo
+**/coverage
+**/backups
+**/.pnpm-store
+.git
+.gitignore
+.env
+.env.*
+*.log
+.DS_Store
+apps/web/graft
+.codebuddy
+.kilo
+graft

@@ -78,6 +78,18 @@ pnpm --filter @chaste/db db:migrate
 pnpm dev                    # http://localhost:3000
 ```
 
+For a production-shaped local Docker run, use the full Compose stack instead:
+
+```sh
+cp .env.example .env       # set BETTER_AUTH_SECRET
+docker compose up -d --build
+curl http://localhost:3000/api/health
+```
+
+The app runs migrations during production boot and connects to Compose Postgres
+at `db:5432`. `node scripts/verify-docker.mjs` performs the same flow on
+isolated ports and cleans up afterward.
+
 Sign up, describe your business in two sentences, and the workspace builds itself: chart of accounts seeded, description embedded into org memory, owner role granted to you.
 
 ## How it works

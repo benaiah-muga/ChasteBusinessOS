@@ -49,6 +49,10 @@ The full v1 changelog is preserved at the bottom of this file.
   Only non-empty strings win now; everything else is stamped fresh.
 
 ### Added
+- **Docker deployment smoke path.** The Compose stack now runs the production
+  web image beside pgvector, supports isolated host ports and runtime settings,
+  checks the database-backed health endpoint, and includes an executable
+  `scripts/verify-docker.mjs` cleanup-safe smoke test.
 - **the pilot surfaces are built (W0.5).** A receiving desk that records
   what arrived line by line — accepted, rejected with a reason, and what
   stays outstanding — through the governed receiving capabilities; a "My
