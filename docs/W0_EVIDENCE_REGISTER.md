@@ -544,9 +544,6 @@ pins what the surviving system owes, per kill window:
   `unknown` (never a blind re-fire), the corpse's ack is fenced, and
   `reconcileOutboxMessage` settles it from the provider receipt exactly once.
   A duplicate enqueue of the same dedupe key collapses onto the settled row.
-- Extend the first queue slice with a worker-kill fixture and complete B03's
-  external-effect reconciliation proof; the local lease/fencing boundary is
-  now implemented and covered.
 
 Feeding W1, in dependency order: least-privilege runtime role; B01 route
 guards + bootstrap exception; B02 atomic effect/audit receipt (discharges

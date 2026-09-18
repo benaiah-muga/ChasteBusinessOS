@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { createDb, type Database, purgeTenantFinancials } from "@chaste/db";
-import { jobs, organizations } from "@chaste/db";
+import { createDb, type Database } from "@chaste/db";
+import { jobs, ledgerEvents, organizations } from "@chaste/db";
 import { logger } from "@chaste/kernel";
 import { claimJob, enqueueCapabilityJob, finalizeJob, processOneJob } from "./jobs";
 
@@ -29,7 +29,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await purgeTenantFinancials(db, orgId);
+  await db.delete(ledgerEvents).where(eq(ledgerEvents.orgId, orgId));
   await db.delete(jobs).where(eq(jobs.orgId, orgId));
   await db.delete(organizations).where(eq(organizations.id, orgId));
   await pg.client.end();
@@ -51,7 +51,13 @@ describe("capability job queue", () => {
 
     // The referenced document does not exist, so the governed execution must
     // fail honestly; with attempts=1 of 3 the job returns to pending.
-    await processOneJob(db, logger);
+    // Sibling suites share this fixture database and can claim a different
+    // job first, so drain until this job has been attempted.
+    for (let i = 0; i < 10; i += 1) {
+      await processOneJob(db, logger);
+      const [current] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (current!.attempts > 0) break;
+    }
     let [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(row!.status).toBe("pending");
     expect(row!.attempts).toBe(1);
@@ -60,7 +66,11 @@ describe("capability job queue", () => {
 
     // Exhaust retries; the queue must land on failed, not loop forever.
     await db.execute(sql`UPDATE jobs SET attempts = max_attempts - 1, available_at = now() WHERE id = ${jobId}`);
-    await processOneJob(db, logger);
+    for (let i = 0; i < 10; i += 1) {
+      await processOneJob(db, logger);
+      const [current] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (current!.status === "failed") break;
+    }
     [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(row!.status).toBe("failed");
     expect(row!.attempts).toBe(row!.maxAttempts);
@@ -107,7 +117,13 @@ describe("capability job queue", () => {
       type: "nonexistent.doesNotExist",
       payload: {},
     });
-    await processOneJob(db, logger);
+    // Sibling suites share this fixture database and can claim the job ahead
+    // of us in queue order; drain until this job settles either way.
+    for (let i = 0; i < 10; i += 1) {
+      await processOneJob(db, logger);
+      const [current] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+      if (current!.status !== "pending") break;
+    }
     const [row] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(row!.status).toBe("failed");
     expect(row!.lastError).toContain("unknown job capability");

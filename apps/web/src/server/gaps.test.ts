@@ -249,7 +249,13 @@ describe("recurring invoices expand through the worker", () => {
       type: "accounting.generateDueInvoices",
       payload: {},
     });
-    await processOneJob(db, logger);
+    // Sibling suites share this fixture database and can claim the job ahead
+    // of us in queue order; drain until this job settles.
+    for (let i = 0; i < 10; i += 1) {
+      await processOneJob(db, logger);
+      const [current] = await db.select().from(jobs).where(eq(jobs.id, _jobId));
+      if (current!.status !== "pending") break;
+    }
 
 
 
