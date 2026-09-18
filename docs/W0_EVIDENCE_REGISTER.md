@@ -297,6 +297,20 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
+## W0.5 — pilot cohort and workflow selection (recommended, awaiting owner confirmation)
+
+`docs/w05-pilot-selection.md` selects the pilot cohort on evidence: a small
+distribution/wholesale purchasing-and-receiving team, running the chain
+receive → accept/reject → remaining visibility → three-way bill match →
+pay → correct (returns/reversals), entered from a P01 "My work" home, with
+P05's receiving desk as the first vertical journey. Every step of the chain
+runs on delivered, ledger-proven contracts from this audit cycle (N16
+receipts, N11 balances, N12 reversals, N22 projections); P03 (reconciliation
+workspace) and P07 (checkout) are documented as deferred alternatives.
+Measurement plan follows the audit's provisional usability targets. The
+selection is the recommended default — owner confirmation unlocks the P05
+UI build.
+
 ## N03 — verified identity binding closed; deployment matrix recorded (delivered)
 
 A password account proves nothing about mailbox ownership, and domain

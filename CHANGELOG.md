@@ -11,6 +11,15 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+- **pilot selection recorded (W0.5).** The audit's "one pilot cohort,
+  P01–P04 first" decision is made on evidence: a distribution/wholesale
+  purchasing-and-receiving team piloting the receive → exception → bill →
+  pay chain from a "My work" home, with the receiving desk as the first
+  vertical journey. `docs/w05-pilot-selection.md` records the cohort, the
+  workflow, alternatives (reconciliation workspace, checkout deferred) and
+  the measurement plan; owner confirmation unlocks the UI build.
+
 ### Changed
 - **sign-in is sealed until the email is verified; unverified sessions
   inherit nothing (N03).** Domain identities are pre-provisioned (SCIM,
