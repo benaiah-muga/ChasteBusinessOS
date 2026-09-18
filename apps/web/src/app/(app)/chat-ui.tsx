@@ -47,7 +47,7 @@ function AskCard({ ask, answered }: { ask: AskPayload; answered?: string }) {
     <div className="mt-2 rounded-xl border border-stone-200 bg-stone-50 p-3">
       <p className="text-sm font-medium text-stone-800">{ask.question}</p>
       {done ? (
-        <p className="mt-2 inline-flex rounded-full bg-maroon-50 px-2.5 py-1 text-xs font-medium text-maroon-800">
+        <p className="mt-2 inline-flex rounded-full bg-gold-50 px-2.5 py-1 text-xs font-medium text-gold-800">
           {answered}
         </p>
       ) : (
@@ -59,7 +59,7 @@ function AskCard({ ask, answered }: { ask: AskPayload; answered?: string }) {
                   key={opt}
                   type="button"
                   onClick={() => chatStore.answerAsk(ask.id, opt)}
-                  className="cursor-pointer rounded-full border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors duration-150 hover:border-maroon-400 hover:bg-maroon-50 hover:text-maroon-900"
+                  className="cursor-pointer rounded-full border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors duration-150 hover:border-gold-400 hover:bg-gold-50 hover:text-gold-900"
                 >
                   {opt}
                 </button>
@@ -80,13 +80,13 @@ function AskCard({ ask, answered }: { ask: AskPayload; answered?: string }) {
                 onChange={(e) => setOther(e.target.value)}
                 placeholder="Other…"
                 aria-label="Other answer"
-                className="min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-xs outline-none placeholder:text-stone-400 focus:border-maroon-400"
+                className="min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-xs outline-none placeholder:text-stone-400 focus:border-gold-400"
               />
               <button
                 type="submit"
                 disabled={!other.trim()}
                 aria-label="Send answer"
-                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-maroon-700 text-white transition-colors duration-150 hover:bg-maroon-800 disabled:pointer-events-none disabled:opacity-35"
+                className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-gold-700 text-white transition-colors duration-150 hover:bg-gold-800 disabled:pointer-events-none disabled:opacity-35"
               >
                 <IconArrowRight className="size-3.5" />
               </button>
@@ -216,7 +216,7 @@ export function MessageList({ messages, busy, compact = false }: { messages: Cha
         if (m.role === "user") {
           return (
             <div key={i} className="flex justify-end">
-              <div className="max-w-[85%] rounded-2xl rounded-br-md bg-maroon-700 px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-white">
+              <div className="max-w-[85%] rounded-2xl rounded-br-md bg-gold-700 px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-white">
                 {m.text}
               </div>
             </div>
@@ -226,7 +226,7 @@ export function MessageList({ messages, busy, compact = false }: { messages: Cha
           <div key={i} className="flex gap-3">
             <span
               aria-hidden="true"
-              className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-maroon-800 text-white shadow-xs [&_svg]:size-3.5"
+              className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-gold-800 text-white shadow-xs [&_svg]:size-3.5"
             >
               <IconSparkle />
             </span>
@@ -302,7 +302,7 @@ export function ChatInput({
   }, [autoFocus]);
 
   return (
-    <div className="flex items-end gap-2 rounded-xl border border-stone-200 bg-white p-2 shadow-xs transition-colors duration-150 focus-within:border-maroon-500 focus-within:ring-[3px] focus-within:ring-maroon-600/10">
+    <div className="flex items-end gap-2 rounded-xl border border-stone-200 bg-white p-2 shadow-xs transition-colors duration-150 focus-within:border-gold-500 focus-within:ring-[3px] focus-within:ring-gold-600/10">
       <textarea
         ref={textareaRef}
         value={value}
@@ -335,7 +335,7 @@ export function ChatInput({
           onClick={onSend}
           disabled={!value.trim()}
           aria-label="Send message"
-          className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-maroon-700 text-white transition-colors duration-150 hover:bg-maroon-800 disabled:pointer-events-none disabled:opacity-35"
+          className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-gold-700 text-white transition-colors duration-150 hover:bg-gold-800 disabled:pointer-events-none disabled:opacity-35"
         >
           <IconArrowRight className="size-4" />
         </button>

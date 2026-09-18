@@ -218,7 +218,7 @@ export default function DocumentsPage() {
             onDrop={onDrop}
             className={cn(
               "flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors duration-150",
-              dragOver ? "border-maroon-500 bg-maroon-50/60" : "border-stone-300 bg-stone-50/50",
+              dragOver ? "border-gold-500 bg-gold-50/60" : "border-stone-300 bg-stone-50/50",
               file && "border-emerald-300 bg-emerald-50/40",
             )}
           >
@@ -318,7 +318,7 @@ export default function DocumentsPage() {
               {docs.map((d) => (
                 <tr
                   key={d.id}
-                  className={cn(detail?.document.id === d.id && "bg-maroon-50/50")}
+                  className={cn(detail?.document.id === d.id && "bg-gold-50/50")}
                 >
                   <td className="font-medium text-stone-800">{d.title}</td>
                   <td className="font-mono text-xs text-stone-500">{d.sourceType}</td>
@@ -395,7 +395,7 @@ export default function DocumentsPage() {
                       <td className="num">{(s.quantityThousandths / 1000).toLocaleString()}</td>
                       <td className="num">{(s.unitPriceMinor / 100).toFixed(2)}</td>
                       <td>
-                        <Badge tone="maroon">{s.suggestedAccountCode}</Badge>
+                        <Badge tone="gold">{s.suggestedAccountCode}</Badge>
                       </td>
                       <td>
                         {s.matchScore > 0 ? (

@@ -544,7 +544,7 @@ function DealsTab(props: {
                 className={cn(
                   "flex w-64 shrink-0 snap-start flex-col rounded-xl border p-2.5 transition-colors duration-100",
                   isOver && dragging
-                    ? "border-maroon-400 bg-maroon-50/50"
+                    ? "border-gold-400 bg-gold-50/50"
                     : "border-stone-200 bg-stone-50/70",
                 )}
               >
@@ -636,7 +636,7 @@ function DealsTab(props: {
                     <p
                       className={cn(
                         "rounded-lg border border-dashed py-4 text-center text-xs transition-colors duration-100",
-                        isOver && dragging ? "border-maroon-300 text-maroon-400" : "border-stone-200 text-stone-300",
+                        isOver && dragging ? "border-gold-300 text-gold-400" : "border-stone-200 text-stone-300",
                       )}
                     >
                       {isOver && dragging ? "Drop to move here" : "-"}

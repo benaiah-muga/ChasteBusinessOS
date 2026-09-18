@@ -150,7 +150,7 @@ export function LibraryTab() {
             {canned.map((c) => (
               <li key={c.id} className="py-2.5">
                 <div className="flex items-center gap-2">
-                  <Badge tone="maroon">{c.shortcut}</Badge>
+                  <Badge tone="gold">{c.shortcut}</Badge>
                   <span className="font-medium text-stone-800">{c.title}</span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-xs text-stone-500">{c.body}</p>

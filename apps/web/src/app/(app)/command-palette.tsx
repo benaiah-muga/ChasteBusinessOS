@@ -3,13 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { appsForOrg, tileStyle, type AppInfo } from "./_shell/apps";
-import { IconPalette, IconSearch } from "@/components/icons";
-import { THEMES, applyTheme, type ThemeId } from "@/components/theme";
+import { IconSearch } from "@/components/icons";
 import { cn } from "@/lib/format";
 
 type Command =
-  | { kind: "app"; app: AppInfo }
-  | { kind: "theme"; id: ThemeId; label: string };
+  | { kind: "app"; app: AppInfo };
 
 export function CommandPalette({
   open,
@@ -31,16 +29,8 @@ export function CommandPalette({
     const apps = appsForOrg(enabledModules).filter(
       (a) => !q || a.name.toLowerCase().includes(q) || a.tagline.toLowerCase().includes(q),
     );
-    const themes = q && "theme".includes(q)
-      ? THEMES.map((t) => ({
-          kind: "theme" as const,
-          id: t.id,
-          label: `Theme · ${t.label}`,
-        }))
-      : [];
     return [
       ...apps.map((app) => ({ kind: "app" as const, app })),
-      ...themes,
     ];
   }, [query, enabledModules]);
 
@@ -63,7 +53,6 @@ export function CommandPalette({
   function run(cmd: Command) {
     onClose();
     if (cmd.kind === "app") router.push(cmd.app.href);
-    else applyTheme(cmd.id);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -107,7 +96,7 @@ export function CommandPalette({
             const isActive = i === active;
             return (
               <button
-                key={cmd.kind === "app" ? cmd.app.id : cmd.id}
+                key={cmd.app.id}
                 type="button"
                 role="option"
                 aria-selected={isActive}
@@ -116,29 +105,18 @@ export function CommandPalette({
                 onClick={() => run(cmd)}
                 className={cn(
                   "flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-75",
-                  isActive ? "bg-maroon-50" : "",
+                  isActive ? "bg-gold-50" : "",
                 )}
               >
-                {cmd.kind === "app" ? (
-                  <>
-                    <span
-                      aria-hidden="true"
-                      style={tileStyle(cmd.app.hue)}
-                      className={cn("flex size-7 shrink-0 items-center justify-center rounded-lg", isActive && "scale-105")}
-                    >
-                      <cmd.app.icon className="size-4" />
-                    </span>
-                    <span className="flex-1 font-medium">{cmd.app.name}</span>
-                    <span className="truncate text-xs text-stone-400">{cmd.app.tagline}</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-500">
-                      <IconPalette className="size-4" />
-                    </span>
-                    <span className="flex-1 font-medium">{cmd.label}</span>
-                  </>
-                )}
+                <span
+                  aria-hidden="true"
+                  style={tileStyle(cmd.app.hue)}
+                  className={cn("flex size-7 shrink-0 items-center justify-center rounded-lg", isActive && "scale-105")}
+                >
+                  <cmd.app.icon className="size-4" />
+                </span>
+                <span className="flex-1 font-medium">{cmd.app.name}</span>
+                <span className="truncate text-xs text-stone-400">{cmd.app.tagline}</span>
               </button>
             );
           })}

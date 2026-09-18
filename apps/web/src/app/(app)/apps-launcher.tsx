@@ -172,7 +172,7 @@ export function AppsLauncher({
                         className={cn(
                           "absolute top-1.5 right-1.5 flex size-6 cursor-pointer items-center justify-center rounded-md transition-all duration-150",
                           isPinned
-                            ? "text-maroon-700 opacity-100"
+                            ? "text-gold-700 opacity-100"
                             : "text-stone-300 opacity-0 group-hover/tile:opacity-100 hover:bg-stone-100 hover:text-stone-600 disabled:pointer-events-none",
                         )}
                       >

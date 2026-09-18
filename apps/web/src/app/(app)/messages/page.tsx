@@ -55,7 +55,7 @@ function Body({ body }: { body: string }) {
     <>
       {parts.map((part, i) =>
         part.startsWith("@") ? (
-          <span key={i} className="font-medium text-maroon-700 underline decoration-maroon-300 underline-offset-2">
+          <span key={i} className="font-medium text-gold-700 underline decoration-gold-300 underline-offset-2">
             {part}
           </span>
         ) : (
@@ -242,7 +242,7 @@ export default function MessagesPage() {
                 className="input h-8 text-xs"
               />
               <label className="flex cursor-pointer items-center gap-2 text-xs text-stone-600">
-                <input type="checkbox" checked={newAgent} onChange={(e) => setNewAgent(e.target.checked)} className="accent-maroon-700" />
+                <input type="checkbox" checked={newAgent} onChange={(e) => setNewAgent(e.target.checked)} className="accent-gold-700" />
                 Include Chaste (AI workmate)
               </label>
               <Button type="submit" size="sm" className="w-full" disabled={!newTitle.trim()}>
@@ -262,14 +262,14 @@ export default function MessagesPage() {
                 onClick={() => setActiveId(c.id)}
                 className={cn(
                   "block w-full border-b border-stone-50 px-4 py-3 text-left transition-colors duration-75",
-                  activeId === c.id ? "bg-maroon-50/70" : "hover:bg-stone-50",
+                  activeId === c.id ? "bg-gold-50/70" : "hover:bg-stone-50",
                 )}
               >
                 <div className="flex items-center gap-2">
                   {c.kind === "dm" ? (
-                    <IconBot className={cn("size-3.5 shrink-0", activeId === c.id ? "text-maroon-700" : "text-stone-400")} />
+                    <IconBot className={cn("size-3.5 shrink-0", activeId === c.id ? "text-gold-700" : "text-stone-400")} />
                   ) : (
-                    <IconHash className={cn("size-3.5 shrink-0", activeId === c.id ? "text-maroon-700" : "text-stone-400")} />
+                    <IconHash className={cn("size-3.5 shrink-0", activeId === c.id ? "text-gold-700" : "text-stone-400")} />
                   )}
                   <span className="truncate text-sm font-medium text-stone-800">{c.title}</span>
                   {c.agentEnabled && (
@@ -368,7 +368,7 @@ export default function MessagesPage() {
                           onClick={() => pickMention(p)}
                           className={cn(
                             "flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm",
-                            i === mentionIndex ? "bg-maroon-50 text-maroon-900" : "text-stone-700 hover:bg-stone-50",
+                            i === mentionIndex ? "bg-gold-50 text-gold-900" : "text-stone-700 hover:bg-stone-50",
                           )}
                         >
                           {p.type === "agent" ? (
@@ -431,7 +431,7 @@ export default function MessagesPage() {
                   type="submit"
                   disabled={sending || !draft.trim()}
                   aria-label="Send message"
-                  className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-maroon-700 text-white transition-colors duration-150 hover:bg-maroon-800 disabled:pointer-events-none disabled:opacity-35"
+                  className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-gold-700 text-white transition-colors duration-150 hover:bg-gold-800 disabled:pointer-events-none disabled:opacity-35"
                 >
                   <IconSend className="size-4" />
                 </button>

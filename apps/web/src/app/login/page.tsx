@@ -137,7 +137,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="auth-surface auth-surface--night min-h-screen bg-[#111416] font-display text-[#f7f1e8]">
+    <div className="min-h-screen bg-[#111416] font-display text-[#f7f1e8]">
       <main className="grid min-h-screen lg:grid-cols-[0.92fr_1.08fr]">
         <section className="relative hidden overflow-hidden bg-[#111416] px-10 py-9 lg:flex lg:flex-col xl:px-16">
           <div className="auth-orbit auth-orbit--one -right-44 top-36" />
@@ -176,7 +176,7 @@ export default function LoginPage() {
           </div>
         </section>
 
-        <section className="relative flex min-h-screen items-center overflow-hidden bg-[#f4efe6] px-5 py-7 text-[#171a1b] sm:px-8 lg:py-8">
+        <section className="relative flex min-h-screen items-center overflow-hidden bg-canvas px-5 py-7 text-stone-950 sm:px-8 lg:py-8">
           <div className="absolute -right-40 -top-40 size-[30rem] rounded-full bg-[#d3aa6c]/10 blur-3xl" />
           <div className="relative mx-auto my-auto w-full max-w-[510px]">
             <div className="mb-7 flex items-center justify-between lg:hidden">
@@ -190,32 +190,32 @@ export default function LoginPage() {
               <IconSearch className="size-4 text-[#a9854e]" aria-hidden="true" />
             </div>
 
-            <div className="rise rounded-[1.75rem] border border-[#d7cdbc] bg-[#fffdf7]/80 p-6 shadow-[0_28px_80px_rgba(59,46,26,0.12)] backdrop-blur sm:p-9 [--rise-delay:100ms]">
+            <div className="rise rounded-[1.75rem] border border-stone-300 bg-cream/85 p-6 shadow-[0_28px_80px_rgba(59,46,26,0.12)] backdrop-blur sm:p-9 [--rise-delay:100ms]">
               <div className="flex items-start justify-between gap-5">
                 <div>
-                  <p className="text-[10px] font-bold tracking-[0.2em] text-[#a1783c] uppercase">{verifySent ? "One more step" : mode === "signup" ? "Create your workspace" : "Welcome back"}</p>
+                  <p className="text-[10px] font-bold tracking-[0.2em] text-gold-700 uppercase">{verifySent ? "One more step" : mode === "signup" ? "Create your workspace" : "Welcome back"}</p>
                   <h2 className="mt-2 text-[2rem] leading-none font-semibold tracking-[-0.06em]">{verifySent ? "Check your inbox." : mode === "signup" ? "Start with clarity." : "Good to see you."}</h2>
-                  <p className="mt-3 max-w-sm text-sm leading-6 text-[#756f66]">
+                  <p className="mt-3 max-w-sm text-sm leading-6 text-stone-600">
                     {verifySent ? "Confirm your email to open the door." : mode === "signup" ? "Create your workspace to get started." : "Sign in to your workspace."}
                   </p>
                 </div>
-                <span className="hidden size-9 items-center justify-center rounded-full border border-[#caa76c]/40 bg-[#d5b277]/15 text-xs font-bold text-[#98713c] sm:flex">{verifySent ? "✉" : mode === "signup" ? "01" : "↗"}</span>
+                <span className="hidden size-9 items-center justify-center rounded-full border border-gold-600/40 bg-gold-500/15 text-xs font-bold text-gold-700 sm:flex">{verifySent ? "✉" : mode === "signup" ? "01" : "↗"}</span>
               </div>
 
               {verifySent ? (
                 <div className="mt-7">
-                  <div className="flex items-start gap-3 rounded-xl border border-[#caa76c]/40 bg-[#d5b277]/10 px-4 py-4">
-                    <IconInbox className="mt-0.5 size-5 shrink-0 text-[#a1783c]" />
-                    <p className="text-sm leading-6 text-[#4a4640]">
+                  <div className="flex items-start gap-3 rounded-xl border border-gold-600/40 bg-gold-500/10 px-4 py-4">
+                    <IconInbox className="mt-0.5 size-5 shrink-0 text-gold-700" />
+                    <p className="text-sm leading-6 text-stone-800">
                       We sent a verification link to{" "}
-                      <strong className="font-semibold text-[#171a1b]">{email.trim()}</strong>. Click it to prove
+                      <strong className="font-semibold text-stone-950">{email.trim()}</strong>. Click it to prove
                       the address is yours — then sign in and we&apos;ll take you straight into setup.
                     </p>
                   </div>
-                  <p className="mt-3 text-[12px] leading-5 text-[#8f877b]">
+                  <p className="mt-3 text-[12px] leading-5 text-stone-500">
                     No email? Check spam, or try signing in — that sends a fresh link automatically.
                   </p>
-                  <button type="button" onClick={toggleMode} className="group mt-4 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-[#946d35] underline-offset-4 hover:underline">
+                  <button type="button" onClick={toggleMode} className="group mt-4 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-gold-700 underline-offset-4 hover:underline">
                     <IconArrowRight className="size-4 rotate-180 transition-transform group-hover:-translate-x-0.5" />
                     Back to sign in
                   </button>
@@ -225,44 +225,44 @@ export default function LoginPage() {
               <form onSubmit={submit} className="mt-7 space-y-4">
                 {mode === "signup" && (
                   <div>
-                    <label htmlFor="name" className="mb-1.5 block text-[12px] font-semibold tracking-[0.04em] text-[#4a4640]">Your name</label>
-                    <input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Ada Lovelace" className="h-11 w-full rounded-xl border border-[#d7cdbc] bg-white/70 px-3.5 text-sm text-ink transition-colors outline-none placeholder:text-[#9a9388] focus:border-[#b88a4c] focus:ring-[3px] focus:ring-[#c59b5e]/20" />
+                    <label htmlFor="name" className="mb-1.5 block text-[12px] font-semibold tracking-[0.04em] text-stone-800">Your name</label>
+                    <input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Ada Lovelace" className="h-11 w-full rounded-xl border border-stone-300 bg-white/70 px-3.5 text-sm text-ink transition-colors outline-none placeholder:text-stone-400 focus:border-gold-600 focus:ring-[3px] focus:ring-gold-600/20" />
                   </div>
                 )}
 
                 <div>
-                  <label htmlFor="email" className="mb-1.5 block text-[12px] font-semibold tracking-[0.04em] text-[#4a4640]">Email</label>
-                  <input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" placeholder="you@company.com" className="h-11 w-full rounded-xl border border-[#d7cdbc] bg-white/70 px-3.5 text-sm text-ink transition-colors outline-none placeholder:text-[#9a9388] focus:border-[#b88a4c] focus:ring-[3px] focus:ring-[#c59b5e]/20" />
+                  <label htmlFor="email" className="mb-1.5 block text-[12px] font-semibold tracking-[0.04em] text-stone-800">Email</label>
+                  <input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" placeholder="you@company.com" className="h-11 w-full rounded-xl border border-stone-300 bg-white/70 px-3.5 text-sm text-ink transition-colors outline-none placeholder:text-stone-400 focus:border-gold-600 focus:ring-[3px] focus:ring-gold-600/20" />
                 </div>
 
                 <div>
-                  <label htmlFor="password" className="mb-1.5 block text-[12px] font-semibold tracking-[0.04em] text-[#4a4640]">Password</label>
+                  <label htmlFor="password" className="mb-1.5 block text-[12px] font-semibold tracking-[0.04em] text-stone-800">Password</label>
                   <div className="relative">
-                    <input id="password" type={showPassword ? "text" : "password"} required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="At least 8 characters" className="h-11 w-full rounded-xl border border-[#d7cdbc] bg-white/70 pr-11 pl-3.5 text-sm text-ink transition-colors outline-none placeholder:text-[#9a9388] focus:border-[#b88a4c] focus:ring-[3px] focus:ring-[#c59b5e]/20" />
-                    <button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? "Hide password" : "Show password"} className="absolute inset-y-0 right-0 flex w-11 cursor-pointer items-center justify-center rounded-r-xl text-[#8f877b] transition-colors hover:text-[#242321]">
+                    <input id="password" type={showPassword ? "text" : "password"} required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="At least 8 characters" className="h-11 w-full rounded-xl border border-stone-300 bg-white/70 pr-11 pl-3.5 text-sm text-ink transition-colors outline-none placeholder:text-stone-400 focus:border-gold-600 focus:ring-[3px] focus:ring-gold-600/20" />
+                    <button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? "Hide password" : "Show password"} className="absolute inset-y-0 right-0 flex w-11 cursor-pointer items-center justify-center rounded-r-xl text-stone-500 transition-colors hover:text-stone-950">
                       {showPassword ? <IconEyeOff className="size-4" /> : <IconEye className="size-4" />}
                     </button>
                   </div>
                 </div>
 
-                {error && <p role="alert" className="flex items-start gap-2 rounded-xl border border-[#d98978]/35 bg-[#fff1ed] px-3.5 py-3 text-sm text-[#8d392d]"><IconAlertTriangle className="mt-0.5 size-4 shrink-0" /><span>{error}</span></p>}
+                {error && <p role="alert" className="flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-3 text-sm text-red-800 dark:text-red-300"><IconAlertTriangle className="mt-0.5 size-4 shrink-0" /><span>{error}</span></p>}
 
-                <button type="submit" disabled={busy} className="group inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#171a1b] text-sm font-semibold text-[#f8f1e6] shadow-[0_12px_26px_rgba(23,26,27,0.18)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#2b2e2e] focus-visible:ring-[3px] focus-visible:ring-[#c59b5e]/35 focus-visible:outline-none active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55">
+                <button type="submit" disabled={busy} className="group inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-stone-950 text-sm font-semibold text-cream shadow-[0_12px_26px_rgba(23,26,27,0.18)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-stone-900 focus-visible:ring-[3px] focus-visible:ring-gold-600/35 focus-visible:outline-none active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55">
                   {busy && <Spinner />}
                   {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
-                  {!busy && <span className="text-[#d3aa6b] transition-transform group-hover:translate-x-1">→</span>}
+                  {!busy && <span className="text-gold-400 transition-transform group-hover:translate-x-1">→</span>}
                 </button>
               </form>
 
-              <p className="mt-6 text-center text-sm text-[#756f66]">
+              <p className="mt-6 text-center text-sm text-stone-600">
                 {mode === "signup" ? "Already have an account?" : "New to Chaste?"}{" "}
-                <button type="button" onClick={toggleMode} className="cursor-pointer font-semibold text-[#946d35] underline-offset-4 hover:underline">{mode === "signup" ? "Sign in" : "Create an account"}</button>
+                <button type="button" onClick={toggleMode} className="cursor-pointer font-semibold text-gold-700 underline-offset-4 hover:underline">{mode === "signup" ? "Sign in" : "Create an account"}</button>
               </p>
                 </>
               )}
             </div>
 
-            <div className="mt-5 flex items-center justify-center gap-2 text-[10px] tracking-[0.12em] text-[#8c8478] uppercase"><span className="size-1.5 rounded-full bg-[#c39a5b]" /> Your data stays yours · Your authority stays yours</div>
+            <div className="mt-5 flex items-center justify-center gap-2 text-[10px] tracking-[0.12em] text-stone-500 uppercase"><span className="size-1.5 rounded-full bg-gold-500" /> Your data stays yours · Your authority stays yours</div>
           </div>
         </section>
       </main>

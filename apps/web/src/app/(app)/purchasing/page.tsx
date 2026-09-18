@@ -338,7 +338,7 @@ export default function PurchasingPage() {
                                       [r.id]: e.target.checked ? [...picked, v.id] : picked.filter((x) => x !== v.id),
                                     })
                                   }
-                                  className="accent-maroon-700"
+                                  className="accent-gold-700"
                                 />
                                 {v.name}
                               </label>
@@ -461,7 +461,7 @@ export default function PurchasingPage() {
               {vendors.length === 0 && !quickVendor.open && (
                 <span className="text-xs text-stone-500">
                   No vendors yet —
-                  <button type="button" className="ml-1 font-medium text-maroon-700 underline underline-offset-2" onClick={() => setQuickVendor({ open: true, name: "", email: "" })}>
+                  <button type="button" className="ml-1 font-medium text-gold-700 underline underline-offset-2" onClick={() => setQuickVendor({ open: true, name: "", email: "" })}>
                     create one here
                   </button>
                 </span>

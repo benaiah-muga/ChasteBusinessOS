@@ -172,7 +172,7 @@ export function HiringTab({ openings, applicants, busy, post, onChanged }: Hirin
               </thead>
               <tbody>
                 {openings.map((o) => (
-                  <tr key={o.id} className={o.id === activeId ? "bg-maroon-50/50" : undefined}>
+                  <tr key={o.id} className={o.id === activeId ? "bg-gold-50/50" : undefined}>
                     <td className="font-medium text-stone-900">
                       <button type="button" className="cursor-pointer text-left hover:underline" onClick={() => setSelected(o.id)}>
                         {o.title}

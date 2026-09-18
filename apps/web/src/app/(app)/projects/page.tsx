@@ -258,7 +258,7 @@ export default function ProjectsPage() {
                         className={cn(
                           "w-full rounded-lg border px-3 py-2 text-left text-sm transition",
                           p.id === selectedId
-                            ? "border-maroon-300 bg-maroon-50/60"
+                            ? "border-gold-300 bg-gold-50/60"
                             : "border-stone-200 hover:border-stone-300 hover:bg-stone-50",
                         )}
                       >

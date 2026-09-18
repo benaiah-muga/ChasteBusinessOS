@@ -22,7 +22,7 @@ interface TrajectoryEvent {
 }
 
 const roleCard: Record<string, string> = {
-  user: "bg-maroon-50/70 border-maroon-100",
+  user: "bg-gold-50/70 border-gold-100",
   assistant: "bg-white border-stone-200",
   tool_call: "bg-violet-50/70 border-violet-200",
   tool_result: "bg-amber-50/60 border-amber-200",
@@ -108,10 +108,10 @@ export default function SessionsPage() {
                 onClick={() => setActiveId(s.id)}
                 className={cn(
                   "block w-full rounded-lg px-3 py-2.5 text-left transition-colors duration-75",
-                  activeId === s.id ? "bg-maroon-50" : "hover:bg-stone-50",
+                  activeId === s.id ? "bg-gold-50" : "hover:bg-stone-50",
                 )}
               >
-                <p className={cn("truncate text-sm font-medium", activeId === s.id ? "text-maroon-900" : "text-stone-800")}>
+                <p className={cn("truncate text-sm font-medium", activeId === s.id ? "text-gold-900" : "text-stone-800")}>
                   {s.title ?? "Untitled session"}
                 </p>
                 <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-stone-400">

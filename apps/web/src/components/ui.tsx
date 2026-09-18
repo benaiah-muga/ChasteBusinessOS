@@ -70,7 +70,7 @@ export function CardTitle({ children, right }: { children: ReactNode; right?: Re
 
 /* ---------------------------------- Badge ---------------------------------- */
 
-export type BadgeTone = "neutral" | "maroon" | "green" | "amber" | "red" | "blue" | "violet";
+export type BadgeTone = "neutral" | "gold" | "green" | "amber" | "red" | "blue" | "violet";
 
 export function Badge({ tone = "neutral", children, className }: { tone?: BadgeTone; children: ReactNode; className?: string }) {
   return <span className={cn("badge", `badge-${tone}`, className)}>{children}</span>;
@@ -243,7 +243,7 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-stone-300 bg-white/60 px-6 py-14 text-center">
-      <div className="mb-3 flex size-11 items-center justify-center rounded-xl bg-maroon-50 text-maroon-700 [&_svg]:size-5">
+      <div className="mb-3 flex size-11 items-center justify-center rounded-xl bg-gold-50 text-gold-700 [&_svg]:size-5">
         {icon}
       </div>
       <p className="text-sm font-medium text-stone-800">{title}</p>
@@ -293,7 +293,7 @@ export function StatCard({
 }) {
   const tones = {
     default: "card",
-    accent: "border-maroon-200 bg-maroon-50/60",
+    accent: "border-gold-200 bg-gold-50/60",
     warn: "border-amber-200 bg-amber-50/60",
     danger: "border-red-200 bg-red-50/60",
     success: "border-emerald-200 bg-emerald-50/60",
@@ -442,7 +442,7 @@ export function Switch({
       <span
         className={cn(
           "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-150",
-          checked ? "bg-maroon-700" : "bg-stone-300",
+          checked ? "bg-gold-700" : "bg-stone-300",
         )}
       >
         <span

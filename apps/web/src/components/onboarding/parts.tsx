@@ -86,8 +86,8 @@ export function StepRail({ steps, current }: { steps: RailStep[]; current: numbe
               <span
                 className={cn(
                   "flex size-5 items-center justify-center rounded-full text-[11px] font-semibold",
-                  active && "bg-[#c49a5a] text-[#111416]",
-                  done && "bg-[#c49a5a]/20 text-[#85632f]",
+                  active && "bg-gold-500 text-stone-950",
+                  done && "bg-gold-500/20 text-gold-800",
                   !active && !done && "bg-sand-200 text-ink-muted",
                 )}
               >
@@ -114,13 +114,13 @@ export function ProgressBar({
 }) {
   const safeValue = Math.max(0, Math.min(100, value));
   return (
-    <div className="rounded-2xl border border-[#c7bca9] bg-[#fbf8f1] px-4 py-3 shadow-[0_14px_38px_rgba(31,25,17,0.06)] sm:px-5">
+    <div className="rounded-2xl border border-stone-300 bg-cream px-4 py-3 shadow-[0_14px_38px_rgba(31,25,17,0.06)] sm:px-5">
       <div className="flex items-end justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-[10px] font-bold tracking-[0.18em] text-[#9a7135] uppercase">{status}</p>
+          <p className="text-[10px] font-bold tracking-[0.18em] text-gold-700 uppercase">{status}</p>
           <p className="mt-1 truncate text-sm font-semibold text-ink">{label}</p>
         </div>
-        <output className="shrink-0 text-2xl font-semibold tracking-[-0.06em] text-[#111416]" aria-live="polite">
+        <output className="shrink-0 text-2xl font-semibold tracking-[-0.06em] text-stone-950" aria-live="polite">
           {Math.round(safeValue)}%
         </output>
       </div>
@@ -228,13 +228,13 @@ export function RecoverBlock({
       role={tone === "error" ? "alert" : "status"}
       className={cn(
         "rounded-lg border px-4 py-3.5",
-        tone === "error" ? "border-red-200 bg-red-50" : "border-gold-400/40 bg-gold-500/8",
+        tone === "error" ? "border-red-500/30 bg-red-500/10" : "border-gold-600/40 bg-gold-500/10",
       )}
     >
-      <p className={cn("text-sm font-semibold", tone === "error" ? "text-red-900" : "text-gold-700")}>
+      <p className={cn("text-sm font-semibold", tone === "error" ? "text-red-800 dark:text-red-300" : "text-gold-800 dark:text-gold-700")}>
         {title}
       </p>
-      <div className={cn("mt-1 text-[13px] leading-relaxed", tone === "error" ? "text-red-800" : "text-ink-muted")}>
+      <div className={cn("mt-1 text-[13px] leading-relaxed", tone === "error" ? "text-red-800/90 dark:text-red-300/90" : "text-ink-muted")}>
         {children}
       </div>
       {actions && <div className="mt-3 flex flex-wrap gap-2">{actions}</div>}
@@ -243,10 +243,10 @@ export function RecoverBlock({
 }
 
 export const primaryButtonClass =
-  "group inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#171a1b] px-4 text-sm font-semibold text-[#f8f1e6] shadow-[0_10px_24px_rgba(23,26,27,0.14)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#2b2e2e] focus-visible:ring-[3px] focus-visible:ring-[#c59b5e]/35 focus-visible:outline-none active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55";
+  "group inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-stone-950 px-4 text-sm font-semibold text-cream shadow-[0_10px_24px_rgba(23,26,27,0.14)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-stone-900 focus-visible:ring-[3px] focus-visible:ring-gold-600/35 focus-visible:outline-none active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55";
 
 export const secondaryButtonClass =
-  "inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#cfc1ae] bg-[#fffdf7] px-4 text-sm font-medium text-ink transition-all hover:-translate-y-0.5 hover:bg-[#f4ede1] focus-visible:ring-[3px] focus-visible:ring-[#c59b5e]/25 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-stone-300 bg-cream px-4 text-sm font-medium text-ink transition-all hover:-translate-y-0.5 hover:bg-stone-100 focus-visible:ring-[3px] focus-visible:ring-gold-600/25 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55";
 
 export const ghostButtonClass =
   "inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium text-ink-muted transition-colors hover:text-ink focus-visible:ring-[3px] focus-visible:ring-gold-500/25 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-55";

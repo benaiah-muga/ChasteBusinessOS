@@ -79,7 +79,7 @@ export function NotificationsBell({ align = "right" }: { align?: "left" | "right
           Notifications
         </span>
         {unread > 0 && (
-          <span className="absolute top-0.5 right-0.5 flex size-3.5 items-center justify-center rounded-full bg-maroon-700 text-[8px] font-bold text-white">
+          <span className="absolute top-0.5 right-0.5 flex size-3.5 items-center justify-center rounded-full bg-gold-700 text-[8px] font-bold text-white">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
@@ -110,7 +110,7 @@ export function NotificationsBell({ align = "right" }: { align?: "left" | "right
                     onClick={() => !n.readAt && void markRead(n.id)}
                     className={cn(
                       "block cursor-pointer px-4 py-2.5 transition-colors hover:bg-stone-50",
-                      !n.readAt && "bg-maroon-50/50",
+                      !n.readAt && "bg-gold-50/50",
                     )}
                   >
                     <p className={cn("text-[13px] leading-snug", !n.readAt ? "font-medium text-stone-900" : "text-stone-600")}>

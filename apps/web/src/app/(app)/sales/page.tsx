@@ -397,7 +397,7 @@ export default function SalesPage() {
               {activeCustomers.length === 0 && !quickCustomer.open && (
                 <span className="text-xs text-stone-500">
                   No customers yet —
-                  <button type="button" className="ml-1 font-medium text-maroon-700 underline underline-offset-2" onClick={() => setQuickCustomer({ open: true, name: "", email: "" })}>
+                  <button type="button" className="ml-1 font-medium text-gold-700 underline underline-offset-2" onClick={() => setQuickCustomer({ open: true, name: "", email: "" })}>
                     create one here
                   </button>
                 </span>

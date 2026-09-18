@@ -115,7 +115,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
           )}
         </span>
         {!!opts?.badge && opts.badge > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full bg-maroon-700 px-1 text-[9px] leading-4 font-bold text-white">
+          <span className="absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full bg-gold-700 px-1 text-[9px] leading-4 font-bold text-white">
             {opts.badge > 9 ? "9+" : opts.badge}
           </span>
         )}
@@ -165,7 +165,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
         href="/"
         aria-label={`Home · ${orgName || "Chaste"}`}
         aria-current={pathname === "/" ? "page" : undefined}
-        className="rail-btn group mb-2 bg-maroon-950 text-[15px] font-bold text-white shadow-xs transition-transform duration-150 hover:scale-105 hover:bg-maroon-900 hover:text-white"
+        className="rail-btn group mb-2 bg-gold-950 text-[15px] font-bold text-white shadow-xs transition-transform duration-150 hover:scale-105 hover:bg-gold-900 hover:text-white"
       >
         C
         <span aria-hidden="true" className="rail-tip">
@@ -272,7 +272,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
       <div className="min-h-screen">
         <a
           href="#main"
-          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-maroon-700 focus:px-3 focus:py-1.5 focus:text-sm focus:text-white"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-gold-700 focus:px-3 focus:py-1.5 focus:text-sm focus:text-white"
         >
           Skip to content
         </a>
@@ -285,7 +285,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
             <Link
               href="/"
               aria-label="Home"
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-maroon-950 text-sm font-bold text-white"
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gold-950 text-sm font-bold text-white"
             >
               C
             </Link>
@@ -304,7 +304,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
             >
               <IconInbox className="size-5" />
               {pendingApprovals > 0 && (
-                <span className="absolute top-0.5 right-0.5 flex size-3.5 items-center justify-center rounded-full bg-maroon-700 text-[8px] font-bold text-white">
+                <span className="absolute top-0.5 right-0.5 flex size-3.5 items-center justify-center rounded-full bg-gold-700 text-[8px] font-bold text-white">
                   {pendingApprovals > 9 ? "9+" : pendingApprovals}
                 </span>
               )}
@@ -342,13 +342,13 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "relative flex flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors duration-100",
-                    active ? "text-maroon-800" : "text-stone-400 hover:text-stone-600",
+                    active ? "text-gold-800" : "text-stone-400 hover:text-stone-600",
                   )}
                 >
                   <NavIcon className="size-5" />
                   {label}
                   {active && (
-                    <span aria-hidden="true" className="absolute top-0 h-0.5 w-8 rounded-full bg-maroon-700" />
+                    <span aria-hidden="true" className="absolute top-0 h-0.5 w-8 rounded-full bg-gold-700" />
                   )}
                 </Link>
               );

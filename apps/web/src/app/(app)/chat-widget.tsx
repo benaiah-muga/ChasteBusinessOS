@@ -151,7 +151,7 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
         rows={1}
         aria-label="Message your workmate"
         placeholder={busy ? "Queue a message, it sends when the agent finishes…" : "Message…"}
-        className="max-h-28 min-w-0 flex-1 resize-none rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-maroon-500"
+        className="max-h-28 min-w-0 flex-1 resize-none rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-gold-500"
       />
       <div className="mt-1.5 flex items-center justify-between gap-2 pl-1">
         <span className="flex items-center gap-1.5 text-[10px] text-stone-400">
@@ -182,7 +182,7 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
             type="submit"
             disabled={!input.trim()}
             aria-label="Send message"
-            className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-maroon-700 text-white transition-colors duration-150 hover:bg-maroon-800 disabled:pointer-events-none disabled:opacity-35"
+            className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-gold-700 text-white transition-colors duration-150 hover:bg-gold-800 disabled:pointer-events-none disabled:opacity-35"
           >
             <IconArrowRight className="size-4" />
           </button>
@@ -197,7 +197,7 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
       <div className="flex items-center gap-2.5 px-4 pt-3 pb-2">
         <span
           aria-hidden="true"
-          className="relative flex size-7 shrink-0 items-center justify-center rounded-lg bg-maroon-950 text-white shadow-xs [&_svg]:size-3.5"
+          className="relative flex size-7 shrink-0 items-center justify-center rounded-lg bg-gold-950 text-white shadow-xs [&_svg]:size-3.5"
         >
           <IconSparkle className="size-3.5" />
           {busy && (
@@ -320,7 +320,7 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
         onClick={() => chatDock.set("open")}
         aria-label="Open chat"
         title="Chat with your workmate"
-        className={`fixed right-5 bottom-20 lg:bottom-5 ${DOCK_Z} flex size-14 cursor-pointer items-center justify-center rounded-full bg-maroon-800 text-white shadow-xl ring-1 ring-black/10 transition-transform duration-150 hover:scale-105 hover:bg-maroon-900`}
+        className={`fixed right-5 bottom-20 lg:bottom-5 ${DOCK_Z} flex size-14 cursor-pointer items-center justify-center rounded-full bg-gold-800 text-white shadow-xl ring-1 ring-black/10 transition-transform duration-150 hover:scale-105 hover:bg-gold-900`}
       >
         <IconSparkle className="size-6" />
         {busy && <span aria-hidden="true" className="absolute -top-0.5 -right-0.5 size-3.5 animate-pulse rounded-full border-2 border-white bg-emerald-500" />}
@@ -336,9 +336,9 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
           e.preventDefault();
           submit();
         }}
-        className="pointer-events-auto flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-stone-200 bg-white/90 p-2 pl-3 shadow-2xl ring-1 ring-black/5 backdrop-blur-md transition-all duration-150 focus-within:border-maroon-400 focus-within:shadow-xl focus-within:ring-[4px] focus-within:ring-maroon-600/10"
+        className="pointer-events-auto flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-stone-200 bg-white/90 p-2 pl-3 shadow-2xl ring-1 ring-black/5 backdrop-blur-md transition-all duration-150 focus-within:border-gold-400 focus-within:shadow-xl focus-within:ring-[4px] focus-within:ring-gold-600/10"
       >
-        <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-maroon-800 text-white shadow-xs [&_svg]:size-4">
+        <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gold-800 text-white shadow-xs [&_svg]:size-4">
           <IconSparkle className="size-4" />
         </span>
         <textarea
@@ -360,7 +360,7 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
             type="submit"
             aria-label={busy ? "Queue message" : "Send message"}
             title={busy ? "The agent is working: this message will queue" : "Send message"}
-            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-maroon-700 text-white transition-colors duration-150 hover:bg-maroon-800"
+            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-gold-700 text-white transition-colors duration-150 hover:bg-gold-800"
           >
             <IconArrowRight className="size-4" />
           </button>
@@ -468,7 +468,7 @@ function SessionHistory() {
       {rows && rows.length > 0 && (
         <p className="px-3 pt-3 pb-1 text-[11px] leading-relaxed text-stone-400">
           Showing the last {rows.length}. Full trajectories, every tool call and decision, live in{" "}
-          <a href="/sessions" className="font-medium text-maroon-800 hover:underline">
+          <a href="/sessions" className="font-medium text-gold-800 hover:underline">
             Sessions
           </a>
           .
@@ -515,7 +515,7 @@ function ConsolePreferences({ onDone }: { onDone: () => void }) {
               className={cn(
                 "cursor-pointer rounded-lg border px-3 py-2 text-[13px] font-medium transition-all duration-150",
                 dockMode === id
-                  ? "border-maroon-500 bg-maroon-50/60 text-maroon-900"
+                  ? "border-gold-500 bg-gold-50/60 text-gold-900"
                   : "border-stone-200 text-stone-600 hover:border-stone-300 hover:bg-stone-50",
               )}
             >

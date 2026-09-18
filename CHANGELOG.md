@@ -11,6 +11,19 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+- **One brand identity across the product (ADR-0054).** The gateway's warm
+  paper + inked band + burnished gold palette is now the product-wide system:
+  `stone-*` re-pointed to warm paper greys, the accent ramp renamed and
+  re-pointed to `gold-*` (the `maroon-*` name is retired), and the four-theme
+  picker removed from settings, the command palette and the rail — Light,
+  Dark and System remain. The inked `#111416` band (masthead, login hero,
+  setup header, support widget) is a brand constant in both modes; the auth
+  pages are tokenized and drop the `.auth-surface` light-mode pin, so the
+  gateway now follows the mode like every other page. Primary buttons are the
+  gateway's ink style (inverting in dark mode), and `dark:` utilities now
+  follow the attribute-based mode via a custom variant.
+
 ### Fixed
 - **Sign-up ended in a hung spinner with no explanation.** Under the
   verified-binding profile (N03) sign-up creates the account but skips

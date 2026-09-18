@@ -550,7 +550,7 @@ function OverviewTab({
         <div>
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="text-sm font-semibold text-stone-800">Who owes me</h2>
-            <button type="button" onClick={() => onTabChange("receivables")} className="cursor-pointer text-[13px] font-medium text-maroon-800 hover:underline">
+            <button type="button" onClick={() => onTabChange("receivables")} className="cursor-pointer text-[13px] font-medium text-gold-800 hover:underline">
               All receivables →
             </button>
           </div>
@@ -571,7 +571,7 @@ function OverviewTab({
         <div>
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="text-sm font-semibold text-stone-800">Who I owe</h2>
-            <button type="button" onClick={() => onTabChange("payables")} className="cursor-pointer text-[13px] font-medium text-maroon-800 hover:underline">
+            <button type="button" onClick={() => onTabChange("payables")} className="cursor-pointer text-[13px] font-medium text-gold-800 hover:underline">
               All bills →
             </button>
           </div>
@@ -597,7 +597,7 @@ function OverviewTab({
       <section aria-label="Recent postings">
         <div className="mb-3 flex items-baseline justify-between">
           <h2 className="text-sm font-semibold text-stone-800">Recent postings</h2>
-          <button type="button" onClick={() => onTabChange("journal")} className="cursor-pointer inline-flex items-center gap-0.5 text-[13px] font-medium text-maroon-800 hover:underline">
+          <button type="button" onClick={() => onTabChange("journal")} className="cursor-pointer inline-flex items-center gap-0.5 text-[13px] font-medium text-gold-800 hover:underline">
             Full journal
             <IconArrowRight className="size-3" />
           </button>

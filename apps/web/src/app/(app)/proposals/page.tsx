@@ -87,7 +87,7 @@ function AgentSetupCard() {
   return (
     <div className="mb-6 rounded-xl border border-stone-200 bg-white p-5 shadow-xs">
       <h2 className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-        <IconSparkle className="size-4 text-maroon-700" />
+        <IconSparkle className="size-4 text-gold-700" />
         Connect a coding agent to use Creator mode
       </h2>
       <p className="mt-1 max-w-3xl text-sm leading-relaxed text-stone-500">
@@ -97,7 +97,7 @@ function AgentSetupCard() {
       </p>
       <ol className="mt-3 space-y-2.5 text-sm">
         <li className="flex flex-wrap items-center gap-2">
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-maroon-100 text-[11px] font-bold text-maroon-800">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-gold-100 text-[11px] font-bold text-gold-800">
             1
           </span>
           <span className="text-stone-600">Install {first?.label ?? "an agent"}:</span>
@@ -110,19 +110,19 @@ function AgentSetupCard() {
                 setTimeout(() => setCopied(false), 1600);
               });
             }}
-            className="cursor-pointer text-xs font-medium text-maroon-700 underline underline-offset-2"
+            className="cursor-pointer text-xs font-medium text-gold-700 underline underline-offset-2"
           >
             {copied ? "copied ✓" : "copy"}
           </button>
         </li>
         <li className="flex flex-wrap items-start gap-2">
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-maroon-100 text-[11px] font-bold text-maroon-800">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-gold-100 text-[11px] font-bold text-gold-800">
             2
           </span>
           <span className="text-stone-600">{first?.authNote}</span>
         </li>
         <li className="flex flex-wrap items-center gap-2">
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-maroon-100 text-[11px] font-bold text-maroon-800">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-gold-100 text-[11px] font-bold text-gold-800">
             3
           </span>
           <Button size="sm" loading={checking} onClick={() => void check()}>
@@ -291,7 +291,7 @@ export default function ProposalsPage() {
                 <button
                   type="button"
                   onClick={() => setOpenId(p.id)}
-                  className="cursor-pointer text-xs font-medium text-maroon-700 underline-offset-2 hover:underline"
+                  className="cursor-pointer text-xs font-medium text-gold-700 underline-offset-2 hover:underline"
                 >
                   Show diff &amp; evidence
                 </button>

@@ -117,7 +117,7 @@ export function ModulesManager() {
                 disabled={busy}
                 onClick={() => toggle(m.id)}
                 className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-150 ${
-                  on ? "bg-maroon-700" : "bg-stone-300"
+                  on ? "bg-gold-700" : "bg-stone-300"
                 }`}
               >
                 <span
@@ -125,7 +125,7 @@ export function ModulesManager() {
                     on ? "left-[22px]" : "left-0.5"
                   }`}
                 >
-                  {on && <IconCheck className="size-3 text-maroon-700" />}
+                  {on && <IconCheck className="size-3 text-gold-700" />}
                 </span>
               </button>
             </li>

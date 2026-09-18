@@ -27,7 +27,7 @@ export function PortalLoading() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
       <div className="mb-8 flex items-center gap-2 text-stone-400">
-        <IconSparkle className="size-4 text-maroon-800" />
+        <IconSparkle className="size-4 text-gold-800" />
         <span className="text-sm font-medium tracking-tight text-stone-600">Chaste · Invoice portal</span>
       </div>
       <div className="animate-pulse space-y-3 rounded-xl border border-stone-200 bg-white p-6">
@@ -62,7 +62,7 @@ export function PortalInvoiceContent({ params }: { params: Promise<{ token: stri
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
       <div className="mb-8 flex items-center gap-2 text-stone-400">
-        <IconSparkle className="size-4 text-maroon-800" />
+        <IconSparkle className="size-4 text-gold-800" />
         <span className="text-sm font-medium tracking-tight text-stone-600">Chaste · Invoice portal</span>
       </div>
 

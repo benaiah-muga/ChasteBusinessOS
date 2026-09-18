@@ -476,7 +476,7 @@ function SetupChecklist({
       <ol className="mt-1.5 divide-y divide-stone-100">
         {visible.map((item) => (
           <li key={item.id} className="group flex items-center gap-3 py-1.5 text-sm first:pt-0.5 last:pb-0">
-            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-maroon-600" />
+            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-gold-600" />
             <span className="min-w-0 flex-1 truncate">
               <span className="font-medium text-stone-900">{item.title}</span>
               <span className="text-xs text-stone-400"> — {item.why}</span>
@@ -484,7 +484,7 @@ function SetupChecklist({
             <span className="flex shrink-0 items-center gap-2">
               <Link
                 href={item.href}
-                className="inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-maroon-800 hover:underline"
+                className="inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-gold-800 hover:underline"
               >
                 Take me there
                 <IconArrowRight className="size-3 transition-transform duration-150 group-hover:translate-x-0.5" />
@@ -507,7 +507,7 @@ function SetupChecklist({
           type="button"
           onClick={() => setExpanded(true)}
           aria-expanded={expanded}
-          className="mt-1.5 cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-maroon-800"
+          className="mt-1.5 cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-gold-800"
         >
           Show {hidden} more step{hidden === 1 ? "" : "s"} ↓
         </button>
@@ -517,7 +517,7 @@ function SetupChecklist({
           type="button"
           onClick={() => setExpanded(false)}
           aria-expanded={expanded}
-          className="mt-1.5 block cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-maroon-800"
+          className="mt-1.5 block cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-gold-800"
         >
           Show fewer steps ↑
         </button>
@@ -661,7 +661,7 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
         <p className="figure-label">
           Needs you
           {count > 0 && (
-            <span className="tnum ml-2 inline-flex -translate-y-px items-center rounded-full bg-maroon-100 px-2 py-0.5 text-[11px] text-maroon-800">
+            <span className="tnum ml-2 inline-flex -translate-y-px items-center rounded-full bg-gold-100 px-2 py-0.5 text-[11px] text-gold-800">
               {count}
             </span>
           )}
@@ -685,7 +685,7 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
               <Link href={item.href} className="group flex items-center gap-3 px-4 py-2.5 transition-colors duration-100 hover:bg-stone-50">
                 <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${dot[item.severity]}`} />
                 <span className="min-w-0 flex-1 text-sm leading-relaxed text-stone-700">{item.text}</span>
-                <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-medium whitespace-nowrap text-maroon-800">
+                <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-medium whitespace-nowrap text-gold-800">
                   {item.cta}
                   <IconArrowRight className="size-3 transition-transform duration-150 group-hover:translate-x-0.5" />
                 </span>
@@ -705,7 +705,7 @@ function WorkingCapital({ data }: { data: DashboardPayload }) {
     <aside aria-label="Working capital" className="rise" style={{ "--rise-delay": "100ms" } as React.CSSProperties}>
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <p className="figure-label">Working capital</p>
-        <Link href="/accounting" className="text-xs font-medium text-maroon-800 hover:underline">
+        <Link href="/accounting" className="text-xs font-medium text-gold-800 hover:underline">
           Open books →
         </Link>
       </div>
@@ -757,9 +757,9 @@ function FunnelBar({ stages }: { stages: DashboardPayload["pipeline"]["stages"] 
   const total = Math.max(1, stages.reduce((s, x) => s + x.count, 0));
   const tones: Record<string, string> = {
     lead: "bg-stone-300",
-    qualified: "bg-maroon-300",
-    proposal: "bg-maroon-500",
-    negotiation: "bg-maroon-700",
+    qualified: "bg-gold-300",
+    proposal: "bg-gold-500",
+    negotiation: "bg-gold-700",
     won: "bg-emerald-600",
     lost: "bg-red-300",
   };
@@ -848,7 +848,7 @@ function ActivityFeed({ activity, embedded = false }: { activity: DashboardPaylo
     >
       <div className="flex items-baseline justify-between gap-3">
         <p className="figure-label">Ledger · recent</p>
-        <Link href="/ledger" className="text-xs font-medium text-maroon-800 hover:underline">
+        <Link href="/ledger" className="text-xs font-medium text-gold-800 hover:underline">
           View all →
         </Link>
       </div>

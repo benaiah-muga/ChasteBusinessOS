@@ -365,7 +365,7 @@ export function OnboardingWizard({ email }: { email: string }) {
   })();
 
   return (
-    <div className="auth-surface auth-surface--paper min-h-screen bg-[#f4efe6] font-display text-ink">
+    <div className="min-h-screen bg-canvas font-display text-ink">
       <OnboardingHeader email={email} />
 
       <main className="mx-auto flex max-w-[1440px] flex-col px-5 py-5 sm:px-8 lg:py-6">
@@ -376,7 +376,7 @@ export function OnboardingWizard({ email }: { email: string }) {
 
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.82fr)] lg:items-start">
           {/* ── The step ────────────────────────────────────────────────── */}
-          <section className="rounded-[1.5rem] border border-[#d7cdbc] bg-[#fffdf7] p-5 shadow-[0_24px_70px_rgba(59,46,26,0.09)] ring-1 ring-white/70 sm:p-7">
+          <section className="rounded-[1.5rem] border border-stone-300 bg-cream p-5 shadow-[0_24px_70px_rgba(59,46,26,0.09)] ring-1 ring-white/70 sm:p-7">
             {failure && (
               <div className="mb-5">
                 <RecoverBlock title={failure.title}>
@@ -583,8 +583,8 @@ export function OnboardingWizard({ email }: { email: string }) {
 
                 {/* Creation overlay: the wait is real, so show it working. */}
                 {creating && (
-                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-[1.5rem] bg-[#fffdf7]/96 px-6 backdrop-blur-sm">
-                    <Spinner className="size-7 text-[#a2783d]" />
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-[1.5rem] bg-cream/96 px-6 backdrop-blur-sm">
+                    <Spinner className="size-7 text-gold-700" />
                     <div className="mt-5 w-full max-w-sm">
                       <ProgressBar value={setupPercent} label={progressLabel} status="Opening your workspace" />
                     </div>
@@ -987,7 +987,7 @@ export function OnboardingWizard({ email }: { email: string }) {
           </section>
 
           {/* ── Context column ──────────────────────────────────────────── */}
-          <aside className="rounded-[1.5rem] border border-[#d7cdbc] bg-[#eae1d3] p-5 ring-1 ring-white/50 lg:sticky lg:top-6">
+          <aside className="rounded-[1.5rem] border border-stone-300 bg-sand-200 p-5 ring-1 ring-white/50 lg:sticky lg:top-6">
             <p className="text-[11px] font-bold tracking-[0.1em] text-gold-600 uppercase">{aside.eyebrow}</p>
             <h2 className="mt-2 text-[19px] leading-snug font-semibold text-ink">{aside.title}</h2>
             <p className="mt-2.5 text-[13px] leading-relaxed text-ink-muted">{aside.body}</p>
@@ -1002,7 +1002,7 @@ export function OnboardingWizard({ email }: { email: string }) {
               ))}
             </ul>
 
-            <div className="mt-5 border-t border-[#cfc1ae] pt-4">
+            <div className="mt-5 border-t border-stone-300 pt-4">
               <p className="text-[12px] leading-relaxed text-ink-muted">
                 Stuck? Everything on the left is optional except the business name and description.
                 You can leave and come back — your progress is saved.

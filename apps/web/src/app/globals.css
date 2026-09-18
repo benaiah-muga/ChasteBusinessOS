@@ -1,16 +1,24 @@
 @import "tailwindcss";
 
+/* `dark:` utilities follow our data-mode attribute (system-resolved), not the
+   OS media query, so hand-tinted colors can flip inside the mode system. */
+@custom-variant dark ([data-mode="dark"] &);
+
 /*
  * Chaste Business OS — design tokens.
  *
- * Every surface in the product draws its character from exactly two scales:
- *   stone-*  → the neutral ramp (paper, ink, hairlines)
- *   maroon-* → the accent ramp (the one color the product owns)
+ * One brand identity: warm paper (sand), an inked band (#111416), and a
+ * burnished gold accent — the palette first shipped on the auth gateway and
+ * setup wizard, now the product-wide system (see ADR-0031).
  *
- * Themes re-declare these two ramps on html[data-theme], so the entire app —
- * including pages still written with raw utility classes — re-skins instantly
- * and consistently. Semantic colors (emerald/red/amber) stay fixed: states
- * must mean the same thing in every theme.
+ * Every surface draws from exactly two scales:
+ *   stone-* → the neutral ramp (paper, ink, hairlines), warm greys
+ *   gold-*  → the accent ramp (the one color the product owns)
+ * with `sand-*`/`cream` as the auth-grade paper surfaces and `ink`/`ink-muted`
+ * as text tokens. Themes re-declare nothing; only `[data-mode]` flips the
+ * ramps, so the entire app re-skins between light and dark in one place.
+ * Semantic colors (emerald/red/amber) stay fixed: states must mean the same
+ * thing in both modes.
  */
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
@@ -18,51 +26,40 @@
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
 
-  /* Theme: Chaste (default). Brick red #9B1313 · burgundy #38000A on warm paper. */
-  --color-stone-50: #faf9f8;
-  --color-stone-100: #f4f2f0;
-  --color-stone-200: #e7e4e0;
-  --color-stone-300: #d5d0ca;
-  --color-stone-400: #ada69d;
-  --color-stone-500: #837b71;
-  --color-stone-600: #665e55;
-  --color-stone-700: #524b43;
-  --color-stone-800: #423c36;
-  --color-stone-900: #36312c;
-  --color-stone-950: #211d1a;
+  /* Neutral ramp: warm paper greys anchored at the sand canvas. */
+  --color-stone-50: #faf8f2;
+  --color-stone-100: #f4efe6;
+  --color-stone-200: #e7dfd0;
+  --color-stone-300: #d7cdbc;
+  --color-stone-400: #a89d8c;
+  --color-stone-500: #8f877b;
+  --color-stone-600: #756f66;
+  --color-stone-700: #5c564e;
+  --color-stone-800: #4a4640;
+  --color-stone-900: #33302b;
+  --color-stone-950: #211f1a;
 
-  --color-maroon-50: #fbf3f2;
-  --color-maroon-100: #f6e3e1;
-  --color-maroon-200: #eec6c1;
-  --color-maroon-300: #e09d95;
-  --color-maroon-400: #cd6a61;
-  --color-maroon-500: #b53c34;
-  --color-maroon-600: #9b1313;
-  --color-maroon-700: #821110;
-  --color-maroon-800: #5d0d10;
-  --color-maroon-900: #43000b;
-  --color-maroon-950: #38000a;
-
-  --color-canvas: #faf9f8;
-
-  /*
-   * Auth & onboarding surface: warm beige paper, golden-olive accent.
-   *
-   * Deliberately separate from the stone-/maroon- ramps above. The rest of
-   * the product is a burgundy ledger; the auth surface is warm sand, and
-   * keeping two scales means restyling one can never disturb the other.
-   */
-  --color-sand-50: #faf6ed;
-  --color-sand-100: #f8f2e4;
-  --color-sand-200: #efe7d3;
-  --color-sand-300: #e3d8be;
-  --color-cream: #fffdf7;
-
+  /* Accent ramp: burnished gold, stepped from the gateway's #c19a32. */
+  --color-gold-50: #faf6ed;
+  --color-gold-100: #f5ecd5;
+  --color-gold-200: #ecd9a8;
   --color-gold-300: #e3c867;
   --color-gold-400: #d2ae45;
   --color-gold-500: #c19a32;
   --color-gold-600: #b8902a;
   --color-gold-700: #96761f;
+  --color-gold-800: #7a5f19;
+  --color-gold-900: #5f4a13;
+  --color-gold-950: #3a2d0a;
+
+  --color-canvas: #f4efe6;
+
+  /* Auth-grade paper surfaces (also used across the wizard). */
+  --color-sand-50: #faf6ed;
+  --color-sand-100: #f8f2e4;
+  --color-sand-200: #efe7d3;
+  --color-sand-300: #e3d8be;
+  --color-cream: #fffdf7;
 
   --color-ink: #1a1a1a;
   --color-ink-muted: #555555;
@@ -72,145 +69,22 @@
     sans-serif;
 }
 
-/* Theme: Graphite. Ink-blue accent on cool slate neutrals. Quiet, technical. */
-[data-theme="graphite"] {
-  --color-stone-50: #f8f9fa;
-  --color-stone-100: #f1f3f5;
-  --color-stone-200: #e4e7eb;
-  --color-stone-300: #ced3da;
-  --color-stone-400: #a6adb8;
-  --color-stone-500: #7d8590;
-  --color-stone-600: #606974;
-  --color-stone-700: #4c545e;
-  --color-stone-800: #3d444d;
-  --color-stone-900: #323841;
-  --color-stone-950: #1e2228;
-
-  --color-maroon-50: #f2f6fa;
-  --color-maroon-100: #e4edf5;
-  --color-maroon-200: #c2d9ea;
-  --color-maroon-300: #90bcd8;
-  --color-maroon-400: #5696bf;
-  --color-maroon-500: #33729e;
-  --color-maroon-600: #265a80;
-  --color-maroon-700: #214967;
-  --color-maroon-800: #1c3b53;
-  --color-maroon-900: #183245;
-  --color-maroon-950: #12222f;
-
-  --color-canvas: #f8f9fb;
-}
-
-/* Theme: Verdant. Deep forest accent on sage-tinted neutrals. Grounded, organic. */
-[data-theme="verdant"] {
-  --color-stone-50: #f8faf7;
-  --color-stone-100: #f1f4ee;
-  --color-stone-200: #e3e8df;
-  --color-stone-300: #cdd5c8;
-  --color-stone-400: #a4ae9f;
-  --color-stone-500: #7c8676;
-  --color-stone-600: #5f685a;
-  --color-stone-700: #4b5347;
-  --color-stone-800: #3d443a;
-  --color-stone-900: #32382e;
-  --color-stone-950: #1e231c;
-
-  --color-maroon-50: #f0f7f1;
-  --color-maroon-100: #deecdf;
-  --color-maroon-200: #bdd6c1;
-  --color-maroon-300: #8cba94;
-  --color-maroon-400: #549761;
-  --color-maroon-500: #357a44;
-  --color-maroon-600: #276135;
-  --color-maroon-700: #22502d;
-  --color-maroon-800: #1d4126;
-  --color-maroon-900: #193721;
-  --color-maroon-950: #102417;
-
-  --color-canvas: #f8faf6;
-}
-
-/* Theme: Meridian. Burnished bronze accent on warm sand neutrals. Ledger heritage. */
-[data-theme="meridian"] {
-  --color-stone-50: #faf9f5;
-  --color-stone-100: #f3f1e9;
-  --color-stone-200: #e7e3d6;
-  --color-stone-300: #d5cebc;
-  --color-stone-400: #aca38c;
-  --color-stone-500: #847a63;
-  --color-stone-600: #675e4a;
-  --color-stone-700: #524b3b;
-  --color-stone-800: #433d30;
-  --color-stone-900: #373228;
-  --color-stone-950: #221e18;
-
-  --color-maroon-50: #faf6ec;
-  --color-maroon-100: #f3ead6;
-  --color-maroon-200: #e7d3ac;
-  --color-maroon-300: #d5b577;
-  --color-maroon-400: #c09243;
-  --color-maroon-500: #a67a28;
-  --color-maroon-600: #87621e;
-  --color-maroon-700: #6f501e;
-  --color-maroon-800: #5c411f;
-  --color-maroon-900: #4d371e;
-  --color-maroon-950: #2f2112;
-
-  --color-canvas: #fbf9f4;
-}
-
 /*
- * The band: the deep ledger-cover color used by the dashboard masthead.
- * Always a dark, inked surface in both modes — light themes get the theme's
- * deepest accent, dark themes get an elevated near-black tinted by it.
+ * The band: the inked cover color used by the dashboard masthead, the login
+ * hero, and the setup header. A brand constant — the same near-black warm
+ * ink in both modes, so the product reads as one object.
  */
 :root {
-  --band: #38000a;
-  --band-ink: #fbeee8;
-  --band-accent: #e47a60;
-}
-[data-theme="graphite"] {
-  --band: #12222f;
-  --band-ink: #e9f3fb;
-  --band-accent: #88b8d1;
-}
-[data-theme="verdant"] {
-  --band: #102417;
-  --band-ink: #eaf4ec;
-  --band-accent: #94b98f;
-}
-[data-theme="meridian"] {
-  --band: #2a1e10;
-  --band-ink: #f6ecd0;
-  --band-accent: #d2b25e;
-}
-[data-mode="dark"] {
-  --band: #200409;
-  --band-ink: #f3cab9;
-  --band-accent: #e47a60;
-}
-[data-theme="graphite"][data-mode="dark"] {
-  --band: #0d1822;
-  --band-ink: #cae2ee;
-  --band-accent: #88b8d1;
-}
-[data-theme="verdant"][data-mode="dark"] {
-  --band: #0c190e;
-  --band-ink: #d0e5cd;
-  --band-accent: #94b98f;
-}
-[data-theme="meridian"][data-mode="dark"] {
-  --band: #1c1409;
-  --band-ink: #eeddb2;
-  --band-accent: #d2b25e;
+  --band: #111416;
+  --band-ink: #f7f1e8;
+  --band-accent: #d2aa6a;
 }
 
 /*
  * Dark mode. The neutral ramp flips (50 becomes the deepest surface, 950 the
  * brightest ink) and `white` — Tailwind's default surface — becomes elevated
- * ink, so every bg-white/text-white pair inverts together. Each theme keeps
- * its accent identity: tint backgrounds go deep, text-on-tint goes pale,
- * mid accents brighten enough to carry white text and read as links on dark.
+ * ink, so every bg-white/text-white pair inverts together. Gold brightens
+ * enough to carry text and read as a link on dark.
  */
 [data-mode="dark"] {
   --color-stone-50: #1b1815;
@@ -231,23 +105,24 @@
 
   --color-canvas: #141210;
 
-  /*
-   * Auth surface in dark mode. The sand ramp inverts to deep warm browns and
-   * ink flips to paper; gold barely moves because it carries dark text and
-   * reads as a link on both. Without this the sign-in page would be a lit
-   * rectangle inside an otherwise dark product.
-   */
+  /* Paper surfaces invert to deep warm browns; ink flips to paper. */
   --color-sand-50: #171512;
   --color-sand-100: #1c1a16;
   --color-sand-200: #2a2621;
   --color-sand-300: #3a342c;
   --color-cream: #211f1a;
 
-  --color-gold-300: #e8d28a;
-  --color-gold-400: #d9bc62;
-  --color-gold-500: #c19a32;
-  --color-gold-600: #b8902a;
-  --color-gold-700: #9a7823;
+  --color-gold-50: #261e0d;
+  --color-gold-100: #2f2410;
+  --color-gold-200: #43331a;
+  --color-gold-300: #6b5327;
+  --color-gold-400: #96752f;
+  --color-gold-500: #b28c38;
+  --color-gold-600: #c49d42;
+  --color-gold-700: #d2b25e;
+  --color-gold-800: #e3cc8f;
+  --color-gold-900: #eeddb2;
+  --color-gold-950: #f6ecd0;
 
   --color-ink: #f4efe4;
   --color-ink-muted: #b0a899;
@@ -280,62 +155,6 @@
   background: rgb(0 0 0 / 55%);
 }
 
-[data-theme="chaste"][data-mode="dark"] {
-  --color-maroon-50: #26120e;
-  --color-maroon-100: #361914;
-  --color-maroon-200: #55241d;
-  --color-maroon-300: #85453a;
-  --color-maroon-400: #b25a4b;
-  --color-maroon-500: #cf5340;
-  --color-maroon-600: #dd5f4a;
-  --color-maroon-700: #e47a60;
-  --color-maroon-800: #eda692;
-  --color-maroon-900: #f3cab9;
-  --color-maroon-950: #f9e2d7;
-}
-
-[data-theme="graphite"][data-mode="dark"] {
-  --color-maroon-50: #0f1720;
-  --color-maroon-100: #152230;
-  --color-maroon-200: #1f3549;
-  --color-maroon-300: #34586f;
-  --color-maroon-400: #4d7d97;
-  --color-maroon-500: #5f97b4;
-  --color-maroon-600: #6fa5c2;
-  --color-maroon-700: #88b8d1;
-  --color-maroon-800: #aed0e2;
-  --color-maroon-900: #cae2ee;
-  --color-maroon-950: #e0eff6;
-}
-
-[data-theme="verdant"][data-mode="dark"] {
-  --color-maroon-50: #101a10;
-  --color-maroon-100: #182517;
-  --color-maroon-200: #243823;
-  --color-maroon-300: #3c5a3a;
-  --color-maroon-400: #587f54;
-  --color-maroon-500: #6d9668;
-  --color-maroon-600: #7da578;
-  --color-maroon-700: #94b98f;
-  --color-maroon-800: #b6d3b1;
-  --color-maroon-900: #d0e5cd;
-  --color-maroon-950: #e4f1e2;
-}
-
-[data-theme="meridian"][data-mode="dark"] {
-  --color-maroon-50: #1e170c;
-  --color-maroon-100: #2b2110;
-  --color-maroon-200: #43331a;
-  --color-maroon-300: #6b5327;
-  --color-maroon-400: #96752f;
-  --color-maroon-500: #b28c38;
-  --color-maroon-600: #c49d42;
-  --color-maroon-700: #d2b25e;
-  --color-maroon-800: #e3cc8f;
-  --color-maroon-900: #eeddb2;
-  --color-maroon-950: #f6ecd0;
-}
-
 @layer base {
   html {
     scrollbar-gutter: stable;
@@ -347,12 +166,12 @@
   }
 
   ::selection {
-    background-color: var(--color-maroon-200);
-    color: var(--color-maroon-950);
+    background-color: var(--color-gold-200);
+    color: var(--color-gold-950);
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-maroon-600);
+    outline: 2px solid var(--color-gold-600);
     outline-offset: 2px;
     border-radius: 4px;
   }
@@ -390,8 +209,10 @@
   .btn-lg {
     @apply h-10 px-5;
   }
+  /* The brand's primary action is the inked button from the gateway: warm
+     near-black with paper text, lightening on hover (inverts in dark mode). */
   .btn-primary {
-    @apply bg-maroon-700 text-white shadow-xs hover:bg-maroon-800 active:bg-maroon-900;
+    @apply bg-stone-950 text-cream shadow-xs hover:bg-stone-900 active:bg-stone-800;
   }
   .btn-secondary {
     @apply border border-stone-300 bg-white text-stone-800 shadow-xs hover:border-stone-400 hover:bg-stone-50 active:bg-stone-100;
@@ -418,7 +239,7 @@
   .input,
   .select,
   .textarea {
-    @apply w-full rounded-lg border border-stone-300 bg-white px-3 text-sm text-stone-900 shadow-xs transition-colors duration-150 outline-none placeholder:text-stone-400 focus:border-maroon-600 focus:ring-[3px] focus:ring-maroon-600/15 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400;
+    @apply w-full rounded-lg border border-stone-300 bg-white px-3 text-sm text-stone-900 shadow-xs transition-colors duration-150 outline-none placeholder:text-stone-400 focus:border-gold-600 focus:ring-[3px] focus:ring-gold-600/15 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400;
   }
   .input,
   .select {
@@ -446,8 +267,8 @@
   .badge-neutral {
     @apply bg-stone-100 text-stone-700;
   }
-  .badge-maroon {
-    @apply bg-maroon-100 text-maroon-800;
+  .badge-gold {
+    @apply bg-gold-100 text-gold-800;
   }
   .badge-green {
     @apply bg-emerald-100 text-emerald-800;
@@ -511,7 +332,7 @@
   }
   .rail-btn[aria-current="page"],
   .rail-btn[data-active="true"] {
-    @apply bg-maroon-50 text-maroon-800;
+    @apply bg-gold-50 text-gold-800;
   }
   /* Active-interface notch: a quiet accent tick on the rail's edge. */
   .rail-btn[aria-current="page"]::before,
@@ -524,7 +345,7 @@
     width: 3px;
     transform: translateY(-50%);
     border-radius: 9999px;
-    background: var(--color-maroon-700);
+    background: var(--color-gold-700);
   }
 
   /* Rail tooltip: appears to the right after a short beat, keyboard too. */
@@ -565,12 +386,12 @@
     @apply relative -mb-px inline-flex cursor-pointer items-center gap-1.5 border-b-2 border-transparent px-1 pb-2.5 text-sm whitespace-nowrap text-stone-500 transition-colors duration-100 hover:text-stone-900;
   }
   .tab[aria-selected="true"] {
-    @apply border-maroon-600 font-medium text-stone-900;
+    @apply border-gold-600 font-medium text-stone-900;
   }
 
   /* ---------- Apps launcher tile ---------- */
   .app-tile {
-    @apply flex cursor-pointer flex-col items-start gap-2.5 rounded-xl border border-transparent px-2 py-2.5 text-left transition-all duration-150 hover:border-stone-200 hover:bg-white focus-visible:border-maroon-400 active:scale-[0.98];
+    @apply flex cursor-pointer flex-col items-start gap-2.5 rounded-xl border border-transparent px-2 py-2.5 text-left transition-all duration-150 hover:border-stone-200 hover:bg-white focus-visible:border-gold-400 active:scale-[0.98];
   }
 
   /* ---------- Entrance motion: one quiet rise, staggered per section ---------- */
@@ -614,40 +435,7 @@
   }
 }
 
-/*
- * Auth + onboarding roots. These screens are authored as a fixed warm-paper
- * composition — hardcoded ink hero, cream panels — so letting the mode flip
- * the token ramp underneath produced charcoal inputs and washed-out headings
- * in dark mode. Re-pin the flipping tokens to their light values inside the
- * auth surface; the gateway reads identically in both modes on purpose.
- */
-.auth-surface {
-  --color-white: #ffffff;
-  --color-ink: #1a1a1a;
-  --color-ink-muted: #555555;
-  --color-sand-50: #faf6ed;
-  --color-sand-100: #f8f2e4;
-  --color-sand-200: #efe7d3;
-  --color-sand-300: #e3d8be;
-  --color-cream: #fffdf7;
-  --color-gold-300: #e3c867;
-  --color-gold-400: #d2ae45;
-  --color-gold-500: #c19a32;
-  --color-gold-600: #b8902a;
-  --color-gold-700: #96761f;
-}
-
-/* The page canvas behind an auth surface follows that surface (the body
-   background propagates to the canvas, scrollbar gutter included), so the
-   gateway never shows a foreign stripe beside its own composition. */
-body:has(.auth-surface--night) {
-  background-color: #111416;
-}
-body:has(.auth-surface--paper) {
-  background-color: #f4efe6;
-}
-
-/* Auth + first-run signature: the brand's orbital mark made out of light. */
+/* Gateway signature: the brand's orbital mark made out of light. */
 .chaste-mark {
   position: relative;
   display: inline-flex;
@@ -689,7 +477,7 @@ body:has(.auth-surface--paper) {
   height: 0.5rem;
   overflow: visible;
   border-radius: 9999px;
-  background: #e8dfd1;
+  background: var(--color-sand-200);
   box-shadow: inset 0 1px 2px rgb(34 28 19 / 0.1);
 }
 .chaste-progress__fill {
