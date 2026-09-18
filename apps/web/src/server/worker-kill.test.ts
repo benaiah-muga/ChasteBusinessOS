@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
+  actionReceipts,
   createDb,
   jobs,
   organizations,
@@ -166,6 +167,18 @@ describe("worker-kill convergence (B03)", () => {
 
     const dead = processOneJob(db, logger, { workerId: "worker-A", now: new Date(), leaseMs: 400 });
     await until(async () => kill.runs === 1, "worker A to reach the kill window");
+    // The kill window is "after the receipt": runs === 1 only proves the
+    // effect started — the audit + receipt writes still need their database
+    // round-trips. Waiting for the receipt row itself is the honest sync
+    // point; without it a loaded database lets worker B read before worker
+    // A's receipt lands, and B re-executes instead of replaying (flake).
+    await until(async () => {
+      const rows = await db
+        .select({ id: actionReceipts.id })
+        .from(actionReceipts)
+        .where(and(eq(actionReceipts.orgId, orgId), eq(actionReceipts.intentKey, `${orgId}:${jobId}`)));
+      return rows.length > 0;
+    }, "worker A's receipt to become durable");
 
     // Worker B arrives after the (simulated) death: the lease is long past
     // expiry on B's clock, and A's heartbeat cannot out-run it.

@@ -281,8 +281,11 @@ const recordPayment = (deps: ModuleDeps) =>
     moneyThresholdMinor: 50_000,
     moneyAmount: (input) => input.amountMinor,
     inverse: {
-      capabilityId: "accounting.reverseEntry",
-      buildInput: (_input, output) => ({ entryId: output.entryId }),
+      // reverseEntry refuses payment entries by design (it would leave the
+      // invoice balance unrepaired), so the declared undo is the domain
+      // compensation — same pattern as payBill → reverseVendorPayment.
+      capabilityId: "accounting.reversePayment",
+      buildInput: (_input, output) => ({ paymentId: output.paymentId, reason: "undo customer payment" }),
     },
     input: z.object({
       invoiceNumber: z.number().int().positive(),

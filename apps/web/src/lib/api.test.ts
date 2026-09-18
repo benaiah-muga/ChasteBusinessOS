@@ -42,6 +42,16 @@ describe("postApi intent identity", () => {
     expect((sentBodies[0] as { intentId: string }).intentId).toBe("fixed-intent");
   });
 
+  it("stamps over a non-string or blank intentId instead of sending a body with no identity", async () => {
+    stubFetch();
+    await postApi("/api/x", { action: "payBill", intentId: undefined });
+    await postApi("/api/x", { action: "payBill", intentId: 123 });
+    await postApi("/api/x", { action: "payBill", intentId: "" });
+    for (const sent of sentBodies as Array<{ intentId?: unknown }>) {
+      expect(sent.intentId).toMatch(/^[0-9a-f-]{36}$/);
+    }
+  });
+
   it("leaves non-object bodies untouched", async () => {
     stubFetch();
     await postApi("/api/x", null);

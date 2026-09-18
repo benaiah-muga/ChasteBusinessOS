@@ -173,4 +173,48 @@ describe("pilot surfaces (P01/P05)", () => {
     const empty = await summarizePOST(new Request("http://localhost/api/my-work/summarize", { method: "POST", body: JSON.stringify({ cards: [] }) }));
     expect(empty.status).toBe(400);
   });
+
+  it("shows returned goods as outstanding again, in units rather than thousandths", async () => {
+    const { sql: drizzleSql } = await import("drizzle-orm");
+    // Second order: 10 units ordered, 6 received, 2 returned → 6 outstanding.
+    const [itemRow] = await db.db.select({ id: items.id }).from(items).where(eq(items.orgId, orgId)).limit(1);
+    const [po2] = await db.db
+      .insert(purchaseOrders)
+      .values({ orgId, vendorId: vendorId!, number: 2, status: "partial" })
+      .returning({ id: purchaseOrders.id, number: purchaseOrders.number });
+    await db.db.execute(
+      drizzleSql`INSERT INTO po_lines (po_id, description, quantity, unit_price_minor, item_id, position, service_accepted_thousandths)
+        VALUES (${po2!.id}, 'Second crate', 10000, 500, ${itemRow!.id}, 1, NULL)`,
+    );
+    const recv = await purchasingPOST(post({ action: "receiveGoods", poNumber: 2, lines: [{ lineNumber: 1, quantity: 6_000 }] }));
+    expect(recv.status).toBe(200);
+    const ret = await purchasingPOST(
+      post({ action: "returnGoods", poNumber: 2, lines: [{ lineNumber: 1, quantity: 2_000, reason: "damaged in transit" }] }),
+    );
+    expect(ret.status).toBe(200);
+
+    const res = await myWorkGET();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { cards: Array<{ kind: string; title: string }> };
+    const remainder = body.cards.find((c) => c.kind === "receipt_remainder" && c.title.includes("PO 2"));
+    expect(remainder).toBeTruthy();
+    // 10 ordered − 6 accepted + 2 returned, read in units.
+    expect(remainder!.title).toContain("6 units");
+  });
+
+  it("hides receipt remainders from roles without purchasing.read (PO 2 from the previous test stays partial)", async () => {
+    const saved = state.current!;
+    state.current = { ...saved, permissions: new Set(["purchasing.post", "signals.read"]) };
+    try {
+      const res = await myWorkGET();
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { cards: Array<{ kind: string; title: string }> };
+      // The payBill approval only needs purchasing.post, so it stays; the
+      // PO remainder needs purchasing.read, so it goes.
+      expect(body.cards.some((c) => c.kind === "approval")).toBe(true);
+      expect(body.cards.some((c) => c.kind === "receipt_remainder")).toBe(false);
+    } finally {
+      state.current = saved;
+    }
+  });
 });

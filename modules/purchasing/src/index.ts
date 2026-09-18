@@ -352,23 +352,27 @@ const reverseVendorPayment = (deps: ModuleDeps) =>
         if (!payment.entryId) throw new Error("vendor payment has no journal entry to reverse");
 
         // Unique at the business-operation level: retries and replays find
-        // the same reversal row and refuse instead of refunding twice.
+        // the same reversal row and refuse instead of refunding twice. The
+        // check runs after the bill lock below is acquired, so two
+        // concurrent reversals of one payment serialize on the bill row and
+        // the loser sees the winner's committed reversal (same discipline
+        // as accounting.reversePayment's invoice lock).
+        const [bill] = await tx
+          .select()
+          .from(vendorBills)
+          .where(and(eq(vendorBills.id, payment.billId), eq(vendorBills.orgId, ctx.actor.orgId)))
+          .limit(1)
+          // N11: releasing paidMinor mutates the bill under the same
+          // document lock the payment path holds.
+          .for("update");
+        if (!bill) throw new Error("vendor payment's bill not found");
+
         const [already] = await tx
           .select({ id: journalEntries.id })
           .from(journalEntries)
           .where(and(eq(journalEntries.orgId, ctx.actor.orgId), eq(journalEntries.reversalOfId, payment.entryId)))
           .limit(1);
         if (already) throw new Error("vendor payment has already been reversed");
-
-        const [bill] = await tx
-          .select()
-          .from(vendorBills)
-          .where(eq(vendorBills.id, payment.billId))
-          .limit(1)
-          // N11: releasing paidMinor mutates the bill under the same
-          // document lock the payment path holds.
-          .for("update");
-        if (!bill) throw new Error("vendor payment's bill not found");
 
         const [entry] = await tx
           .select()
@@ -567,7 +571,9 @@ const receivePO = (deps: ModuleDeps) =>
     }),
     execute: async (ctx, input) => {
       if ((input.overreceiptTolerancePct ?? 0) > 0 !== (input.authorityReason !== undefined)) {
-        throw new Error("overreceipt tolerance needs an authorityReason naming who authorized it, and nothing else may set one");
+        throw new Error(
+        "overreceiptTolerancePct and authorityReason go together: either omit overreceiptTolerancePct entirely, or send both the tolerance percent and an authorityReason naming who authorized the overdelivery",
+      );
       }
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [po] = await tx

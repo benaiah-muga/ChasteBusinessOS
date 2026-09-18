@@ -144,6 +144,36 @@ describe("N12 payment compensation", () => {
     expect(net).toBe(0);
   });
 
+  it("recordPayment declares a working inverse: buildInput from its own output reverses the payment", async () => {
+    const registry = makeRegistry();
+    const recordCap = registry.get("accounting.recordPayment")!;
+    // The declared undo must be the domain compensation — the generic
+    // reverseEntry refuses payment entries by design, so pointing there
+    // would make every kernel-driven undo of a payment fail.
+    expect(recordCap.inverse!.capabilityId).toBe("accounting.reversePayment");
+
+    const inv = await run("accounting.createInvoice", {
+      customerId,
+      lines: [{ description: "inverse probe", quantity: 1000, unitPriceMinor: 50_000 }],
+    });
+    const paid = await run("accounting.recordPayment", {
+      invoiceNumber: inv.invoiceNumber,
+      amountMinor: 20_000,
+      method: "bank_transfer",
+    });
+    const inverseInput = recordCap.inverse!.buildInput(
+      { invoiceNumber: inv.invoiceNumber, amountMinor: 20_000 },
+      paid,
+    );
+    expect(inverseInput).toMatchObject({ paymentId: paid.paymentId });
+    const reverseCap = registry.get("accounting.reversePayment")!;
+    expect(reverseCap.input.safeParse(inverseInput).success).toBe(true);
+
+    const undone = await run("accounting.reversePayment", inverseInput);
+    expect(undone.refundedMinor).toBe(20_000);
+    expect(undone.outstandingMinor).toBe(50_000);
+  });
+
   it("reverses an FX settlement as one coherent pair, each entry in its own currency", async () => {
     await run("accounting.recordFxRate", { quoteCurrency: "EUR", rate: "2" });
     const inv = await run("accounting.createInvoice", {

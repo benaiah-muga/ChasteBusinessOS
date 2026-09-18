@@ -34,9 +34,85 @@ export class OpenAiCompatAdapter implements ModelAdapter {
     this.fallback = opts.fallback;
   }
 
+  /**
+   * Opens the completion stream. On an insufficient-credits refusal (402,
+   * OpenRouter shared pools), the error names what the balance can afford:
+   * retry once with that cap instead of failing the whole agent turn.
+   */
+  private async openStream(
+    client: OpenAI,
+    model: string,
+    mapped: unknown[],
+    tools: ToolSpec[],
+    opts: { signal?: AbortSignal; onDelta?: (text: string) => void },
+    maxTokens: number,
+  ) {
+    try {
+      return await client.chat.completions.create(
+        {
+          model,
+          // biome-ignore lint/suspicious/noExplicitAny: standard OpenAI tool schema
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          messages: mapped as any,
+          // biome-ignore lint/suspicious/noExplicitAny: standard OpenAI tool schema
+          tools: tools as OpenAI.Chat.Completions.ChatCompletionTool[],
+          temperature: this.temperature,
+          max_tokens: maxTokens,
+          stream: true,
+          stream_options: { include_usage: true },
+        },
+        { signal: opts.signal },
+      );
+    } catch (err) {
+      const e = err as { status?: number; message?: string };
+      const afford = e?.status === 402 ? /can only afford (\d+)/i.exec(e?.message ?? "") : null;
+      if (afford) {
+        const cap = Math.max(64, Math.min(maxTokens, Number(afford[1])));
+        return client.chat.completions.create(
+          {
+            model,
+            // biome-ignore lint/suspicious/noExplicitAny: standard OpenAI tool schema
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            messages: mapped as any,
+            // biome-ignore lint/suspicious/noExplicitAny: standard OpenAI tool schema
+            tools: tools as OpenAI.Chat.Completions.ChatCompletionTool[],
+            temperature: this.temperature,
+            max_tokens: cap,
+            stream: true,
+            stream_options: { include_usage: true },
+          },
+          { signal: opts.signal },
+        );
+      }
+      throw err;
+    }
+  }
+
   private isRateLimit(err: unknown): boolean {
     const e = err as { status?: number; message?: string };
     return e?.status === 429 || /rate.?limit/i.test(e?.message ?? "");
+  }
+
+  /**
+   * Stealth and preview models rotate on OpenRouter: a retired slug answers
+   * 404 with a "testing period ended" note. That is a routing problem, not
+   * a conversation-killer — the fallback model takes the turn.
+   */
+  private isModelUnavailable(err: unknown): boolean {
+    const e = err as { status?: number; message?: string };
+    return (
+      e?.status === 404 ||
+      /testing period|no endpoints found|not a valid model|model_not_found/i.test(e?.message ?? "")
+    );
+  }
+
+  /**
+   * Credit limits are per model on OpenRouter (free tier, :free models): a
+   * 402 says this model cannot serve the request at this balance, not that
+   * the turn is doomed. A fallback model may accept it.
+   */
+  private isInsufficientCredits(err: unknown): boolean {
+    return (err as { status?: number }).status === 402;
   }
 
   async run(
@@ -47,7 +123,10 @@ export class OpenAiCompatAdapter implements ModelAdapter {
     try {
       return await this.runWith(this.client, this.model, messages, tools, opts);
     } catch (err) {
-      if (this.fallback && this.isRateLimit(err)) {
+      if (
+        this.fallback &&
+        (this.isRateLimit(err) || this.isModelUnavailable(err) || this.isInsufficientCredits(err))
+      ) {
         return this.runWith(this.fallback.client, this.fallback.model, messages, tools, opts);
       }
       throw err;
@@ -79,19 +158,7 @@ export class OpenAiCompatAdapter implements ModelAdapter {
       return { role: m.role, content: m.content };
     });
 
-    const stream = await client.chat.completions.create(
-      {
-        model,
-        messages: mapped,
-        // biome-ignore lint/suspicious/noExplicitAny: standard OpenAI tool schema
-        tools: tools as OpenAI.Chat.Completions.ChatCompletionTool[],
-        temperature: this.temperature,
-        max_tokens: 4096,
-        stream: true,
-        stream_options: { include_usage: true },
-      },
-      { signal: opts.signal },
-    );
+    const stream = await this.openStream(client, model, mapped, tools, opts, 4096);
 
     let content = "";
     let reasoning = "";

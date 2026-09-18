@@ -130,6 +130,10 @@ export function postApi<T = unknown>(url: string, body: unknown): Promise<ApiRes
  */
 function withIntentId(body: unknown): unknown {
   if (body === null || typeof body !== "object" || Array.isArray(body)) return body;
-  if ("intentId" in body) return body;
+  // Only a real string identity wins: {intentId: undefined}, numbers and
+  // other non-strings would sail through unstamped and execute server-side
+  // with no identity at all. A blank string is no identity either.
+  const existing = (body as Record<string, unknown>).intentId;
+  if (typeof existing === "string" && existing.length > 0) return body;
   return { ...(body as Record<string, unknown>), intentId: crypto.randomUUID() };
 }

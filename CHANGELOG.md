@@ -11,6 +11,43 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Fixed
+- **My Work remainders read full outstanding (W0.5).** The receipt-remainder
+  query correlated receipt lines with a bare `"id"` (Drizzle renders an
+  embedded column unqualified, so the subquery compared each receipt's
+  `po_line_id` against its *own* id and always summed zero) — every card
+  read the full order as outstanding. The correlation is now explicit, the
+  remainder subtracts returns net of receipts (a returned delivery demotes
+  the order to partial in the domain but read as received here), quantities
+  print in units instead of raw thousandths, PO data is gated on
+  `purchasing.read` like every other surface, a non-throwing
+  `signals.list` failure shows the honest unavailable card, and the dead
+  severity term in the ranker is gone (signals.list already sorts red
+  first). Pinned by amount-asserting route tests.
+- **Concurrent vendor-payment reversals double-refunded (N12).** The
+  already-reversed check ran before the bill row lock, so two concurrent
+  reversals both passed it and both mirrored (surfacing as a `RangeError`
+  on negative paidMinor). The check now runs after the bill lock is
+  acquired — the loser sees the winner's committed reversal — and the bill
+  read is org-scoped. Pinned by a `Promise.allSettled` racer (exactly one
+  mirror; proven to fail on the old order).
+- **`accounting.recordPayment` declared a dead inverse.** It pointed at
+  `accounting.reverseEntry`, which refuses payment entries by design, so any
+  kernel-driven undo of a payment failed. It now points at
+  `accounting.reversePayment` (same pattern as payBill →
+  reverseVendorPayment), pinned by a buildInput-from-actual-output test.
+- **Queue/worker-kill fixtures vs the append-only ledger (N09).**
+  `jobs.test.ts` teardown deleted `ledger_events` raw, which the commit-time
+  immutability triggers refuse — it now purges through the declared
+  maintenance helper; the worker-kill "after the receipt" case synchronized
+  on effect-start rather than receipt durability and flaked under load when
+  the replacement read before the receipt landed — it now waits for the
+  receipt row.
+- **Client intent stamp bypass (B02).** `withIntentId` kept any present
+  `intentId` key without checking its type, so `{intentId: undefined}` (or a
+  number, or `""`) sailed through unstamped and executed with no identity.
+  Only non-empty strings win now; everything else is stamped fresh.
+
 ### Added
 - **the pilot surfaces are built (W0.5).** A receiving desk that records
   what arrived line by line — accepted, rejected with a reason, and what

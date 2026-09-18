@@ -144,6 +144,40 @@ describe("N12 vendor payment reversal", () => {
     expect(reversals).toHaveLength(1);
   });
 
+  it("two concurrent reversals of one payment produce exactly one mirror", async () => {
+    const bill = await run("purchasing.createBill", {
+      vendorId,
+      lines: [{ description: "Raced case", quantity: 1_000, unitPriceMinor: 50_000, expenseAccountCode: "6000" }],
+    });
+    const paid = await run("purchasing.payBill", { billNumber: bill.billNumber, amountMinor: 50_000 });
+    const [pay] = await db.db.select().from(vendorPayments).where(eq(vendorPayments.id, paid.paymentId));
+
+    // Both pass any pre-lock check; the bill row lock serializes them and
+    // the loser must see the winner's committed reversal instead of
+    // mirroring a second refund.
+    const outcomes = await Promise.allSettled([
+      run("purchasing.reverseVendorPayment", { vendorPaymentId: paid.paymentId, reason: "concurrent reversal A" }),
+      run("purchasing.reverseVendorPayment", { vendorPaymentId: paid.paymentId, reason: "concurrent reversal B" }),
+    ]);
+    const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
+    const rejected = outcomes.filter((o) => o.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(String((rejected[0] as PromiseRejectedResult).reason)).toMatch(/already been reversed/);
+
+    const reversals = await db.db
+      .select({ id: journalEntries.id })
+      .from(journalEntries)
+      .where(eq(journalEntries.reversalOfId, pay!.entryId!));
+    expect(reversals).toHaveLength(1);
+    const [row] = await db.db
+      .select({ status: vendorBills.status, paidMinor: vendorBills.paidMinor })
+      .from(vendorBills)
+      .where(eq(vendorBills.id, await billIdByNumber(bill.billNumber)));
+    expect(row).toMatchObject({ status: "open", paidMinor: 0 });
+    expect(await booksBalanced()).toBe(true);
+  });
+
   it("credits reduce the outstanding the reversal reports", async () => {
     const bill = await run("purchasing.createBill", {
       vendorId,

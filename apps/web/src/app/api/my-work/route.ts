@@ -24,8 +24,6 @@ export interface WorkCard {
   rank: number;
 }
 
-const SEVERITY_RANK: Record<string, number> = { red: 0, amber: 1, yellow: 2, green: 3 };
-
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -58,6 +56,9 @@ export async function GET() {
   }
 
   // 2. Partial purchase orders with undelivered lines — biggest remaining first.
+  // Same-org role disclosure: PO numbers and line descriptions are only
+  // shown to roles that may read purchasing, like every other surface.
+  if (hasPermissionFor({ permissions: resolved.permissions }, "purchasing.read")) {
   const partialPos = await db
     .select({ id: purchaseOrders.id, number: purchaseOrders.number })
     .from(purchaseOrders)
@@ -65,6 +66,11 @@ export async function GET() {
     .limit(20);
   if (partialPos.length > 0) {
     const poIds = partialPos.map((p) => p.id);
+    // NOTE: the correlated id below is written as a literal po_lines.id.
+    // Drizzle's sql template renders an embedded column as a bare "id",
+    // which the subquery scope resolves to the INNER table's own id —
+    // silently summing over an empty set (every remainder read full
+    // outstanding). The outer table is unaliased, so the literal qualifies.
     const lines = await db
       .select({
         poId: poLines.poId,
@@ -74,15 +80,27 @@ export async function GET() {
         itemId: poLines.id,
         accepted: sql<number>`(
           SELECT coalesce(sum(g.accepted_thousandths), 0) FROM goods_receipt_lines g
-          WHERE g.po_line_id = ${poLines.id}
+          WHERE g.po_line_id = po_lines.id
         ) + (
           SELECT coalesce(sum(CASE WHEN m.quantity_delta > 0 THEN m.quantity_delta ELSE 0 END), 0)
           FROM stock_movements m
-          WHERE m.ref_type = 'po_line' AND m.ref_id = ${poLines.id}
+          WHERE m.ref_type = 'po_line' AND m.ref_id = po_lines.id
         )`,
         rejected: sql<number>`(
           SELECT coalesce(sum(g.rejected_thousandths), 0) FROM goods_receipt_lines g
-          WHERE g.po_line_id = ${poLines.id}
+          WHERE g.po_line_id = po_lines.id
+        )`,
+        // Delivered means accepted net of returns (returns draw from
+        // concrete receipts and demote the order back to partial), so the
+        // remainder must add returns back — otherwise a returned delivery
+        // reads as fully received here while the domain says partial.
+        returned: sql<number>`(
+          SELECT coalesce(sum(g.returned_thousandths), 0) FROM goods_receipt_lines g
+          WHERE g.po_line_id = po_lines.id
+        ) + (
+          SELECT coalesce(sum(CASE WHEN m.quantity_delta < 0 THEN -m.quantity_delta ELSE 0 END), 0)
+          FROM stock_movements m
+          WHERE m.ref_type = 'po_line' AND m.ref_id = po_lines.id
         )`,
       })
       .from(poLines)
@@ -90,7 +108,7 @@ export async function GET() {
     const numberById = new Map<string, number>(partialPos.map((p) => [p.id, p.number] as const));
     const remainingByPo = new Map<string, number>();
     for (const l of lines) {
-      const remaining = l.ordered - Number(l.accepted) - Number(l.rejected);
+      const remaining = l.ordered - Number(l.accepted) - Number(l.rejected) + Number(l.returned);
       if (remaining > 0) {
         remainingByPo.set(l.poId, (remainingByPo.get(l.poId) ?? 0) + remaining);
       }
@@ -98,11 +116,11 @@ export async function GET() {
     const ordered = [...remainingByPo.entries()].sort((a, b) => b[1] - a[1]);
     for (const [poId, remaining] of ordered) {
       const number = numberById.get(poId)!;
-      const poLinesLeft = lines.filter((l) => l.poId === poId && l.ordered - Number(l.accepted) - Number(l.rejected) > 0);
+      const poLinesLeft = lines.filter((l) => l.poId === poId && l.ordered - Number(l.accepted) - Number(l.rejected) + Number(l.returned) > 0);
       cards.push({
         kind: "receipt_remainder",
         id: poId,
-        title: `PO ${number}: ${remaining} thousandths still outstanding`,
+        title: `PO ${number}: ${formatThousandths(remaining)} still outstanding`,
         detail: poLinesLeft.map((l) => `line ${l.position} "${l.description}"`).join(", "),
         whyItMatters: "The supplier has not delivered everything ordered; the shortfall is visible and can be chased or closed.",
         actionLabel: "Open receiving desk",
@@ -112,10 +130,25 @@ export async function GET() {
       });
     }
   }
+  }
 
   // 3. Module signals, red first (signals.list sorts; keep its order).
   if (hasPermissionFor({ permissions: resolved.permissions }, "signals.read")) {
     const executor = buildExecutor(db, registry);
+    const unavailable = () => {
+      // Coverage failure shows as unavailable, never as "zero problems".
+      cards.push({
+        kind: "signal",
+        id: "signals-unavailable",
+        title: "Signal checks unavailable",
+        detail: "The signal sweep could not run right now; this is not a report of zero problems.",
+        whyItMatters: "Coverage must be honest: an unavailable check is visible instead of silently passing.",
+        actionLabel: "Retry later",
+        actionHref: "/",
+        createdAt: null,
+        rank: 3,
+      });
+    };
     try {
       const result = await executor.execute("signals.list", { actor: { type: "human", id: resolved.userId, orgId: resolved.orgId, permissions: resolved.permissions }, now: new Date(), services: {} }, {});
       if (result.ok && result.data) {
@@ -133,24 +166,25 @@ export async function GET() {
             rank: 2,
           });
         }
+      } else {
+        // A returned failure (refusal, unknown outcome) is still a coverage
+        // failure — a silent empty list would read as zero problems.
+        unavailable();
       }
     } catch {
-      // Coverage failure shows as unavailable, never as "zero problems".
-      cards.push({
-        kind: "signal",
-        id: "signals-unavailable",
-        title: "Signal checks unavailable",
-        detail: "The signal sweep could not run right now; this is not a report of zero problems.",
-        whyItMatters: "Coverage must be honest: an unavailable check is visible instead of silently passing.",
-        actionLabel: "Retry later",
-        actionHref: "/",
-        createdAt: null,
-        rank: 3,
-      });
+      unavailable();
     }
   }
 
-  const rankOf = (c: WorkCard) => c.rank * 1_000_000 + (c.kind === "signal" ? (SEVERITY_RANK.red ?? 0) : 0);
-  cards.sort((a, b) => rankOf(a) - rankOf(b));
+  // Deterministic rank groups (approvals, then remainders, then signals);
+  // within a group the insertion order stands — signals.list already sorts
+  // red first, and Array.sort is stable.
+  cards.sort((a, b) => a.rank - b.rank);
   return NextResponse.json({ cards: cards.slice(0, 30), generatedAt: new Date().toISOString() });
+}
+
+/** Pilot-facing quantities read in units, not ledger thousandths. */
+function formatThousandths(thousandths: number): string {
+  const units = thousandths / 1000;
+  return `${Number.isInteger(units) ? units.toString() : units.toFixed(3).replace(/0+$/, "")} units`;
 }

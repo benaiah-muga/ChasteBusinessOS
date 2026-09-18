@@ -6,11 +6,41 @@ import { getResolvedUser } from "@/server/session";
  * P01: deterministic ranking decides the list; the model only writes the
  * one-paragraph brief over the already-authorized card bundle it is given.
  * NL operations for the pilot run on openrouter/stealth/union-alpha
- * (MODEL_PROVIDER-style prefix routes through OPENROUTER_API_KEY). No key,
- * no brief: the endpoint degrades honestly instead of inventing one.
+ * (MODEL_PROVIDER-style prefix routes through OPENROUTER_API_KEY). Stealth
+ * slugs rotate, so a retired model falls back to the successor slug; no
+ * key at all means no brief: the endpoint degrades honestly instead of
+ * inventing one.
  */
 
 const NL_MODEL = process.env.MODEL_NL ?? "openrouter/stealth/union-alpha";
+const NL_FALLBACK_MODEL = process.env.MODEL_NL_FALLBACK ?? "openrouter/unbiased/pareto";
+
+async function briefWith(modelRef: string, list: string[]): Promise<string> {
+  const client = resolveClient(modelRef);
+  const completion = await client.chat.completions.create(
+    {
+      model: stripProviderPrefix(modelRef),
+      temperature: 0.2,
+      max_tokens: 220,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You write a two-sentence brief of a business team's pending work for its home page. " +
+            "Group what belongs together, name concrete counts, never invent items that are not in the list, never give advice.",
+        },
+        { role: "user", content: `Pending work:\n${list.join("\n")}` },
+      ],
+    },
+    { headers: { "X-Title": "ChasteBusinessOS" } },
+  );
+  return completion.choices[0]?.message?.content?.trim() ?? "";
+}
+
+const isModelUnavailable = (err: unknown): boolean => {
+  const e = err as { status?: number; message?: string };
+  return e?.status === 404 || /testing period|no endpoints found|not a valid model|model_not_found/i.test(e?.message ?? "");
+};
 
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
@@ -38,28 +68,24 @@ export async function POST(req: Request) {
   });
 
   try {
-    const client = resolveClient(NL_MODEL);
-    const completion = await client.chat.completions.create(
-      {
-        model: stripProviderPrefix(NL_MODEL),
-        temperature: 0.2,
-        max_tokens: 220,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You write a two-sentence brief of a business team's pending work for its home page. " +
-              "Group what belongs together, name concrete counts, never invent items that are not in the list, never give advice.",
-          },
-          { role: "user", content: `Pending work:\n${lines.join("\n")}` },
-        ],
-      },
-      { headers: { "X-Title": "ChasteBusinessOS" } },
-    );
-    const brief = completion.choices[0]?.message?.content?.trim();
+    let brief = await briefWith(NL_MODEL, lines);
+    let usedModel = stripProviderPrefix(NL_MODEL);
+    if (!brief) {
+      // The primary slug rotated or returned nothing: take the successor model.
+      brief = await briefWith(NL_FALLBACK_MODEL, lines);
+      usedModel = stripProviderPrefix(NL_FALLBACK_MODEL);
+    }
     if (!brief) return NextResponse.json({ error: "summary unavailable" }, { status: 502 });
-    return NextResponse.json({ brief, model: stripProviderPrefix(NL_MODEL) });
+    return NextResponse.json({ brief, model: usedModel });
   } catch (err) {
+    if (isModelUnavailable(err)) {
+      try {
+        const brief = await briefWith(NL_FALLBACK_MODEL, lines);
+        if (brief) return NextResponse.json({ brief, model: stripProviderPrefix(NL_FALLBACK_MODEL) });
+      } catch {
+        // fall through to the honest failure
+      }
+    }
     const message = err instanceof Error ? err.message : "model call failed";
     return NextResponse.json({ error: "summary unavailable", detail: message }, { status: 502 });
   }
