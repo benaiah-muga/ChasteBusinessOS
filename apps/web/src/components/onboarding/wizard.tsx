@@ -51,6 +51,7 @@ import { CsvImportPanel } from "./csv-import";
 import {
   ChoiceCard,
   OnboardingHeader,
+  ProgressBar,
   RecoverBlock,
   Spinner,
   StepRail,
@@ -159,6 +160,30 @@ export function OnboardingWizard({ email }: { email: string }) {
     key: s,
     label: s === "path" ? "How you'll start" : s === "profile" ? "Your business" : s === "data" ? "Your data" : "Your team",
   }));
+
+  const setupPercent =
+    screen === "done"
+      ? 100
+      : creating
+        ? ((progressStep + 1) / CREATE_PROGRESS.length) * 100
+        : Math.max(0, Math.round((Math.max(screenIndex, 0) / Math.max(screens.length - 1, 1)) * 100));
+  const createProgressLabel = CREATE_PROGRESS[progressStep] ?? CREATE_PROGRESS[0] ?? "Opening your workspace…";
+  const progressLabel = creating
+    ? createProgressLabel
+    : screen === "done"
+      ? "Open your workspace"
+      : screen === "path"
+        ? "Choose your starting point"
+        : screen === "profile"
+          ? "Shape your business workspace"
+          : screen === "data"
+            ? "Bring your records with you"
+            : "Make room for your team";
+  const progressStatus = creating
+    ? "Opening your books"
+    : screen === "done"
+      ? "Setup complete"
+      : `Step ${Math.max(screenIndex + 1, 1)} of ${screens.length - 1}`;
 
   const resolvedCurrency = resolveBaseCurrency(currency, customCurrency);
   const descriptionReady = isDescriptionReady(description);
@@ -340,26 +365,18 @@ export function OnboardingWizard({ email }: { email: string }) {
   })();
 
   return (
-    <div className="min-h-screen bg-sand-50 font-display text-ink">
+    <div className="auth-surface auth-surface--paper min-h-screen bg-[#f4efe6] font-display text-ink">
       <OnboardingHeader email={email} />
 
-      <main className="mx-auto max-w-7xl px-5 py-8">
-        <div className="mb-7 flex flex-wrap items-center justify-between gap-4">
+      <main className="mx-auto flex max-w-[1440px] flex-col px-5 py-5 sm:px-8 lg:py-6">
+        <div className="mb-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(310px,0.48fr)] xl:items-center">
           <StepRail steps={rail} current={Math.min(screenIndex, rail.length - 1)} />
-          {screen !== "done" && (
-            <p className="text-[12px] text-ink-muted">
-              Everything here can be changed later in{" "}
-              <Link href="/settings" className="font-medium text-gold-700 underline-offset-2 hover:underline">
-                Settings
-              </Link>
-              .
-            </p>
-          )}
+          <ProgressBar value={setupPercent} label={progressLabel} status={progressStatus} />
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[1.25fr_1fr] lg:items-start">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.82fr)] lg:items-start">
           {/* ── The step ────────────────────────────────────────────────── */}
-          <section className="rounded-xl bg-cream p-6 shadow-md ring-1 ring-sand-200 sm:p-8">
+          <section className="rounded-[1.5rem] border border-[#d7cdbc] bg-[#fffdf7] p-5 shadow-[0_24px_70px_rgba(59,46,26,0.09)] ring-1 ring-white/70 sm:p-7">
             {failure && (
               <div className="mb-5">
                 <RecoverBlock title={failure.title}>
@@ -517,7 +534,7 @@ export function OnboardingWizard({ email }: { email: string }) {
                     </label>
                     <textarea
                       id="description"
-                      rows={7}
+                      rows={4}
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
                       placeholder="We design and sell handmade lighting fixtures online and to interior designers. Most customers order 10–50 units at a time. We offer 2% off to returning wholesale buyers…"
@@ -566,16 +583,10 @@ export function OnboardingWizard({ email }: { email: string }) {
 
                 {/* Creation overlay: the wait is real, so show it working. */}
                 {creating && (
-                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl bg-cream/95 backdrop-blur-sm">
-                    <Spinner className="size-7 text-gold-600" />
-                    <p className="mt-4 text-[15px] font-semibold text-ink" aria-live="polite">
-                      {CREATE_PROGRESS[progressStep]}
-                    </p>
-                    <div className="mt-4 h-1 w-56 overflow-hidden rounded-full bg-sand-200">
-                      <div
-                        className="h-full rounded-full bg-gold-500 transition-all duration-[2400ms] ease-out"
-                        style={{ width: `${((progressStep + 1) / CREATE_PROGRESS.length) * 100}%` }}
-                      />
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-[1.5rem] bg-[#fffdf7]/96 px-6 backdrop-blur-sm">
+                    <Spinner className="size-7 text-[#a2783d]" />
+                    <div className="mt-5 w-full max-w-sm">
+                      <ProgressBar value={setupPercent} label={progressLabel} status="Opening your workspace" />
                     </div>
                     <p className="mt-3 max-w-xs text-center text-[12px] text-ink-muted">
                       This only happens once.
@@ -910,6 +921,7 @@ export function OnboardingWizard({ email }: { email: string }) {
 
             {screen === "done" && (
               <div>
+                <ProgressBar value={100} label="Open your workspace" status="Setup complete" />
                 <span className="flex size-12 items-center justify-center rounded-full bg-gold-500/12 text-gold-600">
                   <IconCheck className="size-6" />
                 </span>
@@ -975,7 +987,7 @@ export function OnboardingWizard({ email }: { email: string }) {
           </section>
 
           {/* ── Context column ──────────────────────────────────────────── */}
-          <aside className="rounded-xl bg-sand-100 p-6 ring-1 ring-sand-200 lg:sticky lg:top-20">
+          <aside className="rounded-[1.5rem] border border-[#d7cdbc] bg-[#eae1d3] p-5 ring-1 ring-white/50 lg:sticky lg:top-6">
             <p className="text-[11px] font-bold tracking-[0.1em] text-gold-600 uppercase">{aside.eyebrow}</p>
             <h2 className="mt-2 text-[19px] leading-snug font-semibold text-ink">{aside.title}</h2>
             <p className="mt-2.5 text-[13px] leading-relaxed text-ink-muted">{aside.body}</p>
@@ -990,12 +1002,21 @@ export function OnboardingWizard({ email }: { email: string }) {
               ))}
             </ul>
 
-            <div className="mt-6 border-t border-sand-200 pt-4">
+            <div className="mt-5 border-t border-[#cfc1ae] pt-4">
               <p className="text-[12px] leading-relaxed text-ink-muted">
                 Stuck? Everything on the left is optional except the business name and description.
                 You can leave and come back — your progress is saved.
               </p>
             </div>
+            {screen !== "done" && (
+              <p className="mt-4 text-[12px] text-ink-muted">
+                Everything here can be changed later in{" "}
+                <Link href="/settings" className="font-medium text-gold-700 underline-offset-2 hover:underline">
+                  Settings
+                </Link>
+                .
+              </p>
+            )}
           </aside>
         </div>
       </main>

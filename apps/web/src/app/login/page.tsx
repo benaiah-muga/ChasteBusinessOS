@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/client";
 import {
   IconAlertTriangle,
+  IconArrowRight,
   IconArrowsHorizontal,
   IconBookOpen,
   IconEye,
   IconEyeOff,
+  IconInbox,
   IconSearch,
   IconShieldCheck,
 } from "@/components/icons";
@@ -45,6 +47,37 @@ function Spinner() {
   );
 }
 
+function BrandMark({ compact = false }: { compact?: boolean }) {
+  return (
+    <span className={`chaste-mark ${compact ? "size-9" : "size-11"}`} aria-hidden="true">
+      <span className="chaste-mark__orbit chaste-mark__orbit--one" />
+      <span className="chaste-mark__orbit chaste-mark__orbit--two" />
+      <span className="chaste-mark__orbit chaste-mark__orbit--three" />
+      <span className="chaste-mark__core">C</span>
+    </span>
+  );
+}
+
+function authErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const normalized = raw.toLowerCase();
+  if (normalized.includes("verif")) {
+    // sendOnSignIn fires a fresh link on every unverified sign-in attempt, so
+    // the honest answer is "check your inbox", not "wrong password".
+    return "That email isn't verified yet. We just sent a fresh link — click it, then sign in.";
+  }
+  if (normalized.includes("invalid") || normalized.includes("credential") || normalized.includes("password")) {
+    return "That email and password did not match. Check them and try again.";
+  }
+  if (normalized.includes("already") || normalized.includes("exist")) {
+    return "An account with that email already exists. Try signing in instead.";
+  }
+  if (normalized.includes("network") || normalized.includes("fetch")) {
+    return "We could not reach Chaste. Check your connection and try again.";
+  }
+  return raw.length > 0 && raw.length <= 160 ? raw : "We could not complete that request. Try again in a moment.";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -54,6 +87,17 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [verifySent, setVerifySent] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    void authClient.getSession().then((res) => {
+      if (mounted && res.data?.user) router.replace("/");
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -69,10 +113,19 @@ export default function LoginPage() {
             })
           : await authClient.signIn.email({ email, password });
       if (res.error) throw new Error(res.error.message ?? "authentication failed");
-      router.push("/");
+      if (mode === "signup" && res.data?.token == null) {
+        // Verified-binding deployments skip auto sign-in: the account exists
+        // but there is no session yet, so success here means "check your
+        // inbox", not "come in" — and redirecting would just bounce off the
+        // auth guard straight back to this page.
+        setVerifySent(true);
+        setBusy(false);
+        return;
+      }
+      router.replace("/");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err));
       setBusy(false);
     }
   }
@@ -80,162 +133,136 @@ export default function LoginPage() {
   function toggleMode() {
     setMode(mode === "signup" ? "signin" : "signup");
     setError(null);
+    setVerifySent(false);
   }
 
   return (
-    <div className="min-h-screen bg-sand-50 font-display text-ink">
-      {/* Sticky header. The avatar and magnifier are the app chrome; on the
-          auth surface there is no session behind them yet. */}
-      <header className="sticky top-0 z-10 border-b border-sand-200 bg-sand-50/85 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
-          <div className="flex items-center gap-2.5">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gold-500 text-sm font-bold text-white">
-              C
-            </span>
-            <span className="text-sm leading-tight">
-              <span className="font-semibold">Chaste Business OS</span>
-              <span className="hidden text-ink-muted md:inline">
-                {" "}
-                — The operating system for your business
-              </span>
-            </span>
+    <div className="auth-surface auth-surface--night min-h-screen bg-[#111416] font-display text-[#f7f1e8]">
+      <main className="grid min-h-screen lg:grid-cols-[0.92fr_1.08fr]">
+        <section className="relative hidden overflow-hidden bg-[#111416] px-10 py-9 lg:flex lg:flex-col xl:px-16">
+          <div className="auth-orbit auth-orbit--one -right-44 top-36" />
+          <div className="auth-orbit auth-orbit--two -bottom-10 left-12" />
+          <div className="relative z-10 flex items-center gap-3">
+            <BrandMark />
+            <div>
+              <p className="text-[15px] font-semibold tracking-[-0.02em]">Chaste Business OS</p>
+              <p className="mt-0.5 text-[10px] tracking-[0.2em] text-[#a9a39b] uppercase">The AI-native business operating system</p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <IconSearch className="size-4 text-ink-muted" aria-hidden="true" />
-            <span className="flex size-8 items-center justify-center rounded-full bg-sand-200 text-sm font-semibold text-ink">
-              N
-            </span>
+          <div className="relative z-10 my-auto max-w-xl py-4">
+            <p className="rise text-[11px] font-bold tracking-[0.22em] text-[#d2aa6a] uppercase [--rise-delay:80ms]">Open source · built for everyone</p>
+            <h1 className="rise mt-4 max-w-lg text-[clamp(2.25rem,4vw,4.2rem)] leading-[0.98] font-semibold tracking-[-0.075em] text-[#f7f1e8] [--rise-delay:150ms]">
+              Run the business.
+              <span className="block text-[#cba269]">Keep the authority.</span>
+            </h1>
+            <p className="rise mt-4 max-w-md text-[14px] leading-6 text-[#bdb8b0] [--rise-delay:220ms]">
+              Describe your business. Your AI workmate runs it under your authority, with every action governed, auditable, and reversible.
+            </p>
+            <div className="rise mt-7 grid max-w-lg grid-cols-3 border-y border-white/10 py-4 [--rise-delay:290ms]">
+              {VALUE_PROPS.map(({ num, title, Icon }) => (
+                <div key={num} className="border-r border-white/10 pr-4 last:border-0 last:pr-0">
+                  <Icon className="size-4 text-[#d2aa6a]" />
+                  <p className="mt-3 text-[11px] font-bold tracking-[0.14em] text-[#f7f1e8] uppercase">{title}</p>
+                  <p className="mt-1 text-[11px] leading-4 text-[#8f8c87]">{num === "01" ? "Nothing acts silently." : num === "02" ? "Every action leaves a trail." : "Corrections are mirror reversals."}</p>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      </header>
 
-      <main className="grid min-h-[calc(100vh-3.5rem)] lg:grid-cols-2">
-        {/* ── Left: the auth card ─────────────────────────────────────── */}
-        <section className="flex items-center justify-center bg-sand-100 px-5 py-12">
-          <div className="w-full max-w-md rounded-xl bg-cream p-7 shadow-md ring-1 ring-sand-200 sm:p-8">
-            <h2 className="text-[26px] leading-tight font-bold tracking-tight">Welcome back</h2>
-            <p className="mt-1.5 text-sm text-ink-muted">
-              {mode === "signup" ? "Create your workspace to get started." : "Sign in to your workspace."}
-            </p>
-
-            <form onSubmit={submit} className="mt-7 space-y-4">
-              {mode === "signup" && (
-                <div>
-                  <label htmlFor="name" className="mb-1.5 block text-[13px] leading-none font-medium text-ink">
-                    Your name
-                  </label>
-                  <input
-                    id="name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    autoComplete="name"
-                    placeholder="Ada Lovelace"
-                    className="h-10 w-full rounded-lg border border-sand-300 bg-white px-3 text-sm text-ink transition-colors outline-none placeholder:text-ink-muted/55 focus:border-gold-500 focus:ring-[3px] focus:ring-gold-500/20"
-                  />
-                </div>
-              )}
-
-              <div>
-                <label htmlFor="email" className="mb-1.5 block text-[13px] leading-none font-medium text-ink">
-                  Email
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                  placeholder="you@company.com"
-                  className="h-10 w-full rounded-lg border border-sand-300 bg-white px-3 text-sm text-ink transition-colors outline-none placeholder:text-ink-muted/55 focus:border-gold-500 focus:ring-[3px] focus:ring-gold-500/20"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="password" className="mb-1.5 block text-[13px] leading-none font-medium text-ink">
-                  Password
-                </label>
-                <div className="relative">
-                  <input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    required
-                    minLength={8}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                    placeholder="At least 8 characters"
-                    className="h-10 w-full rounded-lg border border-sand-300 bg-white pr-10 pl-3 text-sm text-ink transition-colors outline-none placeholder:text-ink-muted/55 focus:border-gold-500 focus:ring-[3px] focus:ring-gold-500/20"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    className="absolute inset-y-0 right-0 flex w-10 cursor-pointer items-center justify-center rounded-r-lg text-ink-muted transition-colors hover:text-ink"
-                  >
-                    {showPassword ? <IconEyeOff className="size-4" /> : <IconEye className="size-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {error && (
-                <p
-                  role="alert"
-                  className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800"
-                >
-                  <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
-                  <span>{error}</span>
-                </p>
-              )}
-
-              <button
-                type="submit"
-                disabled={busy}
-                className="inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-gold-500 text-sm font-semibold text-white shadow-sm transition-colors duration-150 hover:bg-gold-600 focus-visible:ring-[3px] focus-visible:ring-gold-500/30 focus-visible:outline-none active:bg-gold-700 disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                {busy && <Spinner />}
-                {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
-              </button>
-            </form>
-
-            <p className="mt-6 text-center text-sm text-ink-muted">
-              {mode === "signup" ? "Already have an account?" : "New to Chaste?"}{" "}
-              <button
-                type="button"
-                onClick={toggleMode}
-                className="cursor-pointer font-semibold text-gold-700 underline-offset-2 hover:underline"
-              >
-                {mode === "signup" ? "Sign in" : "Create an account"}
-              </button>
-            </p>
+          <div className="relative z-10 flex items-center justify-between text-[10px] tracking-[0.18em] text-[#817d76] uppercase">
+            <span>Simple to adopt.</span>
+            <span>Powerful to grow.</span>
           </div>
         </section>
 
-        {/* ── Right: value props ──────────────────────────────────────── */}
-        <section className="flex flex-col items-center justify-center gap-10 bg-sand-50 px-6 py-14 text-center">
-          <h1 className="max-w-xl text-[32px] leading-[1.15] font-bold tracking-tight text-balance sm:text-[40px]">
-            Describe your business. Your AI workmate runs it,{" "}
-            <span className="text-ink-muted">under your authority.</span>
-          </h1>
-
-          <div className="grid w-full max-w-lg gap-4">
-            {VALUE_PROPS.map(({ num, title, body, Icon }) => (
-              <div
-                key={num}
-                className="flex items-start gap-4 rounded-xl bg-cream p-5 text-left shadow-md ring-1 ring-sand-200"
-              >
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-gold-500/12 text-gold-600">
-                  <Icon className="size-5" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold tracking-[0.1em] text-gold-600 uppercase">
-                    {num} {title}
-                  </p>
-                  <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">{body}</p>
+        <section className="relative flex min-h-screen items-center overflow-hidden bg-[#f4efe6] px-5 py-7 text-[#171a1b] sm:px-8 lg:py-8">
+          <div className="absolute -right-40 -top-40 size-[30rem] rounded-full bg-[#d3aa6c]/10 blur-3xl" />
+          <div className="relative mx-auto my-auto w-full max-w-[510px]">
+            <div className="mb-7 flex items-center justify-between lg:hidden">
+              <div className="flex items-center gap-2.5">
+                <BrandMark compact />
+                <div>
+                  <p className="text-sm font-semibold">Chaste Business OS</p>
+                  <p className="text-[10px] tracking-[0.15em] text-[#847d72] uppercase">Open source · built for everyone</p>
                 </div>
               </div>
-            ))}
+              <IconSearch className="size-4 text-[#a9854e]" aria-hidden="true" />
+            </div>
+
+            <div className="rise rounded-[1.75rem] border border-[#d7cdbc] bg-[#fffdf7]/80 p-6 shadow-[0_28px_80px_rgba(59,46,26,0.12)] backdrop-blur sm:p-9 [--rise-delay:100ms]">
+              <div className="flex items-start justify-between gap-5">
+                <div>
+                  <p className="text-[10px] font-bold tracking-[0.2em] text-[#a1783c] uppercase">{verifySent ? "One more step" : mode === "signup" ? "Create your workspace" : "Welcome back"}</p>
+                  <h2 className="mt-2 text-[2rem] leading-none font-semibold tracking-[-0.06em]">{verifySent ? "Check your inbox." : mode === "signup" ? "Start with clarity." : "Good to see you."}</h2>
+                  <p className="mt-3 max-w-sm text-sm leading-6 text-[#756f66]">
+                    {verifySent ? "Confirm your email to open the door." : mode === "signup" ? "Create your workspace to get started." : "Sign in to your workspace."}
+                  </p>
+                </div>
+                <span className="hidden size-9 items-center justify-center rounded-full border border-[#caa76c]/40 bg-[#d5b277]/15 text-xs font-bold text-[#98713c] sm:flex">{verifySent ? "✉" : mode === "signup" ? "01" : "↗"}</span>
+              </div>
+
+              {verifySent ? (
+                <div className="mt-7">
+                  <div className="flex items-start gap-3 rounded-xl border border-[#caa76c]/40 bg-[#d5b277]/10 px-4 py-4">
+                    <IconInbox className="mt-0.5 size-5 shrink-0 text-[#a1783c]" />
+                    <p className="text-sm leading-6 text-[#4a4640]">
+                      We sent a verification link to{" "}
+                      <strong className="font-semibold text-[#171a1b]">{email.trim()}</strong>. Click it to prove
+                      the address is yours — then sign in and we&apos;ll take you straight into setup.
+                    </p>
+                  </div>
+                  <p className="mt-3 text-[12px] leading-5 text-[#8f877b]">
+                    No email? Check spam, or try signing in — that sends a fresh link automatically.
+                  </p>
+                  <button type="button" onClick={toggleMode} className="group mt-4 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-[#946d35] underline-offset-4 hover:underline">
+                    <IconArrowRight className="size-4 rotate-180 transition-transform group-hover:-translate-x-0.5" />
+                    Back to sign in
+                  </button>
+                </div>
+              ) : (
+                <>
+              <form onSubmit={submit} className="mt-7 space-y-4">
+                {mode === "signup" && (
+                  <div>
+                    <label htmlFor="name" className="mb-1.5 block text-[12px] font-semibold tracking-[0.04em] text-[#4a4640]">Your name</label>
+                    <input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" placeholder="Ada Lovelace" className="h-11 w-full rounded-xl border border-[#d7cdbc] bg-white/70 px-3.5 text-sm text-ink transition-colors outline-none placeholder:text-[#9a9388] focus:border-[#b88a4c] focus:ring-[3px] focus:ring-[#c59b5e]/20" />
+                  </div>
+                )}
+
+                <div>
+                  <label htmlFor="email" className="mb-1.5 block text-[12px] font-semibold tracking-[0.04em] text-[#4a4640]">Email</label>
+                  <input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" placeholder="you@company.com" className="h-11 w-full rounded-xl border border-[#d7cdbc] bg-white/70 px-3.5 text-sm text-ink transition-colors outline-none placeholder:text-[#9a9388] focus:border-[#b88a4c] focus:ring-[3px] focus:ring-[#c59b5e]/20" />
+                </div>
+
+                <div>
+                  <label htmlFor="password" className="mb-1.5 block text-[12px] font-semibold tracking-[0.04em] text-[#4a4640]">Password</label>
+                  <div className="relative">
+                    <input id="password" type={showPassword ? "text" : "password"} required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="At least 8 characters" className="h-11 w-full rounded-xl border border-[#d7cdbc] bg-white/70 pr-11 pl-3.5 text-sm text-ink transition-colors outline-none placeholder:text-[#9a9388] focus:border-[#b88a4c] focus:ring-[3px] focus:ring-[#c59b5e]/20" />
+                    <button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? "Hide password" : "Show password"} className="absolute inset-y-0 right-0 flex w-11 cursor-pointer items-center justify-center rounded-r-xl text-[#8f877b] transition-colors hover:text-[#242321]">
+                      {showPassword ? <IconEyeOff className="size-4" /> : <IconEye className="size-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {error && <p role="alert" className="flex items-start gap-2 rounded-xl border border-[#d98978]/35 bg-[#fff1ed] px-3.5 py-3 text-sm text-[#8d392d]"><IconAlertTriangle className="mt-0.5 size-4 shrink-0" /><span>{error}</span></p>}
+
+                <button type="submit" disabled={busy} className="group inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#171a1b] text-sm font-semibold text-[#f8f1e6] shadow-[0_12px_26px_rgba(23,26,27,0.18)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#2b2e2e] focus-visible:ring-[3px] focus-visible:ring-[#c59b5e]/35 focus-visible:outline-none active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-55">
+                  {busy && <Spinner />}
+                  {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
+                  {!busy && <span className="text-[#d3aa6b] transition-transform group-hover:translate-x-1">→</span>}
+                </button>
+              </form>
+
+              <p className="mt-6 text-center text-sm text-[#756f66]">
+                {mode === "signup" ? "Already have an account?" : "New to Chaste?"}{" "}
+                <button type="button" onClick={toggleMode} className="cursor-pointer font-semibold text-[#946d35] underline-offset-4 hover:underline">{mode === "signup" ? "Sign in" : "Create an account"}</button>
+              </p>
+                </>
+              )}
+            </div>
+
+            <div className="mt-5 flex items-center justify-center gap-2 text-[10px] tracking-[0.12em] text-[#8c8478] uppercase"><span className="size-1.5 rounded-full bg-[#c39a5b]" /> Your data stays yours · Your authority stays yours</div>
           </div>
         </section>
       </main>

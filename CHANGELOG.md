@@ -12,6 +12,27 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Fixed
+- **Sign-up ended in a hung spinner with no explanation.** Under the
+  verified-binding profile (N03) sign-up creates the account but skips
+  auto sign-in, so `router.replace("/")` bounced off the auth guard straight
+  back to `/login` while the submit button read "Please wait…" forever. The
+  form now detects the no-session response and shows a "Check your inbox"
+  state with the address and next steps, and an unverified sign-in attempt
+  maps to "we just sent a fresh link" instead of a raw better-auth error.
+- **Auth and onboarding rendered broken under dark mode.** The login form and
+  the setup wizard are authored as a fixed warm-paper composition (hardcoded
+  ink hero, cream panels), but the tokens they use for inputs, cards and text
+  (`white`, `ink`, `sand-*`, `cream`, `gold-*`) flip with `data-mode` — dark
+  mode produced near-black inputs on the cream card, charcoal path cards, and
+  washed-out headings. An `.auth-surface` scope now re-pins those tokens to
+  the designed light values (and paints the page canvas to match), so the
+  gateway reads identically in both modes.
+- **Onboarding was cut off on large screens.** The wizard pinned itself to
+  `100svh` with `overflow: hidden`, so on a short desktop window the step
+  content (path cards, profile form) clipped with no way to scroll — the same
+  content scrolled fine on small screens. The page now scrolls naturally and
+  the context column sticks beside it; the login page drops its viewport lock
+  the same way.
 - **My Work remainders read full outstanding (W0.5).** The receipt-remainder
   query correlated receipt lines with a bare `"id"` (Drizzle renders an
   embedded column unqualified, so the subquery compared each receipt's
@@ -70,6 +91,11 @@ The full v1 changelog is preserved at the bottom of this file.
   the measurement plan; owner confirmation unlocks the UI build.
 
 ### Changed
+- **Auth and onboarding first impression.** Reworked the first-run surfaces around
+  the Chaste black, ivory, and champagne-gold identity with a responsive split auth
+  composition, orbital brand mark, reduced-motion-safe entrance motion, persistent
+  onboarding status header, glowing linear-gradient progress bar, and clearer
+  recovery copy while preserving the existing setup paths and governed API flow.
 - **sign-in is sealed until the email is verified; unverified sessions
   inherit nothing (N03).** Domain identities are pre-provisioned (SCIM,
   invitations) and bind by email, so a password sign-up for that email used
