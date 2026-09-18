@@ -126,6 +126,7 @@ export default function PurchasingPage() {
   const [tab, setTab] = useState<Tab>("overview");
 
   const [vendorForm, setVendorForm] = useState({ name: "", email: "" });
+  const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [poForm, setPoForm] = useState({
     vendorId: "",
     memo: "",
@@ -976,12 +977,67 @@ export default function PurchasingPage() {
               <EmptyState icon={<IconListTree />} title="No vendors yet" hint="Add the suppliers you buy from; orders and bills reference them." />
             ) : (
               <ul className="divide-y text-sm">
-                {vendors.map((v) => (
-                  <li key={v.id} className="flex items-center justify-between py-1.5">
-                    <span>{v.name}</span>
-                    {v.email ? <span className="opacity-50">{v.email}</span> : null}
-                  </li>
-                ))}
+                {vendors.map((v) => {
+                  // P04: the supplier page remembers the relationship — open
+                  // orders, bills still owed, and what was delivered short,
+                  // composed from data already on the page.
+                  const vendorOrders = orders.filter((o) => o.vendorName === v.name);
+                  const openOrders = vendorOrders.filter((o) => o.status === "ordered" || o.status === "partial");
+                  const vendorBills = bills.filter((b) => b.vendorName === v.name);
+                  const owedMinor = vendorBills.reduce((s, b) => s + b.dueMinor, 0);
+                  const selected = selectedVendorId === v.id;
+                  return (
+                    <li key={v.id} className="py-1.5">
+                      <button
+                        className="flex w-full items-center justify-between text-left"
+                        onClick={() => setSelectedVendorId(selected ? null : v.id)}
+                      >
+                        <span>
+                          {v.name}
+                          <span className="ml-2 text-xs opacity-60">
+                            {openOrders.length > 0 ? `${openOrders.length} open order${openOrders.length > 1 ? "s" : ""}` : "no open orders"}
+                            {owedMinor > 0 ? ` · ${formatMoney(owedMinor)} owed` : ""}
+                          </span>
+                        </span>
+                        {v.email ? <span className="opacity-50">{v.email}</span> : null}
+                      </button>
+                      {selected && (
+                        <div className="mt-2 space-y-1 rounded border p-2 text-xs">
+                          {vendorOrders.length === 0 && vendorBills.length === 0 ? (
+                            <div className="opacity-60">No orders or bills with this vendor yet.</div>
+                          ) : (
+                            <>
+                              {vendorOrders.map((o) => (
+                                <div key={o.id} className="flex justify-between gap-2">
+                                  <span>
+                                    PO {o.number} · {o.status}
+                                  </span>
+                                  <span className="opacity-70">{formatMoney(o.orderedMinor)}</span>
+                                </div>
+                              ))}
+                              {vendorBills.map((b) => (
+                                <div key={b.id} className="flex justify-between gap-2">
+                                  <span>
+                                    Bill {b.number} · {b.status}
+                                  </span>
+                                  <span className="opacity-70">
+                                    {formatMoney(b.totalMinor)}
+                                    {b.dueMinor > 0 ? ` (${formatMoney(b.dueMinor)} outstanding)` : ""}
+                                  </span>
+                                </div>
+                              ))}
+                              <div className="pt-1">
+                                <a className="underline" href={`/purchasing/receiving${openOrders[0] ? `?poNumber=${openOrders[0].number}` : ""}`}>
+                                  Receive against {openOrders[0] ? `PO ${openOrders[0].number}` : "an order"} →
+                                </a>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </Card>

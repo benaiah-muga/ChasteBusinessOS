@@ -545,7 +545,7 @@ const receivePO = (deps: ModuleDeps) =>
         .array(
           z.object({
             lineNumber: z.number().int().positive().describe("stable 1-based position on the order"),
-            quantity: z.number().int().positive().describe("accepted thousandths — the only quantity that stocks and bills"),
+            quantity: z.number().int().min(0).describe("accepted thousandths — the only quantity that stocks and bills"),
             rejected: z.number().int().nonnegative().default(0).describe("arrived but refused; recorded, never stocked"),
             rejectionNote: z.string().max(500).optional(),
           }),

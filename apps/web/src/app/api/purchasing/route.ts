@@ -174,16 +174,27 @@ export async function POST(req: Request) {
       );
     }
     case "receiveGoods": {
-      const lines = body.lines as { lineNumber: number; quantity: number }[] | undefined;
+      // N16 pilot (P05): the receiving desk sends accepted quantity plus an
+      // optional rejected quantity with its reason, and overreceipt only
+      // with the paired authority fields — all validated by the capability.
+      const lines = body.lines as
+        | { lineNumber: number; quantity: number; rejected?: number; rejectionNote?: string }[]
+        | undefined;
       if (!body.poNumber || !lines?.length)
         return NextResponse.json({ error: "poNumber and lines are required" }, { status: 400 });
       return respond(
         await executor.execute("purchasing.receiveGoods", ctx, {
           poNumber: body.poNumber as number,
           lines,
+          overreceiptTolerancePct: (body.overreceiptTolerancePct as number) || undefined,
+          authorityReason: (body.authorityReason as string) || undefined,
+          note: (body.note as string) || undefined,
         }),
       );
     }
+    case "receiptDetail":
+      if (!body.poNumber) return NextResponse.json({ error: "poNumber is required" }, { status: 400 });
+      return respond(await executor.execute("purchasing.listReceipts", ctx, { poNumber: body.poNumber as number }));
     case "createBill": {
       const lines = body.lines as { description: string; quantity: number; unitPriceMinor: number; poLineNumber?: number }[] | undefined;
       if (!body.vendorId || !lines?.length)
@@ -278,7 +289,11 @@ export async function POST(req: Request) {
       if (!body.poNumber || !lines?.length)
         return NextResponse.json({ error: "poNumber and lines are required" }, { status: 400 });
       return respond(
-        await executor.execute("purchasing.returnGoods", ctx, { poNumber: body.poNumber as number, lines }),
+        await executor.execute("purchasing.returnGoods", ctx, {
+          poNumber: body.poNumber as number,
+          receiptNumber: (body.receiptNumber as number) || undefined,
+          lines,
+        }),
       );
     }
     default:

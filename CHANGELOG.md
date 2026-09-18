@@ -12,6 +12,14 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **the pilot surfaces are built (W0.5).** A receiving desk that records
+  what arrived line by line — accepted, rejected with a reason, and what
+  stays outstanding — through the governed receiving capabilities; a "My
+  Work" home section ranking approvals, outstanding deliveries and module
+  signals deterministically, each card with one primary action; an optional
+  AI brief over that ranked list (openrouter/stealth/union-alpha, honest
+  degradation without a key); a supplier view remembering open orders and
+  owed bills; and client-side pilot metrics for time-to-first-action.
 - **pilot selection recorded (W0.5).** The audit's "one pilot cohort,
   P01–P04 first" decision is made on evidence: a distribution/wholesale
   purchasing-and-receiving team piloting the receive → exception → bill →

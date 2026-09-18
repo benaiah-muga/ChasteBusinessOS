@@ -297,6 +297,37 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
+## W0.5 build — receiving desk, My Work home, supplier page, instrumentation (delivered)
+
+The pilot build order executes on the delivered engines:
+
+- **P05 receiving desk** (`/purchasing/receiving`): find the order from the
+  delivery note, enter per line what was accepted and what was refused
+  (reason mandatory, shown to the supplier), overreceipt only with paired
+  tolerance and authority, finish with receipt number and what remains
+  outstanding. Receipt history is visible per order. Every write goes
+  through the governed `purchasing.receiveGoods` / `returnGoods` /
+  `listReceipts` capabilities via the kernel executor with operation ids.
+- **P01 My Work home** (`/api/my-work`, top of the home page): one
+  deterministic ranked list — approvals the viewer has authority to decide
+  first (oldest first), then partial orders' outstanding lines (largest
+  first), then module signals with coverage failures shown as "unavailable,
+  not zero problems". Each card says what changed, why it matters, and one
+  primary action.
+- **NL brief**: `/api/my-work/summarize` writes a two-sentence brief over
+  the already-authorized card bundle on
+  `openrouter/stealth/union-alpha`; without a key it degrades honestly —
+  the ranked list never depends on the model.
+- **P04 supplier view**: the vendors tab remembers the relationship — open
+  orders, bills still owed, receiving-desk deep link per vendor.
+- **Instrumentation**: `lib/pilot-metrics.ts` records home-open,
+  receiving-open, first-action and journey-complete events with elapsed
+  time in localStorage — no server write path, so telemetry cannot become
+  an ungoverned write; the pilot operator exports per device.
+
+Pinned by `apps/web/src/server/pilot-ui.test.ts` (ranked composition,
+receipt round-trip, rejection boundary, honest NL degradation).
+
 ## W0.5 — pilot cohort and workflow selection (recommended, awaiting owner confirmation)
 
 `docs/w05-pilot-selection.md` selects the pilot cohort on evidence: a small
