@@ -11,6 +11,17 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Changed
+- **sign-in is sealed until the email is verified; unverified sessions
+  inherit nothing (N03).** Domain identities are pre-provisioned (SCIM,
+  invitations) and bind by email, so a password sign-up for that email used
+  to walk straight into memberships without owning the mailbox. Sign-in now
+  requires verification (the link is re-sent on each sign-in attempt), and
+  an unverified session resolves to a bare identity — no memberships, no
+  permissions — until the address is verified or proven by a trusted IdP.
+  Existing unverified accounts receive a fresh verification email at their
+  next sign-in attempt.
+
 ### Added
 - **SCIM provisioning tokens expire (0054).** Tokens used to be valid until
   manually deactivated. New tokens live 90 days by default (1–365

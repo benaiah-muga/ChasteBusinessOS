@@ -12,6 +12,22 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,
+    // N03: a password account proves nothing about mailbox ownership, and a
+    // pre-provisioned domain identity (SCIM, invitation) binds by email —
+    // so sign-in stays sealed until the address is verified. Sign-up skips
+    // auto-sign-in in this mode and duplicate-address responses stay
+    // generic (anti-enumeration).
+    requireEmailVerification: true,
+  },
+  emailVerification: {
+    // This deployment has no SMTP transport wired; the verification link is
+    // logged for the operator. docs/n03-verified-binding-matrix.md records
+    // which deployment profiles transport a real mailer and which rely on
+    // trusted-IdP assertions instead of email verification.
+    sendVerificationEmail: async ({ user, url }) => {
+      console.info(`[auth] email verification link for ${user.email}: ${url}`);
+    },
+    sendOnSignIn: true,
   },
   session: {
     expiresIn: 60 * 60 * 24 * 7,

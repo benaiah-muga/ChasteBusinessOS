@@ -297,6 +297,24 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
+## N03 — verified identity binding closed; deployment matrix recorded (delivered)
+
+A password account proves nothing about mailbox ownership, and domain
+identities are pre-provisioned (SCIM, invitations) and bind by email —
+so an unverified sign-up for a provisioned address could previously walk
+straight into the pre-provisioned memberships. Two layers now seal the
+binding: Better Auth runs with `requireEmailVerification` (sign-in refuses
+unverified accounts, re-sends the verification link, sign-up skips
+auto-sign-in, duplicate responses stay generic), and the resolution layer
+surfaced no memberships and no permissions to an unverified session —
+including case-variant claims. Verification, or a trusted-IdP assertion in
+SSO profiles, unlocks pre-provisioned access; concurrent first sign-ins
+collapse to one domain user via the unique email plus conflict re-select.
+`docs/n03-verified-binding-matrix.md` records the deployment profiles (no
+SMTP, password+SMTP, trusted IdP, SCIM), the covered edges (case, recovery,
+email change, enumeration, bootstrap-while-unverified), and the executable
+proof in `apps/web/src/server/identity-binding.test.ts`.
+
 ## SCIM token expiry/rotation policy (delivered, 0054)
 
 SCIM provisioning tokens no longer live forever: creation applies a 90-day

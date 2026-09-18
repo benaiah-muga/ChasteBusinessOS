@@ -489,9 +489,16 @@ export async function resolveActorFromAuth(
   authName: string | null,
   db: Database["db"],
 ): Promise<ResolvedUser> {
-  let [domainUser] = await db.select().from(users).where(eq(users.email, authEmail)).limit(1);
+  // Emails are matched case-insensitively everywhere in the identity path;
+  // normalizing here prevents a case-variant second identity splitting one
+  // person's memberships (N03).
+  const email = authEmail.trim().toLowerCase();
+  let [domainUser] = await db.select().from(users).where(eq(users.email, email)).limit(1);
   if (!domainUser) {
-    [domainUser] = await db.insert(users).values({ email: authEmail, name: authName }).returning();
+    // Two concurrent first sign-ins race the unique email: the loser
+    // re-selects the winner's row instead of failing the resolution.
+    await db.insert(users).values({ email, name: authName }).onConflictDoNothing();
+    [domainUser] = await db.select().from(users).where(eq(users.email, email)).limit(1);
   }
   if (!domainUser) throw new Error("failed to ensure domain user");
 

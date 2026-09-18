@@ -31,6 +31,25 @@ export async function getResolvedUser(): Promise<SessionUser | null> {
   const base = await resolveActorFromAuth(session.user.email, session.user.name ?? null, db);
   const emailVerified = session.user.emailVerified === true;
 
+  // N03 verified binding: a password account proves nothing about mailbox
+  // ownership. Domain identities are pre-provisioned by SCIM and
+  // invitations and bind by email, so an UNVERIFIED session resolves to a
+  // bare identity — no memberships surfaced, no permissions — until the
+  // address is demonstrated. Creating a brand-new org stays possible (it
+  // claims nothing that existed before); pre-provisioned access waits for
+  // the verified email or a trusted-IdP assertion.
+  if (!emailVerified) {
+    return {
+      userId: base.userId,
+      email: base.email,
+      name: base.name,
+      orgId: null,
+      permissions: new Set<string>(),
+      allOrgIds: [],
+      emailVerified,
+    };
+  }
+
   const rows = await db
     .select({ orgId: memberships.orgId })
     .from(memberships)
