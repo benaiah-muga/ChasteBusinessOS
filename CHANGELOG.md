@@ -12,6 +12,11 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **SCIM provisioning tokens expire (0054).** Tokens used to be valid until
+  manually deactivated. New tokens live 90 days by default (1–365
+  configurable), expired tokens are refused outright, and rotation is
+  create-new + deactivate-old; pre-policy tokens stay valid until
+  deactivated.
 - **stock reads hit a maintained projection; one number allocator; bin-scoped
   counts (N22).** Every stock report used to re-sum the entire movement
   ledger, cycle counts could only count the whole warehouse at once, and

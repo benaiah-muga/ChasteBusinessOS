@@ -1569,6 +1569,12 @@ export const scimTokens = pgTable(
     tokenHash: text("token_hash").notNull().unique(),
     label: text("label").notNull().default("IdP provisioning"),
     active: boolean("active").notNull().default(true),
+    /**
+     * Expiry policy (0054): new tokens default to 90 days; null means a
+     * pre-policy token that stays valid until deactivated. The IdP route
+     * refuses expired tokens regardless of the active flag.
+     */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     createdByUserId: uuid("created_by_user_id").references(() => users.id),
     createdAt: createdAt(),

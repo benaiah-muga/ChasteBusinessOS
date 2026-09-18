@@ -379,6 +379,13 @@
       "when": 1789574000003,
       "tag": "0053_stock_projections",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1789574000004,
+      "tag": "0054_scim_token_expiry",
+      "breakpoints": true
     }
   ]
 }

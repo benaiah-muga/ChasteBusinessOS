@@ -297,6 +297,14 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
+## SCIM token expiry/rotation policy (delivered, 0054)
+
+SCIM provisioning tokens no longer live forever: creation applies a 90-day
+default window (1–365 configurable), the IdP route refuses expired tokens
+regardless of the active flag, rotation is create-new + deactivate-old, and
+pre-policy tokens (null expiry) stay valid until deactivated. Pinned by
+`apps/web/src/server/scim-tokens.test.ts`.
+
 ## N22 completion — stock projections, bin-scoped counts, one number allocator (delivered, ADR 0050 extension)
 
 Migration 0053 adds `stock_balances` — one row per org+item+location+lot —

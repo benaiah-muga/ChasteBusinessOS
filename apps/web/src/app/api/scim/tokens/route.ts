@@ -15,6 +15,7 @@ export async function GET() {
       id: scimTokens.id,
       label: scimTokens.label,
       active: scimTokens.active,
+      expiresAt: scimTokens.expiresAt,
       lastUsedAt: scimTokens.lastUsedAt,
       createdAt: scimTokens.createdAt,
     })
@@ -25,7 +26,9 @@ export async function GET() {
 
 /**
  * Creates a SCIM bearer token. The raw token is returned exactly once;
- * only its SHA-256 lands in the database.
+ * only its SHA-256 lands in the database. Expiry policy (0054): tokens live
+ * 90 days by default (1–365 configurable); rotation is create-new then
+ * deactivate-old, and the IdP route refuses expired tokens outright.
  */
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
@@ -33,18 +36,24 @@ export async function POST(req: Request) {
   if (!hasPermission({ permissions: resolved.permissions }, "iam.admin")) {
     return NextResponse.json({ error: "requires iam.admin permission" }, { status: 403 });
   }
-  const body = (await req.json().catch(() => ({}))) as { label?: string };
+  const body = (await req.json().catch(() => ({}))) as { label?: string; expiresInDays?: number };
+  const expiresInDays = body.expiresInDays ?? 90;
+  if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365) {
+    return NextResponse.json({ error: "expiresInDays must be an integer between 1 and 365" }, { status: 400 });
+  }
   const raw = `scim_${randomBytes(24).toString("base64url")}`;
+  const expiresAt = new Date(Date.now() + expiresInDays * 86_400_000);
   const [row] = await getDb().db
     .insert(scimTokens)
     .values({
       orgId: resolved.orgId,
       tokenHash: hashToken(raw),
       label: body.label ?? "IdP provisioning",
+      expiresAt,
       createdByUserId: resolved.userId,
     })
-    .returning({ id: scimTokens.id, label: scimTokens.label });
-  return NextResponse.json({ token: raw, id: row!.id, label: row!.label }, { status: 201 });
+    .returning({ id: scimTokens.id, label: scimTokens.label, expiresAt: scimTokens.expiresAt });
+  return NextResponse.json({ token: raw, id: row!.id, label: row!.label, expiresAt: row!.expiresAt }, { status: 201 });
 }
 
 export async function DELETE(req: Request) {
