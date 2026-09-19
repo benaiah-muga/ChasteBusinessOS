@@ -41,7 +41,7 @@ function ApprovalContext({ approval }: { approval: Approval }) {
     const digest = typeof payload.candidateDigest === "string" ? payload.candidateDigest : null;
     return (
       <div className="mb-4 rounded-lg border border-maroon-200 bg-maroon-50/60 px-3.5 py-3 text-xs text-maroon-950">
-        <div className="flex items-center gap-2"><Badge tone="maroon">Creator release</Badge><span>Approval records a controlled artifact handoff; it does not install or execute source.</span></div>
+        <div className="flex items-center gap-2"><Badge tone="gold">Creator release</Badge><span>Approval records a controlled artifact handoff; it does not install or execute source.</span></div>
         {digest && <div className="mt-2 flex flex-wrap items-center gap-1">Candidate digest <code className="break-all">{digest}</code><CopyButton text={digest} label="Copy digest" /></div>}
       </div>
     );

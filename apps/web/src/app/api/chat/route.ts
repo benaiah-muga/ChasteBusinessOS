@@ -116,7 +116,7 @@ export async function POST(req: Request) {
         userId: ctx.actor.id,
         title: body.data.message.slice(0, 80),
         mode: "assist",
-        modelRef: modelRef,
+        modelRef,
       })
       .returning({ id: agentSessions.id });
     sessionId = session!.id;
