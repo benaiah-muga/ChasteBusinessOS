@@ -3,7 +3,7 @@
  *
  * Pure business rule: given the customer's currently open receivables and
  * the candidate order total, decide whether confirming keeps them inside
- * their configured ceiling. A null limit means "no credit control" — the
+ * their configured ceiling. A null limit means "no credit control" - the
  * honest default for walk-in customers.
  *
  * All amounts are integer minor units. This function performs no IO and
@@ -15,7 +15,7 @@ export interface CreditEvaluation {
   decision: "no-limit" | "within" | "over";
   /**
    * Room left under the limit after this order (null when no limit).
-   * Negative when over — the exact overshoot, so messages can say how
+   * Negative when over - the exact overshoot, so messages can say how
    * much payment or headroom is needed.
    */
   headroomMinor: number | null;

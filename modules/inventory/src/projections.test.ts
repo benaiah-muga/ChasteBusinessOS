@@ -21,7 +21,7 @@ import { registerInventoryCapabilities, type ModuleDeps } from "./index";
 
 /**
  * N22 completion: the stock_balances projection is maintained by a database
- * trigger — consistent with the ledger whatever wrote the movement — so
+ * trigger - consistent with the ledger whatever wrote the movement - so
  * reads stop re-summing the ledger; a rebuild replays the ledger and
  * repairs any drift; cycle counts can scope to one location; and document
  * numbers come from one per-org allocator instead of per-module MAX+1.
@@ -109,7 +109,7 @@ describe("N22 stock projections", () => {
   it("keeps the projection consistent with the ledger whatever wrote the movement", async () => {
     const itemId = await newItem("PJ-BOLT");
 
-    // A fixture-style raw seed — the trigger maintains the projection for it
+    // A fixture-style raw seed - the trigger maintains the projection for it
     // exactly as it does for service-written movements.
     await db.db.insert(stockMovements).values({ orgId, itemId, quantityDelta: 7_000, reason: "adjustment", actorType: "system", actorId: null });
     await db.db.insert(stockMovements).values({ orgId, itemId, quantityDelta: -2_000, reason: "sale", locationId: mainLocId, actorType: "system", actorId: null });

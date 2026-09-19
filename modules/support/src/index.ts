@@ -508,8 +508,8 @@ const suggestTicketCategory = (memo: string): string => {
 };
 
 /**
- * N08: the chat loop's honesty path — "file a ticket when a request cannot
- * be handled honestly" — is a governed action like any other write: one
+ * N08: the chat loop's honesty path - "file a ticket when a request cannot
+ * be handled honestly" - is a governed action like any other write: one
  * contract, one audited append, a durable id in the receipt. Chat's sink
  * executes this as the acting user; a member without support authority gets
  * an honest refusal instead of a silent side-channel insert.
@@ -519,7 +519,7 @@ const createTicket = (deps: ModuleDeps) =>
     id: "support.createTicket",
     title: "File support ticket",
     intent:
-      "Record a ticket for something that cannot be handled honestly right now — a capability gap, a bug, or an explicit request — so a human picks it up on the record",
+      "Record a ticket for something that cannot be handled honestly right now - a capability gap, a bug, or an explicit request - so a human picks it up on the record",
     module: "support",
     risk: "write",
     permission: "support.write",
@@ -589,7 +589,7 @@ const suggestCategory = (_deps: ModuleDeps) =>
   defineCapability({
     id: "support.suggestCategory",
     title: "Suggest ticket category",
-    intent: "Draft a category for a ticket from its text using fixed rules — a suggestion, never a decision",
+    intent: "Draft a category for a ticket from its text using fixed rules - a suggestion, never a decision",
     module: "support",
     risk: "read",
     permission: "support.read",

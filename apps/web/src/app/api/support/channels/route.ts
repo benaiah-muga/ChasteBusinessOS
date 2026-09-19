@@ -9,7 +9,7 @@ import { getResolvedUser } from "@/server/session";
  * Customer-care channel configuration (N08). Reading must never mutate and
  * never hand the embed credential to someone who cannot manage it: GET is a
  * pure read (token only for iam.admin), POST provisions or changes settings
- * and requires iam.admin — changing auto-reply or rotating the token changes
+ * and requires iam.admin - changing auto-reply or rotating the token changes
  * what the public website can reach.
  */
 

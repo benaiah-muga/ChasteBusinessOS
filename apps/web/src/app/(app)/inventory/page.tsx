@@ -181,7 +181,7 @@ export default function InventoryPage() {
     const item = res.ok ? res.data?.data?.item ?? null : null;
     if (item) {
       setScannedSku(item.sku);
-      setNotice({ tone: "success", text: `${item.name} (${item.sku}) — highlighted below.` });
+      setNotice({ tone: "success", text: `${item.name} (${item.sku}) - highlighted below.` });
     } else {
       setScannedSku(null);
       setNotice({
@@ -256,7 +256,7 @@ export default function InventoryPage() {
                     size="sm"
                     disabled={busy || totalValue === 0}
                     onClick={() => void post({ action: "postValuationSummary", memo: `Valuation summary ${new Date().toISOString().slice(0, 10)}` }, "Post valuation summary")}
-                    title="Posts the inventory value to the ledger as a summary entry — approval-gated"
+                    title="Posts the inventory value to the ledger as a summary entry - approval-gated"
                   >
                     Post valuation summary
                   </Button>
@@ -292,11 +292,11 @@ export default function InventoryPage() {
                     <th className="text-right">On hand</th>
                     <th
                       className="text-right"
-                      title="Available-to-promise: on hand minus open reservations — what you can still sell"
+                      title="Available-to-promise: on hand minus open reservations - what you can still sell"
                     >
                       Available
                     </th>
-                    <th className="text-right" title="On hand × moving average cost — what the stock is worth at cost">
+                    <th className="text-right" title="On hand × moving average cost - what the stock is worth at cost">
                       Value
                     </th>
                     <th
@@ -361,10 +361,10 @@ export default function InventoryPage() {
                                         {qty(m.quantityDelta)}
                                       </td>
                                       <td>{m.reason}</td>
-                                      <td className="font-mono opacity-60">{m.refType ?? "—"}</td>
-                                      <td className="opacity-70">{[m.lotCode, m.locationCode].filter(Boolean).join(" · ") || "—"}</td>
+                                      <td className="font-mono opacity-60">{m.refType ?? "-"}</td>
+                                      <td className="opacity-70">{[m.lotCode, m.locationCode].filter(Boolean).join(" · ") || "-"}</td>
                                       <td className="opacity-60">{m.actorType}</td>
-                                      <td className="max-w-64 truncate opacity-70" title={m.note ?? ""}>{m.note ?? "—"}</td>
+                                      <td className="max-w-64 truncate opacity-70" title={m.note ?? ""}>{m.note ?? "-"}</td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -500,7 +500,7 @@ export default function InventoryPage() {
                 <Button disabled={busy || !vendorId || picked.size === 0} onClick={() => void draftPo()}>
                   Draft purchase order ({picked.size})
                 </Button>
-                {vendors.length === 0 && <span className="text-xs opacity-60">No vendors yet — create one via Purchasing or your agent first.</span>}
+                {vendors.length === 0 && <span className="text-xs opacity-60">No vendors yet - create one via Purchasing or your agent first.</span>}
               </div>
               {poNumber !== null && (
                 <p className="rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-900">
@@ -562,9 +562,9 @@ export default function InventoryPage() {
                     <tr key={l.sku} className="border-t">
                       <td className="py-1.5 font-mono">{l.sku}</td>
                       <td className="text-right tabular-nums">{qty(l.expectedThousandths)}</td>
-                      <td className="text-right tabular-nums">{l.countedThousandths === null ? "—" : qty(l.countedThousandths)}</td>
+                      <td className="text-right tabular-nums">{l.countedThousandths === null ? "-" : qty(l.countedThousandths)}</td>
                       <td className={`text-right tabular-nums ${(l.varianceThousandths ?? 0) < 0 ? "text-red-700" : "text-green-800"}`}>
-                        {l.varianceThousandths === null ? "—" : `${l.varianceThousandths > 0 ? "+" : ""}${qty(l.varianceThousandths)}`}
+                        {l.varianceThousandths === null ? "-" : `${l.varianceThousandths > 0 ? "+" : ""}${qty(l.varianceThousandths)}`}
                       </td>
                       <td>
                         {c.status === "open" && (
@@ -639,7 +639,7 @@ export default function InventoryPage() {
               <ul className="divide-y text-sm">
                 {(data.locations ?? []).map((l) => (
                   <li key={l.id} className="py-1.5">
-                    <span className="font-mono">{l.code}</span> — {l.name}
+                    <span className="font-mono">{l.code}</span> - {l.name}
                   </li>
                 ))}
               </ul>
@@ -704,7 +704,7 @@ export default function InventoryPage() {
                         <button
                           type="button"
                           className="cursor-pointer rounded px-1.5 py-1 text-xs opacity-70 hover:opacity-100"
-                          title="Confirm remaining quantity — this writes the paired ledger legs"
+                          title="Confirm remaining quantity - this writes the paired ledger legs"
                           onClick={() => void post({ action: "confirmTransfer", transferId: t.id }, `Confirm transfer #${t.number}`)}
                         >
                           confirm

@@ -45,7 +45,7 @@ describe("evaluateCredit", () => {
     );
   });
 
-  it("property: monotone — more open AR never flips over-limit back to within", () => {
+  it("property: monotone - more open AR never flips over-limit back to within", () => {
     fc.assert(
       fc.property(
         fc.integer({ min: 0, max: 5_000_000 }),

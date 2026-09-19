@@ -7,8 +7,8 @@ Date: 2026-09-15
 ## Context
 
 The stock ledger is append-only and on-hand is a derived sum, so nothing
-stopped two writers from interleaving. Inventory's own commands —
-adjustments, reservations, transfers, cycle counts — read on-hand, checked
+stopped two writers from interleaving. Inventory's own commands -
+adjustments, reservations, transfers, cycle counts - read on-hand, checked
 it, and wrote, all without a lock. POS and purchasing inserted movement rows
 directly, bypassing even the shared insert helper (the module-boundary lint
 rule steered them there), and manufacturing checked availability unlocked
@@ -16,7 +16,7 @@ before consuming. Two concurrent commands could both pass the same check and
 drive the balance negative. Lot IDs were accepted unvalidated: a lot of item
 A could move item B's stock. And the cycle-count drift guard compared total
 on-hand at post time against the snapshot, so a receipt plus a sale during
-counting — net zero — silently validated a stale sheet.
+counting - net zero - silently validated a stale sheet.
 
 ## Decision
 
@@ -30,8 +30,8 @@ change:
   inventory's own commands all converge on the same lock.
 - **Guarded writes.** `applyStockDelta` re-checks the serialized state:
   a lot must belong to the item being moved, and the resulting on-hand may
-  never go negative — org-wide, and at the movement's location when one is
-  given — then appends the movement.
+  never go negative - org-wide, and at the movement's location when one is
+  given - then appends the movement.
 - **Count watermarks.** Each cycle-count line snapshots its item's movement
   count (`cycle_count_lines.expected_movement_count`). Posting refuses when
   the count has changed, even if net quantity landed back where it started:

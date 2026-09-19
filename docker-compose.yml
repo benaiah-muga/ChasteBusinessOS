@@ -13,7 +13,7 @@
 #
 # BETTER_AUTH_SECRET is required: compose refuses to start the app without
 # it (`cp .env.example .env` and fill it, same as the host quickstart).
-# NVIDIA_API_KEY / OPENROUTER_API_KEY / MODEL_* are optional — the app
+# NVIDIA_API_KEY / OPENROUTER_API_KEY / MODEL_* are optional - the app
 # degrades honestly without a model key (no AI briefs, no agent runs).
 
 services:
@@ -50,7 +50,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://chaste:chaste_dev@db:5432/chaste_os_v2
       MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-postgresql://chaste:chaste_dev@db:5432/chaste_os_v2}
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required — copy .env.example to .env and fill it}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required - copy .env.example to .env and fill it}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
       NIM_BASE_URL: ${NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}

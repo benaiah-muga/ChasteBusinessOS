@@ -1,5 +1,5 @@
 /**
- * M13 verification — retail & reach.
+ * M13 verification - retail & reach.
  * Run: pnpm demo:m13 [shifts|marketing|all]
  */
 import { and, eq } from "drizzle-orm";
@@ -37,7 +37,7 @@ async function shiftsScenario(): Promise<string> {
   const sale = data(await ex.execute("pos.completeSale", ownerCtx, { sessionId: session.sessionId, lines: [{ description: "Mug", quantity: 2_000, unitPriceMinor: 150_00, taxMinor: 0, sku: "M13-MUG" }], method: "cash" }));
   ok(`sale ${sale.invoiceNumber} taken ${sale.totalMinor} minor on register front-1`);
   const [inv] = await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.posSessionId, session.sessionId));
-  const gated = await ex.execute("pos.returnSale", ownerCtx, { invoiceId: inv!.id, reason: "chipped mug — customer return" });
+  const gated = await ex.execute("pos.returnSale", ownerCtx, { invoiceId: inv!.id, reason: "chipped mug - customer return" });
   ok("return waits for a human whatever the size", Boolean(gated.pendingApproval));
   const gate = (await db.select().from(approvals).where(and(eq(approvals.orgId, orgId), eq(approvals.status, "pending")))).at(-1);
   if (!gate) throw new Error("gated but no approval row");

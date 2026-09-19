@@ -11,7 +11,7 @@ import { setOnboardingStep } from "@/server/onboarding";
  * spreadsheet of: customers and products.
  *
  * Rows are validated individually and inserted in batches. One malformed row
- * never aborts the import — it comes back in `errors` with its row number and
+ * never aborts the import - it comes back in `errors` with its row number and
  * what was wrong, so the user can fix the file (or just carry on with the
  * rows that were fine) instead of guessing at a 500.
  */

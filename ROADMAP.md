@@ -118,7 +118,7 @@
       (ADR 0021); sandboxed proposal runner (ADR 0023)
 - [ ] Pen-test pass; per-org data residency notes
 
-## M7 — Inventory integrity: books that see the warehouse (✅ shipped, ADR 0033)
+## M7 - Inventory integrity: books that see the warehouse (✅ shipped, ADR 0033)
 Plan and gate specs: `docs/REVENUE_SUITE_PLAN.md` (external inventory audit,
 triaged against the codebase)
 - [x] Inventory → GL closure: periodic valuation summary posting with
@@ -132,7 +132,7 @@ triaged against the codebase)
       stock-term tooltips (receipt notes already carried by ledger note field)
 - Demo proof: `pnpm demo:m7`
 
-## M8 — Signals + reorder intelligence (✅ shipped, ADR 0034, 0035)
+## M8 - Signals + reorder intelligence (✅ shipped, ADR 0034, 0035)
 - [x] Cross-module "Needs Attention" signal registry (ADR 0034): deterministic
       producers, one shape, feeding home dashboard, app overviews, routines,
       and the agent
@@ -142,7 +142,7 @@ triaged against the codebase)
       → policy-gated approval (upgrades the `stock-reorder` advisory skill)
 - Demo proof: `pnpm demo:m8`
 
-## M9 — Quote-to-cash completed + CRM depth (✅ 2026-08-31, 15/15 gates — `GATES.md`)
+## M9 - Quote-to-cash completed + CRM depth (✅ 2026-08-31, 15/15 gates - `GATES.md`)
 - [x] Quote lifecycle: `quotes.expires_at`, expiry-refusing acceptance,
       `accounting.expireQuote` idempotent sweep, expired-quote signal (ADR 0034)
 - [x] Sales orders + fulfillment: reservation-anchored confirm (oversell
@@ -154,26 +154,26 @@ triaged against the codebase)
       (erp-core, property-tested) warning on createCustomer
 - [x] Customer 360: `crm.customerTimeline` merges invoices, payments,
       quotes, deals, and tasks reverse-chronologically
-- Demo proof: `pnpm demo:m9` — FULFILLMENT OK / CREDIT GUARD OK /
+- Demo proof: `pnpm demo:m9` - FULFILLMENT OK / CREDIT GUARD OK /
   EXPIRY GUARD OK / TIMELINE OK; live-DB suites green in modules/sales,
   modules/accounting (quotes), modules/crm
 
-## M10 — Accounting & purchasing depth (✅ 2026-08-31, 21/21 gates — `GATES.md`)
+## M10 - Accounting & purchasing depth (✅ 2026-08-31, 21/21 gates - `GATES.md`)
 Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
 - [x] Cash flow statement (direct method, erp-core, property-tested: ties
       to the cash balance) + AR/AP credit notes (always-gated,
-      reversal-style, immutable credited columns) — ADR 0037
+      reversal-style, immutable credited columns) - ADR 0037
 - [x] Payment terms → due dates; customer/supplier statements with running
       balances; reminder drafting honoring opt-out, delivered over the
       messaging seam; supplier lead-time/on-time/fill-rate memory, price
       history, close-with-backorder flag, purchase returns
 - [x] Money intelligence: duplicate-payment detection → orange signals,
       13-week cash forecast in erp-core (bucket conservation property)
-- Demo proof: `pnpm demo:m10` — CASHFLOW TIES / CREDIT NOTE GATED /
+- Demo proof: `pnpm demo:m10` - CASHFLOW TIES / CREDIT NOTE GATED /
   STATEMENTS RENDERED / REMINDER DRAFTED / SUPPLIER MEMORY OK /
   FORECAST RENDERED / DUPLICATE FLAGGED
 
-## M11 — People, projects, expenses (✅ 2026-09-01, 19/19 gates — `GATES.md`)
+## M11 - People, projects, expenses (✅ 2026-09-01, 19/19 gates - `GATES.md`)
 - [x] HR structure (department/position/manager/emergency contacts),
       attendance via clockIn/clockOut with late flags, derived leave
       balance + calendar, chronic-lateness signals
@@ -187,10 +187,10 @@ Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
 - [x] Expenses depth: rules-first categories with override, receipts via
       documents seam, per-category policy limits → signals, duplicate-claim
       detection
-- Demo proof: `pnpm demo:m11` — ATTENDANCE WATCH OK / PROJECTS STANDALONE OK /
+- Demo proof: `pnpm demo:m11` - ATTENDANCE WATCH OK / PROJECTS STANDALONE OK /
   M11 ALL OK (hire → project → time → expense → approve)
 
-## M12 — Understanding: analytics + helpdesk + documents (✅ 2026-09-01, 17/17 gates — `GATES.md`)
+## M12 - Understanding: analytics + helpdesk + documents (✅ 2026-09-01, 17/17 gates - `GATES.md`)
 - [x] `analytics.explainChange`: deterministic decomposition (contributions
       sum to the delta, property-tested), capability over invoice lines
       with drill-to-transactions; `analytics.askYourBusiness` cited
@@ -199,16 +199,16 @@ Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
       responses, KB articles, rules-first category drafts, SLA-breach signals
 - [x] Documents: folders, business-record metadata, append-only version
       history, expiry signals (ADR 0039)
-- Demo proof: `pnpm demo:m12` — DECOMPOSITION SUMS / ASK-ANSWER CITED /
+- Demo proof: `pnpm demo:m12` - DECOMPOSITION SUMS / ASK-ANSWER CITED /
   TICKETS DEEP OK / DOCUMENTS LAYER OK
 
-## M13 — Retail & reach (✅ 2026-09-01, 11/11 gates — `GATES.md`, demand confirmed)
+## M13 - Retail & reach (✅ 2026-09-01, 11/11 gates - `GATES.md`, demand confirmed)
 - [x] POS returns (always-gated full-sale reversal: refund entry, invoice
       credit, stock restored), shift summaries per register
 - [x] Marketing-lite on confirmed demand: saved deterministic segments,
-      campaigns with append-only send log, opt-out honored at send time —
+      campaigns with append-only send log, opt-out honored at send time -
       no tracking pixels, no journeys, no landing pages (ADR 0040)
-- Demo proof: `pnpm demo:m13` — SHIFT SUMMARY OK / MARKETING LITE OK
+- Demo proof: `pnpm demo:m13` - SHIFT SUMMARY OK / MARKETING LITE OK
 
 ## Standing principles (every milestone)
 1. No feature ships unless it's operable by agent **and** human through the same path.
@@ -217,7 +217,7 @@ Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
 4. If the agent can't do it honestly, it files a ticket, never improvises.
 5. Each module is useful alone; modules compound when combined; cross-module
    effects degrade gracefully when a sibling module is disabled; the AI is the
-   connective tissue that operates the whole — never a bypass around
+   connective tissue that operates the whole - never a bypass around
    governance (enforced by composition conformance, ADR 0035).
 
 

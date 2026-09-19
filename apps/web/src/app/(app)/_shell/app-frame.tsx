@@ -65,46 +65,48 @@ export function AppFrame({
 
   return (
     <div>
-      <header className="sticky top-0 z-20 -mx-4 mb-6 border-b border-stone-200 bg-canvas/90 px-4 backdrop-blur sm:-mx-6 sm:px-6">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-3 pb-3 sm:pt-4">
+      <header className="module-band sticky top-14 z-20 mb-6 rounded-2xl px-4 py-3.5 sm:px-5 lg:top-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <Link
             href="/"
             aria-label="Back to dashboard"
             title="Back to dashboard"
-            className="icon-btn -ml-1 shrink-0"
+            className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[#a9a39b] transition-colors duration-150 hover:bg-white/10 hover:text-[#f7f1e8]"
           >
-            <IconChevronLeft className="size-4.5" />
+            <IconChevronLeft className="size-5" />
           </Link>
           <span
             aria-hidden="true"
-            style={tileStyle(app?.hue ?? 0)}
-            className="flex size-8 shrink-0 items-center justify-center rounded-[9px]"
+            style={tileStyle()}
+            className="flex size-9 shrink-0 items-center justify-center rounded-[10px]"
           >
-            {Icon && <Icon className="size-4.5" />}
+            {Icon && <Icon className="size-5" />}
           </span>
           <div className="min-w-0 flex-1">
-            <nav aria-label="Breadcrumb" className="text-[11px] leading-none text-stone-400">
-              <ol className="flex items-center gap-1">
+            <nav aria-label="Breadcrumb" className="text-[13px] leading-none">
+              <ol className="flex items-center gap-1.5">
                 <li>
-                  <Link href="/" className="hover:text-stone-600 hover:underline">
+                  <Link href="/" className="font-medium text-[#d2aa6a] hover:text-[#e5c585] hover:underline">
                     Home
                   </Link>
                 </li>
-                <li aria-hidden="true">/</li>
-                <li aria-current="page" className="font-medium text-stone-500">
+                <li aria-hidden="true" className="text-[#8f8c87]">
+                  /
+                </li>
+                <li aria-current="page" className="text-[15px] font-semibold tracking-[-0.01em] text-[#f7f1e8]">
                   {app?.name ?? appId}
                 </li>
               </ol>
             </nav>
             {description && (
-              <p className="mt-1 hidden truncate text-xs text-stone-500 sm:block">{description}</p>
+              <p className="mt-1.5 hidden truncate text-xs leading-4 text-[#b5aea4] sm:block">{description}</p>
             )}
           </div>
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </div>
 
         {tabs && (
-          <div role="tablist" aria-label={`${app?.name ?? appId} sections`} className="-mx-1 overflow-x-auto px-1">
+          <div role="tablist" aria-label={`${app?.name ?? appId} sections`} className="-mx-1 overflow-x-auto px-1 pt-3">
             {tabs.map((t) => (
               <button
                 key={t.id}
@@ -112,11 +114,11 @@ export function AppFrame({
                 role="tab"
                 aria-selected={t.id === activeTab}
                 onClick={() => onTabChange?.(t.id)}
-                className={cn("tab mr-4")}
+                className={cn("tab tab-band mr-4")}
               >
                 {t.label}
                 {t.count != null && (
-                  <span className="tnum rounded-full bg-stone-100 px-1.5 py-px text-[11px] font-medium text-stone-500">
+                  <span className="tnum rounded-full bg-white/10 px-1.5 py-px text-[11px] font-medium text-[#e8e2d8]">
                     {t.count}
                   </span>
                 )}

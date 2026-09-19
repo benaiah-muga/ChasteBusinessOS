@@ -5,7 +5,7 @@ import { buildExecutor, composeRegistry } from "./kernel";
 /**
  * B02 unit of work for one governed action: mutation, audit fact and action
  * receipt commit or roll back together. Modules open their own transactions
- * from their `db` handle — handed a transaction they nest via savepoints, so
+ * from their `db` handle - handed a transaction they nest via savepoints, so
  * a capability executing against the transaction-scoped registry lands
  * entirely inside this unit. Audit failures rethrow (failOnAuditError),
  * rolling the whole unit back: a retry starts clean instead of reconciling

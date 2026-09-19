@@ -1,5 +1,5 @@
 /**
- * M11 verification — people, projects, expenses.
+ * M11 verification - people, projects, expenses.
  * Every assertion is a product guarantee.
  *
  * Run: pnpm demo:m11 [hr|projects|flow|all]
@@ -156,14 +156,14 @@ async function flowScenario(): Promise<string> {
     employeeId: hired.employeeId,
     workDate: new Date().toISOString(),
     minutes: 240,
-    note: `Working ${task.taskId.slice(0, 8)} — process maps`,
+    note: `Working ${task.taskId.slice(0, 8)} - process maps`,
   }));
   ok("new hire logged 4 hours against the project task");
 
   data(await ex.execute("accounting.setExpensePolicy", ownerCtx, { category: "travel", limitMinor: 60_000 }));
   const claim = data(await ex.execute("accounting.submitExpenseClaim", ownerCtx, {
     amountMinor: 75_000,
-    memo: "Flight to the client kickoff — travel",
+    memo: "Flight to the client kickoff - travel",
   }));
   ok(`claim categorized "${claim.category}" and flagged over policy (${claim.policyLimitMinor})`, claim.category === "travel" && claim.overPolicyLimit === true);
   const decided = data(await ex.execute("accounting.decideExpenseClaim", ownerCtx, {

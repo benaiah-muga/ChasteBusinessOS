@@ -269,7 +269,7 @@ const listMembers = (deps: ModuleDeps) =>
 /**
  * Turns platform modules on or off for the org. Identity-class on purpose:
  * reshaping which surfaces the business operates is an authority decision,
- * always human-approved, and reversible — the previous set rides along in
+ * always human-approved, and reversible - the previous set rides along in
  * the output so the inverse restores it exactly.
  */
 const setModules = (deps: ModuleDeps) =>

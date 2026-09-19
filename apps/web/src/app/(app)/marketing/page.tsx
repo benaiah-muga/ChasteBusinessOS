@@ -166,7 +166,7 @@ export default function MarketingPage() {
             <EmptyState
               icon={<IconListTree />}
               title="No segments yet"
-              hint="A segment is a deterministic filter — everyone whose lifetime spend clears the threshold."
+              hint="A segment is a deterministic filter - everyone whose lifetime spend clears the threshold."
             />
           ) : (
             <ul className="divide-y text-sm">
@@ -216,12 +216,12 @@ export default function MarketingPage() {
             <textarea
               className="textarea min-h-16 w-full py-2 text-sm"
               rows={3}
-              placeholder="Body — what every recipient will read"
+              placeholder="Body - what every recipient will read"
               value={campaignForm.body}
               onChange={(e) => setCampaignForm({ ...campaignForm, body: e.target.value })}
             />
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-stone-400">Drafting sends nothing — delivery is a separate, logged step.</span>
+              <span className="text-xs text-stone-400">Drafting sends nothing - delivery is a separate, logged step.</span>
               <Button
                 disabled={
                   busy ||
@@ -273,7 +273,7 @@ export default function MarketingPage() {
                       </span>
                     </div>
                     <p className="mt-0.5 truncate text-xs text-stone-500" title={`${c.subject}: ${c.body}`}>
-                      {c.subject} — {c.body}
+                      {c.subject} - {c.body}
                     </p>
                     <div className="mt-1.5 flex items-center gap-2">
                       <Button
@@ -333,13 +333,13 @@ export default function MarketingPage() {
         <CardTitle>Send log</CardTitle>
         <Notice tone="info">
           <span className="font-semibold">Honest analytics:</span> the durable delivery log below is the only tracking.
-          No pixels, no open tracking, no click capture — &ldquo;delivered&rdquo; means the provider acknowledged the outbox operation.
+          No pixels, no open tracking, no click capture - &ldquo;delivered&rdquo; means the provider acknowledged the outbox operation.
         </Notice>
         {recentSends.length === 0 ? (
           <EmptyState
             icon={<IconChartBar />}
             title="Nothing sent yet"
-            hint="When a campaign is queued, every recipient operation is recorded here — permanently and auditably."
+            hint="When a campaign is queued, every recipient operation is recorded here - permanently and auditably."
           />
         ) : (
           <ul className="divide-y text-sm">

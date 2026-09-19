@@ -12,7 +12,7 @@ import {
 /**
  * ADR 0052 extended to inventory: quantity truth is append-only. Inserts are
  * ordinary writes; corrections are compensating movements (reversals, cycle
- * counts) — never edits to history. UPDATE/DELETE/TRUNCATE refuse outside the
+ * counts) - never edits to history. UPDATE/DELETE/TRUNCATE refuse outside the
  * declared maintenance context and succeed inside it.
  */
 

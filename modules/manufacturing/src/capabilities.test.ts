@@ -10,7 +10,7 @@ import { registerInventoryCapabilities } from "@chaste/module-inventory";
 
 /**
  * Ledger-backed integration proofs for the manufacturing capability surface.
- * Runs against the local database (owner role: RLS-exempt, which is fine —
+ * Runs against the local database (owner role: RLS-exempt, which is fine -
  * tenant isolation itself is proven by packages/db/src/rls.test.ts).
  */
 
@@ -142,7 +142,7 @@ describe("production with scrap, lots and multi-level BOMs", () => {
       found: boolean;
       tree: { lotCode: string; fedBy: unknown[] }[];
     };
-    // Components were untracked stock, so no upstream edges yet — but the lot resolves.
+    // Components were untracked stock, so no upstream edges yet - but the lot resolves.
     expect(trace.found).toBe(true);
     expect(trace.tree[0]?.lotCode).toBe("BIKE-LOT-1");
 
@@ -294,7 +294,7 @@ describe("cycle counts", () => {
     await run("inventory.adjustStock", { sku: "RIM", quantityDelta: 100, note: "undo drift inducer" });
 
     // N22 watermark: even with the net back where it started, the sheet saw
-    // movements it must not absorb — the refusal is permanent, not net-based.
+    // movements it must not absorb - the refusal is permanent, not net-based.
     await expect(run("inventory.postCycleCount", { countId: count.countId })).rejects.toThrow(/moved since the snapshot/);
 
     // A fresh snapshot taken after the dust settles posts cleanly.

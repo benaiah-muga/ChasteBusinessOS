@@ -27,7 +27,7 @@ export function PortalLoading() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
       <div className="mb-8 flex items-center gap-2 text-stone-400">
-        <IconSparkle className="size-4 text-maroon-800" />
+        <IconSparkle className="size-4 text-gold-800" />
         <span className="text-sm font-medium tracking-tight text-stone-600">Chaste · Invoice portal</span>
       </div>
       <div className="animate-pulse space-y-3 rounded-xl border border-stone-200 bg-white p-6">
@@ -40,8 +40,8 @@ export function PortalLoading() {
 }
 
 export function PortalInvoiceContent({ params }: { params: Promise<{ token: string }> }) {
-  // use(params) suspends here — inside the Suspense boundary on the server
-  // page — so the shell prerenders without knowing the token.
+  // use(params) suspends here - inside the Suspense boundary on the server
+  // page - so the shell prerenders without knowing the token.
   const { token } = use(params);
   const [invoice, setInvoice] = useState<PortalInvoice | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +50,7 @@ export function PortalInvoiceContent({ params }: { params: Promise<{ token: stri
     fetch(`/api/portal/invoice/${token}`)
       .then(async (r) => {
         if (!r.ok) {
-          setError(r.status === 429 ? "Too many requests — try again shortly." : "This link is not valid.");
+          setError(r.status === 429 ? "Too many requests - try again shortly." : "This link is not valid.");
           return;
         }
         const data = (await r.json()) as { invoice?: PortalInvoice };
@@ -62,7 +62,7 @@ export function PortalInvoiceContent({ params }: { params: Promise<{ token: stri
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
       <div className="mb-8 flex items-center gap-2 text-stone-400">
-        <IconSparkle className="size-4 text-maroon-800" />
+        <IconSparkle className="size-4 text-gold-800" />
         <span className="text-sm font-medium tracking-tight text-stone-600">Chaste · Invoice portal</span>
       </div>
 

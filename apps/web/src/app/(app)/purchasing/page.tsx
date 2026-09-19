@@ -199,7 +199,7 @@ export default function PurchasingPage() {
   return (
     <AppFrame
       appId="purchasing"
-      description="Vendors, purchase orders, receipts, bills, and payments — with three-way matching"
+      description="Vendors, purchase orders, receipts, bills, and payments - with three-way matching"
       persistKey="purchasing"
       tabs={[
         { id: "overview", label: "Overview" },
@@ -276,7 +276,7 @@ export default function PurchasingPage() {
             <EmptyState
               icon={<IconListTree />}
               title="No purchase requests yet"
-              hint="Raise one above — or ask the workmate — to start the request → approval → quotes → order flow."
+              hint="Raise one above - or ask the workmate - to start the request → approval → quotes → order flow."
             />
           ) : (
             (data.requests ?? []).map((r) => {
@@ -323,7 +323,7 @@ export default function PurchasingPage() {
                     <div className="mt-3 space-y-2 border-t pt-3 text-sm">
                       <p className="text-xs font-medium uppercase tracking-wide opacity-50">Send RFQs to vendors</p>
                       {vendors.length === 0 ? (
-                        <p className="text-xs opacity-60">No vendors yet — add them in the Vendors tab first.</p>
+                        <p className="text-xs opacity-60">No vendors yet - add them in the Vendors tab first.</p>
                       ) : (
                         <>
                           <div className="flex flex-wrap gap-x-4 gap-y-1.5">
@@ -338,7 +338,7 @@ export default function PurchasingPage() {
                                       [r.id]: e.target.checked ? [...picked, v.id] : picked.filter((x) => x !== v.id),
                                     })
                                   }
-                                  className="accent-maroon-700"
+                                  className="accent-gold-700"
                                 />
                                 {v.name}
                               </label>
@@ -378,8 +378,8 @@ export default function PurchasingPage() {
                                   {f.status}
                                 </Badge>
                               </td>
-                              <td className="text-right tabular-nums">{f.quoteAmountMinor != null ? formatMoney(f.quoteAmountMinor) : "—"}</td>
-                              <td className="text-right tabular-nums">{f.quoteLeadTimeDays != null ? `${f.quoteLeadTimeDays}d` : "—"}</td>
+                              <td className="text-right tabular-nums">{f.quoteAmountMinor != null ? formatMoney(f.quoteAmountMinor) : "-"}</td>
+                              <td className="text-right tabular-nums">{f.quoteLeadTimeDays != null ? `${f.quoteLeadTimeDays}d` : "-"}</td>
                               <td>
                                 {f.status === "sent" && (
                                   <span className="flex items-center justify-end gap-1">
@@ -422,7 +422,7 @@ export default function PurchasingPage() {
                                     onClick={() =>
                                       void post(
                                         { action: "selectWinningQuote", rfqId: f.id },
-                                        `${f.vendorName} awarded — purchase order raised`,
+                                        `${f.vendorName} awarded - purchase order raised`,
                                       )
                                     }
                                   >
@@ -460,8 +460,8 @@ export default function PurchasingPage() {
               </select>
               {vendors.length === 0 && !quickVendor.open && (
                 <span className="text-xs text-stone-500">
-                  No vendors yet —
-                  <button type="button" className="ml-1 font-medium text-maroon-700 underline underline-offset-2" onClick={() => setQuickVendor({ open: true, name: "", email: "" })}>
+                  No vendors yet -
+                  <button type="button" className="ml-1 font-medium text-gold-700 underline underline-offset-2" onClick={() => setQuickVendor({ open: true, name: "", email: "" })}>
                     create one here
                   </button>
                 </span>
@@ -632,7 +632,7 @@ export default function PurchasingPage() {
                     </Badge>
                   }
                 >
-                  PO #{o.number} — {o.vendorName}
+                  PO #{o.number} - {o.vendorName}
                 </CardTitle>
                 <p className="mb-2 text-xs opacity-60">
                   Ordered {formatMoney(o.orderedMinor)}
@@ -978,7 +978,7 @@ export default function PurchasingPage() {
             ) : (
               <ul className="divide-y text-sm">
                 {vendors.map((v) => {
-                  // P04: the supplier page remembers the relationship — open
+                  // P04: the supplier page remembers the relationship - open
                   // orders, bills still owed, and what was delivered short,
                   // composed from data already on the page.
                   const vendorOrders = orders.filter((o) => o.vendorName === v.name);
@@ -1068,9 +1068,9 @@ export default function PurchasingPage() {
                     <tr key={v.vendorId} className="border-t">
                       <td className="py-1.5 font-medium">{v.vendorName}</td>
                       <td className="text-right tabular-nums">{v.orders}</td>
-                      <td className="text-right tabular-nums">{v.avgLeadTimeDays === null ? "—" : `${v.avgLeadTimeDays} d`}</td>
-                      <td className="text-right tabular-nums">{v.onTimeRate === null ? "—" : `${v.onTimeRate}%`}</td>
-                      <td className="text-right tabular-nums">{v.fillRate === null ? "—" : `${v.fillRate}%`}</td>
+                      <td className="text-right tabular-nums">{v.avgLeadTimeDays === null ? "-" : `${v.avgLeadTimeDays} d`}</td>
+                      <td className="text-right tabular-nums">{v.onTimeRate === null ? "-" : `${v.onTimeRate}%`}</td>
+                      <td className="text-right tabular-nums">{v.fillRate === null ? "-" : `${v.fillRate}%`}</td>
                       <td className="text-right tabular-nums">{v.backorderedOrders}</td>
                     </tr>
                   ))}
@@ -1086,7 +1086,7 @@ export default function PurchasingPage() {
       <Dialog
         open={creditTarget !== null}
         onClose={() => setCreditTarget(null)}
-        title={`Credit bill #${creditTarget?.number ?? ""} — ${creditTarget?.vendorName ?? ""}`}
+        title={`Credit bill #${creditTarget?.number ?? ""} - ${creditTarget?.vendorName ?? ""}`}
         description="A supplier credit reduces what you owe through a reversing entry; the bill itself is never edited."
         footer={
           <>
@@ -1162,7 +1162,7 @@ export default function PurchasingPage() {
       <Dialog
         open={returnTarget !== null}
         onClose={() => setReturnTarget(null)}
-        title={`Return goods — PO #${returnTarget?.number ?? ""} (${returnTarget?.vendorName ?? ""})`}
+        title={`Return goods - PO #${returnTarget?.number ?? ""} (${returnTarget?.vendorName ?? ""})`}
         description="Writes the outbound stock legs against this order so receipts, fill rates and stock stay truthful."
         width="max-w-xl"
         footer={
@@ -1319,7 +1319,7 @@ function PurchasingOverview({ data, goTo }: { data: Payload; goTo: (tab: Tab) =>
             Bills to pay
           </CardTitle>
           {dueBills.length === 0 ? (
-            <p className="text-sm opacity-60">Nothing due — vendors are current.</p>
+            <p className="text-sm opacity-60">Nothing due - vendors are current.</p>
           ) : (
             <ul className="divide-y text-sm">
               {dueBills.slice(0, 5).map((b) => (
@@ -1440,10 +1440,10 @@ function VendorIntelSection({
                 <tr key={`${r.vendorName}-${r.itemDescription}-${i}`} className="border-t">
                   <td className="py-1.5 font-medium">{r.vendorName}</td>
                   <td className="text-stone-600">{r.itemDescription}</td>
-                  <td className="font-mono text-xs text-stone-500">{r.itemSku ?? "—"}</td>
+                  <td className="font-mono text-xs text-stone-500">{r.itemSku ?? "-"}</td>
                   <td className="text-right tabular-nums">{formatMoney(r.unitPriceMinor)}</td>
                   <td className="text-right text-stone-500">
-                    {r.orderedAt ? timeAgo(r.orderedAt) : "—"}
+                    {r.orderedAt ? timeAgo(r.orderedAt) : "-"}
                   </td>
                 </tr>
               ))}

@@ -2,7 +2,7 @@ CREATE TABLE "support_settings" (
 	"org_id" uuid PRIMARY KEY NOT NULL,
 	"embed_token" text NOT NULL,
 	"auto_reply_enabled" boolean DEFAULT true NOT NULL,
-	"greeting" text DEFAULT 'Hi — ask us anything and we''ll get right back to you.' NOT NULL,
+	"greeting" text DEFAULT 'Hi - ask us anything and we''ll get right back to you.' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );

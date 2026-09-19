@@ -129,7 +129,7 @@ export async function POST(req: Request) {
     .where(eq(organizations.id, ctx.actor.orgId))
     .limit(1);
 
-  // N08: the honesty path is governed too — tickets are filed through the
+  // N08: the honesty path is governed too - tickets are filed through the
   // kernel as the acting user, so the append is audited and the tool receipt
   // carries the durable ticket id. The registry is unscoped here on purpose:
   // filing a ticket must not depend on which modules this org enabled.

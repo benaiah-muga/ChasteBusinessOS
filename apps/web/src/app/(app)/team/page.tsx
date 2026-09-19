@@ -122,7 +122,7 @@ export default function TeamPage() {
                 </div>
                 <div className="flex flex-wrap justify-end gap-1">
                   {(m.roleKeys.length ? m.roleKeys : ["no role"]).map((k) => (
-                    <Badge key={k} tone={k === "owner" ? "maroon" : "neutral"}>
+                    <Badge key={k} tone={k === "owner" ? "gold" : "neutral"}>
                       {k}
                     </Badge>
                   ))}
@@ -212,8 +212,8 @@ export default function TeamPage() {
             </ul>
 
             {editingPerms && (
-              <div className="mt-4 rounded-lg border border-maroon-200 bg-maroon-50/40 p-3.5">
-                <p className="mb-2.5 text-xs font-semibold tracking-wide text-maroon-800 uppercase">
+              <div className="mt-4 rounded-lg border border-gold-200 bg-gold-50/40 p-3.5">
+                <p className="mb-2.5 text-xs font-semibold tracking-wide text-gold-800 uppercase">
                   Permissions · {data.roles.find((r) => r.id === editingPerms.roleId)?.name}
                 </p>
                 <div className="grid max-h-64 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
@@ -228,7 +228,7 @@ export default function TeamPage() {
                           else next.delete(perm);
                           setEditingPerms({ ...editingPerms, selected: next });
                         }}
-                        className="accent-maroon-700"
+                        className="accent-gold-700"
                       />
                       <span className="font-mono">{perm}{perm === "*" ? " (everything)" : ""}</span>
                     </label>

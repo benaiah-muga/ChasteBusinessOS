@@ -136,7 +136,7 @@ export default function ApprovalsPage() {
               <div className="p-5">
                 <ApprovalContext approval={a} />
                 {a.rationale && (
-                  <blockquote className="mb-4 border-l-2 border-maroon-300 pl-3.5 text-sm leading-relaxed text-stone-600 italic">
+                  <blockquote className="mb-4 border-l-2 border-gold-300 pl-3.5 text-sm leading-relaxed text-stone-600 italic">
                     {a.rationale}
                   </blockquote>
                 )}

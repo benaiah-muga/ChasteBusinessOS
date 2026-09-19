@@ -266,7 +266,7 @@ export function createNotificationSink(db: Database["db"]): NotificationSink {
         db,
         orgId,
         "approval.requested",
-        `${req.capabilityId} needs approval — ${req.rationale}`.slice(0, 200),
+        `${req.capabilityId} needs approval - ${req.rationale}`.slice(0, 200),
         "/approvals",
       );
     },

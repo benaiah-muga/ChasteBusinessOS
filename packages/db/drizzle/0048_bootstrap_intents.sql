@@ -4,7 +4,7 @@
 -- receipt instead of creating a second org; a conflicting reuse of the same
 -- intent id is refused by the unique pair plus payload hash comparison in
 -- the service. RLS mirrors the tenant_isolation shape: pre-org rows carry a
--- NULL org_id and are invisible to the runtime role, which is correct —
+-- NULL org_id and are invisible to the runtime role, which is correct -
 -- there is no tenant to isolate yet, and the server path reads receipts as
 -- the owner role.
 CREATE TABLE "bootstrap_intents" (

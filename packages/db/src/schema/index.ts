@@ -720,7 +720,7 @@ export const deals = pgTable(
     /** Where the deal came from (referral, website, walk-in…). */
     source: text("source"),
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
-    /** Required when a deal is marked lost — feeds win/loss analysis. */
+    /** Required when a deal is marked lost - feeds win/loss analysis. */
     lostReason: text("lost_reason"),
     note: text("note"),
     createdByUserId: uuid("created_by_user_id").references(() => users.id),
@@ -847,7 +847,7 @@ export const purchaseOrders = pgTable(
     orderedAt: timestamp("ordered_at", { withTimezone: true }),
     /** When the vendor promised delivery; feeds supplier performance (M10). */
     promisedAt: timestamp("promised_at", { withTimezone: true }),
-    /** Closed with unfilled quantities — the shortfall is on record (M10). */
+    /** Closed with unfilled quantities - the shortfall is on record (M10). */
     backordered: boolean("backordered").notNull().default(false),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     createdAt: createdAt(),
@@ -1101,7 +1101,7 @@ export const documents = pgTable(
     /** Business-record link (M12): what this document is evidence of. */
     refType: text("ref_type"),
     refId: uuid("ref_id"),
-    /** When the document loses validity (contracts, licenses) — signals (M12). */
+    /** When the document loses validity (contracts, licenses) - signals (M12). */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1935,7 +1935,7 @@ export const quoteLines = pgTable("quote_lines", {
 /**
  * Subscription-style invoicing templates. The durable worker expands due
  * templates into real invoices through the governed path, then advances
- * next_run_at — never posting directly.
+ * next_run_at - never posting directly.
  */
 export const recurringInvoices = pgTable(
   "recurring_invoices",
@@ -2284,7 +2284,7 @@ export const outboxMessages = pgTable(
 
 /**
  * External bank accounts mirrored for reconciliation. balanceMinor is the
- * statement-side balance, not a ledger figure — the GL stays authoritative;
+ * statement-side balance, not a ledger figure - the GL stays authoritative;
  * this column only feeds the "does the bank agree with the books" check.
  */
 export const bankAccounts = pgTable(
@@ -2334,7 +2334,7 @@ export const bankTransactions = pgTable(
 
 /**
  * N14: a statement line is explained by explicit allocations that share its
- * sign and fit inside its amount — a payment (whole or split across lines),
+ * sign and fit inside its amount - a payment (whole or split across lines),
  * a journal entry, a reviewed fee, or an FX difference. The period is
  * reconciled when the unexplained difference is zero. Payment/entry claims
  * are enforced transactionally (row locks + remaining-amount checks), not
@@ -2408,7 +2408,7 @@ export const supportSettings = pgTable(
     autoReplyEnabled: boolean("auto_reply_enabled").notNull().default(true),
     greeting: text("greeting")
       .notNull()
-      .default("Hi — ask us anything and we'll get right back to you."),
+      .default("Hi - ask us anything and we'll get right back to you."),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2484,7 +2484,7 @@ export const marketingCampaigns = pgTable(
   (t) => [index("marketing_campaign_org_idx").on(t.orgId)],
 );
 
-/** Append-only delivery log — the analytics ARE this table. */
+/** Append-only delivery log - the analytics ARE this table. */
 export const marketingSends = pgTable(
   "marketing_sends",
   {
@@ -2547,12 +2547,12 @@ export const actionReceipts = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    /** `${orgId}:${intentId}` — the executor's action key. */
+    /** `${orgId}:${intentId}` - the executor's action key. */
     intentKey: text("intent_key").notNull(),
     capabilityId: text("capability_id").notNull(),
     inputHash: text("input_hash").notNull(),
     ok: boolean("ok").notNull(),
-    /** known | unknown — unknown outcomes reconcile, never re-execute. */
+    /** known | unknown - unknown outcomes reconcile, never re-execute. */
     outcome: text("outcome").notNull(),
     data: jsonb("data"),
     error: text("error"),

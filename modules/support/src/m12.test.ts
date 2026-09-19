@@ -33,7 +33,7 @@ beforeAll(async () => {
   const [cust] = await db.db.insert(customers).values({ orgId, name: "Ticket Buyer" }).returning({ id: customers.id });
   customerId = cust!.id;
   ctx = { actor: { type: "human", id: null, orgId, permissions: new Set(["*"]) }, now: new Date(), services: {} };
-  const conv = await run("support.startConversation", { customerId, subject: "Order arrived broken — refund?" });
+  const conv = await run("support.startConversation", { customerId, subject: "Order arrived broken - refund?" });
   conversationId = conv.conversationId ?? conv.id;
 });
 
@@ -44,7 +44,7 @@ afterAll(async () => {
 
 describe("ticket depth (M12.3)", () => {
   it("category drafts rules-first from the subject", async () => {
-    const s = await run("support.suggestCategory", { text: "Order arrived broken — refund?" });
+    const s = await run("support.suggestCategory", { text: "Order arrived broken - refund?" });
     expect(s.draft).toBe(true);
     expect(s.category).toBe("billing");
   });

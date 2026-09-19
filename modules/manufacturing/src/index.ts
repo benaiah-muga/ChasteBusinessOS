@@ -218,7 +218,7 @@ const cancelWorkOrder = (deps: ModuleDeps) =>
 
 /**
  * Shared completion posting: consumes exploded+scrap-adjusted components and
- * adds finished goods inside one transaction — the same math as an instant
+ * adds finished goods inside one transaction - the same math as an instant
  * run, but tagged with a run reference so reversal and traceability find it.
  */
 async function postRun(
@@ -424,7 +424,7 @@ const reverseProductionRun = (deps: ModuleDeps) =>
           const onHand = await stockOnHand(tx, ctx.actor.orgId, itemId);
           if (net > onHand) throw new Error("cannot reverse: produced units have already been consumed or sold");
         }
-        // N22: reversal legs are outbound for produced items — lock before
+        // N22: reversal legs are outbound for produced items - lock before
         // writing so a concurrent sale cannot race the feasibility check.
         await lockStockItems(tx, [...netByItem.keys()]);
 
@@ -745,7 +745,7 @@ const lotTrace = (deps: ModuleDeps) =>
 
         // Production movements carry the run reference; produced outputs
         // (delta > 0, lot set) consumed the component lots (delta < 0, lot
-        // set) of the same run — that pairing forms the traceability edges.
+        // set) of the same run - that pairing forms the traceability edges.
         const prodMoves = await tx
           .select({ refId: stockMovements.refId, delta: stockMovements.quantityDelta, lotId: stockMovements.lotId })
           .from(stockMovements)
@@ -840,7 +840,7 @@ const deleteBom = (deps: ModuleDeps) =>
 
 
 
-// ── M11: planning-lite — feasibility answers + lead-time memory ────────
+// ── M11: planning-lite - feasibility answers + lead-time memory ────────
 
 const checkProductionFeasibility = (deps: ModuleDeps) =>
   defineCapability({
@@ -887,7 +887,7 @@ const checkProductionFeasibility = (deps: ModuleDeps) =>
         const availability = checkAvailability(requirements, onHand);
 
         // Ceiling from per-unit needs (explode one unit, scrap applied at
-        // the BOM edge level by explodeBom scaling — per-unit re-derivation
+        // the BOM edge level by explodeBom scaling - per-unit re-derivation
         // keeps the ceiling independent of the desired quantity).
         const perUnit = explodeBom(
           edges.map((e) => ({ assemblyItemId: e.assemblyItemId, componentItemId: e.componentItemId, quantityThousandths: e.quantityThousandths })),

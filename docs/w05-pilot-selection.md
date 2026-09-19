@@ -1,8 +1,8 @@
-# W0.5 — Pilot selection: cohort, workflow and build order
+# W0.5 - Pilot selection: cohort, workflow and build order
 
 **Status: recommended default, awaiting owner confirmation.** The audit
 (§5, §6/I5) requires choosing one pilot cohort and starting with
-P01–P04 — "deliver module-specific features only where that cohort needs
+P01–P04 - "deliver module-specific features only where that cohort needs
 them", and "choose P03/P05/P07/P08 by pilot, not all at once". This
 document makes that selection on the evidence of what the ledger and
 command surfaces can already prove, so the pilot runs on discharged
@@ -11,12 +11,12 @@ ground rather than on promises.
 ## Recommendation
 
 **Pilot cohort:** a small distribution/wholesale business's purchasing and
-receiving team — procurement clerk plus warehouse receiver (2–5 people).
+receiving team - procurement clerk plus warehouse receiver (2–5 people).
 
 **Pilot workflow chain:** receive a delivery against a purchase order →
 accept/reject lines with reasons → see what remains outstanding → match
 the supplier's bill (three-way) → pay it → correct mistakes (returns,
-reversals) — all entered from a calm "My work" home that ranks what needs
+reversals) - all entered from a calm "My work" home that ranks what needs
 attention.
 
 **First product ideas:** P01 (the home) as the entry surface, P05 (the
@@ -36,14 +36,14 @@ within the cohort. P03/P07/P08 wait for pilot evidence, per I5.
    authority. No pilot step rests on an open audit finding.
 2. **The audit's own P01 example is this workflow.** "Supplier delivered
    8 of 10; accept 8 and leave 2 outstanding" is exactly the receipt
-   model `purchasing.listReceipts` now reports — the product idea and the
+   model `purchasing.listReceipts` now reports - the product idea and the
    engine agree by construction, not by adaptation.
 3. **The smallest UI delta.** P05's receiving desk is a thin surface over
    an existing governed capability (`purchasing.receiveGoods` with its
    reject/tolerance inputs), and P01 composes signals, approvals and
    receipt remainders that already exist as ranked-data sources. P03's
    workspace would need statement-import identity first; P07's checkout
-   needs the POS cart work surfaced as its own slice — both are real but
+   needs the POS cart work surfaced as its own slice - both are real but
    larger lifts.
 4. **Measured success is well-defined here.** The audit's provisional
    targets translate directly: unassisted completion of a
@@ -79,7 +79,7 @@ within the cohort. P03/P07/P08 wait for pilot evidence, per I5.
 1. P05 receiving desk UI over `purchasing.receiveGoods`/`listReceipts`
    (accept, reject with reason, remaining visibility).
 2. P01 "My work" home: ranked cards from approvals, purchasing signals,
-   receipt remainders — deterministic ranking first.
+   receipt remainders - deterministic ranking first.
 3. P04 supplier page: order, receipts, bills, balance, history in one
    place (all read capabilities exist).
 4. Pilot instrumentation for the measurement plan above.

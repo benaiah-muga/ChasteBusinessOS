@@ -1,4 +1,4 @@
-# Enterprise planning review — 2026-09-10
+# Enterprise planning review - 2026-09-10
 
 ## Scope and repository synchronization
 
@@ -48,7 +48,7 @@ Local evidence fingerprints (logs retained under ignored `.unlazy/enterprise-pla
 - `test.log`: SHA-256 `6180c75f7357ad8580ce795fde8535c23c1e09a426a0d379a98033fcc3893d07`.
 
 
-## Follow-up product systems review — 2026-09-11
+## Follow-up product systems review - 2026-09-11
 
 Added [Product Systems Addendum](ENTERPRISE_PRODUCT_SYSTEMS_ADDENDUM.md) and integrated it through §16 of the enterprise plan. All 20 follow-up topics have current-state judgment, proposed behavior, ownership/priority and acceptance tests, plus wave mapping and three cross-system journeys. Existing README/assets and other local changes were left untouched. No application/runtime, skills, schema, provider account or network deployment was changed.
 
@@ -67,7 +67,7 @@ Evidence fingerprints:
 - `test.log`: SHA-256 `ac39d1a854ae7a215985ea73629d02433f12ad8a622e90ac9f20cc21533e5e74`.
 
 
-## Broader module audit follow-up — 2026-09-11
+## Broader module audit follow-up - 2026-09-11
 
 Added [Enterprise Module Audit](ENTERPRISE_MODULE_AUDIT.md), linked from Enterprise Evolution §17. It accounts for the measured 19 module directories, separates source-confirmed behavior, local reproduction, investigation and product gaps, and supplies 36 finding entries plus 12 product hypotheses with implementation/release criteria. Findings were checked against shared services/schema where relevant; absence in migrations is explicitly not a live database claim. Parallel reviewers supplied candidate observations but did not complete their artifacts; the lead checked the cited source and wrote the integrated audit locally. No claim of completed independent review is made.
 

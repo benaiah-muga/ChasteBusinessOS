@@ -52,7 +52,7 @@ Cross-cutting coverage: kernel/session resolution, relevant API routes, DB schem
 
 ## 2. Security and operational trust findings
 
-### N01 — Read routes bypass fine-grained authority (P0, source-confirmed)
+### N01 - Read routes bypass fine-grained authority (P0, source-confirmed)
 
 Evidence: `apps/web/src/app/api/hr/route.ts:7` checks session/org and returns salaries and tax rates at line 45; `api/ledger/route.ts:7` calls `recentLedgerEvents`, whose projection includes full payloads (`server/kernel.ts:539`). `api/customers/route.ts:15`, `api/deals/route.ts:8`, `api/marketing/route.ts:22`, `api/projects/route.ts:18` default list, and `api/pos/route.ts:8` also have direct org-scoped reads without their module read checks. The projects board branch does use a governed capability; preserve that distinction. Session detail checks owner/admin, but `api/sessions/route.ts:7` lists other people's titles without the same visibility rule.
 
@@ -62,7 +62,7 @@ Implementation: enumerate every route/action/export and give each an explicit pe
 
 Proof: two organizations, owner, HR-only, cashier and zero-permission member; verify route, capability, export, list, search, count and cached response behavior. Assert denied responses contain neither sensitive values nor identifying metadata. Use the actual non-owner runtime DB role. Roll out route guards before exposing new read surfaces.
 
-### N02 — Aggregate capabilities can reveal denied source data (P0, source-confirmed)
+### N02 - Aggregate capabilities can reveal denied source data (P0, source-confirmed)
 
 Evidence: `modules/signals/src/index.ts:54` invokes all producers with only org/time; `server/kernel.ts:99` composes accounting, HR, CRM, inventory, support and documents producers unconditionally. HR's producer returns named lateness histories (`modules/hr/src/signals.ts:45`). `signals.read` alone therefore controls a cross-domain feed. `analytics.explainChange` and `askYourBusiness` require `analytics.report` while calling financial/CRM queries directly (`modules/analytics/src/index.ts:197`, `:264`), unlike extractors that declare source permissions.
 
@@ -70,7 +70,7 @@ Implementation: producer descriptors declare module and source permissions; aggr
 
 Proof: `signals.read` without `hr.read` cannot see named HR evidence; disabled modules contribute no restricted data; `analytics.report` alone cannot retrieve accounting facts. Failure of one allowed producer yields a visible partial-coverage state, not an all-clear.
 
-### N03 — Domain identity is bound by an unverified email string (P0, source-confirmed path; deployment reproduction required)
+### N03 - Domain identity is bound by an unverified email string (P0, source-confirmed path; deployment reproduction required)
 
 Evidence: `server/auth.ts:13` enables password sign-up/auto-sign-in without requiring email verification. `server/session.ts:24` trusts the returned email; `server/kernel.ts:439` finds the domain user by email and loads memberships. SCIM creates domain users/memberships separately (`api/scim/v2/Users/route.ts`). Installed Better Auth sign-up code creates `emailVerified: false`; sign-in checks verification only when configured. This matters when a domain identity exists before an auth account: a registrant claiming that address can reach the domain binding without demonstrated mailbox ownership. It is not a claim that an existing password account can be bypassed.
 
@@ -78,7 +78,7 @@ Implementation: bind a stable auth subject/provider identity to a domain user. R
 
 Proof: pre-provision a synthetic domain user with no auth account, sign up without mailbox verification, and prove no organization access; verify successful invitation/SSO linkage only after the identity proof. Include case variations, concurrent first login, email change and account recovery. Do not test using real coworkers' addresses.
 
-### N04 — Public customer support binds identity from visitor input (P0, source-confirmed; model disclosure needs an end-to-end proof)
+### N04 - Public customer support binds identity from visitor input (P0, source-confirmed; model disclosure needs an end-to-end proof)
 
 Evidence: `api/support/public/route.ts:103` finds an existing customer by submitted email and binds the conversation; the response supplies its ID. With auto-reply enabled, lines 180–201 generate and publish a customer-bound draft. `modules/support/src/index.ts:275` exposes that customer's invoice facts. Widget settings default auto-reply to true (`packages/db/src/schema/index.ts:1985`). The public embed token identifies the organization; it is available to website visitors and cannot authenticate a customer. Existing thread read/write checks org plus conversation ID, without a separate visitor credential.
 
@@ -86,15 +86,15 @@ Implementation: anonymous visitors get a separate unverified contact and a per-c
 
 Proof: knowing a victim's email and public widget token must reveal no account facts. A visitor credential for thread A cannot read/write B. Test escalation racing an auto reply, token rotation, replay, expiry, deleted customers, denied lookups and model prompts requesting confidential fields. Containment belongs in code before expanding public auto-reply.
 
-### N05 — Support knowledge retrieval has no publication audience (P0, source-confirmed)
+### N05 - Support knowledge retrieval has no publication audience (P0, source-confirmed)
 
-Evidence: `support.searchKnowledge`, `modules/support/src/index.ts:334`, retrieves any matching org memory under `support.read`, including document chunks. It does not restrict results to published support knowledge. Org scope prevents a different problem—cross-tenant retrieval—but does not make payroll documents safe customer-facing material.
+Evidence: `support.searchKnowledge`, `modules/support/src/index.ts:334`, retrieves any matching org memory under `support.read`, including document chunks. It does not restrict results to published support knowledge. Org scope prevents a different problem-cross-tenant retrieval-but does not make payroll documents safe customer-facing material.
 
 Implementation: memories/chunks inherit source ACL, audience, version, validity and deletion state. Public support reads only explicitly published knowledge; staff tools use authorized internal sources. Existing unlabeled chunks default to internal/restricted and require publication review. Reuse X20's provenance model rather than adding a second knowledge store with incompatible rules.
 
 Proof: seed synthetic public policy, internal margin note and employee document; public and support-only contexts never receive restricted chunks in vector or keyword fallback, snippets, citations or caches. Revocation must invalidate derived retrieval artifacts.
 
-### N06 — Private message previews bypass conversation membership (P0, source-confirmed)
+### N06 - Private message previews bypass conversation membership (P0, source-confirmed)
 
 Evidence: `api/conversations/route.ts:10` lists every org conversation and the latest message's first 80 characters. `modules/messaging/src/index.ts:101` similarly lists conversation metadata without membership filtering. Detailed message access checks membership at `:176`, so the list boundary contradicts the detail boundary. `readMessages` orders ascending then limits, returning the oldest messages despite promising recent messages (`:182`).
 
@@ -102,7 +102,7 @@ Implementation: share one membership-scoped query for list/detail, fetch authori
 
 Proof: a nonmember sees no DM title, preview, activity timestamp or count. With >100 messages, the default thread view includes the latest and pagination loses none with equal timestamps. Preserve the existing detail membership guard.
 
-### N07 — Role and SCIM lifecycle leave authority gaps (P0/P1, source-confirmed omissions; lifecycle investigation)
+### N07 - Role and SCIM lifecycle leave authority gaps (P0/P1, source-confirmed omissions; lifecycle investigation)
 
 Evidence: `iam.assignRole` replaces user roles without a last-owner check (`modules/iam/src/index.ts:98`). SCIM deletion removes membership and invitations but leaves `user_roles` (`api/scim/v2/Users/[id]/route.ts:30`); re-provisioning can revive those grants. `resolveForOrg` itself does not verify membership (`server/kernel.ts:487`), relying on callers. The SCIM collection and single-resource routes duplicate authentication/deactivation logic with different rate-limit behavior. Invitation acceptance reads pending status outside its transaction and later replaces roles (`api/invite/[token]/route.ts:58`).
 
@@ -110,7 +110,7 @@ Implementation: shared identity lifecycle service with transactional invitation 
 
 Proof: removing/reassigning the last owner is blocked or uses verified transfer; suspended members cannot execute queued work; SCIM delete/recreate does not resurrect old powers; concurrent invite acceptance and revocation have one deterministic winner. New tests must cover genuine membership, not only an injected permission Set.
 
-### N08 — Several settings/state changes bypass the capability contract (P0 for support exposure; P1 generally)
+### N08 - Several settings/state changes bypass the capability contract (P0 for support exposure; P1 generally)
 
 Evidence: support channel GET lazily inserts settings and POST can toggle auto reply/rotate token with session+module checks only (`api/support/channels/route.ts:16`, `:47`). `api/org/route.ts` PATCH writes agent persona directly, SCIM token/SSO administration uses direct writes, and conversation creation writes header/member rows separately. Some routes have admin checks; the finding is not that all are unauthenticated. Their audit, transactional and approval behavior differs from the architecture's one-path promise.
 
@@ -118,7 +118,7 @@ Implementation: classify bootstrap, auth/SCIM and personal-preference exceptions
 
 Proof: denied member cannot change support exposure or persona; GET causes no mutation; token issuance returns its secret once and audit logs only a reference. Failed conversation membership insert leaves no unusable header. Repeated mutation requests return one receipt.
 
-### N09 — Database integrity guarantees are not established by migrations (P0, source inventory confirmed; live DB unverified)
+### N09 - Database integrity guarantees are not established by migrations (P0, source inventory confirmed; live DB unverified)
 
 Evidence: `packages/db/src/schema/index.ts:374`/`:399` define journal headers/lines with ordinary columns, foreign keys and indexes. Inspection of committed migration SQL found no `CREATE TRIGGER`/`CREATE FUNCTION` establishing balanced-at-commit journals or posted-document immutability. RLS policies do exist. `postEntry` asserts balance in application code. Architecture prose claims triggers/grants and DB-enforced financial invariants; the inspected repository does not substantiate that claim. A live database may have out-of-band objects; that would itself be deployment drift to resolve.
 
@@ -128,7 +128,7 @@ Migration: audit existing inconsistencies first; quarantine/reconcile with accou
 
 Proof: clean migrated DB plus production-equivalent role rejects unbalanced commit, mutation/deletion of posted lines, cross-org account attachment and ledger deletion; permits valid multi-line transaction and governed compensation. Tests of `assertBalanced` alone do not satisfy this gate.
 
-### N10 — Backup fallback may protect a different database (P0 for production migration safety, source-confirmed risk)
+### N10 - Backup fallback may protect a different database (P0 for production migration safety, source-confirmed risk)
 
 Evidence: `packages/db/src/migrate.ts`, `dockerDump`, parses only username/database from the configured URL and runs `pg_dump` inside the default local container. On host client absence/version mismatch, a remote connection can therefore fall back to a same-named local database. Nonempty output plus exit zero does not establish target identity. The helper snapshots on each run before checking for pending migrations, prunes to ten files, and has no explicit dump deadline. `apps/web/src/instrumentation.ts` migrates on each boot unless disabled.
 
@@ -138,7 +138,7 @@ Proof: simulate remote target A and local container B with the same database nam
 
 ## 3. Money, trade and operational correctness
 
-### N11 — Outstanding balances have diverged across consumers (P0, source-confirmed)
+### N11 - Outstanding balances have diverged across consumers (P0, source-confirmed)
 
 Evidence: AR payment checks `paid + payment <= total` without credits (`modules/accounting/src/index.ts:305`); AP has the same omission (`modules/purchasing/src/index.ts:262`). Dashboard working capital uses total minus paid and age since issuance; analytics aging uses issuance/creation age and total minus paid (`modules/analytics/src/datasets.ts:97`); support invoice lookup also ignores credits. Credits exist as a separate persisted field. Thus a 100 invoice with a 40 credit and no payment can still accept a 100 payment and appear as 100 due in some surfaces. Dashboard non-void filtering can include drafts. This is more than a chart-label problem.
 
@@ -146,14 +146,14 @@ Implementation: one pure document-balance contract plus authorized query project
 
 Proof: partial/full credit before and after payment; overpayment; refund; void; future due date; exact due-date boundary; simultaneous payments. Invoice detail, aging, dashboard, support, cash forecast, statements and analytics must reconcile to the same facts. Capture legitimate customer credit separately from debt.
 
-### N12 — A generic journal reversal is not a complete business undo (P0, source-confirmed)
+### N12 - A generic journal reversal is not a complete business undo (P0, source-confirmed)
 
 Evidence: `accounting.reverseEntry`, `modules/accounting/src/index.ts:445`, mirrors journal lines but does not pass the original currency, reject a second reversal of the same original, or compensate payment/document balances. Payment declares it as its inverse. POS declares an inverse using an `entryId` absent from its returned output (`modules/pos/src/index.ts:111`, `:122`, `:244`). Payroll void guidance also directs executed runs toward journal reversal without a payroll lifecycle repair.
 
 Implementation: the first slice (ADR 0051) separates manual-journal reversal
 from the domain compensations. `accounting.reversePayment` mirrors the
-payment's entries — base plus foreign clearing leg as one coherent FX
-settlement — in their original currencies, releases the invoice's paid
+payment's entries - base plus foreign clearing leg as one coherent FX
+settlement - in their original currencies, releases the invoice's paid
 amount through the N11 balance contract, and refuses a second reversal at
 the business-operation level. `hr.reversePayrollPosting` mirrors the posting
 and repairs the run lifecycle (`reversed`). `pos.completeSale`'s inverse is
@@ -163,8 +163,8 @@ manual and unsupported entries, preserves the original currency, and
 refuses protected source types with named routing (`payment`,
 `pos_sale`, `payroll_run`, `invoice` → credit note, `inventory-valuation`).
 The kernel types inverse `buildInput` against the real output, so a phantom
-key is a compile error — the POS bug class is closed structurally. Remaining
-work: purchasing compensations (`reverseVendorPayment`, bill-state repair —
+key is a compile error - the POS bug class is closed structurally. Remaining
+work: purchasing compensations (`reverseVendorPayment`, bill-state repair -
 their declared inverses still target the generic path), paired FX
 reversal renderings in the web UI, and surfacing "what can be undone /
 what has downstream dependencies / what needs a correcting document" per
@@ -172,12 +172,12 @@ document in the journal view.
 
 Proof: pay→reverse→pay produces correct GL, invoice balance, bank reconciliation and receipt; foreign reversal retains currency; second/replayed reversal has no second effect; POS inverse input is valid and undoes stock, drawer and money together. Conformance must exercise inverse input generation against actual outputs, not only check that a named capability exists.
 
-### N13 — Closed-period enforcement is distributed and incomplete (P0, source-confirmed omission; concurrent close needs proof)
+### N13 - Closed-period enforcement is distributed and incomplete (P0, source-confirmed omission; concurrent close needs proof)
 
 Evidence: `accounting.payExpenseClaim`, `modules/accounting/src/index.ts:1490`, calls `postEntry` without `assertPeriodOpen`. `modules/accounting/src/posting.ts:80` does not perform that guard despite its introductory description. Other callers do, making correctness dependent on remembering an extra step. A check followed by posting also needs coordination with a simultaneous period close.
 
 Implementation: the first slice (ADR 0046) moves the guard into the shared
-posting service itself — `postEntry` takes a mandatory effective posting time,
+posting service itself - `postEntry` takes a mandatory effective posting time,
 checks it under a per-org advisory lock shared with transactional
 close/reopen, and stamps the same instant it guarded. Expense reimbursement
 and the valuation reversal are covered with the rest; payroll posts at
@@ -191,12 +191,12 @@ separately from the original business date.
 Proof: every posting producer, including expenses, POS, payroll, valuation
 and FX, refuses a closed period. A synchronized close/post test commits one valid serial order. An allowed historical correction uses its approved open-period date and retains the original business date separately.
 
-### N14 — Bank matching checks identity, not economic equivalence (P0/P1, source-confirmed)
+### N14 - Bank matching checks identity, not economic equivalence (P0/P1, source-confirmed)
 
 Evidence: `accounting.matchBankTransaction`, `modules/accounting/src/index.ts:1840`, verifies referenced rows belong to the org and conditionally claims an unmatched statement line. It does not compare amount, currency, direction, bank account or prior allocation of the payment. The conditional claim is valuable and should remain. It prevents two decisions on one line; it does not establish that the decision reconciles the bank.
 
 Implementation: the first slice (ADR 0048) makes a match require economic
-equivalence — payment matches compare amount, direction and currency;
+equivalence - payment matches compare amount, direction and currency;
 entry matches require the entry's cash-account net to equal the line's
 signed amount; and one payment/entry belongs to exactly one statement line,
 enforced by unique indexes on the claim columns with unmatch releasing the
@@ -208,7 +208,7 @@ opening/closing balances with a zero unexplained difference as the actual
 
 Proof: matching 100 bank inflow to 10 payment is rejected; two lines cannot each consume the same full payment; opposite direction/currency mismatches fail; split allocations conserve amounts; unmatch restores availability. P03 provides the human workflow.
 
-### N15 — Repeated items can exceed available stock within one order (P0 for fulfillment, source-confirmed)
+### N15 - Repeated items can exceed available stock within one order (P0 for fulfillment, source-confirmed)
 
 Evidence: `sales.confirmOrder`, `modules/sales/src/index.ts:202`, plans all reservations before inserting them, rereading the same available quantity for each line. Two lines for the same item can each reserve the same availability. POS checks stock per line before inserting movements in a similar shape.
 
@@ -224,12 +224,12 @@ credit exposure counting outstanding commitments.
 
 Proof: stock 10 with repeated lines 7+7 reserves at most 10; all-or-nothing mode refuses and partial mode records exactly 4 backordered. Two buyers racing for the last unit cannot both win. Delivery, cancellation and partial delivery conserve allocated quantities; disable/reenable inventory cannot silently turn a stocked line into a service.
 
-### N16 — Purchasing needs explicit receipts, stable lines and cumulative matching (P0/P1, source-confirmed)
+### N16 - Purchasing needs explicit receipts, stable lines and cumulative matching (P0/P1, source-confirmed)
 
 Evidence: `purchasing.receiveGoods`, `modules/purchasing/src/index.ts:409`, indexes lines ordered by UUID as a human “line number,” inserts stock only for item-linked lines, and derives receipt completion solely from stock movements. Non-stock service lines cannot progress through this receiving contract. It does not limit receipt quantity to remaining ordered quantity. `createBill` (`:107`) checks each input line against prior bills before inserting this bill, so repeated references within the new bill do not consume each other's allowance; it also does not establish that the bill's vendor matches the referenced PO's vendor. `returnGoods` (`:859`) limits by historically received quantity, not current stock/lot availability, and leaves order status unrecomputed.
 
 Implementation: the first slice (ADR 0049) spends one budget per order line
-inside receipts, returns, and bills — overreceipt is refused, repeated
+inside receipts, returns, and bills - overreceipt is refused, repeated
 in-command references consume each other's allowance, bills must come from
 the order's vendor, service lines complete through an accepted milestone on
 the order line, returns require the goods to be on hand, and returns demote
@@ -241,7 +241,7 @@ that survive reordering.
 
 Proof: service-only and mixed POs can complete; repeat line references cannot overbill; wrong vendor fails; partial receipts/returns/bills reconcile; returned consumed stock is rejected or follows an explicit exception; display line 1 always identifies the same line. This is an implementation deepening of X06, not a second goods/services model.
 
-### N17 — POS human contract drops stock fields and loses the cart on failure (P0/P1, source-confirmed)
+### N17 - POS human contract drops stock fields and loses the cart on failure (P0/P1, source-confirmed)
 
 Evidence: `api/pos/route.ts:65` sale-line schema omits `sku` and `taxMinor` supported by the capability. The page creates description/price lines, and the completion handler always `setLines([])` after `post` (`(app)/pos/page.tsx:380`); `post` reports failure/pending but does not return a success discriminator (`:105`). A failed or approval-pending submission therefore clears the basket. This is a concrete human/agent parity failure.
 
@@ -249,7 +249,7 @@ Implementation: share the sale command schema; use stable product identity and g
 
 Proof: 422, 403, 202, disconnect-after-commit and reload each preserve or recover the correct basket state and do not double-sell. Human and agent submissions produce equivalent tax and stock effects. Test the actual route/page, not only `pos.completeSale` directly.
 
-### N18 — POS sale and return records do not close the full loop (P0, source-confirmed)
+### N18 - POS sale and return records do not close the full loop (P0, source-confirmed)
 
 Evidence: `modules/pos/src/index.ts:185` inserts invoice header/payment but no invoice lines, so item-level analysis and printable receipts cannot reconstruct sale lines from the canonical invoice schema. Sale invoice currency is omitted while `postEntry` resolves organization base currency. `returnSale` (`:347`) mirrors the full original entry, updates credits and stock, but never adjusts a cash drawer. Existing partial credit can make `refundable` smaller than the full journal it mirrors. Stock restoration loses location/lot fields. A “card” sale records accounting facts, not proof of payment-gateway capture.
 
@@ -257,7 +257,7 @@ Implementation: persist immutable sale lines, payment tender type, currency, tax
 
 Proof: sale→full/partial return gives correct lines, stock at original/chosen destination, credits, currency and drawer. Cash/card/closed-shift paths differ correctly; existing credit cannot produce an excessive refund; damaged goods do not silently return to sellable stock. Exactly one provider refund on retries is a connector release gate, not a current capability claim.
 
-### N19 — Valuation projections disagree; one loses transferred value (P0, locally reproduced pure projection)
+### N19 - Valuation projections disagree; one loses transferred value (P0, locally reproduced pure projection)
 
 Evidence: `manufacturing.avgUnitCost`, `modules/manufacturing/src/index.ts:39`, maps history without `valueNeutral: reason === 'transfer'`. Inventory valuation correctly includes that flag (`modules/inventory/src/valuation.ts:23`). A local synthetic replay of receipt 1 unit at 100, full transfer out, then transfer in returns value **100** with the flag and **0** through manufacturing's projection. This proves the projection error; no real stock was changed. Analytics stock value instead uses latest known cost (`modules/analytics/src/datasets.ts:158`), which is a different method from moving average.
 
@@ -265,7 +265,7 @@ Implementation: one authoritative valuation projection/service used by stock rep
 
 Proof: transfer round trips, zero-stock transitions, multiple receipt prices, timestamp ties, returns and production all reconcile; query projections match independent replay; correction preserves immutable movement history and is separately approved.
 
-### N20 — Work-order completion commits stock before updating the order (P0, source-confirmed; crash/race reproduction required)
+### N20 - Work-order completion commits stock before updating the order (P0, source-confirmed; crash/race reproduction required)
 
 Evidence: `completeWorkOrder`, `modules/manufacturing/src/index.ts:324`, loads the order in one transaction, calls `postRun` which owns another transaction (`:226`), then updates produced quantity/status in a third. A crash leaves stock produced with a stale order. Competing completions can overwrite totals. A fresh run reference is generated, but no durable run→work-order row is written; `reverseProductionRun` mirrors movements without reducing the order's produced total or reopening it.
 
@@ -273,7 +273,7 @@ Implementation: production-run header bound to work-order ID, command ID, BOM re
 
 Proof: injected failure between every effect rolls back the whole completion; two partial completions conserve total; reversing a completion restores remaining quantity and appropriate status; cannot reverse output already consumed without a governed downstream correction.
 
-### N21 — Feasibility and production use different BOM rules (P1, source-confirmed)
+### N21 - Feasibility and production use different BOM rules (P1, source-confirmed)
 
 Evidence: `checkProductionFeasibility`, `modules/manufacturing/src/index.ts:871`, loads only direct edges and omits scrap; execution loads the graph in `scrapAdjustedRequirements` (`:49`). Execution then applies the maximum scrap rate for a component across all org edges, including potentially unrelated assemblies, rather than accumulating each path's edge semantics. A comment in feasibility says scrap is applied, but the edge projection omits it.
 
@@ -281,12 +281,12 @@ Implementation: define scrap/yield semantics with manufacturing stakeholders; im
 
 Proof: nested assemblies, shared component reached by different paths, unrelated high-scrap BOM, fractional quantities, reserved components and cycle rejection. “Can make N” followed by immediate execution with unchanged inputs must agree.
 
-### N22 — Inventory commands need aggregate-level consistency and lot checks (P0 for races; P1 usability, investigation grounded in source)
+### N22 - Inventory commands need aggregate-level consistency and lot checks (P0 for races; P1 usability, investigation grounded in source)
 
 Evidence: `recordStockMovement`, `modules/inventory/src/shared.ts:34`, is currently an insertion helper, not an invariant-enforcing service. Reservations, transfers and cycle counts perform read/check/write without a common lock. Transfer feasibility checks item/location quantity; lot movement needs the corresponding lot availability check. Cycle-count drift guard compares total on-hand (`modules/inventory/src/index.ts:511`), so equal net stock after intervening movements is not detected. POS/purchasing bypass even the shared insert helper.
 
 Implementation: the first slice (ADR 0050) puts one command service between
-every writer and the ledger — items locked in stable id order, lot-to-item
+every writer and the ledger - items locked in stable id order, lot-to-item
 binding enforced, non-negative balances org-wide and per location, and
 cycle-count lines snapshot a movement-count watermark so any intervening
 movement (even net-zero) invalidates the sheet at post time. POS, purchasing,
@@ -300,7 +300,7 @@ against seeded history.
 
 Proof: concurrent reserve/sell/transfer/count operations cannot produce impossible balances; item A's lot cannot move item B; full quantity and valuation replay matches projections; a receipt+sale during counting is detected even if net quantity is unchanged. Seed enough history to assess lock duration and query plans.
 
-### N23 — Payroll and leave need a correctable, date-aware lifecycle (P0 correctness; P1 employee UX)
+### N23 - Payroll and leave need a correctable, date-aware lifecycle (P0 correctness; P1 employee UX)
 
 Evidence: drafting payroll rejects any existing period row (`modules/hr/src/index.ts:237`); void leaves that row and the schema's unique org/year/month index (`schema/index.ts:984`), blocking redraft. Staff selection uses currently active employees, not employment effective during the target month; the monthly calculation does not use hire/termination dates. `leaveBalance` (`:731`) selects starts after Jan 1 without an upper boundary, includes later years and misses leave spanning from the previous year. `unpaidLeaveDaysInMonth` (`erp-core/src/payroll.ts:88`) sums overlapping intervals; a local synthetic check counted two copies of the same day as **2** days. Attendance uses fixed 09:00 UTC (`hr/index.ts:640`).
 
@@ -308,15 +308,15 @@ Implementation: payroll period with revisioned draft runs and at most one active
 
 Proof: void→redraft→execute; mid-month joiner/leaver; later deactivation followed by historical payroll; overlapping/cross-year/leap-day leave; future leave does not count as taken; local shift boundaries. Posted-run correction reconciles liabilities/payments and payslips, not just GL lines.
 
-### N24 — Foreign references and assignees need active scope validation (P0 for tenant links; P1 project lifecycle)
+### N24 - Foreign references and assignees need active scope validation (P0 for tenant links; P1 project lifecycle)
 
 Evidence: `hr.requestLeave`, `modules/hr/src/index.ts:120`, inserts caller employee ID without an org-scoped employee lookup; the FK is global ID only. Project create/assign accepts arbitrary user IDs (`modules/projects/src/index.ts:72`, `:158`); CRM task references and assignees are weakly typed (`crm/index.ts:289`). Project creation blocks archived parents, but moving/assigning existing tasks does not recheck archive state. These are distinct from the good parent-task same-project validation already present.
 
-Implementation: shared scoped reference loaders plus composite tenant FKs where practical; active membership and task eligibility for assignees. Model archive as an explicit rule—read-only by default, reopen capability for changes. Link tasks to a typed, authorized business reference and retain a departed user's attribution while offering reassignment. Employee self-service uses `self` identity mappings and separate permissions, not broad `hr.write` over arbitrary employee IDs.
+Implementation: shared scoped reference loaders plus composite tenant FKs where practical; active membership and task eligibility for assignees. Model archive as an explicit rule-read-only by default, reopen capability for changes. Link tasks to a typed, authorized business reference and retain a departed user's attribution while offering reassignment. Employee self-service uses `self` identity mappings and separate permissions, not broad `hr.write` over arbitrary employee IDs.
 
 Proof: foreign employee/customer/task/location IDs fail with non-disclosing errors under both owner and runtime DB roles; inactive/nonmember assignee fails; archive/move race is deterministic; existing historical relationships survive deactivation. A role with permission is still constrained to valid references.
 
-### N25 — CRM lookup ignores the query; conversion can leave partial work (P1, source-confirmed)
+### N25 - CRM lookup ignores the query; conversion can leave partial work (P1, source-confirmed)
 
 Evidence: `crm.listCustomers`, `modules/crm/src/index.ts:82`, declares `query` but execution ignores it, returning an arbitrary first 100 active records. Human `/api/customers` returns at most 500; neither supplies complete server search/pagination. `crm.convertLead` (`:235`) can insert a customer then update the deal in a separate operation; retries/races can create orphan/duplicate customers. Some simple mutations report success even if no row changed, such as deactivateCustomer.
 
@@ -326,7 +326,7 @@ Proof: customer beyond row 500 is found by name/email and preserved in pickers; 
 
 ## 4. Automation, intelligence and shared experience
 
-### N26 — Campaign “send” records recipients without sending (P1, source-confirmed product-contract defect)
+### N26 - Campaign “send” records recipients without sending (P1, source-confirmed product-contract defect)
 
 Evidence: the original defect was `marketing.sendCampaign`, which inserted
 `marketing_sends` and set `sentAt` without a provider/outbox. The first delivery
@@ -346,7 +346,7 @@ permission.
 
 Proof: no connector yields “delivery unavailable” and preserves draft; opted-out/invalid-address contacts never dispatch; duplicate run creates no extra provider effect; mid-campaign unsubscribe is honored; failed recipient can retry independently. Useful first scope is a repeat-customer announcement with a test message and recipient preview, not a large campaign builder.
 
-### N27 — Routine edits and parsing change schedule meaning (P1, partly reproduced)
+### N27 - Routine edits and parsing change schedule meaning (P1, partly reproduced)
 
 Evidence: `modules/routines/src/index.ts:199` recomputed next run whenever an existing schedule was present, including name-only edits. Structured creation accepted `HH:MM` by shape, not range, and update did not repeat creation's required-field checks. Text parser's interval regex was not fully anchored (`erp-core/src/routines.ts:56`): a local call with `every 30 minutes on weekdays` returned an unrestricted interval. Scheduling uses server-local `setHours`/`getDay` with no org timezone. Deleting then invoking its create inverse loses enabled/trigger/token identity and can re-create a previously disabled routine as scheduled.
 
@@ -361,7 +361,7 @@ migration labels for the old server-time basis.
 
 Proof: rename has unchanged due time; 99:99 and incomplete weekly schedule fail; unsupported qualifier asks a targeted question; timezone/server relocation gives same intended local schedule; DST repeated/missing times follow policy; restore doesn't silently enable automation.
 
-### N28 — Routine claims, authority and health status are overstated (P0/P1, source-confirmed windows; concurrency proof required)
+### N28 - Routine claims, authority and health status are overstated (P0/P1, source-confirmed windows; concurrency proof required)
 
 Evidence: `server/routines.ts:63` claims by updating last-run state; next-run advancement occurs in separate later statements, then enqueue occurs separately. Another worker can claim the still-due row in the gap; a crash after reschedule can lose the occurrence. This extends F04's recurring-invoice issue to routines. Execution uses a fixed broad read bundle, not the creator's current delegation. It instructs posting to a general channel, but messaging requires membership and the system actor has `id: null`, so that path is refused. Final routine notifications are org-wide; setting the run to `ok` and swallowing errors/NO_ACTION can hide blocked tools. Queued execution does not recheck `enabled` before starting.
 
@@ -369,7 +369,7 @@ Implementation: the first occurrence-integrity slice in ADR 0045 makes scheduled
 
 Proof: two workers/worker death cannot double-enqueue or lose a due occurrence; failed tool cannot produce all-clear; revoked owner or paused routine cannot initiate another sensitive run; channel membership and notification audience hold. Test agent-free schedule execution separately from live-provider behavior.
 
-### N29 — One person's read mark clears a broadcast for everyone (P1, source-confirmed)
+### N29 - One person's read mark clears a broadcast for everyone (P1, source-confirmed)
 
 Evidence: `api/notifications/route.ts:76` updates the broadcast row's shared `readAt` when `userId IS NULL`; GET uses that same column to count unread for every recipient. A second click returns not-found rather than an idempotent read acknowledgment. Routine notifications use these broadcasts.
 
@@ -377,7 +377,7 @@ Implementation: immutable notification event plus per-user receipt/read/dismiss/
 
 Proof: A reads a broadcast, B remains unread; repeat marking read succeeds idempotently; revoked recipients cannot reopen content; pagination/counts agree. Migrate old shared read marks as uncertain recipient state, not fabricated per-user read history.
 
-### N30 — Async UI results are not consistently bound to their origin (P0 for wrong-recipient draft; P1 other races)
+### N30 - Async UI results are not consistently bound to their origin (P0 for wrong-recipient draft; P1 other races)
 
 Evidence: support `makeDraft` awaits using the current conversation ID then stores a bare draft string (`(app)/support/page.tsx:124`). Conversation switching clears that string but does not prevent the prior request returning later; `sendDraft` uses the newly active ID (`:139`). A draft generated for A can therefore appear in B's composer. `chat-store.ts` is a process-local browser singleton with no organization key; session ID, queue, abort controller and reset operations share mutable state. Shell org switch changes a shared cookie and redirects. Old tabs and in-flight results require explicit tenant-context testing. Server session ownership guards still exist; this finding does not assume those guards are bypassed.
 
@@ -385,7 +385,7 @@ Implementation: draft/result state carries orgId, recordId, input revision and r
 
 Proof: delay A's draft, switch to B, receive A's result: B remains untouched and send-to-B is rejected server-side. Switch org mid-draft/in another tab; reset mid-stream then send again; queued message never migrates to another tenant. Cancellation must reconcile receipts before offering retry.
 
-### N31 — Analytics answer fields and citations are factually inconsistent (P1, source-confirmed)
+### N31 - Analytics answer fields and citations are factually inconsistent (P1, source-confirmed)
 
 Evidence: `askYourBusiness`, `modules/analytics/src/index.ts:297`, reads `r.total_minor` from an extractor returning `totalMinor`; output can say “undefined minor.” It labels all-time top customers “this period.” Collections citations request invoice IDs from an aggregate bucket dataset that has none. `explainChange` groups customer names/product descriptions rather than stable identities, and drill samples only period B, so a lost customer's period-A evidence is absent (`:164`, `:238`). Financial extracts also need N11's metric definitions.
 
@@ -393,7 +393,7 @@ Implementation: typed result rows with stable dimension IDs and separately rende
 
 Proof: no undefined/empty citations; same-name customers stay separate; a customer present only in A has accessible evidence; contributions sum to the defined metric difference and drill totals reconcile. Chart and narrative derive from the same dataset object. X12/X13 remain the analytics/report architecture.
 
-### N32 — Modal/keyboard semantics are incomplete (P1, source-confirmed implementation gap; browser proof pending)
+### N32 - Modal/keyboard semantics are incomplete (P1, source-confirmed implementation gap; browser proof pending)
 
 Evidence: `components/ui.tsx:333` focuses a modal and handles Escape/restoration, but does not trap Tab or make background content inert. Command palette separately implements a dialog/listbox (`(app)/command-palette.tsx:93`) without complete focus containment or a linked active-option announcement. App tabs have ARIA roles, but roles alone do not supply keyboard behavior.
 
@@ -401,7 +401,7 @@ Implementation: consolidate on a well-tested accessible dialog/focus implementat
 
 Proof: keyboard-only create/edit/approve/cancel journeys, screen-reader field/error announcements, focus after deletion, nested modal closure, narrow viewport and 200% zoom. Automated checks supplement manual assistive-technology verification. Follow repository next-dev-loop requirements when implementing UI changes.
 
-### N33 — Response semantics blur pending, failed and unknown outcomes (P1, source-confirmed)
+### N33 - Response semantics blur pending, failed and unknown outcomes (P1, source-confirmed)
 
 Evidence: `apps/web/src/lib/api.ts` marks HTTP 202 as `ok:true`, parses invalid/missing JSON as null even for success, and translates failures by matching English text. Several routes repeat raw `req.json()`/casts while others use safe parsing. `chat-store.ts` checks a response body but not HTTP status/content type, and ignores a final buffered fragment without a newline. Unknown/disconnected action results currently lead toward retry language that may duplicate a committed operation.
 
@@ -409,7 +409,7 @@ Implementation: extend existing API helper rather than adding a parallel transpo
 
 Proof: invalid JSON, HTML error response, null success payload, permission loss, rate limit, partial stream, 202 and timeout-after-commit each produce the correct UI state with retained draft and action-specific recovery. No sensitive payload is exposed in a technical-details panel merely because it is collapsed.
 
-### N34 — Creator review decision races and permission naming need tightening (P1, source-confirmed)
+### N34 - Creator review decision races and permission naming need tightening (P1, source-confirmed)
 
 Evidence: proposal POST checks `in_review` then updates by ID without conditional status/version (`api/proposals/route.ts:48`), allowing concurrent reviewers to overwrite decisions. `creator.listMarketplace` requires `accounting.read` (`modules/creator/src/index.ts:379`), coupling browsing to unrelated financial authority. Coding-agent discovery routes expose host tool inventory to any member. Signed-manifest verification exists, but executable sandbox/deployment proof remains F17; do not relabel “listed/installed” as active verified code.
 
@@ -417,15 +417,15 @@ Implementation: compare-and-set decision with expected proposal revision, immuta
 
 Proof: competing approve/reject yields one decision plus conflict; changed diff cannot reuse approval; marketplace browsing needs no accounting permission; failed capability conformance prevents activation and discovery. Implementation evidence is executed proof tied to an exact code revision, not generated test text.
 
-### N35 — Performance and maintainability hotspots are identifiable but unmeasured (P1/P2, source-confirmed query shapes)
+### N35 - Performance and maintainability hotspots are identifiable but unmeasured (P1/P2, source-confirmed query shapes)
 
 Evidence: dashboard reads whole AR/AP/deal sets and all-history trend then selects six months in memory (`api/dashboard/route.ts`); conversation list does a query per row; inventory valuation does a history query per item; manufacturing repeatedly loads item histories; payroll queries leaves per employee. Several UIs fetch bounded first pages and filter them locally. `accounting/src/index.ts` is 2,643 lines and its page 1,616 in this snapshot. Size alone is not a defect, but duplicate schemas, response adapters, math and business transitions have demonstrably drifted in N11/N17/N31.
 
-Implementation: measure query count, scanned rows, lock time, memory and p50/p95 under stated org/data sizes. Push date filters/aggregation into SQL, page directories, batch histories/joins, and avoid unbounded Promise.all fan-out. Introduce replay-verified valuation/read projections where measured replay cost warrants them. Index from real query plans—candidate org+status+due-date, org+sequence, conversation+createdAt+id—not blanket indexes. Keep permission+tenant+metric-version in every cache key and invalidate after committed events. Separate modules by cohesive use case inside the modular monolith; extract shared contracts before splitting UI files. Reuse the API helper and existing pure math. Consolidate duplicate SCIM handlers and response adapters after behavior is characterized.
+Implementation: measure query count, scanned rows, lock time, memory and p50/p95 under stated org/data sizes. Push date filters/aggregation into SQL, page directories, batch histories/joins, and avoid unbounded Promise.all fan-out. Introduce replay-verified valuation/read projections where measured replay cost warrants them. Index from real query plans-candidate org+status+due-date, org+sequence, conversation+createdAt+id-not blanket indexes. Keep permission+tenant+metric-version in every cache key and invalidate after committed events. Separate modules by cohesive use case inside the modular monolith; extract shared contracts before splitting UI files. Reuse the API helper and existing pure math. Consolidate duplicate SCIM handlers and response adapters after behavior is characterized.
 
 Proof: baseline and changed workloads use the same dataset/hardware; correctness totals and query counts are recorded. Tenant/permission change cannot reuse stale privileged cache. Large scans/exports become jobs with cancellation and resource limits. Do not add microservices, a general graph database, a new state library or a warehouse solely to make this plan sound enterprise-grade.
 
-### N36 — The normal test command omits existing module suites (P0 verification foundation, source-confirmed)
+### N36 - The normal test command omits existing module suites (P0 verification foundation, source-confirmed)
 
 Evidence: root `package.json` runs `turbo test`; only manufacturing and signals among the 19 module packages currently declare a `test` script. A filesystem/package-manifest inventory found **19 existing module `.test.ts` files in packages with no test script**. These include accounting, purchasing, sales, inventory, HR, POS, CRM, projects, documents, analytics, creator, support and marketing. The web Vitest config includes only its own `src/**/*.test.*`; it does not discover those module files. The observed root run had eight task groups, consistent with this narrower scope. Some module behaviors are exercised indirectly by web tests; that does not mean these omitted test files ran.
 
@@ -437,7 +437,7 @@ Proof: deliberately fail a representative formerly omitted module test and demon
 
 These are product hypotheses, not a commitment to ship every idea. Each starts from a repeated job, has a useful manual path with AI off, and uses the same governed commands when AI helps. Start with P01–P04 for one pilot cohort; deliver module-specific features only where that cohort needs them. Adoption, task success and retained usage matter more than chat-message volume.
 
-### P01 — A calm “My work” home that explains the next step
+### P01 - A calm “My work” home that explains the next step
 
 **Job and journey:** “What needs my attention, and what can I finish now?” Show at most a few ranked items across approvals, follow-ups, stock exceptions and personal tasks. Each card says what changed, why it matters, due date/owner, evidence, and one primary action. “Supplier delivered 8 of 10; accept 8 and leave 2 outstanding” is actionable. A general “purchasing issue” is not. Separate waiting-for-others from work the user can do now. Let users snooze with a reason, delegate, or mark the signal unhelpful; an unresolved underlying condition must not disappear permanently.
 
@@ -445,7 +445,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** in a pilot, measure time from opening home to first completed useful action, resolution time, false-positive dismissals and repeated snoozes. Coverage failures must appear as “last checked … / check unavailable,” not zero problems. No algorithmic worker performance score or public employee-lateness feed.
 
-### P02 — Drafts that survive interruptions and a clear finish receipt
+### P02 - Drafts that survive interruptions and a clear finish receipt
 
 **Job and journey:** a receptionist creates a customer while answering a call; a buyer starts a PO and waits for a price. Show “Saved draft” with timestamp, retain edits across reload, and offer “Continue where you left off.” Success returns a concise receipt: what changed, actor/principal, pending steps and “Open customer/order.” If network state is uncertain, “Checking whether this completed” resolves the operation ID before retry.
 
@@ -453,7 +453,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** no lost data on the sampled reload/navigation/failure flows; lower re-entry and duplicate creation; pending approval never masquerades as completion. First implementation: POS basket and purchase order. Generalize only after those work, rather than build a universal form designer.
 
-### P03 — A reconciliation workspace that makes the reason visible
+### P03 - A reconciliation workspace that makes the reason visible
 
 **Job and journey:** import a bank statement, see suggested matches side by side with amount/date/reference evidence, accept the exact ones in a previewed batch, then work a short exception queue. Explain “100 received, 97 banked, 3 fee” and offer the correct governed accounting treatment. Display remaining unexplained difference and statement boundary. Closing the workspace should feel like finishing a finite job.
 
@@ -461,7 +461,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** reconciliation completion time and rate of reversed matches, with conservation tests and a known-answer statement. Avoid a conversational-only accounting screen; experts need dense comparison and keyboard control.
 
-### P04 — Customer and supplier pages that remember the relationship
+### P04 - Customer and supplier pages that remember the relationship
 
 **Job and journey:** open a customer and see current balance, last interaction, open orders, promised follow-up and the next relevant action. Answer “What did we promise?” without opening five modules. Show pending deliveries and disputes separately from overdue debt. A supplier page connects late receipt, current order, bill and contact history. A compact visible timeline distinguishes a human action, an agent acting for someone and a scheduled action.
 
@@ -469,7 +469,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** users find the latest promise and balance in a short task without help; follow-ups missed, duplicate records and unnecessary app switches decline. Avoid a giant all-data profile, generic sentiment score or automatically sent relationship email.
 
-### P05 — A receiving desk for the person holding the delivery
+### P05 - A receiving desk for the person holding the delivery
 
 **Job and journey:** scan/find the PO; see expected goods; enter “8 accepted, 1 damaged, 1 missing”; attach evidence; finish with “8 added to shelf, 1 in quarantine, 1 still expected.” Show service acceptance as “Milestone completed” rather than asking for stock. Create a draft supplier follow-up/credit request from the discrepancy. Preserve partial work when the phone sleeps.
 
@@ -477,7 +477,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** fewer wrong-line receipts and less supplier-chasing re-entry; partial deliveries and services complete without workaround. Test keyboard-only and narrow screen with one hand; retain a desktop bulk-entry view.
 
-### P06 — A warehouse/build assistant that answers “why not?”
+### P06 - A warehouse/build assistant that answers “why not?”
 
 **Job and journey:** request a build or delivery quantity; see “Can make 8 now; 2 more need component C” with exact arithmetic and links. Offer a draft purchase, revised build quantity or later promise. Counts present one bin/item at a time and explain why a changed snapshot needs review. Visual stock labels distinguish on hand, reserved, available, expected and quarantined.
 
@@ -485,7 +485,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** feasibility agrees with immediate execution, shortage explanations are understood, mistaken reservations/counts decrease. No autonomous purchasing based on stale or incomplete availability.
 
-### P07 — A forgiving, fast checkout and shift close
+### P07 - A forgiving, fast checkout and shift close
 
 **Job and journey:** scan/type a product, adjust quantity, take tender, see change and a proper receipt. Park a sale for a returning customer without losing the active queue. A return starts from the original receipt and asks only for quantity, reason/disposition and refund method. Shift close explains each difference through sales, refunds, cash-in/out and opening float.
 
@@ -493,7 +493,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** timed representative sale/return/shift journeys, no cart loss, no duplicate sale on retries and no unexplained drawer differences caused by the software. Defer loyalty tiers, broad promotions and offline financial posting until stable checkout earns daily use.
 
-### P08 — Employee self-service with private, understandable records
+### P08 - Employee self-service with private, understandable records
 
 **Job and journey:** “How much leave can I book?”, “Has my expense been approved?”, “Why is this payslip different?” Provide a personal page showing entitlement/taken/planned leave, reimbursement progress and a simple payslip comparison with approved explanations. Managers see pending decisions and coverage conflicts without exposing medical details to coworkers. An employee can correct a mistaken time entry through a visible review flow.
 
@@ -501,7 +501,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** fewer “where is my claim?” interruptions; employees can find their balance/status without help; salary and sensitive absence reasons never enter general notifications or search. Do not use lateness signals to generate employee rankings or unsupported disciplinary judgments.
 
-### P09 — Personal commitments connected to business work
+### P09 - Personal commitments connected to business work
 
 **Job and journey:** turn “I will call them Friday” into a proposed task linked to the customer, with owner and due date. “My work” shows CRM, project and approval commitments without requiring the user to understand separate task tables. A colleague can see who is waiting on whom and hand work over with context. Completing a task opens the relevant action/record instead of merely moving a card.
 
@@ -509,7 +509,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** fewer missed due items, less duplicate entry and an understandable handoff to another person. AI proposes tasks; it does not treat every sentence in a conversation as a commitment. No time-tracking surveillance or automatic effort scores.
 
-### P10 — A trustworthy customer communication desk
+### P10 - A trustworthy customer communication desk
 
 **Job and journey:** one inbox distinguishes customer request, internal note, AI draft, approved reply and delivered message. A draft shows the evidence it used and a clear recipient. Public visitors can get useful general answers immediately; account-specific answers explain the short verification step. For an announcement, preview audience, excluded contacts and an actual test message, then review delivery results.
 
@@ -517,7 +517,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** wrong-recipient drafts impossible at the backend boundary, fewer stale AI replies after staff takeover, verifiable delivery state and useful recovery for failures. No automatic private-account answer based on typed email; no decorative AI confidence percentage without calibrated meaning.
 
-### P11 — Guided import and document review with visible uncertainty
+### P11 - Guided import and document review with visible uncertainty
 
 **Job and journey:** drop a spreadsheet/invoice, preview detected type and column mappings, resolve only uncertain fields, then see a dry-run summary and errors linked to source rows/pages. “Save this mapping for this supplier/file format” reduces repeat work. Import can pause and resume; rejected rows remain downloadable with reasons. Finish links to created records and the import receipt.
 
@@ -525,7 +525,7 @@ These are product hypotheses, not a commitment to ship every idea. Each starts f
 
 **Success/proof:** first useful import completed with few manual corrections; repeat imports don't duplicate records; source totals reconcile; unsupported file/model route gives an alternative. No “import succeeded” when only part committed, and no screenshots/documents automatically uploaded as telemetry.
 
-### P12 — Progressive onboarding and a developer setup that earns trust
+### P12 - Progressive onboarding and a developer setup that earns trust
 
 **Job and journey:** ask the business type and first desired outcome, then offer “send an invoice,” “receive stock,” “manage a project” or “import data,” filtered by selected modules. Gather only prerequisites for that outcome. Show optional steps as “Set up later,” retain the decision, and resume from the actual state. Explain an unavoidable requirement at the moment it matters. Let experienced users choose manual setup and enter directly. A developer should get a deterministic local setup, a health diagnosis, seeded synthetic data and one working demo before connecting a paid model.
 
@@ -567,14 +567,14 @@ N items add to the existing W0–W7 programme. They do not authorize silently re
 
 | Package | Owner(s) | Scope and dependencies | Concrete exit artifact |
 |---|---|---|---|
-| I0 — Baseline and containment | Security + platform lead | Reproduce N01–N10 with synthetic identities; map every route; establish runtime DB role/schema; N36 suite discovery and existing test failure | Evidence register with each claim confirmed/ruled out/open; affected paths contained; baseline tests and skipped coverage documented |
-| I1 — Identity/read boundaries | IAM + API + security | N01–N08; source ACLs and public visitor identity; independent of new product UI | Denial matrix across routes/capabilities/search/export/cache; verified identity lifecycle; no public private-data path |
-| I2 — Domain transaction spine | Kernel + accounting + DB | Prior B01/B02/B03; N09, N11–N16, N22; align lock/idempotency/receipt contracts | Atomic business effects, correct balances, DB negative proofs, concurrency regressions, repair inventory of affected historical data |
-| I3 — Operational corrections | Inventory/manufacturing + HR + product | N17–N25 after the required I2 service contracts | POS return/shift proof; transfer/production valuation proof; payroll correction proof; reference/assignment safety |
-| I4 — Reliable communication and automation | Jobs + integrations + AI | N26–N30, N34, X05; needs I1 and durable effect/receipt handling | Real external-delivery states, recipient-bound drafts, recoverable occurrences and pause/revocation proof |
-| I5 — First enjoyable vertical journeys | Product + UX/UI + domain owners | P01/P02/P04 first; choose P03/P05/P07/P08 by pilot, not all at once | Complete human and AI-assisted journey with direct links, preserved drafts, useful failure states and measured usability |
-| I6 — Understanding and scale | Analytics + performance + platform | N19/N31/N35, X12/X13; correct metric/authority contracts first | Reconciled reports, working citations, measured query/latency improvements and budget/retention controls |
-| I7 — Expansion from evidence | Product + creator/platform | Remaining P ideas and self-development improvements after pilot | Evidence-backed prioritization; independent implementation proof and staged release; removal/defer decisions for unused complexity |
+| I0 - Baseline and containment | Security + platform lead | Reproduce N01–N10 with synthetic identities; map every route; establish runtime DB role/schema; N36 suite discovery and existing test failure | Evidence register with each claim confirmed/ruled out/open; affected paths contained; baseline tests and skipped coverage documented |
+| I1 - Identity/read boundaries | IAM + API + security | N01–N08; source ACLs and public visitor identity; independent of new product UI | Denial matrix across routes/capabilities/search/export/cache; verified identity lifecycle; no public private-data path |
+| I2 - Domain transaction spine | Kernel + accounting + DB | Prior B01/B02/B03; N09, N11–N16, N22; align lock/idempotency/receipt contracts | Atomic business effects, correct balances, DB negative proofs, concurrency regressions, repair inventory of affected historical data |
+| I3 - Operational corrections | Inventory/manufacturing + HR + product | N17–N25 after the required I2 service contracts | POS return/shift proof; transfer/production valuation proof; payroll correction proof; reference/assignment safety |
+| I4 - Reliable communication and automation | Jobs + integrations + AI | N26–N30, N34, X05; needs I1 and durable effect/receipt handling | Real external-delivery states, recipient-bound drafts, recoverable occurrences and pause/revocation proof |
+| I5 - First enjoyable vertical journeys | Product + UX/UI + domain owners | P01/P02/P04 first; choose P03/P05/P07/P08 by pilot, not all at once | Complete human and AI-assisted journey with direct links, preserved drafts, useful failure states and measured usability |
+| I6 - Understanding and scale | Analytics + performance + platform | N19/N31/N35, X12/X13; correct metric/authority contracts first | Reconciled reports, working citations, measured query/latency improvements and budget/retention controls |
+| I7 - Expansion from evidence | Product + creator/platform | Remaining P ideas and self-development improvements after pilot | Evidence-backed prioritization; independent implementation proof and staged release; removal/defer decisions for unused complexity |
 
 **Parallel work boundaries:** I1 identity/read services and pure I2 financial math can proceed independently once shared contracts are written. POS, purchasing and manufacturing can then use those contracts concurrently. Do not have multiple agents independently invent receipt, inventory-lock, money or permission conventions. Resolve those interfaces before dispatch. UI design prototypes can proceed early; UI implementation must not camouflage missing backend guarantees.
 

@@ -59,7 +59,7 @@ BEGIN
       HAVING sum(debit_minor) <> sum(credit_minor) OR sum(debit_minor) <= 0 OR count(*) < 2
       LIMIT 5
     ) s;
-    RAISE EXCEPTION 'journal pre-validation failed: % unbalanced/incomplete entries, % cross-org lines; offending entry ids: % — reconcile or quarantine these rows before migrating (N09)',
+    RAISE EXCEPTION 'journal pre-validation failed: % unbalanced/incomplete entries, % cross-org lines; offending entry ids: % - reconcile or quarantine these rows before migrating (N09)',
       unbalanced_count, cross_org_count, coalesce(sample_entries, 'none');
   END IF;
 END $$;

@@ -21,7 +21,7 @@ interface ArticleRow {
 const emptyCanned = { shortcut: "", title: "", body: "" };
 const emptyArticle = { title: "", body: "", category: "" };
 
-/** Canned responses and knowledge-base articles — the support library. */
+/** Canned responses and knowledge-base articles - the support library. */
 export function LibraryTab() {
   const [canned, setCanned] = useState<CannedRow[] | null>(null);
   const [articles, setArticles] = useState<ArticleRow[] | null>(null);
@@ -150,7 +150,7 @@ export function LibraryTab() {
             {canned.map((c) => (
               <li key={c.id} className="py-2.5">
                 <div className="flex items-center gap-2">
-                  <Badge tone="maroon">{c.shortcut}</Badge>
+                  <Badge tone="gold">{c.shortcut}</Badge>
                   <span className="font-medium text-stone-800">{c.title}</span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-xs text-stone-500">{c.body}</p>
@@ -235,7 +235,7 @@ export function LibraryTab() {
             ))}
           </ul>
         )}
-        <p className="mt-2 text-xs text-stone-400">Articles are live immediately — the website widget&apos;s AI answers are grounded in these.</p>
+        <p className="mt-2 text-xs text-stone-400">Articles are live immediately - the website widget&apos;s AI answers are grounded in these.</p>
       </Card>
     </div>
   );

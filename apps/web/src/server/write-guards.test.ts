@@ -16,7 +16,7 @@ import {
  *  - N29: broadcast reads are per-user receipts; one person's read never
  *    clears a notification for anyone else; repeats are idempotent; a user
  *    cannot mark another user's personal notification.
- *  - N34: proposal review decisions are compare-and-set — exactly one
+ *  - N34: proposal review decisions are compare-and-set - exactly one
  *    decision wins, the loser gets a conflict.
  *  - N08: reading channel settings never creates the settings row and never
  *    exposes the embed token to non-admins; only admins mutate.

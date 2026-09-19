@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 /**
  * Workspace display preferences: currency, units, date format, week start.
  * Stored locally per device under "chaste-prefs"; server data stays in minor
- * units and ISO — these only change how figures are *presented*. Pages adopt
+ * units and ISO - these only change how figures are *presented*. Pages adopt
  * them progressively via the format helpers below.
  */
 

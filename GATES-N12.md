@@ -1,4 +1,4 @@
-# Gates: N12B — vendor payments undo through their own domain compensation
+# Gates: N12B - vendor payments undo through their own domain compensation
 
 OWNS: modules/purchasing/src/index.ts, modules/purchasing/src/reversal.test.ts, modules/accounting/src/index.ts, modules/accounting/src/reversal.test.ts
 
@@ -19,12 +19,12 @@ Scope: `purchasing.reverseVendorPayment` mirrors the payment entry in its origin
   EXPECT: /Tests\s+\d+ passed/
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=7a5aacf8917c0ce9adf8486fe45c51e9e9dd371df6e2e3258e84777a35517488; output-bytes=24038
 
-- [x] N12B-G3: the kernel accepts the new capability at boot — conformance (id, intent, inverse input generated against the real payBill output) passes inside the module registry
+- [x] N12B-G3: the kernel accepts the new capability at boot - conformance (id, intent, inverse input generated against the real payBill output) passes inside the module registry
   CHECK: pnpm --filter @chaste/module-purchasing exec vitest run && pnpm --filter @chaste/module-accounting exec vitest run && echo N12B-MODULES-OK
   EXPECT: N12B-MODULES-OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=cc09bcadf608b9146152ebafe1be2c0aa03ed0d8d7239056a8be28d24f60d5da; output-bytes=49810
 
-- [x] N12B-G4: repo verification gate — typecheck, lint, and the full workspace test suite pass
+- [x] N12B-G4: repo verification gate - typecheck, lint, and the full workspace test suite pass
   CHECK: pnpm typecheck >/dev/null 2>&1 && pnpm lint >/dev/null 2>&1 && pnpm test >/tmp/kilo/gate-n12-test.log 2>&1 && echo REPO-GATE-OK || { tail -30 /tmp/kilo/gate-n12-test.log; exit 1; }
   EXPECT: REPO-GATE-OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=0c6e5dc74929b6f125a6dfc551264ea8e2e1ad046a1b29c7937ae29c3cc6b215; output-bytes=13

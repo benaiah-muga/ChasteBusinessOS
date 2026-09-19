@@ -30,19 +30,19 @@ tablist. The principle: Overview = understand, tabs = operate. Accounting is
 the first application on this frame (Overview | Journal | Receivables |
 Payables | Reports | Periods, tab state mirrored to the URL hash); other
 modules migrate opportunistically. All previous Accounting functionality is
-preserved — pay bill, mirror reversal, close period, year-end close, cash
-basis, P&L, balance sheet — relocated, not removed.
+preserved - pay bill, mirror reversal, close period, year-end close, cash
+basis, P&L, balance sheet - relocated, not removed.
 
 **3. Two color scales carry the whole identity.** Every neutral routes through
 `--color-stone-*` and every accent through `--color-maroon-*` (Tailwind v4
 utilities compile to these variables, so runtime re-declaration re-skins the
-entire app, including pages still written with raw utilities). Four themes —
+entire app, including pages still written with raw utilities). Four themes -
 Chaste (brick `#9B1313` / burgundy `#38000A`, default), Graphite, Verdant,
-Meridian — re-declare the two ramps plus the canvas on `html[data-theme]`,
+Meridian - re-declare the two ramps plus the canvas on `html[data-theme]`,
 applied pre-paint by an inline script in the root layout. Semantic colors
 (emerald/red/amber) never change: a failure is red in every theme. The theme
-store is provider-free (`components/theme.tsx`) so any surface — rail menu,
-command palette — can read or switch it.
+store is provider-free (`components/theme.tsx`) so any surface - rail menu,
+command palette - can read or switch it.
 
 **4. Dashboard and login follow the same grammar.** The dashboard is an open
 composition (no card walls): financial pulse with a hand-built bar chart, a
@@ -60,7 +60,7 @@ burgundy panel (`.ledger-rules`) and numbered proof points.
   a swatch in `theme.tsx`.
 - Pages not yet on `AppFrame` keep their `PageHeader`; they are already
   theme-aware for free via the token scales.
-- `next lint` (the web package's script) is broken under Next 16 — lint with
+- `next lint` (the web package's script) is broken under Next 16 - lint with
   `eslint .` from the repo root. Pre-existing, tracked separately.
 
 ## Verification

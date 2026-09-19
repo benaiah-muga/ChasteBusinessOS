@@ -18,7 +18,7 @@ import { runOnboarding } from "./onboarding";
 
 /**
  * B01/T08: the bootstrap is the one declared exception to the governed
- * command path — tenant creation cannot require an existing tenant — so its
+ * command path - tenant creation cannot require an existing tenant - so its
  * honesty must be mechanical: a retry after a lost response replays the
  * receipt committed with the organization (even once the session already
  * resolves the org), a conflicting reuse of an intent id is refused, slug
@@ -126,5 +126,31 @@ describe("intent-keyed bootstrap (B01/T08)", () => {
     const vec = await waitForEmbeddingUpgrade(orgIds[0]!);
     expect(vec).not.toBeNull();
     expect(vec).toHaveLength(1024);
+  });
+
+  it("two concurrent bootstraps on one intent create one org; the loser replays instead of erroring", async () => {
+    const userC = crypto.randomUUID();
+    await db.db.insert(users).values({ id: userC, email: `${userC}@bootstrap.test`, name: "Founder C" });
+    try {
+      const params = { ...baseParams(userC), intentId: "intent-race-1" };
+      const outcomes = await Promise.allSettled([runOnboarding(db.db, params), runOnboarding(db.db, params)]);
+      const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
+      const rejected = outcomes.filter((o) => o.status === "rejected");
+      // Exactly one bootstrap wins; the loser converges to the winner's
+      // receipt instead of surfacing a raw unique violation or a second org.
+      expect(rejected).toHaveLength(0);
+      expect(fulfilled).toHaveLength(2);
+      const orgIds = fulfilled.map((o) => (o as PromiseFulfilledResult<{ orgId: string }>).value.orgId);
+      expect(orgIds[0]).toBe(orgIds[1]);
+      const replayed = fulfilled.map((o) => (o as PromiseFulfilledResult<{ orgId: string; replayed?: boolean }>).value.replayed ?? false);
+      expect(replayed.filter(Boolean)).toHaveLength(1);
+      track({ orgId: orgIds[0]! });
+      const ms = await db.db.select().from(memberships).where(eq(memberships.userId, userC));
+      expect(ms).toHaveLength(1);
+    } finally {
+      await db.db.delete(bootstrapIntents).where(eq(bootstrapIntents.userId, userC));
+      await db.db.delete(memberships).where(eq(memberships.userId, userC));
+      await db.db.delete(users).where(eq(users.id, userC));
+    }
   });
 });

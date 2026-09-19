@@ -18,7 +18,7 @@ import { registerPosCapabilities, type ModuleDeps } from "./index";
 
 /**
  * Register oversell integrity (N15): repeated SKU lines spend one running
- * availability budget — 7 + 7 against 10 refuses — and stock promised to a
+ * availability budget - 7 + 7 against 10 refuses - and stock promised to a
  * sales order (open reservation) is not sellable at the register.
  */
 
@@ -81,7 +81,7 @@ afterAll(async () => {
 describe("register oversell integrity (N15)", () => {
   it("repeated SKU lines check one shared budget, and a refused sale leaves nothing behind", async () => {
     // The first line consumed 7 of the 10-unit budget, so the refusal
-    // reports the 3 000 the second line would have drawn from — proof the
+    // reports the 3 000 the second line would have drawn from - proof the
     // lines share one budget rather than each seeing full stock.
     await expect(
       run("pos.completeSale", {

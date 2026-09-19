@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
-import { callApi } from "@/lib/api";
-import { formatMoney, formatMoneyWhole, timeAgo } from "@/lib/format";
+import { callApi, postApi } from "@/lib/api";
+import { cn, formatMoney, formatMoneyWhole, timeAgo } from "@/lib/format";
 import { IconArrowRight, IconSparkle } from "@/components/icons";
+import { pilotBegin, record } from "@/lib/pilot-metrics";
 
 /**
  * The home dashboard reads like the cover page of the accounts book:
@@ -234,7 +235,7 @@ function Masthead({ orgName, data }: { orgName: string; data: DashboardPayload |
                   </span>
                 ) : (
                   <span className="badge border border-red-300/25 bg-red-400/15 text-red-200">
-                    unbalanced — investigate
+                    unbalanced - investigate
                   </span>
                 ))}
               {m && data && <MonthDelta trend={data.trend} />}
@@ -244,7 +245,7 @@ function Masthead({ orgName, data }: { orgName: string; data: DashboardPayload |
           <dl className="tnum flex flex-wrap gap-x-8 gap-y-3 sm:gap-x-10">
             <Stat label="Revenue" value={m ? formatMoney(m.revenueMinor) : undefined} />
             <Stat label="Expenses" value={m ? formatMoney(m.expenseMinor) : undefined} />
-            <Stat label="Cash" value={m ? (m.cashMinor === null ? "—" : formatMoney(m.cashMinor)) : undefined} />
+            <Stat label="Cash" value={m ? (m.cashMinor === null ? "-" : formatMoney(m.cashMinor)) : undefined} />
           </dl>
         </div>
 
@@ -470,21 +471,21 @@ function SetupChecklist({
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="figure-label">Get set up</p>
         <span className="text-xs text-stone-500">
-          {pending.length} step{pending.length === 1 ? "" : "s"} left — a minute each, the workmate can help.
+          {pending.length} step{pending.length === 1 ? "" : "s"} left - a minute each, the workmate can help.
         </span>
       </div>
       <ol className="mt-1.5 divide-y divide-stone-100">
         {visible.map((item) => (
           <li key={item.id} className="group flex items-center gap-3 py-1.5 text-sm first:pt-0.5 last:pb-0">
-            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-maroon-600" />
+            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-gold-600" />
             <span className="min-w-0 flex-1 truncate">
               <span className="font-medium text-stone-900">{item.title}</span>
-              <span className="text-xs text-stone-400"> — {item.why}</span>
+              <span className="text-xs text-stone-400"> - {item.why}</span>
             </span>
             <span className="flex shrink-0 items-center gap-2">
               <Link
                 href={item.href}
-                className="inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-maroon-800 hover:underline"
+                className="inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-gold-800 hover:underline"
               >
                 Take me there
                 <IconArrowRight className="size-3 transition-transform duration-150 group-hover:translate-x-0.5" />
@@ -507,7 +508,7 @@ function SetupChecklist({
           type="button"
           onClick={() => setExpanded(true)}
           aria-expanded={expanded}
-          className="mt-1.5 cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-maroon-800"
+          className="mt-1.5 cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-gold-800"
         >
           Show {hidden} more step{hidden === 1 ? "" : "s"} ↓
         </button>
@@ -517,7 +518,7 @@ function SetupChecklist({
           type="button"
           onClick={() => setExpanded(false)}
           aria-expanded={expanded}
-          className="mt-1.5 block cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-maroon-800"
+          className="mt-1.5 block cursor-pointer text-xs font-medium text-stone-500 transition-colors duration-150 hover:text-gold-800"
         >
           Show fewer steps ↑
         </button>
@@ -561,16 +562,45 @@ function DashboardBody({ data, attentionCount }: { data: DashboardPayload; atten
 
 /**
  * The queue: every item is one sentence ending in a verb. Severity is a dot,
- * not a siren; the point is triage, not alarm. Whole rows are links.
+ * not a siren; the point is triage, not alarm. Whole rows are links. The
+ * workmate's "Brief me" lives here too, so attention has exactly one home.
  */
 function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number }) {
   type Item = { key: string; severity: "high" | "med" | "low"; text: React.ReactNode; href: string; cta: string };
+  type WorkCard = { kind: string; id: string; title: string; detail: string; whyItMatters: string; actionLabel: string; actionHref: string };
+  const [workCards, setWorkCards] = useState<WorkCard[] | null>(null);
+  const [brief, setBrief] = useState<string | null>(null);
+  const [briefState, setBriefState] = useState<"idle" | "loading" | "unavailable">("idle");
+
+  useEffect(() => {
+    pilotBegin("home");
+    callApi<{ cards: WorkCard[] }>("/api/my-work").then((res) => {
+      setWorkCards(res.ok && res.data ? res.data.cards : []);
+    });
+  }, []);
+
+  const onWorkCardClick = useCallback(() => {
+    record("first_action", "needs-you row", "home");
+  }, []);
+
+  const summarize = useCallback(async () => {
+    setBriefState("loading");
+    const res = await postApi<{ brief: string }>("/api/my-work/summarize", { cards: workCards ?? [] });
+    if (res.ok && res.data?.brief) {
+      setBrief(res.data.brief);
+      setBriefState("idle");
+    } else {
+      setBrief(res.error?.hint ?? "The brief is unavailable right now; the ranked list itself is unaffected.");
+      setBriefState("unavailable");
+    }
+  }, [workCards]);
+
   const items: Item[] = [];
   if (data.money.balanced === false)
     items.push({
       key: "balance",
       severity: "high",
-      text: <>Books are unbalanced — treat as corruption.</>,
+      text: <>Books are unbalanced - treat as corruption.</>,
       href: "/accounting",
       cta: "investigate",
     });
@@ -648,6 +678,19 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
       href: "/hr",
       cta: "decide",
     });
+  // The my-work queue folds in here: receipt remainders are the one kind the
+  // dashboard payload does not already cover (approvals and signals would
+  // only duplicate the rows above).
+  for (const card of workCards ?? []) {
+    if (card.kind !== "receipt_remainder") continue;
+    items.push({
+      key: `remainder-${card.id}`,
+      severity: "med",
+      text: <>{card.title}</>,
+      href: card.actionHref,
+      cta: card.actionLabel,
+    });
+  }
 
   const dot: Record<Item["severity"], string> = {
     high: "bg-red-500",
@@ -657,17 +700,43 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
 
   return (
     <section aria-label="Needs you" className="rise" style={{ "--rise-delay": "60ms" } as React.CSSProperties}>
-      <div className="mb-3 flex items-baseline justify-between gap-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <p className="figure-label">
           Needs you
           {count > 0 && (
-            <span className="tnum ml-2 inline-flex -translate-y-px items-center rounded-full bg-maroon-100 px-2 py-0.5 text-[11px] text-maroon-800">
+            <span className="tnum ml-2 inline-flex -translate-y-px items-center rounded-full bg-gold-100 px-2 py-0.5 text-[11px] text-gold-800">
               {count}
             </span>
           )}
         </p>
-        {items.length === 0 && <span className="text-xs text-stone-400">All clear</span>}
+        <div className="flex items-center gap-2.5">
+          {items.length === 0 && <span className="text-xs text-stone-400">All clear</span>}
+          <button
+            type="button"
+            onClick={summarize}
+            disabled={!workCards || workCards.length === 0 || briefState === "loading"}
+            className="btn btn-sm btn-primary gap-1.5 rounded-lg"
+          >
+            <IconSparkle className="size-3.5 text-gold-300" />
+            {briefState === "loading" ? "Summarizing…" : "Brief me"}
+          </button>
+        </div>
       </div>
+
+      {brief && (
+        <p
+          className={cn(
+            "mb-3 flex items-start gap-2 rounded-lg border px-3.5 py-2.5 text-[13px] leading-relaxed",
+            briefState === "unavailable"
+              ? "border-stone-200 bg-stone-50 text-stone-500"
+              : "border-gold-600/40 bg-gold-500/10 text-stone-700",
+          )}
+          role={briefState === "unavailable" ? "status" : undefined}
+        >
+          <IconSparkle className="mt-0.5 size-3.5 shrink-0 text-gold-700" />
+          <span>{brief}</span>
+        </p>
+      )}
 
       {items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-stone-200 bg-white/50 px-5 py-8 text-center">
@@ -682,10 +751,10 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
         <ol className="divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xs">
           {items.map((item) => (
             <li key={item.key}>
-              <Link href={item.href} className="group flex items-center gap-3 px-4 py-2.5 transition-colors duration-100 hover:bg-stone-50">
+              <Link href={item.href} onClick={onWorkCardClick} className="group flex items-center gap-3 px-4 py-2.5 transition-colors duration-100 hover:bg-stone-50">
                 <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${dot[item.severity]}`} />
                 <span className="min-w-0 flex-1 text-sm leading-relaxed text-stone-700">{item.text}</span>
-                <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-medium whitespace-nowrap text-maroon-800">
+                <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-medium whitespace-nowrap text-gold-800">
                   {item.cta}
                   <IconArrowRight className="size-3 transition-transform duration-150 group-hover:translate-x-0.5" />
                 </span>
@@ -705,7 +774,7 @@ function WorkingCapital({ data }: { data: DashboardPayload }) {
     <aside aria-label="Working capital" className="rise" style={{ "--rise-delay": "100ms" } as React.CSSProperties}>
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <p className="figure-label">Working capital</p>
-        <Link href="/accounting" className="text-xs font-medium text-maroon-800 hover:underline">
+        <Link href="/accounting" className="text-xs font-medium text-gold-800 hover:underline">
           Open books →
         </Link>
       </div>
@@ -757,9 +826,9 @@ function FunnelBar({ stages }: { stages: DashboardPayload["pipeline"]["stages"] 
   const total = Math.max(1, stages.reduce((s, x) => s + x.count, 0));
   const tones: Record<string, string> = {
     lead: "bg-stone-300",
-    qualified: "bg-maroon-300",
-    proposal: "bg-maroon-500",
-    negotiation: "bg-maroon-700",
+    qualified: "bg-gold-300",
+    proposal: "bg-gold-500",
+    negotiation: "bg-gold-700",
     won: "bg-emerald-600",
     lost: "bg-red-300",
   };
@@ -848,7 +917,7 @@ function ActivityFeed({ activity, embedded = false }: { activity: DashboardPaylo
     >
       <div className="flex items-baseline justify-between gap-3">
         <p className="figure-label">Ledger · recent</p>
-        <Link href="/ledger" className="text-xs font-medium text-maroon-800 hover:underline">
+        <Link href="/ledger" className="text-xs font-medium text-gold-800 hover:underline">
           View all →
         </Link>
       </div>

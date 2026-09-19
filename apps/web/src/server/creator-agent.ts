@@ -15,7 +15,7 @@ export interface AgentCandidate {
  * Install and auth guidance per known agent id. Detection itself lives in
  * @chaste/ai (single source of truth); this layer only knows how to present
  * what was found and how to help install what was not. The user always runs
- * installs themselves — the wizard only hands them the command — so the web
+ * installs themselves - the wizard only hands them the command - so the web
  * app never executes package-manager writes.
  */
 const CANDIDATES: Record<string, AgentCandidate> = {

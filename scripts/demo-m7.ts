@@ -1,5 +1,5 @@
 /**
- * M7 verification — inventory integrity: GL closure, transfers, product
+ * M7 verification - inventory integrity: GL closure, transfers, product
  * surface. Every assertion is a product guarantee.
  *
  * Run: pnpm demo:m7 [reconciliation|transfers|products|all]

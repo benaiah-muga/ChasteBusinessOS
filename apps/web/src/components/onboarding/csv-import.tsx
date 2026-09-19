@@ -48,7 +48,7 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 const FIELD_NOTES: Record<string, string> = {
-  creditLimit: "Plain amount, e.g. 5000 — not 500000 cents.",
+  creditLimit: "Plain amount, e.g. 5000 - not 500000 cents.",
   salePrice: "Plain amount, e.g. 24.99.",
   paymentTermDays: "Whole days, e.g. 30.",
   unitLabel: "e.g. unit, box, kg.",
@@ -151,7 +151,7 @@ export function CsvImportPanel({
     reset();
     if (file.size > MAX_BYTES) {
       setParseError(
-        `That file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is 5 MB — split it into a few files and import each one.`,
+        `That file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is 5 MB - split it into a few files and import each one.`,
       );
       return;
     }
@@ -292,7 +292,7 @@ export function CsvImportPanel({
             {entity === "customers" ? (
               <>
                 We need a <strong className="font-semibold text-ink">name</strong> column. Email,
-                credit limit and payment terms are optional — you can fill those in later, one
+                credit limit and payment terms are optional - you can fill those in later, one
                 customer at a time.
               </>
             ) : (
@@ -367,7 +367,7 @@ export function CsvImportPanel({
                 onChange={(e) => setMapping({ ...mapping, [f]: e.target.value || null })}
                 className={cn(inputClass, "h-9 w-full max-w-xs", missing && "border-red-300")}
               >
-                <option value="">— not in my file —</option>
+                <option value="">- not in my file -</option>
                 {headers.map((h) => (
                   <option key={h} value={h}>
                     {h}
@@ -433,7 +433,7 @@ export function CsvImportPanel({
                       .concat(fields.filter((f) => !required.includes(f)))
                       .map((f) => (
                         <td key={f} className="px-3 py-2 text-ink">
-                          {r[f] ?? <span className="text-ink-muted/50">—</span>}
+                          {r[f] ?? <span className="text-ink-muted/50">-</span>}
                         </td>
                       ))}
                   </tr>
@@ -449,7 +449,7 @@ export function CsvImportPanel({
           <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-gold-600" />
           <span>
             {prepared.problems.length} of {rows.length} rows will be left out because something is
-            missing or malformed. The rest still import — you can fix those rows and import them
+            missing or malformed. The rest still import - you can fix those rows and import them
             again afterwards.
           </span>
         </p>
@@ -491,7 +491,7 @@ export function CsvImportPanel({
               </li>
             )}
             {result.errors.length > 0 && (
-              <li>{result.errors.length.toLocaleString()} rows were set aside — see below.</li>
+              <li>{result.errors.length.toLocaleString()} rows were set aside - see below.</li>
             )}
           </ul>
 
@@ -500,13 +500,13 @@ export function CsvImportPanel({
               <ul className="space-y-1 text-[12px] text-ink-muted">
                 {result.errors.slice(0, 12).map((e) => (
                   <li key={`${e.row}-${e.message}`}>
-                    <span className="font-medium text-ink">Row {e.row}</span> — {e.message}
+                    <span className="font-medium text-ink">Row {e.row}</span> - {e.message}
                   </li>
                 ))}
               </ul>
               {result.errors.length > 12 && (
                 <p className="mt-2 text-[12px] text-ink-muted">
-                  …and {result.errors.length - 12} more. Fix them in your file and import it again —
+                  …and {result.errors.length - 12} more. Fix them in your file and import it again -
                   anything already imported won&apos;t be duplicated.
                 </p>
               )}

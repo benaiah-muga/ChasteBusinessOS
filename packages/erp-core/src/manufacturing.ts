@@ -11,7 +11,7 @@ import type { ComponentRequirement } from "./bom";
 export const PCT_SCALE = 1_000_000;
 
 /**
- * Scales one requirement up by a scrap allowance and rounds up — you can
+ * Scales one requirement up by a scrap allowance and rounds up - you can
  * consume half a part, so shortfall math must always err on the safe side.
  */
 export function applyScrap(quantityThousandths: number, scrapPctThousandths: number): number {

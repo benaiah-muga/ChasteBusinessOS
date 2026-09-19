@@ -326,7 +326,7 @@ const executePayrollRun = (deps: ModuleDeps) =>
     // mismatches), so it is the honest gating amount.
     moneyAmount: (input) => input.expectedTotalNetMinor,
     // N12 (ADR 0051): the undo of an executed run is the payroll
-    // compensation — it mirrors the posting AND repairs the run lifecycle.
+    // compensation - it mirrors the posting AND repairs the run lifecycle.
     // buildInput is typed against this capability's output, so a key the
     // output never returns is a compile error.
     inverse: {
@@ -424,7 +424,7 @@ const voidPayrollRun = (deps: ModuleDeps) =>
 
 /**
  * N12 (ADR 0051): the domain compensation for executePayrollRun. The generic
- * journal mirror left the run marked "executed" — the lifecycle and the
+ * journal mirror left the run marked "executed" - the lifecycle and the
  * ledger disagreed. Reversing an executed run mirrors its posting in the
  * original currency, flips the run to "reversed", and refuses a second
  * reversal. Payslips and time entries are history: they stay as they were.
@@ -700,7 +700,7 @@ const updateEmployeeStructure = (deps: ModuleDeps) =>
     id: "hr.updateEmployeeStructure",
     title: "Update employee structure",
     intent:
-      "Set where an employee sits — department, position, reporting line — and their emergency contact, so the directory answers who does what and who to call",
+      "Set where an employee sits - department, position, reporting line - and their emergency contact, so the directory answers who does what and who to call",
     module: "hr",
     risk: "write",
     permission: "hr.write",
@@ -837,7 +837,7 @@ const leaveBalance = (deps: ModuleDeps) =>
     id: "hr.leaveBalance",
     title: "Leave balance",
     intent:
-      "Show an employee's derived paid-leave position — entitlement minus approved days already taken this year — so nobody guesses at a balance",
+      "Show an employee's derived paid-leave position - entitlement minus approved days already taken this year - so nobody guesses at a balance",
     module: "hr",
     risk: "read",
     permission: "hr.read",
@@ -1042,7 +1042,7 @@ const hireApplicant = (deps: ModuleDeps) =>
     id: "hr.hireApplicant",
     title: "Hire applicant",
     intent:
-      "Convert a candidate at the offer stage into a real employee — same path as a direct hire, with the opening's department carried over and the pipeline closed",
+      "Convert a candidate at the offer stage into a real employee - same path as a direct hire, with the opening's department carried over and the pipeline closed",
     module: "hr",
     risk: "write",
     permission: "hr.write",

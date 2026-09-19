@@ -8,7 +8,7 @@ function Base({ children, ...props }: IconProps) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.75}
+      strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -199,7 +199,7 @@ export const IconArrowRight = (p: IconProps) => (
   </Base>
 );
 
-/** Pointed both ways — "reversible", for the auth value props. */
+/** Pointed both ways - "reversible", for the auth value props. */
 export const IconArrowsHorizontal = (p: IconProps) => (
   <Base {...p}>
     <path d="M7 8 3 12l4 4" />

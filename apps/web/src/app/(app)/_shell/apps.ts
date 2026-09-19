@@ -75,19 +75,14 @@ export function appByHref(href: string): AppInfo | undefined {
   return APPS.find((a) => a.href === href);
 }
 
-/** Resolves an app by its catalog id or route — callers use whichever is at hand. */
+/** Resolves an app by its catalog id or route - callers use whichever is at hand. */
 export function resolveApp(idOrHref: string): AppInfo | undefined {
   return APPS.find((a) => a.id === idOrHref || a.href === idOrHref);
 }
 
-/** Tile background/foreground pair derived from the app's hue — quiet by design. */
-export function tileStyle(hue: number): CSSProperties {
-  if (hue === 0) {
-    // System apps stay neutral: ink on paper, no color claim.
-    return { background: "var(--color-stone-100)", color: "var(--color-stone-600)" };
-  }
-  return {
-    background: `oklch(0.955 0.03 ${hue})`,
-    color: `oklch(0.45 0.14 ${hue})`,
-  };
+/** Tile background/foreground pair derived from the app's hue - quiet by design. */
+export function tileStyle(): CSSProperties {
+  // One color for every app tile: the brand's brownish bronze, the pair the
+  // warm-hued apps already wore, now uniform. Mode-aware via tokens.
+  return { background: "var(--color-gold-100)", color: "var(--color-gold-800)" };
 }

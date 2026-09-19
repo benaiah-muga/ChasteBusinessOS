@@ -66,7 +66,7 @@ describe("crm depth (M9.3)", () => {
   });
 
   it("convertLead creates the customer and qualifies the deal", async () => {
-    const deal = await run("crm.createDeal", { title: "Website lead — Falcon", valueMinor: 500_000, source: "website" });
+    const deal = await run("crm.createDeal", { title: "Website lead - Falcon", valueMinor: 500_000, source: "website" });
     const converted = await run("crm.convertLead", { dealId: deal.dealId, createCustomer: true, customerName: "Falcon Industries" });
     expect(converted.stage).toBe("qualified");
     const [row] = await db.db.select({ customerId: deals.customerId, stage: deals.stage }).from(deals).where(eq(deals.id, deal.dealId));

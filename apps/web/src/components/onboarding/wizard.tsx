@@ -67,7 +67,7 @@ import {
  * Three rules drove this:
  *  1. A new user should never have to guess what a step wants or why it exists.
  *  2. Every failure says what happened and offers the way out, as a button.
- *  3. Anything skippable is *remembered*, not dropped — deferred steps come
+ *  3. Anything skippable is *remembered*, not dropped - deferred steps come
  *     back as a checklist on the dashboard.
  */
 
@@ -284,7 +284,7 @@ export function OnboardingWizard({ email }: { email: string }) {
         outcomes.push({
           email: inv.email,
           ok: true,
-          note: "Queued for approval — it lands in the Approvals inbox first.",
+          note: "Queued for approval - it lands in the Approvals inbox first.",
         });
       } else {
         outcomes.push({ email: inv.email, ok: true, note: "Invited." });
@@ -305,7 +305,7 @@ export function OnboardingWizard({ email }: { email: string }) {
         return {
           eyebrow: "Step 1 of " + (screens.length - 1),
           title: "Nothing here is locked in",
-          body: "Pick the closest match. Every one of these can be done later, changed, or done twice — the books don't care which door you came in by.",
+          body: "Pick the closest match. Every one of these can be done later, changed, or done twice - the books don't care which door you came in by.",
           points: [
             { icon: <IconLandmark className="size-4" />, text: "Your chart of accounts is seeded either way." },
             { icon: <IconShieldCheck className="size-4" />, text: "You stay the owner, whatever you choose." },
@@ -345,7 +345,7 @@ export function OnboardingWizard({ email }: { email: string }) {
         return {
           eyebrow: "Step " + (screenIndex + 1) + " of " + (screens.length - 1),
           title: "Why identities matter here",
-          body: "Everyone acts under their own name, so the audit trail can always answer who did what — including the AI. That is the whole point of the system.",
+          body: "Everyone acts under their own name, so the audit trail can always answer who did what - including the AI. That is the whole point of the system.",
           points: [
             { icon: <IconUsers className="size-4" />, text: "Invites carry a role, and roles carry authority." },
             { icon: <IconBookOpen className="size-4" />, text: "Every action is hash-chained to a person or an agent." },
@@ -365,7 +365,7 @@ export function OnboardingWizard({ email }: { email: string }) {
   })();
 
   return (
-    <div className="auth-surface auth-surface--paper min-h-screen bg-[#f4efe6] font-display text-ink">
+    <div className="min-h-screen bg-canvas font-display text-ink">
       <OnboardingHeader email={email} />
 
       <main className="mx-auto flex max-w-[1440px] flex-col px-5 py-5 sm:px-8 lg:py-6">
@@ -376,7 +376,7 @@ export function OnboardingWizard({ email }: { email: string }) {
 
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.82fr)] lg:items-start">
           {/* ── The step ────────────────────────────────────────────────── */}
-          <section className="rounded-[1.5rem] border border-[#d7cdbc] bg-[#fffdf7] p-5 shadow-[0_24px_70px_rgba(59,46,26,0.09)] ring-1 ring-white/70 sm:p-7">
+          <section className="rounded-[1.5rem] border border-stone-300 bg-cream p-5 shadow-[0_24px_70px_rgba(59,46,26,0.09)] ring-1 ring-white/70 sm:p-7">
             {failure && (
               <div className="mb-5">
                 <RecoverBlock title={failure.title}>
@@ -413,7 +413,7 @@ export function OnboardingWizard({ email }: { email: string }) {
               <div>
                 <h1 className="text-[26px] leading-tight font-bold tracking-tight">How would you like to start?</h1>
                 <p className="mt-1.5 text-sm text-ink-muted">
-                  There is no wrong answer — this only decides what we offer you next.
+                  There is no wrong answer - this only decides what we offer you next.
                 </p>
 
                 <div className="mt-6 space-y-3">
@@ -507,7 +507,7 @@ export function OnboardingWizard({ email }: { email: string }) {
                     >
                       {CURRENCIES.map((c) => (
                         <option key={c.code} value={c.code}>
-                          {c.code} — {c.label}
+                          {c.code} - {c.label}
                         </option>
                       ))}
                       <option value="other">Other (ISO code)</option>
@@ -583,8 +583,8 @@ export function OnboardingWizard({ email }: { email: string }) {
 
                 {/* Creation overlay: the wait is real, so show it working. */}
                 {creating && (
-                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-[1.5rem] bg-[#fffdf7]/96 px-6 backdrop-blur-sm">
-                    <Spinner className="size-7 text-[#a2783d]" />
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-[1.5rem] bg-cream/96 px-6 backdrop-blur-sm">
+                    <Spinner className="size-7 text-gold-700" />
                     <div className="mt-5 w-full max-w-sm">
                       <ProgressBar value={setupPercent} label={progressLabel} status="Opening your workspace" />
                     </div>
@@ -622,7 +622,7 @@ export function OnboardingWizard({ email }: { email: string }) {
                         type="button"
                         onClick={() => {
                           // Leaving without importing is a real choice, so it is
-                          // recorded as one — the checklist will offer it again.
+                          // recorded as one - the checklist will offer it again.
                           if (imported.customers === 0) void markStep("import_customers", "skipped");
                           if (imported.products === 0) void markStep("import_products", "skipped");
                           setScreen("team");
@@ -734,7 +734,7 @@ export function OnboardingWizard({ email }: { email: string }) {
                                 type="button"
                                 onClick={() => {
                                   void markStep("connect_source", "pending");
-                                  setConnectNote("Saved to your setup checklist — we'll surface it on your dashboard.");
+                                  setConnectNote("Saved to your setup checklist - we'll surface it on your dashboard.");
                                 }}
                                 className={cn(secondaryButtonClass, "h-9 text-[13px]")}
                               >
@@ -782,14 +782,14 @@ export function OnboardingWizard({ email }: { email: string }) {
               <div>
                 <h1 className="text-[26px] leading-tight font-bold tracking-tight">Who else works here?</h1>
                 <p className="mt-1.5 text-sm text-ink-muted">
-                  Optional. You can do this any time from the Team page — nothing else waits on it.
+                  Optional. You can do this any time from the Team page - nothing else waits on it.
                 </p>
 
                 {rolesFailed ? (
                   <div className="mt-5">
                     <RecoverBlock title="We couldn't load your roles">
                       Roles are created with your workspace, so this is usually a hiccup. You can invite
-                      people from the Team page instead — it&apos;s the same thing.
+                      people from the Team page instead - it&apos;s the same thing.
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Link href="/team" className={cn(primaryButtonClass, "h-9 w-auto px-3.5 text-[13px]")}>
                           Go to the Team page
@@ -885,7 +885,7 @@ export function OnboardingWizard({ email }: { email: string }) {
                           <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
                         )}
                         <span>
-                          <strong className="font-semibold">{o.email}</strong> — {o.note}
+                          <strong className="font-semibold">{o.email}</strong> - {o.note}
                         </span>
                       </li>
                     ))}
@@ -936,7 +936,7 @@ export function OnboardingWizard({ email }: { email: string }) {
                   {[
                     { icon: <IconLandmark className="size-4" />, text: "A full chart of accounts, seeded." },
                     { icon: <IconBuilding className="size-4" />, text: `Books kept in ${resolvedCurrency}.` },
-                    { icon: <IconShieldCheck className="size-4" />, text: "You are the owner — every gated action waits for you." },
+                    { icon: <IconShieldCheck className="size-4" />, text: "You are the owner - every gated action waits for you." },
                     ...(imported.customers > 0
                       ? [{ icon: <IconUsers className="size-4" />, text: `${imported.customers.toLocaleString()} customers imported.` }]
                       : []),
@@ -987,7 +987,7 @@ export function OnboardingWizard({ email }: { email: string }) {
           </section>
 
           {/* ── Context column ──────────────────────────────────────────── */}
-          <aside className="rounded-[1.5rem] border border-[#d7cdbc] bg-[#eae1d3] p-5 ring-1 ring-white/50 lg:sticky lg:top-6">
+          <aside className="rounded-[1.5rem] border border-stone-300 bg-sand-200 p-5 ring-1 ring-white/50 lg:sticky lg:top-6">
             <p className="text-[11px] font-bold tracking-[0.1em] text-gold-600 uppercase">{aside.eyebrow}</p>
             <h2 className="mt-2 text-[19px] leading-snug font-semibold text-ink">{aside.title}</h2>
             <p className="mt-2.5 text-[13px] leading-relaxed text-ink-muted">{aside.body}</p>
@@ -1002,10 +1002,10 @@ export function OnboardingWizard({ email }: { email: string }) {
               ))}
             </ul>
 
-            <div className="mt-5 border-t border-[#cfc1ae] pt-4">
+            <div className="mt-5 border-t border-stone-300 pt-4">
               <p className="text-[12px] leading-relaxed text-ink-muted">
                 Stuck? Everything on the left is optional except the business name and description.
-                You can leave and come back — your progress is saved.
+                You can leave and come back - your progress is saved.
               </p>
             </div>
             {screen !== "done" && (

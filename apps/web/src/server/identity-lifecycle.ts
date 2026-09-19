@@ -82,7 +82,7 @@ export async function claimInvitation(
     }
 
     // Replacing this member's roles must never strand the org without an
-    // owner — a current owner re-claiming a lesser invite is refused here
+    // owner - a current owner re-claiming a lesser invite is refused here
     // exactly as they would be in iam.assignRole (N07).
     const [targetRole] = await tx
       .select({ key: roles.key })
@@ -121,8 +121,8 @@ export type DeactivateResult =
   | { ok: false; reason: "not_found" | "last_owner"; message: string };
 
 /**
- * N07: deactivation removes ALL authority in one motion — membership, role
- * grants, and pending invitations — so an IdP-driven disable cannot leave a
+ * N07: deactivation removes ALL authority in one motion - membership, role
+ * grants, and pending invitations - so an IdP-driven disable cannot leave a
  * half-live identity behind, and re-provisioning starts from least
  * privilege. Historical attribution is never destroyed.
  */

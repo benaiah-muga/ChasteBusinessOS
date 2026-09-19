@@ -7,7 +7,7 @@ import { documentOutstanding } from "@/server/balances";
 
 /**
  * Full human surface for the purchasing module: vendors, orders, receipts,
- * bills, payments, and AP aging — every capability the agent has, through
+ * bills, payments, and AP aging - every capability the agent has, through
  * the same governed executor.
  */
 export async function GET() {
@@ -176,7 +176,7 @@ export async function POST(req: Request) {
     case "receiveGoods": {
       // N16 pilot (P05): the receiving desk sends accepted quantity plus an
       // optional rejected quantity with its reason, and overreceipt only
-      // with the paired authority fields — all validated by the capability.
+      // with the paired authority fields - all validated by the capability.
       const lines = body.lines as
         | { lineNumber: number; quantity: number; rejected?: number; rejectionNote?: string }[]
         | undefined;

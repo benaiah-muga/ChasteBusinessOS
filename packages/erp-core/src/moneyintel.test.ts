@@ -15,9 +15,9 @@ describe("duplicate payment detection (M10.3)", () => {
     const payments = [
       pay("a", "inv-1", 5_000, 0),
       pay("b", "inv-1", 5_000, 2),
-      pay("c", "inv-2", 5_000, 3), // different invoice — never flags
-      pay("d", "inv-1", 6_000, 1), // different amount — never flags
-      pay("e", "inv-1", 5_000, 30), // outside window — never flags
+      pay("c", "inv-2", 5_000, 3), // different invoice - never flags
+      pay("d", "inv-1", 6_000, 1), // different amount - never flags
+      pay("e", "inv-1", 5_000, 30), // outside window - never flags
     ];
     const dupes = findDuplicatePayments(payments);
     expect(dupes).toHaveLength(1);

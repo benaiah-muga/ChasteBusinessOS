@@ -22,7 +22,7 @@ encode these workflows for coding agents.
    incremental mode):
    - `cacheComponents: true` in `apps/web/next.config.mjs`.
    - Removed both `export const dynamic = "force-dynamic"` exports
-     (`api/purchasing`, `api/manufacturing`) — under Cache Components every
+     (`api/purchasing`, `api/manufacturing`) - under Cache Components every
      route is dynamic by default; nothing to translate.
    - Ran the `cache-components-instant-false` codemod. It opted out exactly
      three server segments with blocking reads (`src/app/layout.tsx`,

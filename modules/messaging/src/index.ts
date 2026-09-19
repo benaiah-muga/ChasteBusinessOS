@@ -74,7 +74,7 @@ const sendMessage = (deps: ModuleDeps) =>
         .returning({ id: messages.id });
 
       // Mentioned humans hear about it through the notification bell; agent
-      // mentions need no row — the mention itself pulls the agent in.
+      // mentions need no row - the mention itself pulls the agent in.
       if (input.mentions?.length && ctx.actor.type === "human") {
         const [sender] = await deps.db
           .select({ name: users.name, email: users.email })
@@ -122,7 +122,7 @@ const listConversations = (deps: ModuleDeps) =>
       // The system actor has no user identity and thus no conversations.
       if (!ctx.actor.id) return { conversations: [] };
       // Membership-scoped (N06): the module boundary must agree with the
-      // message-read boundary — a nonmember lists neither DMs nor channels
+      // message-read boundary - a nonmember lists neither DMs nor channels
       // they have not joined.
       const rows = await deps.db
         .select({
@@ -248,7 +248,7 @@ const listPeople = (deps: ModuleDeps) =>
 
 /**
  * N08: conversation creation is a governed action, not a route-side insert.
- * The header and the creator's membership commit in one unit — a failed
+ * The header and the creator's membership commit in one unit - a failed
  * member insert can no longer strand an unusable header.
  */
 const createConversation = (deps: ModuleDeps) =>

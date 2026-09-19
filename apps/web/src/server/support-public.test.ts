@@ -8,7 +8,7 @@ import { GET, POST } from "@/app/api/support/public/route";
  * I1 (N04) widget containment: a visitor-supplied email never binds a
  * customer. The public token identifies the org, not the visitor; the
  * per-conversation secret issued once at start is what makes a thread the
- * visitor's — knowing a former customer's email plus the public token must
+ * visitor's - knowing a former customer's email plus the public token must
  * reveal nothing about them.
  */
 
@@ -66,7 +66,7 @@ describe("public widget identity containment (N04)", () => {
     expect(conv!.customerId).toBeNull();
     expect(conv!.visitorEmail).toBe(victimEmail);
     expect(conv!.visitorSecretHash).toBeTruthy();
-    // The victim's customer row is untouched — no new customer was created
+    // The victim's customer row is untouched - no new customer was created
     // for the visitor either.
     const victimRows = await db.db
       .select()

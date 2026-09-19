@@ -1,8 +1,8 @@
-# Gates: N13B — exceptional entries, posting eligibility, and the backdated-correction path
+# Gates: N13B - exceptional entries, posting eligibility, and the backdated-correction path
 
 OWNS: packages/db/drizzle/0051_entry_kinds.sql, packages/db/drizzle/meta/_journal.json, packages/db/src/schema/index.ts, modules/accounting/src/posting.ts, modules/accounting/src/index.ts, modules/accounting/src/year-end.test.ts
 
-Scope: the year-end roll is an explicit exceptional entry (`entry_kind = 'year_end_close'`) with at most one live roll per sealed year — re-closing a reopened year replaces the live roll inside the reopened December, never in the current period; the P&L report excludes the close family, so closing a year no longer erases its operating history from reports; corrections (generic reversals) post in the approved open period while carrying the original business date in `business_at`; and pre-resolved account ids are validated against posting eligibility (same org, not archived) in the one posting service.
+Scope: the year-end roll is an explicit exceptional entry (`entry_kind = 'year_end_close'`) with at most one live roll per sealed year - re-closing a reopened year replaces the live roll inside the reopened December, never in the current period; the P&L report excludes the close family, so closing a year no longer erases its operating history from reports; corrections (generic reversals) post in the approved open period while carrying the original business date in `business_at`; and pre-resolved account ids are validated against posting eligibility (same org, not archived) in the one posting service.
 
 - [x] G0: this ledger states oracles that can fail
   CHECK: node /home/benaiah/.agents/skills/unlazy/scripts/gate-lint.mjs GATES-N13.md
@@ -24,12 +24,12 @@ Scope: the year-end roll is an explicit exceptional entry (`entry_kind = 'year_e
   EXPECT: /Tests\s+1 passed/
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=bca45ca7a22e4c6d7eee2f74159a8c363641c312ef51ecadd0fa713c0499c04e; output-bytes=24061
 
-- [x] N13B-G4: re-closing a reopened year reverses the live roll inside the reopened December and rolls the full year exactly once — one live roll remains, the replaced roll is referenced by its replacement, balance sheet and trial balance stay balanced
+- [x] N13B-G4: re-closing a reopened year reverses the live roll inside the reopened December and rolls the full year exactly once - one live roll remains, the replaced roll is referenced by its replacement, balance sheet and trial balance stay balanced
   CHECK: pnpm --filter @chaste/module-accounting exec vitest run src/year-end.test.ts -t "re-closing a reopened year"
   EXPECT: /Tests\s+1 passed/
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=35b6273c4beda54cbcc2fea7d908340b26e9d9e78e89a487ca7891a0cd7e0ae2; output-bytes=24204
 
-- [x] N13B-G5: repo verification gate — typecheck, lint, and the full workspace test suite pass
+- [x] N13B-G5: repo verification gate - typecheck, lint, and the full workspace test suite pass
   CHECK: pnpm typecheck >/dev/null 2>&1 && pnpm lint >/dev/null 2>&1 && pnpm test >/tmp/kilo/gate-n13-test.log 2>&1 && echo REPO-GATE-OK || { tail -30 /tmp/kilo/gate-n13-test.log; exit 1; }
   EXPECT: REPO-GATE-OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=0c6e5dc74929b6f125a6dfc551264ea8e2e1ad046a1b29c7937ae29c3cc6b215; output-bytes=13

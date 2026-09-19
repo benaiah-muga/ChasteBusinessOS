@@ -9,7 +9,7 @@ import { appPins, MAX_PINS, usePinnedApps } from "../_shell/pins";
 import { useModuleEnabled } from "../_shell/module-context";
 import { ModulesManager } from "../_shell/modules-manager";
 import { AppFrame } from "../_shell/app-frame";
-import { THEMES, applyTheme, applyMode, useTheme, useMode, type ThemeId, MODES } from "@/components/theme";
+import { applyMode, useMode, MODES } from "@/components/theme";
 import {
   CURRENCIES,
   usePrefs,
@@ -20,13 +20,6 @@ import {
 } from "@/lib/prefs";
 import { IconAlertTriangle, IconCheck, IconMoon, IconPinTack, IconSun } from "@/components/icons";
 import { cn, timeAgo } from "@/lib/format";
-
-const SWATCH: Record<ThemeId, [string, string]> = {
-  chaste: ["#9b1313", "#faf9f8"],
-  graphite: ["#265a80", "#f8f9fb"],
-  verdant: ["#276135", "#f8faf6"],
-  meridian: ["#a67a28", "#fbf9f4"],
-};
 
 const TABS = [
   { id: "appearance", label: "Appearance" },
@@ -143,14 +136,13 @@ function RuntimeTab() {
 /* ----------------------------------------------------------- appearance ---- */
 
 function AppearanceTab() {
-  const theme = useTheme();
   const mode = useMode();
   const pinnedIds = usePinnedApps();
   const apps = APPS;
 
   return (
     <div className="max-w-3xl">
-      <Section title="Color mode" hint="Light, dark, or follow your system — resolved before first paint.">
+      <Section title="Color mode" hint="Light, dark, or follow your system - resolved before first paint.">
         <div role="radiogroup" aria-label="Color mode" className="flex w-fit gap-1 rounded-xl border border-stone-200 bg-white p-1 shadow-xs">
           {MODES.map((m) => (
             <button
@@ -161,7 +153,7 @@ function AppearanceTab() {
               onClick={() => applyMode(m.id)}
               className={cn(
                 "flex cursor-pointer items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-150",
-                mode === m.id ? "bg-maroon-50 text-maroon-900" : "text-stone-500 hover:bg-stone-100",
+                mode === m.id ? "bg-gold-50 text-gold-900" : "text-stone-500 hover:bg-stone-100",
               )}
             >
               {m.id === "dark" ? (
@@ -175,38 +167,16 @@ function AppearanceTab() {
         </div>
       </Section>
 
-      <Section title="Theme" hint="Four palettes, one product. Semantic colors — success, warnings, errors — never change.">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {THEMES.map((t) => {
-            const active = theme === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => applyTheme(t.id)}
-                aria-pressed={active}
-                className={cn(
-                  "cursor-pointer rounded-xl border p-3 text-left transition-all duration-150",
-                  active
-                    ? "border-maroon-500 bg-white shadow-xs ring-[3px] ring-maroon-600/10"
-                    : "border-stone-200 hover:border-stone-300 hover:bg-white",
-                )}
-              >
-                <span
-                  aria-hidden="true"
-                  className="mb-2.5 flex h-10 overflow-hidden rounded-lg border border-black/5"
-                  style={{
-                    background: `linear-gradient(160deg, ${SWATCH[t.id][0]} 0 55%, ${SWATCH[t.id][1]} 55% 100%)`,
-                  }}
-                />
-                <span className="flex items-center gap-1.5">
-                  <span className="text-[13px] font-medium text-stone-900">{t.label}</span>
-                  {active && <IconCheck className="size-3.5 text-maroon-700" />}
-                </span>
-                <span className="block text-[11px] text-stone-400">{t.id === "meridian" ? `${t.hint} · default` : t.hint}</span>
-              </button>
-            );
-          })}
+      <Section title="Brand" hint="One identity across every surface - warm paper, the inked band, burnished gold.">
+        <div className="flex items-center gap-4 rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
+          <span
+            aria-hidden="true"
+            className="flex h-10 w-16 shrink-0 overflow-hidden rounded-lg border border-black/5"
+            style={{ background: "linear-gradient(160deg, #111416 0 55%, #f4efe6 55% 100%)" }}
+          />
+          <div className="text-[13px] leading-relaxed text-stone-600">
+            Chaste ships with a single brand palette. Semantic colors - success, warnings, errors - never change between modes.
+          </div>
         </div>
       </Section>
 
@@ -235,13 +205,13 @@ function WorkspaceTab() {
         <dl className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
           <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
             <dt className="text-stone-500">Name</dt>
-            <dd className="font-medium text-stone-900">{orgName || "—"}</dd>
+            <dd className="font-medium text-stone-900">{orgName || "-"}</dd>
           </div>
           <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
             <dt className="text-stone-500">Modules</dt>
             <dd className="text-stone-700">
               {accountingOn ? "Managed by owners" : "Restricted set"} ·{" "}
-              <Link href="/team" className="font-medium text-maroon-800 hover:underline">
+              <Link href="/team" className="font-medium text-gold-800 hover:underline">
                 Team &amp; roles
               </Link>
             </dd>
@@ -249,7 +219,7 @@ function WorkspaceTab() {
           <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
             <dt className="text-stone-500">Agent sessions</dt>
             <dd>
-              <Link href="/sessions" className="font-medium text-maroon-800 hover:underline">
+              <Link href="/sessions" className="font-medium text-gold-800 hover:underline">
                 View trajectory log →
               </Link>
             </dd>
@@ -278,7 +248,7 @@ function LocalizationTab() {
     <div className="max-w-2xl">
       <p className="mb-6 text-sm leading-relaxed text-stone-500">
         How figures and dates are <em>presented</em> on this device. The books
-        themselves stay in their recording currency — these settings never
+        themselves stay in their recording currency - these settings never
         rewrite stored amounts.
       </p>
 
@@ -291,7 +261,7 @@ function LocalizationTab() {
         >
           {CURRENCIES.map((c) => (
             <option key={c.code} value={c.code}>
-              {c.symbol} {c.code} — {c.label}
+              {c.symbol} {c.code} - {c.label}
             </option>
           ))}
         </select>
@@ -313,7 +283,7 @@ function LocalizationTab() {
               onClick={() => update({ units: id as Units })}
               className={cn(
                 "cursor-pointer rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-150",
-                prefs.units === id ? "bg-maroon-50 text-maroon-900" : "text-stone-500 hover:bg-stone-100",
+                prefs.units === id ? "bg-gold-50 text-gold-900" : "text-stone-500 hover:bg-stone-100",
               )}
             >
               {label}
@@ -338,7 +308,7 @@ function LocalizationTab() {
               onClick={() => update({ dateFormat: id as DateFormat })}
               className={cn(
                 "cursor-pointer rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-150",
-                prefs.dateFormat === id ? "bg-maroon-50 text-maroon-900" : "text-stone-500 hover:bg-stone-100",
+                prefs.dateFormat === id ? "bg-gold-50 text-gold-900" : "text-stone-500 hover:bg-stone-100",
               )}
             >
               {label}
@@ -363,7 +333,7 @@ function LocalizationTab() {
               onClick={() => update({ weekStart: id as WeekStart })}
               className={cn(
                 "cursor-pointer rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-150",
-                prefs.weekStart === id ? "bg-maroon-50 text-maroon-900" : "text-stone-500 hover:bg-stone-100",
+                prefs.weekStart === id ? "bg-gold-50 text-gold-900" : "text-stone-500 hover:bg-stone-100",
               )}
             >
               {label}
@@ -595,7 +565,7 @@ function AiTab() {
             >
               <p className="text-sm font-medium text-stone-900">Agent sessions</p>
               <p className="mt-1 text-xs leading-relaxed text-stone-500">
-                Every model action, its capability, and its outcome — auditable forever.
+                Every model action, its capability, and its outcome - auditable forever.
               </p>
             </Link>
           </div>
@@ -669,13 +639,13 @@ function PinsSection({ pinnedIds, apps }: { pinnedIds: string[]; apps: typeof AP
                 className={cn(
                   "flex w-full cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-all duration-150",
                   pinned
-                    ? "border-maroon-300 bg-maroon-50/60"
+                    ? "border-gold-300 bg-gold-50/60"
                     : "border-stone-200 bg-white hover:border-stone-300 disabled:pointer-events-none disabled:opacity-40",
                 )}
               >
                 <span
                   aria-hidden="true"
-                  style={tileStyle(app.hue)}
+                  style={tileStyle()}
                   className="flex size-8 shrink-0 items-center justify-center rounded-lg"
                 >
                   <app.icon className="size-4" />
@@ -685,7 +655,7 @@ function PinsSection({ pinnedIds, apps }: { pinnedIds: string[]; apps: typeof AP
                   <span className="block truncate text-[11px] text-stone-400">{app.tagline}</span>
                 </span>
                 <IconPinTack
-                  className={cn("size-4 shrink-0", pinned ? "text-maroon-700" : "text-stone-300")}
+                  className={cn("size-4 shrink-0", pinned ? "text-gold-700" : "text-stone-300")}
                   strokeWidth={pinned ? 2.4 : 1.75}
                 />
               </button>
@@ -716,7 +686,7 @@ function EmailSection() {
     setNote(null);
     const res = await postApi<{ reason?: string }>("/api/email", { action: "test", to: to.trim() });
     setBusy(false);
-    setNote(res.ok ? "Test email sent — check the inbox." : (res.error?.title ?? "Send failed."));
+    setNote(res.ok ? "Test email sent - check the inbox." : (res.error?.title ?? "Send failed."));
   }
 
   return (
@@ -730,7 +700,7 @@ function EmailSection() {
             {status.from ? (
               <>
                 {" "}
-                — sending as <code className="rounded bg-stone-100 px-1">{status.from}</code>
+                - sending as <code className="rounded bg-stone-100 px-1">{status.from}</code>
               </>
             ) : null}
             .
@@ -801,7 +771,7 @@ function SoulSection() {
           rows={5}
           aria-label="Agent persona instructions"
           placeholder={"Example:\n- We are a hardware store; keep replies practical and short.\n- Always mention outstanding balances when discussing a customer.\n- Never recommend credit terms beyond Net 30."}
-          className="w-full resize-y rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-stone-400 focus:border-maroon-500"
+          className="w-full resize-y rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-stone-400 focus:border-gold-500"
         />
         <div className="mt-2 flex items-center gap-2">
           <Button size="sm" loading={busy} onClick={() => void save()}>
@@ -914,7 +884,7 @@ function RoutinesTab() {
               type="checkbox"
               checked={withWebhook}
               onChange={(e) => setWithWebhook(e.target.checked)}
-              className="accent-maroon-700"
+              className="accent-gold-700"
             />
             Allow webhook trigger (Paperclip-compatible)
           </label>

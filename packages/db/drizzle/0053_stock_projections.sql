@@ -45,7 +45,7 @@ ALTER TABLE "doc_counters" ADD CONSTRAINT "doc_counters_org_id_organizations_id_
 
 -- The projection is maintained by the database itself: every ledger insert
 -- lands in stock_balances atomically, whatever wrote it, so the read model
--- cannot drift from the ledger except by a bug — and the rebuild replays
+-- cannot drift from the ledger except by a bug - and the rebuild replays
 -- the ledger to prove it.
 CREATE OR REPLACE FUNCTION stock_balances_apply() RETURNS trigger AS $$
 BEGIN

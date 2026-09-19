@@ -16,7 +16,7 @@ import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 /**
  * Marketing-lite (M13, ADR 0040): saved deterministic segments, campaigns
  * with recipient-bound outbox delivery, opt-out honored at queue and dispatch time.
- * Explicitly NO tracking pixels, no journeys, no landing pages — the send
+ * Explicitly NO tracking pixels, no journeys, no landing pages - the send
  * log is the analytics.
  */
 
@@ -29,7 +29,7 @@ const createSegment = (deps: ModuleDeps) =>
     id: "marketing.createSegment",
     title: "Create segment",
     intent:
-      "Save a deterministic customer filter — everyone whose lifetime spend is at least the threshold — so campaigns target the same people every time",
+      "Save a deterministic customer filter - everyone whose lifetime spend is at least the threshold - so campaigns target the same people every time",
     module: "marketing",
     risk: "write",
     permission: "marketing.write",
@@ -74,7 +74,7 @@ const sendCampaign = (deps: ModuleDeps) =>
     id: "marketing.sendCampaign",
     title: "Send campaign",
     intent:
-      "Deliver a campaign to every segment member who has not opted out, recording one append-only send-log row each — opted-out customers are never contacted",
+      "Deliver a campaign to every segment member who has not opted out, recording one append-only send-log row each - opted-out customers are never contacted",
     module: "marketing",
     risk: "write",
     permission: "marketing.write",
@@ -179,7 +179,7 @@ const campaignAnalytics = (deps: ModuleDeps) =>
   defineCapability({
     id: "marketing.campaignAnalytics",
     title: "Campaign analytics",
-    intent: "Report provider-confirmed campaign delivery straight from the outbox — no pixels, no guesses",
+    intent: "Report provider-confirmed campaign delivery straight from the outbox - no pixels, no guesses",
     module: "marketing",
     risk: "read",
     permission: "marketing.read",

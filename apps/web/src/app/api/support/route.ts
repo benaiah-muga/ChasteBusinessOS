@@ -236,7 +236,7 @@ export async function POST(req: Request) {
         // Escalation is a human-handoff signal; reuse the ticket sink so
         // webhook and email subscribers hear about it like any other gap.
         void createNotificationSink(db).ticketFiled(
-          `Support escalation: thread ${input.conversationId.slice(0, 8)} — ${input.reason.slice(0, 120)}`,
+          `Support escalation: thread ${input.conversationId.slice(0, 8)} - ${input.reason.slice(0, 120)}`,
           resolved.orgId,
         );
       }

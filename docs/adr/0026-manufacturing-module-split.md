@@ -8,7 +8,7 @@ Status: Accepted
 Manufacturing began as "BOM-lite" folded into the inventory module: three
 capabilities (`defineBom`, `produceFromBom`, `bomReport`) over a flat
 component list. That was honest about scope but conflated two concerns that
-organizations govern differently — stock custody (what do we have, where,
+organizations govern differently - stock custody (what do we have, where,
 counted how) and transformation (what do we build, in what order, at what
 cost). It also had a real correctness gap: `produceFromBom`'s declared
 inverse only reversed the finished-goods side of a run, leaving consumed
@@ -24,7 +24,7 @@ capability namespace (`manufacturing.*`), permissions
 **not** keep its own stock records: every quantity change it causes flows
 through `@chaste/module-inventory`'s exported ledger primitives
 (`recordStockMovement`, `stockOnHand`, `getOrCreateLot`). One append-only
-stock ledger, many writers — the same discipline as the shared GL posting
+stock ledger, many writers - the same discipline as the shared GL posting
 service (ADR 0020). The split is along governance seams, not data seams.
 
 ### 2. Work orders as governed plans
@@ -40,7 +40,7 @@ refused by availability checks.
 ### 3. Reversal mirrors reality, not intentions
 
 `manufacturing.reverseProductionRun` takes a run reference and posts exact
-opposite movements for everything the run wrote — components return at their
+opposite movements for everything the run wrote - components return at their
 recorded unit costs, finished units leave. It refuses double reversal
 (idempotency via `production_reversal` marker movements) and refuses to drive
 stock negative. Inverses that would silently revalue (re-running produce at
@@ -54,7 +54,7 @@ previews. Movements optionally carry lot and location references; production
 outputs can be tagged with a lot code, and `manufacturing.lotTrace` walks the
 consumption graph upstream through work-order references for recall tracing.
 Cycle counts snapshot expected quantities at open time and refuse to post if
-stock moved since the snapshot — variance must never absorb unrelated
+stock moved since the snapshot - variance must never absorb unrelated
 movement.
 
 ### 5. Consequences

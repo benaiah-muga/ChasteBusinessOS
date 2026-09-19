@@ -274,14 +274,14 @@ export default function CrmPage() {
       <Dialog
         open={timeline !== null}
         onClose={() => setTimeline(null)}
-        title={timeline ? `History — ${timeline.name}` : "History"}
+        title={timeline ? `History - ${timeline.name}` : "History"}
         description="Everything that happened with this customer, newest first."
         width="max-w-xl"
       >
         {timeline?.entries === undefined ? (
           <p className="py-4 text-sm text-stone-400">Loading…</p>
         ) : timeline.entries.length === 0 ? (
-          <p className="py-4 text-sm text-stone-500">Nothing recorded yet — quotes, invoices, payments, deals and tasks will appear here.</p>
+          <p className="py-4 text-sm text-stone-500">Nothing recorded yet - quotes, invoices, payments, deals and tasks will appear here.</p>
         ) : (
           <ul className="max-h-96 divide-y overflow-auto text-sm">
             {timeline.entries.map((e, i) => (
@@ -397,7 +397,7 @@ function OverviewTab({ deals, customers }: { deals: Deal[]; customers: Customer[
 
       {won.length > 0 && (
         <p className="mt-4 text-xs text-stone-400">
-          <Badge tone="green">tip</Badge> Won deals post nothing by themselves — invoice them from the Console when
+          <Badge tone="green">tip</Badge> Won deals post nothing by themselves - invoice them from the Console when
           you&apos;re ready.
         </p>
       )}
@@ -544,7 +544,7 @@ function DealsTab(props: {
                 className={cn(
                   "flex w-64 shrink-0 snap-start flex-col rounded-xl border p-2.5 transition-colors duration-100",
                   isOver && dragging
-                    ? "border-maroon-400 bg-maroon-50/50"
+                    ? "border-gold-400 bg-gold-50/50"
                     : "border-stone-200 bg-stone-50/70",
                 )}
               >
@@ -636,7 +636,7 @@ function DealsTab(props: {
                     <p
                       className={cn(
                         "rounded-lg border border-dashed py-4 text-center text-xs transition-colors duration-100",
-                        isOver && dragging ? "border-maroon-300 text-maroon-400" : "border-stone-200 text-stone-300",
+                        isOver && dragging ? "border-gold-300 text-gold-400" : "border-stone-200 text-stone-300",
                       )}
                     >
                       {isOver && dragging ? "Drop to move here" : "-"}
@@ -655,7 +655,7 @@ function DealsTab(props: {
       )}
 
       <p className="mt-2 text-xs text-stone-400">
-        Drag a card to any stage — every move is recorded in the ledger and reversible. Keyboard: use Advance, Mark
+        Drag a card to any stage - every move is recorded in the ledger and reversible. Keyboard: use Advance, Mark
         lost, or Reopen on each card.
       </p>
 
@@ -663,7 +663,7 @@ function DealsTab(props: {
         open={convertTarget !== null}
         onClose={() => setConvertTarget(null)}
         title={`Convert “${convertTarget?.title ?? ""}”`}
-        description="Promotes the deal to qualified and attaches the customer it belongs to — creating one on the fly when asked."
+        description="Promotes the deal to qualified and attaches the customer it belongs to - creating one on the fly when asked."
         footer={
           <>
             <Button tone="secondary" onClick={() => setConvertTarget(null)} disabled={converting}>

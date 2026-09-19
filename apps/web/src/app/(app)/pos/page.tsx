@@ -155,7 +155,7 @@ export default function PosPage() {
       if (res.status === 202) {
         setNotice({
           tone: "pending",
-          text: `Return of sale #${sale.number} is awaiting human approval — it posts once approved in the Approvals inbox.`,
+          text: `Return of sale #${sale.number} is awaiting human approval - it posts once approved in the Approvals inbox.`,
         });
       } else if (!res.ok || !res.data?.data) {
         setNotice({ tone: "error", error: res.error ?? { title: "That didn't work", hint: "Try again in a moment." } });
@@ -163,7 +163,7 @@ export default function PosPage() {
         const d = res.data.data;
         setNotice({
           tone: "success",
-          text: `Return posted — ${formatMoney(d.creditedMinor)} credited, ${d.restockedLines} line${d.restockedLines === 1 ? "" : "s"} restocked.`,
+          text: `Return posted - ${formatMoney(d.creditedMinor)} credited, ${d.restockedLines} line${d.restockedLines === 1 ? "" : "s"} restocked.`,
         });
       }
       void load();
@@ -220,7 +220,7 @@ export default function PosPage() {
               sub={openSession ? `open since ${timeAgo(openSession.openedAt)}` : "no session running"}
               tone={openSession ? "success" : "default"}
             />
-            <StatCard label="Expected in drawer" value={openSession ? formatMoney(expectedCash) : "—"} />
+            <StatCard label="Expected in drawer" value={openSession ? formatMoney(expectedCash) : "-"} />
             <StatCard
               label="Closed today"
               value={closedToday.length}
@@ -240,7 +240,7 @@ export default function PosPage() {
                 <ul className="space-y-2 text-sm">
                   <li className="flex items-center gap-2">
                     <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-500" />
-                    “{openSession.register}” is open — float {formatMoney(openSession.openingFloatMinor)}
+                    “{openSession.register}” is open - float {formatMoney(openSession.openingFloatMinor)}
                   </li>
                   <li className="flex items-center gap-2">
                     <span aria-hidden="true" className="size-1.5 rounded-full bg-stone-300" />
@@ -465,12 +465,12 @@ export default function PosPage() {
             </div>
             <div className="flex justify-between">
               <dt className="text-stone-500">Counted cash</dt>
-              <dd className="tnum">{summary.countedCashMinor !== null ? formatMoney(summary.countedCashMinor) : "—"}</dd>
+              <dd className="tnum">{summary.countedCashMinor !== null ? formatMoney(summary.countedCashMinor) : "-"}</dd>
             </div>
             <div className="flex justify-between border-t border-stone-200 pt-2 font-semibold">
               <dt>Variance</dt>
               <dd className={cn("tnum", summary.varianceMinor ? "text-red-700" : "")}>
-                {summary.varianceMinor !== null ? formatMoney(summary.varianceMinor) : "—"}
+                {summary.varianceMinor !== null ? formatMoney(summary.varianceMinor) : "-"}
               </dd>
             </div>
           </dl>

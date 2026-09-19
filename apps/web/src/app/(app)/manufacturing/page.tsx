@@ -249,7 +249,7 @@ export default function ManufacturingPage() {
               <span className="ml-2 opacity-70">{n.name}</span>
             </td>
             <td className="text-right tabular-nums">{qty(n.quantityPerParentThousandths)}</td>
-            <td className="text-right tabular-nums">{n.scrapPctThousandths ? pct(n.scrapPctThousandths) : "—"}</td>
+            <td className="text-right tabular-nums">{n.scrapPctThousandths ? pct(n.scrapPctThousandths) : "-"}</td>
             <td />
             <td />
           </tr>
@@ -461,7 +461,7 @@ export default function ManufacturingPage() {
                             <td className="text-right tabular-nums">{qty(l.requiredThousandths)}</td>
                             <td className="text-right tabular-nums">{qty(l.onHandThousandths)}</td>
                             <td className={`text-right tabular-nums ${l.shortfallThousandths > 0 ? "font-medium text-red-700" : "opacity-50"}`}>
-                              {l.shortfallThousandths > 0 ? qty(l.shortfallThousandths) : "—"}
+                              {l.shortfallThousandths > 0 ? qty(l.shortfallThousandths) : "-"}
                             </td>
                           </tr>
                         ))}
@@ -500,7 +500,7 @@ export default function ManufacturingPage() {
                             <td className="text-right tabular-nums">{qty(l.requiredThousandths)}</td>
                             <td className="text-right tabular-nums">{qty(l.onHandThousandths)}</td>
                             <td className={`text-right tabular-nums ${l.shortfallThousandths > 0 ? "font-medium text-red-700" : "opacity-50"}`}>
-                              {l.shortfallThousandths > 0 ? qty(l.shortfallThousandths) : "—"}
+                              {l.shortfallThousandths > 0 ? qty(l.shortfallThousandths) : "-"}
                             </td>
                           </tr>
                         ))}
@@ -579,7 +579,7 @@ export default function ManufacturingPage() {
                   </tbody>
                 </table>
                 <p className="mt-1 text-xs opacity-50">
-                  This is what the run would post before anything moves — no ledger entries are written until you produce.
+                  This is what the run would post before anything moves - no ledger entries are written until you produce.
                 </p>
               </div>
             )}
@@ -717,7 +717,7 @@ export default function ManufacturingPage() {
                 {(data.lots ?? []).map((l) => (
                   <li key={l.id} className="flex items-center justify-between py-1.5">
                     <span>
-                      <span className="font-mono">{l.lotCode}</span> of {l.sku} — balance {qty(l.balanceThousandths)}
+                      <span className="font-mono">{l.lotCode}</span> of {l.sku} - balance {qty(l.balanceThousandths)}
                       {l.expiresAt ? ` · expires ${formatDateTime(l.expiresAt)}` : ""}
                     </span>
                     <a
@@ -743,7 +743,7 @@ export default function ManufacturingPage() {
               </Button>
             </div>
             <p className="mt-1 text-xs opacity-50">
-              Reversal puts consumed components back at their original cost and removes finished units — both sides of the run, not just the output.
+              Reversal puts consumed components back at their original cost and removes finished units - both sides of the run, not just the output.
             </p>
           </Card>
         </>

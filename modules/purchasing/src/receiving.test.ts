@@ -71,7 +71,7 @@ async function orderStatus(poNumber: number): Promise<string> {
 
 /**
  * Lines are addressed by their stable display position, so tests must
- * resolve positions the way humans do — by looking at the order, not row
+ * resolve positions the way humans do - by looking at the order, not row
  * storage.
  */
 async function lineNumberFor(poNumber: number, description: string): Promise<number> {

@@ -15,7 +15,7 @@ import { applyStockDelta, itemBySku, openReserved, stockOnHand } from "@chaste/m
  * Confirming reserves stock through the existing reservation primitives;
  * delivery consumes the reservation, writes the outgoing stock leg through
  * the shared writer, and invoices what actually shipped via the shared
- * posting path — the same write path quotes and POS use. Backorders are a
+ * posting path - the same write path quotes and POS use. Backorders are a
  * flag on the order (partial reservation under allowBackorder), never a
  * document zoo.
  */
@@ -40,7 +40,7 @@ const orderNumber = async (tx: Tx, orgId: string) => {
   return nextDocNumber(tx, orgId, "sales_order");
 };
 
-/** Open (unpaid) receivables for one customer — the credit guard's baseline. */
+/** Open (unpaid) receivables for one customer - the credit guard's baseline. */
 async function openArMinor(tx: Tx, orgId: string, customerId: string): Promise<number> {
   const [row] = await tx
     .select({
@@ -208,7 +208,7 @@ const orderConfirm = (deps: ModuleDeps) =>
         }
 
         // Aggregate demand by inventory identity, then spend one running
-        // availability budget per item — repeated lines can no longer each
+        // availability budget per item - repeated lines can no longer each
         // claim the same stock (N15).
         const demand = new Map<string, number>();
         for (const line of lines) {

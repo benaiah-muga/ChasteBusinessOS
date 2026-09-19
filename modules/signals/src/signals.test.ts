@@ -76,7 +76,7 @@ afterAll(async () => {
 });
 
 describe("signals.list (ADR 0034)", () => {
-  it("passes capability conformance — read class, valid id and intent", () => {
+  it("passes capability conformance - read class, valid id and intent", () => {
     const registry = makeRegistry();
     const issues = registry.validateAll().filter((i) => i.capabilityId === "signals.list" && i.level === "error");
     expect(issues).toHaveLength(0);

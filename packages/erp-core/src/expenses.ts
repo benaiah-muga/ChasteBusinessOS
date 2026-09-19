@@ -2,7 +2,7 @@
  * Expense intelligence primitives (M11, ADR 0038).
  *
  * Deterministic, advisory: category suggestions come from a fixed keyword
- * table (rules-first — the human always overrides); duplicate-claim
+ * table (rules-first - the human always overrides); duplicate-claim
  * detection is pairwise with stable ordering, like payment duplicates.
  */
 
@@ -39,7 +39,7 @@ export interface DuplicateClaimPair {
   daysApart: number;
 }
 
-/** Same claimant, same amount, inside the window — the classic double submit. */
+/** Same claimant, same amount, inside the window - the classic double submit. */
 export function findDuplicateExpenseClaims(claims: ExpenseClaimRecord[], windowDays = 3): DuplicateClaimPair[] {
   const out: DuplicateClaimPair[] = [];
   const sorted = [...claims].sort(

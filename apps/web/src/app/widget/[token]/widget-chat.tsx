@@ -10,7 +10,7 @@ interface Msg {
 }
 
 const SENDER_STYLE: Record<string, CSSProperties> = {
-  customer: { background: "#38000a", color: "#fff", marginLeft: "auto" },
+  customer: { background: "#111416", color: "#fff", marginLeft: "auto" },
   agent: { background: "#f5f5f4", color: "#1c1917" },
   staff: { background: "#f5f5f4", color: "#1c1917" },
   system: { background: "transparent", color: "#78716c", textAlign: "center", fontSize: "12px", maxWidth: "100%" },
@@ -135,7 +135,7 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
 
   return (
     <div className="flex h-screen flex-col bg-white">
-      <header className="flex items-center gap-2 bg-[#38000a] px-4 py-3 text-white">
+      <header className="flex items-center gap-2 bg-[#111416] px-4 py-3 text-white">
         <span className="text-sm font-semibold tracking-tight">Chat with us</span>
         <span className="ml-auto text-[11px] text-white/60">
           {status === "escalated" ? "A human is joining" : status === "resolved" ? "Resolved" : "We reply fast"}
@@ -166,7 +166,7 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
             type="button"
             disabled={busy || !/.+@.+\..+/.test(email)}
             onClick={() => void start()}
-            className="cursor-pointer rounded-lg bg-[#9b1313] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#7c0f0f] disabled:pointer-events-none disabled:opacity-40"
+            className="cursor-pointer rounded-lg bg-[#111416] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#2b2e2e] disabled:pointer-events-none disabled:opacity-40"
           >
             Start chatting
           </button>
@@ -210,7 +210,7 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
                 aria-label="Send message"
                 disabled={busy || !text.trim() || status !== "open"}
                 onClick={() => void send()}
-                className="cursor-pointer rounded-lg bg-[#9b1313] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#7c0f0f] disabled:pointer-events-none disabled:opacity-40"
+                className="cursor-pointer rounded-lg bg-[#111416] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#2b2e2e] disabled:pointer-events-none disabled:opacity-40"
               >
                 Send
               </button>

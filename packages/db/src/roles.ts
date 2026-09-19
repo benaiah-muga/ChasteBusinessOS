@@ -43,7 +43,7 @@ export interface AppRoleResult {
   roleName: string;
   /** True when this call created the role; false when it already existed. */
   created: boolean;
-  /** Connection URL for the runtime role. Contains the password — never log it. */
+  /** Connection URL for the runtime role. Contains the password - never log it. */
   runtimeUrl: string;
 }
 

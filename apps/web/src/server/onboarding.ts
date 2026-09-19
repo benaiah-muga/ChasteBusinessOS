@@ -35,7 +35,7 @@ export interface OnboardingResult {
 
 /**
  * Setup steps a workspace can defer. Anything left `pending` is surfaced back
- * to the user later rather than silently forgotten — the point of tracking
+ * to the user later rather than silently forgotten - the point of tracking
  * them is that "skipped" must never become "lost".
  */
 export const ONBOARDING_STEPS = [
@@ -85,7 +85,7 @@ export function parseOnboardingState(settings: unknown): OnboardingState | null 
  * accounts is seeded; the creator gets an owner role with full authority.
  *
  * B01: tenant creation cannot require an existing tenant, so this is the one
- * declared bootstrap exception to the governed command path — it is
+ * declared bootstrap exception to the governed command path - it is
  * session-authenticated, seeds only the caller's own membership, and is
  * intent-keyed: a retry after a lost response replays the receipt committed
  * with the organization instead of creating a second tenant, and reusing an
@@ -134,7 +134,9 @@ export async function runOnboarding(
   const existing = await db.select().from(memberships).where(eq(memberships.userId, params.userId)).limit(1);
   if (existing.length > 0) throw new Error("user already belongs to an organization");
 
-  const result = await db.transaction(async (tx) => {
+  let result: { orgId: string; replayed?: boolean };
+  try {
+    result = await db.transaction(async (tx) => {
     // Slug uniqueness settles inside the transaction: a pre-flight check
     // races concurrent bootstraps, the unique constraint does not. Each
     // attempt runs under a savepoint so a clash rolls back only the org
@@ -219,7 +221,29 @@ export async function runOnboarding(
     }
 
     return { orgId: org.id };
-  });
+    });
+  } catch (err) {
+    const code =
+      (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
+    if (code !== "23505" || !params.intentId) throw err;
+    // Lost the receipt race: two bootstraps on one intent both missed the
+    // pre-transaction replay read and both created an org, but the unique
+    // (user_id, intent_id) index serialized the receipt inserts - the loser
+    // blocked until the winner committed, so the winning receipt is visible
+    // now. Converge to it instead of surfacing a raw unique violation (the
+    // loser's org rolls back with its transaction). A conflicting payload
+    // still refuses; a missing row rethrows the original error.
+    const [winner] = await db
+      .select({ orgId: bootstrapIntents.orgId, payloadHash: bootstrapIntents.payloadHash })
+      .from(bootstrapIntents)
+      .where(and(eq(bootstrapIntents.userId, params.userId), eq(bootstrapIntents.intentId, params.intentId)))
+      .limit(1);
+    if (!winner?.orgId) throw err;
+    if (winner.payloadHash !== payloadHash) {
+      throw new Error("bootstrap intent conflict: this intent id was used with a different payload");
+    }
+    return { orgId: winner.orgId, replayed: true };
+  }
 
   // Ledger entry after commit, the chain writer runs on its own connection.
   const ledger = new PgLedgerStore(db);
@@ -311,7 +335,7 @@ export async function setOnboardingStep(
       orgId,
       userId: userId ?? null,
       kind: "system",
-      title: `${meta.title} — ${status === "skipped" ? "skipped during setup" : "left for later"}`,
+      title: `${meta.title} - ${status === "skipped" ? "skipped during setup" : "left for later"}`,
       body: meta.why,
       href: meta.fix.href,
     });

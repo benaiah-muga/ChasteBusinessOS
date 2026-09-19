@@ -16,9 +16,9 @@ import { detectCodingAgent } from "@/server/creator-agent";
 export interface SetupItem {
   id: string;
   title: string;
-  /** Why it matters, one sentence — the "what is expected of me". */
+  /** Why it matters, one sentence - the "what is expected of me". */
   why: string;
-  /** Where to do it — powers the take-me-there link. */
+  /** Where to do it - powers the take-me-there link. */
   href: string;
   done: boolean;
 }
@@ -26,7 +26,7 @@ export interface SetupItem {
 /**
  * The workspace setup checklist: what is expected of this organization,
  * what depends on what, and where to do each thing. Computed live from
- * real state — an item disappears the moment it is actually done.
+ * real state - an item disappears the moment it is actually done.
  */
 export async function GET() {
   const resolved = await getResolvedUser();

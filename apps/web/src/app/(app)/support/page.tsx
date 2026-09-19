@@ -350,14 +350,14 @@ export default function SupportPage() {
               <ul className="space-y-2.5 text-sm leading-relaxed opacity-80">
                 <li className="flex gap-2">
                   <IconBot aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-violet-500" />
-                  The workmate drafts replies from the customer&apos;s own order history — nothing else.
+                  The workmate drafts replies from the customer&apos;s own order history - nothing else.
                 </li>
                 <li className="flex gap-2">
                   <IconSend aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-sky-500" />
                   A human sends every draft; the model never talks to customers directly.
                 </li>
                 <li className="flex gap-2">
-                  <IconLifeBuoy aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-maroon-600" />
+                  <IconLifeBuoy aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-gold-600" />
                   The website widget routes visitors into the same governed inbox.
                 </li>
               </ul>
@@ -531,8 +531,8 @@ export default function SupportPage() {
                         className={cn(
                           "rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
                           m.senderType === "customer" && "rounded-bl-md bg-stone-100 text-stone-800",
-                          m.senderType === "staff" && "rounded-br-md bg-maroon-700 text-white",
-                          m.senderType === "agent" && "rounded-br-md bg-maroon-100 text-maroon-950",
+                          m.senderType === "staff" && "rounded-br-md bg-gold-700 text-white",
+                          m.senderType === "agent" && "rounded-br-md bg-gold-100 text-gold-950",
                           m.senderType === "system" && "bg-transparent px-0 py-0 text-xs text-stone-400",
                         )}
                       >
@@ -543,15 +543,15 @@ export default function SupportPage() {
                 ))}
                 {draft != null && (
                   <div className="flex justify-end">
-                    <div className="w-full max-w-[85%] rounded-xl border border-maroon-200 bg-maroon-50/60 p-3">
-                      <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-maroon-700">
-                        AI draft — review before sending
+                    <div className="w-full max-w-[85%] rounded-xl border border-gold-200 bg-gold-50/60 p-3">
+                      <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gold-700">
+                        AI draft - review before sending
                       </p>
                       <textarea
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
                         rows={Math.min(8, Math.ceil(draft.length / 60) + 1)}
-                        className="w-full resize-none rounded-lg border border-stone-200 bg-white p-2 text-sm outline-none focus:border-maroon-500"
+                        className="w-full resize-none rounded-lg border border-stone-200 bg-white p-2 text-sm outline-none focus:border-gold-500"
                       />
                       <div className="mt-2 flex justify-end gap-2">
                         <Button size="sm" onClick={() => setDraft(null)}>
@@ -575,7 +575,7 @@ export default function SupportPage() {
                       type="checkbox"
                       checked={fromCustomer}
                       onChange={(e) => setFromCustomer(e.target.checked)}
-                      className="accent-maroon-700"
+                      className="accent-gold-700"
                     />
                     Log as customer&apos;s words
                   </label>
@@ -590,7 +590,7 @@ export default function SupportPage() {
                     }}
                     rows={1}
                     placeholder="Log what the customer wrote, or write the staff reply…"
-                    className="max-h-32 flex-1 resize-none rounded-xl border border-stone-200 p-2 text-sm outline-none focus:border-maroon-500"
+                    className="max-h-32 flex-1 resize-none rounded-xl border border-stone-200 p-2 text-sm outline-none focus:border-gold-500"
                   />
                   <Button tone="primary" onClick={postMessage} disabled={busy || !composer.trim()}>
                     <IconSend className="size-4" />
@@ -629,7 +629,7 @@ export default function SupportPage() {
               <button
                 type="button"
                 onClick={() => setQuickCustomer({ open: true, name: "", email: "" })}
-                className="mb-3 cursor-pointer text-xs font-medium text-maroon-700 underline underline-offset-2 hover:text-maroon-900"
+                className="mb-3 cursor-pointer text-xs font-medium text-gold-700 underline underline-offset-2 hover:text-gold-900"
               >
                 + New customer
               </button>
@@ -757,15 +757,15 @@ function ChannelsPanel() {
           <p className="mt-3 rounded-lg border border-dashed border-stone-300 p-3 text-sm text-stone-500">
             {state.canManage
               ? "No embed token yet. Save your channel settings below to generate one."
-              : "The website channel is not configured yet — an organization admin can generate its embed token here."}
+              : "The website channel is not configured yet - an organization admin can generate its embed token here."}
           </p>
         )}
         <p className="mt-3 text-xs text-stone-500">
           Prefer a plain link? Share{" "}
-          <button type="button" onClick={() => link && copy(link, "link")} className="font-medium text-maroon-700 underline underline-offset-2">
+          <button type="button" onClick={() => link && copy(link, "link")} className="font-medium text-gold-700 underline underline-offset-2">
             {copied === "link" ? "copied ✓" : "the standalone chat page"}
           </button>{" "}
-          anywhere — email signatures, social bios, help docs.
+          anywhere - email signatures, social bios, help docs.
         </p>
       </section>
 
@@ -777,13 +777,13 @@ function ChannelsPanel() {
             checked={state.autoReplyEnabled}
             onChange={(e) => void patch({ autoReplyEnabled: e.target.checked })}
             disabled={busy || !state.canManage}
-            className="mt-0.5 size-4 accent-[#9b1313]"
+            className="mt-0.5 size-4 accent-gold-600"
           />
           <span className="text-sm text-stone-700">
             <strong className="font-medium">Answer visitors automatically.</strong>{" "}
             <span className="text-stone-500">
-              Replies are grounded in your knowledge base and order history. When you turn this off — or a visitor asks
-              for a human — the thread waits for staff and shows as needing you.
+              Replies are grounded in your knowledge base and order history. When you turn this off - or a visitor asks
+              for a human - the thread waits for staff and shows as needing you.
             </span>
           </span>
         </label>
@@ -808,7 +808,7 @@ function ChannelsPanel() {
         <h2 className="text-sm font-semibold text-stone-900">What the AI can reach</h2>
         <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-stone-500">
           <li>Your knowledge base (Documents app)</li>
-          <li>The asking customer&apos;s own order status — nothing about other customers</li>
+          <li>The asking customer&apos;s own order status - nothing about other customers</li>
           <li>Nothing else. Escalated threads are answered only by people.</li>
         </ul>
       </section>

@@ -16,7 +16,7 @@ import { registerHrCapabilities, type ModuleDeps } from "./index";
 
 /**
  * Payroll compensation (N12, ADR 0051): an executed run is undone by
- * hr.reversePayrollPosting — it mirrors the posting in the original
+ * hr.reversePayrollPosting - it mirrors the posting in the original
  * currency AND repairs the run lifecycle, which the generic journal mirror
  * never did (the ledger and the run status used to disagree).
  */
@@ -109,7 +109,7 @@ describe("N12 payroll compensation", () => {
     expect(mirror!.sourceType).toBe("payroll_reversal");
     expect(mirror!.currency).toBe("USD");
 
-    // The original posts DR expense gross / CR cash net / CR withholding —
+    // The original posts DR expense gross / CR cash net / CR withholding -
     // the mirror swaps every side at the same gross amount.
     const lines = await db.db.select().from(journalLines).where(eq(journalLines.entryId, mirror!.id));
     let net = 0;

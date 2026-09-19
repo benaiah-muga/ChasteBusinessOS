@@ -195,7 +195,7 @@ const explainChangeCap = (deps: AnalyticsDeps) =>
     id: "analytics.explainChange",
     title: "Explain metric change",
     intent:
-      "Attribute a revenue change across a dimension — customers or products — with exact contributions that sum to the delta and drill down to the underlying invoices",
+      "Attribute a revenue change across a dimension - customers or products - with exact contributions that sum to the delta and drill down to the underlying invoices",
     module: "analytics",
     risk: "read",
     permission: "analytics.report",

@@ -11,6 +11,48 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+### Added
+- **The Chaste emblem ships.** The logo from `assets/` is now the favicon,
+  the rail's home coin, the mobile top-bar home button, and the brand mark on
+  the sign-in and setup screens.
+- **Branded route loading.** Navigations show the emblem spinning like a
+  struck coin ("Opening the books...") instead of a blank frame, both
+  full-screen for top-level segments and in-content inside the app shell;
+  honors reduced motion.
+- **Mobile account access.** The mobile top bar gains the account avatar; it
+  opens the same account menu as the desktop rail (identity, org switcher,
+  sign out).
+
+### Changed
+- **Module chrome rides the inked band.** Every module's header (breadcrumb,
+  description, tabs, actions) is now the brand's dark cover plate: "Home /
+  Accounting" is written large in paper and gold instead of an easy-to-miss
+  grey whisper, with the tabs styled for the dark surface.
+- **Icons match the notifications bell.** The shared icon base draws at the
+  bell's stroke weight, so every icon across the rail, launcher, tabs and
+  page bodies carries the same confident weight.
+- **The dashboard keeps one attention list.** The separate "My work" card is
+  gone; "Needs you" is the single queue (receipt remainders folded in) and
+  the "Brief me" button lives in its header in the brand ink instead of grey.
+- **One brand identity across the product (ADR-0054).** The gateway's warm
+  paper + inked band + burnished gold palette is now the product-wide system:
+  `stone-*` re-pointed to warm paper greys, the accent ramp renamed and
+  re-pointed to `gold-*` (the `maroon-*` name is retired), and the four-theme
+  picker removed from settings, the command palette and the rail - Light,
+  Dark and System remain. The inked `#111416` band (masthead, login hero,
+  setup header, support widget) is a brand constant in both modes; the auth
+  pages are tokenized and drop the `.auth-surface` light-mode pin, so the
+  gateway now follows the mode like every other page. Primary buttons are the
+  gateway's ink style (inverting in dark mode), and `dark:` utilities now
+  follow the attribute-based mode via a custom variant.
+- **One color for app icons.** Every tile in the apps catalogue, the command
+  palette, the app frame header, and the rail's pinned/recent apps renders in
+  the single brand ink (`#111416` with paper icon) instead of per-app hues;
+  rail icons moved to the same dark ink. (ADR-0054 continuation.)
+- **No em dashes anywhere.** All 1,251 em dashes across docs, source
+  comments, and UI copy were replaced with hyphens, and `AGENTS.md` now
+  instructs agents never to write them.
+
 ### Fixed
 - **Sign-up ended in a hung spinner with no explanation.** Under the
   verified-binding profile (N03) sign-up creates the account but skips
@@ -22,21 +64,21 @@ The full v1 changelog is preserved at the bottom of this file.
 - **Auth and onboarding rendered broken under dark mode.** The login form and
   the setup wizard are authored as a fixed warm-paper composition (hardcoded
   ink hero, cream panels), but the tokens they use for inputs, cards and text
-  (`white`, `ink`, `sand-*`, `cream`, `gold-*`) flip with `data-mode` — dark
+  (`white`, `ink`, `sand-*`, `cream`, `gold-*`) flip with `data-mode` - dark
   mode produced near-black inputs on the cream card, charcoal path cards, and
   washed-out headings. An `.auth-surface` scope now re-pins those tokens to
   the designed light values (and paints the page canvas to match), so the
   gateway reads identically in both modes.
 - **Onboarding was cut off on large screens.** The wizard pinned itself to
   `100svh` with `overflow: hidden`, so on a short desktop window the step
-  content (path cards, profile form) clipped with no way to scroll — the same
+  content (path cards, profile form) clipped with no way to scroll - the same
   content scrolled fine on small screens. The page now scrolls naturally and
   the context column sticks beside it; the login page drops its viewport lock
   the same way.
 - **My Work remainders read full outstanding (W0.5).** The receipt-remainder
   query correlated receipt lines with a bare `"id"` (Drizzle renders an
   embedded column unqualified, so the subquery compared each receipt's
-  `po_line_id` against its *own* id and always summed zero) — every card
+  `po_line_id` against its *own* id and always summed zero) - every card
   read the full order as outstanding. The correlation is now explicit, the
   remainder subtracts returns net of receipts (a returned delivery demotes
   the order to partial in the domain but read as received here), quantities
@@ -49,7 +91,7 @@ The full v1 changelog is preserved at the bottom of this file.
   already-reversed check ran before the bill row lock, so two concurrent
   reversals both passed it and both mirrored (surfacing as a `RangeError`
   on negative paidMinor). The check now runs after the bill lock is
-  acquired — the loser sees the winner's committed reversal — and the bill
+  acquired - the loser sees the winner's committed reversal - and the bill
   read is org-scoped. Pinned by a `Promise.allSettled` racer (exactly one
   mirror; proven to fail on the old order).
 - **`accounting.recordPayment` declared a dead inverse.** It pointed at
@@ -59,10 +101,10 @@ The full v1 changelog is preserved at the bottom of this file.
   reverseVendorPayment), pinned by a buildInput-from-actual-output test.
 - **Queue/worker-kill fixtures vs the append-only ledger (N09).**
   `jobs.test.ts` teardown deleted `ledger_events` raw, which the commit-time
-  immutability triggers refuse — it now purges through the declared
+  immutability triggers refuse - it now purges through the declared
   maintenance helper; the worker-kill "after the receipt" case synchronized
   on effect-start rather than receipt durability and flaked under load when
-  the replacement read before the receipt landed — it now waits for the
+  the replacement read before the receipt landed - it now waits for the
   receipt row.
 - **Client intent stamp bypass (B02).** `withIntentId` kept any present
   `intentId` key without checking its type, so `{intentId: undefined}` (or a
@@ -131,8 +173,8 @@ The full v1 changelog is preserved at the bottom of this file.
   checks the database-backed health endpoint, and includes an executable
   `scripts/verify-docker.mjs` cleanup-safe smoke test.
 - **the pilot surfaces are built (W0.5).** A receiving desk that records
-  what arrived line by line — accepted, rejected with a reason, and what
-  stays outstanding — through the governed receiving capabilities; a "My
+  what arrived line by line - accepted, rejected with a reason, and what
+  stays outstanding - through the governed receiving capabilities; a "My
   Work" home section ranking approvals, outstanding deliveries and module
   signals deterministically, each card with one primary action; an optional
   AI brief over that ranked list (openrouter/stealth/union-alpha, honest
@@ -157,8 +199,8 @@ The full v1 changelog is preserved at the bottom of this file.
   invitations) and bind by email, so a password sign-up for that email used
   to walk straight into memberships without owning the mailbox. Sign-in now
   requires verification (the link is re-sent on each sign-in attempt), and
-  an unverified session resolves to a bare identity — no memberships, no
-  permissions — until the address is verified or proven by a trusted IdP.
+  an unverified session resolves to a bare identity - no memberships, no
+  permissions - until the address is verified or proven by a trusted IdP.
   Existing unverified accounts receive a fresh verification email at their
   next sign-in attempt.
 
@@ -173,8 +215,8 @@ The full v1 changelog is preserved at the bottom of this file.
   ledger, cycle counts could only count the whole warehouse at once, and
   each module rolled its own `max(number)+1` document numbering that could
   race under two concurrent creators. The ledger now projects into
-  `stock_balances` via a database trigger — consistent by construction,
-  repairable by replay — so on-hand reads are constant-cost; cycle counts
+  `stock_balances` via a database trigger - consistent by construction,
+  repairable by replay - so on-hand reads are constant-cost; cycle counts
   scope to a single location with per-bin adjustments; and document numbers
   come from one per-org allocator seeded from existing maxima.
 - **goods receipts are documents with stable line positions and explicit
@@ -182,9 +224,9 @@ The full v1 changelog is preserved at the bottom of this file.
   ledger: no record of who received or when, no home for refused goods,
   no way to say which receipt a return undid, and "line 1" meant whatever
   row the database happened to return first. Receiving now writes receipt
-  documents — accepted versus rejected quantities per line, returns drawn
+  documents - accepted versus rejected quantities per line, returns drawn
   from concrete receipts, overreceipt only with paired tolerance and
-  authority reason — and order lines carry stable display positions that
+  authority reason - and order lines carry stable display positions that
   survive reordering across the module and the human API.
 - **year-end closes are explicit exceptional entries, with eligible posting
   and dated corrections (N13).** The closing roll used to be an
@@ -201,7 +243,7 @@ The full v1 changelog is preserved at the bottom of this file.
   posting service validates every account id against posting eligibility.
 - **vendor payments undo through their own domain compensation (N12).**
   Reversing a vendor payment with the generic journal mirror used to leave
-  the bill marked paid and its paid amount consumed — the books balanced
+  the bill marked paid and its paid amount consumed - the books balanced
   while the payable lied. The new `purchasing.reverseVendorPayment` mirrors
   the payment entry in its original currency, releases the bill's paid
   amount, demotes a paid bill back to open, and refuses a second or
@@ -210,9 +252,9 @@ The full v1 changelog is preserved at the bottom of this file.
   mark a bill paid.
 - **bank matching grows an allocation model with a real reconciled
   definition (N14).** A statement line is explained by explicit
-  allocations — a payment (whole, split across lines, or grouped with other
+  allocations - a payment (whole, split across lines, or grouped with other
   payments on one line), a journal entry, a reviewed bank fee, or an FX
-  difference — that share the line's sign and fit inside its amount.
+  difference - that share the line's sign and fit inside its amount.
   Payment and entry claims are enforced by row locks and remaining-amount
   budgets instead of single-claim unique indexes, so splits and grouped
   settlements are expressible without loose matches. New
@@ -220,10 +262,10 @@ The full v1 changelog is preserved at the bottom of this file.
   allocations and the unexplained difference; a statement period is
   reconciled when that difference is exactly zero.
 - **one credit-adjusted balance everywhere, with locked money application
-  (N11).** Every surface that shows an outstanding amount — invoice lists,
+  (N11).** Every surface that shows an outstanding amount - invoice lists,
   AR aging, the dashboard's receivables and payables, vendor bill due
   amounts, the customer portal, support invoice lookup, FX exposure and
-  overdue signals — now nets credits against the total, so a credited
+  overdue signals - now nets credits against the total, so a credited
   invoice no longer looks collectible in one place and settled in another.
   Overdue aging and signals run from the due date rather than the issue
   date, and not-yet-due invoices stay current. Payments and credits
@@ -232,15 +274,15 @@ The full v1 changelog is preserved at the bottom of this file.
 - **worker-kill proof for the queue and outbox (B03).** A new fixture kills
   a worker mid-flight while it holds the lease and pins the recovery
   contract for three windows: killed after the effect (the replacement
-  replays the receipt — exactly one effect), killed mid-execution
+  replays the receipt - exactly one effect), killed mid-execution
   (at-least-once redelivery, the dead worker's acknowledgement stays
   fenced), and an external webhook whose acknowledgement died in transit
   (the delivery converges to an honest "unknown", never auto re-fires, and
   reconciliation settles it from the provider receipt exactly once).
 - **the stock ledger is append-only at the database (ADR 0052 extension).**
   Stock movements can no longer be edited or deleted by any code path:
-  corrections are compensating movements — reversal runs, transfer
-  reversals, cycle-count postings — exactly like financial corrections.
+  corrections are compensating movements - reversal runs, transfer
+  reversals, cycle-count postings - exactly like financial corrections.
   Database triggers refuse mutations outside a declared maintenance
   context used only by teardown and repair, and the runtime role holds the
   same append-only privilege shape as the journal tables.
@@ -257,14 +299,14 @@ The full v1 changelog is preserved at the bottom of this file.
   The UI's single API seam now stamps each POST with a per-call `intentId`
   (callers can pass their own to span retries of one logical action), and
   every mutating API route threads it into the actor context. A request
-  that is retried — double-click, flaky network, proxy replay — now
+  that is retried - double-click, flaky network, proxy replay - now
   reconciles to the original server-side receipt instead of executing
   twice, and reusing an identity with a different payload is refused.
   Agent loops are excluded by design (one context spans many tool steps;
   scheduled runs already key receipts by job id).
 - **identity lifecycle and public-widget containment (N03/N04/N07/N08,
   ADR 0053).** Invitation acceptance is now a row-locked, compare-and-set
-  transaction — a concurrent double accept yields exactly one winner, an
+  transaction - a concurrent double accept yields exactly one winner, an
   unverified mailbox cannot claim a pre-provisioned binding, and expired or
   mismatched invitations fail honestly. Member deactivation (SCIM DELETE)
   removes membership, every role grant, and pending invitations in one
@@ -274,7 +316,7 @@ The full v1 changelog is preserved at the bottom of this file.
   secret (issued once, stored hashed) gating every later read, message, and
   escalation, so knowing someone's email plus the public token reveals
   nothing about them. Conversation and ticket creation go through governed
-  kernel capabilities — chat's honesty path files audited tickets with a
+  kernel capabilities - chat's honesty path files audited tickets with a
   real id in the receipt and reports refusals honestly.
 
 - **The database now enforces the ledger's defining invariants (N09,
@@ -284,14 +326,14 @@ The full v1 changelog is preserved at the bottom of this file.
   that would commit unbalanced, incomplete (fewer than two lines), with a
   zero total, or with a line whose account belongs to another organization;
   posted journal rows and event-ledger rows refuse UPDATE, DELETE and
-  TRUNCATE — corrections are reversal entries. Teardowns and out-of-band
+  TRUNCATE - corrections are reversal entries. Teardowns and out-of-band
   repairs use one declared maintenance context
   (`beginLedgerMaintenance`/`purgeTenantFinancials` in @chaste/db) that the
   immutability guards honor but the balance guards ignore, so nothing broken
   can ever commit. The runtime role (`chaste_app`) additionally lost
   mutation rights on the append-only tables, re-revoked on every role
   provisioning run and asserted by the RLS conformance sweep. A dirty legacy
-  database fails the migration naming the offending entries — reconcile
+  database fails the migration naming the offending entries - reconcile
   first, never silently rewrite history. Pinned by `journal-guards.test.ts`
   (the audit's full negative/positive proof list), the runtime-role suite,
   the conformance sweep, and a discharged `probe-n09`.
@@ -324,7 +366,7 @@ The full v1 changelog is preserved at the bottom of this file.
   entry was inserted before the invoice row existed, so the register code
   reached back to stamp `source_id` on a posted ledger row. The invoice is
   now created first and the entry posts with its source link at insert time
-  — the only legitimate post-insert journal mutation is gone, and returns
+  - the only legitimate post-insert journal mutation is gone, and returns
   find the sale entry exactly as before.
 - **A generic journal reversal was offered as a complete business undo
   (N12).** Reversing a payment's GL entry left the invoice collecting on
@@ -348,10 +390,10 @@ The full v1 changelog is preserved at the bottom of this file.
   of each passing the same check and driving stock negative. A lot can no
   longer move another item's stock, the balance can no longer go negative
   org-wide or at a named location, and cycle counts snapshot a movement
-  watermark — a receipt plus a sale during counting is caught at post time
+  watermark - a receipt plus a sale during counting is caught at post time
   even when net quantity landed back where it started (a drifted sheet is
   refused permanently; re-count). POS and purchasing import the inventory
-  command service directly — the sanctioned stock-ledger seam now matches
+  command service directly - the sanctioned stock-ledger seam now matches
   the one every writer actually uses (ADR 0050). Pinned by seven live-DB
   inventory tests; manufacturing's cycle-count suite asserts the stricter
   watermark semantics.
@@ -362,7 +404,7 @@ The full v1 changelog is preserved at the bottom of this file.
   bill consume each other's allowance instead of each seeing full stock, and
   a vendor bill is only valid from the vendor who holds the order. Service
   lines join the receiving contract through an explicit accepted milestone
-  on the order line — no fake stock — so mixed and service-only orders can
+  on the order line - no fake stock - so mixed and service-only orders can
   complete. Returns require the goods to still be on hand (shipped goods
   need a customer return) and demote a fully-received order back to
   partial. Pinned by six live-DB purchasing tests (ADR 0049).
@@ -370,7 +412,7 @@ The full v1 changelog is preserved at the bottom of this file.
   can now claim a payment or entry only when it is economically equivalent:
   same amount (100 banked refuses to explain a 10 payment), same direction
   (a customer payment is money in), same currency as the statement account,
-  and — for entries — the entry must move the cash account by the line's
+  and - for entries - the entry must move the cash account by the line's
   signed amount. One reconciled payment or entry belongs to exactly one
   statement line, enforced by unique indexes in data (unmatched lines carry
   NULL and never conflict) with readable refusals for racing claims, and
@@ -380,7 +422,7 @@ The full v1 changelog is preserved at the bottom of this file.
   claim rejection (ADR 0048).
 - **Repeated order lines could over-reserve the same stock (N15).** Stock
   checks now aggregate demand by item identity and spend one running
-  availability budget — 7 + 7 against 10 reserves 10, never 14 — and readers
+  availability budget - 7 + 7 against 10 reserves 10, never 14 - and readers
   lock the touched item rows in stable id order, so two concurrent orders (or
   an order and a register sale) can no longer both claim the last unit: the
   loser re-reads the budget and refuses. The register now also sells only
@@ -397,7 +439,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - **Some postings could land in a closed accounting period (N13).** The
   shared posting service now owns the guard: every entry carries a mandatory
   effective posting time, the service checks it under a per-org lock shared
-  with period close/reopen, and close/reopen commit transactionally — so a
+  with period close/reopen, and close/reopen commit transactionally - so a
   post and a close always finish in one serial order. Expense reimbursement
   and the inventory valuation reversal (previously unguarded) refuse sealed
   months along with every other producer; payroll posts at execution time
@@ -445,14 +487,14 @@ The full v1 changelog is preserved at the bottom of this file.
   carries `ticketId` across chat, conversation replies, and routines.
 - **Route read authorization (N01) and the conversation list leak (N06)**:
   unguarded GET routes no longer return another module's records to any
-  signed-in member — hr salaries (`hr.read`), ledger payloads
+  signed-in member - hr salaries (`hr.read`), ledger payloads
   (`accounting.read`), customers/deals (`crm.read`), marketing
   (`marketing.read`), projects (`projects.read`), POS lists (`pos.read`),
   accounting summaries (`accounting.read`), and the setup checklist
   (`iam.admin`, it exposes the support embed token).
   The agent-session list applies the detail route's visibility rule (own
   sessions, all for admins). The conversations list is now membership-scoped
-  like the detail boundary — a nonmember sees neither titles nor message
+  like the detail boundary - a nonmember sees neither titles nor message
   previews of a DM. Owners (`*`) are unaffected; restricted roles need the
   explicit read grants. Pinned by a six-case route matrix calling real
   handlers with mocked sessions against a fixture database. The web suite's
@@ -462,7 +504,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - **Six org-scoped tables had no row-level security.** `bank_accounts`,
   `bank_transactions`, `purchase_requests`, `rfqs`, `sales_tax_filings` and
   `support_settings` were created after migration 0014's RLS pass and never
-  received policies — a tenant's rows were fully visible to any same-database
+  received policies - a tenant's rows were fully visible to any same-database
   reader bypassing the application layer. Migration 0037 applies the standard
   `tenant_isolation` policy, and a new mechanical conformance suite
   (`packages/db/src/rls-conformance.test.ts`) now sweeps every org-scoped
@@ -476,7 +518,7 @@ The full v1 changelog is preserved at the bottom of this file.
   only for that person, repeats are idempotent, and one user cannot mark
   another user's personal notification.
 - **Proposal review decisions could double-apply (N34).** The review decision
-  is now compare-and-set — the status check lives in the UPDATE — so two
+  is now compare-and-set - the status check lives in the UPDATE - so two
   concurrent reviewers produce exactly one decision and one conflict.
   Marketplace browsing no longer requires `accounting.read` (new
   `platform.browse` permission).
@@ -518,28 +560,28 @@ The full v1 changelog is preserved at the bottom of this file.
   explicit reconciliation instead of automatic duplicate sends.
 - **Atomic unit of work for governed payments (B02)**:
   `executeAtomically` runs one action's mutation, audit fact and action
-  receipt inside a single transaction — modules nest via savepoints — with a
+  receipt inside a single transaction - modules nest via savepoints - with a
   `failOnAuditError` executor mode so an audit failure rolls the whole unit
   back instead of reporting an unproven outcome. `api/accounting` `payBill`
   adopts it whenever the client sends `intentId`, and the accounting page
   generates one identity per confirmed intent. Pinned by tests proving
   commit+replay in one unit and full rollback on crash-after-write.
 - **Honest effect semantics and action receipts in the kernel (B02 slice)**:
-  `KernelExecutor` validates capability output against its declared schema —
+  `KernelExecutor` validates capability output against its declared schema -
   a write returning invalid output now reports `outcome: "unknown"` instead
   of `ok: true`, and an audit append failure after a committed write reports
   unknown instead of a retryable failure (closing the F01/F02 reproductions
   in the evidence register). New `EffectReceiptStore` seam +
   `action_receipts` table (migration 0035, tenant-RLS policy included) give
   every action an idempotent identity: with `ctx.intentId`, retries serve
-  the stored receipt — a committed effect replays its receipt instead of
+  the stored receipt - a committed effect replays its receipt instead of
   re-executing, a reused key with a changed payload conflicts, and an
   unproven outcome reconciles rather than double-posting. Wired through
   `buildExecutor`; `api/accounting` mutations accept `intentId`. Pinned by
   six kernel tests and three integration tests including the
   payment-crash-retry money case.
 - **Least-privilege runtime database role** (`@chaste/db/roles`): `chaste_app`
-  — NOBYPASSRLS, DML-only, no DDL — provisioned idempotently with grants on
+  - NOBYPASSRLS, DML-only, no DDL - provisioned idempotently with grants on
   existing tables and default privileges for future ones, so the application
   can stop running as the superuser migration owner (migration 0014's stated
   intent, previously never wired up: the deployed database had a single
@@ -548,10 +590,10 @@ The full v1 changelog is preserved at the bottom of this file.
   security contract (tenant-scoped reads, fail-closed without context, no
   cross-tenant writes, no DDL) is pinned by five tests in
   `packages/db/src/runtime-role.test.ts`. The application's own role flip is
-  deliberately not done yet — it requires the entry-point context audit (S01).
+  deliberately not done yet - it requires the entry-point context audit (S01).
 - **W0 evidence register** (`docs/W0_EVIDENCE_REGISTER.md`): F01–F17 and
   N01–N10 revalidated at the current commit with executed probes where
-  possible — F01 (committed write reported as failure when the audit append
+  possible - F01 (committed write reported as failure when the audit append
   fails), F02 (capability output schema not enforced at the executor
   boundary), F05 (agent-loop trajectory events silently unpersisted,
   reproduced from test logs), N09 (no database-enforced ledger balance or
@@ -580,18 +622,18 @@ wizard and the spreadsheet import.
 - **Tests for the CSV importer and the setup wizard**: 140 tests covering
   `lib/csv.ts` (RFC 4180 quoting, line endings, ragged rows, header
   guessing), `lib/onboarding-flow.ts`, `components/onboarding/wizard.tsx`,
-  and the shell app/module catalogs. The wizard's decisions — which screen
+  and the shell app/module catalogs. The wizard's decisions - which screen
   comes next, whether a profile may be submitted, how a failure is explained
-  — now live in `lib/onboarding-flow.ts` so they can be tested without
+  - now live in `lib/onboarding-flow.ts` so they can be tested without
   rendering React; the component tests then drive the real wizard through its
   flows, including the one where a skipped step comes back. `jsdom` and
   `@testing-library/react` are new `apps/web` dev dependencies, and
   `pnpm-lock.yaml` is regenerated with them.
-- **Retail & reach (M13, ADR 0040)**: `pos.returnSale` — always-gated
+- **Retail & reach (M13, ADR 0040)**: `pos.returnSale` - always-gated
   full-sale reversal that refunds through a mirrored entry, credits the
   invoice, and restores stock; per-register shift summaries; marketing-lite
   with saved deterministic segments, campaigns, opt-out honored at send
-  time, and the append-only send log as the analytics — no tracking pixels
+  time, and the append-only send log as the analytics - no tracking pixels
   (`pnpm demo:m13 [shifts|marketing]`).
 - **Front ends for every shipped capability**: POS page gains a Return
   action on recent sales (202 → approvals-inbox state) and a shift-summary
@@ -633,7 +675,7 @@ wizard and the spreadsheet import.
   ledger-true returns; 13-week cash forecast; duplicate-payment signals
   (`pnpm demo:m10 [cashflow|creditnote|statements|reminders|supplier|forecast|duplicate]`).
 - **Sales orders + fulfillment (M9, ADR 0036)**: `modules/sales` with
-  reservation-anchored orders — confirming checks the customer's credit
+  reservation-anchored orders - confirming checks the customer's credit
   headroom (`customers.creditLimitMinor`) and reserves stock; delivery
   consumes reservations, writes the stock leg through the shared writer,
   and invoices exactly what shipped via the shared posting path;
@@ -669,7 +711,7 @@ wizard and the spreadsheet import.
   to capabilities via `ctx.services.moduleGate`; POS sales degrade
   gracefully with Inventory disabled (money posts, no stock legs); subset
   matrix + degradation tests guard it. Org policies now resolve by
-  specificity — the most specific matching pattern wins, ties resolve to
+  specificity - the most specific matching pattern wins, ties resolve to
   the stricter cap, so the onboarding blanket rule can be tightened per
   module without loosening anything.
 
@@ -745,7 +787,7 @@ wizard and the spreadsheet import.
   options `contextWindow`/`reserveTokens` and the legacy budget remain.
 - **Routine-run observability**: routine runs create `Routine: <name>`
   agent sessions visible in Sessions, and the worker script (`pnpm worker`)
-  now loads `.env` and actually runs — its import paths previously pointed
+  now loads `.env` and actually runs - its import paths previously pointed
   at a nonexistent `./apps/...` location, so the queue never drained.
 
 ### Changed
@@ -771,7 +813,7 @@ wizard and the spreadsheet import.
   required, branches must be up to date with `main` before merging, and force
   pushes and branch deletion are disabled.
 - **Contributing: stacked-PR policy and PR template.** A stacked PR is not
-  independently reviewable — its diff is the delta against its parent branch,
+  independently reviewable - its diff is the delta against its parent branch,
   not against `main`. The template now forces authors to declare the chain,
   and `CONTRIBUTING.md` documents how to keep a stack from rotting.
 
@@ -786,7 +828,7 @@ wizard and the spreadsheet import.
   on any `"`, so a product named `6" pipe` was imported as `6 pipe`. RFC 4180
   treats a quote as data unless it starts a field, and the parser now agrees.
 - **CSV: "Unit Price" maps to the price**: `guessMapping` ran its substring
-  pass per field, so `unitLabel` — declared before `salePrice` — claimed a
+  pass per field, so `unitLabel` - declared before `salePrice` - claimed a
   "Unit Price" column on the strength of "unit" alone and left the price
   unmapped. Exact matches are now resolved for every field before any
   substring match runs, and short synonyms (`id`, `ean`, `upc`) match exactly
@@ -811,7 +853,7 @@ wizard and the spreadsheet import.
   the routines E2E gate.
 - **`insertInvoiceWithPosting` was never exported** from `modules/accounting`
   (`TS2459`). It survived the life of its PR because CI aborted at
-  `pnpm install` on a stale lockfile, so the typecheck never ran — a good
+  `pnpm install` on a stale lockfile, so the typecheck never ran - a good
   example of a broken pipeline hiding a real defect rather than just being
   noisy.
 - **Inventory posting-seam lint rule restored**: `eslint.config.mjs` listed
@@ -828,7 +870,7 @@ wizard and the spreadsheet import.
 
 ### Added
 - **Tabbed app framework (`AppFrame`)**: every business app now opens into a
-  shared frame — breadcrumb, app identity, underline tabs with live counts.
+  shared frame - breadcrumb, app identity, underline tabs with live counts.
   Tabs persist per app (`persistKey`) and initialize from `?tab=` for
   deep-linking; writes `chaste-app-tab:{key}` to localStorage. CRM, Settings,
   POS, Inventory, Purchasing, Manufacturing, Documents, Support, Analytics,
@@ -845,7 +887,7 @@ wizard and the spreadsheet import.
   capability.
 - **Settings rebuilt as four tabs**: Appearance (mode, themes, pinned apps),
   Workspace (org, modules, email/SMTP), Localization (display currency,
-  metric/imperial units, date format, week start — persisted per device via
+  metric/imperial units, date format, week start - persisted per device via
   the new `chaste-prefs` store), and AI & Automation (new `GET /api/ai-config`
   honestly reflecting provider, endpoint, and model configuration from the
   server environment; API keys never reach the browser).
@@ -861,7 +903,7 @@ wizard and the spreadsheet import.
   the body reflows into three columns (needs-you · working capital ·
   operations & ledger) on wide screens. Mobile keeps its natural scroll.
 - **Dashboard redesign ("the bookkeeper's cover page")**: the home screen
-  opens with a deep ledger band — net income set as a cover figure over fine
+  opens with a deep ledger band - net income set as a cover figure over fine
   ruling, revenue/expenses/cash inline, and the income-vs-expenses trend
   drawn as a smooth SVG area chart inside the band (theme-aware via `--band`
   tokens). Below it the paper body is re-set: setup steps as a quiet card,
@@ -880,8 +922,8 @@ wizard and the spreadsheet import.
 
 ### Added
 - **Guided setup ("what is expected of me")**: `GET /api/setup` computes a
-  live checklist per organization — products, customers, vendors, team,
-  email, website widget, Creator-mode agent — each item with a one-sentence
+  live checklist per organization - products, customers, vendors, team,
+  email, website widget, Creator-mode agent - each item with a one-sentence
   "why", done-state computed from real data, and a take-me-there link.
 - **Creator-mode coding-agent wizard**: `GET /api/creator/agent` detects
   installed coding CLIs (Claude Code, Codex CLI, Gemini CLI) read-only on
@@ -900,7 +942,7 @@ wizard and the spreadsheet import.
   balanced-posting assertion, double-convert race safety, and terminal
   decline.
 - **Purchasing workflow (request → approval → RFQ → award)**: new
-  `purchase_requests` and `rfqs` tables plus governed capabilities —
+  `purchase_requests` and `rfqs` tables plus governed capabilities -
   `purchasing.createPurchaseRequest`, `purchasing.decidePurchaseRequest`,
   `purchasing.createRfq`, `purchasing.recordQuote`,
   `purchasing.selectWinningQuote`, and the read-only
@@ -935,7 +977,7 @@ wizard and the spreadsheet import.
   five read-only dataset extractors, Arquero frame-op layer, and
   `analytics.renderReport` composing narrative text, SVG charts, and tables
   into a downloadable HTML document.
-- **Full CRM surface**: "Pipeline" is now "CRM" with two tabs — Customers
+- **Full CRM surface**: "Pipeline" is now "CRM" with two tabs - Customers
   (list, create, soft-deactivate) alongside the existing deal pipeline.
 - **Boot-time auto-migration with pre-migration snapshots**: the web server
   applies pending Drizzle migrations at startup, serialized by advisory lock,
@@ -946,7 +988,7 @@ wizard and the spreadsheet import.
   `cacheComponents: true` validated by `next build`.
 - **Official Next.js Skills** committed at `.agents/skills/`.
 - **Manufacturing module split** (`modules/manufacturing`, ADR 0026): full
-  production lifecycle — work orders, multi-level BOMs with scrap, cost
+  production lifecycle - work orders, multi-level BOMs with scrap, cost
   previews, run reversal, lot traceability.
 - **Inventory module surface**: stock history, available-to-promise,
   reservations, cycle counts, locations, lot balances, valuation.
@@ -998,7 +1040,7 @@ wizard and the spreadsheet import.
   keyboard grid navigation.
 - **Application frames and tabs** (`_shell/app-frame.tsx`): applications
   open at an Overview with breadcrumb and operation tabs.
-- **Four designed color themes**: Chaste, Graphite, Verdant, Meridian —
+- **Four designed color themes**: Chaste, Graphite, Verdant, Meridian -
   switching re-skins the entire product via Tailwind v4 token architecture.
 - **Command-center dashboard**: financial pulse, "Needs you" triage queue,
   working-capital figures, pipeline shape, operations signals, event ledger.
@@ -1023,7 +1065,7 @@ wizard and the spreadsheet import.
 - CI gains gitleaks workflow; `.env.example` cleaned up.
 
 ### Removed
-- `_shell/nav.ts` (sidebar navigation tree) — superseded by the application
+- `_shell/nav.ts` (sidebar navigation tree) - superseded by the application
   catalog in `_shell/apps.ts`.
 
 ### Fixed

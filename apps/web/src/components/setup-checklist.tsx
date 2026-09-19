@@ -12,7 +12,7 @@ import { IconAlertTriangle, IconArrowRight, IconCheck, IconX } from "@/component
  *
  * Deferred setup steps come back here, on the dashboard, with the reason they
  * matter and the one click that finishes them. Dismissal is stored locally so
- * a dismissed item stops nagging without silently marking work as done — the
+ * a dismissed item stops nagging without silently marking work as done - the
  * server still knows it is outstanding.
  */
 
@@ -120,7 +120,7 @@ export function SetupChecklist() {
                   href={meta.fix.href}
                   className={cn(
                     "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium",
-                    "text-maroon-700 transition-colors hover:bg-maroon-50",
+                    "text-gold-700 transition-colors hover:bg-gold-50",
                   )}
                 >
                   {meta.fix.label}

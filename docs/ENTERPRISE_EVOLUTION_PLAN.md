@@ -60,7 +60,7 @@ Additional investigations: authorization on exports/search/attachments; tenant-c
 
 ## 3. Backend architecture and execution contracts
 
-### B01 — One governed command path and an explicit bootstrap exception (P0)
+### B01 - One governed command path and an explicit bootstrap exception (P0)
 
 Owner: kernel lead; reviewers: security and domain leads. Depends on baseline inventory.
 
@@ -70,7 +70,7 @@ Tenant creation cannot require an existing tenant. Define a narrow authenticated
 
 Gate: enumerate all entry points; run the same authorized and forbidden fixture through UI adapter, agent adapter and worker; prove identical decisions/effects. Bootstrap concurrency returns one organization per creation intent; intentional creation of another organization uses a distinct intent and explicit eligibility rules.
 
-### B02 — Atomic local effects, idempotency and stable receipts (P0)
+### B02 - Atomic local effects, idempotency and stable receipts (P0)
 
 Owner: kernel + database leads. Depends on B01 contract; migrate one payment path first.
 
@@ -82,7 +82,7 @@ Persist `action_intents`/effect receipts with statuses `accepted`, `waiting_appr
 
 Gate: inject failure before write, after write, during audit, after commit/before response and after response loss. Every retry yields one business effect and one authoritative receipt, or an explicit reconciliation case; a committed effect is never labelled “nothing changed.” Concurrent 100 identical requests and reused keys with changed inputs are part of the proof, not just sequential duplicate calls.
 
-### B03 — Recoverable queue, external effects and business workflows (P0)
+### B03 - Recoverable queue, external effects and business workflows (P0)
 
 Owner: runtime lead. Depends on B02 identity contract.
 
@@ -96,7 +96,7 @@ External effect contract: write an outbox intent, commit, send with provider ide
 
 Gate: kill worker at every transition; reclaim stale lease; let the stale worker return late; redeliver both job and provider webhook. No duplicate committed internal effect, no silently lost occurrence, no unbounded retries, no unauthorized re-drive. Test a provider with no idempotency support explicitly.
 
-### B04 — Durable plans, interruptions and delegation (P0/P1)
+### B04 - Durable plans, interruptions and delegation (P0/P1)
 
 Owner: agent-runtime lead. Depends on B02/B03.
 
@@ -108,7 +108,7 @@ Acceptance is business state: e.g. “one approved PO exists for these shortages
 
 Gate: restart through a multi-module workflow; compact while awaiting approval; revoke actor access; change a price; cancel during an external timeout; amend user intent. Each case has a deterministic terminal or waiting state, an accurate receipt, and no authority escalation.
 
-### B05 — Capability contracts, business events and modules (P1)
+### B05 - Capability contracts, business events and modules (P1)
 
 Owner: architecture lead. Depends on B01/B02.
 
@@ -120,7 +120,7 @@ Events carry tenant, schema version, causation, correlation and aggregate versio
 
 Gate: boot conformance plus invalid-output rollback, read-capability write detection in test fixtures, event upgrade fixtures, module-disable permutations and inverse tests against later conflicting changes.
 
-### B06 — Exact financial and operational truth (P0 range checks; P1 domain depth)
+### B06 - Exact financial and operational truth (P0 range checks; P1 domain depth)
 
 Owner: accounting/inventory leads, with finance practitioner review.
 
@@ -138,7 +138,7 @@ Business completeness priorities:
 
 Gate: property tests plus reconciled scenario packs for each enabled segment, with overflow, zero/three-decimal currencies, partial returns, concurrent close/post, backdated changes and source-document history. A balanced ledger is necessary but cannot prove a business transaction was correctly classified.
 
-### B07 — Imports, connectors, search and knowledge (P1)
+### B07 - Imports, connectors, search and knowledge (P1)
 
 Owner: integrations lead. Depends on B02/B03 and authorization scopes.
 
@@ -152,7 +152,7 @@ Gate: replay an interrupted import with duplicate rows and changed mapping; tota
 
 ## 4. Autonomy that can be explained and enforced
 
-### A01 — Product levels and mandates (P0 contract, P1 rollout)
+### A01 - Product levels and mandates (P0 contract, P1 rollout)
 
 These are Chaste product definitions, not an external standardized autonomy scale.
 
@@ -169,7 +169,7 @@ Identity changes, policy loosening, audit alteration and production code promoti
 
 Gate: split a prohibited payment into small actions; use concurrent agents; change currency; enqueue then revoke the owner; attempt a new payee; exceed spend through model retries. All are refused or escalated according to the mandate with readable reasons.
 
-### A02 — Meaningful approval and control (P1)
+### A02 - Meaningful approval and control (P1)
 
 Bind approval to canonical payload, resource versions, policy/mandate revision, requester, approver identity, expiry and intended external destination. Recheck authority and invariants at execution. Approval is not a reusable bearer credential. Support maker/checker separation, scoped delegation, quorum for selected operations, out-of-office handover and rejection/cancellation permissions. Emergency access is time-bound, independently logged and reviewed; no silent bypass.
 
@@ -177,7 +177,7 @@ An approval preview shows what changes, amount/currency, counterparty, cumulativ
 
 Control scopes: pause a run, suspend a mandate, block a connector, stop tenant agent writes, stop fleet autonomous writes. Enforcement is server-side before every new effect. An in-flight irreversible effect may finish; report it and reconcile. Retain read access and manual operations when safe. Test controls across replicas and workers; targeting propagation within five seconds is a proposed engineering gate, not a present guarantee.
 
-### A03 — Earned rollout and useful proactive behavior (P1)
+### A03 - Earned rollout and useful proactive behavior (P1)
 
 Promote one workflow L1 → shadow → L2 → limited L3, per tenant and workflow version. Shadow records would-act decisions without external effects. Evaluate missed obligations as well as bad actions; a routine that always says no-action is not useful. Deterministic prechecks prevent unnecessary model calls, with sampled no-action audits to detect blind spots.
 
@@ -185,7 +185,7 @@ Use a benchmark of normal, ambiguous, adversarial, stale and partial-failure sce
 
 ## 5. Security, privacy and enterprise operation
 
-### S01 — Tenant and identity boundary (P0)
+### S01 - Tenant and identity boundary (P0)
 
 Owner: security + IAM leads. Inventory shared/global tables, tenant tables and indirect child tables. Runtime DB role must be non-owner and `NOBYPASSRLS`; migration credentials are separate. Test `USING` and `WITH CHECK`, unset tenant context, pooled context reuse, background jobs, joins, foreign-key linkage, exports and cache hits. Use composite `(org_id, id)` references or equivalent checked constraints where cross-tenant linkage is possible. A global dispatcher may discover jobs with a narrow role but executes tenant work in tenant scope. Never “fix” worker failures by giving every worker superuser access.
 
@@ -193,7 +193,7 @@ Trace full SSO login rather than accepting configuration storage as completion: 
 
 Gate: adversarial two-tenant integration matrix under actual runtime roles; stale session after deprovision; malicious account-link and cross-org invitation; unauthorized approval/rejection. Fail release on boundary failures even if all unit tests pass.
 
-### S02 — Untrusted data, secrets and external boundaries (P0/P1)
+### S02 - Untrusted data, secrets and external boundaries (P0/P1)
 
 Owner: application-security lead.
 
@@ -203,7 +203,7 @@ Secrets remain encrypted references, never model context, client bundles, generi
 
 Gate: inject malicious instructions into documents/memory/tool outputs; request forbidden exports; leak seeded canary secrets through errors; spoof forwarded headers; rotate a connector secret during a retry. Assert actual effects and egress, not just an assistant refusal string.
 
-### S03 — Retention, audit credibility and recovery (P1)
+### S03 - Retention, audit credibility and recovery (P1)
 
 Owner: operations + security; privacy/legal review for customer commitments.
 
@@ -215,7 +215,7 @@ Pin deployment images and dependencies, generate SBOM/provenance, scan secrets/d
 
 ## 6. Human experience before visual polish
 
-### U01 — A shared work surface (P1, delivered with durable runs)
+### U01 - A shared work surface (P1, delivered with durable runs)
 
 Owner: product + UX leads. Default experience depends on job, not technical skill: owner sees cash/obligations and approvals; operator sees today's tasks and exceptions; accountant sees reconciliation/close; administrator sees access and health. Offer progressive disclosure and saved views instead of duplicating separate products for beginners and experts.
 
@@ -225,7 +225,7 @@ Create a unified work inbox for approvals, exceptions, missing information and f
 
 Gate: test five tasks with novice, operator and accountant participants: find overdue obligation, review a proposal, correct an agent, recover a failed action and explain the final business state. Record completion, errors, assistance and time; proposed pilot target ≥90% unassisted completion on each critical task after iteration. Automated browser tests cover permissions and durable state transitions; usability claims require observed participants.
 
-### U02 — Onboarding that creates first value (P1)
+### U02 - Onboarding that creates first value (P1)
 
 Build on the existing wizard and remote tests. The minimum first session creates a workspace, confirms accounting-critical defaults and produces one useful, safe result. Rich business description, imports, team invitations, branding, connectors and agent/provider configuration can wait.
 
@@ -244,7 +244,7 @@ Backend corrections: move embedding to a post-commit job; make bootstrap receipt
 
 Gate: fresh/import/connect, mobile/keyboard, slow network, duplicate submission, provider absent, import partial failure, concurrent setup tabs, logout/return, invited user and multi-org user. Every optional step can be deferred and resumed; required posting prerequisites cannot be skipped into unsafe execution. Proposed research target: useful first draft within five minutes for the fresh path, reported separately from imports and compliance setup.
 
-### U03 — Error, recovery and trust language (P0 semantics, P1 surfaces)
+### U03 - Error, recovery and trust language (P0 semantics, P1 surfaces)
 
 Every failed action answers: what happened, whether anything changed, what to do next, and a safe support reference. Use codes such as `validation_failed`, `permission_denied`, `stale_approval`, `version_conflict`, `dependency_unavailable`, `budget_exhausted`, `outcome_unknown` and `internal_error`. Localize user text while retaining stable machine codes. Retry affordances follow the result contract, never substring matching an exception.
 
@@ -266,7 +266,7 @@ Gate: verify initial load and client navigation with the repository's `next-dev-
 
 ## 8. Developer experience, code conventions and removal work
 
-### D01 — Reproducible local setup (P1)
+### D01 - Reproducible local setup (P1)
 
 Owner: developer-platform lead. Provide one documented bootstrap command and a read-only `doctor` command: supported Node/pnpm versions, Docker health, ports, database extension/migration state, non-owner runtime role, required secrets by mode, provider connectivity and actionable repair guidance. Respect a running server; never start duplicates or reset a developer database silently. A fresh clone with a frozen lockfile must start app + worker + synthetic data and run a governed demo without a provider key through a deterministic development adapter.
 
@@ -274,7 +274,7 @@ Separate `demo`, `development`, `test` and production configuration; reject test
 
 Gate: a clean environment following only README completes setup, migration, login, first draft, worker task and tests. Test a second documented setup environment; report unsupported hosts rather than invent portability. Missing provider key should degrade AI features with a clear status while deterministic ERP flows remain usable.
 
-### D02 — Boundaries and intentional cleanup (P1/P2)
+### D02 - Boundaries and intentional cleanup (P1/P2)
 
 Use Zod at external boundaries, pure domain functions in `erp-core`, IO repositories in modules and authority in kernel. Replace `services: Record<string, unknown>` incrementally with typed service keys for the services that matter; avoid a dependency-injection framework until lifecycle needs justify it. Share browser-safe onboarding schemas/types instead of mirrored step lists. Normalize errors and results before extracting generic UI factories.
 
@@ -313,17 +313,17 @@ Gate: before/after runs on identical fixture with sufficient repetitions, correc
 
 ## 10. Continuous self-development as an operated delivery system
 
-### E01 — Two distinct learning loops (P1)
+### E01 - Two distinct learning loops (P1)
 
 Owner: creator-platform lead, with separate security and release owners.
 
 Operational learning improves explicit tenant configuration, retrieval facts and approved workflows. Product development changes tested artifacts. Neither loop silently edits model weights, grants itself permissions or treats repeated suggestions as authorization. A successful user action can suggest an SOP; it does not automatically become policy.
 
-Intake sources: reproducible missing capabilities, user corrections, recurring exceptions, task-verifier failures, privacy-preserving aggregate friction, performance regressions and dependency/security advisories. Deduplicate by behavior/root cause, link affected versions and business impact, distinguish support/configuration gaps from code defects, and assign a budget/owner before building. Continuous means scheduled, bounded, observable cycles with a stop condition—not an infinite self-triggering agent.
+Intake sources: reproducible missing capabilities, user corrections, recurring exceptions, task-verifier failures, privacy-preserving aggregate friction, performance regressions and dependency/security advisories. Deduplicate by behavior/root cause, link affected versions and business impact, distinguish support/configuration gaps from code defects, and assign a budget/owner before building. Continuous means scheduled, bounded, observable cycles with a stop condition-not an infinite self-triggering agent.
 
 Lifecycle: observed → triaged → specified → fixture_ready → building → verifying → review → candidate → staged → promoted → observing → validated. Explicit side states: needs_information, rejected, blocked, failed, cancelled, superseded, rolled_back. “Validated” requires a post-release acceptance outcome; promotion alone does not close a feature gap. Track lead time, verified resolution, recurrence, rollback frequency, review burden and total cost; code volume is not success.
 
-### E02 — Contract and verifier integrity (P0 for credible evidence; P1 pipeline)
+### E02 - Contract and verifier integrity (P0 for credible evidence; P1 pipeline)
 
 A change contract includes user outcome, non-goals, actor/resource scopes, invariants, touched entry points, forbidden bypasses, compatibility/migration needs, performance budget, adversarial fixtures and required UX observables. Freeze its revision before coding. The author may propose tests; an independently controlled verifier runs baseline and candidate against held-out tests and unchanged mandatory gates. A candidate cannot relax tests, change a gate expectation, replace the test runner or alter CI policy and still certify itself.
 
@@ -333,7 +333,7 @@ Apply unlazy discipline in implementation: inventory independently omittable out
 
 Gate: submit a proposal with fabricated logs, stale source digest, deleted failing test, changed CI runner, only skipped tests, placeholder assertion and malicious gate command. Each fails the appropriate verifier without gaining host authority. A legitimate change demonstrates a failing baseline regression and a passing candidate outcome.
 
-### E03 — Isolation and least-privilege exchange (P1)
+### E03 - Isolation and least-privilege exchange (P1)
 
 Production emits a sanitized, tenant-scoped gap envelope through an authenticated outbox. Development consumes only approved fixtures, not a production DB credential. Export approval checks re-identification risk and actual attachment contents; sanitization is not proven by a filename. Begin with synthetic fixtures; minimal redacted exports require explicit policy/approval and expiry.
 
@@ -343,7 +343,7 @@ Treat repository instructions, fixtures and build output as untrusted input to t
 
 Gate: synthetic malicious proposal attempts egress, host traversal, symlink escape, resource exhaustion, production credential retrieval and cross-job cache poisoning; none crosses the selected boundary. Kill/retry the build without duplicate promotion or leaked fixture data.
 
-### E04 — Promotion, rollback and real learning (P1/P2)
+### E04 - Promotion, rollback and real learning (P1/P2)
 
 Separate principals for authoring, verification, artifact signing and production deployment. Human code review and protected CI govern platform merges; tenant administrators enable tenant-scoped functionality but cannot approve shared platform code for every tenant. A production runtime has no source-write/package-install authority. Auto-remediation is initially restricted to preapproved reversible configuration/workflow actions, never self-expanded release permissions.
 

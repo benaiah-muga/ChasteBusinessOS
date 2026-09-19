@@ -96,7 +96,7 @@ export class OpenAiCompatAdapter implements ModelAdapter {
   /**
    * Stealth and preview models rotate on OpenRouter: a retired slug answers
    * 404 with a "testing period ended" note. That is a routing problem, not
-   * a conversation-killer — the fallback model takes the turn.
+   * a conversation-killer - the fallback model takes the turn.
    */
   private isModelUnavailable(err: unknown): boolean {
     const e = err as { status?: number; message?: string };

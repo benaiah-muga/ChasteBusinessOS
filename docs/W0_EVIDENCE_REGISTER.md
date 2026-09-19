@@ -17,7 +17,7 @@ source moves.
 
 | Fact | Evidence |
 |---|---|
-| The historical red gate was environmental, not a code defect: shared dev DB `chaste_os_v2` had 37 applied migrations and a documents layout (`content`, `lifecycle`, `visibility`, `insights`, `current_version`; no `content_base64`) produced by no migration on this branch — migrated by out-of-branch work, likely `origin/feat/document-ingestion`. `jobs.test.ts:58` and the intermittent `products.test.ts` timeout both pass against a branch-migrated fixture DB. | Session diagnosis; full web suite 209/209 on fixture DB |
+| The historical red gate was environmental, not a code defect: shared dev DB `chaste_os_v2` had 37 applied migrations and a documents layout (`content`, `lifecycle`, `visibility`, `insights`, `current_version`; no `content_base64`) produced by no migration on this branch - migrated by out-of-branch work, likely `origin/feat/document-ingestion`. `jobs.test.ts:58` and the intermittent `products.test.ts` timeout both pass against a branch-migrated fixture DB. | Session diagnosis; full web suite 209/209 on fixture DB |
 | Tests now provision per-run fixture databases by default and drop them on teardown; `CHASTE_TEST_DB=1` opts into a provided DB after a migration-count drift guard. | `packages/db/src/test-fixture.ts`; `@chaste/db/test-fixture` export |
 | All 22 module test files now execute under `pnpm test` (19 were previously invisible; N36). `turbo test` is uncached. | Working tree; CHANGELOG `[Unreleased]` |
 | CI demo coverage remains slice/m4/m5 only, key-conditional. | `.github/workflows/ci.yml` |
@@ -26,14 +26,14 @@ source moves.
 
 | ID | Status at this commit | Evidence and remaining proof |
 |---|---|---|
-| F01 | **reproduced** | Probe `apps/web/.w0-probes/probe-f01.mts` (run `pnpm exec tsx apps/web/.w0-probes/probe-f01.mts`): a capability whose write commits, followed by a ledger append that throws, returns `ok:false` to the caller while the effect persists — the retry-duplicates-effect window. Structural anchor: `packages/kernel/src/executor.ts:118-124` wraps execute + audit in one try. Fix belongs to B02 (atomic effect/audit receipt). |
+| F01 | **reproduced** | Probe `apps/web/.w0-probes/probe-f01.mts` (run `pnpm exec tsx apps/web/.w0-probes/probe-f01.mts`): a capability whose write commits, followed by a ledger append that throws, returns `ok:false` to the caller while the effect persists - the retry-duplicates-effect window. Structural anchor: `packages/kernel/src/executor.ts:118-124` wraps execute + audit in one try. Fix belongs to B02 (atomic effect/audit receipt). |
 | F02 | **reproduced** | Probe `probe-f02.mts`: capability returns `{"n":"not-a-number-7"}` against a declared `z.object({n: z.number()})` output; executor returns `ok:true` with the invalid data (`executor.ts:120` never parses `cap.output`). Fix belongs to B02/B05 (output validation before commit). |
 | F03 | **resolved (T06 + B03 notification outbox slice)** | Jobs now claim with expiring leases, heartbeat the matching owner/fencing token, reclaim stale processing rows, back off retryable failures and fence late acknowledgements. Approval/support notification intents now commit to a fenced outbox before delivery; uncertain webhook/SMTP outcomes become explicit reconciliation cases. `apps/web/src/server/jobs.test.ts` and `apps/web/src/server/outbox.test.ts` cover stale-worker rejection, no-resend uncertainty and reconciliation. Payment/connector effects and full worker-kill timing remain B03 follow-up evidence. |
 | F04 | **resolved (T03)** | Recurring expansion now runs only through `accounting.generateDueInvoices`; due templates are row-locked and each scheduled instant is persisted in `recurring_invoice_runs` under a unique `(org_id, recurring_invoice_id, scheduled_for)` key. `modules/accounting/src/recurring.test.ts` proves a repeated occurrence creates one invoice and one completed run. DST/outage policy and broader scheduled-work occurrence sharing remain follow-up work. |
-| F05 | **reproduced (in test logs)** | On a clean fixture DB, `analytics.test.ts` and `support.test.ts` drive the agent loop; its step/tool event inserts into `session_events` fail (no parent `agent_sessions` row) and are logged fire-and-forget while the run continues — silent trajectory gaps, exactly the audit/replay risk. Fix belongs to B04 (durable run log). |
+| F05 | **reproduced (in test logs)** | On a clean fixture DB, `analytics.test.ts` and `support.test.ts` drive the agent loop; its step/tool event inserts into `session_events` fail (no parent `agent_sessions` row) and are logged fire-and-forget while the run continues - silent trajectory gaps, exactly the audit/replay risk. Fix belongs to B04 (durable run log). |
 | F06 | source-confirmed | `packages/kernel/src/policy.ts` ordinal risk + amount thresholds; system actor in `jobs.ts` built from the queued capability permission. Open: delegation-ceiling and cumulative-exposure tests (A01). |
 | F07 | source-confirmed | `apps/web/src/server/approvals.ts` conditional claim present; rejection branch precedes capability-permission check. Open: restricted-member rejection repro (T05). |
-| F08 | source-confirmed | `modules/creator/src/index.ts` — four `risk: "read"` sites include proposal-inserting capabilities; render/test evidence split absent. Open: route-level proof (T04). |
+| F08 | source-confirmed | `modules/creator/src/index.ts` - four `risk: "read"` sites include proposal-inserting capabilities; render/test evidence split absent. Open: route-level proof (T04). |
 | F09 | source-confirmed | `packages/db/src/client.ts` documents the bypass-role escape hatch; creator takes direct `deps.db`. Open: runtime-role matrix (T09/S01). |
 | F10 | source-confirmed | `apps/web/src/server/kernel.ts` single constant advisory lock for the ledger chain. Open: contention measurement (ADR 0022 decision). |
 | F11 | source-confirmed | `apps/web/src/server/onboarding.ts` embedding inside the org transaction (4 anchor hits). Open: slow-provider/failure/timing repro. |
@@ -50,15 +50,15 @@ source moves.
 |---|---|---|
 | N01 | source-confirmed | `apps/web/src/app/api/hr/route.ts:7` GET passes session/org check only and returns `monthlySalaryMinor`/`taxRateBps` (`:49-50`) via direct `db.select()`; same shape in customers/deals/marketing/projects/pos list routes. Open: cross-role denial matrix incl. non-owner runtime role (I1/T09). |
 | N02 | source-confirmed | `modules/signals/src/index.ts` invokes all producers with org/time only (3 anchor hits); `server/kernel.ts` composes producers unconditionally. Open: cross-module disclosure repro (I1). |
-| N03 | **resolved (N03 delivery)** | Sign-in sealed behind `requireEmailVerification` (link re-sent on each attempt); unverified sessions resolve to a bare identity — no memberships surfaced, no permissions, case variants included — so pre-provisioned (SCIM/invitation) emails are claimable only after verification or a trusted-IdP assertion. Concurrent first sign-ins collapse to one domain user. Deployment profiles and edges: `docs/n03-verified-binding-matrix.md`; executable proof: `identity-binding.test.ts`. Open: real-SMTP/real-IdP end-to-end runs need a staging deployment. |
+| N03 | **resolved (N03 delivery)** | Sign-in sealed behind `requireEmailVerification` (link re-sent on each attempt); unverified sessions resolve to a bare identity - no memberships surfaced, no permissions, case variants included - so pre-provisioned (SCIM/invitation) emails are claimable only after verification or a trusted-IdP assertion. Concurrent first sign-ins collapse to one domain user. Deployment profiles and edges: `docs/n03-verified-binding-matrix.md`; executable proof: `identity-binding.test.ts`. Open: real-SMTP/real-IdP end-to-end runs need a staging deployment. |
 | N04 | source-confirmed | `api/support/public/route.ts` binds conversations from submitted email (4 anchor hits). Open: end-to-end disclosure proof against a running server (I1). |
 | N05 | source-confirmed | `modules/support/src/index.ts` `searchKnowledge` retrieves any org memory under `support.read` (3 hits). Open: retrieval repro incl. document chunks (I1). |
-| N06 | source-confirmed | `api/conversations/route.ts:10` lists every org conversation with latest-message preview `body.slice(0, 80)` and **no membership filter** (detail route checks membership — boundary contradiction confirmed at HEAD); also one query per conversation (N35 overlap). Open: two-actor browser/API proof (I1). |
+| N06 | source-confirmed | `api/conversations/route.ts:10` lists every org conversation with latest-message preview `body.slice(0, 80)` and **no membership filter** (detail route checks membership - boundary contradiction confirmed at HEAD); also one query per conversation (N35 overlap). Open: two-actor browser/API proof (I1). |
 | N07 | source-confirmed | `modules/iam/src/index.ts` `assignRole` lacks last-owner check (3 hits); SCIM delete leaves `user_roles`. Open: lifecycle concurrency repro (I1). |
 | N08 | source-confirmed | `api/support/channels/route.ts` GET lazily inserts settings; POST toggles/tokens with session+module checks only (4 hits). Open: mutation-classification inventory (I1/B01). |
-| N09 | **resolved (N09/ADR 0052, migration 0046)** | Commit-time enforcement delivered: line CHECKs (nonnegative, single-sided, nonzero), deferred balance/completeness/cross-org constraint triggers, and UPDATE/DELETE/TRUNCATE refusal on `journal_entries`/`journal_lines`/`ledger_events` — with one declared maintenance context (`app.ledger_maintenance`) for teardown/repair that the balance guards ignore. The runtime role additionally lost mutation rights on the append-only set (`APPEND_ONLY_TABLES`, re-revoked on every `ensureAppRole` grant; conformance sweep asserts it). `probe-n09` now asserts DISCHARGED on a fresh fixture: 8 triggers present, unbalanced commit refused, posted-line UPDATE/DELETE refused. `journal-guards.test.ts` pins the audit's full negative/positive proof list. POS's post-insert `sourceId` patch is gone (invoice inserted before posting). Stock-ledger immutability (`stock_movements`) remains open as a follow-up slice. |
+| N09 | **resolved (N09/ADR 0052, migration 0046)** | Commit-time enforcement delivered: line CHECKs (nonnegative, single-sided, nonzero), deferred balance/completeness/cross-org constraint triggers, and UPDATE/DELETE/TRUNCATE refusal on `journal_entries`/`journal_lines`/`ledger_events` - with one declared maintenance context (`app.ledger_maintenance`) for teardown/repair that the balance guards ignore. The runtime role additionally lost mutation rights on the append-only set (`APPEND_ONLY_TABLES`, re-revoked on every `ensureAppRole` grant; conformance sweep asserts it). `probe-n09` now asserts DISCHARGED on a fresh fixture: 8 triggers present, unbalanced commit refused, posted-line UPDATE/DELETE refused. `journal-guards.test.ts` pins the audit's full negative/positive proof list. POS's post-insert `sourceId` patch is gone (invoice inserted before posting). Stock-ledger immutability (`stock_movements`) remains open as a follow-up slice. |
 | N10 | source-confirmed | `packages/db/src/migrate.ts` `dockerDump` parses only user/database from the URL and falls back to the default local container (`:141-150`); snapshot-before-pending-check and last-ten retention confirmed in the same file. Open: restore drill + identity verification (S03). |
-| N11 | **resolved (Slice E + N11 completion)** | The credit-adjusted balance contract is now the only outstanding computation: `recordPayment`/`payBill` gate and mutate under a per-document `FOR UPDATE` lock (simultaneous overpays serialize — exactly one commits), `reversePayment`/`creditNote` share the lock; `listInvoices`, `arAging`, `unrealizedFxExposure`, overdue signals, the accounting/dashboard/purchasing pages and the customer portal all show `documentBalance`'s credit-adjusted outstanding; aging and overdue signals run from `dueAt` with an explicit as-of. `n11-reconciliation.test.ts` pins one invoice's identical outstanding across contract, aging, analytics, support and portal; `balance-reconciliation.test.ts` pins the lock race. Open: none for the core; historical-disagreement audit for pre-existing rows remains a migration-time task. |
+| N11 | **resolved (Slice E + N11 completion)** | The credit-adjusted balance contract is now the only outstanding computation: `recordPayment`/`payBill` gate and mutate under a per-document `FOR UPDATE` lock (simultaneous overpays serialize - exactly one commits), `reversePayment`/`creditNote` share the lock; `listInvoices`, `arAging`, `unrealizedFxExposure`, overdue signals, the accounting/dashboard/purchasing pages and the customer portal all show `documentBalance`'s credit-adjusted outstanding; aging and overdue signals run from `dueAt` with an explicit as-of. `n11-reconciliation.test.ts` pins one invoice's identical outstanding across contract, aging, analytics, support and portal; `balance-reconciliation.test.ts` pins the lock race. Open: none for the core; historical-disagreement audit for pre-existing rows remains a migration-time task. |
 | N12–N36 | N12/N13/N14/N16/N22 **resolved** (see delivery sections below) | N12 vendor-payment domain compensation; N13 exceptional year-end entries, posting eligibility, backdated corrections; N14 allocation model + reconciled definition; N16 receipt documents + stable positions + authoritative overreceipt; N22 stock projections, bin-scoped counts, one number allocator. The remaining N12–N36 rows are not yet revalidated: treat audit anchors as starting points, revalidate at fix time per the audit's §8 contract. |
 
 ## Probe reproduction
@@ -76,7 +76,7 @@ pnpm exec tsx apps/web/.w0-probes/probe-n11.mts   # N11 credit-ignoring payment 
 The DB probes create and drop their own fixture databases; they never touch
 the development database.
 
-## W0.4 — entry-point and runtime-role inventory
+## W0.4 - entry-point and runtime-role inventory
 
 Mechanical classification of all 55 files under `apps/web/src/app/api/**/route.ts`
 (executor calls vs direct `db.insert/update/select`, swept 2026-09-12). This is
@@ -108,7 +108,7 @@ with zero `executor.execute` involvement.
 `api/pos` (list), `api/sessions` (titles), `api/dashboard`, `api/approvals`
 (GET), `api/metrics`, `api/conversations` (list + previews), `api/setup`
 (org counts + embed token), `api/portal/invoice/[token]` (tokenized public
-exception — verify scope), `api/support/public` reads. Governed writes do not
+exception - verify scope), `api/support/public` reads. Governed writes do not
 legitimize ungoverned reads; each needs an explicit permission + audience.
 
 ### Governed and infrastructure entry points
@@ -117,14 +117,14 @@ legitimize ungoverned reads; each needs an explicit permission + audience.
   deals, documents, email, expenses, health, hr (POST), inventory,
   manufacturing, marketing, marketplace, modules, pos, projects, purchasing,
   quotes, recurring, reports, routines, signals, support, team, time.
-- `api/auth/[...all]`: Better Auth handler — documented infrastructure
+- `api/auth/[...all]`: Better Auth handler - documented infrastructure
   exception (S01 governs its configuration).
 - Worker (`scripts/worker.ts` → `processOneJob`) executes through the kernel
-  by a system actor scoped to the job's org — governed (F06 delegation
+  by a system actor scoped to the job's org - governed (F06 delegation
   ceiling still open).
-- Server actions: only `app/(app)/_shell/actions.ts` (org switch) — no
+- Server actions: only `app/(app)/_shell/actions.ts` (org switch) - no
   domain writes.
-- Boot (`instrumentation.ts`): runs migrations — infrastructure, but see N10.
+- Boot (`instrumentation.ts`): runs migrations - infrastructure, but see N10.
 
 ### Runtime DB roles
 
@@ -132,14 +132,14 @@ legitimize ungoverned reads; each needs an explicit permission + audience.
 |---|---|---|
 | Exactly one role exists in the deployed database: `chaste`, **superuser, BYPASSRLS**. | `pg_roles` inventory of the live dev database, 2026-09-12 | RLS is inert for the application; the S01 gate "runtime role must be non-owner and NOBYPASSRLS" fails by default in dev **and CI** (service defines `POSTGRES_USER: chaste`) |
 | The only NOBYPASSRLS probe role (`chaste_rls_probe`) is created and dropped ad hoc by `packages/db/src/rls.test.ts`. | test source | RLS isolation is proven only in that one test, never by the running app |
-| No migration creates application roles. | zero `CREATE ROLE` in `packages/db/drizzle/*.sql` | role provisioning is entirely manual/out-of-band — same drift class as the schema incident |
+| No migration creates application roles. | zero `CREATE ROLE` in `packages/db/drizzle/*.sql` | role provisioning is entirely manual/out-of-band - same drift class as the schema incident |
 
 Required: a least-privilege runtime role (SELECT/INSERT/UPDATE/DELETE on
 tenant tables, no DDL, NOBYPASSRLS) wired through `DATABASE_URL`, with
 separate migration credentials; CI must run the suite under it. This is the
 W1 prerequisite for every RLS-dependent gate (S01, N01, F09).
 
-## W1a — least-privilege runtime role (delivered)
+## W1a - least-privilege runtime role (delivered)
 
 `chaste_app` (NOBYPASSRLS, DML-only, no DDL) is now provisioned idempotently
 by `ensureAppRole` (`@chaste/db/roles`): cluster-level role plus per-database
@@ -154,11 +154,11 @@ writes are rejected; DDL is refused.
 Not yet flipped: the application still connects as `chaste` by default.
 Flipping `DATABASE_URL` to the runtime role requires the codebase-wide
 audit of context-setting paths (better-auth handlers, bootstrap, SCIM,
-background jobs) — that is the I1/S01 matrix work. The floor is now
+background jobs) - that is the I1/S01 matrix work. The floor is now
 executable instead of aspirational, and migration 0014's stated intent
 ("the app connects as a role that does NOT bypass RLS") has a supported path.
 
-## W1c — atomic receipts and honest outcomes (B02 first slice, delivered)
+## W1c - atomic receipts and honest outcomes (B02 first slice, delivered)
 
 The executor now enforces honest effect semantics at the trust boundary:
 
@@ -184,77 +184,77 @@ real store, including the money case: crash-after-commit + retry yields one
 posting, not two).
 
 Residual gaps, tracked for later slices: the receipt write and audit append
-are two statements (the full B02 unit of work — one transaction spanning
-mutation, audit and receipt — still requires injecting the transaction into
+are two statements (the full B02 unit of work - one transaction spanning
+mutation, audit and receipt - still requires injecting the transaction into
 module repositories); `intentId` is adopted only by the accounting route's
 mutations (UIs do not yet send it); `accounting.recordPayment` has **no
-route caller at all** — a capability-discovery gap (X04), recorded here.
+route caller at all** - a capability-discovery gap (X04), recorded here.
 
-## W1b — route read guards and the N06 list fix (first slice, delivered)
+## W1b - route read guards and the N06 list fix (first slice, delivered)
 
 - **N01 (route surface) discharged for the audit's listed reads**: a
   `missingPermission` guard (`apps/web/src/server/route-guards.ts`) now gates
   hr salaries (`hr.read`), the ledger payload projection (`accounting.read`),
   customers/deals (`crm.read`), marketing (`marketing.read`), projects list
   (`projects.read`), POS lists (`pos.read`), and the setup checklist
-  (`iam.admin` — it exposes the support embed token and org counts). The
+  (`iam.admin` - it exposes the support embed token and org counts). The
   sessions list applies the detail route's visibility predicate (own sessions,
   everything for `iam.admin`). Pinned by a six-case route matrix
   (`apps/web/src/server/route-guards.test.ts`) calling the real handlers with
-  mocked session resolution against the fixture database — including the
+  mocked session resolution against the fixture database - including the
   negative assertions that denied responses contain no sensitive values.
 - **N06 route side fixed**: the conversations list now inner-joins
   conversation membership (`messaging.read` + member filter) and fetches
-  previews only for visible conversations — a nonmember no longer sees titles,
+  previews only for visible conversations - a nonmember no longer sees titles,
   previews, or activity for a DM. Covered in the same matrix.
 - Still open on these findings: exports/search/attachments authorization,
   cache-aware checks, and the module-side `messaging.listConversations`
   capability (same leak inside the module, per N06); the remaining ungoverned
   write routes from the W0.4 inventory; `approvals`/`metrics` GET policy.
-- Infrastructure: `hookTimeout: 30_000` for the web suite — 18 files contend
+- Infrastructure: `hookTimeout: 30_000` for the web suite - 18 files contend
   for one fixture database per run and a 5-second `beforeAll` under parallel
   load legitimately exceeded the 10s default (the historical
   `products.test.ts` flake, reproduced and resolved honestly).
 
 ## Slices A–C (delivered in one pass)
 
-**Slice A — W1b remainder (write boundaries):**
+**Slice A - W1b remainder (write boundaries):**
 - **N06 module side fixed**: `messaging.listConversations` now membership-scoped like the route; the system actor lists nothing.
 - **N29 fixed**: notifications are immutable events with per-user receipts (`notification_reads`, migration 0036, RLS included). One person's read of a broadcast leaves it unread for everyone else; repeats are idempotent; another user's personal notification is a 404. The broadcast row's `readAt` is never rewritten.
-- **N34 fixed (review race)**: proposal decisions are compare-and-set — the status check lives in the UPDATE, so concurrent reviewers produce exactly one decision and one 409. Marketplace browsing moved from `accounting.read` to a dedicated `platform.browse` permission.
+- **N34 fixed (review race)**: proposal decisions are compare-and-set - the status check lives in the UPDATE, so concurrent reviewers produce exactly one decision and one 409. Marketplace browsing moved from `accounting.read` to a dedicated `platform.browse` permission.
 - **N08 fixed (channels)**: GET never creates the settings row and hands the embed token only to `iam.admin`; POST (provision/rotate/toggle) requires `iam.admin`; the support settings UI handles the unconfigured state and non-admin read-only view.
 
-**Slice B — W1d (B02 unit of work + adoption):**
+**Slice B - W1d (B02 unit of work + adoption):**
 - `executeAtomically` (`apps/web/src/server/unit-of-work.ts`): opens one transaction; a transaction-scoped registry and executor run mutation, audit fact and receipt **in the same unit**. Modules nest via savepoints (their `withOrgContext(deps.db, …)` accepts the tx).
-- `failOnAuditError` executor mode: inside a unit of work, an audit failure rethrows — rolling back the whole effect — instead of the no-shared-transaction "unknown" outcome. The executor's outer catch no longer conflates audit failures with domain failures.
+- `failOnAuditError` executor mode: inside a unit of work, an audit failure rethrows - rolling back the whole effect - instead of the no-shared-transaction "unknown" outcome. The executor's outer catch no longer conflates audit failures with domain failures.
 - Adoption: `api/accounting` `payBill` runs atomically whenever the client sends `intentId`; the accounting page generates one identity per confirmed intent. Proven by `unit-of-work.test.ts`: commit+replay in one unit; audit failure after the write rolls back payments, ledger and receipts together; the retry then starts clean and commits once.
 
-**Slice C — S01 floor (mechanical RLS conformance):**
+**Slice C - S01 floor (mechanical RLS conformance):**
 - Every fixture database now provisions `chaste_app` (drop `CHASTE_TEST_NO_APP_ROLE=1` to skip), so RLS conformance is testable anywhere.
 - `packages/db/src/rls-conformance.test.ts` sweeps every org-scoped table (38 tables) and asserts: RLS enabled, `tenant_isolation` policy present, DML granted to the runtime role, zero rows without tenant context, and zero cross-tenant rows under the other org's context.
-- **The sweep found real drift on its first run**: `bank_accounts`, `bank_transactions`, `purchase_requests`, `rfqs`, `sales_tax_filings`, `support_settings` — added after 0014's RLS pass — had no policies. Fixed in migration 0037; the suite now prevents recurrence.
+- **The sweep found real drift on its first run**: `bank_accounts`, `bank_transactions`, `purchase_requests`, `rfqs`, `sales_tax_filings`, `support_settings` - added after 0014's RLS pass - had no policies. Fixed in migration 0037; the suite now prevents recurrence.
 
-Still open (unchanged scope): remaining ungoverned write routes (import, scim, invite, sso, public support, chat tickets, onboarding bootstrap — I1/I2 design work), the application-wide role flip (now far safer: the conformance sweep proves the policy floor), and intentId adoption in the remaining UI surfaces.
+Still open (unchanged scope): remaining ungoverned write routes (import, scim, invite, sso, public support, chat tickets, onboarding bootstrap - I1/I2 design work), the application-wide role flip (now far safer: the conformance sweep proves the policy floor), and intentId adoption in the remaining UI surfaces.
 
 ## Slices D–E (delivered)
 
-**Slice D — import boundaries and ticket receipts:**
-- **X15 (import) fixed at the boundary**: importing customers now requires `crm.write`, products `inventory.write` — writing domain rows is domain authority, not session membership. Money parsing is exact (`toMinor` from the raw string): `"1,234.56"` → 123456, `"19.99"` → 1999, and sub-cent precision, negatives and malformed values are row errors — the float `Math.round(n * 100)` path is gone.
-- **X11 (ticket receipts)**: `TicketSink.file` returns the durable ticket id and the loop's `file_ticket` tool result carries `ticketId` — chat no longer answers "ticket filed" with no reference. Implemented in the chat route, the messages route, and the routine runner sinks.
-- Verified already-gated (no change needed): `api/org` PATCH (normalized to `hasPermission`), `api/team/sso`, `api/scim/tokens` — all `iam.admin`.
+**Slice D - import boundaries and ticket receipts:**
+- **X15 (import) fixed at the boundary**: importing customers now requires `crm.write`, products `inventory.write` - writing domain rows is domain authority, not session membership. Money parsing is exact (`toMinor` from the raw string): `"1,234.56"` → 123456, `"19.99"` → 1999, and sub-cent precision, negatives and malformed values are row errors - the float `Math.round(n * 100)` path is gone.
+- **X11 (ticket receipts)**: `TicketSink.file` returns the durable ticket id and the loop's `file_ticket` tool result carries `ticketId` - chat no longer answers "ticket filed" with no reference. Implemented in the chat route, the messages route, and the routine runner sinks.
+- Verified already-gated (no change needed): `api/org` PATCH (normalized to `hasPermission`), `api/team/sso`, `api/scim/tokens` - all `iam.admin`.
 
-**Slice E — N11 discharged (one balance contract):**
-- `packages/erp-core/src/document-balance.ts`: `documentBalance` (credit-adjusted outstanding, over-allocation, settled flag) and `canAcceptPayment` (lifecycle eligibility — drafts and voids refuse money — plus the outstanding cap), integer-exact, RangeError on bad money.
+**Slice E - N11 discharged (one balance contract):**
+- `packages/erp-core/src/document-balance.ts`: `documentBalance` (credit-adjusted outstanding, over-allocation, settled flag) and `canAcceptPayment` (lifecycle eligibility - drafts and voids refuse money - plus the outstanding cap), integer-exact, RangeError on bad money.
 - Adopted at every divergence the audit named: `accounting.recordPayment` and `purchasing.payBill` now gate on the credit-adjusted outstanding and refuse drafts (previously only voids were refused and credits ignored); analytics invoice aging and the support invoice projection compute outstanding the same way.
-- Probes: `probe-n11` now asserts DISCHARGED — the full 10000 payment against a 4000-credited invoice is refused with "outstanding is 6000". Contract pinned by 7 erp-core tests including conservation and acceptance-cap sweeps.
+- Probes: `probe-n11` now asserts DISCHARGED - the full 10000 payment against a 4000-credited invoice is refused with "outstanding is 6000". Contract pinned by 7 erp-core tests including conservation and acceptance-cap sweeps.
 
-## I1 write boundaries — remaining ungoverned writes (delivered, ADR 0053)
+## I1 write boundaries - remaining ungoverned writes (delivered, ADR 0053)
 
 The W0.4 ungoverned-write inventory is now closed except onboarding
 bootstrap:
 
 - **N07 lifecycle**: `server/identity-lifecycle.ts` owns invitation claims
-  (row-locked, compare-and-set, verified-email required — the N03
+  (row-locked, compare-and-set, verified-email required - the N03
   containment) and member deactivation (membership + user_roles + pending
   invitations cleared in one transaction; last-owner refused with zero
   partial effects; SCIM DELETE uses it). `iam.assignRole` shares the
@@ -265,7 +265,7 @@ bootstrap:
   sink executes through the kernel and reports refusal honestly
   (`TicketSink.file → { id: null, error }`). The routine runner's sink is a
   documented system-actor exception pending F06/A01 delegation work.
-- **N04 containment**: widget conversations start unbound — visitor email
+- **N04 containment**: widget conversations start unbound - visitor email
   lives on the thread (migration 0047: nullable `customer_id`,
   `visitor_email`, hashed `visitor_secret_hash`), a per-conversation secret
   issued once gates read/write/escalate, and the care agent reports "no
@@ -273,7 +273,7 @@ bootstrap:
   public token reveals nothing about them. Pinned by
   `support-public.test.ts`.
 
-## B01/T08 — intent-keyed bootstrap (delivered; the I1 standing exception is discharged)
+## B01/T08 - intent-keyed bootstrap (delivered; the I1 standing exception is discharged)
 
 `runOnboarding` remains the one declared bootstrap exception to the governed
 command path (tenant creation cannot require an existing tenant), but its
@@ -297,7 +297,7 @@ honesty is now mechanical:
 - Still open by design: N03's full verified-binding matrix (deployment-level
   proof); SCIM token expiry/rotation policy.
 
-## W0.5 build — receiving desk, My Work home, supplier page, instrumentation (delivered)
+## W0.5 build - receiving desk, My Work home, supplier page, instrumentation (delivered)
 
 The pilot build order executes on the delivered engines:
 
@@ -309,26 +309,26 @@ The pilot build order executes on the delivered engines:
   through the governed `purchasing.receiveGoods` / `returnGoods` /
   `listReceipts` capabilities via the kernel executor with operation ids.
 - **P01 My Work home** (`/api/my-work`, top of the home page): one
-  deterministic ranked list — approvals the viewer has authority to decide
+  deterministic ranked list - approvals the viewer has authority to decide
   first (oldest first), then partial orders' outstanding lines (largest
   first), then module signals with coverage failures shown as "unavailable,
   not zero problems". Each card says what changed, why it matters, and one
   primary action.
 - **NL brief**: `/api/my-work/summarize` writes a two-sentence brief over
   the already-authorized card bundle on
-  `openrouter/stealth/union-alpha`; without a key it degrades honestly —
+  `openrouter/stealth/union-alpha`; without a key it degrades honestly -
   the ranked list never depends on the model.
-- **P04 supplier view**: the vendors tab remembers the relationship — open
+- **P04 supplier view**: the vendors tab remembers the relationship - open
   orders, bills still owed, receiving-desk deep link per vendor.
 - **Instrumentation**: `lib/pilot-metrics.ts` records home-open,
   receiving-open, first-action and journey-complete events with elapsed
-  time in localStorage — no server write path, so telemetry cannot become
+  time in localStorage - no server write path, so telemetry cannot become
   an ungoverned write; the pilot operator exports per device.
 
 Pinned by `apps/web/src/server/pilot-ui.test.ts` (ranked composition,
 receipt round-trip, rejection boundary, honest NL degradation).
 
-## W0.5 — pilot cohort and workflow selection (recommended, awaiting owner confirmation)
+## W0.5 - pilot cohort and workflow selection (recommended, awaiting owner confirmation)
 
 `docs/w05-pilot-selection.md` selects the pilot cohort on evidence: a small
 distribution/wholesale purchasing-and-receiving team, running the chain
@@ -339,19 +339,19 @@ runs on delivered, ledger-proven contracts from this audit cycle (N16
 receipts, N11 balances, N12 reversals, N22 projections); P03 (reconciliation
 workspace) and P07 (checkout) are documented as deferred alternatives.
 Measurement plan follows the audit's provisional usability targets. The
-selection is the recommended default — owner confirmation unlocks the P05
+selection is the recommended default - owner confirmation unlocks the P05
 UI build.
 
-## N03 — verified identity binding closed; deployment matrix recorded (delivered)
+## N03 - verified identity binding closed; deployment matrix recorded (delivered)
 
 A password account proves nothing about mailbox ownership, and domain
-identities are pre-provisioned (SCIM, invitations) and bind by email —
+identities are pre-provisioned (SCIM, invitations) and bind by email -
 so an unverified sign-up for a provisioned address could previously walk
 straight into the pre-provisioned memberships. Two layers now seal the
 binding: Better Auth runs with `requireEmailVerification` (sign-in refuses
 unverified accounts, re-sends the verification link, sign-up skips
 auto-sign-in, duplicate responses stay generic), and the resolution layer
-surfaced no memberships and no permissions to an unverified session —
+surfaced no memberships and no permissions to an unverified session -
 including case-variant claims. Verification, or a trusted-IdP assertion in
 SSO profiles, unlocks pre-provisioned access; concurrent first sign-ins
 collapse to one domain user via the unique email plus conflict re-select.
@@ -368,9 +368,9 @@ regardless of the active flag, rotation is create-new + deactivate-old, and
 pre-policy tokens (null expiry) stay valid until deactivated. Pinned by
 `apps/web/src/server/scim-tokens.test.ts`.
 
-## N22 completion — stock projections, bin-scoped counts, one number allocator (delivered, ADR 0050 extension)
+## N22 completion - stock projections, bin-scoped counts, one number allocator (delivered, ADR 0050 extension)
 
-Migration 0053 adds `stock_balances` — one row per org+item+location+lot —
+Migration 0053 adds `stock_balances` - one row per org+item+location+lot -
 maintained by the `stock_balances_apply` trigger on `stock_movements`, so
 the read model is consistent with the ledger by construction whatever wrote
 the movement. Every on-hand read (inventory, transfers, manufacturing, POS,
@@ -382,7 +382,7 @@ and shows the projection read hitting one balance row through
 `stock_balance_item_idx` (constant, ~0.09 ms) while the ledger sum grows
 with history (200 movement rows scanned at this seed size). Cycle counts
 scope to one location: expected quantities snapshot per bin and posting
-adjusts that bin only, while the movement watermark stays item-global —
+adjusts that bin only, while the movement watermark stays item-global -
 stricter is safe; a false invalidation forces a recount, never a bad
 adjustment. Document numbers come from one per-org allocator
 (`nextDocNumber` over `doc_counters`, seeded from existing maxima),
@@ -390,18 +390,18 @@ replacing per-module MAX+1 across purchasing, accounting, sales, POS,
 manufacturing and support. Pinned by
 `modules/inventory/src/projections.test.ts`.
 
-## N16 deepening — receipt documents, stable positions, authoritative overreceipt (delivered, ADR 0049 extension)
+## N16 deepening - receipt documents, stable positions, authoritative overreceipt (delivered, ADR 0049 extension)
 
 Receiving now writes a first-class document: `goods_receipts` headers (who
 received, when, against which order) with lines that split arrivals into
-accepted and rejected quantities — rejected goods need a stated reason,
+accepted and rejected quantities - rejected goods need a stated reason,
 never stock, but still complete the vendor's delivery duty. Migration 0052
 gives every `po_lines` row a stable `position` assigned once at creation:
 "line 1" identifies the same line for the order's whole life, in the
 module, in bills, and in the human API surface, whatever row storage does.
 Overreceipt tolerance is an explicit authority (`overreceiptTolerancePct`
 paired with `authorityReason`), never an accident. Returns draw from
-concrete receipts — a named receipt or oldest-first FIFO — and update each
+concrete receipts - a named receipt or oldest-first FIFO - and update each
 receipt line's returned quantity, while three-way bill matching stays on
 accepted-net-of-returns. `purchasing.listReceipts` reports
 accepted/rejected/returned/remaining per receipt line and per order line.
@@ -409,31 +409,31 @@ Pinned by `modules/purchasing/src/receipts.test.ts` (rejection recording,
 authority pairing, reorder-surviving addressing, receipt-linked returns)
 and the standing equivalence floor in `receiving.test.ts`.
 
-## N13 completion — exceptional year-end entries, posting eligibility, backdated corrections (delivered)
+## N13 completion - exceptional year-end entries, posting eligibility, backdated corrections (delivered)
 
 The year-end roll is now an explicit exceptional entry (`journal_entries.entry_kind
 = 'year_end_close'`, migration 0051), not a manual entry that happens to zero
 the P&L: at most one live roll exists per sealed year, and re-closing a
-reopened year replaces the live roll — reversed inside the reopened December,
-never mirrored into the current period — before the fresh roll lands, so
+reopened year replaces the live roll - reversed inside the reopened December,
+never mirrored into the current period - before the fresh roll lands, so
 retained earnings is rolled once, not twice. `accounting.incomeStatement`
 excludes the close family, so a sealed year keeps its operating history (an
 all-time operating view) instead of silently reporting zero revenue. Generic
 reversals are corrections: they post into the approved open period while
 carrying the original business date in `business_at`. The posting service
-validates every pre-resolved account id against posting eligibility — same
-org, not archived — closing the cross-tenant and behind-the-chart posting
+validates every pre-resolved account id against posting eligibility - same
+org, not archived - closing the cross-tenant and behind-the-chart posting
 holes. Pinned by `modules/accounting/src/year-end.test.ts` (eligibility
 refusals, correction provenance, roll survival of the P&L, double-close
 refusal, replace-and-reclose with one live roll).
 
-## N12 purchasing compensations — vendor payments undo through their own domain (delivered, ADR 0051 extension)
+## N12 purchasing compensations - vendor payments undo through their own domain (delivered, ADR 0051 extension)
 
 `purchasing.reverseVendorPayment` mirrors the payment entry in its original
 currency, releases the bill's paid amount through the balance contract,
 demotes a paid bill back to open (bill-state repair), and refuses a second
 or replayed reversal at the business-operation level. `payBill` declares it
-as its real inverse — the kernel types inverse input against actual output —
+as its real inverse - the kernel types inverse input against actual output -
 and settles bills through `documentBalance`, so a bill fully covered by
 vendor credits is paid without a payment. The generic `accounting.reverseEntry`
 refuses `vendor_payment` entries with named routing. Pinned by
@@ -441,13 +441,13 @@ refuses `vendor_payment` entries with named routing. Pinned by
 replay refusal, credit-aware outstanding) and a routing case in the
 accounting reversal suite.
 
-## N14 allocation model — bank reconciliation with remaining amounts and a real reconciled definition (delivered, ADR 0048 extension)
+## N14 allocation model - bank reconciliation with remaining amounts and a real reconciled definition (delivered, ADR 0048 extension)
 
 Migration 0050 introduces `bank_allocations` (tenant-isolated, backfilled
 from existing single-claim matches) and retires the claim columns and their
 unique indexes. A statement line is explained by explicit allocations that
-share its sign and fit inside its amount: a payment — whole, partial split,
-or grouped with other payments — a journal entry (transfers included), a
+share its sign and fit inside its amount: a payment - whole, partial split,
+or grouped with other payments - a journal entry (transfers included), a
 reviewed fee, or an FX difference. Claims are enforced transactionally by
 row locks and remaining-amount budgets (`paymentRemaining`,
 entry cash-effect budget), not unique indexes. `accounting.bankReconciliation`
@@ -457,7 +457,7 @@ reconciled means that difference is exactly zero. Pure math in
 pinned by `bank-matching.test.ts` (equivalence floor) and `bankrec.test.ts`
 (fees, FX, grouped settlements, the reconciled flip).
 
-## N11 completion — one balance contract everywhere, locked money application (delivered)
+## N11 completion - one balance contract everywhere, locked money application (delivered)
 
 Slice E built the pure contract and the payment gate; this slice closes the
 remaining divergence the audit named:
@@ -472,7 +472,7 @@ remaining divergence the audit named:
   `unrealizedFxExposure`, the accounting-module overdue signal producer,
   the accounting/dashboard/purchasing pages, and the customer portal all
   compute outstanding through `documentBalance` (web surfaces via the
-  shared `server/balances.ts` helper) — credits reduce what is chased,
+  shared `server/balances.ts` helper) - credits reduce what is chased,
   over-allocation clamps at zero instead of hiding credit behind a
   negative, and the portal shows credited amounts explicitly.
 - **Due-date collections basis**: `computeAging` buckets days past due
@@ -484,11 +484,11 @@ remaining divergence the audit named:
   arAging, the analytics aging capability, the support invoice lookup, and
   the portal handler.
 
-## Stock-ledger immutability — quantity truth is append-only (delivered, ADR 0052 extension)
+## Stock-ledger immutability - quantity truth is append-only (delivered, ADR 0052 extension)
 
 Migration 0049 extends the commit-time immutability pattern to
 `stock_movements`: corrections are compensating movements (production and
-transfer reversals, cycle-count postings) — never edits to history. UPDATE,
+transfer reversals, cycle-count postings) - never edits to history. UPDATE,
 DELETE, and TRUNCATE refuse outside the declared maintenance context;
 `purgeTenantFinancials` now clears stock history alongside journal and
 ledger rows; the runtime role holds the append-only privilege shape. Pinned
@@ -496,7 +496,7 @@ by `stock-guards.test.ts` (3 live-DB cases) plus the runtime-role and
 RLS-conformance sweeps; inventory and seeded analytics/degradation suites
 run on purge-through-maintenance teardowns.
 
-## B02 client action identity — intentId adoption across UI surfaces (delivered)
+## B02 client action identity - intentId adoption across UI surfaces (delivered)
 
 Every mutating UI request now carries a client action identity, closing the
 B02 adoption gap (the kernel receipts existed; most surfaces never sent an
@@ -512,7 +512,7 @@ id):
   exceptions: SCIM (machine API, no client identity), invite claim
   (state-guarded CAS that answers retries honestly), chat and the messages
   agent reply (one actor context is shared across every step of an agent
-  loop — a single request-scoped id would false-conflict; job-driven agent
+  loop - a single request-scoped id would false-conflict; job-driven agent
   runs already key receipts by job id), notifications (idempotent read
   receipt on a conflict-protected table, not a domain write).
 - Pinned by `GATES-INTENT.md`: postApi unit test, the route-threading sweep
@@ -524,19 +524,19 @@ id):
 - Revalidate and reproduce N12–N36 anchors on demand, prioritized by wave (I1/I2 items first).
 - Pilot segment/workflow selection (W0.5).
 
-## B03 — worker-kill fixture and external-effect reconciliation (delivered)
+## B03 - worker-kill fixture and external-effect reconciliation (delivered)
 
 `worker-kill.test.ts` kills a worker mid-flight while it holds the lease and
 pins what the surviving system owes, per kill window:
 
 - **Killed after the effect and receipt, before the acknowledgement**: the
-  replacement worker replays the stored receipt — exactly one effect and one
+  replacement worker replays the stored receipt - exactly one effect and one
   audit row, the job completes done, and the revived worker's late
   acknowledgement is fenced by its stale fencing token.
 - **Killed mid-execution, before the effect**: the replacement runs fresh and
   completes; when the corpse un-freezes it commits a duplicate effect but its
   acknowledgement is still fenced. The queue's honest promise is
-  **at-least-once plus fencing** — mid-flight exactly-once requires
+  **at-least-once plus fencing** - mid-flight exactly-once requires
   capability-level idempotency, which external effects get from dedupe keys
   and idempotency-key headers.
 - **External webhook whose acknowledgement died in transit**: the provider

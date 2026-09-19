@@ -127,7 +127,7 @@ const createBill = (deps: ModuleDeps) =>
           // N16: addressing is by stable position, never by storage order.
           const poLineAt = (position: number) => poLineRows.find((r) => r.position === position);
           // N16: repeated references to one order line inside this bill
-          // consume each other's allowance — the aggregate is what the
+          // consume each other's allowance - the aggregate is what the
           // three-way match validates, not each row against full stock.
           const consumed = new Map<string, number>();
           for (const bl of input.lines) {
@@ -273,7 +273,7 @@ const payBill = (deps: ModuleDeps) =>
           .from(vendorBills)
           .where(and(eq(vendorBills.orgId, ctx.actor.orgId), eq(vendorBills.number, input.billNumber)))
           .limit(1)
-          // N11: serialize money application per document — the outstanding
+          // N11: serialize money application per document - the outstanding
           // verdict must see every committed payment, not a stale snapshot.
           .for("update");
         if (!bill) throw new Error("bill not found");
@@ -305,7 +305,7 @@ const payBill = (deps: ModuleDeps) =>
           .returning({ id: vendorPayments.id });
 
         const paidMinor = bill.paidMinor + input.amountMinor;
-        // N11/N12: settle and flag status through the one balance contract —
+        // N11/N12: settle and flag status through the one balance contract -
         // a bill fully covered by credits is settled without payments.
         const balance = documentBalance({ ...bill, paidMinor });
         await tx
@@ -389,7 +389,7 @@ const reverseVendorPayment = (deps: ModuleDeps) =>
           .from(journalLines)
           .where(eq(journalLines.entryId, entry.id));
 
-        // The mirror keeps the original's currency (ADR 0021) — a vendor
+        // The mirror keeps the original's currency (ADR 0021) - a vendor
         // payment settles in the currency it was posted in.
         const reversalEntryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Vendor payment reversal for bill ${bill.number}: ${input.reason}`,
@@ -525,7 +525,7 @@ const createPO = (deps: ModuleDeps) =>
             unitPriceMinor: l.unitPriceMinor,
             itemId: l.sku ? (itemMap.get(l.sku) ?? null) : null,
             // N16: stable display position, fixed at creation and never
-            // renumbered — "line 1" means this line forever.
+            // renumbered - "line 1" means this line forever.
             position: i + 1,
           })),
         );
@@ -549,14 +549,14 @@ const receivePO = (deps: ModuleDeps) =>
         .array(
           z.object({
             lineNumber: z.number().int().positive().describe("stable 1-based position on the order"),
-            quantity: z.number().int().min(0).describe("accepted thousandths — the only quantity that stocks and bills"),
+            quantity: z.number().int().min(0).describe("accepted thousandths - the only quantity that stocks and bills"),
             rejected: z.number().int().nonnegative().default(0).describe("arrived but refused; recorded, never stocked"),
             rejectionNote: z.string().max(500).optional(),
           }),
         )
         .min(1),
       /**
-       * N16: overreceipt tolerance is an explicit authority, not an accident —
+       * N16: overreceipt tolerance is an explicit authority, not an accident -
        * accepting more than ordered (within pct of the ordered quantity)
        * requires the paired reason naming who authorized it.
        */
@@ -588,7 +588,7 @@ const receivePO = (deps: ModuleDeps) =>
         // N16: addressing is by stable position, never by storage order.
         const lineAt = (position: number) => lines.find((l) => l.position === position);
 
-        // N16: aggregate this receipt's demand per line first — repeated
+        // N16: aggregate this receipt's demand per line first - repeated
         // references to the same line spend one budget, not one each.
         const wanted = new Map<number, { accepted: number; rejected: number; rejectionNote?: string }>();
         for (const rl of input.lines) {
@@ -675,7 +675,7 @@ const receivePO = (deps: ModuleDeps) =>
         }
 
         // N22: write the stock movements through the shared inventory command
-        // service — items locked in stable id order first, so a receipt and a
+        // service - items locked in stable id order first, so a receipt and a
         // concurrent sale/production of the same item serialize. Only accepted
         // goods stock; rejected goods are recorded on the receipt and stop
         // there.
@@ -732,7 +732,7 @@ async function rejectedForLine(tx: Parameters<Parameters<Database["db"]["transac
 }
 
 /**
- * True when every line has its full ordered quantity delivered — through
+ * True when every line has its full ordered quantity delivered - through
  * accepted receipts (stock movements for item lines, accepted milestones
  * for service lines) plus recorded rejections, net of returns: goods sent
  * back are owed again, so a return demotes a "received" order to partial
@@ -1036,7 +1036,7 @@ const listPurchaseWorkflow = (deps: ModuleDeps) =>
 // ── M10: supplier memory, credit notes, returns, backorders ────────────
 
 /**
- * AP credit note (M10, ADR 0037): the supplier conceded money — mirror of
+ * AP credit note (M10, ADR 0037): the supplier conceded money - mirror of
  * the AR credit note. Always gates; the bill document is never edited.
  */
 const billCreditNote = (deps: ModuleDeps) =>
@@ -1044,7 +1044,7 @@ const billCreditNote = (deps: ModuleDeps) =>
     id: "purchasing.billCreditNote",
     title: "Credit a vendor bill",
     intent:
-      "Record a supplier credit against an open bill — an approved reversing entry that reduces what is owed without editing the bill",
+      "Record a supplier credit against an open bill - an approved reversing entry that reduces what is owed without editing the bill",
     module: "purchasing",
     risk: "money",
     permission: "purchasing.write",
@@ -1131,7 +1131,7 @@ const closePurchaseOrder = (deps: ModuleDeps) =>
         let short = 0;
         for (const line of lines) {
           // N16: the shortfall still owed is ordered minus what remains
-          // accepted net of returns — rejections were delivered (refused,
+          // accepted net of returns - rejections were delivered (refused,
           // not owed), returns are owed again.
           const delivered = line.itemId
             ? (await acceptedForLine(tx, line.id)) - (await returnedForLine(tx, line.id)) + (await rejectedForLine(tx, line.id))
@@ -1260,7 +1260,7 @@ const returnGoods = (deps: ModuleDeps) =>
                 : `line ${lineNumber}: no receipt carries ${quantity} thousandths available to return on this line`,
             );
           }
-          // Legacy line — received before receipts existed, so the return
+          // Legacy line - received before receipts existed, so the return
           // can only draw from the historical net and points at the line.
           const legacy = receiptLines.length === 0;
           const scopeNote = input.receiptNumber ? `receipt ${input.receiptNumber}` : "receipts";
@@ -1286,7 +1286,7 @@ const returnGoods = (deps: ModuleDeps) =>
         }
 
         // N22: the outbound legs go through the shared inventory command
-        // service — items locked in stable id order, non-negative balance
+        // service - items locked in stable id order, non-negative balance
         // re-checked against the serialized state.
         await lockStockItems(tx, returnWrites.map((w) => w.itemId));
         for (const w of returnWrites) {
@@ -1319,7 +1319,7 @@ const listReceipts = (deps: ModuleDeps) =>
     id: "purchasing.listReceipts",
     title: "List goods receipts for a purchase order",
     intent:
-      "Show each receipt an order produced — per line what was accepted, rejected, returned, and what remains outstanding — so receiving and three-way matching can be checked by hand",
+      "Show each receipt an order produced - per line what was accepted, rejected, returned, and what remains outstanding - so receiving and three-way matching can be checked by hand",
     module: "purchasing",
     risk: "read",
     permission: "purchasing.read",
@@ -1449,7 +1449,7 @@ const supplierPerformance = (deps: ModuleDeps) =>
     id: "purchasing.supplierPerformance",
     title: "Supplier performance",
     intent:
-      "Summarize each vendor's delivery record — average lead time from order to receipt, fill rate, backorders, and late arrivals against promised dates",
+      "Summarize each vendor's delivery record - average lead time from order to receipt, fill rate, backorders, and late arrivals against promised dates",
     module: "purchasing",
     risk: "read",
     permission: "purchasing.read",
@@ -1500,7 +1500,7 @@ const supplierPerformance = (deps: ModuleDeps) =>
               const rec = Math.max(0, (await acceptedForLine(tx, line.id)) - (await returnedForLine(tx, line.id)));
               receivedTotal += Math.min(rec, line.quantity);
             }
-            // Lead time runs from order to first receipt — the receipt
+            // Lead time runs from order to first receipt - the receipt
             // header when receipts exist, the first legacy movement
             // otherwise (N16).
             let firstAt: Date | null = null;
@@ -1603,7 +1603,7 @@ const supplierStatement = (deps: ModuleDeps) =>
     id: "purchasing.supplierStatement",
     title: "Supplier statement",
     intent:
-      "Render a vendor's account as a dated, running-balance statement of bills, payments, and supplier credits — what you reconcile their month-end statement against",
+      "Render a vendor's account as a dated, running-balance statement of bills, payments, and supplier credits - what you reconcile their month-end statement against",
     module: "purchasing",
     risk: "read",
     permission: "purchasing.read",

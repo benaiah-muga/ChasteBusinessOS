@@ -1,6 +1,6 @@
 /**
  * Needs-attention signals (ADR 0034): the shared shape every module uses to
- * say "this deserves the owner's attention" — and the one shape every
+ * say "this deserves the owner's attention" - and the one shape every
  * consumer (home dashboard, app overviews, routines, the agent) reads.
  *
  * Signals are advisory by definition: a suggestedAction names a governed
@@ -36,7 +36,7 @@ export interface BusinessSignal {
 
 /**
  * A producer collects one module's signals for one org. Purely derived from
- * live data — no LLM, no randomness, no clock beyond the caller's now.
+ * live data - no LLM, no randomness, no clock beyond the caller's now.
  */
 export type SignalProducer = (orgId: string, now: Date) => Promise<BusinessSignal[]>;
 

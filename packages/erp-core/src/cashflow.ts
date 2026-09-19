@@ -5,10 +5,10 @@ import type { AccountType } from "./posting";
  *
  * Derived, never stored: a pure function over ledger lines. An entry moves
  * cash when it touches a cash account; its category comes from the
- * counter-accounts — operating for the trading cycle (AR, inventory, AP,
+ * counter-accounts - operating for the trading cycle (AR, inventory, AP,
  * tax, revenue, expense), financing for equity, investing for other assets.
  * Books are balanced, so an entry's cash delta is exactly minus the sum of
- * its counter deltas — the property tests hold both directions.
+ * its counter deltas - the property tests hold both directions.
  */
 
 export interface CashFlowLine {
@@ -38,7 +38,7 @@ function signed(line: CashFlowLine): number {
 
 /**
  * Classify one entry. Returns null when the entry never touches cash (a
- * non-cash event like depreciation or an AR sale) — it has no place in a
+ * non-cash event like depreciation or an AR sale) - it has no place in a
  * direct-method statement.
  */
 export function classifyCashEntry(
@@ -84,7 +84,7 @@ export interface CashFlowStatement {
   ties: boolean;
 }
 
-/** Independent cash balance over the given entries — the statement must tie to this. */
+/** Independent cash balance over the given entries - the statement must tie to this. */
 export function cashBalanceFromEntries(entries: CashFlowEntry[], cashCodes: string[]): number {
   let balance = 0;
   for (const e of entries) {
@@ -116,7 +116,7 @@ export function buildCashFlowStatement(
   const netMinor = totals.operating.netMinor + totals.investing.netMinor + totals.financing.netMinor;
   const closingMinor = opts.openingMinor + netMinor;
   // Independent recomputation: every cash movement must have landed in
-  // exactly one category — no drops, no double-counts.
+  // exactly one category - no drops, no double-counts.
   const cashBalanceMinor = cashBalanceFromEntries(entries, opts.cashCodes);
   return {
     openingMinor: opts.openingMinor,
