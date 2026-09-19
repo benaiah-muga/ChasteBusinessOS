@@ -5,7 +5,7 @@ import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import type { ModuleDeps } from "./shared";
 
 /**
- * Product-surface capabilities (M7.3): identity beyond the SKU — image,
+ * Product-surface capabilities (M7.3): identity beyond the SKU - image,
  * tags, and a scannable barcode. Barcode lookup fails honestly: a miss
  * returns `item: null`, never a guess.
  */

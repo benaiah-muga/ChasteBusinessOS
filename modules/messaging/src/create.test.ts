@@ -13,7 +13,7 @@ const memoryLedger: LedgerStore = {
 
 /**
  * I1 (N08): conversation creation is a governed capability that commits the
- * header and the creator's membership in one unit — no route-side inserts,
+ * header and the creator's membership in one unit - no route-side inserts,
  * no unusable orphan headers.
  */
 

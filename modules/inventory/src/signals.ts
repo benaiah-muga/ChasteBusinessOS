@@ -75,7 +75,7 @@ export function createInventorySignalProducer(db: Database["db"]): SignalProduce
           severity: "orange",
           module: "inventory",
           subject: `${item.name} has not moved in ${ageDays} days`,
-          detail: `${(onHand / 1000).toFixed(3)} on hand with no outbound movement since ${Math.floor(ageDays / 30)} months — cash sitting on a shelf.`,
+          detail: `${(onHand / 1000).toFixed(3)} on hand with no outbound movement since ${Math.floor(ageDays / 30)} months - cash sitting on a shelf.`,
           evidence: { refType: "item", refId: item.id },
           suggestedAction: null,
         });
@@ -97,7 +97,7 @@ export function createInventorySignalProducer(db: Database["db"]): SignalProduce
           severity: "red",
           module: "inventory",
           subject: `Unusual adjustment on ${item?.name ?? "an item"}`,
-          detail: `A single adjustment of ${(adj.quantityDelta / 1000).toFixed(3)} is more than half the current on-hand (${(onHand / 1000).toFixed(3)}) — worth a look.`,
+          detail: `A single adjustment of ${(adj.quantityDelta / 1000).toFixed(3)} is more than half the current on-hand (${(onHand / 1000).toFixed(3)}) - worth a look.`,
           evidence: { refType: "stock_movement", refId: adj.id },
           suggestedAction: null,
         });

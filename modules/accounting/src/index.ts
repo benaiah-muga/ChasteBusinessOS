@@ -229,7 +229,7 @@ const createInvoice = (deps: ModuleDeps) =>
     module: "accounting",
     risk: "write",
     permission: "accounting.write",
-    // No mechanical inverse: undoing an invoice is a business decision —
+    // No mechanical inverse: undoing an invoice is a business decision -
     // how much to concede goes through accounting.creditNote, whose amount
     // cannot be derived from the invoice's output. Reversing the posting
     // alone would leave the invoice collecting money the GL says reversed,
@@ -283,7 +283,7 @@ const recordPayment = (deps: ModuleDeps) =>
     inverse: {
       // reverseEntry refuses payment entries by design (it would leave the
       // invoice balance unrepaired), so the declared undo is the domain
-      // compensation — same pattern as payBill → reverseVendorPayment.
+      // compensation - same pattern as payBill → reverseVendorPayment.
       capabilityId: "accounting.reversePayment",
       buildInput: (_input, output) => ({ paymentId: output.paymentId, reason: "undo customer payment" }),
     },
@@ -310,11 +310,11 @@ const recordPayment = (deps: ModuleDeps) =>
           .from(invoices)
           .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.number, input.invoiceNumber)))
           .limit(1)
-          // N11: serialize money application per document — the outstanding
+          // N11: serialize money application per document - the outstanding
           // verdict must see every committed payment, not a stale snapshot.
           .for("update");
         if (!inv) throw new Error("invoice not found");
-        // N11: one balance contract gates every payment — lifecycle
+        // N11: one balance contract gates every payment - lifecycle
         // eligibility first, then the credit-adjusted outstanding.
         const verdict = canAcceptPayment(inv, inv.status, input.amountMinor);
         if (!verdict.ok) throw new Error(verdict.reason);
@@ -465,8 +465,8 @@ const recordPayment = (deps: ModuleDeps) =>
 
 /**
  * N12 (ADR 0051): the domain compensation for recordPayment. A payment is
- * an allocation on an invoice — and for cross-currency settlements a *pair*
- * of entries joined by an fx_settlements row — so the generic journal
+ * an allocation on an invoice - and for cross-currency settlements a *pair*
+ * of entries joined by an fx_settlements row - so the generic journal
  * mirror is not a complete undo. Reversing a payment means mirroring every
  * entry in its original currency, releasing the amount from the invoice's
  * paid balance through the one balance contract (N11), and refusing a
@@ -628,7 +628,7 @@ const reverseEntry = (deps: ModuleDeps) =>
         }
 
         // N12 (ADR 0051): a journal mirror alone is not a business undo for
-        // source types that own subledger state — those have domain
+        // source types that own subledger state - those have domain
         // compensations, and the generic path must route there instead of
         // silently leaving the document, drawer or run unrepaired.
         const domainRoutes: Record<string, string> = {
@@ -639,7 +639,7 @@ const reverseEntry = (deps: ModuleDeps) =>
           invoice: "accounting.creditNote against the invoice",
           "inventory-valuation": "inventory.reverseValuationSummary on the summary",
           // A roll must be replaced inside its own reopened December, not
-          // mirrored into the current period — that would restore closed-year
+          // mirrored into the current period - that would restore closed-year
           // income on the wrong books. closeYear does the replace-and-roll.
           year_end_close: "accounting.closeYear (reopen December first): it replaces the closing entry",
         };
@@ -663,7 +663,7 @@ const reverseEntry = (deps: ModuleDeps) =>
           .where(eq(journalLines.entryId, orig.id));
 
         // One currency per entry (ADR 0021): the mirror keeps the original's
-        // currency — reversing a foreign-currency entry in the base currency
+        // currency - reversing a foreign-currency entry in the base currency
         // double-counted it in FX exposure.
         // N13 correction provenance: the mirror lands in the approved open
         // period (postedAt = now) but carries the original business date, so
@@ -941,7 +941,7 @@ const arAging = (deps: ModuleDeps) =>
       const receivables = rows
         .filter((r) => r.issuedAt !== null)
         .map((r) => {
-          // N11: one balance contract — credits reduce what collections chases.
+          // N11: one balance contract - credits reduce what collections chases.
           const outstanding = documentBalance(r).outstandingMinor;
           return {
             invoiceNumber: r.number,
@@ -1115,11 +1115,11 @@ const closeYear = (deps: ModuleDeps) =>
 
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         // The roll is an exceptional entry with an explicit kind: at most
-        // one live roll per sealed year — live means not itself referenced
+        // one live roll per sealed year - live means not itself referenced
         // by a replacement reversal, or a second re-close would undo a
         // stale roll twice. Re-closing after a reopen replaces the live
-        // roll — reversed in the reopened December, never in the current
-        // period — before the fresh roll lands, so retained earnings is
+        // roll - reversed in the reopened December, never in the current
+        // period - before the fresh roll lands, so retained earnings is
         // rolled once, not twice.
         const [liveRoll] = await tx
           .select({ id: journalEntries.id, postedAt: journalEntries.postedAt })
@@ -1443,7 +1443,7 @@ const quoteDecline = (deps: ModuleDeps) =>
 
 /**
  * Marks every sent quote whose validity has lapsed as expired (M9).
- * No inverse: expiry is honest archiving — acceptance is refused past the
+ * No inverse: expiry is honest archiving - acceptance is refused past the
  * deadline regardless, so un-expiring would only invite overwriting history
  * with a lie. Declining stays available for anything that needs a decision
  * recorded.
@@ -2052,7 +2052,7 @@ const importBankFeed = (deps: ModuleDeps) =>
     risk: "write",
     permission: "accounting.write",
     // No mechanical inverse: an import records external facts, and each row
-    // has its own undo paths — unmatch/unexclude reset state and
+    // has its own undo paths - unmatch/unexclude reset state and
     // accounting.deleteBankTransaction removes an erroneously imported line.
     input: z.object({
       /** Omitted = the org's only account; ambiguous with several. */
@@ -2133,7 +2133,7 @@ const deleteBankTransaction = (deps: ModuleDeps) =>
     module: "accounting",
     risk: "write",
     permission: "accounting.write",
-    // Deletion of a raw fact is deliberately terminal — the line came from
+    // Deletion of a raw fact is deliberately terminal - the line came from
     // the bank's export, so the real restore path is importing it again.
     input: z.object({ transactionId: z.string().uuid() }),
     output: z.object({ deleted: z.boolean() }),
@@ -2163,7 +2163,7 @@ const matchBankTransaction = (deps: ModuleDeps) =>
     id: "accounting.matchBankTransaction",
     title: "Match bank transaction",
     intent:
-      "Explain a bank statement line with explicit allocations — a payment (whole or partial), a journal entry, a reviewed fee, or an FX difference — so the line's money is fully accounted for",
+      "Explain a bank statement line with explicit allocations - a payment (whole or partial), a journal entry, a reviewed fee, or an FX difference - so the line's money is fully accounted for",
     module: "accounting",
     risk: "write",
     permission: "accounting.write",
@@ -2276,7 +2276,7 @@ const matchBankTransaction = (deps: ModuleDeps) =>
             existingAllocated,
             proposed.map((a) => ({ kind: a.kind, amountMinor: a.amountMinor })),
           );
-          // Only the payment-kind slice consumes the payment's budget — the
+          // Only the payment-kind slice consumes the payment's budget - the
           // fee and FX allocations explain the bank's side of the gap.
           const paymentSlices = planned
             .filter((a) => a.kind === "payment")
@@ -2401,7 +2401,7 @@ const bankReconciliation = (deps: ModuleDeps) =>
     id: "accounting.bankReconciliation",
     title: "Bank reconciliation",
     intent:
-      "Show a bank account's statement lines with their allocations and the unexplained difference — reconciled means that difference is exactly zero",
+      "Show a bank account's statement lines with their allocations and the unexplained difference - reconciled means that difference is exactly zero",
     module: "accounting",
     risk: "read",
     permission: "accounting.read",
@@ -2705,7 +2705,7 @@ const fileSalesTaxReturn = (deps: ModuleDeps) =>
 
         // Invoice collection credited 2100 (Sales Tax Payable); the filing
         // debits that same account so the liability nets to zero. Remitting
-        // means cash leaves, so the balancing side is 1000 Cash — the same
+        // means cash leaves, so the balancing side is 1000 Cash - the same
         // convention payBill uses when money goes out.
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Sales tax filing ${input.periodFrom} → ${input.periodTo}`,
@@ -2735,11 +2735,11 @@ const fileSalesTaxReturn = (deps: ModuleDeps) =>
     },
   });
 
-// ── M10: money depth — credit notes, statements, reminders, cash flow ──
+// ── M10: money depth - credit notes, statements, reminders, cash flow ──
 
 /**
  * AR credit note (M10, ADR 0037): reversal-style, like reverseEntry. The
- * document is never edited — a proportional mirror entry reduces revenue,
+ * document is never edited - a proportional mirror entry reduces revenue,
  * tax, and the receivable, and the credited amount lands on an immutable
  * column. Always gates: the reversed amount lives in the invoice, not the
  * input, so the policy engine treats it as "always require a human".
@@ -2768,7 +2768,7 @@ const creditNote = (deps: ModuleDeps) =>
           .where(and(eq(invoices.id, input.invoiceId), eq(invoices.orgId, ctx.actor.orgId)))
           .limit(1)
           // N11: creditedMinor mutates here under the same document lock the
-          // payment path holds — a payment and a credit can't race the balance.
+          // payment path holds - a payment and a credit can't race the balance.
           .for("update");
         if (!inv) throw new Error("invoice not found");
         if (inv.status === "void") throw new Error("invoice is void; nothing to credit");
@@ -2831,7 +2831,7 @@ const customerStatement = (deps: ModuleDeps) =>
     id: "accounting.customerStatement",
     title: "Customer statement",
     intent:
-      "Render a customer's account as a dated, running-balance statement of invoices, payments, and credit notes — the document you can send when they dispute what they owe",
+      "Render a customer's account as a dated, running-balance statement of invoices, payments, and credit notes - the document you can send when they dispute what they owe",
     module: "accounting",
     risk: "read",
     permission: "accounting.read",
@@ -2900,7 +2900,7 @@ const customerStatement = (deps: ModuleDeps) =>
           if (!invoiceIds.has(p.invoiceId)) continue;
           rows.push({ date: p.receivedAt, kind: "payment", ref: "Payment received", amountMinor: -p.amountMinor });
         }
-        // One clock basis (N13) means same-instant rows are normal — the
+        // One clock basis (N13) means same-instant rows are normal - the
         // statement orders them by business sequence, not wall-clock luck:
         // the invoice exists before money or credit can touch it.
         const KIND_ORDER: Record<string, number> = { invoice: 0, payment: 1, credit_note: 2 };
@@ -2997,7 +2997,7 @@ const buildReminders = (deps: ModuleDeps) =>
           overdueCount: e.count,
           oldestDaysOverdue: e.oldest,
           totalOverdueMinor: e.total,
-          message: `Hi ${e.name} — a friendly nudge that ${e.count} invoice${e.count === 1 ? "" : "s"} totalling $${(e.total / 100).toFixed(2)} ${e.count === 1 ? "is" : "are"} now ${e.oldest} day${e.oldest === 1 ? "" : "s"} past due. If you have already sent payment, thank you and please disregard; otherwise we would appreciate it at your earliest convenience.`,
+          message: `Hi ${e.name} - a friendly nudge that ${e.count} invoice${e.count === 1 ? "" : "s"} totalling $${(e.total / 100).toFixed(2)} ${e.count === 1 ? "is" : "are"} now ${e.oldest} day${e.oldest === 1 ? "" : "s"} past due. If you have already sent payment, thank you and please disregard; otherwise we would appreciate it at your earliest convenience.`,
         }));
         reminders.sort((a, b) => b.totalOverdueMinor - a.totalOverdueMinor);
         return { reminders };
@@ -3042,7 +3042,7 @@ const cashFlow = (deps: ModuleDeps) =>
     id: "accounting.cashFlow",
     title: "Cash flow statement",
     intent:
-      "Derive the direct-method cash flow statement from the ledger — operating, investing, and financing buckets that provably tie to the cash balance",
+      "Derive the direct-method cash flow statement from the ledger - operating, investing, and financing buckets that provably tie to the cash balance",
     module: "accounting",
     risk: "read",
     permission: "accounting.read",

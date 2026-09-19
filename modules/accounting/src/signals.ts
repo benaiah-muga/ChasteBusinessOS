@@ -8,11 +8,11 @@ import { documentBalance, evaluateExpensePolicy, findDuplicateExpenseClaims, fin
  * Receivables signals (ADR 0034): invoices that are out with money owed and
  * slipping past their age bands. 30+ days is orange; 60+ is red.
  *
- * M9 adds expired quotes: validity lapsed, money not yet committed — red,
+ * M9 adds expired quotes: validity lapsed, money not yet committed - red,
  * suggesting the governed decline so the pipeline stays truthful.
  *
  * M10 adds suspected duplicate payments: same invoice, same amount, close
- * together — orange, evidence attached, human decides (ADR 0037).
+ * together - orange, evidence attached, human decides (ADR 0037).
  *
  * M11 adds expense hygiene: duplicate claims (same person, same amount,
  * days apart) and pending claims over their category's policy limit.
@@ -48,7 +48,7 @@ export function createAccountingSignalProducer(db: Database["db"]): SignalProduc
         severity: ageDays >= 60 ? "red" : "orange",
         module: "accounting",
         subject: `Invoice #${inv.number} is ${ageDays} days past due`,
-        detail: `${(balance / 100).toFixed(2)} minor-major units outstanding of ${(inv.totalMinor / 100).toFixed(2)} — due ${ageDays} days ago.`,
+        detail: `${(balance / 100).toFixed(2)} minor-major units outstanding of ${(inv.totalMinor / 100).toFixed(2)} - due ${ageDays} days ago.`,
         evidence: { refType: "invoice", refId: inv.id },
         suggestedAction: {
           capabilityId: "accounting.recordPayment",
@@ -87,7 +87,7 @@ export function createAccountingSignalProducer(db: Database["db"]): SignalProduc
         severity: "orange",
         module: "accounting",
         subject: `Suspected duplicate payment on invoice (${(d.amountMinor / 100).toFixed(2)}, ${d.daysApart} day${d.daysApart === 1 ? "" : "s"} apart)`,
-        detail: `Payments ${d.paymentIdA.slice(0, 8)} and ${d.paymentIdB.slice(0, 8)} hit the same invoice for the same amount ${d.daysApart} day${d.daysApart === 1 ? "" : "s"} apart. Could be a double click or an installment that matches by coincidence — verify and refund or reconcile.`,
+        detail: `Payments ${d.paymentIdA.slice(0, 8)} and ${d.paymentIdB.slice(0, 8)} hit the same invoice for the same amount ${d.daysApart} day${d.daysApart === 1 ? "" : "s"} apart. Could be a double click or an installment that matches by coincidence - verify and refund or reconcile.`,
         evidence: { refType: "invoice", refId: d.invoiceId },
         suggestedAction: null,
       });

@@ -159,7 +159,7 @@ describe("inventory command service (N22)", () => {
     expect(await balance()).toBe(start);
   });
 
-  it("two concurrent commands for the last unit serialize — exactly one wins", async () => {
+  it("two concurrent commands for the last unit serialize - exactly one wins", async () => {
     const report = await run("inventory.stockReport", { belowReorderOnly: false });
     const onHand = report.items.find((i: { sku: string }) => i.sku === WIDGET).onHandThousandths as number;
     expect(onHand).toBeGreaterThan(0);

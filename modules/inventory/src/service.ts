@@ -3,8 +3,8 @@ import { items, lots, stockBalances, stockMovements } from "@chaste/db";
 import { recordStockMovement, stockOnHand, type DbLike, type MovementInput } from "./shared";
 
 /**
- * N22 (ADR 0050): one command service for the stock ledger. Every writer —
- * inventory, POS, purchasing, sales, manufacturing — locks the item rows
+ * N22 (ADR 0050): one command service for the stock ledger. Every writer -
+ * inventory, POS, purchasing, sales, manufacturing - locks the item rows
  * first (stable id order, so concurrent commands cannot deadlock), then
  * moves quantity through here, which re-checks the guards against the
  * serialized state: lot must belong to the item being moved, and the
@@ -13,8 +13,8 @@ import { recordStockMovement, stockOnHand, type DbLike, type MovementInput } fro
  *
  * N22 completion: the stock_balances projection that stockOnHand reads is
  * maintained by a database trigger on stock_movements (migration 0053), so
- * the projection is consistent with the ledger by construction — whatever
- * wrote the movement — and rebuildStockBalances replays the ledger to
+ * the projection is consistent with the ledger by construction - whatever
+ * wrote the movement - and rebuildStockBalances replays the ledger to
  * prove it.
  */
 
@@ -31,7 +31,7 @@ export async function lockStockItems(tx: DbLike, itemIds: string[]): Promise<voi
 }
 
 /**
- * Replays the ledger into the projection for one org — the read model is
+ * Replays the ledger into the projection for one org - the read model is
  * derived state, and this is its one repair path. Returns the projection
  * rows written and the org-wide total quantity.
  */
@@ -54,7 +54,7 @@ export async function rebuildStockBalances(
   return { rows: Number(row?.rows ?? 0), totalQuantity: Number(row?.total ?? 0) };
 }
 
-/** Movements recorded so far for one item — the watermark a count sheet is snapshotted against. */
+/** Movements recorded so far for one item - the watermark a count sheet is snapshotted against. */
 export async function itemMovementCount(db: DbLike, orgId: string, itemId: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)` })

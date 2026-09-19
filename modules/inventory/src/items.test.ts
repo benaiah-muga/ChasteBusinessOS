@@ -59,7 +59,7 @@ describe("product surface (M7.3)", () => {
     expect(typeof created.itemId).toBe("string");
   });
 
-  it("looks up by barcode — positive control before trusting the miss", async () => {
+  it("looks up by barcode - positive control before trusting the miss", async () => {
     const hit = await run("inventory.lookupByBarcode", { barcode: "6001234500017" });
     expect(hit.item).not.toBeNull();
     expect(hit.item.sku).toBe("SCAN-1");

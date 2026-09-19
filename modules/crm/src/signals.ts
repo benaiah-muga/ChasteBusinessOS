@@ -7,7 +7,7 @@ import type { BusinessSignal, SignalProducer } from "@chaste/kernel";
  * Pipeline signals (ADR 0034): open deals with no stage movement recently.
  * A deal that has gone quiet is the cheapest loss to prevent.
  *
- * M9 adds overdue tasks: a promised follow-up past its due date is red —
+ * M9 adds overdue tasks: a promised follow-up past its due date is red -
  * the cheapest trust to lose.
  */
 
@@ -43,7 +43,7 @@ export function createCrmSignalProducer(db: Database["db"]): SignalProducer {
         severity: "orange",
         module: "crm",
         subject: `Deal "${deal.title}" has gone quiet for ${ageDays} days`,
-        detail: `Sat in "${deal.stage}" with ${(deal.valueMinor / 100).toFixed(2)} attached — a nudge now is cheaper than a loss later.`,
+        detail: `Sat in "${deal.stage}" with ${(deal.valueMinor / 100).toFixed(2)} attached - a nudge now is cheaper than a loss later.`,
         evidence: { refType: "deal", refId: deal.id },
         suggestedAction: {
           capabilityId: "crm.moveDealStage",
@@ -63,7 +63,7 @@ export function createCrmSignalProducer(db: Database["db"]): SignalProducer {
         severity: "red",
         module: "crm",
         subject: `Task "${t.title}" is ${daysLate} day${daysLate === 1 ? "" : "s"} overdue`,
-        detail: `Due ${t.dueAt!.toISOString().slice(0, 10)} and still open. Close it or renegotiate the date — silent slippage is how trust erodes.`,
+        detail: `Due ${t.dueAt!.toISOString().slice(0, 10)} and still open. Close it or renegotiate the date - silent slippage is how trust erodes.`,
         evidence: { refType: "task", refId: t.id },
         suggestedAction: {
           capabilityId: "crm.completeTask",

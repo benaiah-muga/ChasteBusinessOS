@@ -8,7 +8,7 @@ import type { ActionContext, SignalProducer } from "@chaste/kernel";
  *
  * Every extractor is an ordinary read capability: it declares the *source
  * module's* permission (accounting.read etc.), executes only org-scoped SQL,
- * and its every run lands in the audit ledger — for humans and agents alike.
+ * and its every run lands in the audit ledger - for humans and agents alike.
  * That is the whole jurisdiction model: an actor is bound to one org, so a
  * dataset can never cross the boundary, and each result carries the org's
  * data region tag so every consumer knows where the numbers live.

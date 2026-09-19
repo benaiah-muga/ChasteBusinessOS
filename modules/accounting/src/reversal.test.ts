@@ -147,7 +147,7 @@ describe("N12 payment compensation", () => {
   it("recordPayment declares a working inverse: buildInput from its own output reverses the payment", async () => {
     const registry = makeRegistry();
     const recordCap = registry.get("accounting.recordPayment")!;
-    // The declared undo must be the domain compensation — the generic
+    // The declared undo must be the domain compensation - the generic
     // reverseEntry refuses payment entries by design, so pointing there
     // would make every kernel-driven undo of a payment fail.
     expect(recordCap.inverse!.capabilityId).toBe("accounting.reversePayment");

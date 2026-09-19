@@ -169,6 +169,40 @@ describe("N13 exceptional entries and posting eligibility", () => {
     await expect(run("accounting.closeYear", { year: 2025 })).rejects.toThrow(/period 2025-12 is closed/);
   });
 
+  it("two concurrent closes of one year produce exactly one live roll", async () => {
+    await post(
+      { memo: "2027 revenue", lines: [{ accountCode: "1000", debitMinor: 400_000, creditMinor: 0 }, { accountCode: "4000", debitMinor: 0, creditMinor: 400_000 }] },
+      new Date("2027-02-01T00:00:00Z"),
+    );
+    // Both pass the live-roll check before either commits; the shared
+    // posting lock serializes the rolls and the loser must fail closed
+    // (December is sealed by the winner) instead of rolling twice.
+    const outcomes = await Promise.allSettled([
+      run("accounting.closeYear", { year: 2027 }),
+      run("accounting.closeYear", { year: 2027 }),
+    ]);
+    const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
+    const rejected = outcomes.filter((o) => o.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+
+    const rolls = await db.db
+      .select({ id: journalEntries.id, reversalOfId: journalEntries.reversalOfId })
+      .from(journalEntries)
+      .where(
+        and(
+          eq(journalEntries.orgId, orgId),
+          eq(journalEntries.entryKind, "year_end_close"),
+          sql`extract(year from ${journalEntries.postedAt}) = 2027`,
+        ),
+      );
+    const reversedIds = new Set(rolls.map((r) => r.reversalOfId).filter((v): v is string => v !== null));
+    const live = rolls.filter((r) => r.reversalOfId === null && !reversedIds.has(r.id));
+    expect(live).toHaveLength(1);
+    expect((await run("accounting.balanceSheet", {})).balanced).toBe(true);
+    expect((await run("accounting.trialBalance", {})).balanced).toBe(true);
+  });
+
   it("re-closing a reopened year replaces the live roll and rolls the full year once", async () => {
     await post(
       { memo: "2026 revenue", lines: [{ accountCode: "1000", debitMinor: 400_000, creditMinor: 0 }, { accountCode: "4000", debitMinor: 0, creditMinor: 400_000 }] },

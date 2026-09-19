@@ -40,7 +40,7 @@ afterAll(async () => {
 describe("documents layer (M12.4)", () => {
   it("folder, business-record metadata, and expiry persist at ingest", async () => {
     const doc = await run("documents.createDocument", {
-      title: "Lease — depot B",
+      title: "Lease - depot B",
       text: "Lease agreement text.",
       folder: "contracts/2026",
       refType: "project",

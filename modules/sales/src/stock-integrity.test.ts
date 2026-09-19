@@ -17,8 +17,8 @@ import { registerSalesCapabilities, type ModuleDeps } from "./index";
 
 /**
  * Stock consistency under one order (N15): repeated lines for the same item
- * spend one running availability budget — 7 + 7 against 10 reserves 10, not
- * 14 — and concurrent confirms serialize on the item rows so two buyers
+ * spend one running availability budget - 7 + 7 against 10 reserves 10, not
+ * 14 - and concurrent confirms serialize on the item rows so two buyers
  * cannot both win the last unit.
  */
 

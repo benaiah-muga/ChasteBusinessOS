@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import {
   accounts,
   bankAccounts,
+  bankAllocations,
   bankTransactions,
   createDb,
   customers,
@@ -146,6 +147,29 @@ describe("N14 explicit allocation alternatives", () => {
     const again = await feedLine(500_000, "unmatch fee re-match");
     const rematch = await run("accounting.matchBankTransaction", { transactionId: again, paymentId: p });
     expect(rematch.status).toBe("matched");
+  });
+
+  it("two concurrent splits cannot overdraw one payment: exactly one 60k slice of 100k wins", async () => {
+    const p = await newPayment(100_000, "raced split invoice");
+    const lineA = await feedLine(60_000, "raced split line A");
+    const lineB = await feedLine(60_000, "raced split line B");
+    // Both read a fresh budget concurrently; the payment row lock
+    // serializes them and the loser sees the winner's committed slice.
+    const outcomes = await Promise.allSettled([
+      run("accounting.matchBankTransaction", { transactionId: lineA, paymentId: p, amountMinor: 60_000 }),
+      run("accounting.matchBankTransaction", { transactionId: lineB, paymentId: p, amountMinor: 60_000 }),
+    ]);
+    const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
+    const rejected = outcomes.filter((o) => o.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(String((rejected[0] as PromiseRejectedResult).reason)).toMatch(/over-allocated/);
+    // The payment's budget holds: allocations total exactly the one slice.
+    const claimed = await db.db
+      .select({ amountMinor: bankAllocations.amountMinor })
+      .from(bankAllocations)
+      .where(eq(bankAllocations.paymentId, p));
+    expect(claimed.reduce((s, r) => s + r.amountMinor, 0)).toBe(60_000);
   });
 });
 

@@ -12,7 +12,7 @@ const memoryLedger: LedgerStore = {
 };
 
 /**
- * I1 (N08): ticket filing — the agent honesty path — is a governed action:
+ * I1 (N08): ticket filing - the agent honesty path - is a governed action:
  * audited through the kernel, contracted output, durable id in the receipt.
  */
 

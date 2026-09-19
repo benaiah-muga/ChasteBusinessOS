@@ -39,7 +39,7 @@ const createCustomer = (deps: ModuleDeps) =>
     }),
     output: z.object({
       customerId: z.string(),
-      /** Present when an existing customer looks like the same one — never a refusal. */
+      /** Present when an existing customer looks like the same one - never a refusal. */
       duplicateWarning: z.string().nullable(),
     }),
     execute: async (ctx, input) => {
@@ -159,7 +159,7 @@ const moveDealStage = (deps: ModuleDeps) =>
     input: z.object({
       dealId: z.string(),
       stage: z.enum(DEAL_STAGES),
-      /** Why the deal died — feeds win/loss analysis. Stored when moving to lost. */
+      /** Why the deal died - feeds win/loss analysis. Stored when moving to lost. */
       lostReason: z.string().max(500).optional(),
     }),
     output: z.object({ moved: z.boolean(), stage: z.string() }),
@@ -396,7 +396,7 @@ const customerTimeline = (deps: ModuleDeps) =>
     id: "crm.customerTimeline",
     title: "Customer timeline",
     intent:
-      "Assemble one reverse-chronological view of everything that happened with a customer — quotes, invoices, payments, deals, and tasks — from a single read",
+      "Assemble one reverse-chronological view of everything that happened with a customer - quotes, invoices, payments, deals, and tasks - from a single read",
     module: "crm",
     risk: "read",
     permission: "crm.read",

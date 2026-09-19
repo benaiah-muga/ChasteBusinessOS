@@ -6,7 +6,7 @@ import { registerProjectsCapabilities, type ModuleDeps } from "./index";
 
 /**
  * Projects standalone proof (M11.5): the module depends on nothing but the
- * kernel and the db — it works in an org with no other module enabled.
+ * kernel and the db - it works in an org with no other module enabled.
  * Kanban moves are honest: states come from the fixed column set.
  */
 

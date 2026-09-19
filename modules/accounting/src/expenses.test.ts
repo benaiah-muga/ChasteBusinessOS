@@ -12,7 +12,7 @@ import { registerAccountingCapabilities, createAccountingSignalProducer, type Mo
 
 /**
  * Expenses depth (M11.6, ADR 0038): rules-first categories with human
- * override, receipt attachment (stored; degrades when Documents is off —
+ * override, receipt attachment (stored; degrades when Documents is off -
  * proven in the demo subset), per-category policy limits surfaced as
  * signals, and duplicate-claim detection.
  */

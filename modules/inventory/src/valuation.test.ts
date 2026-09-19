@@ -134,7 +134,7 @@ describe("inventory.postValuationSummary / reverseValuationSummary (ADR 0033)", 
     expect(await glAccountBalanceMinor(deps.db, orgId)).toBe(4_400);
   });
 
-  it("is idempotent — a reconciled ledger gets an explicit no-op, never an empty entry", async () => {
+  it("is idempotent - a reconciled ledger gets an explicit no-op, never an empty entry", async () => {
     const again = await run("inventory.postValuationSummary", { memo: "probe no-op" });
     expect(again.posted).toBe(false);
     expect(again.entryId).toBeNull();
