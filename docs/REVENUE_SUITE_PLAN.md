@@ -1,4 +1,4 @@
-# Revenue Suite Plan — Inventory · Sales · CRM (M7–M9)
+# Revenue Suite Plan - Inventory · Sales · CRM (M7–M9)
 
 Status: proposed (awaiting owner sign-off) · 2026-08-30
 
@@ -11,7 +11,7 @@ ADR 0026 (manufacturing split), ADR 0029 (governed analytics), ADR 0031 (routine
 
 1. One execution path: every write is a kernel capability (`module.action` id,
    intent, inverse). Verified: `/api/quotes` is a thin adapter executing
-   `accounting.createQuote/acceptQuote/declineQuote` through the registry —
+   `accounting.createQuote/acceptQuote/declineQuote` through the registry -
    quotes are governed. M9.1's open question is therefore only their home/ids
    (`accounting.*` vs a `sales.*` re-home), not a governance gap.
 2. Domain math is deterministic and property-tested in `packages/erp-core`.
@@ -31,10 +31,10 @@ ADR 0026 (manufacturing split), ADR 0029 (governed analytics), ADR 0031 (routine
 | Suppliers, POs, 3-way match, partial receipts | BUILT | `modules/purchasing`, `matchThreeWay` in erp-core |
 | Manufacturing consumes/produces | BUILT | ADR 0026, shared stock writer |
 | Reorder points + alerts | PARTIAL | `needsReorder()` only; no velocity/lead-time math → M8.2 |
-| **Accounting integration (GL)** | **MISSING — top priority** | ADR 0009 deferred it deliberately; valuation now proven → M7.1 |
-| **Internal transfers** | MISSING (audit says Essential — agreed) | no transfer capability exists → M7.2 |
+| **Accounting integration (GL)** | **MISSING - top priority** | ADR 0009 deferred it deliberately; valuation now proven → M7.1 |
+| **Internal transfers** | MISSING (audit says Essential - agreed) | no transfer capability exists → M7.2 |
 | Product images / tags / barcode field | NEW | cheap columns + lookup capability → M7.3 |
-| Variants, full UoM, FIFO, camera scanning | ADAPTED / DEFERRED | correctness surface vs checklist optics — §6 |
+| Variants, full UoM, FIFO, camera scanning | ADAPTED / DEFERRED | correctness surface vs checklist optics - §6 |
 | Zones/bins/picking/routes, EDI, 3PL | REJECTED (audit tier ⑤) | matches ARCHITECTURE non-goals |
 
 Key correction to the audit: it buried "accounting should understand
@@ -68,10 +68,10 @@ architectural gap (ADR 0009's deferral), so it goes first.
 | Customer portal | PARTIAL | `/api/portal` exists; keep minimal |
 | Templates, e-signature, quote comparison, subscriptions, EDI | REJECTED / DEFERRED | §6 |
 
-### 1.4 On forecasting: "Odoo does it without AI — wouldn't we be ahead?"
+### 1.4 On forecasting: "Odoo does it without AI - wouldn't we be ahead?"
 
 Odoo's replenishment is deterministic min/max orderpoints plus
-confirmed-demand forecasting — no AI, correct. So our reorder math (M8.2) is
+confirmed-demand forecasting - no AI, correct. So our reorder math (M8.2) is
 **parity, not edge**, and it's table stakes: we build it anyway, because
 without it every AI answer about stock is vibes.
 
@@ -79,7 +79,7 @@ The edge over Odoo is the loop and the surface, not the math:
 
 - Odoo's automation quietly creates RFQs or shows a Replenishment report you
   must open. Ours produces a **signal** (needs attention), a **plan** with
-  visible arithmetic, **draft POs**, and a **policy-gated approval** — audited,
+  visible arithmetic, **draft POs**, and a **policy-gated approval** - audited,
   reversible, identical path for human and agent.
 - Every suggestion carries evidence rows (velocity window, lead time, safety
   stock, on-hand, incoming). "Why?" is answered with numbers, never with a
@@ -87,7 +87,7 @@ The edge over Odoo is the loop and the surface, not the math:
 - Deterministic core means the LLM cannot hallucinate a quantity; it can only
   mis-narrate one, and the receipt is right there.
 
-So: yes, implement — but only M8.1 + M8.3 make us *ahead*; M8.2 alone makes us
+So: yes, implement - but only M8.1 + M8.3 make us *ahead*; M8.2 alone makes us
 Odoo-shaped. We will not market "AI forecasting"; we ship deterministic
 forecasting with an AI interface.
 
@@ -105,29 +105,29 @@ Stock movement ← every step          BUILT (shared writer, ADR 0009)
         → GL                         M7.1 (the missing tail)
 ```
 
-Principle preserved: modular underneath, simple on the surface — the user
+Principle preserved: modular underneath, simple on the surface - the user
 never has to learn this diagram. "John wants 50 chairs, prepare everything"
 composes it through governed capabilities with receipts, and every step stays
 visible, auditable, and manually controllable.
 
-## 3. M7 — Inventory integrity: "books that see the warehouse"
+## 3. M7 - Inventory integrity: "books that see the warehouse"
 
 Goal: the balance sheet reflects the warehouse; multi-location stock moves;
 product identity is complete enough for real shops.
 
-### Slice 7.1 — Inventory → GL closure (top priority)
+### Slice 7.1 - Inventory → GL closure (top priority)
 
 - Periodic valuation posting: at period close (or on demand) post a summary
-  journal — DR inventory asset / CR COGS relief & adjustments — derived from
+  journal - DR inventory asset / CR COGS relief & adjustments - derived from
   the stock ledger. ADR-0033 draft position: **periodic first**; perpetual
   COGS-at-sale waits until cost-layer policy settles (moving average is the
   only method until then).
-- `erp-core`: pure reconciliation — replay ledger → valuation state vs GL
+- `erp-core`: pure reconciliation - replay ledger → valuation state vs GL
   inventory account balance → variance report (zero unless adjustments posted).
 - Capability `inventory.postValuationSummary`: risk `money`, approval-gated,
   inverse = reversal entry. Blocked when derived variance ≠ 0.
 
-Gates (spec — materialized into `GATES.md` from the unlazy leaf template when
+Gates (spec - materialized into `GATES.md` from the unlazy leaf template when
 the slice starts):
 
 - **G7.1a** reconciliation property: randomized mixed activity → variance = 0
@@ -142,7 +142,7 @@ the slice starts):
   - `CHECK: pnpm --filter @chaste/module-inventory test -- valuation-guard`
   - `EXPECT: "posting-refused"`
 
-### Slice 7.2 — Internal transfers
+### Slice 7.2 - Internal transfers
 
 - `inventory.createTransfer` (pending) → `inventory.confirmTransfer`: paired
   −out/+in legs in one transaction; partial confirm supported; inverse =
@@ -161,7 +161,7 @@ Gates:
   - `CHECK: pnpm demo:m7` (transfer scenario)
   - `EXPECT: "TRANSFER OK"`
 
-### Slice 7.3 — Product surface
+### Slice 7.3 - Product surface
 
 - `items` gains `imageUrl`, `tags`, `barcode` (unique per org) + read
   capability `inventory.lookupByBarcode`; receipt notes on goods receipts
@@ -179,9 +179,9 @@ Gates:
   - `CHECK: pnpm demo:m7` (product scenario)
   - `EXPECT: "PRODUCT SURFACE OK"`
 
-## 4. M8 — Signals + reorder intelligence (the marquee)
+## 4. M8 - Signals + reorder intelligence (the marquee)
 
-### Slice 8.1 — "Needs Attention" signal registry (ADR-0034)
+### Slice 8.1 - "Needs Attention" signal registry (ADR-0034)
 
 - Registry of deterministic per-module **producers**; one shape:
   `{ id, severity: red|orange|green, module, subject, evidenceLink,
@@ -204,7 +204,7 @@ Gates:
   - `CHECK: pnpm demo:m8`
   - `EXPECT: "SIGNALS RENDERED"`
 
-### Slice 8.2 — Reorder math in erp-core (the Odoo-parity part)
+### Slice 8.2 - Reorder math in erp-core (the Odoo-parity part)
 
 - Pure functions: `averageDailyDemand(history, windowDays)`,
   `leadTimeDemand(demand, leadTimeDays)`,
@@ -223,7 +223,7 @@ Gates:
   - `CHECK: pnpm --filter @chaste/erp-core test -- reorder-golden`
   - `EXPECT: "golden-match"`
 
-### Slice 8.3 — Governed reorder loop (the Odoo-beating part)
+### Slice 8.3 - Governed reorder loop (the Odoo-beating part)
 
 - Upgrade the existing advisory `stock-reorder` skill into the governed loop:
   read signals + math outputs → compose plan (items, qty, preferred supplier
@@ -231,7 +231,7 @@ Gates:
   draft POs per supplier via existing `purchasing` capabilities → money
   policy applies as usual.
 - The agent answers the marquee question with citations: "7 products at risk;
-  plan = UGX X; create the POs?" — every number comes from 8.2, never from the
+  plan = UGX X; create the POs?" - every number comes from 8.2, never from the
   model.
 
 Gates:
@@ -244,14 +244,14 @@ Gates:
   - `CHECK: pnpm demo:m8 --decline`
   - `EXPECT: "DECLINE AUDITED"`
 
-## 5. M9 — Quote-to-cash completed + CRM depth
+## 5. M9 - Quote-to-cash completed + CRM depth
 
-### Slice 9.1 — Quote lifecycle consolidation (corrected)
+### Slice 9.1 - Quote lifecycle consolidation (corrected)
 
 - Verified: quotes already run through governed capabilities
   (`accounting.createQuote/sendQuote`-equivalent, `acceptQuote`, `declineQuote`)
-  via a thin `/api/quotes` adapter — no governance gap. Remaining work:
-  decide home/ids (`accounting.*` kept vs `sales.*` re-home — capability ids
+  via a thin `/api/quotes` adapter - no governance gap. Remaining work:
+  decide home/ids (`accounting.*` kept vs `sales.*` re-home - capability ids
   are embedded for intent search and referenced by advisory skills, so a
   rename has migration cost; default: **keep ids, document the home**),
   add expiry handling (auto-decline past validity → signal), verify the
@@ -267,12 +267,12 @@ Gates:
   - `CHECK: pnpm demo:m9`
   - `EXPECT: "QUOTE2CASH OK"`
 
-### Slice 9.2 — Sales orders + fulfillment (light)
+### Slice 9.2 - Sales orders + fulfillment (light)
 
 - `sales_orders` as the contract between sales and inventory: confirm →
   reserve stock (existing reservation primitives); `sales.deliverOrder`
   (full/partial) consumes the reservation, writes movements via the shared
-  writer, and invoices (default: invoice-on-delivery — see §8.3); backorder
+  writer, and invoices (default: invoice-on-delivery - see §8.3); backorder
   flag when undersupplied (flag, not a document zoo); cancel → release
   reservations.
 - Customers gain `creditLimitMinor`; confirming an order over limit routes to
@@ -289,7 +289,7 @@ Gates:
   - `CHECK: pnpm demo:m9` (fulfillment scenario)
   - `EXPECT: "FULFILLMENT OK"`
 
-### Slice 9.3 — CRM depth (lean)
+### Slice 9.3 - CRM depth (lean)
 
 - `deals` gains `source`, `ownerUserId`, `lostReason`; **leads = deals in early
   stages** (deliberate one-object choice, §8.2); `crm.convertLead` marks
@@ -310,11 +310,11 @@ Gates:
   - `CHECK: pnpm --filter @chaste/erp-core test -- duplicates`
   - `EXPECT: "duplicates-ok"`
 
-### Slice 9.4 — Customer 360 (read-only)
+### Slice 9.4 - Customer 360 (read-only)
 
 - `crm.customerTimeline` read capability assembling invoices, quotes,
   payments, deals, tasks, support threads, and messages into one dated,
-  sourced feed — an analytics extractor underneath (ADR 0029 pattern). Powers
+  sourced feed - an analytics extractor underneath (ADR 0029 pattern). Powers
   "summarize this customer" with citations.
 
 Gate:
@@ -327,7 +327,7 @@ Gate:
 ## 6. Explicitly not building (adopted from the audit's ④/⑤, plus ours)
 
 - WMS depth: zones, bins, put-away, wave/batch picking, warehouse routes.
-- FIFO / landed costs — moving average only until a named customer needs
+- FIFO / landed costs - moving average only until a named customer needs
   otherwise.
 - Product variants; multi-dimensional UoM (display-level `unitLabel` already
   exists and is enough).
@@ -341,19 +341,19 @@ Gate:
 
 ## 7. ADRs to write (at slice start, not before)
 
-- **0033 `inventory-gl-integration`** — periodic summary vs perpetual COGS;
+- **0033 `inventory-gl-integration`** - periodic summary vs perpetual COGS;
   draft position: periodic + property-tested reconciliation; retires ADR
   0009's deferral.
-- **0034 `needs-attention-signal-registry`** — one registry, many consumers;
+- **0034 `needs-attention-signal-registry`** - one registry, many consumers;
   producers deterministic; signals are advisory, actions still governed.
-- **0036 `sales-order-fulfillment-model`** — reservation-anchored SO,
+- **0036 `sales-order-fulfillment-model`** - reservation-anchored SO,
   invoice-on-delivery default, backorders as a flag.
 
 ## 8. Open decisions for the owner
 
 1. **GL posting cadence**: on-demand + period-close (recommended) vs scheduled
    job.
-2. **Leads**: one-object (deals with early stages — recommended) vs a separate
+2. **Leads**: one-object (deals with early stages - recommended) vs a separate
    `leads` table.
 3. **Invoice timing**: invoice-on-delivery (recommended) vs invoice-on-confirm.
 4. **Expiry dates on lots**: pull into M7 if the first FMCG/pharma customer is

@@ -13,7 +13,7 @@ membership but left `user_roles` behind (re-provisioning resurrected old
 powers) and could silently delete the org's last owner; conversation and
 ticket creation wrote domain rows route-side with no audit entry; and the
 public widget bound a conversation to whichever customer matched the
-visitor's submitted email — anyone who knew a customer's address and the
+visitor's submitted email - anyone who knew a customer's address and the
 public embed token could open a thread carrying that customer's account
 facts into model-generated drafts.
 
@@ -36,14 +36,14 @@ without an owner.
 
 **Widget threads start unbound.** The public route no longer looks up or
 creates customers. A widget conversation stores the visitor's email on the
-thread itself plus a per-conversation secret — issued once at start, stored
+thread itself plus a per-conversation secret - issued once at start, stored
 only as a SHA-256 hash, required (timing-safe compare) for every subsequent
 message, escalation, and poll. A thread address in client hands is a
 guessable uuid; the secret is what makes it the visitor's. Customer binding
 becomes verified staff action on the desk. The care agent's order tool
 honestly reports "no account on file" for unbound threads, so auto-replies
 can lean on published knowledge but cannot disclose account facts about
-anyone — including the address the visitor typed.
+anyone - including the address the visitor typed.
 
 **Creation paths go through the kernel.** `messaging.createConversation`
 (header + creator membership in one audited unit) and

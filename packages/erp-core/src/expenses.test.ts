@@ -28,9 +28,9 @@ describe("expense intelligence (M11.6)", () => {
     const claims = [
       claim("a", "u1", 5_000, 0),
       claim("b", "u1", 5_000, 2),
-      claim("c", "u2", 5_000, 1), // different claimant — never flags
-      claim("d", "u1", 7_000, 1), // different amount — never flags
-      claim("e", "u1", 5_000, 9), // outside window — never flags
+      claim("c", "u2", 5_000, 1), // different claimant - never flags
+      claim("d", "u1", 7_000, 1), // different amount - never flags
+      claim("e", "u1", 5_000, 9), // outside window - never flags
     ];
     const dupes = findDuplicateExpenseClaims(claims);
     expect(dupes).toHaveLength(1);

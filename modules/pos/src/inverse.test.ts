@@ -19,7 +19,7 @@ import { registerPosCapabilities, type ModuleDeps } from "./index";
 /**
  * POS inverse round-trip (N12, ADR 0051): completeSale's declared inverse is
  * pos.returnSale, and buildInput against the ACTUAL sale output produces
- * input the return accepts — the return then restores stock, the drawer and
+ * input the return accepts - the return then restores stock, the drawer and
  * the money together. A journal mirror alone could never do all three.
  */
 
@@ -125,7 +125,7 @@ describe("N12 POS inverse round-trip", () => {
     const inverseInput = saleCap.inverse!.buildInput(saleInput, sale);
     expect(inverseInput).toMatchObject({ invoiceId: sale.invoiceId });
 
-    // The built input must parse against returnSale's schema — a named
+    // The built input must parse against returnSale's schema - a named
     // capability is not enough, the generated input has to be accepted.
     const returnCap = makeRegistry().require("pos.returnSale");
     const parsed = returnCap.input.parse(inverseInput);

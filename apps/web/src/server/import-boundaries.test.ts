@@ -5,7 +5,7 @@ import { createDb, customers, items, organizations, users, type Database } from 
 /**
  * Slice D import boundaries (X15/N08): writing imported rows demands domain
  * authority (crm.write / inventory.write), and money parses exactly from the
- * raw string — "1,234.56" is 123456 minor units, "19.999" and negatives are
+ * raw string - "1,234.56" is 123456 minor units, "19.999" and negatives are
  * row errors, never silent float coercion.
  */
 

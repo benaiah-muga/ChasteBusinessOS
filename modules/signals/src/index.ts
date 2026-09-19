@@ -19,7 +19,7 @@ const signalsList = (deps: SignalsDeps) =>
     id: "signals.list",
     title: "List business signals",
     intent:
-      "Collect every module's needs-attention signals — stockout risk, dead stock, overdue receivables, stalled deals — sorted red first, each with evidence and a suggested governed action",
+      "Collect every module's needs-attention signals - stockout risk, dead stock, overdue receivables, stalled deals - sorted red first, each with evidence and a suggested governed action",
     module: "signals",
     risk: "read",
     permission: "signals.read",
@@ -56,7 +56,7 @@ const signalsList = (deps: SignalsDeps) =>
             return await producer(ctx.actor.orgId, ctx.now);
           } catch {
             // A failing producer degrades to missing signals, never to a
-            // broken aggregator — the dashboard must render regardless.
+            // broken aggregator - the dashboard must render regardless.
             return [];
           }
         }),

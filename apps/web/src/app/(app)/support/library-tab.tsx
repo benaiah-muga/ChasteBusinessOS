@@ -21,7 +21,7 @@ interface ArticleRow {
 const emptyCanned = { shortcut: "", title: "", body: "" };
 const emptyArticle = { title: "", body: "", category: "" };
 
-/** Canned responses and knowledge-base articles — the support library. */
+/** Canned responses and knowledge-base articles - the support library. */
 export function LibraryTab() {
   const [canned, setCanned] = useState<CannedRow[] | null>(null);
   const [articles, setArticles] = useState<ArticleRow[] | null>(null);
@@ -235,7 +235,7 @@ export function LibraryTab() {
             ))}
           </ul>
         )}
-        <p className="mt-2 text-xs text-stone-400">Articles are live immediately — the website widget&apos;s AI answers are grounded in these.</p>
+        <p className="mt-2 text-xs text-stone-400">Articles are live immediately - the website widget&apos;s AI answers are grounded in these.</p>
       </Card>
     </div>
   );

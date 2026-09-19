@@ -4,7 +4,7 @@ import { z } from "zod";
 /**
  * Declarative dataframe ops over extracted rows (the "pandas step").
  *
- * The model — or the UI — never writes code: it picks from these verbs and
+ * The model - or the UI - never writes code: it picks from these verbs and
  * the kernel validates every field. There is no eval, no expression parser,
  * no escape hatch into arbitrary computation, so an analysis can never
  * become a data-exfiltration primitive.

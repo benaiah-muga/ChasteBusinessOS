@@ -12,7 +12,7 @@ import { IconAlertTriangle, IconArrowRight, IconCheck, IconX } from "@/component
  *
  * Deferred setup steps come back here, on the dashboard, with the reason they
  * matter and the one click that finishes them. Dismissal is stored locally so
- * a dismissed item stops nagging without silently marking work as done — the
+ * a dismissed item stops nagging without silently marking work as done - the
  * server still knows it is outstanding.
  */
 

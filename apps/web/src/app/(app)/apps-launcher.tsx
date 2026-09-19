@@ -151,7 +151,7 @@ export function AppsLauncher({
                       >
                         <span
                           aria-hidden="true"
-                          style={tileStyle(app.hue)}
+                          style={tileStyle()}
                           className={`flex size-10 items-center justify-center rounded-[11px] transition-transform duration-150${isActive ? " scale-[1.04]" : ""}`}
                         >
                           <TileIcon className="size-5.5" />
@@ -172,7 +172,7 @@ export function AppsLauncher({
                         className={cn(
                           "absolute top-1.5 right-1.5 flex size-6 cursor-pointer items-center justify-center rounded-md transition-all duration-150",
                           isPinned
-                            ? "text-gold-700 opacity-100"
+                            ? "text-gold-800 opacity-100"
                             : "text-stone-300 opacity-0 group-hover/tile:opacity-100 hover:bg-stone-100 hover:text-stone-600 disabled:pointer-events-none",
                         )}
                       >

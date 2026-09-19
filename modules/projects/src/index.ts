@@ -6,7 +6,7 @@ import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 
 /**
- * Projects (M11, ADR 0038): a small, standalone module — projects with
+ * Projects (M11, ADR 0038): a small, standalone module - projects with
  * kanban tasks, subtasks via parent links, assignment, due dates,
  * priorities, and explicit column ordering. No cross-module imports: it
  * works in a subset org with every other module disabled.
@@ -131,7 +131,7 @@ const moveTask = (deps: ModuleDeps) =>
   defineCapability({
     id: "projects.moveTask",
     title: "Move task",
-    intent: "Drag a task across the board — todo, doing, done — with an explicit column position",
+    intent: "Drag a task across the board - todo, doing, done - with an explicit column position",
     module: "projects",
     risk: "write",
     permission: "projects.write",
@@ -180,7 +180,7 @@ const listBoard = (deps: ModuleDeps) =>
   defineCapability({
     id: "projects.listBoard",
     title: "Project board",
-    intent: "Render a project's kanban board — every task with its column, position, assignee, due date, and priority",
+    intent: "Render a project's kanban board - every task with its column, position, assignee, due date, and priority",
     module: "projects",
     risk: "read",
     permission: "projects.read",

@@ -7834,7 +7834,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'Hi — ask us anything and we''ll get right back to you.'"
+          "default": "'Hi - ask us anything and we''ll get right back to you.'"
         },
         "created_at": {
           "name": "created_at",

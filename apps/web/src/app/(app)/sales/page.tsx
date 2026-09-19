@@ -349,7 +349,7 @@ export default function SalesPage() {
             visibleQuotes.map((q) => (
               <Card key={q.id}>
                 <CardTitle right={<Badge tone={toneFor(q.status)}>{q.status}</Badge>}>
-                  Quote #{q.number} — {customerName.get(q.customerId) ?? "Unknown customer"}
+                  Quote #{q.number} - {customerName.get(q.customerId) ?? "Unknown customer"}
                 </CardTitle>
                 <p className="text-xs opacity-60">
                   {formatMoney(q.totalMinor)} · created {timeAgo(q.createdAt)}
@@ -396,7 +396,7 @@ export default function SalesPage() {
               </select>
               {activeCustomers.length === 0 && !quickCustomer.open && (
                 <span className="text-xs text-stone-500">
-                  No customers yet —
+                  No customers yet -
                   <button type="button" className="ml-1 font-medium text-gold-700 underline underline-offset-2" onClick={() => setQuickCustomer({ open: true, name: "", email: "" })}>
                     create one here
                   </button>

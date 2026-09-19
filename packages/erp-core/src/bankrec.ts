@@ -2,7 +2,7 @@
  * N14 bank-reconciliation allocation math. A statement line is explained
  * when its signed amount is fully covered by allocations that share its
  * sign; a statement period is reconciled when the unexplained difference
- * is exactly zero. Pure — the caller owns locking and persistence.
+ * is exactly zero. Pure - the caller owns locking and persistence.
  */
 
 export type AllocationKind = "payment" | "entry" | "fee" | "fx_difference";
@@ -65,7 +65,7 @@ export function planLineAllocations(
     assertMinor(p.amountMinor, "allocation amount");
     if (p.amountMinor === 0) throw new Error("allocation amount must be nonzero");
     // An allocation explains part of the line's money, so it must move in
-    // the line's direction — a positive slice cannot explain a debit line.
+    // the line's direction - a positive slice cannot explain a debit line.
     if (line.amountMinor > 0 && p.amountMinor < 0) {
       throw new Error(`allocation direction mismatch: line is money in (${line.amountMinor}), allocation is ${p.amountMinor}`);
     }

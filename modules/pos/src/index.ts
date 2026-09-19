@@ -106,7 +106,7 @@ const completeSale = (deps: ModuleDeps) =>
         (sum, l) => sum + Math.round((l.quantity * l.unitPriceMinor) / 1000) + l.taxMinor,
         0,
       ),
-    // N12 (ADR 0051): the undo of a register sale is a register return —
+    // N12 (ADR 0051): the undo of a register sale is a register return -
     // it restores stock, the drawer and the money together. buildInput is
     // typed against completeSale's output, so a key the sale never returns
     // is a compile error.
@@ -139,7 +139,7 @@ const completeSale = (deps: ModuleDeps) =>
         if (session.status !== "open") throw new Error("session is closed");
 
         // Graceful degradation (ADR 0035): with the inventory module disabled,
-        // a sale is a pure money event — no item resolution, no oversell
+        // a sale is a pure money event - no item resolution, no oversell
         // checks, no ledger legs. No gate configured behaves as enabled.
         const gate = ctx.services.moduleGate as
           | { isEnabled(orgId: string, moduleId: string): boolean | Promise<boolean> }
@@ -155,7 +155,7 @@ const completeSale = (deps: ModuleDeps) =>
           // repeated lines spend one running availability budget, not one
           // each. Item rows are locked in a stable order so a concurrent
           // sales-order confirm (or register) cannot claim the same stock.
-          // Available means on hand minus open reservations — stock promised
+          // Available means on hand minus open reservations - stock promised
           // to an order is not sellable at the register.
           const resolved: { itemId: string; sku: string; quantity: number }[] = [];
           for (const l of input.lines) {
@@ -226,7 +226,7 @@ const completeSale = (deps: ModuleDeps) =>
         ];
 
         // The invoice row exists before posting so the entry carries its
-        // source link at insert time — posted journal rows are immutable
+        // source link at insert time - posted journal rows are immutable
         // (N09), so there is no post-hoc patch of the GL header.
         const [inv] = await tx
           .insert(invoices)
@@ -261,7 +261,7 @@ const completeSale = (deps: ModuleDeps) =>
           entryId,
         });
 
-        // Stock leaves the ledger in the same transaction as the money —
+        // Stock leaves the ledger in the same transaction as the money -
         // only when the inventory module is enabled (ADR 0035). N22: through
         // the shared command service, so the ledger guards hold here too.
         for (const sl of inventoryEnabled ? stockLines : []) {
@@ -350,7 +350,7 @@ const returnSale = (deps: ModuleDeps) =>
     id: "pos.returnSale",
     title: "Return POS sale",
     intent:
-      "Take goods back at the register: refund the customer through a balanced reversing entry, credit the sale invoice, and put the stock back on the shelf — the original sale is never edited",
+      "Take goods back at the register: refund the customer through a balanced reversing entry, credit the sale invoice, and put the stock back on the shelf - the original sale is never edited",
     // Always gates: the refunded amount lives in the sale, not the input.
     module: "pos",
     risk: "money",
@@ -371,7 +371,7 @@ const returnSale = (deps: ModuleDeps) =>
         if (!inv) throw new Error("sale not found");
         if (inv.status === "void") throw new Error("sale is void");
         // POS sales are paid at the register, so the refundable amount is
-        // total minus what has already been returned — paid is refundable.
+        // total minus what has already been returned - paid is refundable.
         const refundable = inv.totalMinor - inv.creditedMinor;
         if (refundable <= 0) throw new Error(`sale has nothing left to return (total ${inv.totalMinor} − credited ${inv.creditedMinor})`);
         const refund = refundable;
@@ -382,7 +382,7 @@ const returnSale = (deps: ModuleDeps) =>
           .limit(1);
         if (!origEntry) throw new Error("sale entry not found; cannot mirror a return");
         // Mirror the original sale entry exactly (reverseEntry mechanics):
-        // every line swaps sides. Full returns only — partial credits go
+        // every line swaps sides. Full returns only - partial credits go
         // through accounting.creditNote.
         const origLines = await tx
           .select({ accountId: journalLines.accountId, debitMinor: journalLines.debitMinor, creditMinor: journalLines.creditMinor })
@@ -404,7 +404,7 @@ const returnSale = (deps: ModuleDeps) =>
         await tx.update(invoices).set({ creditedMinor: inv.creditedMinor + refund }).where(eq(invoices.id, inv.id));
 
         // N12 (ADR 0051): a cash refund physically leaves the drawer, so the
-        // session's expected cash drops with it — otherwise closeSession
+        // session's expected cash drops with it - otherwise closeSession
         // would flag an "overage" that is really money already handed back.
         // A closed session's count is frozen history; its variance was
         // recorded when it closed and is not rewritten by later returns.
@@ -465,7 +465,7 @@ const shiftSummary = (deps: ModuleDeps) =>
     id: "pos.shiftSummary",
     title: "Shift summary",
     intent:
-      "Summarize a register session — sales count, takings, expected versus counted cash, and variance — so closing a shift is a check, not a guess",
+      "Summarize a register session - sales count, takings, expected versus counted cash, and variance - so closing a shift is a check, not a guess",
     module: "pos",
     risk: "read",
     permission: "pos.read",

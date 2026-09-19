@@ -20,8 +20,8 @@ import type { ModuleDeps } from "./shared";
 /**
  * Ledger-backed proof of internal transfers (M7.2): paired legs conserve
  * quantity across locations, partial confirmations work, source-location
- * oversell is refused, reversal restores the start state, and — the ADR 0033
- * invariant — transfer legs never move valuation value.
+ * oversell is refused, reversal restores the start state, and - the ADR 0033
+ * invariant - transfer legs never move valuation value.
  */
 
 const url = process.env.DATABASE_URL ?? "postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2";

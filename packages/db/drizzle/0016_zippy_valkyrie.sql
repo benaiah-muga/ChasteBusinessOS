@@ -32,7 +32,7 @@ CREATE INDEX "support_conv_customer_idx" ON "support_conversations" USING btree 
 CREATE INDEX "support_msg_conversation_idx" ON "support_messages" USING btree ("conversation_id","created_at");--> statement-breakpoint
 
 -- Tenant isolation for the support desk (0014 pattern; defense-in-depth
--- under the application's org filters — see ADR 0024 for the owner-role gap).
+-- under the application's org filters - see ADR 0024 for the owner-role gap).
 ALTER TABLE "support_conversations" ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "tenant_isolation" ON "support_conversations";
 CREATE POLICY "tenant_isolation" ON "support_conversations" USING (

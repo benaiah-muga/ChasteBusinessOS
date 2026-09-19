@@ -15,7 +15,7 @@ interface ModuleInfo {
 /**
  * The module switchboard. Saving goes through the governed iam.setModules
  * capability (identity-class), so changes land in the Approvals inbox and
- * apply after a human with iam.admin approves — the UI never flips the
+ * apply after a human with iam.admin approves - the UI never flips the
  * switch directly.
  */
 export function ModulesManager() {

@@ -29,7 +29,7 @@ describe("valuationAdjustmentLines", () => {
     expect(lines[1]).toMatchObject({ accountCode: "1200", debitMinor: 0, creditMinor: 400 });
   });
 
-  it("reconciled books post nothing — an empty entry must not exist", () => {
+  it("reconciled books post nothing - an empty entry must not exist", () => {
     expect(valuationAdjustmentLines(0, CODES)).toEqual([]);
   });
 

@@ -4,7 +4,7 @@
  * The stock ledger is operational truth: replaying its append-only
  * movements yields the moving-average value inventory actually holds.
  * The GL inventory account (1200) drifts from that truth for legitimate
- * reasons — bills coded straight to expense, timing, manual entries —
+ * reasons - bills coded straight to expense, timing, manual entries -
  * so instead of wiring every movement to journal entries, valuation is
  * closed periodically: one balanced adjustment entry brings the GL to
  * the ledger, never the other way round.

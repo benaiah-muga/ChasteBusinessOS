@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/client";
+import { LogoMark } from "@/components/logo";
 import {
   IconAlertTriangle,
   IconArrowRight,
@@ -27,7 +28,7 @@ const VALUE_PROPS = [
   {
     num: "02",
     title: "Auditable",
-    body: "A hash-chained event trail records who did what — human or agent — forever.",
+    body: "A hash-chained event trail records who did what - human or agent - forever.",
     Icon: IconBookOpen,
   },
   {
@@ -48,14 +49,7 @@ function Spinner() {
 }
 
 function BrandMark({ compact = false }: { compact?: boolean }) {
-  return (
-    <span className={`chaste-mark ${compact ? "size-9" : "size-11"}`} aria-hidden="true">
-      <span className="chaste-mark__orbit chaste-mark__orbit--one" />
-      <span className="chaste-mark__orbit chaste-mark__orbit--two" />
-      <span className="chaste-mark__orbit chaste-mark__orbit--three" />
-      <span className="chaste-mark__core">C</span>
-    </span>
-  );
+  return <LogoMark size={compact ? 36 : 44} />;
 }
 
 function authErrorMessage(error: unknown): string {
@@ -64,7 +58,7 @@ function authErrorMessage(error: unknown): string {
   if (normalized.includes("verif")) {
     // sendOnSignIn fires a fresh link on every unverified sign-in attempt, so
     // the honest answer is "check your inbox", not "wrong password".
-    return "That email isn't verified yet. We just sent a fresh link — click it, then sign in.";
+    return "That email isn't verified yet. We just sent a fresh link - click it, then sign in.";
   }
   if (normalized.includes("invalid") || normalized.includes("credential") || normalized.includes("password")) {
     return "That email and password did not match. Check them and try again.";
@@ -116,7 +110,7 @@ export default function LoginPage() {
       if (mode === "signup" && res.data?.token == null) {
         // Verified-binding deployments skip auto sign-in: the account exists
         // but there is no session yet, so success here means "check your
-        // inbox", not "come in" — and redirecting would just bounce off the
+        // inbox", not "come in" - and redirecting would just bounce off the
         // auth guard straight back to this page.
         setVerifySent(true);
         setBusy(false);
@@ -209,11 +203,11 @@ export default function LoginPage() {
                     <p className="text-sm leading-6 text-stone-800">
                       We sent a verification link to{" "}
                       <strong className="font-semibold text-stone-950">{email.trim()}</strong>. Click it to prove
-                      the address is yours — then sign in and we&apos;ll take you straight into setup.
+                      the address is yours - then sign in and we&apos;ll take you straight into setup.
                     </p>
                   </div>
                   <p className="mt-3 text-[12px] leading-5 text-stone-500">
-                    No email? Check spam, or try signing in — that sends a fresh link automatically.
+                    No email? Check spam, or try signing in - that sends a fresh link automatically.
                   </p>
                   <button type="button" onClick={toggleMode} className="group mt-4 inline-flex cursor-pointer items-center gap-1.5 text-sm font-semibold text-gold-700 underline-offset-4 hover:underline">
                     <IconArrowRight className="size-4 rotate-180 transition-transform group-hover:-translate-x-0.5" />

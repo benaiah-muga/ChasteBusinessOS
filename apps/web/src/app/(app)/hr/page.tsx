@@ -254,7 +254,7 @@ export default function HrPage() {
     try {
       const res = await postApi(url, payload);
       if (res.status === 202) {
-        setNotice({ tone: "pending", text: `${label} needs human approval — it's in the Approvals inbox.` });
+        setNotice({ tone: "pending", text: `${label} needs human approval - it's in the Approvals inbox.` });
       } else if (!res.ok) {
         setNotice({ tone: "error", error: res.error! });
       } else {
@@ -449,7 +449,7 @@ export default function HrPage() {
   return (
     <AppFrame
       appId="hr"
-      description="Hire people, decide leave and timesheets, and run payroll — drafts must be confirmed before money moves."
+      description="Hire people, decide leave and timesheets, and run payroll - drafts must be confirmed before money moves."
       tabs={[
         { id: "overview", label: "Overview" },
         { id: "people", label: "People", count: activeStaff.length || undefined },
@@ -568,7 +568,7 @@ export default function HrPage() {
               <EmptyState
                 icon={<IconUsers />}
                 title="No employees yet"
-                hint="Hire your first team member above — they join every future payroll draft automatically."
+                hint="Hire your first team member above - they join every future payroll draft automatically."
               />
             ) : (
               <div className="table-shell">
@@ -590,7 +590,7 @@ export default function HrPage() {
                           <span className="font-medium text-stone-900">{emp.name}</span>
                           {emp.title && <span className="block text-xs text-stone-500">{emp.title}</span>}
                         </td>
-                        <td className="text-stone-500">{emp.email ?? "—"}</td>
+                        <td className="text-stone-500">{emp.email ?? "-"}</td>
                         <td className="tnum text-right font-medium">{formatMoney(emp.monthlySalaryMinor)}</td>
                         <td className="tnum text-right text-stone-500">{(emp.taxRateBps / 100).toFixed(1)}%</td>
                         <td>
@@ -634,7 +634,7 @@ export default function HrPage() {
             <CardTitle>File a leave request</CardTitle>
             {activeStaff.length === 0 ? (
               <p className="text-sm text-stone-500">
-                No active employees yet — hire your first person in the <strong>People</strong> tab before filing leave.
+                No active employees yet - hire your first person in the <strong>People</strong> tab before filing leave.
               </p>
             ) : (
               <form
@@ -711,7 +711,7 @@ export default function HrPage() {
               <CardTitle>Pending decisions</CardTitle>
               {pendingLeave.length === 0 ? (
                 <p className="mt-2 flex items-center gap-2 text-sm text-stone-400">
-                  <IconInbox className="size-4" /> Nothing waiting on you — every request has been decided.
+                  <IconInbox className="size-4" /> Nothing waiting on you - every request has been decided.
                 </p>
               ) : (
                 <ul className="mt-2 space-y-2">
@@ -875,7 +875,7 @@ export default function HrPage() {
             <CardTitle>Log time</CardTitle>
             {activeStaff.length === 0 ? (
               <p className="text-sm text-stone-500">
-                No active employees yet — hire your first person in the <strong>People</strong> tab before logging time.
+                No active employees yet - hire your first person in the <strong>People</strong> tab before logging time.
               </p>
             ) : (
               <form
@@ -945,7 +945,7 @@ export default function HrPage() {
                 </Button>
               </form>
             )}
-            <p className="mt-3 text-xs text-stone-400">Entries are submitted for approval — only approved hours count toward reports.</p>
+            <p className="mt-3 text-xs text-stone-400">Entries are submitted for approval - only approved hours count toward reports.</p>
           </Card>
 
           <Card>
@@ -985,7 +985,7 @@ export default function HrPage() {
               <EmptyState
                 icon={<IconHistory />}
                 title="No time logged in this range"
-                hint="Adjust the range above or log an entry — submitted entries show as pending until approved."
+                hint="Adjust the range above or log an entry - submitted entries show as pending until approved."
               />
             ) : (
               <div className="table-shell">
@@ -1008,7 +1008,7 @@ export default function HrPage() {
                             <td className="font-medium text-stone-900">{emp.name}</td>
                             <td className="tnum text-right">{fmtHours(row.approvedMinutes)}</td>
                             <td className={cn("tnum text-right", row.pendingMinutes > 0 && "font-medium text-amber-700")}>
-                              {row.pendingMinutes > 0 ? fmtHours(row.pendingMinutes) : "—"}
+                              {row.pendingMinutes > 0 ? fmtHours(row.pendingMinutes) : "-"}
                             </td>
                             <td className="tnum text-right font-medium">{fmtHours(row.approvedMinutes + row.pendingMinutes)}</td>
                           </tr>
@@ -1017,7 +1017,7 @@ export default function HrPage() {
                     <tr className="border-t-2 border-stone-200 font-medium">
                       <td>Total · {periodLabel}</td>
                       <td className="tnum text-right">{fmtHours(approvedMinutes)}</td>
-                      <td className="tnum text-right text-amber-700">{pendingMinutes > 0 ? fmtHours(pendingMinutes) : "—"}</td>
+                      <td className="tnum text-right text-amber-700">{pendingMinutes > 0 ? fmtHours(pendingMinutes) : "-"}</td>
                       <td className="tnum text-right">{fmtHours(approvedMinutes + pendingMinutes)}</td>
                     </tr>
                   </tbody>
@@ -1035,7 +1035,7 @@ export default function HrPage() {
               <p className="text-sm text-stone-400">Loading…</p>
             ) : pendingEntries.length === 0 ? (
               <p className="flex items-center gap-2 text-sm text-stone-400">
-                <IconInbox className="size-4" /> No submitted entries waiting — everything is decided.
+                <IconInbox className="size-4" /> No submitted entries waiting - everything is decided.
               </p>
             ) : (
               <ul className="divide-y text-sm">
@@ -1088,7 +1088,7 @@ export default function HrPage() {
                                 {open.late && <Badge tone="amber">late</Badge>}
                               </span>
                             ) : (
-                              <span className="text-sm text-stone-400">—</span>
+                              <span className="text-sm text-stone-400">-</span>
                             )}
                           </td>
                           <td className="text-right">
@@ -1148,7 +1148,7 @@ export default function HrPage() {
               <EmptyState
                 icon={<IconCash />}
                 title="No payroll runs yet"
-                hint="Draft your first month above — you'll review the totals before any money moves."
+                hint="Draft your first month above - you'll review the totals before any money moves."
               />
             ) : (
               <div className="table-shell">
@@ -1199,14 +1199,14 @@ export default function HrPage() {
                 </table>
               </div>
             )}
-            <p className="mt-2 text-xs text-stone-400">Executed runs are posted ledger entries — corrections go through reversals, not edits.</p>
+            <p className="mt-2 text-xs text-stone-400">Executed runs are posted ledger entries - corrections go through reversals, not edits.</p>
           </Card>
         </>
       )}
 
       {tab === "expenses" && <ExpensesTab />}
 
-      {/* Structure edit — where someone sits and who to call */}
+      {/* Structure edit - where someone sits and who to call */}
       <Dialog
         open={structureTarget !== null}
         onClose={() => setStructureTarget(null)}
@@ -1312,7 +1312,7 @@ export default function HrPage() {
         busy={busy}
       />
 
-      {/* Execute payroll run — posts money, so it always confirms */}
+      {/* Execute payroll run - posts money, so it always confirms */}
       <ConfirmDialog
         open={executeTarget !== null}
         onClose={() => setExecuteTarget(null)}
@@ -1415,7 +1415,7 @@ function OverviewTab({
         />
         <StatCard
           label="Latest payroll run"
-          value={latestRun ? monthLabel(latestRun.year, latestRun.month) : "—"}
+          value={latestRun ? monthLabel(latestRun.year, latestRun.month) : "-"}
           sub={
             latestRun ? (
               <span className="flex items-center gap-1.5">
@@ -1537,7 +1537,7 @@ function OverviewTab({
                   ))}
                 </dl>
                 {latestRun.status === "draft" && (
-                  <p className="pt-1 text-xs text-amber-700">This draft hasn't posted yet — executing it moves real money in the ledger.</p>
+                  <p className="pt-1 text-xs text-amber-700">This draft hasn't posted yet - executing it moves real money in the ledger.</p>
                 )}
               </div>
             )}
@@ -1588,7 +1588,7 @@ function ExpensesTab() {
     try {
       const res = await postApi("/api/expenses", payload);
       if (res.status === 202) {
-        setNotice({ tone: "pending", text: `${label} is above the payment threshold — it's in the Approvals inbox.` });
+        setNotice({ tone: "pending", text: `${label} is above the payment threshold - it's in the Approvals inbox.` });
       } else if (!res.ok) {
         setNotice({ tone: "error", error: res.error! });
       } else {
@@ -1755,7 +1755,7 @@ function ExpensesTab() {
           </ul>
         )}
         <p className="mt-3 text-xs text-stone-400">
-          Claims over a category&apos;s limit stay visible as signals until decided — the cap doesn&apos;t block, it scrutinizes.
+          Claims over a category&apos;s limit stay visible as signals until decided - the cap doesn&apos;t block, it scrutinizes.
         </p>
       </Card>
 

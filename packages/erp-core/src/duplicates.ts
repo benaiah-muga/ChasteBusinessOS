@@ -1,13 +1,13 @@
 /**
  * Deterministic customer duplicate detection (M9).
  *
- * Pure string logic — the CRM surfaces a warning when a new customer looks
+ * Pure string logic - the CRM surfaces a warning when a new customer looks
  * like an existing one; it never silently merges. Two customers are
  * duplicates when their normalized names match (suffix-insensitive so
  * "Acme LLC" == "Acme") or their emails match case-insensitively.
  *
  * Deterministic and byte-order stable by construction: no locale-aware
- * comparisons (M8 lesson — localeCompare is environment-dependent).
+ * comparisons (M8 lesson - localeCompare is environment-dependent).
  */
 export interface CustomerFingerprint {
   name: string;
@@ -50,7 +50,7 @@ export function normalizeEmail(email: string | null | undefined): string | null 
 export interface DuplicateVerdict {
   /** true when the candidate matches an existing customer closely enough to warn. */
   duplicate: boolean;
-  /** "name" or "email" — which fingerprint matched. */
+  /** "name" or "email" - which fingerprint matched. */
   reason: "name" | "email" | null;
   /** The existing customer's name as stored (for the warning message). */
   existingName: string | null;

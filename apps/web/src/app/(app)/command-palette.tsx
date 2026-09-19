@@ -110,7 +110,7 @@ export function CommandPalette({
               >
                 <span
                   aria-hidden="true"
-                  style={tileStyle(cmd.app.hue)}
+                  style={tileStyle()}
                   className={cn("flex size-7 shrink-0 items-center justify-center rounded-lg", isActive && "scale-105")}
                 >
                   <cmd.app.icon className="size-4" />

@@ -13,7 +13,7 @@ claims as database-guaranteed. "Debits equal credits" lived only in
 `erp-core`'s `assertBalanced`, called by the posting service; "posted
 financial documents are immutable" lived only in convention. A probe on a
 clean fixture database committed a 10000/5000 entry, updated a posted line
-and deleted another — the books' defining invariants had no negative proof
+and deleted another - the books' defining invariants had no negative proof
 below the application layer. Any future write path that skipped the posting
 service (a new module, a migration, a hand-written route) could silently
 break the ledger.
@@ -23,7 +23,7 @@ break the ledger.
 Migration 0046 enforces at commit time what application code used to assert:
 
 1. **Line shape** (CHECK constraints, validated): amounts nonnegative, a
-   line is single-sided, a line is nonzero — the same rules as
+   line is single-sided, a line is nonzero - the same rules as
    `assertBalanced`, now un-bypassable.
 2. **Balance and completeness at commit** (deferred constraint triggers):
    an entry must carry at least two lines, `sum(debit) = sum(credit) > 0`,
@@ -43,14 +43,14 @@ Migration 0046 enforces at commit time what application code used to assert:
    `beginLedgerMaintenance`/`purgeTenantFinancials` (`@chaste/db`). Every
    use is a greppable, intentional act; the runtime application never sets
    it. The immutability guards honor the context; the balance, completeness
-   and tenancy guards do not — maintenance may delete history, but nothing
+   and tenancy guards do not - maintenance may delete history, but nothing
    broken can ever commit. A repair that must re-add rows stages balanced
    rows or leaves them out.
 
 The POS sale path was the one legitimate writer that mutated the journal
 after insert (patching `sourceId` after the invoice row existed). It now
 inserts the invoice before posting, so the entry carries its source link at
-insert time — the patch path no longer exists anywhere in production code.
+insert time - the patch path no longer exists anywhere in production code.
 
 ## Consequences
 
@@ -58,7 +58,7 @@ insert time — the patch path no longer exists anywhere in production code.
   journal/event deletes; deleting an organization whose journal rows remain
   would otherwise be refused (the cascade fires the immutability triggers).
 - A dirty legacy database fails migration 0046's validation stage with the
-  offending entry ids named — reconcile or quarantine deliberately, never
+  offending entry ids named - reconcile or quarantine deliberately, never
   silently rewrite history (N09 migration protocol).
 - `assertBalanced` stays: it produces domain-level error messages before any
   SQL runs. The database guard is the backstop, not the UX.

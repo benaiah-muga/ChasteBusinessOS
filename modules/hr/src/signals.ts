@@ -5,7 +5,7 @@ import type { BusinessSignal, SignalProducer } from "@chaste/kernel";
 
 /**
  * Attendance signals (M11, ADR 0038): chronic lateness in the trailing
- * week. Deterministic — three or more late clock-ins since the cutoff —
+ * week. Deterministic - three or more late clock-ins since the cutoff -
  * and advisory: a conversation, not an accusation.
  */
 
@@ -41,7 +41,7 @@ export function createHrSignalProducer(db: Database["db"]): SignalProducer {
         severity: "orange",
         module: "hr",
         subject: `${r.name} clocked in late ${count} times in the last ${TRAILING_DAYS} days`,
-        detail: `Pattern, not one-off — worth a conversation before it becomes a culture.`,
+        detail: `Pattern, not one-off - worth a conversation before it becomes a culture.`,
         evidence: { refType: "employee", refId: r.employeeId },
         suggestedAction: null,
       });

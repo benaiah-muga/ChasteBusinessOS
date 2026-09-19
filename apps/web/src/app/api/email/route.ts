@@ -95,7 +95,7 @@ export async function POST(req: Request) {
 
   const result = await sendOrgMail({
     to: parsed.data.to,
-    subject: `Invoice #${inv.number} — ${money(inv.totalMinor)} ${inv.currency}`,
+    subject: `Invoice #${inv.number} - ${money(inv.totalMinor)} ${inv.currency}`,
     text: `Invoice #${inv.number}\nBilled to: ${inv.customerName}\nTotal: ${money(inv.totalMinor)} ${inv.currency} (paid ${money(inv.paidMinor)})\n\nOpen your live invoice: ${origin}${urlPath}`,
     attachments: [{ filename: `invoice-${inv.number}.html`, content: html, contentType: "text/html" }],
   });

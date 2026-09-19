@@ -350,7 +350,7 @@ export default function SupportPage() {
               <ul className="space-y-2.5 text-sm leading-relaxed opacity-80">
                 <li className="flex gap-2">
                   <IconBot aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-violet-500" />
-                  The workmate drafts replies from the customer&apos;s own order history — nothing else.
+                  The workmate drafts replies from the customer&apos;s own order history - nothing else.
                 </li>
                 <li className="flex gap-2">
                   <IconSend aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-sky-500" />
@@ -545,7 +545,7 @@ export default function SupportPage() {
                   <div className="flex justify-end">
                     <div className="w-full max-w-[85%] rounded-xl border border-gold-200 bg-gold-50/60 p-3">
                       <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gold-700">
-                        AI draft — review before sending
+                        AI draft - review before sending
                       </p>
                       <textarea
                         value={draft}
@@ -757,7 +757,7 @@ function ChannelsPanel() {
           <p className="mt-3 rounded-lg border border-dashed border-stone-300 p-3 text-sm text-stone-500">
             {state.canManage
               ? "No embed token yet. Save your channel settings below to generate one."
-              : "The website channel is not configured yet — an organization admin can generate its embed token here."}
+              : "The website channel is not configured yet - an organization admin can generate its embed token here."}
           </p>
         )}
         <p className="mt-3 text-xs text-stone-500">
@@ -765,7 +765,7 @@ function ChannelsPanel() {
           <button type="button" onClick={() => link && copy(link, "link")} className="font-medium text-gold-700 underline underline-offset-2">
             {copied === "link" ? "copied ✓" : "the standalone chat page"}
           </button>{" "}
-          anywhere — email signatures, social bios, help docs.
+          anywhere - email signatures, social bios, help docs.
         </p>
       </section>
 
@@ -782,8 +782,8 @@ function ChannelsPanel() {
           <span className="text-sm text-stone-700">
             <strong className="font-medium">Answer visitors automatically.</strong>{" "}
             <span className="text-stone-500">
-              Replies are grounded in your knowledge base and order history. When you turn this off — or a visitor asks
-              for a human — the thread waits for staff and shows as needing you.
+              Replies are grounded in your knowledge base and order history. When you turn this off - or a visitor asks
+              for a human - the thread waits for staff and shows as needing you.
             </span>
           </span>
         </label>
@@ -808,7 +808,7 @@ function ChannelsPanel() {
         <h2 className="text-sm font-semibold text-stone-900">What the AI can reach</h2>
         <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-stone-500">
           <li>Your knowledge base (Documents app)</li>
-          <li>The asking customer&apos;s own order status — nothing about other customers</li>
+          <li>The asking customer&apos;s own order status - nothing about other customers</li>
           <li>Nothing else. Escalated threads are answered only by people.</li>
         </ul>
       </section>

@@ -2,7 +2,7 @@
  * Minimal RFC 4180 CSV reader and a header guesser for the import wizard.
  *
  * Client-side on purpose: parsing never touches the database, and showing the
- * user exactly which columns we understood — before anything is written — is
+ * user exactly which columns we understood - before anything is written - is
  * the difference between a confident import and a silent mess.
  */
 
@@ -132,11 +132,11 @@ export function guessMapping(
 
   for (const field of fields) mapping[field] = null;
 
-  /* Pass 1 — exact matches, resolved for *every* field before any fuzzy match
+  /* Pass 1 - exact matches, resolved for *every* field before any fuzzy match
      runs. Doing it per-field instead is how "Unit Price" used to land on
      `unitLabel`: that field is declared first, found no exact match, and fell
-     through to a substring match on "unit" before `salePrice` — for which
-     "unit price" is a listed synonym — was ever consulted. */
+     through to a substring match on "unit" before `salePrice` - for which
+     "unit price" is a listed synonym - was ever consulted. */
   for (const field of fields) {
     const wanted = wantedFor.get(field) ?? [];
     const hit = cols.find((c) => !taken.has(c.raw) && wanted.includes(c.norm));
@@ -146,7 +146,7 @@ export function guessMapping(
     }
   }
 
-  /* Pass 2 — substring matches for whatever is still unmatched, most specific
+  /* Pass 2 - substring matches for whatever is still unmatched, most specific
      synonym first so a longer phrase beats the short word nested inside it. */
   const candidates: { field: string; raw: string; score: number; fieldRank: number; colRank: number }[] = [];
   fields.forEach((field, fieldRank) => {

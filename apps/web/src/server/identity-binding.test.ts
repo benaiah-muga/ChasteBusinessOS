@@ -6,7 +6,7 @@ import { createDb, memberships, organizations, purgeTenantFinancials, users, typ
  * N03 verified binding: domain identities are pre-provisioned (SCIM,
  * invitations) and bind by email, so a password account for that email
  * proves nothing until the mailbox is demonstrated. An unverified session
- * resolves to a bare identity — no memberships, no permissions — however
+ * resolves to a bare identity - no memberships, no permissions - however
  * the address is cased; verification (or a trusted-IdP assertion) unlocks
  * the pre-provisioned access. Concurrent first sign-ins resolve to exactly
  * one domain user.
@@ -82,7 +82,7 @@ describe("N03 verified identity binding", () => {
     expect(cased!.permissions.size).toBe(0);
   });
 
-  it("verification — or a trusted IdP assertion — unlocks the pre-provisioned access", async () => {
+  it("verification - or a trusted IdP assertion - unlocks the pre-provisioned access", async () => {
     state.session = { user: { email: provisionedEmail, name: "Provisioned Person", emailVerified: true } };
     const resolved = await getResolvedUser();
     expect(resolved!.userId).toBe(provisionedUserId);

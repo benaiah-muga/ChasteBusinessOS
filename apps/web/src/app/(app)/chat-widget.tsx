@@ -89,7 +89,7 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
 
   /**
    * Live console strip: what the agent is doing right now (loop step, last
-   * capability, cumulative tokens) — the Marker-style status row from modern
+   * capability, cumulative tokens) - the Marker-style status row from modern
    * chat UIs, kept to one quiet line.
    */
   const consoleStrip = busy ? (
@@ -538,7 +538,7 @@ function ConsolePreferences({ onDone }: { onDone: () => void }) {
           Start a new conversation
         </button>
         <p className="mt-1.5 text-[11px] leading-relaxed text-stone-400">
-          Clears this view. Everything already done stays in the session log — nothing is ever erased.
+          Clears this view. Everything already done stays in the session log - nothing is ever erased.
         </p>
       </section>
     </div>

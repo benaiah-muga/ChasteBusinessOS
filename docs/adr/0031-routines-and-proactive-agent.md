@@ -59,7 +59,7 @@ notification linked to the run's session.
 **5. SOUL is a per-org column, not a file.** `organizations.agent_soul`
 (small text, admin-gated PATCH) carries standing persona instructions. It is
 injected into the system prompt framed as preferences that can never override
-security rules, approval gates, or financial integrity — the governance
+security rules, approval gates, or financial integrity - the governance
 equivalent of OpenClaw's `SOUL.md`, without a filesystem dependency. The
 heartbeat ships as a one-click routine preset rather than a special code
 path: a daily routine with the OpenClaw-style "surface anything needing
@@ -68,7 +68,7 @@ attention, else stay quiet" prompt.
 **6. Paperclip compatibility is a webhook capability.** Each routine can own
 a secret webhook token; `POST /api/routines/webhook/:token` (no session auth;
 the ~128 bits of token entropy are the capability) enqueues a run. Any
-external orchestrator — Paperclip routines, cron, CI, Zapier — can therefore
+external orchestrator - Paperclip routines, cron, CI, Zapier - can therefore
 trigger governed Chaste agent runs without Chaste trusting the caller with
 anything broader than that one routine.
 

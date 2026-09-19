@@ -17,7 +17,7 @@ import { registerPurchasingCapabilities, type ModuleDeps } from "./index";
 
 /**
  * N12 (ADR 0051 extension): a vendor payment is undone by its own domain
- * compensation, not the generic journal mirror — the mirror posts in the
+ * compensation, not the generic journal mirror - the mirror posts in the
  * original currency, releases the bill's paid amount through the balance
  * contract, demotes a paid bill back to open, and a second or replayed
  * reversal has no second effect. The generic reverseEntry refuses the

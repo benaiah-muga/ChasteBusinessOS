@@ -26,6 +26,7 @@ import {
   IconSparkle,
 } from "@/components/icons";
 import { Avatar } from "@/components/ui";
+import { LogoMark } from "@/components/logo";
 import { ThemeMenu } from "@/components/theme";
 import { cn } from "@/lib/format";
 
@@ -49,6 +50,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  const mobileAccountRef = useRef<HTMLDivElement>(null);
   const dockMode = useChatDockMode();
   const chatPinned = dockMode === "pinned";
   const inputMode = dockMode === "input";
@@ -61,7 +63,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
         setLauncherOpen(false);
         setPaletteOpen((v) => !v);
       }
-      // ⌘G — the launcher. G for "go", same muscle memory as the browser.
+      // ⌘G - the launcher. G for "go", same muscle memory as the browser.
       if (e.key.toLowerCase() === "g") {
         e.preventDefault();
         setPaletteOpen(false);
@@ -80,7 +82,9 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
   useEffect(() => {
     if (!accountOpen) return;
     function onDown(e: PointerEvent) {
-      if (accountRef.current && !accountRef.current.contains(e.target as Node)) setAccountOpen(false);
+      const target = e.target as Node;
+      if (accountRef.current?.contains(target) || mobileAccountRef.current?.contains(target)) return;
+      setAccountOpen(false);
     }
     window.addEventListener("pointerdown", onDown);
     return () => window.removeEventListener("pointerdown", onDown);
@@ -92,6 +96,41 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
   async function signOut() {
     await authClient.signOut();
     window.location.href = "/login";
+  }
+
+  /**
+   * The account menu body, shared by the desktop rail and the mobile top
+   * bar; `pos` only decides which corner it hangs from.
+   */
+  function accountMenu(pos: string) {
+    return (
+      <div
+        role="menu"
+        aria-label="Account"
+        className={cn("overlay-panel absolute z-50 w-56 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl", pos)}
+      >
+        <div className="border-b border-stone-100 px-2 pt-1 pb-2">
+          <p className="truncate text-sm font-medium text-stone-900">{user.name || "Account"}</p>
+          <p className="truncate text-xs text-stone-400">{user.email}</p>
+        </div>
+        {orgSwitcher && (
+          // The switcher is a server-rendered form; keep clicks inside it
+          // from closing the menu before the transition runs.
+          <div className="px-1.5 py-2" onClick={(e) => e.stopPropagation()}>
+            {orgSwitcher}
+          </div>
+        )}
+        <button
+          type="button"
+          role="menuitem"
+          onClick={signOut}
+          className="mt-0.5 flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-stone-700 transition-colors duration-75 hover:bg-stone-100"
+        >
+          <IconLogOut className="size-3.5" />
+          Sign out
+        </button>
+      </div>
+    );
   }
 
   function railButton(label: string, icon: ReactNode, onClick: () => void, opts?: { active?: boolean; badge?: number; hint?: string }) {
@@ -147,7 +186,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
       >
         <span
           aria-hidden="true"
-          style={tileStyle(app.hue)}
+          style={tileStyle()}
           className="flex size-6 items-center justify-center rounded-md"
         >
           <app.icon className="size-3.5" />
@@ -165,9 +204,9 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
         href="/"
         aria-label={`Home · ${orgName || "Chaste"}`}
         aria-current={pathname === "/" ? "page" : undefined}
-        className="rail-btn group mb-2 bg-gold-950 text-[15px] font-bold text-white shadow-xs transition-transform duration-150 hover:scale-105 hover:bg-gold-900 hover:text-white"
+        className="rail-btn group mb-2 transition-transform duration-150 hover:scale-105"
       >
-        C
+        <LogoMark size={30} />
         <span aria-hidden="true" className="rail-tip">
           Home{orgName ? ` · ${orgName}` : ""}
         </span>
@@ -183,7 +222,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
         badge: pendingApprovals,
       })}
 
-      {/* Pinned favorites and recent apps — the daily drivers, one click away */}
+      {/* Pinned favorites and recent apps - the daily drivers, one click away */}
       {(pinned.length > 0 || mru.length > 0) && (
         <div className="mt-2 flex flex-col items-center gap-1">
           <span aria-hidden="true" className="mb-1 h-px w-6 bg-stone-200" />
@@ -234,34 +273,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
               {user.name || "Account"}
             </span>
           </button>
-          {accountOpen && (
-            <div
-              role="menu"
-              aria-label="Account"
-              className="overlay-panel absolute bottom-11 left-2 z-50 w-56 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl"
-            >
-              <div className="border-b border-stone-100 px-2 pt-1 pb-2">
-                <p className="truncate text-sm font-medium text-stone-900">{user.name || "Account"}</p>
-                <p className="truncate text-xs text-stone-400">{user.email}</p>
-              </div>
-              {orgSwitcher && (
-                // The switcher is a server-rendered form; keep clicks inside it
-                // from closing the menu before the transition runs.
-                <div className="px-1.5 py-2" onClick={(e) => e.stopPropagation()}>
-                  {orgSwitcher}
-                </div>
-              )}
-              <button
-                type="button"
-                role="menuitem"
-                onClick={signOut}
-                className="mt-0.5 flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-stone-700 transition-colors duration-75 hover:bg-stone-100"
-              >
-                <IconLogOut className="size-3.5" />
-                Sign out
-              </button>
-            </div>
-          )}
+          {accountOpen && accountMenu("bottom-11 left-2")}
         </div>
       </div>
     </aside>
@@ -281,13 +293,13 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
 
         <div className={cn("transition-[padding] duration-200 lg:pl-14", chatPinned && "lg:pr-[380px]")}>
           {/* Mobile top bar: the rail collapses into it */}
-          <header className="sticky top-0 z-20 flex h-12 items-center gap-1 border-b border-stone-200 bg-white/90 px-2 backdrop-blur lg:hidden">
+          <header className="sticky top-0 z-30 flex h-12 items-center gap-1 border-b border-stone-200 bg-white/90 px-2 backdrop-blur lg:hidden">
             <Link
               href="/"
               aria-label="Home"
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gold-950 text-sm font-bold text-white"
+              className="flex size-8 shrink-0 items-center justify-center"
             >
-              C
+              <LogoMark size={30} />
             </Link>
             <span className="min-w-0 flex-1 truncate px-1 text-sm font-semibold tracking-tight text-stone-900">
               {currentApp?.name || orgName || "Chaste"}
@@ -312,6 +324,19 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
             <button type="button" onClick={() => setLauncherOpen(true)} aria-label="Applications" className="icon-btn">
               <IconGrid className="size-5" />
             </button>
+            <div ref={mobileAccountRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setAccountOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={accountOpen}
+                aria-label="Account"
+                className="flex cursor-pointer rounded-full ring-2 ring-transparent transition-shadow duration-150 hover:ring-stone-300"
+              >
+                <Avatar name={user.name} />
+              </button>
+              {accountOpen && accountMenu("top-11 right-0")}
+            </div>
           </header>
 
           <main

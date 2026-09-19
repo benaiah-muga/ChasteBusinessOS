@@ -10,9 +10,9 @@ Read `ARCHITECTURE.md` first, then `ROADMAP.md`. Design decisions live in
 
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+This version has breaking changes - APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
 
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+This block is written and re-added by `next dev` - verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
 
@@ -42,18 +42,21 @@ pnpm dev                    # apps/web on :3000
 pnpm typecheck && pnpm lint && pnpm test
 ```
 
-Live behavior proofs — one per milestone, each an executable specification:
+Live behavior proofs - one per milestone, each an executable specification:
 `demo:slice`, `demo:m2`, `demo:m3`, `demo:m4`, `demo:m4b`, `demo:m5`,
 `demo:m6`, `demo:support`, `demo:m7` … `demo:m13`. See the list in
 [README.md](README.md#demo-proofs). A change that breaks a demo is not done.
 
 Every demo needs a migrated database; several also drive the real agent and
 so need a provider key. CI skips the set when no key is configured, so a
-missing key shows up as a skipped job rather than a failure — run them
+missing key shows up as a skipped job rather than a failure - run them
 locally before claiming a milestone works.
 
 ## For coding agents
 
+- **Never write em dashes (the U+2014 character) anywhere**: not in code,
+  comments, docs, UI copy, commit messages, or PR descriptions. Use commas,
+  colons, parentheses, or plain hyphens instead.
 - New capabilities must pass conformance (`assertWellFormedCapability`):
   valid `module.action` id, intent ≥ 20 chars (it gets embedded), and an
   inverse declared for state changes unless you can justify the warning.
@@ -69,7 +72,7 @@ locally before claiming a milestone works.
   behavioral change, Added/Changed/Fixed/Removed.
 - Adding or bumping a workspace dependency means committing a **regenerated**
   `pnpm-lock.yaml` in the same change. CI installs with `--frozen-lockfile`,
-  so a stale lockfile fails before lint, typecheck or tests ever run — which
+  so a stale lockfile fails before lint, typecheck or tests ever run - which
   means it also hides real errors until it is fixed. Never hand-edit it.
 - Do not add comments explaining obvious code; explain *why*, not *what*.
 
@@ -101,7 +104,7 @@ to the dev server's built-in MCP endpoint at `/_next/mcp`. Start the dev
 server (`pnpm --filter web dev`) and use its tools instead of guessing:
 `get_errors`, `get_logs`, `get_page_metadata`, `get_project_metadata`,
 `get_routes`, `get_server_action_by_id`, `get_compilation_issues`,
-`compile_route` — e.g. check compilation via MCP before running a full
+`compile_route` - e.g. check compilation via MCP before running a full
 `next build`.
 
 `next dev` also forwards browser console errors/warnings to the terminal,
@@ -140,41 +143,41 @@ matching Skill, and guard outcomes with `instant()` tests rather than
 one-off measurements.
 
 <!-- graft:start -->
-## Graft — repo context graph
+## Graft - repo context graph
 
 This repo is indexed in `graft/`: small linked markdown nodes that explain each
 system and carry exact file:line spans, kept in sync with the code through git.
 
-For ANY task here — understanding how something works, finding where code lives,
-or scoping a change — get context from the graph before grepping or opening
+For ANY task here - understanding how something works, finding where code lives,
+or scoping a change - get context from the graph before grepping or opening
 source files. Re-ask freely (it's cheap) and reuse literal identifiers you
 already have (symbol, error string, file name) as the query. New to this repo?
-Run `graft map` first — a token-budgeted orientation (dir clusters, hubs,
+Run `graft map` first - a token-budgeted orientation (dir clusters, hubs,
 hotspots), no LLM, no key.
 
 - Run `graft ask "<your question>" --source` → ranked nodes with the relevant
   code spans inlined (each hit's ≤8-line crux by default; `--full` for whole
   definitions when the crux isn't enough). Match the tool to the task shape:
-  for understanding or editing, the top node IS the answer — cite its
+  for understanding or editing, the top node IS the answer - cite its
   `covers:` file:line spans and edit straight from `--source`. For
   exhaustive tasks ("every occurrence / every caller of this pattern"), ranked
-  results are top-N, not complete — run `graft grep "<literal>"` instead
+  results are top-N, not complete - run `graft grep "<literal>"` instead
   (exhaustive over indexed files, grouped by enclosing symbol), falling back
   to raw `grep -rn` only for unindexed files.
 - `graft skeleton <file>` → every definition's signature + span, ~10× cheaper
   than reading the file; use it to skim an API surface.
-- `graft callers <symbol>` gives precomputed, exact edges — who calls this.
+- `graft callers <symbol>` gives precomputed, exact edges - who calls this.
   Add `--direction out` for what it calls, or `--depth N` to walk
   transitively for the full blast radius. For structural questions, skip
   ranking and use this directly.
 - Or browse: `graft/INDEX.md` lists every node; follow the links.
-- Monorepos and folders of multiple repos rank fairly across sub-projects —
+- Monorepos and folders of multiple repos rank fairly across sub-projects -
   hits carry `[scope/]` labels naming which one they're from. Narrow with
   `graft ask "<task>" --in <scope>/` once you know where you're working.
 
 If a returned span is truncated ("+N more lines"), open the file at that exact
 range before finalizing. Only open source files when a node genuinely lacks a
-needed detail, and then at the exact file:line the node points to — never
+needed detail, and then at the exact file:line the node points to - never
 re-read whole files.
 
 After big code changes, refresh the graph with `graft build` (deterministic,

@@ -1,6 +1,6 @@
 -- Stock-ledger immutability, following ADR 0052's pattern: quantity truth is
 -- append-only. Corrections are compensating movements (production reversals,
--- transfer reversals, cycle-count postings) — never edits to history. The
+-- transfer reversals, cycle-count postings) - never edits to history. The
 -- single escape hatch is the same transaction-local maintenance context
 -- (app.ledger_maintenance = 'on') declared by fixture teardowns and repair
 -- transactions via beginLedgerMaintenance / purgeTenantFinancials.

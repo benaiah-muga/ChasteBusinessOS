@@ -85,7 +85,7 @@ export async function assertMigrationsInSync(url: string): Promise<void> {
   if (applied !== defined) {
     throw new Error(
       `test database is out of sync with this branch: ${applied} migrations applied, ` +
-        `${defined} migration files present — the database was migrated by a different branch. ` +
+        `${defined} migration files present - the database was migrated by a different branch. ` +
         `Migrate it with \`pnpm --filter @chaste/db db:migrate\`, or drop CHASTE_TEST_DB so tests ` +
         `provision their own fixture database.`,
     );

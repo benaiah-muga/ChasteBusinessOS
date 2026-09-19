@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn, initials as toInitials } from "@/lib/format";
+import { LogoMark } from "@/components/logo";
 import type { AppError } from "@/lib/api";
 import {
   IconAlertTriangle,
@@ -262,9 +263,12 @@ export function Skeleton({ className }: { className?: string }) {
 export function LoadingPage() {
   return (
     <div className="space-y-8" aria-busy="true" aria-label="Loading">
-      <div className="space-y-2">
-        <Skeleton className="h-6 w-44" />
-        <Skeleton className="h-4 w-96 max-w-full" />
+      <div className="flex items-center gap-3">
+        <LogoMark size={34} className="brand-loader__coin" />
+        <div className="space-y-1.5">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-3 w-64 max-w-full" />
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {Array.from({ length: 4 }, (_, i) => (

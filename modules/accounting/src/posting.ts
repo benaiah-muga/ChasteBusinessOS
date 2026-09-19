@@ -65,7 +65,7 @@ const PERIOD_LOCK_CLASS = 7_362_911;
 
 /**
  * Serializes posting against period close/reopen for one org. Transaction-
- * scoped: whoever acquires it first defines the serial order — a close that
+ * scoped: whoever acquires it first defines the serial order - a close that
  * commits before a posting makes the posting refuse; a posting that commits
  * first is already on the books when the close seals the month.
  */

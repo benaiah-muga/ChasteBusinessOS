@@ -37,7 +37,7 @@ skill({
   steps: [
     "Confirm what is being bought, roughly what it should cost, and why. Ask only for what is missing.",
     "Formal route: raise a purchase request with purchasing.createPurchaseRequest, then have a reviewer approve it with purchasing.decidePurchaseRequest.",
-    "For competitive buying, send RFQs with purchasing.createRfq (needs an approved request), record each vendor's bid with purchasing.recordQuote, then award the best one with purchasing.selectWinningQuote — it raises the PO for you.",
+    "For competitive buying, send RFQs with purchasing.createRfq (needs an approved request), record each vendor's bid with purchasing.recordQuote, then award the best one with purchasing.selectWinningQuote - it raises the PO for you.",
     "Informal route (small or repeat buys): skip the request and create the purchase order directly with purchasing.createPurchaseOrder; put each distinct item on its own line.",
     "If the vendor does not exist, create them with purchasing.createVendor, then continue where you left off.",
     "When goods or the service arrive, record them against the order with purchasing.receiveGoods.",
@@ -70,7 +70,7 @@ skill({
   steps: [
     "Confirm the customer, what they are buying, prices, and any discount. Ask only for what is missing.",
     "If the customer does not exist, create them with crm.createCustomer, then continue where you left off.",
-    "Draft a quotation with accounting.createQuote — it goes out as sent immediately.",
+    "Draft a quotation with accounting.createQuote - it goes out as sent immediately.",
     "On acceptance, convert it with accounting.acceptQuote; it creates the real invoice on the books verbatim.",
     "Record the payment with accounting.recordPayment when it arrives.",
     "Report the quote number, invoice number, amount, and outstanding balance.",

@@ -26,7 +26,7 @@ import {
 } from "./shared";
 import { applyStockDelta, itemMovementCount, lockStockItems, movementCountsByItem, rebuildStockBalances } from "./service";
 
-// Public surface other modules import — this is the sanctioned integration
+// Public surface other modules import - this is the sanctioned integration
 // seam: the manufacturing module writes to THIS ledger through these helpers
 // rather than keeping its own stock records.
 export {
@@ -295,7 +295,7 @@ const reserveStock = (deps: ModuleDeps) =>
       withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const item = await itemBySku(tx, ctx.actor.orgId, input.sku);
         if (!item) throw new Error(`no item with SKU ${input.sku}`);
-        // N22: serialize the availability read against concurrent sellers —
+        // N22: serialize the availability read against concurrent sellers -
         // a reservation and a sale of the same last unit cannot both succeed.
         await lockStockItems(tx, [item.id]);
         const onHand = await stockOnHand(tx, ctx.actor.orgId, item.id);
@@ -426,12 +426,19 @@ const startCycleCount = (deps: ModuleDeps) =>
             createdByActorId: ctx.actor.id,
           })
           .returning({ id: cycleCounts.id });
-        // N22: each line also snapshots how many movements its item has — the
+        // N22: each line also snapshots how many movements its item has - the
         // watermark the drift guard compares against at post time, so a
         // receipt+sale during counting is caught even when net quantity lands
         // back where it started. The watermark stays item-global even on a
         // bin-scoped sheet: stricter is safe, a false invalidation forces a
-        // recount, never a bad adjustment.
+        // recount, never a bad adjustment. Snapshot under the item lock so
+        // the on-hand read and the watermark read are atomic - otherwise a
+        // movement landing between the two births a torn sheet whose
+        // variance silently absorbs it.
+        await lockStockItems(
+          tx,
+          activeItems.map((i) => i.id),
+        );
         const counts = await movementCountsByItem(
           tx,
           ctx.actor.orgId,
@@ -525,9 +532,16 @@ const postCycleCount = (deps: ModuleDeps) =>
         }
         // N22 watermark drift guard: a count sheet is only valid against the
         // stock it was snapshotted from. Any movement on a counted item since
-        // the snapshot invalidates the sheet — even one whose net quantity
-        // landed back where it started — because the variance could silently
-        // absorb an unrelated movement. Force a fresh count instead.
+        // the snapshot invalidates the sheet - even one whose net quantity
+        // landed back where it started - because the variance could silently
+        // absorb an unrelated movement. Force a fresh count instead. The
+        // item lock comes first so the check runs against a serialized
+        // state: nothing can land between the guard and the variance
+        // writes below.
+        await lockStockItems(
+          tx,
+          lines.filter((l) => l.countedThousandths !== null).map((l) => l.itemId),
+        );
         for (const line of lines) {
           if (line.countedThousandths === null) continue;
           const movements = await itemMovementCount(tx, ctx.actor.orgId, line.itemId);
@@ -538,13 +552,6 @@ const postCycleCount = (deps: ModuleDeps) =>
             );
           }
         }
-        // N22: post under the item lock so nothing slips in between the guard
-        // and the variance writes; the snapshot guarantee holds because the
-        // watermark check above ran against a serialized state.
-        await lockStockItems(
-          tx,
-          lines.filter((l) => l.countedThousandths !== null).map((l) => l.itemId),
-        );
         let adjustments = 0;
         let netVariance = 0;
         for (const line of lines) {
@@ -625,7 +632,7 @@ const stockHistory = (deps: ModuleDeps) =>
     id: "inventory.itemHistory",
     title: "Stock movement history",
     intent:
-      "Show the append-only movement history of one item — every quantity change with its reason, reference, cost, lot, and actor",
+      "Show the append-only movement history of one item - every quantity change with its reason, reference, cost, lot, and actor",
     module: "inventory",
     risk: "read",
     permission: "inventory.read",

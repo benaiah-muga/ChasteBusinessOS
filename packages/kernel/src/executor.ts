@@ -204,7 +204,7 @@ export class KernelExecutor {
 
     // Output conformance at the trust boundary (F02): a write whose output
     // violates its declared schema may have committed an effect that cannot
-    // be trusted or blindly retried — report unknown, never a retryable
+    // be trusted or blindly retried - report unknown, never a retryable
     // plain failure. Read-class capabilities have no effect to orphan.
     const outputCheck = cap.output.safeParse(data);
     if (!outputCheck.success) {

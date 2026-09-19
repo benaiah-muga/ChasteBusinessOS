@@ -1,5 +1,5 @@
 /**
- * M12 verification — understanding: analytics + helpdesk + documents.
+ * M12 verification - understanding: analytics + helpdesk + documents.
  * Run: pnpm demo:m12 [decompose|ask|tickets|documents|all]
  */
 import { getDb, invoiceLines, invoices, users } from "@chaste/db";
@@ -91,7 +91,7 @@ async function ticketsScenario(): Promise<string> {
   const { orgId, ownerCtx } = await seedOrg(db, "M12 Tickets Co");
   const cust = data(await ex.execute("crm.createCustomer", ownerCtx, { name: "SLA Tester" }));
   const conv = data(await ex.execute("support.startConversation", ownerCtx, { customerId: cust.customerId, subject: "Order still missing" }));
-  const suggestion = data(await ex.execute("support.suggestCategory", ownerCtx, { text: "Order still missing — where is delivery?" }));
+  const suggestion = data(await ex.execute("support.suggestCategory", ownerCtx, { text: "Order still missing - where is delivery?" }));
   ok(`category draft: ${suggestion.category}`, suggestion.draft === true);
   data(await ex.execute("support.updateTicket", ownerCtx, {
     conversationId: conv.conversationId,
@@ -99,7 +99,7 @@ async function ticketsScenario(): Promise<string> {
     category: "shipping",
     slaDueAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
   }));
-  const canned = data(await ex.execute("support.createCannedResponse", ownerCtx, { shortcut: "/sorry", title: "Apology", body: "We are sorry — here is what happens next." }));
+  const canned = data(await ex.execute("support.createCannedResponse", ownerCtx, { shortcut: "/sorry", title: "Apology", body: "We are sorry - here is what happens next." }));
   const kb = data(await ex.execute("support.createKbArticle", ownerCtx, { title: "Late deliveries", body: "Escalation path for late deliveries.", category: "shipping" }));
   ok(`canned response ${canned.cannedResponseId.slice(0, 8)}… and KB article ${kb.articleId.slice(0, 8)}… saved`);
   const signals = data(await ex.execute("signals.list", ownerCtx, {}));

@@ -18,7 +18,7 @@ describe("reorder primitives", () => {
     expect(() => averageDailyDemand(-1, 30)).toThrow(/cannot be negative/);
   });
 
-  it("days of cover is null without demand — no demand, no stockout", () => {
+  it("days of cover is null without demand - no demand, no stockout", () => {
     expect(daysOfCover(10_000, 0)).toBeNull();
     expect(daysOfCover(10_000, 1_000)).toBe(10);
   });
@@ -118,7 +118,7 @@ describe("governed reorder plan (M8.3)", () => {
 describe("golden fixture (90-day demand history)", () => {
   // Deterministic pseudo-demand: 90 days, base 3,000 with a stable jitter.
   // Expected values below were derived independently (node REPL) from this
-  // exact fixture — they pin the formulas against silent drift.
+  // exact fixture - they pin the formulas against silent drift.
   const daily = Array.from({ length: 90 }, (_, i) => 3_000 + ((i * 7_919) % 5_000));
   const total = daily.reduce((sum, v) => sum + v, 0);
 

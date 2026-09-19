@@ -16,8 +16,8 @@ export const MIN_DESCRIPTION = 20;
 
 /**
  * The screens a path walks through. "Start from scratch" has nothing to
- * import, so it skips the data screen entirely; every other path — including
- * no choice yet — keeps it.
+ * import, so it skips the data screen entirely; every other path - including
+ * no choice yet - keeps it.
  */
 export function screensForPath(path: OnboardingPath | null): Screen[] {
   return path === "fresh"
@@ -92,7 +92,7 @@ export function recoveryFor(code: string): Recovery {
 
 const KNOWN_FAILURES: Record<string, { title: string; hint: string }> = {
   unauthorized: { title: "Your session ended", hint: "Sign in again and you'll pick up right here." },
-  already_onboarded: { title: "You already have a workspace", hint: "Nothing to set up — your books are open." },
+  already_onboarded: { title: "You already have a workspace", hint: "Nothing to set up - your books are open." },
   rate_limited: { title: "Too many attempts", hint: "Wait a moment and try again." },
   not_found: { title: "Set up your workspace first", hint: "This step needs a workspace to attach to." },
 };
@@ -100,7 +100,7 @@ const KNOWN_FAILURES: Record<string, { title: string; hint: string }> = {
 /**
  * Turns an unsuccessful response into something a person can act on.
  *
- * A server message is only repeated when it reads like a sentence — short, and
+ * A server message is only repeated when it reads like a sentence - short, and
  * free of the braces and angle brackets that leak JSON and markup into the UI.
  */
 export function failureFromResponse(
@@ -134,7 +134,7 @@ export function networkFailure(err: unknown): Failure {
   return {
     code: "network",
     title: "Can't reach the server",
-    hint: "Check your connection and try again — nothing has been lost.",
+    hint: "Check your connection and try again - nothing has been lost.",
     detail: String(err),
   };
 }

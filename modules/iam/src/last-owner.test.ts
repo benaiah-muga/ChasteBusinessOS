@@ -105,4 +105,25 @@ describe("iam.assignRole last-owner protection (N07)", () => {
       .where(and(eq(userRoles.orgId, orgId), eq(userRoles.roleId, ownerRoleId)));
     expect(owners.map((r) => r.userId)).toEqual([secondUserId]);
   });
+
+  it("two concurrent demotions of the last two owners leave exactly one owner standing", async () => {
+    // whichever order the two removals serialize in - naturally sequential
+    // or overlapping on the owner-grant locks - the loser must recount
+    // against the winner's commit and refuse, never strand the org.
+    await run("iam.assignRole", ctxFor(secondUserId), { userId: ownerUserId, roleId: ownerRoleId });
+    const outcomes = await Promise.allSettled([
+      run("iam.assignRole", ctxFor(secondUserId), { userId: secondUserId, roleId: memberRoleId }),
+      run("iam.assignRole", ctxFor(ownerUserId), { userId: ownerUserId, roleId: memberRoleId }),
+    ]);
+    const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
+    const rejected = outcomes.filter((o) => o.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(String((rejected[0] as PromiseRejectedResult).reason)).toMatch(/last owner/);
+    const owners = await db.db
+      .select({ userId: userRoles.userId })
+      .from(userRoles)
+      .where(and(eq(userRoles.orgId, orgId), eq(userRoles.roleId, ownerRoleId)));
+    expect(owners).toHaveLength(1);
+  });
 });

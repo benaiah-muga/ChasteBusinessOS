@@ -7,7 +7,7 @@ Status: Accepted (M12)
 
 - **explainChange is pure arithmetic** (erp-core/explainchange.ts): the
   metric delta across a dimension decomposes per key and the contributions
-  sum to the delta EXACTLY — property-tested. The capability adds drill:
+  sum to the delta EXACTLY - property-tested. The capability adds drill:
   sample invoice ids behind the biggest movers. The model narrates the
   decomposition; it never computes one.
 - **askYourBusiness composes gated reads** (extractors, signals) and every
@@ -20,4 +20,4 @@ Status: Accepted (M12)
   auto-applied), red SLA-breach signals.
 - **Documents gain the business layer**: folder path, refType/refId links
   to the records they evidence, and expiry metadata that raises signals.
-  Version history is append-only — the document row is always the latest.
+  Version history is append-only - the document row is always the latest.

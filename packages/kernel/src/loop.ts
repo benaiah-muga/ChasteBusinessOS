@@ -44,7 +44,7 @@ export interface LoopMessage {
 export interface TicketSink {
   /** Files the ticket and returns its durable id, so the tool result can
    * hand the user a real reference instead of "ticket filed" (X11). A
-   * governed refusal returns id: null with the reason — filing honestly
+   * governed refusal returns id: null with the reason - filing honestly
    * includes reporting honestly when filing itself is refused (N08). */
   file(orgId: string, title: string, description: string): Promise<{ id: string | null; error?: string }>;
 }

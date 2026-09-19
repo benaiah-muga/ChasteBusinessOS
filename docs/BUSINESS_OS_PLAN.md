@@ -1,4 +1,4 @@
-# Business OS Plan — Full Module Suite (M7–M13)
+# Business OS Plan - Full Module Suite (M7–M13)
 
 Status: proposed (awaiting owner go-ahead) · 2026-08-30
 Input: eleven external feature-audit checklists (Accounting, Purchasing, HR,
@@ -27,19 +27,19 @@ Governing principle (owner's words, treated as an architectural requirement):
 
 ### 0.2 The four seams that make combination exponential
 
-1. **Signal registry (M8.1)** — every module contributes needs-attention
+1. **Signal registry (M8.1)** - every module contributes needs-attention
    signals; home, app overviews, routines, and the agent consume one shape.
-2. **Cross-module read capabilities** — e.g. `support.lookupOrderStatus`
+2. **Cross-module read capabilities** - e.g. `support.lookupOrderStatus`
    already crosses into sales/POS; `crm.customerTimeline` (M9.4) spans
    invoices, quotes, payments, deals, tasks, support, messages. Reads
    compose; writes stay governed.
-3. **Advisory skills as playbooks** — `procure-to-pay`, `quote-to-cash`,
+3. **Advisory skills as playbooks** - `procure-to-pay`, `quote-to-cash`,
    `stock-reorder`, `month-end-close` already exist; each milestone adds
    playbooks that chain capabilities across modules.
-4. **The event ledger** — one append-only, hash-chained audit spine; any
+4. **The event ledger** - one append-only, hash-chained audit spine; any
    cross-module action is reconstructible end-to-end.
 
-### 0.3 Composition conformance (new, enforced — ADR-0035, M8.0)
+### 0.3 Composition conformance (new, enforced - ADR-0035, M8.0)
 
 The principle becomes a testable rule set:
 
@@ -73,7 +73,7 @@ Legend: BUILT (exists, governed) · PARTIAL (exists, gaps listed) · NEW ·
 DEFERRED (deliberate). Evidence = capability ids / tables observed in the
 registry and schema.
 
-### 1.1 Accounting — strongest module already; depth, not rebuild
+### 1.1 Accounting - strongest module already; depth, not rebuild
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
@@ -90,7 +90,7 @@ registry and schema.
 | Anomaly/duplicate detection, cash-flow forecast, "explain" | NEW (deterministic) | stats → signals; forecast from AR/AP/recurring in erp-core → M10.3 |
 | Multi-company, consolidation, cost centers, analytic acct, deferred rev/exp | DEFERRED (audit ④) | design hooks only, per ARCHITECTURE non-goals |
 
-### 1.2 Purchasing — workflow complete; add memory and intelligence
+### 1.2 Purchasing - workflow complete; add memory and intelligence
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
@@ -101,7 +101,7 @@ registry and schema.
 | Unusual price increases; best supplier; "what should we order" | NEW | deterministic comparisons → signals; ordering = M8 reorder loop |
 | Budgets, blanket orders, MOQ rules, contracts, vendor portals, subcontracting, tenders, EDI | DEFERRED (audit ③④) | |
 
-### 1.3 HR — core exists; structure and recruiting are the gaps
+### 1.3 HR - core exists; structure and recruiting are the gaps
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
@@ -115,7 +115,7 @@ registry and schema.
 | AI: candidate summarization, JD/interview drafting | NEW | draft-only, cited; hiring decisions never autonomous |
 | Benefits, reviews, goals, training, self-service, succession, shift planning | DEFERRED (audit ②④) | |
 
-### 1.4 Manufacturing — production core done; planning lite only
+### 1.4 Manufacturing - production core done; planning lite only
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
@@ -126,7 +126,7 @@ registry and schema.
 | Bottleneck/waste analysis, demand-driven planning | NEW | deterministic; feeds signals |
 | By-products, quality checks, subcontracting, MRP, MPS, capacity engine, routings, shop-floor/IoT | DEFERRED (audit ③④) | |
 
-### 1.5 Projects — greenfield, deliberately small
+### 1.5 Projects - greenfield, deliberately small
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
@@ -135,7 +135,7 @@ registry and schema.
 | AI: status summaries; extract tasks from messages; plan drafting | NEW | summaries from ledger; extraction is draft-only via messaging reads → M11.5 |
 | Dependencies/Gantt, milestones, budgets, client portal, portfolio, resource planning | DEFERRED (audit ②④) | |
 
-### 1.6 Expenses — governed core exists; receipts and policy are the gaps
+### 1.6 Expenses - governed core exists; receipts and policy are the gaps
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
@@ -145,7 +145,7 @@ registry and schema.
 | Duplicate receipt detection; policy limits; auto-categorization | NEW | deterministic: hash/amount-date match, limit checks → approval routing, rules-first coding (extends `documents.suggestCoding` pattern) → M11.6 |
 | Mileage, per-diem, corporate cards, multi-currency expenses | DEFERRED (audit ②④) | |
 
-### 1.7 POS — solid core; returns and receipts complete it
+### 1.7 POS - solid core; returns and receipts complete it
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
@@ -157,7 +157,7 @@ registry and schema.
 | Multiple locations/registers; shift management; POS reports | PARTIAL | sessions exist; registers-as-locations verify → M13.2 |
 | Offline mode, loyalty, gift cards, promotions engine, customer display, kitchen/tables, hardware | DEFERRED (audit ②④) | offline is explicitly rejected for now |
 
-### 1.8 Marketing — approved to build (owner decision 2026-08-30): keep it tiny
+### 1.8 Marketing - approved to build (owner decision 2026-08-30): keep it tiny
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
@@ -167,11 +167,11 @@ registry and schema.
 | Basic analytics | NEW | sends/bounces from the seam; **no open/click tracking** (privacy + scope) |
 | Automated sequences, journeys, landing pages, forms, A/B tests, attribution, multi-channel | DEFERRED (audit ②④) | the audit itself says: don't become Mailchimp + HubSpot |
 
-### 1.9 Helpdesk — good bones (draft-only agent already shipped); add ticketing depth
+### 1.9 Helpdesk - good bones (draft-only agent already shipped); add ticketing depth
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
-| Conversations, replies, escalation, resolve/reopen, knowledge search, order-status lookup | BUILT | `support.*` (9 capabilities), ADR 0025 — `lookupOrderStatus` is already a cross-module read |
+| Conversations, replies, escalation, resolve/reopen, knowledge search, order-status lookup | BUILT | `support.*` (9 capabilities), ADR 0025 - `lookupOrderStatus` is already a cross-module read |
 | AI drafted replies (bound, zero model-controlled ids) | BUILT | ADR 0025, `demo:support` proves injection resistance |
 | **Ticket fields** (number, priority, category, assignee, SLA-lite dueAt) | NEW | extend support conversations → M12.3 |
 | Canned responses; internal notes; collision prevention | NEW | light → M12.3 |
@@ -179,7 +179,7 @@ registry and schema.
 | AI: auto-categorize/prioritize, similar-ticket retrieval | NEW | deterministic rules first; model suggestions land as drafts, never auto-applied; retrieval via `searchMemory` → M12.3 |
 | SLA policies, teams, CSAT, omnichannel, voice, ITSM | DEFERRED (audit ②④) | SLA-lite dueAt only |
 
-### 1.10 Documents — the business document layer, not Google Drive
+### 1.10 Documents - the business document layer, not Google Drive
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
@@ -191,13 +191,13 @@ registry and schema.
 | Sharing/permissions | PARTIAL | RLS org-scoped today (ADR 0017); per-document grants deferred |
 | Approval workflows, e-signature, templates, retention policies, legal DMS | DEFERRED (audit ②④) | |
 
-### 1.11 Analytics — the place modules become understanding
+### 1.11 Analytics - the place modules become understanding
 
 | Audit item | Verdict | Evidence / action |
 |---|---|---|
 | Five read-only dataset extractors + `analytics.renderReport` (narrative, SVG charts, tables → HTML) | BUILT | ADR 0029, `modules/analytics` |
 | Dashboards: per-app overviews + home dashboard + custom dashboards | BUILT | M-batch (`core.dashboard.create`), overview dashboards |
-| **`analytics.explainChange` — the killer capability** | NEW | deterministic contribution decomposition (metric delta attributed by product/customer/category; contributions sum to delta — property-tested); model narrates, then offers a governed action → M12.1 |
+| **`analytics.explainChange` - the killer capability** | NEW | deterministic contribution decomposition (metric delta attributed by product/customer/category; contributions sum to delta - property-tested); model narrates, then offers a governed action → M12.1 |
 | "Ask your business" composition | NEW | extractors + signals + explainChange + skills; answers cite rows and end in proposed actions → M12.2 |
 | Automated weekly/monthly business review | NEW | routine (ADR 0031) renders review via renderReport → notification/email → M12.2 |
 | Forecasting (sales, cash flow, inventory) | NEW | deterministic erp-core functions (M8.2, M10.3); model never computes |
@@ -211,7 +211,7 @@ signals + reorder intelligence → quote-to-cash + CRM depth). This section
 extends the sequence. Every milestone: unlazy gates written first, repo
 verification gate, a demo proof, and at least one subset-org run (§0.3).
 
-### M10 — Accounting & purchasing depth ("trustworthy money, memorable suppliers")
+### M10 - Accounting & purchasing depth ("trustworthy money, memorable suppliers")
 
 - **10.1 Cash flow statement + credit notes.** Direct-method cash flow from
   the ledger (erp-core, property-tested: ending cash ties to balance sheet);
@@ -234,7 +234,7 @@ verification gate, a demo proof, and at least one subset-org run (§0.3).
   - G10.3a `CHECK: pnpm --filter @chaste/erp-core test -- forecast` / `EXPECT: "forecast-ok"`
   - G10.3b `CHECK: pnpm demo:m10` (forecast scenario) / `EXPECT: "AFFORD CHECK OK"`
 
-### M11 — People, projects, expenses ("run the business, not HR bureaucracy")
+### M11 - People, projects, expenses ("run the business, not HR bureaucracy")
 
 - **11.1 HR structure.** Departments/positions/manager on employees;
   directory UI; employee documents via the documents seam; emergency contacts.
@@ -262,12 +262,12 @@ verification gate, a demo proof, and at least one subset-org run (§0.3).
   duplicate-claim detection (deterministic); rules-first auto-categorization
   extending the suggestCoding pattern.
   - G11.6 `CHECK: pnpm --filter @chaste/module-accounting test -- expenses` / `EXPECT: "expenses-depth-ok"`
-- Demo proof: `pnpm demo:m11` — hire → assign to project → log time → expense
+- Demo proof: `pnpm demo:m11` - hire → assign to project → log time → expense
   claim with receipt → approve → payroll; subset matrix run included.
 
-### M12 — Understanding ("BI is dead, long live the business review")
+### M12 - Understanding ("BI is dead, long live the business review")
 
-- **12.1 `analytics.explainChange` — the killer capability.** Deterministic
+- **12.1 `analytics.explainChange` - the killer capability.** Deterministic
   contribution decomposition: metric delta attributed across dimensions
   (product, customer, category, period); contributions sum to the delta
   (property-tested in erp-core); results drill to underlying transactions;
@@ -290,11 +290,11 @@ verification gate, a demo proof, and at least one subset-org run (§0.3).
   history, expiry metadata → expiry signals; cross-document Q&A with explicit
   citations.
   - G12.4 `CHECK: pnpm --filter @chaste/module-documents test -- metadata` / `EXPECT: "documents-metadata-ok"`
-- Demo proof: `pnpm demo:m12` — the audit's marquee, verbatim: revenue down
+- Demo proof: `pnpm demo:m12` - the audit's marquee, verbatim: revenue down
   12% → decomposed to Product A and 14 repeat customers → three not seen in
   45+ days → "prepare a follow-up list?" → tasks + drafts created on approval.
 
-### M13 — Retail & reach (demand-gated)
+### M13 - Retail & reach (demand-gated)
 
 - **13.1 POS completion.** Returns (reversal + stock back), receipt
   render/print, line-level discounts/taxes verification, multiple payment
@@ -326,12 +326,12 @@ verification gate, a demo proof, and at least one subset-org run (§0.3).
 
 ## 4. ADRs to write (at their slice start)
 
-- 0033 `inventory-gl-integration` (M7.1) — periodic first; retires ADR 0009's
+- 0033 `inventory-gl-integration` (M7.1) - periodic first; retires ADR 0009's
   deferral.
-- 0034 `needs-attention-signal-registry` (M8.1) — deterministic producers,
+- 0034 `needs-attention-signal-registry` (M8.1) - deterministic producers,
   many consumers.
-- 0036 `sales-order-fulfillment-model` (M9.2) — reservation-anchored SO.
-- 0036 `module-composition-conformance` (M8.0) — this plan's §0.3 as enforced
+- 0036 `sales-order-fulfillment-model` (M9.2) - reservation-anchored SO.
+- 0036 `module-composition-conformance` (M8.0) - this plan's §0.3 as enforced
   rules: no sibling imports, graceful degradation, subset matrix, AI-as-tissue.
 - Others (credit notes, cash flow method, ticketing fields, projects schema)
   decided in their slices.
@@ -343,14 +343,14 @@ verification gate, a demo proof, and at least one subset-org run (§0.3).
 2. Leads one-object vs separate table (revenue plan §8.2; recommended:
    one-object).
 3. Invoice timing (revenue plan §8.3; recommended: invoice-on-delivery).
-4. **Projects in M11.5** — include (recommended; small, your own ops likely
+4. **Projects in M11.5** - include (recommended; small, your own ops likely
    use it) or drop until a customer asks.
-5. **Marketing-lite in M13.3** — include only on confirmed demand
+5. **Marketing-lite in M13.3** - include only on confirmed demand
    (recommended) or cut from the plan entirely.
-6. Recruitment-lite (M11.3) — build (recommended, kanban is cheap) or defer.
-7. Expiry-on-lots pull-forward (revenue plan §8.4) — keep tier ④ unless first
+6. Recruitment-lite (M11.3) - build (recommended, kanban is cheap) or defer.
+7. Expiry-on-lots pull-forward (revenue plan §8.4) - keep tier ④ unless first
    FMCG/pharma customer is real.
-8. Camera scanning post-M9 — confirm deferral.
+8. Camera scanning post-M9 - confirm deferral.
 
 ## 6. Process (long-running engagement rules)
 
@@ -363,7 +363,7 @@ verification gate, a demo proof, and at least one subset-org run (§0.3).
 - Every milestone ends with: demo proof + at least one subset-org run +
   CHANGELOG entry + ROADMAP checkboxes ticked only on gate evidence.
 - Standing principle added to ROADMAP: modules useful alone, exponential
-  together, AI as connective tissue — enforced by ADR-0035 conformance.
+  together, AI as connective tissue - enforced by ADR-0035 conformance.
 
 
 

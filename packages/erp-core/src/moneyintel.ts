@@ -21,7 +21,7 @@ export interface DuplicatePair {
   daysApart: number;
 }
 
-/** Same invoice, same amount, inside the window — the classic double click. */
+/** Same invoice, same amount, inside the window - the classic double click. */
 export function findDuplicatePayments(payments: PaymentRecord[], windowDays = 7): DuplicatePair[] {
   const out: DuplicatePair[] = [];
   const sorted = [...payments].sort(
@@ -31,7 +31,7 @@ export function findDuplicatePayments(payments: PaymentRecord[], windowDays = 7)
     for (let j = i + 1; j < sorted.length; j++) {
       const a = sorted[i]!;
       const b = sorted[j]!;
-      if (a.invoiceId !== b.invoiceId) break; // sorted by invoice — no later match
+      if (a.invoiceId !== b.invoiceId) break; // sorted by invoice - no later match
       if (a.amountMinor !== b.amountMinor) continue;
       const daysApart = Math.abs(a.receivedAt.getTime() - b.receivedAt.getTime()) / 86_400_000;
       if (daysApart > windowDays) continue;

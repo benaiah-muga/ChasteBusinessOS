@@ -17,7 +17,7 @@ import { ModuleDisabled, useModuleEnabled } from "../../_shell/module-context";
 import { AppFrame } from "../../_shell/app-frame";
 
 /**
- * P05 — the receiving desk for the person holding the delivery: find the
+ * P05 - the receiving desk for the person holding the delivery: find the
  * order, enter per line what arrived (accepted / rejected with a reason),
  * and finish with what was added, refused and still expected. Every number
  * goes through the governed receiving capability; partial work survives
@@ -188,7 +188,7 @@ export default function ReceivingDeskPage() {
   if (!enabled) return <ModuleDisabled label="Purchasing (Procurement)" />;
 
   return (
-    <AppFrame appId="purchasing" description="Receiving desk — record what arrived, line by line" persistKey="purchasing-receiving">
+    <AppFrame appId="purchasing" description="Receiving desk - record what arrived, line by line" persistKey="purchasing-receiving">
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
       <Card>
         <CardTitle>Find the order on the delivery note</CardTitle>

@@ -1,4 +1,4 @@
-# Gates: SCIM — token expiry and rotation policy
+# Gates: SCIM - token expiry and rotation policy
 
 OWNS: packages/db/drizzle/0054_scim_token_expiry.sql, packages/db/drizzle/meta/_journal.json, packages/db/src/schema/index.ts, apps/web/src/app/api/scim/tokens/route.ts, apps/web/src/app/api/scim/v2/Users/route.ts, apps/web/src/server/scim-tokens.test.ts
 
@@ -19,7 +19,7 @@ Scope: SCIM provisioning tokens live 90 days by default (1–365 configurable at
   EXPECT: /Tests\s+1 passed/
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=2242f1efa53d991bc8f5a2e2c8f5e1c67d6ac3b03d34b08ca1c5a92be3c29211; output-bytes=25023
 
-- [x] SCIM-G3: repo verification gate — typecheck, lint, and the full workspace test suite pass
+- [x] SCIM-G3: repo verification gate - typecheck, lint, and the full workspace test suite pass
   CHECK: pnpm typecheck >/dev/null 2>&1 && pnpm lint >/dev/null 2>&1 && pnpm test >/tmp/kilo/gate-scim-test.log 2>&1 && echo REPO-GATE-OK || { tail -30 /tmp/kilo/gate-scim-test.log; exit 1; }
   EXPECT: REPO-GATE-OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=0c6e5dc74929b6f125a6dfc551264ea8e2e1ad046a1b29c7937ae29c3cc6b215; output-bytes=13

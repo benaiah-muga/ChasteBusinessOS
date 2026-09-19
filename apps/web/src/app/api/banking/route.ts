@@ -6,7 +6,7 @@ import { getResolvedUser } from "@/server/session";
 
 /**
  * Full human surface for bank feeds & reconciliation: accounts, statement
- * imports, matching, exclusion, and the summary — every capability through
+ * imports, matching, exclusion, and the summary - every capability through
  * the same governed executor the agent uses.
  */
 export async function GET() {

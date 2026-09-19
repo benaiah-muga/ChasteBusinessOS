@@ -6,12 +6,12 @@ import { APPEND_ONLY_TABLES, ensureAppRole } from "./roles";
  * S01 floor, swept mechanically over every org-scoped table of a fresh
  * fixture database migrated from this branch: RLS enabled, a tenant
  * isolation policy present, DML granted to the least-privilege runtime role,
- * and that role provably fail-closed — no rows visible without tenant
+ * and that role provably fail-closed - no rows visible without tenant
  * context, and no cross-tenant rows even when filtering by the other org's
  * id. Any new tenant table that skips its RLS policy fails this suite.
  *
  * N09: the append-only financial tables (journal, event ledger) are swept
- * for reads/inserts like every other table but must LACK mutation rights —
+ * for reads/inserts like every other table but must LACK mutation rights -
  * the runtime role appends to history, it never rewrites it.
  */
 

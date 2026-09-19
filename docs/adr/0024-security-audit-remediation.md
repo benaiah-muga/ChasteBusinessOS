@@ -1,4 +1,4 @@
-# ADR 0024: Security audit remediation — tenant, supply-chain, and agent boundaries
+# ADR 0024: Security audit remediation - tenant, supply-chain, and agent boundaries
 
 Date: 2026-08-24
 Status: Accepted
@@ -34,7 +34,7 @@ lost-update races. The RLS submitter policy stays as defense-in-depth.
 
 The worker ran jobs as a system actor holding `*`. Any future bug that lets
 an attacker insert a job row would become org-admin execution through the
-governed path — the worst possible failure mode for a "single governed path"
+governed path - the worst possible failure mode for a "single governed path"
 design. The actor now holds exactly the target capability's permission;
 unknown types fail permanently instead of retrying.
 
@@ -93,5 +93,5 @@ code-only change; tracked here so it is not forgotten.
   execution, unbounded agent spend, DM exposure across members, agent-initiated
   membership changes, and immortal approvals are all closed.
 - Republishing a marketplace package under a new version now requires the
-  original publisher — intentional friction against takeover.
+  original publisher - intentional friction against takeover.
 - Rate limits are conservative defaults; tune via env before scale-out.

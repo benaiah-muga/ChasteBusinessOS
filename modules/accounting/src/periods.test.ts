@@ -283,7 +283,7 @@ describe("closed-period enforcement (N13)", () => {
       // sealed the month after it.
       expect(invoiceRows).toHaveLength(1);
     } else {
-      // Close committed first: the post refused the sealed month — and no
+      // Close committed first: the post refused the sealed month - and no
       // other failure is acceptable.
       expect((invoiceSettled.reason as Error).message).toMatch(/is closed/);
       expect(invoiceRows).toHaveLength(0);

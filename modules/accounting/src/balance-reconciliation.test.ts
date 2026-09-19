@@ -165,7 +165,7 @@ describe("N11 balance contract across surfaces", () => {
     expect(pays).toHaveLength(1);
     expect(row!.paidMinor).toBe(pays[0]!.amountMinor);
     expect(row!.paidMinor === 4_000_000 || row!.paidMinor === 5_000_000).toBe(true);
-    // either winner leaves 1,000.00 or 2,000.00 outstanding — never settled
+    // either winner leaves 1,000.00 or 2,000.00 outstanding - never settled
     expect(fulfilled[0]!.value.fullyPaid).toBe(false);
   });
 });

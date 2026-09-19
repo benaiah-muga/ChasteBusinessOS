@@ -10,7 +10,7 @@ Stock checking was per line, per reader. `sales.confirmOrder` re-read the
 same availability for every line, so two order lines for the same item could
 each claim the same stock (7 + 7 against 10 reserved 14), and the register
 checked raw on-hand per line with the same shape. Nothing serialized readers
-either: two concurrent orders — or an order and a register sale — could both
+either: two concurrent orders - or an order and a register sale - could both
 read the last unit as available, and the register did not see reservations at
 all, so stock promised to a confirmed order was still sellable over the
 counter.

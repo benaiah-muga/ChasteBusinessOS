@@ -178,7 +178,7 @@ export function HiringTab({ openings, applicants, busy, post, onChanged }: Hirin
                         {o.title}
                       </button>
                     </td>
-                    <td className="text-stone-500">{o.department ?? "—"}</td>
+                    <td className="text-stone-500">{o.department ?? "-"}</td>
                     <td className="tnum text-right">{countFor(o.id)}</td>
                     <td>
                       <Badge tone={statusTone(o.status)}>{o.status}</Badge>
@@ -200,7 +200,7 @@ export function HiringTab({ openings, applicants, busy, post, onChanged }: Hirin
 
       {activeId && (
         <Card>
-          <CardTitle>Pipeline — {openings.find((o) => o.id === activeId)?.title ?? "opening"}</CardTitle>
+          <CardTitle>Pipeline - {openings.find((o) => o.id === activeId)?.title ?? "opening"}</CardTitle>
           <form
             className="mb-4 flex flex-wrap items-end gap-2 border-b border-stone-100 pb-4 text-sm"
             onSubmit={(e) => {
@@ -278,7 +278,7 @@ export function HiringTab({ openings, applicants, busy, post, onChanged }: Hirin
                         <td>
                           <Badge tone={stageTone[a.stage] ?? "neutral"}>{a.stage}</Badge>
                         </td>
-                        <td className="text-stone-500">{a.note ?? "—"}</td>
+                        <td className="text-stone-500">{a.note ?? "-"}</td>
                         <td className="whitespace-nowrap text-right">
                           {active && (
                             <span className="inline-flex gap-1.5">
@@ -338,7 +338,7 @@ export function HiringTab({ openings, applicants, busy, post, onChanged }: Hirin
           if (ok) await onChanged();
         }}
         title={`Reject ${rejectTarget?.name ?? ""}?`}
-        body="Rejected candidates leave the pipeline. Reversing isn't possible — start a fresh application instead."
+        body="Rejected candidates leave the pipeline. Reversing isn't possible - start a fresh application instead."
         confirmLabel="Reject"
         busy={busy}
       />

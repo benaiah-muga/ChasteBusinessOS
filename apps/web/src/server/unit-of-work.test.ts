@@ -21,8 +21,8 @@ import { executeAtomically } from "./unit-of-work";
 /**
  * B02 unit-of-work proof: with a transaction-backed executor, mutation,
  * audit fact and receipt commit together. An audit failure after the write
- * rolls the whole unit back — payments, ledger events and receipts all gone
- * — so the retry starts clean instead of reconciling an unknown outcome.
+ * rolls the whole unit back - payments, ledger events and receipts all gone
+ * - so the retry starts clean instead of reconciling an unknown outcome.
  */
 
 const url = process.env.DATABASE_URL ?? "postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2";

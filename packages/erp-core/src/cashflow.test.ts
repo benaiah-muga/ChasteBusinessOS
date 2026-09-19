@@ -18,7 +18,7 @@ const COUNTERS: Array<{ code: string; type: CashFlowLine["accountType"] }> = [
   { code: "4000", type: "income" },
   { code: "5000", type: "expense" },
   { code: "3000", type: "equity" },
-  { code: "1500", type: "asset" }, // equipment — investing
+  { code: "1500", type: "asset" }, // equipment - investing
 ];
 
 const arbEntry = fc

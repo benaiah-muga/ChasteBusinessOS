@@ -1,7 +1,7 @@
 /**
  * Thirteen-week cash forecast (M10, ADR 0037).
  *
- * Advisory only — never a posting. Open receivables and payables are
+ * Advisory only - never a posting. Open receivables and payables are
  * bucketed into weekly closes from current cash. Every flow lands in
  * exactly one bucket (flows past the horizon fall into week 13; negative
  * offsets clamp into week 1), weekly closes chain, and the final close is
@@ -34,7 +34,7 @@ export interface CashForecast {
 
 const WEEK_MS = 7 * 86_400_000;
 
-/** Monday 00:00 UTC of the week containing d — deterministic week buckets. */
+/** Monday 00:00 UTC of the week containing d - deterministic week buckets. */
 export function weekStartOf(d: Date): Date {
   const utc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   const dow = (d.getUTCDay() + 6) % 7; // 0 = Monday

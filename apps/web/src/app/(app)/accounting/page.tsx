@@ -303,7 +303,7 @@ export default function AccountingPage() {
   return (
     <AppFrame
       appId="accounting"
-      description="Entries are immutable — corrections are mirror reversals. Sealed periods refuse new postings."
+      description="Entries are immutable - corrections are mirror reversals. Sealed periods refuse new postings."
       tabs={[
         { id: "overview", label: "Overview" },
         { id: "journal", label: "Journal" },
@@ -399,7 +399,7 @@ export default function AccountingPage() {
         open={closeOpen}
         onClose={() => setCloseOpen(false)}
         title="Close a period"
-        description="Sealed periods refuse new postings. Reopening is a gated destructive action — make sure the month is reconciled first."
+        description="Sealed periods refuse new postings. Reopening is a gated destructive action - make sure the month is reconciled first."
         footer={
           <>
             <Button tone="secondary" onClick={() => setCloseOpen(false)}>
@@ -467,7 +467,7 @@ export default function AccountingPage() {
         body={
           <>
             Post a mirror reversal of “{reverseTarget?.memo}” ({formatMoney(reverseTarget?.amountMinor ?? 0)})? The
-            original stays untouched — corrections are always additive.
+            original stays untouched - corrections are always additive.
           </>
         }
         confirmLabel="Post reversal"
@@ -521,7 +521,7 @@ function OverviewTab({
               {reports.balanceSheet.balanced ? (
                 <Badge tone="green">books balanced</Badge>
               ) : (
-                <Badge tone="red">unbalanced — investigate</Badge>
+                <Badge tone="red">unbalanced - investigate</Badge>
               )}
               <span>Assets {formatMoney(reports.balanceSheet.assetsMinor)}</span>
             </div>
@@ -533,7 +533,7 @@ function OverviewTab({
           <Figure label="Expenses" value={formatMoney(reports?.pnl.expenseMinor ?? 0)} />
           <Figure
             label={`Net cash · YTD`}
-            value={cash ? formatMoney(cash.netCashMinor) : "—"}
+            value={cash ? formatMoney(cash.netCashMinor) : "-"}
             tone={cash && cash.netCashMinor < 0 ? "danger" : "default"}
           />
           <Figure
@@ -606,7 +606,7 @@ function OverviewTab({
           <EmptyState
             icon={<IconUndo />}
             title="No journal entries yet"
-            hint="Post an invoice, bill, sale, or payroll run — or just ask your workmate below."
+            hint="Post an invoice, bill, sale, or payroll run - or just ask your workmate below."
           />
         ) : (
           <ol className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
@@ -714,7 +714,7 @@ function JournalSection({
         <EmptyState
           icon={<IconUndo />}
           title={search ? "No entries match" : "No journal entries yet"}
-          hint={search ? "Try a different filter." : "Post an invoice, bill, sale, or payroll run — or just ask your workmate."}
+          hint={search ? "Try a different filter." : "Post an invoice, bill, sale, or payroll run - or just ask your workmate."}
         />
       ) : (
         <div className="table-shell">
@@ -823,7 +823,7 @@ function ReceivablesSection({
       setEmailTo("");
       setEmailNote(`Invoice #${number} sent.`);
     } else {
-      setEmailNote(res.error?.title ?? "Couldn't send — is SMTP configured in Settings?");
+      setEmailNote(res.error?.title ?? "Couldn't send - is SMTP configured in Settings?");
     }
   }
 
@@ -871,7 +871,7 @@ function ReceivablesSection({
 
       {/* Full invoice ledger */}
       {invoices.length === 0 ? (
-        <QuietLine>No invoices yet — issue your first one above, or accept a quote in Sales.</QuietLine>
+        <QuietLine>No invoices yet - issue your first one above, or accept a quote in Sales.</QuietLine>
       ) : (
         <div className="table-shell mt-4">
           <table className="data-table">
@@ -981,7 +981,7 @@ function ReceivablesSection({
           Payments received
         </CardTitle>
         {payments.length === 0 ? (
-          <QuietLine>No payments recorded yet — hit Pay on an invoice above.</QuietLine>
+          <QuietLine>No payments recorded yet - hit Pay on an invoice above.</QuietLine>
         ) : (
           <div className="table-shell">
             <table className="data-table">
@@ -1022,7 +1022,7 @@ function ReceivablesSection({
             </table>
           </div>
         )}
-        <p className="mt-2 text-xs text-stone-500">Reversals mirror the payment&apos;s entries and release the invoice balance — always approval-gated.</p>
+        <p className="mt-2 text-xs text-stone-500">Reversals mirror the payment&apos;s entries and release the invoice balance - always approval-gated.</p>
       </Card>
       {emailNote && <p className="mt-2 text-xs text-stone-500">{emailNote}</p>}
 
@@ -1031,7 +1031,7 @@ function ReceivablesSection({
         open={invoiceOpen}
         onClose={() => setInvoiceOpen(false)}
         title="New invoice"
-        description="Posts the receivable and revenue to the ledger immediately — posted documents are immutable, corrections go through credit notes."
+        description="Posts the receivable and revenue to the ledger immediately - posted documents are immutable, corrections go through credit notes."
         width="max-w-2xl"
         footer={
           <>
@@ -1141,7 +1141,7 @@ function ReceivablesSection({
       <Dialog
         open={payFor !== null}
         onClose={() => setPayFor(null)}
-        title={`Record payment — invoice #${payFor?.number ?? ""}`}
+        title={`Record payment - invoice #${payFor?.number ?? ""}`}
         description="Posts cash to the ledger and settles the invoice balance. Payments above the policy threshold wait for approval."
         footer={
           <>
@@ -1200,7 +1200,7 @@ function ReceivablesSection({
       <Dialog
         open={creditFor !== null}
         onClose={() => setCreditFor(null)}
-        title={`Credit invoice #${creditFor?.number ?? ""} — ${creditFor?.customerName ?? ""}`}
+        title={`Credit invoice #${creditFor?.number ?? ""} - ${creditFor?.customerName ?? ""}`}
         description="Concedes part of the invoice through an approved reversing entry; the invoice itself is never edited."
         footer={
           <>
@@ -1430,7 +1430,7 @@ function ReportsSection({
           </CardTitle>
           {!reports.balanceSheet.balanced && (
             <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-900">
-              Assets ≠ liabilities + equity. This should be impossible — treat it as corruption and investigate before
+              Assets ≠ liabilities + equity. This should be impossible - treat it as corruption and investigate before
               trusting any figure.
             </p>
           )}
@@ -1479,7 +1479,7 @@ function ReportsSection({
       {cf && (
         <Card>
           <CardTitle
-            right={cf.ties ? <Badge tone="green">ties to cash</Badge> : <Badge tone="red">doesn&apos;t tie — investigate</Badge>}
+            right={cf.ties ? <Badge tone="green">ties to cash</Badge> : <Badge tone="red">doesn&apos;t tie - investigate</Badge>}
           >
             Cash flow statement · direct method
           </CardTitle>
@@ -1494,8 +1494,8 @@ function ReportsSection({
               ).map(([label, b]) => (
                 <tr key={label}>
                   <td className="py-1.5 text-stone-600">{label}</td>
-                  <td className="num py-1.5 text-emerald-700">{b.inflowMinor ? `+${formatMoney(b.inflowMinor)}` : "—"}</td>
-                  <td className="num py-1.5 text-stone-600">{b.outflowMinor ? `−${formatMoney(b.outflowMinor)}` : "—"}</td>
+                  <td className="num py-1.5 text-emerald-700">{b.inflowMinor ? `+${formatMoney(b.inflowMinor)}` : "-"}</td>
+                  <td className="num py-1.5 text-stone-600">{b.outflowMinor ? `−${formatMoney(b.outflowMinor)}` : "-"}</td>
                   <td className="num py-1.5 font-medium">{formatMoney(b.netMinor)}</td>
                 </tr>
               ))}
@@ -1519,7 +1519,7 @@ function ReportsSection({
       <Card>
         <CardTitle>FX exposure &amp; rates</CardTitle>
         {exposures.length === 0 ? (
-          <QuietLine>No foreign-currency receivables outstanding — no unrealized exposure.</QuietLine>
+          <QuietLine>No foreign-currency receivables outstanding - no unrealized exposure.</QuietLine>
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -1539,7 +1539,7 @@ function ReportsSection({
                     {e.latestRateNum !== null && e.latestRateDen !== null ? (e.latestRateNum / e.latestRateDen).toFixed(4) : "no rate yet"}
                   </td>
                   <td className="num text-right font-medium">
-                    {e.outstandingBaseMinor === null ? "—" : formatMoney(e.outstandingBaseMinor)}
+                    {e.outstandingBaseMinor === null ? "-" : formatMoney(e.outstandingBaseMinor)}
                   </td>
                 </tr>
               ))}
@@ -1787,7 +1787,7 @@ function BankSection({
       <div>
         <h2 className="mb-3 text-sm font-semibold text-stone-800">Accounts</h2>
         {accounts.length === 0 ? (
-          <QuietLine>No bank accounts yet — add one below to start importing statements.</QuietLine>
+          <QuietLine>No bank accounts yet - add one below to start importing statements.</QuietLine>
         ) : (
           <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
             {accounts.map((a) => {
@@ -1830,7 +1830,7 @@ function BankSection({
       <div className="border-t border-stone-200 pt-6">
         <h2 className="text-sm font-semibold text-stone-800">Import feed</h2>
         <p className="mt-1 text-sm leading-relaxed text-stone-500">
-          Paste bank export lines, one per row: <code className="text-stone-700">date,amount,description</code> — e.g.
+          Paste bank export lines, one per row: <code className="text-stone-700">date,amount,description</code> - e.g.
           <code className="ml-1 text-stone-700">2025-06-01,-42.10,Card fees</code>. Positive is money in. Duplicate lines
           are skipped automatically, so re-pasting an export is safe.
         </p>
@@ -1953,7 +1953,7 @@ function BankSection({
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-xs text-stone-500">A mistaken match releases the line back to unmatched — nothing is ever deleted.</p>
+          <p className="mt-2 text-xs text-stone-500">A mistaken match releases the line back to unmatched - nothing is ever deleted.</p>
         </div>
       )}
 
@@ -2076,7 +2076,7 @@ function TaxSection({
         >
           File return for {from} → {to}
         </Button>
-        {!report && <p className="mt-2 text-xs text-stone-500">Run the report first — the filing uses its figures.</p>}
+        {!report && <p className="mt-2 text-xs text-stone-500">Run the report first - the filing uses its figures.</p>}
       </div>
 
 
@@ -2140,7 +2140,7 @@ function TaxSection({
 
 /**
  * M10 treasury + collections surfaces: 13-week cash forecast, drafted payment
- * reminders, and per-customer statements — all read capabilities through the
+ * reminders, and per-customer statements - all read capabilities through the
  * same governed executor.
  */
 function CashSection({ customers }: { customers: { id: string; name: string }[] }) {
@@ -2223,10 +2223,10 @@ function CashSection({ customers }: { customers: { id: string; name: string }[] 
                       )}
                     </td>
                     <td className="text-right tabular-nums text-emerald-700">
-                      {w.inflowMinor ? formatMoney(w.inflowMinor) : "—"}
+                      {w.inflowMinor ? formatMoney(w.inflowMinor) : "-"}
                     </td>
                     <td className="text-right tabular-nums text-stone-600">
-                      {w.outflowMinor ? formatMoney(w.outflowMinor) : "—"}
+                      {w.outflowMinor ? formatMoney(w.outflowMinor) : "-"}
                     </td>
                     <td className="text-right font-medium tabular-nums">{formatMoney(w.closeMinor)}</td>
                   </tr>
@@ -2252,9 +2252,9 @@ function CashSection({ customers }: { customers: { id: string; name: string }[] 
           Payment reminder drafts
         </CardTitle>
         {reminders === null ? (
-          <QuietLine>Draft polite chases for every overdue customer — nothing is sent automatically.</QuietLine>
+          <QuietLine>Draft polite chases for every overdue customer - nothing is sent automatically.</QuietLine>
         ) : reminders.length === 0 ? (
-          <QuietLine>No overdue balances — nobody needs chasing right now.</QuietLine>
+          <QuietLine>No overdue balances - nobody needs chasing right now.</QuietLine>
         ) : (
           <ul className="divide-y divide-stone-100">
             {reminders.map((r) => (
@@ -2282,7 +2282,7 @@ function CashSection({ customers }: { customers: { id: string; name: string }[] 
       <Card>
         <CardTitle>Customer statement</CardTitle>
         {customers.length === 0 ? (
-          <QuietLine>No customers yet — record an invoice first.</QuietLine>
+          <QuietLine>No customers yet - record an invoice first.</QuietLine>
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2 text-sm">

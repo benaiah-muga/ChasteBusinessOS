@@ -23,7 +23,7 @@ Four enforceable rules:
    postings).
 2. **Graceful degradation.** The executor surfaces the module gate to
    capabilities via `ctx.services.moduleGate`. An enabled capability asks
-   whether its sibling is enabled and skips that effect only — POS sale
+   whether its sibling is enabled and skips that effect only - POS sale
    with Inventory off posts the money and writes no stock legs. Unknown or
    missing gate behaves as enabled, so standalone module usage is unchanged.
 3. **Subset matrix in CI.** The web server suite boots the full registry
@@ -37,7 +37,7 @@ Four enforceable rules:
 Policy specificity (same milestone): when several org policy rules match a
 capability, the most specific pattern wins; ties resolve to the stricter
 autonomy cap. The onboarding blanket `* → write` becomes a fallback that
-specific rules can tighten — ambiguity can never loosen a gate.
+specific rules can tighten - ambiguity can never loosen a gate.
 
 ## Consequences
 

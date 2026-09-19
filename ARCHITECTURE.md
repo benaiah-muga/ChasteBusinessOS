@@ -142,7 +142,7 @@ Detection also resolves versions and flags config-only installs; it is unit-test
 against fixture homes and fake PATHs.
 
 Hosted providers configured by API key sit beside these: NVIDIA NIM, OpenRouter,
-Groq, Mistral, and Z.ai (GLM) — all OpenAI-compatible. One abstraction:
+Groq, Mistral, and Z.ai (GLM) - all OpenAI-compatible. One abstraction:
 **ModelRef** = { provider: nim | openai-compat | local-cli }. `MODEL_PROVIDER`
 selects the default, and an explicit model prefix (`groq/…`, `zai/…`) wins over
 it, so a single process can route one call to a secondary provider.

@@ -3,8 +3,8 @@
  *
  * Seeds ~40k stock movements across 200 items for one probe org, then
  * compares the two ways to answer "how much of item X is on hand":
- *   ledger sum  — sum(quantity_delta) over the item's movements
- *   projection  — sum(quantity) over its stock_balances rows (trigger-maintained)
+ *   ledger sum  - sum(quantity_delta) over the item's movements
+ *   projection  - sum(quantity) over its stock_balances rows (trigger-maintained)
  * and prints the EXPLAIN plans and timings. The projection read scans a
  * handful of balance rows; the ledger sum scans every movement of the
  * item's lifetime. Run with the dev database up:

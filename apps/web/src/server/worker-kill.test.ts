@@ -19,16 +19,16 @@ import type * as kernelModule from "@/server/kernel";
  * and the surviving system must converge honestly. Three kill windows, each
  * with a different contract:
  *
- * 1. killed after the effect + receipt but before acknowledgement — the
+ * 1. killed after the effect + receipt but before acknowledgement - the
  *    replacement worker replays the receipt: exactly one effect, one audit
  *    row, the late worker's acknowledgement is fenced.
- * 2. killed mid-execution, before the effect — the replacement runs fresh;
+ * 2. killed mid-execution, before the effect - the replacement runs fresh;
  *    when the dead worker's execution un-freezes it produces a SECOND effect
  *    whose acknowledgement is still fenced. The queue's honest promise is
  *    at-least-once plus fencing: mid-flight crashes need capability-level
  *    idempotency, which is why external effects carry idempotency keys.
  * 3. external delivery (outbox webhook): the provider received the call but
- *    the acknowledgement died in transit — the row converges to "unknown",
+ *    the acknowledgement died in transit - the row converges to "unknown",
  *    nothing re-fires automatically, and reconciliation settles it from the
  *    provider receipt exactly once.
  */
@@ -159,7 +159,7 @@ afterEach(async () => {
 });
 
 describe("worker-kill convergence (B03)", () => {
-  it("killed after the effect and receipt, before the acknowledgement: the replacement replays the receipt — one effect, one audit row, late ack fenced", async () => {
+  it("killed after the effect and receipt, before the acknowledgement: the replacement replays the receipt - one effect, one audit row, late ack fenced", async () => {
     const jobId = await enqueueCapabilityJob(db, { orgId, type: "messaging.killzoneProbe", payload: { tag: "after-receipt" } });
     const auditBefore = await auditRowCount();
     kill.parkAfter = true;
@@ -168,7 +168,7 @@ describe("worker-kill convergence (B03)", () => {
     const dead = processOneJob(db, logger, { workerId: "worker-A", now: new Date(), leaseMs: 400 });
     await until(async () => kill.runs === 1, "worker A to reach the kill window");
     // The kill window is "after the receipt": runs === 1 only proves the
-    // effect started — the audit + receipt writes still need their database
+    // effect started - the audit + receipt writes still need their database
     // round-trips. Waiting for the receipt row itself is the honest sync
     // point; without it a loaded database lets worker B read before worker
     // A's receipt lands, and B re-executes instead of replaying (flake).
@@ -199,7 +199,7 @@ describe("worker-kill convergence (B03)", () => {
     await expectAuditDelta(auditBefore, 1);
   });
 
-  it("killed mid-execution, before the effect: the replacement runs fresh and the revived corpse's effect is still fenced at acknowledgement — at-least-once, honestly", async () => {
+  it("killed mid-execution, before the effect: the replacement runs fresh and the revived corpse's effect is still fenced at acknowledgement - at-least-once, honestly", async () => {
     const jobId = await enqueueCapabilityJob(db, { orgId, type: "messaging.killzoneProbe", payload: { tag: "mid-flight" } });
     const auditBefore = await auditRowCount();
     kill.parkInside = true;
@@ -213,8 +213,8 @@ describe("worker-kill convergence (B03)", () => {
     expect(done!.status).toBe("done");
     expect(kill.effects).toEqual(["mid-flight"]);
 
-    // The corpse resumes and commits its effect — the at-least-once reality
-    // of a mid-flight kill — but its acknowledgement can never win.
+    // The corpse resumes and commits its effect - the at-least-once reality
+    // of a mid-flight kill - but its acknowledgement can never win.
     kill.close("inside");
     await dead;
     const [after] = await db.select().from(jobs).where(eq(jobs.id, jobId));

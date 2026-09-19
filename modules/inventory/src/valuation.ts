@@ -11,7 +11,7 @@ import { movementHistory, withOrgContext, type DbLike, type ModuleDeps } from ".
  * is operational truth; account 1200 is brought to it by one balanced entry,
  * the counterpart landing on COGS (5000). The variance is only knowable
  * inside the transaction, so the capabilities declare moneyAmount → null,
- * which the kernel treats as "always gate" — valuation postings always
+ * which the kernel treats as "always gate" - valuation postings always
  * demand a human approval, whichever policy is configured.
  */
 
@@ -71,7 +71,7 @@ export const postValuationSummary = (deps: ModuleDeps) =>
         .string()
         .min(3)
         .max(300)
-        .default("Inventory valuation summary — stock ledger to GL"),
+        .default("Inventory valuation summary - stock ledger to GL"),
     }),
     output: z.object({
       posted: z.boolean(),

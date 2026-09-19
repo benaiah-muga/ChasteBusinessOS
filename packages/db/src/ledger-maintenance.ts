@@ -8,7 +8,7 @@ import type { Database, Tx } from "./client";
  * assert: journals balance, entries are complete, posted rows never change.
  * Those guards fail closed for every ordinary code path. Fixture teardowns
  * and out-of-band repair transactions opt out explicitly, per transaction,
- * by setting `app.ledger_maintenance = 'on'` — every use of this helper is
+ * by setting `app.ledger_maintenance = 'on'` - every use of this helper is
  * a greppable, intentional act; the runtime application never calls it.
  */
 
@@ -23,8 +23,8 @@ export async function beginLedgerMaintenance<T>(
 }
 
 /**
- * Removes a tenant's immutable history — journal lines/entries, event-ledger
- * rows, and stock movements — inside one declared maintenance transaction.
+ * Removes a tenant's immutable history - journal lines/entries, event-ledger
+ * rows, and stock movements - inside one declared maintenance transaction.
  * Call it before deleting the organization row: the org cascade would
  * otherwise fire the immutability guards, and ledger_events restrict-deletes
  * on a surviving org reference.

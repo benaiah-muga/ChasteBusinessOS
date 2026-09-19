@@ -54,7 +54,7 @@ describe("max producible units (M11.4)", () => {
     );
   });
 
-  it("exact example: 2 bolts + 1 frame per unit — bolts cap output at 350", () => {
+  it("exact example: 2 bolts + 1 frame per unit - bolts cap output at 350", () => {
     const needs: PerUnitNeed[] = [
       { componentItemId: "bolt", perUnitThousandths: 2_000 },
       { componentItemId: "frame", perUnitThousandths: 1_000 },

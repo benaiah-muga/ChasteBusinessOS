@@ -63,7 +63,7 @@ function AppearanceTab() {
 
   return (
     <div className="max-w-3xl">
-      <Section title="Color mode" hint="Light, dark, or follow your system — resolved before first paint.">
+      <Section title="Color mode" hint="Light, dark, or follow your system - resolved before first paint.">
         <div role="radiogroup" aria-label="Color mode" className="flex w-fit gap-1 rounded-xl border border-stone-200 bg-white p-1 shadow-xs">
           {MODES.map((m) => (
             <button
@@ -88,7 +88,7 @@ function AppearanceTab() {
         </div>
       </Section>
 
-      <Section title="Brand" hint="One identity across every surface — warm paper, the inked band, burnished gold.">
+      <Section title="Brand" hint="One identity across every surface - warm paper, the inked band, burnished gold.">
         <div className="flex items-center gap-4 rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
           <span
             aria-hidden="true"
@@ -96,7 +96,7 @@ function AppearanceTab() {
             style={{ background: "linear-gradient(160deg, #111416 0 55%, #f4efe6 55% 100%)" }}
           />
           <div className="text-[13px] leading-relaxed text-stone-600">
-            Chaste ships with a single brand palette. Semantic colors — success, warnings, errors — never change between modes.
+            Chaste ships with a single brand palette. Semantic colors - success, warnings, errors - never change between modes.
           </div>
         </div>
       </Section>
@@ -126,7 +126,7 @@ function WorkspaceTab() {
         <dl className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
           <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
             <dt className="text-stone-500">Name</dt>
-            <dd className="font-medium text-stone-900">{orgName || "—"}</dd>
+            <dd className="font-medium text-stone-900">{orgName || "-"}</dd>
           </div>
           <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
             <dt className="text-stone-500">Modules</dt>
@@ -169,7 +169,7 @@ function LocalizationTab() {
     <div className="max-w-2xl">
       <p className="mb-6 text-sm leading-relaxed text-stone-500">
         How figures and dates are <em>presented</em> on this device. The books
-        themselves stay in their recording currency — these settings never
+        themselves stay in their recording currency - these settings never
         rewrite stored amounts.
       </p>
 
@@ -182,7 +182,7 @@ function LocalizationTab() {
         >
           {CURRENCIES.map((c) => (
             <option key={c.code} value={c.code}>
-              {c.symbol} {c.code} — {c.label}
+              {c.symbol} {c.code} - {c.label}
             </option>
           ))}
         </select>
@@ -295,7 +295,7 @@ function AiTab() {
   return (
     <div className="max-w-2xl">
       <p className="mb-6 text-sm leading-relaxed text-stone-500">
-        Your workmate runs on models configured in the server environment —
+        Your workmate runs on models configured in the server environment -
         keys never enter the browser, and the model reaches your business only
         through the same governed capabilities you use.
       </p>
@@ -364,7 +364,7 @@ function AiTab() {
             >
               <p className="text-sm font-medium text-stone-900">Agent sessions</p>
               <p className="mt-1 text-xs leading-relaxed text-stone-500">
-                Every model action, its capability, and its outcome — auditable forever.
+                Every model action, its capability, and its outcome - auditable forever.
               </p>
             </Link>
           </div>
@@ -444,7 +444,7 @@ function PinsSection({ pinnedIds, apps }: { pinnedIds: string[]; apps: typeof AP
               >
                 <span
                   aria-hidden="true"
-                  style={tileStyle(app.hue)}
+                  style={tileStyle()}
                   className="flex size-8 shrink-0 items-center justify-center rounded-lg"
                 >
                   <app.icon className="size-4" />
@@ -485,7 +485,7 @@ function EmailSection() {
     setNote(null);
     const res = await postApi<{ reason?: string }>("/api/email", { action: "test", to: to.trim() });
     setBusy(false);
-    setNote(res.ok ? "Test email sent — check the inbox." : (res.error?.title ?? "Send failed."));
+    setNote(res.ok ? "Test email sent - check the inbox." : (res.error?.title ?? "Send failed."));
   }
 
   return (
@@ -499,7 +499,7 @@ function EmailSection() {
             {status.from ? (
               <>
                 {" "}
-                — sending as <code className="rounded bg-stone-100 px-1">{status.from}</code>
+                - sending as <code className="rounded bg-stone-100 px-1">{status.from}</code>
               </>
             ) : null}
             .

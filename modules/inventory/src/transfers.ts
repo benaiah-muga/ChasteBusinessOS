@@ -7,9 +7,9 @@ import { applyStockDelta, lockStockItems } from "./service";
 import { getOrCreateLot, stockOnHand, withOrgContext, type DbLike, type ModuleDeps } from "./shared";
 
 /**
- * Internal transfers (M7.2). Quantity is conserved by construction — every
+ * Internal transfers (M7.2). Quantity is conserved by construction - every
  * confirmed line writes paired out/in legs through the shared ledger writer
- * with reason "transfer" — and value is untouched: transfer legs are
+ * with reason "transfer" - and value is untouched: transfer legs are
  * value-neutral in valuation replay (ADR 0033), so round trips cannot drift
  * the moving average.
  */
@@ -123,7 +123,7 @@ async function confirmLine(
   const atSource = await stockOnHand(tx, orgId, line.itemId, transfer.fromLocationId);
   assertTransferFeasible(atSource, quantityThousandths);
   const legs = transferLegs(quantityThousandths);
-  // N22: both legs go through the command service — the out-leg is guarded
+  // N22: both legs go through the command service - the out-leg is guarded
   // at the source location, the in-leg org-wide.
   await applyStockDelta(tx, {
     orgId,
@@ -254,7 +254,7 @@ const cancelTransfer = (deps: ModuleDeps) =>
           .limit(1);
         if (!transfer) throw new Error(`no transfer ${input.transferId}`);
         if (transfer.status !== "pending") {
-          throw new Error(`transfer is ${transfer.status}; only untouched drafts can be cancelled — reverse it instead`);
+          throw new Error(`transfer is ${transfer.status}; only untouched drafts can be cancelled - reverse it instead`);
         }
         const movedRows = await tx
           .select({ moved: sql<number>`coalesce(sum(${stockTransferLines.confirmedThousandths}), 0)` })

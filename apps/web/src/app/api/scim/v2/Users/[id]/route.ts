@@ -31,7 +31,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!user) return NextResponse.json({ status: "404" }, { status: 404 });
 
   // One transaction removes membership, role grants, and pending invitations
-  // (N07) — an IdP disable can no longer leave a half-live identity, and the
+  // (N07) - an IdP disable can no longer leave a half-live identity, and the
   // org's last owner is protected rather than silently deprovisioned.
   const result = await deactivateMember({ orgId: token.orgId, userId: id });
   if (!result.ok) {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canAcceptPayment, documentBalance } from "./document-balance";
 
 /**
- * N11 property floor: with credits present, every derivation agrees — a
+ * N11 property floor: with credits present, every derivation agrees - a
  * 100 invoice with a 40 credit and no payment exposes 60 outstanding, can
  * accept at most 60, and no consumer can reconstruct a 100 debt.
  */

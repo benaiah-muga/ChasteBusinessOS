@@ -12,7 +12,7 @@ export async function GET() {
   const db = getDb().db;
 
   // Membership-scoped (N06): the list boundary must agree with the detail
-  // boundary — a nonmember sees neither titles nor previews of a DM.
+  // boundary - a nonmember sees neither titles nor previews of a DM.
   const denied = missingPermission(resolved, "messaging.read");
   if (denied) return denied;
 
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
   const body = createSchema.safeParse(raw);
   if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
-  // N08: governed creation — the capability inserts the header and the
+  // N08: governed creation - the capability inserts the header and the
   // creator's membership in one audited unit instead of two route statements.
   const ctx = actorFromResolved(resolved, { intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });

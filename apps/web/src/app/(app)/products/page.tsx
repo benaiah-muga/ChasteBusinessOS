@@ -216,7 +216,7 @@ export default function ProductsPage() {
               </ul>
             )}
             <p className="mt-2 text-xs opacity-50">
-              Stock movements live in the Inventory app — receive, adjust, and count stock there; this catalog stays the pricing
+              Stock movements live in the Inventory app - receive, adjust, and count stock there; this catalog stays the pricing
               and product surface.
             </p>
           </Card>
@@ -252,7 +252,7 @@ export default function ProductsPage() {
                 <tr className="text-left opacity-50">
                   <th>SKU</th>
                   <th
-                    title="Everything currently in the building — the sum of the stock ledger"
+                    title="Everything currently in the building - the sum of the stock ledger"
                   >
                     Name
                   </th>
@@ -266,7 +266,7 @@ export default function ProductsPage() {
                   >
                     Avg cost
                   </th>
-                  <th className="text-right" title="On hand × moving average cost — what the stock is worth at cost">
+                  <th className="text-right" title="On hand × moving average cost - what the stock is worth at cost">
                     Value
                   </th>
                   <th className="text-right">Barcode</th>
@@ -289,11 +289,11 @@ export default function ProductsPage() {
                         )}
                       </span>
                     </td>
-                    <td className="text-right tabular-nums">{(i.salePriceMinor ?? 0) > 0 ? formatMoney(i.salePriceMinor!) : "—"}</td>
+                    <td className="text-right tabular-nums">{(i.salePriceMinor ?? 0) > 0 ? formatMoney(i.salePriceMinor!) : "-"}</td>
                     <td className="text-right tabular-nums">{qty(i.onHandThousandths)}</td>
                     <td className="text-right tabular-nums">{formatMoney(i.avgUnitCostMinor)}</td>
                     <td className="text-right tabular-nums">{formatMoney(i.valueMinor)}</td>
-                    <td className="text-right font-mono text-xs opacity-70">{i.barcode ?? "—"}</td>
+                    <td className="text-right font-mono text-xs opacity-70">{i.barcode ?? "-"}</td>
                     <td className="text-right">
                       {i.reorderNeeded ? <Badge tone="amber">reorder</Badge> : <Badge tone="neutral">ok</Badge>}
                     </td>
@@ -311,7 +311,7 @@ export default function ProductsPage() {
                         <button
                           type="button"
                           aria-label={`Archive ${i.sku}`}
-                          title="Archive — hides from pickers, keeps history"
+                          title="Archive - hides from pickers, keeps history"
                           onClick={() => void archive(i.sku)}
                           className="cursor-pointer rounded px-1.5 py-1 text-stone-400 transition-colors hover:bg-red-50 hover:text-red-700"
                         >
@@ -403,7 +403,7 @@ export default function ProductsPage() {
         </Card>
       )}
 
-      {/* Edit item — identity beyond the SKU */}
+      {/* Edit item - identity beyond the SKU */}
       <Dialog
         open={editTarget !== null}
         onClose={() => setEditTarget(null)}

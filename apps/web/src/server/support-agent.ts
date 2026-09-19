@@ -47,8 +47,8 @@ export const SUPPORT_AGENT_TOOL_IDS = [
 
 /**
  * Binds a capability to one conversation at the type level: the model sees
- * an empty input schema, so it cannot supply — or be steered into
- * supplying — another conversation's id. The pivot is impossible rather
+ * an empty input schema, so it cannot supply - or be steered into
+ * supplying - another conversation's id. The pivot is impossible rather
  * than merely discouraged. Used for tools whose subject is fixed by the
  * thread itself.
  */
@@ -113,7 +113,7 @@ async function buildCustomerTranscript(
     (m) => `${speaker[m.senderType] ?? "UNKNOWN"}: ${cleanTranscriptText(m.body)}`,
   );
 
-  // N04: widget threads start unbound — the draft sees the transcript only,
+  // N04: widget threads start unbound - the draft sees the transcript only,
   // named for the visitor contact, never a customer's account identity.
   let customerName = "the customer";
   if (conv.customerId) {

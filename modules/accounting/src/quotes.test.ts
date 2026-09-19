@@ -5,8 +5,8 @@ import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerAccountingCapabilities, createAccountingSignalProducer, type ModuleDeps } from "./index";
 
 /**
- * Quote lifecycle proof (M9.1): an expired quote cannot be accepted — the
- * refusal is honest and actionable — the sweep archives lapsed quotes
+ * Quote lifecycle proof (M9.1): an expired quote cannot be accepted - the
+ * refusal is honest and actionable - the sweep archives lapsed quotes
  * idempotently, the expired-quote signal names the governed decline, and a
  * quote without an expiry still converts through the one shared invoice
  * write path (books stay balanced).
@@ -85,7 +85,7 @@ describe("quote lifecycle (M9.1)", () => {
 
     const signals = await createAccountingSignalProducer(deps.db)(orgId, new Date());
     const expired = signals.filter((s) => s.id.startsWith("accounting.quoteExpired:"));
-    // The row is already marked expired, so the producer stays quiet —
+    // The row is already marked expired, so the producer stays quiet -
     // signals point at lapsed-but-unmarked quotes only.
     expect(expired).toHaveLength(0);
   });

@@ -8,7 +8,7 @@ Date: 2026-09-15
 
 Sealing an accounting period was enforced by convention: `postEntry`, the one
 shared path into the general ledger, did not check the period at all. Each
-capability was expected to call `assertPeriodOpen` first, and some did not —
+capability was expected to call `assertPeriodOpen` first, and some did not -
 expense reimbursement and the inventory valuation reversal posted into closed
 months, and correctness depended on every future producer remembering an extra
 step. Close/reopen also wrote the `periods` row outside any transaction, so a
@@ -34,9 +34,9 @@ second database clock read.
 
 ## Consequences
 
-- Every posting producer — invoices, payments, FX settlements, expense
+- Every posting producer - invoices, payments, FX settlements, expense
   claims, POS sales/returns, vendor bills/payments/credits, payroll,
-  valuation summaries and their reversals — refuses a closed period by
+  valuation summaries and their reversals - refuses a closed period by
   construction; new producers inherit the guard for free.
 - A synchronized close and post commit in exactly one serial order: either
   the posting landed first (the close seals the month with it on the books)

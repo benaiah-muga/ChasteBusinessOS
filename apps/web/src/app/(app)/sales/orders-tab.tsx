@@ -122,7 +122,7 @@ export function OrdersListTab({ orders, customers, busy, post }: OrdersTabProps)
                 </span>
               }
             >
-              Order #{o.number} — {customerName.get(o.customerId) ?? "Unknown customer"}
+              Order #{o.number} - {customerName.get(o.customerId) ?? "Unknown customer"}
             </CardTitle>
             <p className="text-xs opacity-60">
               {formatMoney(o.totalMinor)} · created {timeAgo(o.createdAt)}

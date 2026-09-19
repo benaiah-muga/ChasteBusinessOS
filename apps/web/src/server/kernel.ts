@@ -110,7 +110,7 @@ export function composeRegistry(db: Database["db"]): CapabilityRegistry {
   registerSupportCapabilities(registry, { db });
   registerSkillCapabilities(registry);
   registerRoutineCapabilities(registry, { db });
-  // Signal producers compose here, at the app layer — modules never import
+  // Signal producers compose here, at the app layer - modules never import
   // each other for this (ADR 0034).
   registerSignalsCapabilities(registry, {
     producers: [
@@ -262,7 +262,7 @@ export function createNotificationSink(db: Database["db"]): NotificationSink {
         db,
         orgId,
         "approval.requested",
-        `${req.capabilityId} needs approval — ${req.rationale}`.slice(0, 200),
+        `${req.capabilityId} needs approval - ${req.rationale}`.slice(0, 200),
         "/approvals",
       );
     },

@@ -1,5 +1,5 @@
 /**
- * M10 verification — accounting & purchasing depth.
+ * M10 verification - accounting & purchasing depth.
  * Every assertion is a product guarantee.
  *
  * Run: pnpm demo:m10 [cashflow|creditnote|statements|reminders|supplier|forecast|duplicate|all]
@@ -116,7 +116,7 @@ async function creditnoteScenario(): Promise<string> {
   const agentRun = await ex.execute("accounting.creditNote", agentCtx, {
     invoiceId: inv.invoiceId,
     amountMinor: 100_00,
-    reason: "scratch on delivery — agreed with customer",
+    reason: "scratch on delivery - agreed with customer",
   });
   ok("credit note waits for a human whatever the size", Boolean(agentRun.pendingApproval));
   const approved = data(await approve(db, orgId, ex, ownerCtx, "accounting.creditNote"));
