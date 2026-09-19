@@ -1,6 +1,6 @@
 /**
  * Pinned apps: the user's favorite surfaces, pinned to the workspace rail.
- * Client preference (max 5), not a governed object — it decorates navigation
+ * Client preference (max 5), not a governed object - it decorates navigation
  * only and never gates authority.
  */
 import { useSyncExternalStore } from "react";

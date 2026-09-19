@@ -1,8 +1,8 @@
-# Gates: N09 — commit-time ledger enforcement
+# Gates: N09 - commit-time ledger enforcement
 
 OWNS: packages/db/drizzle/0046_*.sql, packages/db/drizzle/meta/_journal.json, packages/db/src/ledger-maintenance.ts, packages/db/src/index.ts, packages/db/src/roles.ts, packages/db/src/journal-guards.test.ts, packages/db/src/runtime-role.test.ts, packages/db/src/rls-conformance.test.ts, packages/db/src/rls.test.ts, modules/pos/src/index.ts, apps/web/.w0-probes/probe-n09.mts, docs/adr/0052-commit-time-ledger-enforcement.md, docs/W0_EVIDENCE_REGISTER.md, CHANGELOG.md
 
-Scope: migrations enforce at commit time what application code merely asserts — journals must balance, entries must be complete, lines must be single-sided and same-tenant, posted journal rows and the event ledger must be immutable, and the runtime role must hold append-only privileges; every refusal has a declared maintenance escape used only by teardown/repair.
+Scope: migrations enforce at commit time what application code merely asserts - journals must balance, entries must be complete, lines must be single-sided and same-tenant, posted journal rows and the event ledger must be immutable, and the runtime role must hold append-only privileges; every refusal has a declared maintenance escape used only by teardown/repair.
 
 - [x] G0: this ledger states oracles that can fail
   CHECK: node /home/benaiah/.agents/skills/unlazy/scripts/gate-lint.mjs GATES-N09.md
@@ -29,12 +29,12 @@ Scope: migrations enforce at commit time what application code merely asserts �
   EXPECT: /Test Files\s+1 passed/
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=0935a974bf4304c55154ec1edfcb80ae53bc78d2ad4dbe7e9da184e7acae4d7a; output-bytes=23552
 
-- [x] N09.5-G1: the N09 probe no longer reproduces — against a fresh fixture DB it reports the discharged state (triggers present, unbalanced commit refused, posted-line mutation refused)
+- [x] N09.5-G1: the N09 probe no longer reproduces - against a fresh fixture DB it reports the discharged state (triggers present, unbalanced commit refused, posted-line mutation refused)
   CHECK: pnpm exec tsx apps/web/.w0-probes/probe-n09.mts
   EXPECT: N09 DISCHARGED
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=b6923b84d2a6d737f12212eba0a37cc185c5a6d69a58b4a4630a1de15a868ca1; output-bytes=23701
 
-- [x] N09.6-G1: the POS sale path posts the entry with its invoice link at insert time — no post-hoc journal UPDATE — and the full POS suite (sales, returns, inverse, oversell, shifts) stays green
+- [x] N09.6-G1: the POS sale path posts the entry with its invoice link at insert time - no post-hoc journal UPDATE - and the full POS suite (sales, returns, inverse, oversell, shifts) stays green
   CHECK: pnpm --filter @chaste/module-pos exec vitest run
   EXPECT: /Test Files\s+\d+ passed/
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=78425325f602417c54472558bc9b8ba796620134478bfe11656ffb63ae607c07; output-bytes=23623
@@ -44,7 +44,7 @@ Scope: migrations enforce at commit time what application code merely asserts �
   EXPECT: AFFECTED-MODULES-OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=250f6b6fb5fb612673728d1e719ed6991d2ad1c5bd56aaeb28087fdbf4aa5fe6; output-bytes=119526
 
-- [x] N09.8-G1: repo verification gate — typecheck, lint, and the full workspace test suite pass
+- [x] N09.8-G1: repo verification gate - typecheck, lint, and the full workspace test suite pass
   CHECK: pnpm typecheck && pnpm lint && pnpm test && echo REPO-GATE-OK
   EXPECT: REPO-GATE-OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=49a538f27fa2327472c5771f298a0adf928fcc7b66f100b9f43993803d394c59; output-bytes=990496

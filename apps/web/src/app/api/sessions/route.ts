@@ -7,7 +7,7 @@ import { getResolvedUser } from "@/server/session";
 /**
  * One visibility predicate for session lists and details (N01/N07): people
  * see their own sessions; org admins (iam.admin) may audit everyone's.
- * Titles alone reveal who asked what — the detail route's rule applies here
+ * Titles alone reveal who asked what - the detail route's rule applies here
  * too.
  */
 export async function GET() {

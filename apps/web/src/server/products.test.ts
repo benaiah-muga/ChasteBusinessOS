@@ -25,7 +25,7 @@ import { createDb, purgeTenantFinancials } from "@chaste/db";
 /**
  * Products & sales surface, end to end against real Postgres: item catalog
  * with sale price exposure, archiving (history kept, pickers clean), and the
- * quote lifecycle — create as sent, accept converts through the single
+ * quote lifecycle - create as sent, accept converts through the single
  * posting path into a balanced invoice, decline is terminal.
  */
 

@@ -68,7 +68,7 @@ export async function POST(req: Request) {
     const field = first?.path.join(".") ?? "";
     const known: Record<string, string> = {
       orgName: "Business name needs at least 2 characters.",
-      businessDescription: "Tell us a little more — at least 20 characters about what you do.",
+      businessDescription: "Tell us a little more - at least 20 characters about what you do.",
     };
     return fail("invalid", known[field] ?? (first?.message || "That doesn't look right."), 400, {
       field,

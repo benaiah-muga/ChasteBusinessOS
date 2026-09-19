@@ -1,5 +1,5 @@
 /**
- * Metric-change decomposition (M12, ADR 0039) — the deterministic core of
+ * Metric-change decomposition (M12, ADR 0039) - the deterministic core of
  * analytics.explainChange. Given the same metric sliced by a dimension in
  * two periods, attribute the delta across dimension values. Contributions
  * sum to the delta EXACTLY (each key's delta is its own; nothing is

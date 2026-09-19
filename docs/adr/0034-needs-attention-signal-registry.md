@@ -18,7 +18,7 @@ A shared signal contract in the kernel (`kernel/signals.ts`):
       evidence?: { refType, refId }, suggestedAction?: { capabilityId, inputDraft } }
 
 - **Producers are per-module functions** (`collect*Signals`), deterministic
-  over live data. No model in the compute path — thresholds and arithmetic
+  over live data. No model in the compute path - thresholds and arithmetic
   live in module or erp-core code.
 - **Composition happens at the app layer**: `buildRegistry` injects the
   producers of whatever modules the process composes into
@@ -32,7 +32,7 @@ A shared signal contract in the kernel (`kernel/signals.ts`):
   with a draft input; execution still flows through policy, approvals, and
   the ledger like any human action.
 - Consumers: `/api/signals` (the feed), the home dashboard's needs-you
-  queue, and — via the same read capability — the agent and routines.
+  queue, and - via the same read capability - the agent and routines.
 
 Inventory ships the first producers (reorder pressure, dead stock,
 anomalous adjustments), accounting adds overdue receivables, CRM adds

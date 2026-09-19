@@ -7,7 +7,7 @@ import { missingPermission } from "@/server/route-guards";
 import { getResolvedUser } from "@/server/session";
 
 /**
- * GET lists the org's projects, or — with ?projectId= — returns one project's
+ * GET lists the org's projects, or - with ?projectId= - returns one project's
  * board through the projects.listBoard capability (column/status shapes come
  * from the capability's output, not this route).
  */

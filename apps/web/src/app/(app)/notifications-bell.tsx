@@ -100,7 +100,7 @@ export function NotificationsBell({ align = "right" }: { align?: "left" | "right
               <li className="px-4 py-6 text-center text-xs text-stone-400">Loading…</li>
             ) : rows.length === 0 ? (
               <li className="px-4 py-6 text-center text-xs text-stone-400">
-                Nothing yet — approvals and escalations land here.
+                Nothing yet - approvals and escalations land here.
               </li>
             ) : (
               rows.map((n) => (

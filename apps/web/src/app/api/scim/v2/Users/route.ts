@@ -38,7 +38,7 @@ async function resolveOrg(req: Request): Promise<string | null> {
     .limit(1);
   if (!token) return null;
   // Expiry policy (0054): an expired token is dead even while still marked
-  // active — provisioning access must not outlive its review window.
+  // active - provisioning access must not outlive its review window.
   if (token.expiresAt && token.expiresAt.getTime() <= Date.now()) return null;
   await getDb()
     .db.update(scimTokens)

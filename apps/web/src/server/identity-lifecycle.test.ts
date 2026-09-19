@@ -16,7 +16,7 @@ import { purgeTenantFinancials } from "@chaste/db";
 /**
  * I1 (N07/N03): the shared identity lifecycle. Invitation claims are
  * row-locked compare-and-set transitions that require a verified mailbox,
- * and deactivation removes every grant in one motion — with the last owner
+ * and deactivation removes every grant in one motion - with the last owner
  * refused and no partial effects.
  */
 

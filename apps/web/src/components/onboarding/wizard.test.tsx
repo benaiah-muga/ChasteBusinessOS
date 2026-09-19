@@ -8,7 +8,7 @@ import { OnboardingWizard } from "./wizard";
  * The setup wizard, driven the way a person drives it.
  *
  * The unit tests in `lib/onboarding-flow.test.ts` prove the rules; these prove
- * the rules are actually wired to the screen — that the button is disabled when
+ * the rules are actually wired to the screen - that the button is disabled when
  * it should be, that a failure offers the way out it claims to, and that a
  * step someone skipped comes back instead of disappearing.
  *
@@ -95,7 +95,7 @@ async function fillProfile(orgName = "Glow Works") {
   });
 }
 
-describe("OnboardingWizard — choosing a path", () => {
+describe("OnboardingWizard - choosing a path", () => {
   it("opens on the path screen and will not continue until one is picked", () => {
     renderWizard();
     expect(screen.getByText("How would you like to start?")).toBeTruthy();
@@ -118,7 +118,7 @@ describe("OnboardingWizard — choosing a path", () => {
   });
 });
 
-describe("OnboardingWizard — describing the business", () => {
+describe("OnboardingWizard - describing the business", () => {
   it("keeps 'Open my books' disabled until the name and description are enough", async () => {
     renderWizard();
     await choosePath(/Start from scratch/i);
@@ -148,7 +148,7 @@ describe("OnboardingWizard — describing the business", () => {
   });
 });
 
-describe("OnboardingWizard — opening the books", () => {
+describe("OnboardingWizard - opening the books", () => {
   it("posts the profile and records the steps the chosen path defers", async () => {
     renderWizard();
     await choosePath(/Import a spreadsheet/i);
@@ -204,7 +204,7 @@ describe("OnboardingWizard — opening the books", () => {
   });
 });
 
-describe("OnboardingWizard — when it fails", () => {
+describe("OnboardingWizard - when it fails", () => {
   it("offers a way back in when the session has expired", async () => {
     respond = () => ({ status: 401, body: { code: "unauthorized" } });
     renderWizard();
@@ -253,7 +253,7 @@ describe("OnboardingWizard — when it fails", () => {
   });
 });
 
-describe("OnboardingWizard — a lost response must not create two workspaces", () => {
+describe("OnboardingWizard - a lost response must not create two workspaces", () => {
   beforeEach(() => {
     window.localStorage.clear();
   });
@@ -295,7 +295,7 @@ describe("OnboardingWizard — a lost response must not create two workspaces", 
   });
 });
 
-describe("OnboardingWizard — skipping is remembered, not dropped", () => {
+describe("OnboardingWizard - skipping is remembered, not dropped", () => {
   it("brings deferred steps back on the done screen", async () => {
     renderWizard();
     await choosePath(/Import a spreadsheet/i);
@@ -330,7 +330,7 @@ describe("OnboardingWizard — skipping is remembered, not dropped", () => {
   });
 });
 
-describe("OnboardingWizard — finishing", () => {
+describe("OnboardingWizard - finishing", () => {
   it("completes setup and hands the user to their workspace", async () => {
     renderWizard();
     await choosePath(/Start from scratch/i);

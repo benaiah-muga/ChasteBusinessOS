@@ -104,7 +104,7 @@ function AskCard({ ask, answered }: { ask: AskPayload; answered?: string }) {
  * dashes so no em dash ever reaches the screen, whatever the model emits.
  */
 export function sanitizeReply(text: string): string {
-  return text.replace(/—/g, ", ").replace(/–/g, "-");
+  return text.replace(/-/g, ", ").replace(/–/g, "-");
 }
 
 function renderInline(text: string, keyPrefix: string): React.ReactNode[] {

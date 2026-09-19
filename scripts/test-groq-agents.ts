@@ -51,7 +51,7 @@ import { runOnboarding } from "../apps/web/src/server/onboarding";
 /** Provider from env: groq | mistral | openrouter | nim (default nim). */
 const PROVIDER = process.env.MODEL_PROVIDER ?? "groq";
 const MODEL = stripProviderPrefix(process.env.MODEL_PRIMARY ?? "openai/gpt-oss-120b");
-/** $18M minor — every known-amount test payment runs autonomously (int32-safe). */
+/** $18M minor - every known-amount test payment runs autonomously (int32-safe). */
 const MONEY_THRESHOLD_MINOR = 1_800_000_000;
 
 type Db = ReturnType<typeof getDb>["db"];
@@ -286,7 +286,7 @@ const TASKS: Task[] = [
     modules: ['documents', 'crm', 'accounting', 'analytics'],
     orgName: "Groq Media Analytics",
     goal:
-      "Combined reporting + memory task. Ingest a document titled 'Q3 Media Strategy' whose text contains verbatim: 'Ad budget is capped at forty thousand dollars next quarter.' — parse it into searchable memory. Create customer Northstar Media and ONE invoice to them for 40_000_00 minor. Pull the last 12 months of revenue analytics, render a 'Q3 Media Report' with a revenue section and a short narrative, then search memory for the budget policy and quote it in your final answer.",
+      "Combined reporting + memory task. Ingest a document titled 'Q3 Media Strategy' whose text contains verbatim: 'Ad budget is capped at forty thousand dollars next quarter.' - parse it into searchable memory. Create customer Northstar Media and ONE invoice to them for 40_000_00 minor. Pull the last 12 months of revenue analytics, render a 'Q3 Media Report' with a revenue section and a short narrative, then search memory for the budget policy and quote it in your final answer.",
     hints:
       "documents createDocument → parseDocument; accounting createCustomer+invoice; analytics revenueByMonth(monthsBack:12) → renderReport; documents.searchMemory with a query whose words appear in the document text.",
     maxSteps: 18,
@@ -409,7 +409,7 @@ async function main() {
         "End with a concise final message stating what you did with the real ids and totals and any variances.",
         "CRITICAL: execute the objective now using the tools that are actually listed above. Do not call file_ticket, skills_find, or any tool that is not listed.",
       ].join("\n"),
-      userGoal: [t.hints.split("\n").map((h) => `Guidance — ${h}`).join("\n"), "Objective: " + t.goal].filter(Boolean).join("\n\n"),
+      userGoal: [t.hints.split("\n").map((h) => `Guidance - ${h}`).join("\n"), "Objective: " + t.goal].filter(Boolean).join("\n\n"),
       noCapabilityNote: null,
       onEvent: (e) => {
         if (e.role === "tool_call") {

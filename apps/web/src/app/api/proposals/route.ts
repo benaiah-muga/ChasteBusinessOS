@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   if (!proposal) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Compare-and-set decision (N34): the status check lives in the UPDATE, so
-  // two concurrent reviewers produce exactly one decision and one conflict —
+  // two concurrent reviewers produce exactly one decision and one conflict -
   // never two writes.
   const decided = await db
     .update(creatorProposals)

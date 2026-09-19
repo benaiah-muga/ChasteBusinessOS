@@ -17,7 +17,7 @@ import { SupportDraftError, draftSupportReply } from "@/server/support-agent";
  * Public boundary for the embeddable customer-care widget (N04).
  *
  * Identity containment: a visitor-supplied email never binds a customer.
- * Widget conversations start UNBOUND — the email is stored on the thread
+ * Widget conversations start UNBOUND - the email is stored on the thread
  * with a per-conversation secret (hashed, issued once), and only verified
  * staff action may attach a real customer. Knowing a former customer's
  * email plus the public token therefore reveals nothing about them: no
@@ -122,7 +122,7 @@ export async function POST(req: Request) {
 
   if (data.action === "start") {
     // N04 containment: the conversation starts UNBOUND. The email is contact
-    // information on the thread, never a customer binding — a visitor naming
+    // information on the thread, never a customer binding - a visitor naming
     // an existing customer's address cannot see or touch that customer's
     // account. Verified staff bind a customer later, on the record.
     const secret = randomBytes(24).toString("hex");

@@ -13,7 +13,7 @@ import { buildExecutor, buildRegistry } from "./kernel";
 
 /**
  * Graceful degradation (ADR 0035): an org running POS without Inventory
- * still sells — the money path posts, the stock ledger is untouched, and
+ * still sells - the money path posts, the stock ledger is untouched, and
  * the audit chain records everything.
  */
 

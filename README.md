@@ -56,12 +56,12 @@ It cannot spend above your approval threshold without sign-off. It cannot assign
 
 ## Quick start
 
-Requirements: Node 24+ (matches CI), pnpm 11+, Postgres 16 **with pgvector**, and — optionally — one model provider key (NVIDIA NIM ([build.nvidia.com](https://build.nvidia.com)) by default, or OpenRouter, Groq, Mistral, or Z.ai (GLM) via `MODEL_PROVIDER`).
+Requirements: Node 24+ (matches CI), pnpm 11+, Postgres 16 **with pgvector**, and - optionally - one model provider key (NVIDIA NIM ([build.nvidia.com](https://build.nvidia.com)) by default, or OpenRouter, Groq, Mistral, or Z.ai (GLM) via `MODEL_PROVIDER`).
 
 **Docker is not required.** The commands below use it for the database because
 it is the shortest path, but [docs/SETUP.md](docs/SETUP.md) covers three
-options — Docker, a hosted Postgres (Neon/Supabase/Railway, no containers at
-all), and a native Postgres install — along with a troubleshooting table.
+options - Docker, a hosted Postgres (Neon/Supabase/Railway, no containers at
+all), and a native Postgres install - along with a troubleshooting table.
 
 ```sh
 git clone https://github.com/benaiah-muga/ChasteBusinessOS.git
@@ -125,7 +125,7 @@ pnpm demo:m13     # POS returns, shift summaries, marketing-lite
 
 Most take a subcommand to run one proof, e.g. `pnpm demo:m9 fulfillment`.
 Every demo needs a migrated database, and several also drive the real agent
-and so need a model provider key — CI skips the whole set when no key is
+and so need a model provider key - CI skips the whole set when no key is
 configured, so a missing key looks like a skipped job rather than a failure.
 
 ## Upgrading

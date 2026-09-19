@@ -12,7 +12,7 @@ Status: Accepted (M11)
 - **Attendance reuses timeEntries.** clockIn opens an entry, clockOut
   settles the minutes; lateness is a stored flag against a fixed 09:00 UTC
   threshold. Anomaly signals are deterministic (3+ late clock-ins in the
-  trailing week → orange) — a nudge toward a conversation, not a verdict.
+  trailing week → orange) - a nudge toward a conversation, not a verdict.
 - **Leave balances are derived** (annual entitlement − approved days taken
   this year); no balance table to drift. The calendar read lists approved
   leave per month.
@@ -22,7 +22,7 @@ Status: Accepted (M11)
   `hiredEmployeeId` link. No model in the compute path.
 - **Manufacturing planning is arithmetic.** erp-core/bom.ts already
   exploded BOMs and checked availability for a fixed quantity; M11 adds
-  the ceiling (`maxProducibleUnits`) — the honest minimum over per-unit
+  the ceiling (`maxProducibleUnits`) - the honest minimum over per-unit
   component ratios. The capability answers "can we produce N?" with
   requirements, shortfalls, the ceiling, and a lead-time estimate averaged
   from completed-run history (useful even when the answer is no). Work
@@ -43,5 +43,5 @@ Status: Accepted (M11)
 - No new balances-to-reconcile: attendance, leave, and supplier-style
   memory all derive from existing ledgers.
 - Projects composes with anything and depends on nothing.
-- The expense ceiling is a signal, not a block — deliberate approval
+- The expense ceiling is a signal, not a block - deliberate approval
   stays the human's call, with the arithmetic attached.

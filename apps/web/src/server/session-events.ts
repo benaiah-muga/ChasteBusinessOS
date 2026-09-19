@@ -5,7 +5,7 @@ import { logger } from "@chaste/kernel";
 /**
  * Appends one trajectory event with an atomically assigned per-session seq:
  * a single INSERT...SELECT computes MAX(seq)+1 and the (session_id, seq)
- * unique index backstops concurrent writers — a loser retries instead of
+ * unique index backstops concurrent writers - a loser retries instead of
  * interleaving duplicate sequence numbers or silently dropping the event.
  */
 export async function appendSessionEvent(

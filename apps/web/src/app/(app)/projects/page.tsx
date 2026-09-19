@@ -105,7 +105,7 @@ export default function ProjectsPage() {
     try {
       const res = await postApi<{ data?: T }>("/api/projects", payload);
       if (res.status === 202) {
-        setNotice({ tone: "pending", text: `${label} needs human approval — it's in the Approvals inbox.` });
+        setNotice({ tone: "pending", text: `${label} needs human approval - it's in the Approvals inbox.` });
       } else if (!res.ok) {
         setNotice({ tone: "error", error: res.error! });
       } else {
@@ -245,7 +245,7 @@ export default function ProjectsPage() {
                 <EmptyState
                   icon={<IconInbox />}
                   title="No projects yet"
-                  hint="Create your first project above — tasks live on its board."
+                  hint="Create your first project above - tasks live on its board."
                 />
               ) : (
                 <ul className="space-y-1.5">
@@ -297,7 +297,7 @@ export default function ProjectsPage() {
               <>
                 {selected.status !== "active" ? (
                   <p className="text-sm text-stone-500">
-                    This project is {selected.status} — its board is read-only, and new tasks are refused.
+                    This project is {selected.status} - its board is read-only, and new tasks are refused.
                   </p>
                 ) : (
                   <form
@@ -446,7 +446,7 @@ export default function ProjectsPage() {
         onClose={() => setArchiveTarget(null)}
         onConfirm={() => void archiveProject()}
         title={`Archive ${archiveTarget?.name ?? ""}?`}
-        body="The project is retired and its board becomes read-only. Nothing is deleted — history stays queryable, and tasks keep their final state."
+        body="The project is retired and its board becomes read-only. Nothing is deleted - history stays queryable, and tasks keep their final state."
         confirmLabel="Archive project"
         busy={busy}
       />

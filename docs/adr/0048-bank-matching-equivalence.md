@@ -27,9 +27,9 @@ A match must be economically equivalent to the line it explains:
   signed amount (net debit for money in, net credit for money out).
 
 One reconciled payment or entry belongs to exactly one statement line. The
-claim is enforced in data — unique indexes on the matched-payment and
+claim is enforced in data - unique indexes on the matched-payment and
 matched-entry columns, where unmatched/excluded lines carry NULL and never
-conflict — with friendly in-transaction guards and a payment/entry row lock
+conflict - with friendly in-transaction guards and a payment/entry row lock
 so a racing pair gets a readable error instead of a constraint dump.
 Unmatching releases the claim and the line returns to the unmatched queue.
 
@@ -39,8 +39,8 @@ Unmatching releases the claim and the line returns to the unmatched queue.
   direction mismatch, currency mismatch, and double claims all fail with
   actionable messages before any state changes.
 - "Zero unmatched lines" now means something closer to reconciled, but a
-  full reconciliation claim — statement opening/closing balances with an
-  unexplained difference of zero — still requires the reconciliation
+  full reconciliation claim - statement opening/closing balances with an
+  unexplained difference of zero - still requires the reconciliation
   workspace (P03). Fees, splits, grouped settlements, transfers and FX
   differences remain unmatchable by design until they have an explicit
   reviewed representation; they surface as amount-mismatch refusals rather

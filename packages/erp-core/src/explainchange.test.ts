@@ -24,7 +24,7 @@ describe("explainChange (M12.1)", () => {
     );
   });
 
-  it("property: order-independent — shuffled inputs decompose identically", () => {
+  it("property: order-independent - shuffled inputs decompose identically", () => {
     fc.assert(
       fc.property(arbRows, arbRows, fc.nat(4), (a, b, _seed) => {
         const one = explainChange(a, b);

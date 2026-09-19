@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm";
 import { getDb, organizations } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
 import { SetupChecklist } from "@/components/setup-checklist";
-import { MyWork } from "@/components/my-work";
 import { HomeDashboard } from "./home-dashboard";
 
 // TODO: Cache Components adoption. Refactor this route so this opt-out can be removed.
@@ -27,7 +26,6 @@ export default async function HomePage() {
     <>
       {/* Anything deferred during setup comes back here, with the way to finish it. */}
       <SetupChecklist />
-      <MyWork />
       <HomeDashboard orgName={orgName} />
     </>
   );

@@ -23,7 +23,7 @@ that never posts.
   and `purchasing.billCreditNote` post proportional mirror entries (revenue
   + tax ← AR; AP ← expenses), carry amounts on immutable `creditedMinor`
   columns, and declare `moneyAmount → null` so every credit waits for a
-  human, whatever the size — same discipline as reverseEntry (M1).
+  human, whatever the size - same discipline as reverseEntry (M1).
   Documents are never edited; statements net gross documents with their
   credit lines.
 - **Payment terms are counterparty defaults with per-document overrides.**
@@ -36,16 +36,16 @@ that never posts.
   `po_line`): average lead time (ordered → first receipt), fill rate,
   promised-date on-time rate, and price history from PO lines. Closing an
   order with unfilled quantities records a `backordered` flag; returns are
-  negative purchase movements through the same ledger — no second truth.
+  negative purchase movements through the same ledger - no second truth.
 - **Foresight never posts.** The 13-week forecast buckets open AR/AP by due
   week from current cash (property: bucket conservation, chained closes);
   duplicate-payment detection is a deterministic pairwise rule (same
   invoice, same amount, inside a window) surfacing orange signals with
-  evidence — advisory, human decides.
+  evidence - advisory, human decides.
 
 ## Consequences
 
 - Corrections are visible, gated, and never rewrite history.
 - Statements reconcile by construction: same ledger, same derivation.
-- The forecast's honesty is bounded by due-date hygiene — terms that are
+- The forecast's honesty is bounded by due-date hygiene - terms that are
   entered truthfully produce forecasts worth trusting.

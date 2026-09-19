@@ -40,8 +40,8 @@ export function PortalLoading() {
 }
 
 export function PortalInvoiceContent({ params }: { params: Promise<{ token: string }> }) {
-  // use(params) suspends here — inside the Suspense boundary on the server
-  // page — so the shell prerenders without knowing the token.
+  // use(params) suspends here - inside the Suspense boundary on the server
+  // page - so the shell prerenders without knowing the token.
   const { token } = use(params);
   const [invoice, setInvoice] = useState<PortalInvoice | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +50,7 @@ export function PortalInvoiceContent({ params }: { params: Promise<{ token: stri
     fetch(`/api/portal/invoice/${token}`)
       .then(async (r) => {
         if (!r.ok) {
-          setError(r.status === 429 ? "Too many requests — try again shortly." : "This link is not valid.");
+          setError(r.status === 429 ? "Too many requests - try again shortly." : "This link is not valid.");
           return;
         }
         const data = (await r.json()) as { invoice?: PortalInvoice };

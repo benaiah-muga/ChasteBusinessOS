@@ -5,10 +5,10 @@
 @custom-variant dark ([data-mode="dark"] &);
 
 /*
- * Chaste Business OS — design tokens.
+ * Chaste Business OS - design tokens.
  *
  * One brand identity: warm paper (sand), an inked band (#111416), and a
- * burnished gold accent — the palette first shipped on the auth gateway and
+ * burnished gold accent - the palette first shipped on the auth gateway and
  * setup wizard, now the product-wide system (see ADR-0031).
  *
  * Every surface draws from exactly two scales:
@@ -71,7 +71,7 @@
 
 /*
  * The band: the inked cover color used by the dashboard masthead, the login
- * hero, and the setup header. A brand constant — the same near-black warm
+ * hero, and the setup header. A brand constant - the same near-black warm
  * ink in both modes, so the product reads as one object.
  */
 :root {
@@ -82,7 +82,7 @@
 
 /*
  * Dark mode. The neutral ramp flips (50 becomes the deepest surface, 950 the
- * brightest ink) and `white` — Tailwind's default surface — becomes elevated
+ * brightest ink) and `white` - Tailwind's default surface - becomes elevated
  * ink, so every bg-white/text-white pair inverts together. Gold brightens
  * enough to carry text and read as a link on dark.
  */
@@ -327,12 +327,14 @@
   }
 
   /* ---------- OS rail (the slim left edge of the workspace) ---------- */
+  /* Rail icons share one color, the brand's brownish bronze (mode-flipping
+     for visibility), so the edge reads as a single instrument. */
   .rail-btn {
-    @apply relative inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-stone-500 transition-all duration-150 hover:bg-stone-200/70 hover:text-stone-900 disabled:pointer-events-none disabled:opacity-40;
+    @apply relative inline-flex size-9 cursor-pointer items-center justify-center rounded-lg text-gold-800 transition-all duration-150 hover:bg-gold-100/70 hover:text-gold-900 disabled:pointer-events-none disabled:opacity-40;
   }
   .rail-btn[aria-current="page"],
   .rail-btn[data-active="true"] {
-    @apply bg-gold-50 text-gold-800;
+    @apply bg-gold-50 text-gold-900;
   }
   /* Active-interface notch: a quiet accent tick on the rail's edge. */
   .rail-btn[aria-current="page"]::before,
@@ -388,6 +390,28 @@
   .tab[aria-selected="true"] {
     @apply border-gold-600 font-medium text-stone-900;
   }
+  /* Tabs sitting on the inked module band. The band is a brand constant, so
+     its text uses fixed band-ink colors, never mode-flipping tokens (even
+     `white` flips). */
+  .tab-band {
+    @apply text-[#a9a39b] hover:text-[#f7f1e8];
+  }
+  .tab-band[aria-selected="true"] {
+    @apply border-[#d2aa6a] font-medium text-[#f7f1e8];
+  }
+
+  /* ---------- Inked module band ---------- */
+  /* The ledger cover, scaled down for module chrome: where you are, written
+     large on the brand's dark, with the tabs riding along. */
+  .module-band {
+    background: var(--band);
+    color: var(--band-ink);
+    box-shadow: 0 14px 40px rgb(17 20 22 / 0.22);
+  }
+  .module-band ::selection {
+    background: rgb(210 170 106 / 0.4);
+    color: #fff;
+  }
 
   /* ---------- Apps launcher tile ---------- */
   .app-tile {
@@ -435,41 +459,18 @@
   }
 }
 
-/* Gateway signature: the brand's orbital mark made out of light. */
-.chaste-mark {
-  position: relative;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgb(205 162 92 / 0.6);
-  border-radius: 9999px;
-  background: radial-gradient(circle at 35% 28%, rgb(255 255 255 / 0.16), transparent 42%), #171b1d;
-  box-shadow: 0 0 0 4px rgb(205 162 92 / 0.06), 0 10px 30px rgb(0 0 0 / 0.2);
-  color: #d2aa6a;
+/* Route-loader coin: the emblem spins like a struck coin while a page opens. */
+.brand-loader__coin {
+  animation: coin-spin 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  box-shadow: 0 10px 30px rgb(17 20 22 / 0.2);
 }
-.chaste-mark__orbit {
-  position: absolute;
-  inset: 23%;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  opacity: 0.82;
-  transform: rotate(45deg) scaleX(1.85);
-}
-.chaste-mark__orbit--two {
-  transform: rotate(-45deg) scaleX(1.85);
-}
-.chaste-mark__orbit--three {
-  transform: rotate(90deg) scaleX(1.85);
-  opacity: 0.36;
-}
-.chaste-mark__core {
-  position: relative;
-  z-index: 1;
-  font-size: 0.75em;
-  font-weight: 700;
-  letter-spacing: -0.12em;
-  transform: translateX(-0.04em);
+@keyframes coin-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chaste-progress {
@@ -542,6 +543,7 @@
   .chaste-progress__fill,
   .auth-orbit--one,
   .auth-orbit--two,
+  .brand-loader__coin,
   .rise {
     animation: none !important;
     transition: none !important;

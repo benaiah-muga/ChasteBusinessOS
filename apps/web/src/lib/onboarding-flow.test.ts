@@ -21,7 +21,7 @@ import {
  *
  * These are the decisions a user feels directly: which screen comes next,
  * whether the thing they typed is enough to open a set of books, and what an
- * error actually says. The failure-mapping cases matter more than they look —
+ * error actually says. The failure-mapping cases matter more than they look -
  * a wrong hint sends someone to sign in again when they should be waiting out
  * a rate limit, and a shared table that one request can mutate leaks the
  * previous user's message into the next one.

@@ -9,8 +9,8 @@ import {
 /**
  * The CSV reader is the front door of the import wizard: everything a business
  * already has in a spreadsheet passes through it. A parser bug here does not
- * fail loudly, it writes the wrong thing — a name in the email column, a price
- * read as a unit, a quoted field split in half — so these tests pin the RFC
+ * fail loudly, it writes the wrong thing - a name in the email column, a price
+ * read as a unit, a quoted field split in half - so these tests pin the RFC
  * 4180 rules that protect the data rather than the happy path.
  *
  * Two deviations from RFC 4180 are deliberate and asserted as such below:
@@ -18,7 +18,7 @@ import {
  * lines are dropped. Both suit hand-made spreadsheets.
  */
 
-describe("parseCsv — empty and degenerate input", () => {
+describe("parseCsv - empty and degenerate input", () => {
   it("returns an empty table for an empty string", () => {
     expect(parseCsv("")).toEqual({ headers: [], rows: [] });
   });
@@ -43,7 +43,7 @@ describe("parseCsv — empty and degenerate input", () => {
   });
 });
 
-describe("parseCsv — the basic shape", () => {
+describe("parseCsv - the basic shape", () => {
   it("parses a simple table", () => {
     const table = parseCsv("name,email\nAda,ada@example.com\nAlan,alan@example.com\n");
     expect(table.headers).toEqual(["name", "email"]);
@@ -74,7 +74,7 @@ describe("parseCsv — the basic shape", () => {
   });
 });
 
-describe("parseCsv — line endings (RFC 4180 §2.1)", () => {
+describe("parseCsv - line endings (RFC 4180 §2.1)", () => {
   it("handles CRLF", () => {
     expect(parseCsv("a,b\r\n1,2\r\n").rows).toEqual([{ a: "1", b: "2" }]);
   });
@@ -92,7 +92,7 @@ describe("parseCsv — line endings (RFC 4180 §2.1)", () => {
   });
 });
 
-describe("parseCsv — quoting", () => {
+describe("parseCsv - quoting", () => {
   it("keeps a comma inside a quoted field instead of splitting on it", () => {
     const table = parseCsv('name,address\nAda,"Kampala, Uganda"\n');
     expect(table.rows[0]).toEqual({ name: "Ada", address: "Kampala, Uganda" });
@@ -141,14 +141,14 @@ describe("parseCsv — quoting", () => {
   });
 });
 
-describe("parseCsv — ragged and duplicate columns (documented behaviour)", () => {
+describe("parseCsv - ragged and duplicate columns (documented behaviour)", () => {
   it("fills missing trailing cells with empty strings", () => {
     const table = parseCsv("a,b,c\n1,2\n");
     expect(table.rows[0]).toEqual({ a: "1", b: "2", c: "" });
   });
 
   /* Extra cells are dropped, not invented a home for. The wizard only reads
-     columns the mapping names, so this loses nothing on import — but it is
+     columns the mapping names, so this loses nothing on import - but it is
      loss, and it is pinned here so a future change has to say so out loud. */
   it("drops cells beyond the header count", () => {
     const table = parseCsv("a,b\n1,2,3\n");
@@ -162,7 +162,7 @@ describe("parseCsv — ragged and duplicate columns (documented behaviour)", () 
   });
 });
 
-describe("parseCsv — trimming (deliberate deviation from RFC 4180 §2.7)", () => {
+describe("parseCsv - trimming (deliberate deviation from RFC 4180 §2.7)", () => {
   it("trims headers", () => {
     expect(parseCsv("  Name , Email \n1,2\n").headers).toEqual(["Name", "Email"]);
   });
@@ -176,7 +176,7 @@ describe("parseCsv — trimming (deliberate deviation from RFC 4180 §2.7)", () 
   });
 });
 
-describe("parseCsv — content fidelity", () => {
+describe("parseCsv - content fidelity", () => {
   it("preserves non-ASCII text", () => {
     const table = parseCsv('name,note\nJosé,"café ☕"\n');
     expect(table.rows[0]).toEqual({ name: "José", note: "café ☕" });
@@ -192,7 +192,7 @@ describe("parseCsv — content fidelity", () => {
   });
 });
 
-describe("guessMapping — exact matching wins", () => {
+describe("guessMapping - exact matching wins", () => {
   it("prefers an exact header over one that merely contains the word", () => {
     const mapping = guessMapping("customers", ["Email (work)", "Email"]);
     expect(mapping.email).toBe("Email");
@@ -216,7 +216,7 @@ describe("guessMapping — exact matching wins", () => {
   });
 });
 
-describe("guessMapping — column assignment", () => {
+describe("guessMapping - column assignment", () => {
   /* The bug this guards: `unitLabel` is declared before `salePrice`, so a
      substring pass run per-field let "unit" claim "Unit Price" and left the
      price unmapped. The price column is the one that cannot be wrong. */
@@ -246,7 +246,7 @@ describe("guessMapping — column assignment", () => {
   });
 });
 
-describe("guessMapping — short synonyms are exact-only", () => {
+describe("guessMapping - short synonyms are exact-only", () => {
   /* "id" lives inside "paid"; "ean" inside "cleaner". Letting two- and
      three-letter synonyms match on substring imports columns nobody chose. */
   it("does not read a 'Paid' column as the SKU", () => {
@@ -266,7 +266,7 @@ describe("guessMapping — short synonyms are exact-only", () => {
   });
 });
 
-describe("guessMapping — realistic spreadsheets", () => {
+describe("guessMapping - realistic spreadsheets", () => {
   it("maps every required customer field from a typical export", () => {
     const headers = ["Customer Name", "Email Address", "Credit Limit", "Payment Terms"];
     const mapping = guessMapping("customers", headers);

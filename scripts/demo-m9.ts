@@ -1,5 +1,5 @@
 /**
- * M9 verification — quote-to-cash completed + CRM depth.
+ * M9 verification - quote-to-cash completed + CRM depth.
  * Every assertion is a product guarantee.
  *
  * Run: pnpm demo:m9 [fulfillment|credit|expiry|timeline|all]
@@ -87,7 +87,7 @@ async function fulfillmentScenario(): Promise<string> {
   const confirmed = data(await executor.execute("sales.confirmOrder", ownerCtx, { orderId: order.orderId }));
   ok(`confirm reserved ${confirmed.reservedThousandths} thousandths (30 units)`);
 
-  // Deliver two-thirds, then the rest — two invoices, one order.
+  // Deliver two-thirds, then the rest - two invoices, one order.
   const soLines = await db.select({ id: salesOrderLines.id }).from(salesOrderLines).where(eq(salesOrderLines.orderId, order.orderId));
   const lineId = soLines[0]!.id;
   const first = data(await executor.execute("sales.deliverOrder", ownerCtx, {
@@ -168,7 +168,7 @@ async function expiryScenario(): Promise<string> {
 
   const signals = data(await executor.execute("signals.list", ownerCtx, {}));
   const hit = (signals.signals ?? []).find((s: { id: string }) => s.id.startsWith("accounting.quoteExpired:"));
-  // The sweep already archived it, so the signal stays quiet — signals only
+  // The sweep already archived it, so the signal stays quiet - signals only
   // point at lapsed-but-unmarked quotes. Verify the guard end-to-end with a
   // fresh lapsed quote.
   ok("archived quote raises no stale signal", !hit);
@@ -195,7 +195,7 @@ async function timelineScenario(): Promise<string> {
   const executor = buildExecutor(db, registry);
   const { orgId, ownerCtx } = await seedOrg(db, "M9 Timeline Co");
 
-  const deal = data(await executor.execute("crm.createDeal", ownerCtx, { title: "Walk-in — Harbor Cafe", valueMinor: 1_200_000, source: "walk-in" }));
+  const deal = data(await executor.execute("crm.createDeal", ownerCtx, { title: "Walk-in - Harbor Cafe", valueMinor: 1_200_000, source: "walk-in" }));
   const converted = data(await executor.execute("crm.convertLead", ownerCtx, { dealId: deal.dealId, createCustomer: true, customerName: "Harbor Cafe" }));
   ok(`lead converted into customer ${converted.customerId} at stage ${converted.stage}`);
 

@@ -43,7 +43,7 @@ interface AgentStatus {
 
 /**
  * Creator-mode onboarding: detect an installed coding agent, or walk the
- * human through installing one — the app never runs the install itself,
+ * human through installing one - the app never runs the install itself,
  * it only hands over the command and verifies afterwards.
  */
 function AgentSetupCard() {
@@ -93,7 +93,7 @@ function AgentSetupCard() {
       <p className="mt-1 max-w-3xl text-sm leading-relaxed text-stone-500">
         Creator mode works by an agent proposing changes as reviewed diffs. No supported coding CLI
         {agent.candidates.map((c) => ` ${c.label}`).join(" ·")} was found on this machine's PATH.
-        Install one — you only leave the app to sign in with the vendor.
+        Install one - you only leave the app to sign in with the vendor.
       </p>
       <ol className="mt-3 space-y-2.5 text-sm">
         <li className="flex flex-wrap items-center gap-2">
@@ -225,7 +225,7 @@ export default function ProposalsPage() {
   return (
     <AppFrame
       appId="creator"
-      description="When you enable Creator Mode in the console, the agent can propose changes to this platform itself. Nothing merges automatically — your approval records the decision and the diff lands through a normal pull request where CI verifies it again."
+      description="When you enable Creator Mode in the console, the agent can propose changes to this platform itself. Nothing merges automatically - your approval records the decision and the diff lands through a normal pull request where CI verifies it again."
       persistKey="proposals"
       tabs={[
         { id: "proposals", label: "Proposals", count: proposals?.length || undefined },

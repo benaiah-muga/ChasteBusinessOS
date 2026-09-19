@@ -16,15 +16,15 @@ import {
  * N09 executable proof: the balanced-books and append-only invariants are
  * enforced by the database at commit time, not merely asserted by
  * application code. Refusals here are trigger/constraint refusals against
- * the run's fixture database (migrated from this branch by globalSetup —
+ * the run's fixture database (migrated from this branch by globalSetup -
  * provisioning a second database here was measured losing a hook-timeout
- * race under full-workspace parallel load) — the same negative proofs the
+ * race under full-workspace parallel load) - the same negative proofs the
  * audit's N09 gate demands (unbalanced commit, incomplete entry, cross-org
  * account, posted-line mutation, ledger deletion), plus the positive path:
  * valid multi-line entries, governed reversals, and the declared
  * maintenance context used only by teardown and repair. The immutability
  * guards honor the maintenance context; the balance, completeness, and
- * tenancy guards never do — maintenance may delete history, but nothing
+ * tenancy guards never do - maintenance may delete history, but nothing
  * broken can ever commit.
  */
 
@@ -211,7 +211,7 @@ describe("commit-time ledger enforcement (N09)", () => {
   it("refuses TRUNCATE of the journal tables outside maintenance", async () => {
     await expectRefusal(db.db.execute("TRUNCATE journal_lines"), /immutable/);
     // journal_entries is refused even earlier: its FK to lines (and lines'
-    // rows) would be truncated away — the FK check names it before the
+    // rows) would be truncated away - the FK check names it before the
     // trigger can. Either way the table cannot be truncated.
     await expectRefusal(db.db.execute("TRUNCATE journal_entries"), /immutable|foreign key/);
   });

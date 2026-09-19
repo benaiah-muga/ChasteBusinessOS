@@ -174,7 +174,7 @@ export default function DocumentsPage() {
                 <EmptyState
                   icon={<IconFileText />}
                   title="No documents yet"
-                  hint="Ingest your first vendor bill — coding suggestions appear after parsing."
+                  hint="Ingest your first vendor bill - coding suggestions appear after parsing."
                 />
               ) : (
                 <ul className="divide-y text-sm">

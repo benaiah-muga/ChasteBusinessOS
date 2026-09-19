@@ -20,7 +20,7 @@ every piece of auxiliary infrastructure a project like this usually accretes:
 - **Pub/sub**: `LISTEN/NOTIFY`.
 
 Each standalone service (Redis, RabbitMQ, Meilisearch, a cron sidecar) is
-one more thing to deploy, back up, secure, and monitor — for a product whose
+one more thing to deploy, back up, secure, and monitor - for a product whose
 deployment story is "docker compose and go". But Postgres is not free of
 costs either: long-running queries hurt OLTP, extensions need
 superuser/maintenance windows, and some workloads (fan-out fan-in, large
@@ -42,7 +42,7 @@ workload Postgres cannot do before it is admitted.** Concretely:
 2. **Scheduling stays an application worker tick** (2s poll), with routines
    (ADR 0031) claimed via SKIP LOCKED. `pg_cron` was considered: it would
    remove the idle poll, but it runs statements as the database user, which
-   cannot execute capabilities — the worker is where governance lives. A
+   cannot execute capabilities - the worker is where governance lives. A
    future optimization is `LISTEN/NOTIFY` to wake the worker on enqueue
    instead of polling; not needed at current volume.
 3. **Text search adopts `pg_trgm` now.** Migration 0028 creates the

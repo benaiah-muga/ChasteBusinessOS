@@ -9,7 +9,7 @@ type Params = { params: Promise<{ token: string }> };
 /**
  * Public customer-portal endpoint. The token IS the credential: 192 random
  * bits, revocable, scoped to exactly one invoice. It reveals only what the
- * customer needs — number, currency, totals, payment state — never other
+ * customer needs - number, currency, totals, payment state - never other
  * customers, ledger internals, or org data.
  */
 export async function GET(req: Request, { params }: Params) {

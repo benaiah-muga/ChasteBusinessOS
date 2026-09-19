@@ -2,7 +2,7 @@
  * Planning arithmetic on top of the BOM primitives (M11, ADR 0038).
  *
  * erp-core/bom.ts already answers availability for a FIXED quantity; this
- * adds the ceiling question — "how many COULD we produce?" — as a pure
+ * adds the ceiling question - "how many COULD we produce?" - as a pure
  * floor over per-unit component ratios. Deterministic; the agent narrates
  * the arithmetic, never invents it.
  */

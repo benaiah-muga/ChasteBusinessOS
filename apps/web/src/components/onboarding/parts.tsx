@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/format";
 import { IconCheck, IconSearch } from "@/components/icons";
+import { LogoMark } from "@/components/logo";
 
 /** Shared chrome for the setup wizard: header, spinner, step rail, choice cards. */
 
@@ -16,19 +17,12 @@ export function Spinner({ className = "size-4" }: { className?: string }) {
 }
 
 export function BrandMark({ compact = false }: { compact?: boolean }) {
-  return (
-    <span className={cn("chaste-mark", compact ? "size-9" : "size-11")} aria-hidden="true">
-      <span className="chaste-mark__orbit chaste-mark__orbit--one" />
-      <span className="chaste-mark__orbit chaste-mark__orbit--two" />
-      <span className="chaste-mark__orbit chaste-mark__orbit--three" />
-      <span className="chaste-mark__core">C</span>
-    </span>
-  );
+  return <LogoMark size={compact ? 36 : 44} />;
 }
 
 /**
  * The same app chrome as the sign-in page. The avatar carries the user's real
- * initial — during setup there is nothing else on screen telling them they are
+ * initial - during setup there is nothing else on screen telling them they are
  * already signed in as the right person.
  */
 export function OnboardingHeader({ email }: { email: string }) {
@@ -210,7 +204,7 @@ export function ChoiceCard({
 
 /**
  * One failure, explained. Every error in the wizard gets a reason and a way
- * out — a bare red string is how a new user ends up stuck and blaming the tool.
+ * out - a bare red string is how a new user ends up stuck and blaming the tool.
  */
 export function RecoverBlock({
   title,

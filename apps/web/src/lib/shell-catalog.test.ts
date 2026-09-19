@@ -64,7 +64,7 @@ describe("app catalog", () => {
   });
 
   /* A moduleId the switchboard has never heard of means the app is filtered
-     out for every org — shipped, but permanently invisible. */
+     out for every org - shipped, but permanently invisible. */
   it("gates every app on a module the catalog actually knows", () => {
     for (const a of APPS) {
       if (!a.moduleId) continue;
@@ -126,7 +126,7 @@ describe("appsForOrg", () => {
   });
 
   /* Team, approvals and the ledger are part of the OS, not of a business
-     module — switching every module off must still leave them reachable. */
+     module - switching every module off must still leave them reachable. */
   it("always keeps system apps, even with every module switched off", () => {
     const ids = appsForOrg(new Set()).map((a) => a.id);
     expect(ids).toContain("team");
@@ -142,14 +142,9 @@ describe("appsForOrg", () => {
 });
 
 describe("tileStyle", () => {
-  it("keeps system tiles neutral instead of claiming a hue", () => {
-    expect(tileStyle(0).background).toBe("var(--color-stone-100)");
-  });
-
-  it("tints a business app from its hue", () => {
-    const style = tileStyle(145);
-    expect(style.background).toContain("oklch");
-    expect(style.background).toContain("145");
+  it("renders every app tile in the one brand bronze pair", () => {
+    expect(tileStyle().background).toBe("var(--color-gold-100)");
+    expect(tileStyle().color).toBe("var(--color-gold-800)");
   });
 });
 
@@ -159,7 +154,7 @@ describe("onboarding plan content", () => {
   });
 
   /* The wizard's copy and the server's persisted list are written out twice on
-     purpose — the client cannot import the server module without dragging the
+     purpose - the client cannot import the server module without dragging the
      database and the embedding client into the bundle. That makes this the only
      guard on them drifting apart, and a drift means a step the user completed
      is silently dropped from the checklist. */

@@ -56,9 +56,9 @@ The current implementation has several observable limits:
   crash recovery, duplicate-effect resistance, or proactive-run quality.
 
 The accurate product claim today is: **“Chaste executes bounded, governed agent
-workflows and scheduled read-mostly routines.”** The stronger claim—**“Chaste
+workflows and scheduled read-mostly routines.”** The stronger claim-**“Chaste
 reliably completes resumable, replayable, multi-step business tasks and proactive
-routines”**—becomes valid only after the reliability gates in this plan pass.
+routines”**-becomes valid only after the reliability gates in this plan pass.
 
 This also matches the useful lesson from Hermes: persistent memory, skills,
 scheduled jobs, and delegation are product capabilities, while long-lived work
@@ -160,12 +160,12 @@ The current session page replays ordered `session_events`, which is valuable for
 transparency but is not yet deterministic replay. A true replay implementation
 must distinguish three operations:
 
-1. **Audit playback** — render exactly what happened from recorded events. No model
+1. **Audit playback** - render exactly what happened from recorded events. No model
    or tool is called.
-2. **Deterministic replay** — re-run the same harness against recorded model
+2. **Deterministic replay** - re-run the same harness against recorded model
    responses, tool observations, clocks, random seeds, configuration, policy, and
    capability graph. External effects are simulated or rejected.
-3. **Fork/run** — start from a recorded checkpoint, change the user request,
+3. **Fork/run** - start from a recorded checkpoint, change the user request,
    policy, model, or profile, and create a new child run with explicit lineage.
 
 Every run and event needs, at minimum:
@@ -255,7 +255,7 @@ guessing from prompt length.
 Before waking the model, a routine may run a deterministic precheck over signals,
 timestamps, or new records. If nothing changed, it records a successful silent
 tick without spending model tokens. If the precheck says to wake the model, its
-output becomes bounded, labelled context—not an instruction source.
+output becomes bounded, labelled context-not an instruction source.
 
 Proactive runs get the same durable run state, leases, retries, idempotency, and
 acceptance checks as interactive runs. They default to read/draft behavior, emit a
@@ -377,7 +377,7 @@ flow rather than rewriting all ERP modules.
 
 ## Depth tree and delivery phases
 
-### Phase 0 — decision and upstream inventory
+### Phase 0 - decision and upstream inventory
 
 - Freeze the upstream commit(s) under consideration.
 - Produce a source inventory: Cordis, loader, bundles, sessions, loop, sandbox,
@@ -387,7 +387,7 @@ flow rather than rewriting all ERP modules.
 
 Exit gate: the upstream inventory and adoption boundary are approved.
 
-### Phase 1 — composability boundary
+### Phase 1 - composability boundary
 
 Deliver `@chaste/harness` with profile, bundle, service, dependency, lifecycle,
 event, and config patch contracts. Mount one existing ERP module and one model
@@ -397,7 +397,7 @@ rewrite yet.
 Exit gate: composition tests pass and all capability calls still traverse the
 existing kernel governance path.
 
-### Phase 1.5 — reliable multi-step and proactive execution
+### Phase 1.5 - reliable multi-step and proactive execution
 
 Add durable run checkpoints, resume/restart semantics, action idempotency,
 queue leases and stale-claim recovery, routine scheduled-run records, explicit
@@ -409,7 +409,7 @@ committed effect; a scheduled run neither disappears nor duplicates; context
 compaction preserves pending actions and invariants; and the same task reports
 measured completion/recovery/cache behavior across repeated runs.
 
-### Phase 2 — canonical run log and true replay
+### Phase 2 - canonical run log and true replay
 
 Add immutable run/event schema, hashes, lineage, checkpoints, observations,
 replayability classification, audit playback, deterministic replay fixtures, and
@@ -419,7 +419,7 @@ live model or posting a second payment.
 Exit gate: replay has a failing test for missing observations and a passing
 round-trip proof for a governed ERP flow.
 
-### Phase 3 — behaviour specs and evolution records
+### Phase 3 - behaviour specs and evolution records
 
 Add versioned behavioural contracts, `feature_gaps`, `evolution_runs`, status
 events, desired-state/config proposals, and a UI read model. Convert one existing
@@ -428,7 +428,7 @@ capability gap into a visible ticket and a replay fixture.
 Exit gate: a user can see progress and an agent can honestly stop at a missing
 capability without improvising.
 
-### Phase 4 — isolated development pipeline
+### Phase 4 - isolated development pipeline
 
 Add the dev worker, queue/outbox exchange, Docker worktree, synthetic fixture
 builder, test/replay runner, artifact digest, proposal evidence, and promotion
@@ -437,7 +437,7 @@ handoff. Add explicit production-deny policy tests.
 Exit gate: a production-originated gap can become a reviewed candidate without a
 production credential and without modifying production code or data.
 
-### Phase 5 — safe self-configuration and plugin evolution
+### Phase 5 - safe self-configuration and plugin evolution
 
 Start with declarative workflows and skills, then tenant plugins, then platform
 code. Add trust tiers, signed manifests, scoped permissions, migration gates,
@@ -447,7 +447,7 @@ default org environment.
 Exit gate: each rung has distinct permissions, evidence, approval, and rollback;
 there is no path from ordinary user input directly to a production code write.
 
-### Phase 6 — UI integration and operational hardening
+### Phase 6 - UI integration and operational hardening
 
 Keep the Chaste shell and ERP navigation. Add runtime composition inspection,
 profile/preset display, replay/fork controls, evolution progress, proposal diff and

@@ -1,4 +1,4 @@
-# Gates: STOCK — stock-ledger immutability at commit time (ADR 0052 extension)
+# Gates: STOCK - stock-ledger immutability at commit time (ADR 0052 extension)
 
 OWNS: packages/db/drizzle/0049_stock_ledger_immutability.sql, packages/db/drizzle/meta/_journal.json, packages/db/src/roles.ts, packages/db/src/ledger-maintenance.ts, packages/db/src/stock-guards.test.ts, modules/inventory/src/service.test.ts, apps/web/src/server/analytics.test.ts, docs/W0_EVIDENCE_REGISTER.md, CHANGELOG.md
 
@@ -9,7 +9,7 @@ Scope: quantity truth joins the financial ledger as append-only. Inserts (includ
   EXPECT: LINT OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=48630b7361dd44ee870917b12c3d19b9d7bdea738aaca16bb04d4cab83b772d2; output-bytes=8
 
-- [x] STOCK-G1: appending movements — including compensating reversals — stays an ordinary write, while UPDATE, DELETE, and TRUNCATE refuse outside the maintenance context and a declared-maintenance delete succeeds
+- [x] STOCK-G1: appending movements - including compensating reversals - stays an ordinary write, while UPDATE, DELETE, and TRUNCATE refuse outside the maintenance context and a declared-maintenance delete succeeds
   CHECK: pnpm --filter @chaste/db exec vitest run src/stock-guards.test.ts
   EXPECT: /Tests\s+3 passed/
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=96d8f214bbe7f7ad8b73e5a70d76ed1e57cc9656c2e054ab4cc924d9dca2ff6e; output-bytes=23792
@@ -24,7 +24,7 @@ Scope: quantity truth joins the financial ledger as append-only. Inserts (includ
   EXPECT: STOCK-TEARDOWNS-OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=d9d05360a0bf1f52f212a8cb9b0318b0f6f35f29371998f22b3babbcd0bdbd60; output-bytes=76842
 
-- [x] STOCK-G4: repo verification gate — typecheck, lint, and the full workspace test suite pass
+- [x] STOCK-G4: repo verification gate - typecheck, lint, and the full workspace test suite pass
   CHECK: pnpm typecheck >/dev/null 2>&1 && pnpm lint >/dev/null 2>&1 && pnpm test >/tmp/kilo/gate-stock-test.log 2>&1 && echo REPO-GATE-OK || { tail -30 /tmp/kilo/gate-stock-test.log; exit 1; }
   EXPECT: REPO-GATE-OK
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=1ebc9426bc5d/28 entries; EXPECT=matched; output-sha256=0c6e5dc74929b6f125a6dfc551264ea8e2e1ad046a1b29c7937ae29c3cc6b215; output-bytes=13

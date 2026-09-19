@@ -3,7 +3,7 @@
  * value: a transfer relocates stock, it never acquires or consumes it.
  * Every leg is written as a pair of ledger deltas with reason "transfer",
  * and valuation replay treats those legs as value-neutral (see
- * replayValuation) — otherwise a round trip would drift the moving
+ * replayValuation) - otherwise a round trip would drift the moving
  * average by rounding residue.
  */
 

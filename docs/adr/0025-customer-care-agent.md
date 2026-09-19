@@ -1,4 +1,4 @@
-# ADR 0025: Customer care agent — draft-only autonomy with customer-bound tools
+# ADR 0025: Customer care agent - draft-only autonomy with customer-bound tools
 
 Date: 2026-08-24
 Status: Accepted
@@ -7,7 +7,7 @@ Status: Accepted
 
 Support inquiries arrive as free text from the least trusted party in the
 system: the customer. An AI that answers them touches three risk classes at
-once — prompt injection via direct instruction (OWASP LLM01), cross-customer
+once - prompt injection via direct instruction (OWASP LLM01), cross-customer
 data exposure (the IDOR question recast for agents), and unauthorized state
 change (refunds, payments). The platform's standing rules already cover
 governed execution and audit; what was missing was a design for *answering
@@ -20,7 +20,7 @@ customers* where every tool is safe to point at hostile input.
 The care agent never talks to the customer. It produces a draft that a human
 reviews and releases through `support.postMessage`, recorded with `agent`
 provenance plus the releasing user. Human confirmation breaks any injected
-instruction chain at the point of real-world effect — the mitigation OWASP
+instruction chain at the point of real-world effect - the mitigation OWASP
 and industry guidance rate as most reliable. When the answer needs authority
 (money changes, exceptions), staff escalate via
 `support.escalateConversation`; escalation is itself an audited capability,
@@ -66,7 +66,7 @@ every word.
 Drafting is rate-limited per user+conversation, capped at 4 loop steps,
 with retrieval degrading to text search rather than failing. When records
 or knowledge do not hold the answer, the system prompt requires saying so
-and recommending escalation — matching the house rule that the agent files
+and recommending escalation - matching the house rule that the agent files
 down, never improvises.
 
 ## Consequences

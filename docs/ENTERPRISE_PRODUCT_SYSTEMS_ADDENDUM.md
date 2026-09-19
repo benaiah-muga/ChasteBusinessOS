@@ -29,7 +29,7 @@ Purpose: answer the follow-up questions with implementation evidence, decisions,
 | X19 | Website intake and employee lifecycle | Public support/portal endpoints and recruitment primitives exist; add scoped public intake and lifecycle orchestration. |
 | X20 | Documents and cross-module automation | Useful foundation, insufficient for broad enterprise document automation; prioritize immutable versions, provenance, review and safe derivations. |
 
-## X01 — Accountable identity from request to effect
+## X01 - Accountable identity from request to effect
 
 **Evidence.** `apps/web/src/server/kernel.ts`, `actorFromResolved`, sets `actor.id = resolved.userId` and type to `agent` or `human`; chat calls it with `asAgent: true`. `packages/kernel/src/ledger.ts` records actor type/ID. This can distinguish “Alice acting through chat's agent” from “Alice acting through the human adapter.” It does not establish which physical person operated a session, and agent type alone does not identify a stable agent instance. Worker actors and approval re-execution need richer provenance.
 
@@ -39,7 +39,7 @@ Show “Alice's purchasing agent prepared this; Bob approved; Purchasing Worker 
 
 **Owner/priority/gate.** Kernel + IAM; P0/W1–W2. One fixture covers direct human, personal agent, team routine, external API, human approval, retry and revoked owner. Each receipt has the complete causation chain, including retries and compensation; spoofed actor fields are rejected. Inspect existing ledger projections before promising this wording is already available.
 
-## X02 — Operational skills are maintained product knowledge
+## X02 - Operational skills are maintained product knowledge
 
 **Evidence.** `modules/skills/src/index.ts` has static advisory playbooks, `skills.find` keyword summaries and `skills.load` steps/capability IDs. Access uses `documents.read`. No tenant-versioned skill lifecycle or capability availability filtering inside these tools was found. Some advice is stale or misleading: reorder notes say lead times are not modeled despite the delivered reorder work; month-end guidance conflates unpaid bills with unposted items; payroll wording says execution pays real money without distinguishing ledger posting from external settlement. “Improvise” must never imply waiving a policy or missing invariant.
 
@@ -49,7 +49,7 @@ Use a browser/server-safe skill schema and dedicated permissions where tenant SO
 
 **Owner/priority/gate.** Domain enablement + runtime; P1/W2–W3, stale financial guidance P0 correction. Domain experts approve revised procure/pay, stock reorder, close and payroll playbooks. Conformance rejects missing IDs/version incompatibility; disabled modules are not recommended as executable; an injected tenant SOP cannot bypass approval. Preserve distinctions among advice, policy and executable workflow.
 
-## X03 — A development skill pack for coding agents
+## X03 - A development skill pack for coding agents
 
 **Evidence.** Committed `.agents/skills/` contains Next runtime/cache/prefetch guidance; root AGENTS provides kernel/domain conventions. Creator scaffolding generates source and test skeletons. This does not constitute a complete module-development skill or executed verification pack.
 
@@ -61,7 +61,7 @@ The pack helps an author; it cannot certify its own output. Mandatory verifier r
 
 **Owner/priority/gate.** Developer platform + architecture; P1/W2 and W5. A coding agent builds a small service-delivery capability from the pack; independent CI proves tenant isolation, permissions, idempotency, discovery, human surface and domain postconditions. A missing registration or fake test result blocks completion.
 
-## X04 — Capability discovery is part of release, not just source generation
+## X04 - Capability discovery is part of release, not just source generation
 
 **Evidence.** `packages/kernel/src/registry.ts` registers and validates capabilities and exposes `forActor`, `scopedToModules` and keyword `search`. The loop builds tool specifications from the actor-visible registry. `apps/web/src/server/kernel.ts` explicitly imports/registers modules and caches the registry using `REGISTRY_VERSION`. A new source file or marketplace listing alone is not executable/discoverable production functionality.
 
@@ -71,7 +71,7 @@ Deploy registry and discovery index atomically by digest; run health checks on e
 
 **Owner/priority/gate.** Kernel + release; P1/W2–W3. Add a test capability, deploy, search by a user synonym and execute via authorized agent; deny disabled/unauthorized access. Test rolling deploy, stale index, removed capability and capability version conflict. Human and agent availability match the same registry.
 
-## X05 — Automation rules and durable workflows
+## X05 - Automation rules and durable workflows
 
 **Evidence.** Routines, recurring invoice jobs, signals and module-specific state transitions exist. A generic visual rule designer with persisted branching/waiting contracts is not established. Odoo's documented automation rules combine triggers, optional conditions and one or more actions; that is a useful usability reference, not a claim of Chaste parity. [Odoo automation rules](https://www.odoo.com/documentation/19.0/applications/studio/automated_actions.html)
 
@@ -83,7 +83,7 @@ Prevent event recursion with causation-chain depth, per-record occurrence identi
 
 **Owner/priority/gate.** Runtime + product; P1/W3 after B02/B03, sophisticated designer P2. Prove overdue reminder, bill mismatch approval and new-hire checklist using templates; simulate update-trigger loops, DST, duplicate webhooks, approval waits, crash recovery, definition edits and revocation. Show current step, blockers and next owner in UI.
 
-## X06 — Goods, services and mixed transactions
+## X06 - Goods, services and mixed transactions
 
 **Evidence.** `packages/db/src/schema/index.ts`, `items`, stores SKU, unit, price and reorder point but no product/service kind. A custom unit label does not establish service semantics. Free-text invoice lines are also not a full service lifecycle.
 
@@ -103,7 +103,7 @@ Migration: rows with stock history retain physical semantics; ambiguous rows ent
 
 **Owner/priority/gate.** ERP core + sales/purchasing/inventory/HR; P0 contract/W1, P1 implementation/W3. Prove consulting-only, mixed installation-plus-equipment, untracked consumable and partial milestone scenarios. Services never create stock movements; goods preserve existing valuation/inverse invariants; migrations preserve historical documents and report totals.
 
-## X07 — Structured questions: retain and harden the existing feature
+## X07 - Structured questions: retain and harden the existing feature
 
 **Evidence.** `packages/kernel/src/loop.ts` defines `AskQuestion`, exposes `ask_user`, emits `ask` events and ends the turn. Chat streams them and `apps/web/src/app/(app)/chat-ui.tsx` renders `AskCard` with choices/free text. This is already the requested tool-plus-component pattern; a second implementation would create drift. In the loop, the turn ends after processing the tool-call batch, so a question does not itself prove subsequent calls in that same batch are suspended.
 
@@ -113,17 +113,17 @@ Use narrow UI schemas for single/multi-choice, date, amount/currency and authori
 
 **Owner/priority/gate.** Runtime + chat UX; P0 batching review, P1/W2 durability. Test question followed by a write in the same response, double answer, outdated answer after replan, tenant switch, expired session and free-text validation. No dependent effect occurs until a valid answer; the UI does not lose an answer on refresh.
 
-## X08 — Action receipts and direct navigation
+## X08 - Action receipts and direct navigation
 
 **Evidence.** Tool results return entity IDs in many modules; there is no universal resource-link envelope in the inspected executor/loop. General session links exist, but they are not a guaranteed link to a newly created customer. A dedicated customer detail route was not found in the app route inventory.
 
 **Decision.** Extend success/pending receipts with typed resource references, e.g. `{type: "customer", id, relation: "created", label}` plus action/run/approval IDs. The server's route registry resolves links; models cannot invent URLs, embed arbitrary external schemes or claim a guessed record exists. Build canonical tenant-aware detail routes (or a durable list/detail-panel deep link) for customer, supplier, order, invoice, application, document and report first. URL selection alone never conveys authorization; resolve tenant membership and resource scope on navigation and return safe inaccessible/archived states.
 
-Show “Customer created — Open customer” from the committed receipt. Multi-action responses show the primary result and an expandable list of related receipts. Pending approval links to the proposal, not an entity falsely described as created. Stale/deleted records show retained history where authorized. Undo links invoke governed compensation and explain eligibility. Clipboard/open-new-tab and browser back behavior should work without a chat session remaining open.
+Show “Customer created - Open customer” from the committed receipt. Multi-action responses show the primary result and an expandable list of related receipts. Pending approval links to the proposal, not an entity falsely described as created. Stale/deleted records show retained history where authorized. Undo links invoke governed compensation and explain eligibility. Clipboard/open-new-tab and browser back behavior should work without a chat session remaining open.
 
 **Owner/priority/gate.** Kernel contracts + product UI; P1/W2–W3. Create a customer in chat, click the receipt, land on the exact authorized record, then verify tenant switch, revoked access, delayed commit, duplicate retry and archived record. Every advertised action link comes from a real persisted resource or proposal.
 
-## X09 — AI enabled by default, with graceful granular controls
+## X09 - AI enabled by default, with graceful granular controls
 
 **Evidence.** `/api/ai-config` is read-only environment configuration; module availability and some routine/support settings exist. No unified feature-level policy for all AI calls was established.
 
@@ -135,7 +135,7 @@ On disable: stop admitting new affected calls, cancel safe in-flight generation,
 
 **Owner/priority/gate.** Product + policy/runtime; P1/W2–W3. Turn each feature off before request, during stream and while queued; verify server/worker enforcement across replicas, no further provider egress, accurate partial outcomes and a usable manual path. Test workspace settings versus user overrides and a provider outage.
 
-## X10 — Product telemetry and voluntary diagnostics are different channels
+## X10 - Product telemetry and voluntary diagnostics are different channels
 
 **Evidence.** `/api/metrics` aggregates tenant session token/cache usage; structured logs and audit events exist. This is not proof of safe product-wide telemetry, consent, screenshot capture or bug-report handling.
 
@@ -147,7 +147,7 @@ A “Report a problem” flow is voluntary: describe issue, preview exactly what
 
 **Owner/priority/gate.** Privacy/security + product reliability; P1/W3. Network-capture tests under all preference states show only allowlisted fields; canary PII does not leave via automatic telemetry, logs or proxy metadata. Manual screenshot upload requires preview/confirmation, access controls and deletion verification. Track actual product outcomes, not user surveillance.
 
-## X11 — Missing capability becomes a useful next step
+## X11 - Missing capability becomes a useful next step
 
 **Evidence.** Chat supplies `TicketSink.file`; it inserts a ticket but returns no ID. The loop returns `{ok: true, note: "ticket filed"}`. This does not give a usable ticket receipt, status, workaround or delivery commitment.
 
@@ -157,7 +157,7 @@ Persist gap ID, source contract/run, impact, acceptance condition, duplicate lin
 
 **Owner/priority/gate.** Runtime + support/creator + UX; P1/W2–W3. Unsupported command yields a persistent link and next action; retry deduplicates; permission denial does not create a misleading feature request; partial completed work is accurately listed; ticket-storage failure is never reported as success.
 
-## X12 — Analytics as an evidence-backed exploration workspace
+## X12 - Analytics as an evidence-backed exploration workspace
 
 **Evidence.** `modules/analytics/src/index.ts` provides typed extractors, frame operations, `explainChange` and `askYourBusiness`; source permissions gate extractors. This is a useful basis. A full metric semantic catalogue, provenance-bound dataset handles and saved investigative workspace were not established.
 
@@ -169,7 +169,7 @@ Add comparable-period selection, useful segmented trends, anomaly investigation 
 
 **Owner/priority/gate.** Analytics + domain/UX; P1/W3. Trace a revenue change to exact rows; reconcile totals with standard accounting reports; test timezone boundaries, returns, cash/accrual basis, mixed currencies, hidden records, stale projections and AI-off operation. Usability research checks that users can explain the metric and find evidence, not just like the chart.
 
-## X13 — Reports as durable business artifacts
+## X13 - Reports as durable business artifacts
 
 **Evidence.** `analytics.renderReport` accepts caller-provided rows/operations/narrative and emits HTML/SVG; `report.ts` provides printable HTML. It formats what it receives. It does not prove the supplied rows came unchanged from a trusted extractor; a model-generated table can look authoritative without verified provenance. Standard accounting/report endpoints also exist.
 
@@ -181,7 +181,7 @@ Scheduled delivery uses the outbox and rechecks recipient authorization at gener
 
 **Owner/priority/gate.** Analytics + finance + documents; P1/W3–W4. Repeat an issued report from pinned sources; reconcile to GL; reject fabricated dataset provenance; revoke recipient before delivery; render large/multi-page and RTL/locale fixtures; verify safe spreadsheet export. AI-off gives the same numeric report.
 
-## X14 — Account recovery without a universal master phrase
+## X14 - Account recovery without a universal master phrase
 
 **Evidence.** `apps/web/src/server/auth.ts` configures email/password sessions and throttling; no app-level backup-code or passkey recovery enrollment is present in the inspected configuration. Library availability does not mean the product flow is wired.
 
@@ -193,7 +193,7 @@ Recovery of login is different from recovery of encrypted customer data. Do not 
 
 **Owner/priority/gate.** IAM + security; P1/W3, before enterprise identity readiness. Test single-use concurrency, rate limiting, regenerate/reuse, lost device, compromised email, SSO-only account, disabled employee and last administrator. Recovery cannot elevate role or bypass audit/step-up for sensitive operations.
 
-## X15 — AI-assisted mapping with deterministic migration controls
+## X15 - AI-assisted mapping with deterministic migration controls
 
 **Evidence.** `/api/import` handles customers/products with row validation and batched direct inserts. It checks authentication/org but no explicit domain permission before those writes. Its `toMinor` uses `Number` and `Math.round(n * 100)` despite a “no float” comment, assuming two-decimal currency. These are source-observed governance and exact-currency gaps; do not expand AI import around them.
 
@@ -205,7 +205,7 @@ Offer sandbox trial migration, mapping reuse, validation summary, dry-run totals
 
 **Owner/priority/gate.** Integrations + ERP core/security + onboarding UX; P0 existing boundary fixes/W1, P1 assistant/W3. Restricted user cannot import; 0/2/3-decimal currencies and locale decimals remain exact; ambiguous dates require review; repeating a file/intent does not duplicate; mixed service/goods and foreign-key dependencies reconcile; model failure leaves manual mapping usable.
 
-## X16 — Private prod/dev communication
+## X16 - Private prod/dev communication
 
 **Decision.** Yes, consider Tailscale or a comparable WireGuard-based private network for operations endpoints and a narrow artifact-exchange service. Tailscale supports workload identity federation using provider OIDC identity, which can reduce standing join credentials. Product choice remains conditional on deployment support, region, controls and operating cost. [Tailscale workload identity federation](https://tailscale.com/docs/features/workload-identity-federation)
 
@@ -215,7 +215,7 @@ Avoid broad subnet routes, an all-to-all tailnet and shared node keys. Human eme
 
 **Owner/priority/gate.** Platform/security; P1/W5 optional deployment profile. Network tests prove candidate runner cannot reach production DB/admin ports or other tenants, including compromised runner identity; revoke identity mid-run; test control-plane/network outage and queued artifact recovery. Joining the network cannot approve a release or authorize an ERP capability.
 
-## X17 — Attachments and modality-aware models
+## X17 - Attachments and modality-aware models
 
 **Evidence.** Kernel `LoopMessage.content` is a string and `OpenAiCompatAdapter` maps that into chat content; the normal chat path is not a general attachment pipeline. `packages/ai/src/documents.ts` separately sends bytes as an `image_url` to an OCR model. Generic MIME syntax and an OCR call are not proof that PDF, Office, audio or video files are supported.
 
@@ -236,7 +236,7 @@ DeepSeek is a valid candidate to evaluate: current official docs identify V4.1 F
 
 **Owner/priority/gate.** AI platform + documents/security; P1/W3. Matrix tests text-only, image-capable and unavailable provider routes; mixed attachments, long/scanned/password-protected files, corrupt MIME, oversized image, provider failover and egress opt-out. Citations point to source versions/pages and truncation is visible. Failover preserves privacy and required modality.
 
-## X18 — Neon and Supabase as optional PostgreSQL targets
+## X18 - Neon and Supabase as optional PostgreSQL targets
 
 **Decision.** Yes, support both through a tested database deployment profile while retaining ordinary PostgreSQL/self-hosting as the baseline. Neon documents pooled PostgreSQL connectivity; Supabase provides PostgreSQL connection options. Validate Chaste against each exact deployment configuration rather than marking support complete because a connection succeeds. [Neon pooling](https://neon.com/docs/connect/connection-pooling), [Supabase PostgreSQL connections](https://supabase.com/docs/guides/database/connecting-to-postgres)
 
@@ -248,7 +248,7 @@ Supabase Storage/Realtime and Neon branching may be optional adapters if they so
 
 **Owner/priority/gate.** DB/platform; P1 compatibility investigation/W0, supported profiles W3. Run the same migrated non-owner RLS, money, queue crash/idempotency, approval and restore suites on local PostgreSQL and both managed targets. Publish supported profile versions and limits. No hosted provider account or production migration is created by this plan.
 
-## X19 — Public intake APIs and employee lifecycle
+## X19 - Public intake APIs and employee lifecycle
 
 **Evidence.** `/api/support/public`, tokenized invoice portal and routine webhook routes exist. HR has opening/applicant/stage/hire capabilities, employee structure, time/leave and payroll primitives. A public careers submission API and complete employee lifecycle were not found. Public support uses a per-org embed token plus conversation ID for reads in the inspected route; an embed token shipped to browsers is public identification, not proof of visitor identity. Submitted email is also not identity verification. Review this before extending the pattern to sensitive intake or order information.
 
@@ -260,7 +260,7 @@ Lifecycle: requisition/approval → published opening → application/consent �
 
 **Owner/priority/gate.** Integrations + HR/IAM/security; P0 public-boundary review, P1 careers intake/W3, deeper lifecycle P2. Submit from an external site, quarantine CV, create one applicant, acknowledge privately, hire once and trigger governed onboarding. Prove cross-tenant, mass-assignment, attachment, duplicate, closed-opening, withdrawal, access revocation and public-support isolation cases.
 
-## X20 — Documents as a governed evidence system
+## X20 - Documents as a governed evidence system
 
 **Judgment.** Keep the module, but it is not yet sufficient for the enterprise document and automation ambition. `modules/documents/src/index.ts` handles uploads/text, OCR, coding suggestions, memory, metadata and versions. Important source findings: primary bytes live as base64 in database rows; memory includes only the first 8,000 characters; line extraction in `packages/ai/src/documents.ts` uses only 12,000 characters and “cents” wording; parsing embeds inside a transaction; `addVersion` replaces content without resetting parsed content/status or invalidating memory/suggestions in that path; delete does not explicitly clear the string-linked memory records. Verify database cleanup triggers separately before asserting an orphan exploit. Concurrent version allocation and parse-versus-update also need tests.
 

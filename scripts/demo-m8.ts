@@ -1,5 +1,5 @@
 /**
- * M8 verification — signals, reorder intelligence, governed loop.
+ * M8 verification - signals, reorder intelligence, governed loop.
  * Every assertion is a product guarantee.
  *
  * Run: pnpm demo:m8 [signals|reorder-approve|reorder-decline|all]
@@ -168,7 +168,7 @@ async function reorderApproveScenario(): Promise<string> {
     agentCtx,
     {
       vendorId: vendor!.id,
-      memo: "Reorder plan — approve to order",
+      memo: "Reorder plan - approve to order",
       lines: plan.lines.map((l) => ({
         description: `${l.name} replenishment`,
         quantity: l.quantityThousandths,

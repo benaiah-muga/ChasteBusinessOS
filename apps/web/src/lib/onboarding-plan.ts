@@ -3,8 +3,8 @@
  *
  * Deliberately free of server imports: `server/onboarding.ts` pulls in the
  * database and the embedding client, and a wizard that imports it would drag
- * both into the client bundle. The step keys are mirrored from that module —
- * `ONBOARDING_STEPS` — and the two lists must stay identical, which is why
+ * both into the client bundle. The step keys are mirrored from that module -
+ * `ONBOARDING_STEPS` - and the two lists must stay identical, which is why
  * they are written out rather than derived.
  */
 
@@ -30,7 +30,7 @@ export interface OnboardingState {
 export interface StepMeta {
   /** Short name, shown in checklists and the wizard rail. */
   title: string;
-  /** Why it is worth doing — the honest answer, not a nudge. */
+  /** Why it is worth doing - the honest answer, not a nudge. */
   why: string;
   /** The concrete way to finish it from inside the app. */
   fix: { label: string; href: string };
@@ -91,7 +91,7 @@ export const PATH_META: Record<OnboardingPath, PathMeta> = {
   connect: {
     id: "connect",
     title: "Connect where your data lives",
-    blurb: "Your records sit in another system — a store, an accounting tool, a database.",
+    blurb: "Your records sit in another system - a store, an accounting tool, a database.",
     steps: ["connect_source"],
     estimate: "Varies",
   },

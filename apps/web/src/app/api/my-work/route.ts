@@ -5,7 +5,7 @@ import { buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel"
 import { getResolvedUser } from "@/server/session";
 
 /**
- * P01 — the calm "My work" home. One ranked list across approvals, receipt
+ * P01 - the calm "My work" home. One ranked list across approvals, receipt
  * remainders and module signals: each card says what changed, why it
  * matters, and carries one primary action. Deterministic ranking first;
  * AI never ranks, it may only summarize the authorized bundle (see
@@ -31,7 +31,7 @@ export async function GET() {
   const registry = buildRegistry(db);
   const cards: WorkCard[] = [];
 
-  // 1. Pending approvals the viewer has authority to decide — oldest first.
+  // 1. Pending approvals the viewer has authority to decide - oldest first.
   const { approvals } = await import("@chaste/db");
   const pending = await db
     .select()
@@ -55,7 +55,7 @@ export async function GET() {
     });
   }
 
-  // 2. Partial purchase orders with undelivered lines — biggest remaining first.
+  // 2. Partial purchase orders with undelivered lines - biggest remaining first.
   // Same-org role disclosure: PO numbers and line descriptions are only
   // shown to roles that may read purchasing, like every other surface.
   if (hasPermissionFor({ permissions: resolved.permissions }, "purchasing.read")) {
@@ -68,7 +68,7 @@ export async function GET() {
     const poIds = partialPos.map((p) => p.id);
     // NOTE: the correlated id below is written as a literal po_lines.id.
     // Drizzle's sql template renders an embedded column as a bare "id",
-    // which the subquery scope resolves to the INNER table's own id —
+    // which the subquery scope resolves to the INNER table's own id -
     // silently summing over an empty set (every remainder read full
     // outstanding). The outer table is unaliased, so the literal qualifies.
     const lines = await db
@@ -92,7 +92,7 @@ export async function GET() {
         )`,
         // Delivered means accepted net of returns (returns draw from
         // concrete receipts and demote the order back to partial), so the
-        // remainder must add returns back — otherwise a returned delivery
+        // remainder must add returns back - otherwise a returned delivery
         // reads as fully received here while the domain says partial.
         returned: sql<number>`(
           SELECT coalesce(sum(g.returned_thousandths), 0) FROM goods_receipt_lines g
@@ -168,7 +168,7 @@ export async function GET() {
         }
       } else {
         // A returned failure (refusal, unknown outcome) is still a coverage
-        // failure — a silent empty list would read as zero problems.
+        // failure - a silent empty list would read as zero problems.
         unavailable();
       }
     } catch {
@@ -177,7 +177,7 @@ export async function GET() {
   }
 
   // Deterministic rank groups (approvals, then remainders, then signals);
-  // within a group the insertion order stands — signals.list already sorts
+  // within a group the insertion order stands - signals.list already sorts
   // red first, and Array.sort is stable.
   cards.sort((a, b) => a.rank - b.rank);
   return NextResponse.json({ cards: cards.slice(0, 30), generatedAt: new Date().toISOString() });

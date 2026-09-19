@@ -1,6 +1,6 @@
 /**
- * One document-balance contract (N11). Every consumer — payment gating,
- * aging, dashboards, support lookups — derives outstanding from this, so a
+ * One document-balance contract (N11). Every consumer - payment gating,
+ * aging, dashboards, support lookups - derives outstanding from this, so a
  * customer credit can never make one surface say 60 is due while another
  * accepts 100. All values are integer minor units; the contract throws on
  * anything else rather than laundering bad money math.
