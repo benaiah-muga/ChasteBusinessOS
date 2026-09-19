@@ -70,6 +70,62 @@ The full v1 changelog is preserved at the bottom of this file.
   Only non-empty strings win now; everything else is stamped fresh.
 
 ### Added
+- **Workspace model provider and currency controls.** Administrators can now
+  choose supported providers or an OpenAI-compatible endpoint, configure model
+  roles, rotate or clear an encrypted workspace key, and use the active
+  organization/device currency in shared money formatting. Local Codex,
+  OpenCode, and Kilo subscription files are deliberately not imported.
+- **Durable agent run checkpoints.** Agent goals now have version-pinned,
+  tenant-scoped run and step records that link approvals, queue jobs, and
+  action receipts. A replacement worker can reclaim a lease after a crash and
+  replay the same intent without creating a second purchase order.
+- **Read-only trajectory replay.** Persisted user, assistant, tool-call, and
+  tool-result events can now be reconstructed into the model-visible trace
+  without invoking a model, capability, or executor.
+- **Structured capability-gap tickets.** Unavailable behavior can be captured
+  with a requested capability id, desired behavior, acceptance criteria, and
+  example input; the ticket records that no execution was attempted.
+- **Isolated Creator candidate evidence.** A sanitized gap can be rendered in
+  a disposable detached worktree, independently checked, hashed, and recorded
+  with rollback evidence while remaining `in_review`; generated code is not
+  promoted or executed by the verifier.
+- **Cordis-like harness composition boundary.** Versioned profiles, deterministic
+  bundle/configuration digests, dependency-ordered service lifecycle, rollback,
+  runtime inspection, and live events now wrap the existing registry and kernel
+  executor without creating a second capability execution path.
+- **Persisted harness identity and safe inspection.** Approved composition
+  snapshots are now tenant-scoped and idempotent, durable runs pin their
+  profile/version/digest, and inspection returns metadata and config keys
+  without exposing patch values.
+- **Profile-aware durable-run coordination.** Durable runs can now resolve a
+  tenant-approved composition, verify the requested profile and live runtime
+  digest, mount the existing kernel bridge, and fail closed before run creation
+  for cross-tenant, unsupported, or mismatched compositions.
+- **Approved harness bundle resolution.** The adapter now resolves persisted
+  bundle manifests through an explicit resolver list, supports additional
+  lifecycle services and runtime configuration patches, and rejects unknown
+  bundles before a durable run can be created.
+- **Governed harness composition approval.** Composition requests now use the
+  existing capability registry, approval inbox, atomic decision path, and
+  append-only audit ledger; durable coordination requires an executed approval
+  for the exact tenant-owned composition digest before mounting or run creation.
+- **Controlled Creator evolution release handoff.** Approved isolated
+  candidates can now be staged and promoted only through the existing kernel
+  approval path, with the exact evidence digest and immutable artifact
+  reference recorded in a tenant-scoped release row. Staged or promoted
+  handoffs can be rolled back conditionally; no candidate source is installed
+  or executed by this runtime.
+- **Creator canary outcome evidence.** Promoted releases now retain their
+  originating capability-gap ticket, and a distinct
+  `platform.creator.release` principal can record durable canary pass/fail
+  evidence for the exact digest. Outcomes do not automatically deploy or roll
+  back the release; source execution remains outside this runtime.
+- **Integrated operations surfaces.** Sessions now show durable run
+  checkpoints and canonical read-only replay; Creator proposals now include
+  capability gaps, controlled release state, and canary evidence; and Settings
+  exposes safe tenant-scoped harness composition inspection. Release actions
+  request the existing kernel approval path rather than creating a second
+  authority surface.
 - **Docker deployment smoke path.** The Compose stack now runs the production
   web image beside pgvector, supports isolated host ports and runtime settings,
   checks the database-backed health endpoint, and includes an executable

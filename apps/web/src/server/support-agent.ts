@@ -6,7 +6,7 @@ import {
   supportMessages,
   type Database,
 } from "@chaste/db";
-import { MODELS, OpenAiCompatAdapter, resolveClient } from "@chaste/ai";
+import { OpenAiCompatAdapter, resolveClient } from "@chaste/ai";
 import {
   CapabilityRegistry,
   runAgentLoop,
@@ -20,6 +20,7 @@ import { MESSAGE_BODY_MAX, TRANSCRIPT_MAX_MESSAGES } from "@chaste/module-suppor
 import { appendSessionEvent } from "./session-events";
 import { buildExecutor } from "./kernel";
 import { checkRateLimit } from "./rate-limit";
+import { runtimeAiConfig } from "./ai-settings";
 
 /**
  * Draft-only customer care agent (ADR 0025).
@@ -196,6 +197,8 @@ export async function draftSupportReply(input: {
     throw new SupportDraftError("support tools are unavailable", 409);
   }
 
+  const ai = await runtimeAiConfig(db, resolved.orgId);
+
   const [session] = await db
     .insert(agentSessions)
     .values({
@@ -203,7 +206,7 @@ export async function draftSupportReply(input: {
       userId: resolved.userId,
       title: `Support: ${context.subject}`.slice(0, 80),
       mode: "assist",
-      modelRef: MODELS.primary(),
+      modelRef: ai.models.primary,
     })
     .returning({ id: agentSessions.id });
 
@@ -228,8 +231,8 @@ export async function draftSupportReply(input: {
   const adapter =
     input.adapter ??
     new OpenAiCompatAdapter({
-      client: resolveClient(),
-      model: MODELS.primary(),
+      client: resolveClient(ai.models.primary, ai.runtime),
+      model: ai.models.primary,
     });
 
   const result = await runAgentLoop(adapter, loopRegistry, buildExecutor(db, loopRegistry), ctx, {

@@ -215,6 +215,72 @@ export const approvals = pgTable(
   (t) => [index("approval_org_status_idx").on(t.orgId, t.status)],
 );
 
+/**
+ * Immutable, tenant-scoped identity for an approved harness composition.
+ * The JSON snapshots make a later run/replay refer to the exact profile and
+ * bundle inputs that were approved, while inspection code redacts patch values.
+ */
+export const harnessCompositions = pgTable(
+  "harness_compositions",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    profileId: text("profile_id").notNull(),
+    profileVersion: text("profile_version").notNull(),
+    environment: text("environment").notNull(),
+    profileDigest: text("profile_digest").notNull(),
+    compositionDigest: text("composition_digest").notNull(),
+    profile: jsonb("profile").notNull(),
+    bundles: jsonb("bundles").notNull().default([]),
+    patches: jsonb("patches").notNull().default([]),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("harness_composition_org_digest_idx").on(t.orgId, t.compositionDigest),
+    index("harness_composition_org_idx").on(t.orgId, t.createdAt),
+  ],
+);
+
+/**
+ * Durable agent execution state. A session is the conversation/trajectory;
+ * a run is the resumable business task inside it. Keeping these separate
+ * lets a user reconnect to a task without treating a transcript as a
+ * recovery checkpoint.
+ */
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    goal: text("goal").notNull(),
+    status: text("status").notNull().default("pending"),
+    contractRevision: integer("contract_revision").notNull().default(1),
+    registryVersion: text("registry_version").notNull(),
+    modelRef: text("model_ref"),
+    harnessCompositionId: uuid("harness_composition_id").references(() => harnessCompositions.id, { onDelete: "set null" }),
+    harnessProfileId: text("harness_profile_id"),
+    harnessProfileVersion: text("harness_profile_version"),
+    harnessCompositionDigest: text("harness_composition_digest"),
+    currentStep: integer("current_step").notNull().default(0),
+    lastError: text("last_error"),
+    initiatedByActorType: text("initiated_by_actor_type").notNull(),
+    initiatedByActorId: uuid("initiated_by_actor_id"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("agent_run_org_status_idx").on(t.orgId, t.status, t.createdAt),
+    index("agent_run_session_idx").on(t.sessionId),
+  ],
+);
+
 /** Org-level autonomy policies. */
 export const policies = pgTable("policies", {
   id: id(),
@@ -517,6 +583,7 @@ export const creatorProposals = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     summary: text("summary").notNull(),
+    gapTicketId: uuid("gap_ticket_id").references(() => tickets.id, { onDelete: "restrict" }),
     /** Unified diff of the proposed change. */
     diffText: text("diff_text").notNull(),
     testEvidence: text("test_evidence"),
@@ -531,6 +598,68 @@ export const creatorProposals = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("creator_proposal_org_status_idx").on(t.orgId, t.status)],
+);
+
+/**
+ * A release handoff for an independently verified Creator candidate. This is
+ * deliberately metadata only: the platform records the exact artifact
+ * reference and digest but never installs or executes candidate source.
+ */
+export const creatorEvolutionReleases = pgTable(
+  "creator_evolution_releases",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    proposalId: uuid("proposal_id")
+      .notNull()
+      .references(() => creatorProposals.id, { onDelete: "cascade" }),
+    gapTicketId: uuid("gap_ticket_id")
+      .references(() => tickets.id, { onDelete: "restrict" }),
+    candidateDigest: text("candidate_digest").notNull(),
+    artifactRef: text("artifact_ref").notNull(),
+    status: text("status").notNull().default("staged"), // staged | promoted | rolled_back
+    stagedAt: timestamp("staged_at", { withTimezone: true }).notNull().defaultNow(),
+    promotedAt: timestamp("promoted_at", { withTimezone: true }),
+    rolledBackAt: timestamp("rolled_back_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("creator_evolution_org_status_idx").on(t.orgId, t.status),
+    index("creator_evolution_proposal_idx").on(t.orgId, t.proposalId, t.candidateDigest),
+  ],
+);
+
+/**
+ * Verified post-promotion observations. A canary result is evidence linked
+ * to the originating gap, not a deployment command or an implicit rollback.
+ */
+export const creatorEvolutionOutcomes = pgTable(
+  "creator_evolution_outcomes",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    releaseId: uuid("release_id")
+      .notNull()
+      .references(() => creatorEvolutionReleases.id, { onDelete: "cascade" }),
+    gapTicketId: uuid("gap_ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "restrict" }),
+    candidateDigest: text("candidate_digest").notNull(),
+    phase: text("phase").notNull().default("canary"),
+    verdict: text("verdict").notNull(), // pass | fail
+    evidenceRef: text("evidence_ref").notNull(),
+    metrics: jsonb("metrics").notNull().default({}),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("creator_outcome_release_phase_idx").on(t.releaseId, t.phase),
+    index("creator_outcome_org_gap_idx").on(t.orgId, t.gapTicketId, t.createdAt),
+  ],
 );
 
 // ── Teams: invitations & multi-membership ───────────────────────────────
@@ -2063,6 +2192,9 @@ export const jobs = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     type: text("type").notNull(), // capability id, e.g. "documents.parseDocument"
+    runId: uuid("run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    runStepIndex: integer("run_step_index"),
+    approvedApprovalId: uuid("approved_approval_id").references(() => approvals.id, { onDelete: "set null" }),
     payload: jsonb("payload").notNull(),
     status: text("status").notNull().default("pending"), // pending | processing | done | failed
     attempts: integer("attempts").notNull().default(0),
@@ -2080,6 +2212,7 @@ export const jobs = pgTable(
   (t) => [
     index("job_status_idx").on(t.status, t.createdAt),
     index("job_org_idx").on(t.orgId),
+    index("job_run_idx").on(t.runId, t.runStepIndex),
     index("job_available_idx").on(t.status, t.availableAt, t.createdAt),
   ],
 );
@@ -2426,6 +2559,38 @@ export const actionReceipts = pgTable(
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("action_receipt_org_intent_idx").on(t.orgId, t.intentKey)],
+);
+
+/** Version-pinned steps and checkpoints for resumable business work. */
+export const agentRunSteps = pgTable(
+  "agent_run_steps",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: "cascade" }),
+    stepIndex: integer("step_index").notNull(),
+    kind: text("kind").notNull().default("capability"),
+    status: text("status").notNull().default("pending"),
+    capabilityId: text("capability_id"),
+    capabilityVersion: text("capability_version"),
+    inputHash: text("input_hash"),
+    input: jsonb("input"),
+    output: jsonb("output"),
+    receiptId: uuid("receipt_id").references(() => actionReceipts.id, { onDelete: "set null" }),
+    approvalId: uuid("approval_id").references(() => approvals.id, { onDelete: "set null" }),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("agent_run_step_unique_idx").on(t.runId, t.stepIndex),
+    index("agent_run_step_org_idx").on(t.orgId, t.createdAt),
+  ],
 );
 
 /**

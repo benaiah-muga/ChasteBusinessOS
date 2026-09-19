@@ -1,0 +1,2 @@
+ALTER TABLE "creator_proposals" ADD COLUMN "gap_ticket_id" uuid;--> statement-breakpoint
+ALTER TABLE "creator_proposals" ADD CONSTRAINT "creator_proposals_gap_ticket_id_tickets_id_fk" FOREIGN KEY ("gap_ticket_id") REFERENCES "public"."tickets"("id") ON DELETE restrict ON UPDATE no action;
