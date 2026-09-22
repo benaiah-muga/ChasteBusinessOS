@@ -15,6 +15,8 @@ import {
   type ActionNoticeState,
 } from "@/components/ui";
 import { formatDate, formatMoney, timeAgo } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
+import { QuickCreateButton } from "../quick-create";
 import { IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
@@ -119,6 +121,7 @@ interface PurchaseRequest {
 const qty = (t: number) => (t / 1000).toFixed(3);
 
 export default function PurchasingPage() {
+  useMoneySync();
   const enabled = useModuleEnabled("purchasing");
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
@@ -449,7 +452,7 @@ export default function PurchasingPage() {
           <div className="space-y-2 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <select
-                className="rounded border bg-transparent px-2 py-1.5"
+                className="select"
                 value={poForm.vendorId}
                 onChange={(e) => setPoForm({ ...poForm, vendorId: e.target.value })}
               >
@@ -458,6 +461,13 @@ export default function PurchasingPage() {
                   <option key={v.id} value={v.id}>{v.name}</option>
                 ))}
               </select>
+              <QuickCreateButton
+                entity="vendor"
+                onCreated={(r) => {
+                  void load();
+                  setPoForm((f) => ({ ...f, vendorId: r.id }));
+                }}
+              />
               {vendors.length === 0 && !quickVendor.open && (
                 <span className="text-xs text-stone-500">
                   No vendors yet -
@@ -508,7 +518,7 @@ export default function PurchasingPage() {
             {poForm.lines.map((l, i) => (
               <div key={i} className="flex flex-wrap gap-2">
                 <select
-                  className="w-44 rounded border bg-transparent px-2 py-1.5"
+                  className="select w-44"
                   title="Pick a stocked product to fill this line"
                   value={products.some((p) => p.sku === l.sku) ? l.sku : ""}
                   onChange={(e) => {
@@ -723,7 +733,7 @@ export default function PurchasingPage() {
             <div className="space-y-2 text-sm">
               <div className="flex flex-wrap gap-2">
                 <select
-                  className="rounded border bg-transparent px-2 py-1.5"
+                  className="select"
                   value={billForm.vendorId}
                   onChange={(e) => setBillForm({ ...billForm, vendorId: e.target.value })}
                 >
@@ -1464,7 +1474,7 @@ function VendorIntelSection({
           <>
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <select
-                className="rounded border bg-transparent px-2 py-1.5"
+                className="select"
                 value={vendorId}
                 onChange={(e) => setVendorId(e.target.value)}
                 aria-label="Vendor"

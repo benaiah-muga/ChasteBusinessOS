@@ -198,7 +198,7 @@ export class KernelExecutor {
       data = await cap.execute(ctx, parsed.data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      await this.audit(ctx, "capability.failed", cap.id, { input: parsed.data, error: message });
+      await this.audit(ctx, "capability.failed", cap.id, { ...this.auditInput(cap, parsed.data), error: message });
       return { ok: false, error: message };
     }
 
@@ -210,7 +210,7 @@ export class KernelExecutor {
     if (!outputCheck.success) {
       const message = `capability returned invalid output: ${outputCheck.error.message}`;
       if (cap.risk === "read") {
-        await this.auditBestEffort(ctx, "capability.failed", cap.id, { input: parsed.data, error: message });
+        await this.auditBestEffort(ctx, "capability.failed", cap.id, { ...this.auditInput(cap, parsed.data), error: message });
         return { ok: false, error: message };
       }
       // A transaction-backed caller rolls the effect back entirely.
@@ -223,12 +223,12 @@ export class KernelExecutor {
         outcome: "unknown",
         recordedAt: new Date().toISOString(),
       });
-      await this.auditBestEffort(ctx, "capability.failed", cap.id, { input: parsed.data, error: message, outcome: "unknown" });
+      await this.auditBestEffort(ctx, "capability.failed", cap.id, { ...this.auditInput(cap, parsed.data), error: message, outcome: "unknown" });
       return { ok: false, outcome: "unknown", error: message };
     }
 
     try {
-      await this.audit(ctx, "capability.executed", cap.id, { input: parsed.data });
+      await this.audit(ctx, "capability.executed", cap.id, this.auditInput(cap, parsed.data));
     } catch (err) {
       // The write committed but the audit append failed. Without a shared
       // transaction the honest answer is "unknown" (F01). A transaction-
@@ -286,5 +286,15 @@ export class KernelExecutor {
 
   private async audit(ctx: ActionContext, kind: string, capabilityId: string | null, payload: unknown) {
     await this.deps.ledger.append(ledgerEventFor(ctx, kind, capabilityId, payload));
+  }
+
+  /**
+   * Secret-class capabilities (risk: "secret") carry credentials in their
+   * input. The ledger must record THAT they ran, never WHAT was passed -
+   * a hash-chained log is forever, so the input is replaced with a marker
+   * before any audit write.
+   */
+  private auditInput(cap: Capability, input: unknown): Record<string, unknown> {
+    return cap.risk === "secret" ? { input: "[REDACTED: secret-class]" } : { input };
   }
 }

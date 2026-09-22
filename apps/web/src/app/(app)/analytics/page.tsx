@@ -151,7 +151,7 @@ export default function AnalyticsPage() {
             />
             <select
               aria-label="Add a dataset"
-              className="input h-9 w-56"
+              className="select h-9 w-56"
               value=""
               onChange={(e) => e.target.value && void preview(e.target.value)}
             >
@@ -202,7 +202,7 @@ export default function AnalyticsPage() {
                   <span className="text-sm font-medium text-stone-800">{s.label}</span>
                   <select
                     aria-label={`Chart type for ${s.label}`}
-                    className="input h-8 w-32 text-xs"
+                    className="select h-8 w-32 text-xs"
                     value={s.chartType}
                     onChange={(e) => updateSection(i, { chartType: e.target.value as SectionDraft["chartType"] })}
                   >
@@ -216,7 +216,7 @@ export default function AnalyticsPage() {
                     <>
                       <select
                         aria-label={`Category column for ${s.label}`}
-                        className="input h-8 w-40 text-xs"
+                        className="select h-8 w-40 text-xs"
                         value={s.x}
                         onChange={(e) => updateSection(i, { x: e.target.value })}
                       >
@@ -228,7 +228,7 @@ export default function AnalyticsPage() {
                       </select>
                       <select
                         aria-label={`Value column for ${s.label}`}
-                        className="input h-8 w-40 text-xs"
+                        className="select h-8 w-40 text-xs"
                         value={s.y[0] ?? ""}
                         onChange={(e) => updateSection(i, { y: e.target.value ? [e.target.value] : [] })}
                       >

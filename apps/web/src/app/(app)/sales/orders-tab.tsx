@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Badge,
   Button,
@@ -12,7 +12,8 @@ import {
   Switch,
 } from "@/components/ui";
 import { IconFileText, IconPlus, IconTrash } from "@/components/icons";
-import { formatMoney, timeAgo, toMinor } from "@/lib/format";
+import { formatMoney, minorToInput, timeAgo, toMinor } from "@/lib/format";
+import { QuickCreateButton } from "../quick-create";
 
 export interface OrderRow {
   id: string;
@@ -166,8 +167,38 @@ export function OrdersListTab({ orders, customers, busy, post }: OrdersTabProps)
   );
 }
 
-export function NewOrderTab({ customers, products, busy, post }: OrdersTabProps) {
+export function NewOrderTab({
+  customers,
+  products,
+  busy,
+  post,
+  onDataChanged,
+}: OrdersTabProps & { onDataChanged?: () => void }) {
   const [form, setForm] = useState({ customerId: "", note: "", lines: [{ ...emptyLine }] });
+  // A just-quick-created product: applied to its line once the refreshed
+  // product list arrives and the sku resolves to a product.
+  const [pendingLine, setPendingLine] = useState<{ index: number; sku: string } | null>(null);
+
+  useEffect(() => {
+    if (!pendingLine) return;
+    const p = products.find((x) => x.sku === pendingLine.sku);
+    if (!p) return;
+    setForm((f) => ({
+      ...f,
+      lines: f.lines.map((l, j) =>
+        j === pendingLine.index
+          ? {
+              ...l,
+              sku: p.sku,
+              description: l.description || p.name,
+              unitPrice:
+                p.salePriceMinor != null && p.salePriceMinor > 0 ? minorToInput(p.salePriceMinor) : l.unitPrice,
+            }
+          : l,
+      ),
+    }));
+    setPendingLine(null);
+  }, [pendingLine, products]);
 
   const activeCustomers = customers.filter((c) => !c.deactivatedAt);
   const customerName = new Map(customers.map((c) => [c.id, c.name]));
@@ -198,7 +229,7 @@ export function NewOrderTab({ customers, products, busy, post }: OrdersTabProps)
       <div className="space-y-2 text-sm">
         <div className="flex flex-wrap items-center gap-2">
           <select
-            className="rounded border bg-transparent px-2 py-1.5"
+            className="select"
             aria-label="Customer"
             value={form.customerId}
             onChange={(e) => setForm({ ...form, customerId: e.target.value })}
@@ -208,6 +239,13 @@ export function NewOrderTab({ customers, products, busy, post }: OrdersTabProps)
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+          <QuickCreateButton
+            entity="customer"
+            onCreated={(r) => {
+              onDataChanged?.();
+              setForm((f) => ({ ...f, customerId: r.id }));
+            }}
+          />
           <input
             className="min-w-40 flex-1 rounded border bg-transparent px-2 py-1.5"
             placeholder="Note (optional)"
@@ -224,7 +262,7 @@ export function NewOrderTab({ customers, products, busy, post }: OrdersTabProps)
             return (
               <div key={i} className="flex flex-wrap items-center gap-2">
                 <select
-                  className="w-44 rounded border bg-transparent px-2 py-1.5"
+                  className="select w-44"
                   title="Pick a product to fill description and price; leave blank for a service line"
                   aria-label={`Line ${i + 1} product`}
                   value={products.some((p) => p.sku === line.sku) ? line.sku : ""}
@@ -236,7 +274,7 @@ export function NewOrderTab({ customers, products, busy, post }: OrdersTabProps)
                       description: line.description || p.name,
                       unitPrice:
                         p.salePriceMinor != null && p.salePriceMinor > 0
-                          ? (p.salePriceMinor / 100).toFixed(2)
+                          ? minorToInput(p.salePriceMinor)
                           : line.unitPrice,
                     });
                   }}
@@ -246,6 +284,15 @@ export function NewOrderTab({ customers, products, busy, post }: OrdersTabProps)
                     <option key={p.sku} value={p.sku}>{p.name} · {p.sku}</option>
                   ))}
                 </select>
+                <QuickCreateButton
+                  entity="product"
+                  className="size-7"
+                  onCreated={(r) => {
+                    onDataChanged?.();
+                    setPendingLine({ index: i, sku: r.id });
+                    setLine({ sku: r.id });
+                  }}
+                />
                 <input
                   className="min-w-40 flex-1 rounded border bg-transparent px-2 py-1.5"
                   placeholder="Description"

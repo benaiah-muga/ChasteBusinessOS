@@ -11,6 +11,8 @@ interface LedgerEvent {
   kind: string;
   capabilityId: string | null;
   actorType: string;
+  actorId?: string | null;
+  sessionId?: string | null;
   payload: unknown;
   hash: string | null;
   prevHash: string | null;
@@ -103,7 +105,17 @@ export default function LedgerPage() {
                     {e.capabilityId ?? "-"}
                   </td>
                   <td>
-                    <Badge tone={e.actorType === "agent" ? "violet" : "neutral"}>{e.actorType}</Badge>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Badge tone={e.actorType === "agent" ? "violet" : "neutral"}>{e.actorType}</Badge>
+                      {e.actorType === "agent" && e.sessionId && (
+                        <span
+                          className="font-mono text-[10px] text-stone-400"
+                          title={`Agent session ${e.sessionId} acting for user ${e.actorId ?? "unknown"}`}
+                        >
+                          s·{e.sessionId.slice(0, 6)}
+                        </span>
+                      )}
+                    </span>
                   </td>
                   <td className="text-xs whitespace-nowrap text-stone-500" title={formatDateTime(e.occurredAt)}>
                     {timeAgo(e.occurredAt)}

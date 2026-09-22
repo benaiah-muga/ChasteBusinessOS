@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/client";
 import { EnabledModulesProvider } from "./_shell/module-context";
+import { QuickCreateProvider } from "./quick-create";
 import { resolveEnabledModules } from "./_shell/modules";
 import { resolveApp, tileStyle } from "./_shell/apps";
 import { usePinnedApps } from "./_shell/pins";
@@ -29,6 +30,7 @@ import { Avatar } from "@/components/ui";
 import { LogoMark } from "@/components/logo";
 import { ThemeMenu } from "@/components/theme";
 import { cn } from "@/lib/format";
+import { applyOrgDefault } from "@/lib/money";
 
 const authClient = createAuthClient();
 
@@ -36,6 +38,8 @@ interface ShellProps {
   children: ReactNode;
   user: { name: string; email: string };
   orgName: string;
+  /** The active org's base currency; the default presentation currency. */
+  orgCurrency: string;
   pendingApprovals: number;
   /** Server-rendered org switcher form (server action). */
   orgSwitcher?: ReactNode;
@@ -43,7 +47,7 @@ interface ShellProps {
   enabledModules: string[] | null;
 }
 
-export function AppShell({ children, user, orgName, pendingApprovals, orgSwitcher, enabledModules }: ShellProps) {
+export function AppShell({ children, user, orgName, orgCurrency, pendingApprovals, orgSwitcher, enabledModules }: ShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [launcherOpen, setLauncherOpen] = useState(false);
@@ -54,6 +58,10 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
   const dockMode = useChatDockMode();
   const chatPinned = dockMode === "pinned";
   const inputMode = dockMode === "input";
+
+  useEffect(() => {
+    applyOrgDefault(orgCurrency);
+  }, [orgCurrency]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -281,6 +289,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
 
   return (
     <EnabledModulesProvider value={enabledModules}>
+      <QuickCreateProvider>
       <div className="min-h-screen">
         <a
           href="#main"
@@ -385,6 +394,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
         <AppsLauncher open={launcherOpen} onClose={() => setLauncherOpen(false)} enabledModules={enabled} />
         <ChatWidget />
       </div>
+      </QuickCreateProvider>
     </EnabledModulesProvider>
   );
 }

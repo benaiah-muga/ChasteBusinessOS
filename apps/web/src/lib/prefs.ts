@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { currencyStyleFor } from "@/lib/format";
 
 /**
  * Workspace display preferences: currency, units, date format, week start.
@@ -19,22 +20,27 @@ export const CURRENCIES = [
 ] as const;
 
 export type CurrencyCode = (typeof CURRENCIES)[number]["code"];
+/** "org" follows the organization's base currency; anything else pins this device. */
+export type DisplayCurrency = CurrencyCode | "org";
 export type Units = "metric" | "imperial";
 export type DateFormat = "iso" | "dmy";
 export type WeekStart = "sun" | "mon";
 
 export interface Prefs {
-  currency: CurrencyCode;
+  currency: DisplayCurrency;
   units: Units;
   dateFormat: DateFormat;
   weekStart: WeekStart;
+  /** Harper spell/grammar underlines on writing surfaces. */
+  writingAids: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  currency: "USD",
+  currency: "org",
   units: "metric",
   dateFormat: "dmy",
   weekStart: "mon",
+  writingAids: true,
 };
 
 const KEY = "chaste-prefs";
@@ -45,25 +51,28 @@ export function currencyOf(code: string) {
 
 /** Formats integer minor units in the given display currency's symbol style. */
 export function formatMoneyIn(code: string, minor: number): string {
-  const { symbol } = currencyOf(code);
-  const body = (Math.abs(minor) / 100).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+  const style = currencyStyleFor(code) ?? { code: "USD", symbol: "$", minorUnits: 2 };
+  const body = (Math.abs(minor) / 10 ** style.minorUnits).toLocaleString("en-US", {
+    minimumFractionDigits: style.minorUnits,
+    maximumFractionDigits: style.minorUnits,
   });
-  return `${minor < 0 ? "−" : ""}${symbol}${body}`;
+  return `${minor < 0 ? "−" : ""}${style.symbol}${body}`;
 }
 
 function readPrefs(): Prefs {
+  if (typeof window === "undefined") return DEFAULT_PREFS;
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return DEFAULT_PREFS;
     const parsed = JSON.parse(raw) as Partial<Prefs>;
-    const validCurrency = CURRENCIES.some((c) => c.code === parsed.currency);
+    const validCurrency =
+      parsed.currency === "org" || CURRENCIES.some((c) => c.code === parsed.currency);
     return {
-      currency: validCurrency ? (parsed.currency as CurrencyCode) : DEFAULT_PREFS.currency,
+      currency: validCurrency ? (parsed.currency as DisplayCurrency) : DEFAULT_PREFS.currency,
       units: parsed.units === "imperial" ? "imperial" : "metric",
       dateFormat: parsed.dateFormat === "iso" ? "iso" : "dmy",
       weekStart: parsed.weekStart === "sun" ? "sun" : "mon",
+      writingAids: parsed.writingAids !== false,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -71,6 +80,19 @@ function readPrefs(): Prefs {
 }
 
 const listeners = new Set<(p: Prefs) => void>();
+
+/** Current preferences; safe on the server (returns defaults). */
+export function getPrefs(): Prefs {
+  return readPrefs();
+}
+
+/** Subscribes to preference changes; returns the unsubscribe function. */
+export function subscribePrefs(cb: (p: Prefs) => void): () => void {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
 
 export function setPrefs(next: Partial<Prefs>) {
   const merged = { ...readPrefs(), ...next };

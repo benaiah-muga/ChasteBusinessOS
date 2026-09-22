@@ -39,6 +39,9 @@ function fixtureUrlOf(baseUrl: string, database: string): string {
   return parsed.toString();
 }
 
+/** Global advisory-lock key so concurrent suites provision one at a time. */
+const PROVISION_LOCK_KEY = 727_273;
+
 export async function provisionFixtureDatabase(
   options: { baseUrl?: string; database?: string; migrate?: boolean; prefix?: string } = {},
 ): Promise<FixtureDatabase> {
@@ -48,20 +51,44 @@ export async function provisionFixtureDatabase(
     `chaste_test_${options.prefix ?? "run"}_${process.pid.toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
   const admin = postgres(adminUrlOf(baseUrl), { max: 1 });
   try {
-    await admin.unsafe(`CREATE DATABASE "${database.replace(/"/g, '""')}"`);
+    // When the whole monorepo tests in parallel, every suite wants CREATE
+    // DATABASE + full migrations at once, and the shared server buckles
+    // (connection exhaustion, lock timeouts). A session-scoped advisory
+    // lock turns the stampede into an orderly queue: provisioning happens
+    // one suite at a time, then tests run truly parallel on separate
+    // databases.
+    await admin.unsafe(`SELECT pg_advisory_lock(${PROVISION_LOCK_KEY})`);
+    try {
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await admin.unsafe(`CREATE DATABASE "${database.replace(/"/g, '""')}"`);
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+          await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+        }
+      }
+      if (lastError) {
+        throw new Error(`could not create fixture database "${database}": ${String(lastError)}`);
+      }
+      const url = fixtureUrlOf(baseUrl, database);
+      if (options.migrate !== false) {
+        await runMigrations({ url, backup: false });
+      }
+      // Every fixture carries the least-privilege runtime role (S01 floor) so
+      // RLS conformance is testable in any suite that needs it.
+      if (!process.env.CHASTE_TEST_NO_APP_ROLE) {
+        await ensureAppRole({ databaseUrl: url });
+      }
+      return { url, database };
+    } finally {
+      await admin.unsafe(`SELECT pg_advisory_unlock(${PROVISION_LOCK_KEY})`).catch(() => undefined);
+    }
   } finally {
     await admin.end();
   }
-  const url = fixtureUrlOf(baseUrl, database);
-  if (options.migrate !== false) {
-    await runMigrations({ url, backup: false });
-  }
-  // Every fixture carries the least-privilege runtime role (S01 floor) so
-  // RLS conformance is testable in any suite that needs it.
-  if (!process.env.CHASTE_TEST_NO_APP_ROLE) {
-    await ensureAppRole({ databaseUrl: url });
-  }
-  return { url, database };
 }
 
 export async function dropFixtureDatabase(options: { baseUrl?: string; database: string }): Promise<void> {

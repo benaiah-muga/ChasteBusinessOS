@@ -8,6 +8,8 @@ export interface LedgerEntry {
   actorId: string | null;
   kind: string;
   capabilityId: string | null;
+  /** Attribution context: the agent session behind this event. Not hash-covered. */
+  sessionId?: string | null;
   payload: unknown;
   prevHash: string | null;
   hash: string;
@@ -65,6 +67,7 @@ export function ledgerEventFor(ctx: ActionContext, kind: string, capabilityId: s
     actorId: ctx.actor.id,
     kind,
     capabilityId,
+    sessionId: ctx.sessionId ?? null,
     payload,
     occurredAt: ctx.now,
   };

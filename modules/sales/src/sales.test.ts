@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   accounts,
   createDb,
@@ -181,5 +181,49 @@ describe("sales orders (M9.2)", () => {
     } finally {
       await db.db.update(customers).set({ creditLimitMinor: null }).where(eq(customers.id, customerId));
     }
+  });
+});
+
+describe("services as first-class order lines", () => {
+  it("service items confirm and deliver with no stock, and still land on the invoice", async () => {
+    const [svc] = await db.db
+      .insert(items)
+      .values({ orgId, sku: "SO-INSTALL", name: "Probe Installation", kind: "service", salePriceMinor: 50_00 })
+      .returning({ id: items.id });
+    expect(svc).toBeTruthy();
+
+    // A mixed order: stocked chairs plus an installation service line plus
+    // a bare description-only service line.
+    const created = await run("sales.createOrder", {
+      customerId,
+      lines: [
+        { description: "Probe Chair", quantity: 10_000, unitPriceMinor: UNIT_PRICE, sku: "SO-CHAIR" },
+        { description: "Installation", quantity: 1_000, unitPriceMinor: 50_00, sku: "SO-INSTALL" },
+        { description: "Consulting half-day", quantity: 1_000, unitPriceMinor: 100_00 },
+      ],
+    });
+    const confirmed = await run("sales.confirmOrder", { orderId: created.orderId });
+    // The service lines commit in full without consuming the stock budget.
+    expect(confirmed).toMatchObject({ confirmed: true, backordered: false, reservedThousandths: 11_000 });
+    expect(await openReserved(db.db, orgId, svc!.id)).toBe(0);
+
+    const [svcLine] = await db.db
+      .select()
+      .from(salesOrderLines)
+      .where(and(eq(salesOrderLines.orderId, created.orderId), eq(salesOrderLines.description, "Installation")));
+    expect(svcLine?.reservedThousandths).toBe(1_000);
+
+    const delivered = await run("sales.deliverOrder", { orderId: created.orderId });
+    expect(delivered.orderStatus).toBe("delivered");
+    // Invoice carries all three lines: 10 chairs + installation + consulting.
+    expect(delivered.invoiceTotalMinor).toBe(10 * UNIT_PRICE + 50_00 + 100_00);
+
+    // No stock ever moved for the service item or the bare line.
+    const [svcMoves] = await db.db
+      .select({ total: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)` })
+      .from(stockMovements)
+      .where(eq(stockMovements.itemId, svc!.id));
+    expect(Number(svcMoves?.total ?? 0)).toBe(0);
+    expect(await booksBalanced()).toBe(true);
   });
 });

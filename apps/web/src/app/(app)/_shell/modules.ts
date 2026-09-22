@@ -13,6 +13,8 @@ export interface ModuleInfo {
   description: string;
   /** Primary page; null for headless modules reachable through others. */
   href: string | null;
+  /** Platform spine: always on, the switchboard cannot disable it. */
+  protected?: boolean;
 }
 
 export const MODULE_CATALOG: ModuleInfo[] = [
@@ -32,9 +34,15 @@ export const MODULE_CATALOG: ModuleInfo[] = [
   { id: "support", label: "Customer care", description: "Support desk with AI-drafted replies", href: "/support" },
   { id: "skills", label: "Skills", description: "Advisory playbooks the workmate can consult", href: null },
   { id: "creator", label: "Creator & marketplace", description: "Capability proposals and signed plugins", href: "/proposals" },
+  { id: "iam", label: "Identity & access", description: "Roles, permissions, module switchboard", href: "/team", protected: true },
+  { id: "routines", label: "Routines", description: "Scheduled agent runs on a fixed least-privilege bundle", href: null, protected: true },
+  { id: "signals", label: "Signals", description: "Needs-attention registry feeding home and the workmate", href: null, protected: true },
 ];
 
 export const ALL_MODULE_IDS = MODULE_CATALOG.map((m) => m.id);
+
+/** Spine modules the switchboard can never turn off (kept in sync with @chaste/module-iam). */
+export const PROTECTED_MODULE_IDS = MODULE_CATALOG.filter((m) => m.protected).map((m) => m.id);
 
 /** The effective enabled set for an org row value (null = everything). */
 export function resolveEnabledModules(value: string[] | null | undefined): Set<string> {

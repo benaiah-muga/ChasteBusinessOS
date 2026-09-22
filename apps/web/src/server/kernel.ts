@@ -34,7 +34,8 @@ import { registerPurchasingCapabilities } from "@chaste/module-purchasing";
 import { registerPosCapabilities } from "@chaste/module-pos";
 import { registerProjectsCapabilities } from "@chaste/module-projects";
 import { registerMarketingCapabilities } from "@chaste/module-marketing";
-import { registerIamCapabilities } from "@chaste/module-iam";
+import { registerIamCapabilities, PROTECTED_MODULE_IDS } from "@chaste/module-iam";
+import { moduleSettingsSchemas } from "./module-settings";
 import { registerInventoryCapabilities, createInventorySignalProducer } from "@chaste/module-inventory";
 import { registerManufacturingCapabilities } from "@chaste/module-manufacturing";
 import { registerSalesCapabilities } from "@chaste/module-sales";
@@ -100,7 +101,7 @@ export function composeRegistry(db: Database["db"]): CapabilityRegistry {
   registerPosCapabilities(registry, { db });
   registerProjectsCapabilities(registry, { db });
   registerMarketingCapabilities(registry, { db });
-  registerIamCapabilities(registry, { db });
+  registerIamCapabilities(registry, { db, settingsSchemas: moduleSettingsSchemas });
   registerInventoryCapabilities(registry, { db });
   registerManufacturingCapabilities(registry, { db });
   registerSalesCapabilities(registry, { db });
@@ -364,7 +365,7 @@ export class DbApprovalFlow implements ApprovalFlow {
     await this.db.insert(approvals).values({
       orgId: ctx.actor.orgId,
       sessionId: ctx.sessionId ?? null,
-      requestedByUserId: ctx.actor.type === "human" ? ctx.actor.id : null,
+      requestedByUserId: ctx.actor.id,
       capabilityId: request.capabilityId,
       riskClass: request.riskClass,
       payload: request.payload as object,
@@ -422,6 +423,7 @@ export function buildPolicyEngine(db: Database["db"]): OrgPolicyEngine {
       capabilityPattern: r.capabilityPattern,
       maxRiskAutonomous: r.maxRiskAutonomous as OrgPolicyRule["maxRiskAutonomous"],
       moneyThresholdMinor: r.moneyThresholdMinor ?? undefined,
+      requiresApprovalFor: Array.isArray(r.requiresApprovalFor) ? (r.requiresApprovalFor as string[]) : [],
     }));
   });
 }
@@ -430,12 +432,15 @@ export function buildPolicyEngine(db: Database["db"]): OrgPolicyEngine {
 /**
  * Module gate backed by the organization row. One small primary-key lookup
  * per execution keeps correctness over cleverness: toggles apply on the next
- * action with no cache-invalidation story to get wrong.
+ * action with no cache-invalidation story to get wrong. Protected spine
+ * modules are always enabled, independent of what any saved set says: a
+ * historical or hand-edited row can never brick governance again.
  */
 export function createDbModuleGate(db: Database["db"]) {
   return {
     async isEnabled(orgId: string, moduleId: string): Promise<boolean> {
       if (!orgId) return true;
+      if ((PROTECTED_MODULE_IDS as readonly string[]).includes(moduleId)) return true;
       const [row] = await db
         .select({ value: organizations.enabledModules })
         .from(organizations)
@@ -602,6 +607,8 @@ export async function recentLedgerEvents(orgId: string, db: Database["db"], limi
       kind: ledgerEvents.kind,
       capabilityId: ledgerEvents.capabilityId,
       actorType: ledgerEvents.actorType,
+      actorId: ledgerEvents.actorId,
+      sessionId: ledgerEvents.sessionId,
       payload: ledgerEvents.payload,
       hash: ledgerEvents.hash,
       prevHash: ledgerEvents.prevHash,

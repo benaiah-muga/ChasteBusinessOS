@@ -162,6 +162,7 @@ export async function POST(req: Request) {
         await executor.execute("inventory.createItem", ctx, {
           sku: str("sku")!,
           name: str("name")!,
+          kind: body.kind === "service" ? "service" : "goods",
           unitLabel: str("unitLabel") ?? "unit",
           salePriceMinor: num("salePriceMinor") ?? 0,
           reorderPointThousandths: num("reorderPointThousandths") ?? 0,

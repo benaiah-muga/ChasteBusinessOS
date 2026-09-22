@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { callApi, postApi } from "@/lib/api";
-import { Button } from "@/components/ui";
+import { Button, ConfirmDialog, Notice } from "@/components/ui";
 import { APPS, tileStyle } from "../_shell/apps";
 import { appPins, MAX_PINS, usePinnedApps } from "../_shell/pins";
 import { useModuleEnabled } from "../_shell/module-context";
@@ -13,17 +13,20 @@ import { applyMode, useMode, MODES } from "@/components/theme";
 import {
   CURRENCIES,
   usePrefs,
-  type CurrencyCode,
   type DateFormat,
+  type DisplayCurrency,
   type Units,
   type WeekStart,
 } from "@/lib/prefs";
-import { IconMoon, IconPinTack, IconSun } from "@/components/icons";
-import { cn } from "@/lib/format";
+import { IconMoon, IconPinTack, IconSun, IconTrash } from "@/components/icons";
+import { cn, minorToInput, toMinor } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 
 const TABS = [
   { id: "appearance", label: "Appearance" },
   { id: "workspace", label: "Workspace" },
+  { id: "modules", label: "Modules" },
+  { id: "governance", label: "Governance" },
   { id: "localization", label: "Localization" },
   { id: "ai", label: "AI & automation" },
   { id: "routines", label: "Routines" },
@@ -47,6 +50,8 @@ export default function SettingsPage() {
     >
       {tab === "appearance" && <AppearanceTab />}
       {tab === "workspace" && <WorkspaceTab />}
+      {tab === "modules" && <ModulesTab />}
+      {tab === "governance" && <GovernanceTab />}
       {tab === "localization" && <LocalizationTab />}
       {tab === "ai" && <AiTab />}
       {tab === "routines" && <RoutinesTab />}
@@ -148,13 +153,6 @@ function WorkspaceTab() {
         </dl>
       </Section>
 
-      <Section
-        title="Modules"
-        hint="Which applications your organization runs. Turning a module off hides it from people, the workmate, and the job queue at once; changes are identity-class and wait for approval."
-      >
-        <ModulesManager />
-      </Section>
-
       <EmailSection />
     </div>
   );
@@ -164,6 +162,7 @@ function WorkspaceTab() {
 
 function LocalizationTab() {
   const [prefs, update] = usePrefs();
+  const activeCurrency = useMoneySync();
 
   return (
     <div className="max-w-2xl">
@@ -173,13 +172,14 @@ function LocalizationTab() {
         rewrite stored amounts.
       </p>
 
-      <SettingRow label="Display currency" hint="Applied to money figures on pages that adopt it.">
+      <SettingRow label="Display currency" hint="Applies to every money figure in the app, on top of the organization's base currency.">
         <select
           value={prefs.currency}
-          onChange={(e) => update({ currency: e.target.value as CurrencyCode })}
+          onChange={(e) => update({ currency: e.target.value as DisplayCurrency })}
           aria-label="Display currency"
           className="select w-56"
         >
+          <option value="org">Organization default ({activeCurrency})</option>
           {CURRENCIES.map((c) => (
             <option key={c.code} value={c.code}>
               {c.symbol} {c.code} - {c.label}
@@ -263,132 +263,529 @@ function LocalizationTab() {
         </div>
       </SettingRow>
 
+      <SettingRow label="Writing aids" hint="Spell and grammar underlines in the document editor and other writing surfaces.">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={prefs.writingAids}
+          onClick={() => update({ writingAids: !prefs.writingAids })}
+          className={cn(
+            "relative h-6 w-11 cursor-pointer rounded-full transition-colors duration-150",
+            prefs.writingAids ? "bg-emerald-600" : "bg-stone-300",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-0.5 size-5 rounded-full bg-white shadow transition-all duration-150",
+              prefs.writingAids ? "left-[1.375rem]" : "left-0.5",
+            )}
+          />
+          <span className="sr-only">{prefs.writingAids ? "Writing aids on" : "Writing aids off"}</span>
+        </button>
+      </SettingRow>
+
       <p className="mt-6 rounded-lg border border-stone-200 bg-stone-50 px-4 py-3 text-xs leading-relaxed text-stone-500">
         Recording currency for new documents is set per document (invoices carry
         their own currency); this display preference is applied on top.
       </p>
+
+      <BrandingSection />
+    </div>
+  );
+}
+
+/* ----------------------------------------------------- print branding ---- */
+
+function BrandingSection() {
+  const [branding, setBranding] = useState<{
+    logoDataUrl: string | null;
+    accentColor: string | null;
+    invoiceFooter: string | null;
+    layout: string;
+  } | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
+  const [footer, setFooter] = useState("");
+  const [accent, setAccent] = useState("#b45309");
+  const [layout, setLayout] = useState<"classic" | "modern">("classic");
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await callApi<{
+        branding: { logoDataUrl: string | null; accentColor: string | null; invoiceFooter: string | null; layout: string } | null;
+        canEdit: boolean;
+      }>("/api/branding");
+      if (res.ok && res.data) {
+        setBranding(res.data.branding);
+        setCanEdit(res.data.canEdit);
+        setFooter(res.data.branding?.invoiceFooter ?? "");
+        setAccent(res.data.branding?.accentColor ?? "#b45309");
+        setLayout(res.data.branding?.layout === "modern" ? "modern" : "classic");
+      }
+    })();
+  }, []);
+
+  function readLogo(f: File) {
+    if (f.size > 200_000) {
+      setError("Logos up to 200KB are supported.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setBranding((b) => ({ ...(b ?? { accentColor: null, invoiceFooter: null, layout: "classic" }), logoDataUrl: String(reader.result) }));
+      setSaved(false);
+    };
+    reader.readAsDataURL(f);
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await postApi("/api/branding", {
+        ...(branding?.logoDataUrl ? { logoDataUrl: branding.logoDataUrl } : {}),
+        accentColor: accent,
+        invoiceFooter: footer,
+        layout,
+      });
+      if (res.status === 202) setError("Proposed to the workmate's queue: approvals inbox holds the change.");
+      else if (!res.ok) setError(res.error?.title ?? "Could not save branding.");
+      else setSaved(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-8 border-t border-stone-200 pt-6">
+      <p className="figure-label">Print branding</p>
+      <p className="mb-4 mt-1 text-sm text-stone-500">
+        How your invoices and printed documents identify the organization. Printed from{" "}
+        <code className="rounded bg-stone-100 px-1 font-mono text-xs">Documents → an order&apos;s invoice</code>.
+      </p>
+      {error && (
+        <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3.5 py-2.5 text-sm text-red-800">
+          {error}
+        </p>
+      )}
+      <SettingRow label="Logo" hint="PNG, JPEG or SVG up to 200KB. Shown at the top of printed documents.">
+        <div className="flex items-center gap-3">
+          {branding?.logoDataUrl ? (
+            <img src={branding.logoDataUrl} alt="Organization logo" className="h-10 w-auto rounded border border-stone-200 bg-white p-1" />
+          ) : (
+            <span className="text-xs text-stone-400">None</span>
+          )}
+          {canEdit && (
+            <label className="cursor-pointer rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-[13px] font-medium text-stone-700 shadow-xs hover:bg-stone-50">
+              Upload
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml"
+                aria-label="Upload logo"
+                className="sr-only"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) readLogo(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          )}
+        </div>
+      </SettingRow>
+      <SettingRow label="Accent color" hint="Rules, headings and totals on printed documents.">
+        <input
+          type="color"
+          aria-label="Accent color"
+          value={accent}
+          disabled={!canEdit}
+          onChange={(e) => setAccent(e.target.value)}
+          className="h-9 w-16 cursor-pointer rounded-lg border border-stone-200 bg-white p-1"
+        />
+      </SettingRow>
+      <SettingRow label="Layout" hint="Classic: gray table headers. Modern: your accent color.">
+        <div role="radiogroup" aria-label="Layout" className="flex w-fit gap-1 rounded-xl border border-stone-200 bg-white p-1 shadow-xs">
+          {(["classic", "modern"] as const).map((l) => (
+            <button
+              key={l}
+              type="button"
+              role="radio"
+              aria-checked={layout === l}
+              disabled={!canEdit}
+              onClick={() => setLayout(l)}
+              className={cn(
+                "cursor-pointer rounded-lg px-3 py-1.5 text-[13px] font-medium capitalize transition-colors duration-150",
+                layout === l ? "bg-gold-50 text-gold-900" : "text-stone-500 hover:bg-stone-100",
+              )}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      </SettingRow>
+      <SettingRow label="Invoice footer" hint="Small print at the foot of every printed document.">
+        <input
+          value={footer}
+          disabled={!canEdit}
+          onChange={(e) => setFooter(e.target.value)}
+          placeholder="Thank you for your business."
+          className="input max-w-sm"
+        />
+      </SettingRow>
+      {canEdit && (
+        <div className="mt-4 flex items-center gap-3">
+          <Button loading={busy} onClick={save}>
+            Save branding
+          </Button>
+          {saved && <span className="text-sm font-medium text-emerald-700">Saved</span>}
+        </div>
+      )}
     </div>
   );
 }
 
 /* --------------------------------------------------------------- ai tab ---- */
 
-interface AiConfig {
+const AI_PROVIDERS = [
+  { id: "nim", label: "NVIDIA NIM" },
+  { id: "openrouter", label: "OpenRouter" },
+  { id: "groq", label: "Groq" },
+  { id: "mistral", label: "Mistral" },
+  { id: "zai", label: "Z.ai" },
+] as const;
+
+const AI_ROLES: { key: string; label: string; hint: string }[] = [
+  { key: "primary", label: "Primary", hint: "Conversations, drafting, agent turns" },
+  { key: "fast", label: "Fast", hint: "Classifications and quick lookups" },
+  { key: "reasoning", label: "Reasoning", hint: "Deep multi-step analysis" },
+  { key: "embeddings", label: "Embeddings", hint: "Document search and memory" },
+  { key: "ocr", label: "OCR", hint: "Document image parsing" },
+];
+
+interface OrgAiSettings {
   provider: string;
-  configured: boolean;
-  baseUrl: string;
-  models: { primary: string; fast: string; reasoning: string; embeddings: string };
-  source: string;
+  keyLast4: string | null;
+  hasKey: boolean;
+  baseUrl: string | null;
+  routing: Record<string, string>;
+}
+
+interface MemoryEntry {
+  id: string;
+  kind: string;
+  source: string | null;
+  preview: string;
+  createdAt: string;
 }
 
 function AiTab() {
-  const [config, setConfig] = useState<AiConfig | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [payload, setPayload] = useState<{
+    settings: OrgAiSettings | null;
+    canEdit: boolean;
+    encryptionReady: boolean;
+    envFallback: { provider: string; models: Record<string, string>; keyConfigured: boolean };
+  } | null>(null);
+  const [provider, setProvider] = useState("nim");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [routing, setRouting] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "pending" | "info"; text: string } | null>(null);
+  const [memory, setMemory] = useState<MemoryEntry[]>([]);
+  const [memoryQuery, setMemoryQuery] = useState("");
+  const [canEditMemory, setCanEditMemory] = useState(false);
+  const [confirmMemoryId, setConfirmMemoryId] = useState<string | null>(null);
 
   useEffect(() => {
-    void callApi<AiConfig>("/api/ai-config").then((res) => {
-      if (res.data) setConfig(res.data);
-      else setError(res.error?.title ?? "Could not load model configuration");
-    });
+    void (async () => {
+      const res = await callApi<NonNullable<unknown>>("/api/ai-settings");
+      if (!res.data) return;
+      const d = res.data as {
+        settings: OrgAiSettings | null;
+        canEdit: boolean;
+        encryptionReady: boolean;
+        envFallback: { provider: string; models: Record<string, string>; keyConfigured: boolean };
+      };
+      setPayload(d);
+      if (d.settings) {
+        setProvider(d.settings.provider);
+        setBaseUrl(d.settings.baseUrl ?? "");
+        setRouting(d.settings.routing ?? {});
+      }
+    })();
   }, []);
+
+  const loadMemory = useCallback(async (q: string) => {
+    const res = await callApi<{ memories?: MemoryEntry[]; canEdit?: boolean }>(
+      `/api/memory${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`,
+    );
+    if (res.data?.memories) setMemory(res.data.memories);
+    setCanEditMemory(Boolean(res.data?.canEdit));
+  }, []);
+
+  useEffect(() => {
+    void loadMemory("");
+  }, [loadMemory]);
+
+  async function save() {
+    setSaving(true);
+    setNotice(null);
+    const res = await postApi<{ pendingApproval?: boolean }>("/api/ai-settings", {
+      provider,
+      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+      ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+      routing: Object.fromEntries(Object.entries(routing).filter(([, v]) => v.trim() !== "")),
+    });
+    setSaving(false);
+    if (res.status === 202 || res.data?.pendingApproval) {
+      setNotice({ tone: "pending", text: "Change sent to the Approvals inbox." });
+      return;
+    }
+    if (!res.ok) {
+      setNotice({ tone: "error", text: res.error ? `${res.error.title}${res.error.hint ? ` - ${res.error.hint}` : ""}` : "Couldn't save." });
+      return;
+    }
+    setApiKey("");
+    setNotice({ tone: "ok", text: "Saved. The workmate's next turn uses it." });
+    void (async () => {
+      const fresh = await callApi<{ settings: OrgAiSettings | null }>("/api/ai-settings");
+      if (fresh.data) setPayload((p) => (p ? { ...p, settings: fresh.data!.settings } : p));
+    })();
+  }
+
+  async function testConnection() {
+    setTesting(true);
+    setNotice(null);
+    const res = await fetch("/api/ai-settings/test", { method: "POST" });
+    const d = (await res.json().catch(() => ({}))) as { ok?: boolean; model?: string; latencyMs?: number; error?: string; provider?: string };
+    setTesting(false);
+    if (d.ok) setNotice({ tone: "ok", text: `Connected via ${d.provider} (${d.model}) in ${d.latencyMs}ms.` });
+    else setNotice({ tone: "error", text: `Connection failed: ${d.error ?? "unknown error"}` });
+  }
+
+  async function deleteMemory(id: string) {
+    const res = await postApi<{ pendingApproval?: boolean }>("/api/memory", { action: "delete", memoryId: id });
+    setConfirmMemoryId(null);
+    if (res.status === 202 || res.data?.pendingApproval) {
+      setNotice({ tone: "pending", text: "Memory deletion sent to the Approvals inbox." });
+      return;
+    }
+    if (!res.ok) {
+      setNotice({ tone: "error", text: res.error ? `${res.error.title}${res.error.hint ? ` - ${res.error.hint}` : ""}` : "Couldn't delete." });
+      return;
+    }
+    void loadMemory(memoryQuery);
+  }
+
+  const settings = payload?.settings ?? null;
+  const editDisabled = !payload?.canEdit;
 
   return (
     <div className="max-w-2xl">
-      <p className="mb-6 text-sm leading-relaxed text-stone-500">
-        Your workmate runs on models configured in the server environment -
-        keys never enter the browser, and the model reaches your business only
-        through the same governed capabilities you use.
-      </p>
+      <Section
+        title="Provider & credentials"
+        hint="Your organization's own AI provider. The key is encrypted at rest, never shown again, and never sent to the browser; without one, the server's env configuration applies."
+      >
+        {!payload ? (
+          <div className="h-24 animate-pulse rounded-xl bg-stone-100" />
+        ) : (
+          <div className="max-w-xl space-y-4 rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
+            {!payload.encryptionReady && (
+              <Notice tone="pending">
+                Secret storage is not configured: ask the operator to set CHASTE_ENCRYPTION_KEY. Until then, org keys
+                cannot be saved and the server environment configuration applies.
+              </Notice>
+            )}
+            {settings?.hasKey && (
+              <p className="text-xs text-emerald-700">
+                Organization key on file: ••••{settings.keyLast4}. Leave the key field empty to keep it.
+              </p>
+            )}
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Provider</span>
+              <select
+                className="select"
+                value={provider}
+                disabled={editDisabled}
+                aria-label="AI provider"
+                onChange={(e) => setProvider(e.target.value)}
+              >
+                {AI_PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">
+                API key {settings?.hasKey ? "(leave empty to keep current)" : ""}
+              </span>
+              <input
+                type="password"
+                value={apiKey}
+                disabled={editDisabled || !payload.encryptionReady}
+                placeholder={settings?.hasKey ? "••••" + settings.keyLast4 : "paste the provider API key"}
+                aria-label="Provider API key"
+                onChange={(e) => setApiKey(e.target.value)}
+                className="input font-mono"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Base URL (optional)</span>
+              <input
+                value={baseUrl}
+                disabled={editDisabled}
+                placeholder="https://integrate.api.nvidia.com/v1"
+                aria-label="Provider base URL override"
+                onChange={(e) => setBaseUrl(e.target.value)}
+                className="input font-mono"
+              />
+            </label>
 
-      {!config ? (
-        <p className="text-sm text-stone-400">{error ?? "Checking configuration…"}</p>
-      ) : (
-        <>
-          <div className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
-            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-              <dt className="text-stone-500">Provider</dt>
-              <dd className="flex items-center gap-2 font-medium text-stone-900">
-                {config.provider === "openrouter"
-                  ? "OpenRouter"
-                  : config.provider === "groq"
-                    ? "Groq"
-                    : config.provider === "mistral"
-                      ? "Mistral"
-                      : config.provider === "zai"
-                        ? "Z.ai (GLM)"
-                        : "NVIDIA NIM"}
-                {config.configured ? (
-                  <span className="badge badge-green">connected</span>
-                ) : (
-                  <span className="badge badge-amber">key missing</span>
-                )}
-              </dd>
+            <div>
+              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Model routing</span>
+              <div className="space-y-2.5">
+                {AI_ROLES.map((r) => (
+                  <label key={r.key} className="block">
+                    <span className="mb-1 flex items-baseline justify-between">
+                      <span className="text-[13px] font-medium text-stone-700">{r.label}</span>
+                      <span className="text-[11px] text-stone-400">{r.hint}</span>
+                    </span>
+                    <input
+                      value={routing[r.key] ?? ""}
+                      disabled={editDisabled}
+                      placeholder={payload.envFallback.models[r.key === "ocr" ? "primary" : r.key] ?? "server default"}
+                      aria-label={`Model for ${r.label}`}
+                      onChange={(e) => setRouting((prev) => ({ ...prev, [r.key]: e.target.value }))}
+                      className="input font-mono text-xs"
+                    />
+                  </label>
+                ))}
+              </div>
+              <span className="mt-1.5 block text-xs leading-relaxed text-stone-400">
+                Empty fields fall back to the server defaults listed below. A "provider/" prefix (for example
+                openrouter/) overrides the provider for that role.
+              </span>
             </div>
-            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-              <dt className="text-stone-500">Endpoint</dt>
-              <dd className="truncate font-mono text-xs text-stone-600">{config.baseUrl}</dd>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {payload.canEdit && (
+                <>
+                  <Button size="sm" onClick={() => void save()} loading={saving} disabled={!payload.encryptionReady}>
+                    Save configuration
+                  </Button>
+                  <Button size="sm" tone="secondary" onClick={() => void testConnection()} loading={testing}>
+                    Test connection
+                  </Button>
+                </>
+              )}
+              {notice && (
+                <span
+                  className={cn(
+                    "text-xs",
+                    notice.tone === "ok"
+                      ? "text-emerald-700"
+                      : notice.tone === "pending"
+                        ? "text-amber-700"
+                        : notice.tone === "info"
+                          ? "text-stone-500"
+                          : "text-red-700",
+                  )}
+                  role="status"
+                >
+                  {notice.text}
+                </span>
+              )}
+              {editDisabled && <span className="text-xs text-stone-400">Only organization admins can change this.</span>}
             </div>
-            <ModelRow label="Primary" model={config.models.primary} hint="Conversations, drafting, coding suggestions" />
-            <ModelRow label="Fast" model={config.models.fast} hint="Classifications and quick lookups" />
-            <ModelRow label="Reasoning" model={config.models.reasoning} hint="Deep multi-step analysis" />
-            <ModelRow label="Embeddings" model={config.models.embeddings} hint="Document search and memory" />
           </div>
+        )}
+      </Section>
 
-          {!config.configured && (
-            <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              Set <code className="rounded bg-amber-100 px-1">NVIDIA_API_KEY</code> (or{" "}
-              <code className="rounded bg-amber-100 px-1">OPENROUTER_API_KEY</code> with{" "}
-              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=openrouter</code>, or{" "}
-              <code className="rounded bg-amber-100 px-1">GROQ_API_KEY</code> with{" "}
-              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=groq</code>, or{" "}
-              <code className="rounded bg-amber-100 px-1">MISTRAL_API_KEY</code> with{" "}
-              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=mistral</code>, or{" "}
-              <code className="rounded bg-amber-100 px-1">ZAI_API_KEY</code> with{" "}
-              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=zai</code>) in the server environment.
-            </p>
+      <Section
+        title="Memory"
+        hint="What the workmate has learned about the organization: profile facts, SOPs, decisions, preferences, and document knowledge. Entries wrong or stale? Remove them."
+      >
+        <div className="rounded-xl border border-stone-200 bg-white shadow-xs">
+          <div className="flex items-center gap-2 border-b border-stone-100 px-3 py-2">
+            <input
+              value={memoryQuery}
+              onChange={(e) => {
+                setMemoryQuery(e.target.value);
+                void loadMemory(e.target.value);
+              }}
+              placeholder="Search memory…"
+              aria-label="Search organization memory"
+              className="input h-8 flex-1 text-xs"
+            />
+            <span className="text-[11px] whitespace-nowrap text-stone-400">{memory.length} shown</span>
+          </div>
+          {memory.length === 0 ? (
+            <p className="p-4 text-sm text-stone-400">Nothing remembered yet.</p>
+          ) : (
+            <ul className="max-h-80 divide-y divide-stone-100 overflow-y-auto">
+              {memory.map((m) => (
+                <li key={m.id} className="flex items-start justify-between gap-3 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-stone-500">
+                      {m.kind}
+                      {m.source ? <span className="font-normal text-stone-400"> · {m.source}</span> : null}
+                    </p>
+                    <p className="mt-0.5 line-clamp-2 text-sm text-stone-800">{m.preview}</p>
+                  </div>
+                  {canEditMemory && (
+                    <button
+                      type="button"
+                      aria-label="Delete memory entry"
+                      title="Forget this"
+                      onClick={() => setConfirmMemoryId(m.id)}
+                      className="icon-btn size-6 shrink-0 hover:text-red-700"
+                    >
+                      <IconTrash className="size-3" />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
+        </div>
+      </Section>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <Link
-              href="/proposals"
-              className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs transition-colors duration-150 hover:border-stone-300"
-            >
-              <p className="text-sm font-medium text-stone-900">Creator mode</p>
-              <p className="mt-1 text-xs leading-relaxed text-stone-500">
-                Connect a coding agent to propose capabilities as reviewed diffs.
-              </p>
-            </Link>
-            <Link
-              href="/sessions"
-              className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs transition-colors duration-150 hover:border-stone-300"
-            >
-              <p className="text-sm font-medium text-stone-900">Agent sessions</p>
-              <p className="mt-1 text-xs leading-relaxed text-stone-500">
-                Every model action, its capability, and its outcome - auditable forever.
-              </p>
-            </Link>
+      <Section title="Server defaults" hint="What applies when this organization has not set its own configuration.">
+        <div className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white text-sm shadow-xs">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <span className="text-stone-500">Provider</span>
+            <span className="font-medium text-stone-900">{payload?.envFallback.provider || "nim"}</span>
           </div>
-        </>
-      )}
+          {Object.entries(payload?.envFallback.models ?? {}).map(([role, model]) => (
+            <div key={role} className="flex items-center justify-between gap-3 px-4 py-3">
+              <span className="text-stone-500 capitalize">{role}</span>
+              <span className="font-mono text-xs text-stone-700">{model}</span>
+            </div>
+          ))}
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <span className="text-stone-500">Env key</span>
+            <span className="text-stone-700">{payload?.envFallback.keyConfigured ? "configured" : "not set"}</span>
+          </div>
+        </div>
+      </Section>
 
-      <div className="mt-8 border-t border-stone-100 pt-6">
-        <SoulSection />
-      </div>
+      <ConfirmDialog
+        open={confirmMemoryId != null}
+        onClose={() => setConfirmMemoryId(null)}
+        onConfirm={() => confirmMemoryId && void deleteMemory(confirmMemoryId)}
+        title="Forget this memory?"
+        body="Searches and agent answers stop using it immediately. The audit trail records the removal."
+        confirmLabel="Forget"
+      />
     </div>
   );
 }
 
-function ModelRow({ label, model, hint }: { label: string; model: string; hint: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 px-4 py-3">
-      <dt className="text-sm text-stone-500">
-        {label}
-        <span className="block text-[11px] text-stone-400">{hint}</span>
-      </dt>
-      <dd className="truncate font-mono text-xs text-stone-600">{model}</dd>
-    </div>
-  );
-}
 
 /* -------------------------------------------------------------- shared ----- */
 
@@ -532,56 +929,6 @@ function EmailSection() {
 
 /* --------------------------------------------------- soul + routines ---- */
 
-function SoulSection() {
-  const [soul, setSoul] = useState<string>("");
-  const [loaded, setLoaded] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    void callApi<{ agentSoul: string }>("/api/org", { method: "PUT" }).then((res) => {
-      if (res.data) setSoul(res.data.agentSoul ?? "");
-      setLoaded(true);
-    });
-  }, []);
-
-  async function save() {
-    setBusy(true);
-    setNote(null);
-    const res = await callApi("/api/org", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentSoul: soul }),
-    });
-    setBusy(false);
-    setNote(res.ok ? "Saved. Your workmate picks it up on the next message." : (res.error?.title ?? "Could not save"));
-  }
-
-  return (
-    <Section
-      title="Agent persona (SOUL)"
-      hint="Standing instructions your workmate follows in every conversation: voice, tone, hard rules. It cannot override security, approvals, or financial integrity."
-    >
-      <div className="max-w-2xl">
-        <textarea
-          value={soul}
-          onChange={(e) => setSoul(e.target.value)}
-          disabled={!loaded}
-          rows={5}
-          aria-label="Agent persona instructions"
-          placeholder={"Example:\n- We are a hardware store; keep replies practical and short.\n- Always mention outstanding balances when discussing a customer.\n- Never recommend credit terms beyond Net 30."}
-          className="w-full resize-y rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-stone-400 focus:border-gold-500"
-        />
-        <div className="mt-2 flex items-center gap-2">
-          <Button size="sm" loading={busy} onClick={() => void save()}>
-            Save persona
-          </Button>
-          {note && <span className="text-xs text-stone-500">{note}</span>}
-        </div>
-      </div>
-    </Section>
-  );
-}
 
 interface RoutineRow {
   id: string;
@@ -771,6 +1118,316 @@ function RoutinesTab() {
             </li>
           ))}
         </ul>
+      </Section>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- modules -- */
+
+interface ModuleSettingsField {
+  key: string;
+  label: string;
+  type: "text" | "number";
+  placeholder?: string;
+}
+
+const MODULE_SETTING_PANELS: { moduleId: string; title: string; hint: string; fields: ModuleSettingsField[] }[] = [
+  {
+    moduleId: "inventory",
+    title: "Inventory",
+    hint: "What the product form starts with when you add a new item.",
+    fields: [
+      { key: "defaultUnitLabel", label: "Default unit label", type: "text", placeholder: "unit" },
+      { key: "defaultReorderPointUnits", label: "Default reorder point", type: "number", placeholder: "0" },
+    ],
+  },
+];
+
+function ModuleSettingsPanel({ moduleId, title, hint, fields }: { moduleId: string; title: string; hint: string; fields: ModuleSettingsField[] }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "pending"; text: string } | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await callApi<{ settings?: Record<string, unknown> }>(`/api/module-settings?module=${moduleId}`);
+      if (res.data?.settings) {
+        const next: Record<string, string> = {};
+        for (const f of fields) next[f.key] = String(res.data.settings[f.key] ?? "");
+        setValues(next);
+      }
+      setLoading(false);
+    })();
+    // Field lists are static per module.
+  }, [moduleId, fields]);
+
+  async function save() {
+    setSaving(true);
+    setNotice(null);
+    const settings: Record<string, unknown> = {};
+    for (const f of fields) {
+      const raw = values[f.key] ?? "";
+      if (f.type === "number") {
+        if (raw !== "") settings[f.key] = Number(raw);
+      } else if (raw.trim() !== "") {
+        settings[f.key] = raw.trim();
+      }
+    }
+    const res = await postApi<{ pendingApproval?: boolean }>(`/api/module-settings`, { module: moduleId, settings });
+    setSaving(false);
+    if (res.status === 202 || res.data?.pendingApproval) {
+      setNotice({ tone: "pending", text: "Change sent to the Approvals inbox." });
+      return;
+    }
+    if (!res.ok) {
+      setNotice({ tone: "error", text: res.error ? `${res.error.title}${res.error.hint ? ` - ${res.error.hint}` : ""}` : "Couldn't save." });
+      return;
+    }
+    setNotice({ tone: "ok", text: "Saved. New defaults apply right away." });
+  }
+
+  return (
+    <Section title={title} hint={hint}>
+      {loading ? (
+        <div className="h-16 animate-pulse rounded-xl bg-stone-100" />
+      ) : (
+        <div className="max-w-xl rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {fields.map((f) => (
+              <label key={f.key} className="block">
+                <span className="mb-1.5 block text-[13px] font-medium text-stone-700">{f.label}</span>
+                <input
+                  type={f.type}
+                  inputMode={f.type === "number" ? "numeric" : undefined}
+                  min={f.type === "number" ? 0 : undefined}
+                  value={values[f.key] ?? ""}
+                  placeholder={f.placeholder}
+                  aria-label={`${title} ${f.label}`}
+                  onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                  className="input"
+                />
+              </label>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center gap-3">
+            <Button size="sm" onClick={() => void save()} loading={saving}>
+              Save defaults
+            </Button>
+            {notice && (
+              <span
+                className={cn(
+                  "text-xs",
+                  notice.tone === "ok" ? "text-emerald-700" : notice.tone === "pending" ? "text-amber-700" : "text-red-700",
+                )}
+                role="status"
+              >
+                {notice.text}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function ModulesTab() {
+  return (
+    <div className="max-w-3xl">
+      <Section
+        title="Switchboard"
+        hint="Which applications your organization runs. Turning a module off hides it from people, the workmate, and the job queue at once; as an admin your change applies immediately and lands in the ledger. The workmate proposing the same change still waits for approval."
+      >
+        <ModulesManager />
+      </Section>
+
+      <Section
+        title="Module defaults"
+        hint="Configuration each module owns: the values its forms and flows start from. Changes are governed like any other write."
+      >
+        <p className="text-[13px] leading-relaxed text-stone-500">
+          Defaults live per module below. Modules without editable settings yet manage their behavior in code and
+          surfaces of their own.
+        </p>
+      </Section>
+      {MODULE_SETTING_PANELS.map((p) => (
+        <ModuleSettingsPanel key={p.moduleId} {...p} />
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ governance -- */
+
+const POLICY_RISKS = [
+  { id: "read", label: "Read" },
+  { id: "write", label: "Write" },
+  { id: "money", label: "Money" },
+  { id: "identity", label: "Identity" },
+  { id: "destructive", label: "Destructive" },
+] as const;
+
+const STRICT_OPTIONS = [
+  { id: "identity", label: "Identity actions" },
+  { id: "destructive", label: "Destructive actions" },
+  { id: "money", label: "Payments over threshold" },
+] as const;
+
+function GovernanceTab() {
+  const [policy, setPolicy] = useState<{ maxRiskAutonomous: string; moneyThresholdMinor: number; requiresApprovalFor: string[] } | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
+  const [thresholdInput, setThresholdInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "pending"; text: string } | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await callApi<{
+        policy?: { maxRiskAutonomous: string; moneyThresholdMinor: number; requiresApprovalFor: string[] };
+        canEdit?: boolean;
+      }>("/api/policy");
+      if (res.data?.policy) {
+        setPolicy(res.data.policy);
+        setThresholdInput(res.data.policy.moneyThresholdMinor > 0 ? minorToInput(res.data.policy.moneyThresholdMinor) : "");
+      }
+      setCanEdit(Boolean(res.data?.canEdit));
+    })();
+  }, []);
+
+  async function save() {
+    if (!policy) return;
+    setSaving(true);
+    setNotice(null);
+    const res = await postApi<{ pendingApproval?: boolean }>("/api/policy", {
+      maxRiskAutonomous: policy.maxRiskAutonomous,
+      moneyThresholdMinor: thresholdInput.trim() === "" ? 0 : toMinor(thresholdInput),
+      requiresApprovalFor: policy.requiresApprovalFor,
+    });
+    setSaving(false);
+    if (res.status === 202 || res.data?.pendingApproval) {
+      setNotice({ tone: "pending", text: "Change sent to the Approvals inbox." });
+      return;
+    }
+    if (!res.ok) {
+      setNotice({ tone: "error", text: res.error ? `${res.error.title}${res.error.hint ? ` - ${res.error.hint}` : ""}` : "Couldn't save." });
+      return;
+    }
+    setNotice({ tone: "ok", text: "Policy saved. It applies to the next action immediately." });
+  }
+
+  function toggleStrict(id: string) {
+    setPolicy((p) =>
+      p
+        ? {
+            ...p,
+            requiresApprovalFor: p.requiresApprovalFor.includes(id)
+              ? p.requiresApprovalFor.filter((x) => x !== id)
+              : [...p.requiresApprovalFor, id],
+          }
+        : p,
+    );
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <Section
+        title="Workmate autonomy"
+        hint="The highest risk class the workmate may act at without asking. Whatever you pick, every action is still audited in the ledger."
+      >
+        {!policy ? (
+          <div className="h-24 animate-pulse rounded-xl bg-stone-100" />
+        ) : (
+          <div className="max-w-xl space-y-4 rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Max autonomous risk</span>
+              <select
+                className="select"
+                value={policy.maxRiskAutonomous}
+                disabled={!canEdit}
+                aria-label="Max autonomous risk"
+                onChange={(e) => setPolicy((p) => (p ? { ...p, maxRiskAutonomous: e.target.value } : p))}
+              >
+                {POLICY_RISKS.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1.5 block text-xs leading-relaxed text-stone-400">
+                Write covers creating and updating records. Money adds anything that moves value. Identity and
+                destructive are always gated for the workmate, no matter what this says.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Payment approval threshold</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={thresholdInput}
+                disabled={!canEdit}
+                placeholder="No limit"
+                aria-label="Payment approval threshold"
+                onChange={(e) => setThresholdInput(e.target.value)}
+                className="input"
+              />
+              <span className="mt-1.5 block text-xs leading-relaxed text-stone-400">
+                Workmate payments above this amount wait for a person. Lower it to tighten control; empty for none.
+              </span>
+            </label>
+
+            <div>
+              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Maker-checker for people (strict mode)</span>
+              <div className="flex flex-wrap gap-1.5">
+                {STRICT_OPTIONS.map((s) => {
+                  const on = policy.requiresApprovalFor.includes(s.id);
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      aria-pressed={on}
+                      disabled={!canEdit}
+                      onClick={() => toggleStrict(s.id)}
+                      className={cn(
+                        "cursor-pointer rounded-full border px-3 py-1 text-xs font-medium transition-colors duration-150",
+                        on ? "border-gold-500 bg-gold-50 text-gold-900" : "border-stone-200 bg-white text-stone-500 hover:border-stone-300",
+                        !canEdit && "cursor-not-allowed opacity-50",
+                      )}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="mt-1.5 block text-xs leading-relaxed text-stone-400">
+                Off by default: people with the permission act under their own authority. Turn a chip on to require a
+                second pair of eyes for that risk class, even for humans.
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {canEdit && (
+                <Button size="sm" onClick={() => void save()} loading={saving}>
+                  Save policy
+                </Button>
+              )}
+              {notice && (
+                <span
+                  className={cn(
+                    "text-xs",
+                    notice.tone === "ok" ? "text-emerald-700" : notice.tone === "pending" ? "text-amber-700" : "text-red-700",
+                  )}
+                  role="status"
+                >
+                  {notice.text}
+                </span>
+              )}
+              {!canEdit && <span className="text-xs text-stone-400">Only organization admins can change policy.</span>}
+            </div>
+          </div>
+        )}
       </Section>
     </div>
   );

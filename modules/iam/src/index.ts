@@ -2,13 +2,19 @@ import { randomBytes } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
+  aiSettings,
   invitations,
   memberships,
+  moduleSettings,
+  orgBranding,
   organizations,
+  policies,
   rolePermissions,
   roles,
   users,
   userRoles,
+  encryptSecret,
+  secretLast4,
 } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
@@ -19,6 +25,13 @@ export { assertNotLastOwner } from "./last-owner";
 
 export interface ModuleDeps {
   db: Database["db"];
+  /**
+   * Per-module settings schemas (web layer). When a module has a schema,
+   * setModuleConfig validates the payload against it kernel-side, so agents
+   * and UI share the same boundary. Modules without a schema accept a plain
+   * record.
+   */
+  settingsSchemas?: Record<string, z.ZodTypeAny>;
 }
 
 /**
@@ -267,10 +280,20 @@ const listMembers = (deps: ModuleDeps) =>
   });
 
 /**
- * Turns platform modules on or off for the org. Identity-class on purpose:
- * reshaping which surfaces the business operates is an authority decision,
- * always human-approved, and reversible - the previous set rides along in
- * the output so the inverse restores it exactly.
+ * Platform spine modules that can never be switched off: they host the
+ * switchboard itself (iam), the needs-attention registry (signals), and the
+ * scheduler (routines). Disabling any of them would let one toggle brick the
+ * org's ability to govern itself, so every write path unions them back in
+ * and the kernel module gate always reports them enabled.
+ */
+export const PROTECTED_MODULE_IDS = ["iam", "signals", "routines"] as const;
+
+/**
+ * Turns platform modules on or off for the org. Identity-class: reshaping
+ * which surfaces the business operates is an authority decision, reversible -
+ * the previous set rides along in the output so the inverse restores it
+ * exactly. Protected spine modules are unioned in: no caller (human route,
+ * agent tool call, or a stale inverse) can drop them.
  */
 const setModules = (deps: ModuleDeps) =>
   defineCapability({
@@ -303,11 +326,12 @@ const setModules = (deps: ModuleDeps) =>
           .limit(1);
         if (!org) throw new Error("organization not found");
         const previousModules = Array.isArray(org.value) ? (org.value as string[]) : [];
+        const next = [...new Set([...PROTECTED_MODULE_IDS, ...input.modules])];
         await tx
           .update(organizations)
-          .set({ enabledModules: [...new Set(input.modules)] })
+          .set({ enabledModules: next })
           .where(eq(organizations.id, ctx.actor.orgId));
-        return { enabledModules: [...new Set(input.modules)], previousModules };
+        return { enabledModules: next, previousModules };
       });
     },
   });
@@ -315,7 +339,8 @@ const setModules = (deps: ModuleDeps) =>
 /**
  * The inverse side of the switchboard: put back exactly the module list that
  * was live before a setModules applied. Kept as its own governed id because
- * a capability cannot be its own inverse.
+ * a capability cannot be its own inverse. Protected modules are unioned in,
+ * so even a snapshot from before they existed cannot disable them.
  */
 const restoreModules = (deps: ModuleDeps) =>
   defineCapability({
@@ -332,11 +357,12 @@ const restoreModules = (deps: ModuleDeps) =>
     output: z.object({ enabledModules: z.array(z.string()) }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const next = [...new Set([...PROTECTED_MODULE_IDS, ...input.modules])];
         await tx
           .update(organizations)
-          .set({ enabledModules: [...new Set(input.modules)] })
+          .set({ enabledModules: next })
           .where(eq(organizations.id, ctx.actor.orgId));
-        return { enabledModules: [...new Set(input.modules)] };
+        return { enabledModules: next };
       });
     },
   });
@@ -349,4 +375,231 @@ export function registerIamCapabilities(registry: CapabilityRegistry, deps: Modu
   registry.register(listMembers(deps));
   registry.register(setModules(deps));
   registry.register(restoreModules(deps));
+  registry.register(setModuleConfig(deps));
+  registry.register(setOrgPolicy(deps));
+  registry.register(setOrgBranding(deps));
+  registry.register(setAiSettings(deps));
 }
+
+/**
+ * Per-module configuration. One jsonb row per org per module; the payload is
+ * validated against the module's registered schema (when one exists) before
+ * it is stored, so a malformed settings object is refused at the boundary,
+ * not discovered as a broken UI later.
+ */
+const setModuleConfig = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "iam.setModuleConfig",
+    title: "Set module configuration",
+    intent:
+      "Save configuration values for one platform module, such as default units or payment terms, so its pages and forms pick the values up as defaults",
+    module: "iam",
+    risk: "write",
+    permission: "iam.admin",
+    input: z.object({
+      module: z.string().min(1).max(40),
+      settings: z.record(z.string(), z.unknown()),
+    }),
+    output: z.object({ module: z.string(), settings: z.record(z.string(), z.unknown()) }),
+    execute: async (ctx, input) => {
+      const schema = deps.settingsSchemas?.[input.module];
+      let settings = input.settings;
+      if (schema) {
+        const parsed = schema.safeParse(settings);
+        if (!parsed.success) {
+          throw new Error(`invalid settings for module "${input.module}": ${parsed.error.issues[0]?.message ?? "shape mismatch"}`);
+        }
+        settings = parsed.data as Record<string, unknown>;
+      }
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await tx
+          .insert(moduleSettings)
+          .values({ orgId: ctx.actor.orgId, module: input.module, settings })
+          .onConflictDoUpdate({
+            target: [moduleSettings.orgId, moduleSettings.module],
+            set: { settings, updatedAt: new Date() },
+          });
+      }).then(() => ({ module: input.module, settings }));
+    },
+  });
+
+/**
+ * The org's blanket autonomy policy. Identity-class: deciding what the
+ * workmate may do autonomously - and whether humans are subject to
+ * maker-checker - is an authority decision (ADR 0055).
+ */
+const setOrgPolicy = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "iam.setOrgPolicy",
+    title: "Set organization policy",
+    intent:
+      "Choose how much the workmate may do autonomously: the highest risk class it may act on without approval, the money amount above which payments need sign-off, and whether humans are also subject to maker-checker",
+    module: "iam",
+    risk: "identity",
+    permission: "iam.admin",
+    input: z.object({
+      maxRiskAutonomous: z.enum(["read", "write", "money", "identity", "destructive"]),
+      moneyThresholdMinor: z.number().int().min(0).max(1_000_000_000).optional(),
+      requiresApprovalFor: z.array(z.enum(["identity", "destructive", "money", "*"])).max(4).default([]),
+    }),
+    output: z.object({ saved: z.literal(true) }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const values = {
+          orgId: ctx.actor.orgId,
+          capabilityPattern: "*",
+          maxRiskAutonomous: input.maxRiskAutonomous,
+          moneyThresholdMinor: input.moneyThresholdMinor ?? null,
+          requiresApprovalFor: input.requiresApprovalFor,
+          updatedAt: new Date(),
+        };
+        await tx
+          .insert(policies)
+          .values(values)
+          .onConflictDoUpdate({
+            target: [policies.orgId, policies.capabilityPattern],
+            set: {
+              maxRiskAutonomous: values.maxRiskAutonomous,
+              moneyThresholdMinor: values.moneyThresholdMinor,
+              requiresApprovalFor: values.requiresApprovalFor,
+              updatedAt: values.updatedAt,
+            },
+          });
+        return { saved: true as const };
+      });
+    },
+  });
+
+const AI_PROVIDERS = ["nim", "openrouter", "groq", "mistral", "zai"] as const;
+
+/**
+ * The organization's own AI configuration: which provider, which key, which
+ * model per role. Secret-class: the key is encrypted at rest (AES-256-GCM),
+ * never rendered back, and never included in ledger payloads - the ledger
+ * entry records that credentials changed, not the credentials. An org
+ * without its own key falls back to the server's env configuration.
+ */
+/**
+ * Print branding for the org's invoices, quotes and printed documents
+ * (Phase 4). Single-row config upsert like setModuleConfig: applying new
+ * values IS the reversal, so no inverse is declared.
+ */
+const setOrgBranding = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "iam.setOrgBranding",
+    title: "Set print branding",
+    intent:
+      "Choose how the organization's printed documents look: upload a logo, pick an accent color, set the small print footer, and pick the invoice layout",
+    module: "iam",
+    risk: "write",
+    permission: "iam.admin",
+    input: z.object({
+      logoDataUrl: z
+        .string()
+        .regex(/^data:image\/(png|jpeg|svg\+xml);base64,[A-Za-z0-9+/=]+$/)
+        .max(300_000)
+        .optional(),
+      accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      invoiceFooter: z.string().max(300).optional(),
+      layout: z.enum(["classic", "modern"]).optional(),
+    }),
+    output: z.object({ saved: z.literal(true) }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [existing] = await tx
+          .select({ logoDataUrl: orgBranding.logoDataUrl })
+          .from(orgBranding)
+          .where(eq(orgBranding.orgId, ctx.actor.orgId))
+          .limit(1);
+        const values = {
+          orgId: ctx.actor.orgId,
+          // Omitting the logo keeps the stored one; send logoDataUrl: null
+          // shape is impossible through zod optional, so clearing is explicit below.
+          logoDataUrl: input.logoDataUrl ?? existing?.logoDataUrl ?? null,
+          accentColor: input.accentColor ?? null,
+          invoiceFooter: input.invoiceFooter ?? null,
+          layout: input.layout ?? "classic",
+          updatedAt: ctx.now,
+        };
+        await tx
+          .insert(orgBranding)
+          .values(values)
+          .onConflictDoUpdate({
+            target: orgBranding.orgId,
+            set: {
+              logoDataUrl: values.logoDataUrl,
+              accentColor: values.accentColor,
+              invoiceFooter: values.invoiceFooter,
+              layout: values.layout,
+              updatedAt: values.updatedAt,
+            },
+          });
+        return { saved: true as const };
+      });
+    },
+  });
+
+const setAiSettings = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "iam.setAiSettings",
+    title: "Set organization AI settings",
+    intent:
+      "Choose which AI provider this organization uses, store its API key encrypted, and pick which model plays each role such as primary, fast or embeddings",
+    module: "iam",
+    risk: "secret",
+    permission: "iam.admin",
+    input: z.object({
+      provider: z.enum(AI_PROVIDERS).default("nim"),
+      apiKey: z.string().min(8).max(400).optional(),
+      baseUrl: z.string().url().max(300).optional(),
+      routing: z
+        .object({
+          primary: z.string().min(1).max(120).optional(),
+          fast: z.string().min(1).max(120).optional(),
+          reasoning: z.string().min(1).max(120).optional(),
+          embeddings: z.string().min(1).max(120).optional(),
+          ocr: z.string().min(1).max(120).optional(),
+        })
+        .default({}),
+    }),
+    output: z.object({ saved: z.literal(true), keyLast4: z.string().nullable() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [existing] = await tx
+          .select({ encryptedApiKey: aiSettings.encryptedApiKey, keyLast4: aiSettings.keyLast4 })
+          .from(aiSettings)
+          .where(eq(aiSettings.orgId, ctx.actor.orgId))
+          .limit(1);
+        const keyPayload =
+          input.apiKey !== undefined
+            ? { encryptedApiKey: encryptSecret(input.apiKey), keyLast4: secretLast4(input.apiKey) }
+            : {
+                encryptedApiKey: existing?.encryptedApiKey ?? null,
+                keyLast4: existing?.keyLast4 ?? null,
+              };
+        const values = {
+          orgId: ctx.actor.orgId,
+          provider: input.provider,
+          ...keyPayload,
+          baseUrl: input.baseUrl ?? null,
+          modelRouting: input.routing,
+          updatedAt: new Date(),
+        };
+        await tx
+          .insert(aiSettings)
+          .values(values)
+          .onConflictDoUpdate({
+            target: aiSettings.orgId,
+            set: {
+              provider: values.provider,
+              encryptedApiKey: values.encryptedApiKey,
+              keyLast4: values.keyLast4,
+              baseUrl: values.baseUrl,
+              modelRouting: values.modelRouting,
+              updatedAt: values.updatedAt,
+            },
+          });
+        return { saved: true as const, keyLast4: values.keyLast4 };
+      });
+    },
+  });

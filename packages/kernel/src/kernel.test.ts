@@ -54,6 +54,18 @@ const reverseEntry = defineCapability({
   execute: async () => ({ reversed: true }),
 });
 
+const rotateApiKey = defineCapability({
+  id: "iam.rotateApiKey",
+  title: "Rotate API key",
+  intent: "Replace the stored provider credential for this organization with a new secret",
+  module: "iam",
+  risk: "secret",
+  permission: "iam.admin",
+  input: z.object({ apiKey: z.string().min(8) }),
+  output: z.object({ rotated: z.literal(true) }),
+  execute: async () => ({ rotated: true as const }),
+});
+
 const grantRole = defineCapability({
   id: "iam.grantRole",
   title: "Grant role to user",
@@ -72,6 +84,7 @@ function buildKernel(approvals?: { proceed: boolean; verify?: (id: string) => bo
   registry.register(postEntry);
   registry.register(reverseEntry);
   registry.register(grantRole);
+  registry.register(rotateApiKey);
   const ledger = new InMemoryLedger();
   let approvalRequested = false;
   const executor = new KernelExecutor({
@@ -215,4 +228,20 @@ describe("governance pipeline", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain("approval verification failed");
   });
+
+  it("redacts secret-class inputs in the ledger, both on success and on gate", async () => {
+    const k = buildKernel();
+    const executed = await k.executor.execute(
+      "iam.rotateApiKey",
+      makeCtx(["iam.admin"]),
+      { apiKey: "sk-super-secret-value" },
+    );
+    expect(executed.ok).toBe(true);
+    const entries = k.ledger.entries;
+    const last = entries.at(-1);
+    expect(last?.kind).toBe("capability.executed");
+    expect(JSON.stringify(last?.payload)).not.toContain("sk-super-secret-value");
+    expect(JSON.stringify(last?.payload)).toContain("[REDACTED: secret-class]");
+  });
+
 });

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, organizations, type Database } from "@chaste/db";
+import { createDb, items, organizations, type Database } from "@chaste/db";
 import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerInventoryCapabilities } from "./index";
 import type { ModuleDeps } from "./shared";
@@ -98,5 +98,25 @@ describe("product surface (M7.3)", () => {
     await expect(
       run("inventory.createItem", { sku: "SCAN-3", name: "Third Widget", barcode: "6001234500017" }),
     ).rejects.toThrow(/already on another item/);
+  });
+});
+
+describe("service items", () => {
+  it("create without reorder points and refuse stock adjustments", async () => {
+    const created = await run("inventory.createItem", {
+      sku: "SVC-01",
+      name: "Probe Installation",
+      kind: "service",
+      reorderPointThousandths: 5_000,
+    });
+    expect(created.itemId).toBeTruthy();
+    const [row] = await db.db.select().from(items).where(eq(items.sku, "SVC-01"));
+    expect(row?.kind).toBe("service");
+    // A reorder point on a service is dropped at the boundary.
+    expect(row?.reorderPointThousandths).toBe(0);
+
+    await expect(
+      run("inventory.adjustStock", { sku: "SVC-01", quantityDelta: 1_000, note: "should not stock" }),
+    ).rejects.toThrow(/is a service; there is nothing to stock/);
   });
 });

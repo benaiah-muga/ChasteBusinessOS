@@ -14,6 +14,7 @@ import {
 } from "@/components/ui";
 import { IconListTree, IconSend, IconChartBar } from "@/components/icons";
 import { formatDateTime, formatMoney, timeAgo, toMinor } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 
@@ -65,6 +66,7 @@ interface AnalyticsData {
 type CapabilityResult = SendResult | AnalyticsData | { segmentId: string } | { campaignId: string };
 
 export default function MarketingPage() {
+  useMoneySync();
   const enabled = useModuleEnabled("marketing");
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
@@ -188,7 +190,7 @@ export default function MarketingPage() {
           <div className="mb-5 space-y-2 text-sm">
             <div className="flex flex-wrap gap-2">
               <select
-                className="rounded border bg-transparent px-2 py-1.5"
+                className="select"
                 aria-label="Segment"
                 value={campaignForm.segmentId}
                 onChange={(e) => setCampaignForm({ ...campaignForm, segmentId: e.target.value })}

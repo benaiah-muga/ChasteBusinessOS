@@ -3,8 +3,9 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { agentSessions, getDb, organizations } from "@chaste/db";
 import { hasPermission as hasPermissionFor, logger, runAgentLoop, type TicketSink } from "@chaste/kernel";
-import { OpenAiCompatAdapter, MODELS, nimClient, resolveClient } from "@chaste/ai";
+import { OpenAiCompatAdapter, nimClient } from "@chaste/ai";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
+import { resolveOrgClient } from "@/server/ai-config";
 import { appendSessionEvent, addTokenUsage } from "@/server/session-events";
 import { drainSteering } from "@/server/steering";
 import { getResolvedUser } from "@/server/session";
@@ -54,6 +55,7 @@ could be affected. You cannot merge anything yourself; say so plainly.`;
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!resolved.orgId) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
   const ctx = actorFromResolved(resolved, { asAgent: true });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
@@ -75,10 +77,13 @@ export async function POST(req: Request) {
     resolveEnabledModules(resolved.enabledModules),
   );
   const executor = buildExecutor(db, registry);
-  const usingOpenRouter = process.env.MODEL_PROVIDER === "openrouter";
-  const modelRef = MODELS.primary();
+  // The org's own AI configuration wins when present; env configuration is
+  // the fallback for orgs that have not set credentials.
+  const orgAi = await resolveOrgClient(db, resolved.orgId, "primary");
+  const usingOpenRouter = orgAi.provider === "openrouter";
+  const modelRef = orgAi.model;
   const model = new OpenAiCompatAdapter({
-    client: resolveClient(usingOpenRouter ? `openrouter/${modelRef}` : modelRef),
+    client: orgAi.client,
     model: modelRef,
     // Upstream shared pools (e.g. stealth/ox-alpha) throttle under load;
     // falling back to the primary NIM model keeps agent turns honest
@@ -115,7 +120,7 @@ export async function POST(req: Request) {
         userId: ctx.actor.id,
         title: body.data.message.slice(0, 80),
         mode: "assist",
-        modelRef: MODELS.primary(),
+        modelRef,
       })
       .returning({ id: agentSessions.id });
     sessionId = session!.id;

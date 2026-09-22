@@ -386,6 +386,55 @@
       "when": 1789574000004,
       "tag": "0054_scim_token_expiry",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1789926524029,
+      "tag": "0055_ledger_session_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1789935009903,
+      "tag": "0056_module_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1789961259879,
+      "tag": "0057_messaging_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1789963273177,
+      "tag": "0058_item_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1790004571416,
+      "tag": "0059_ai_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1790010000000,
+      "tag": "0060_authored_docs",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1790011000000,
+      "tag": "0061_org_branding",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui";
 import { IconCard, IconCash, IconLock, IconPlus, IconTrash, IconUndo } from "@/components/icons";
 import { cn, formatMoney, statusTone, timeAgo, toMinor } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 import { useRouter } from "next/navigation";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
@@ -59,6 +60,7 @@ interface ShiftSummary {
 }
 
 export default function PosPage() {
+  useMoneySync();
   const __enabled = useModuleEnabled("pos");
   const router = useRouter();
   const [sessions, setSessions] = useState<PosSession[] | null>(null);

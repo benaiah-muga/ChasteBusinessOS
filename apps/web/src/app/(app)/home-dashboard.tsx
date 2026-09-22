@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { callApi, postApi } from "@/lib/api";
 import { cn, formatMoney, formatMoneyWhole, timeAgo } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 import { IconArrowRight, IconSparkle } from "@/components/icons";
 import { pilotBegin, record } from "@/lib/pilot-metrics";
 
@@ -94,6 +95,7 @@ function openChatWith(prompt: string) {
 }
 
 export function HomeDashboard({ orgName }: { orgName: string }) {
+  useMoneySync();
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setup, setSetup] = useState<SetupItem[] | null>(null);

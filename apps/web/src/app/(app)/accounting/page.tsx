@@ -25,6 +25,7 @@ import {
   IconUndo,
 } from "@/components/icons";
 import { cn, formatDate, formatDateTime, formatMoney } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
@@ -162,6 +163,7 @@ function initialTab(): TabId {
 }
 
 export default function AccountingPage() {
+  useMoneySync();
   const __enabled = useModuleEnabled("accounting");
   const router = useRouter();
   const [tab, setTab] = useState<TabId>(initialTab);
@@ -1047,7 +1049,7 @@ function ReceivablesSection({
         <div className="space-y-2 text-sm">
           <div className="flex flex-wrap gap-2">
             <select
-              className="rounded border bg-transparent px-2 py-1.5"
+              className="select"
               aria-label="Customer"
               value={invoiceForm.customerId}
               onChange={(e) => setInvoiceForm({ ...invoiceForm, customerId: e.target.value })}
@@ -1836,7 +1838,7 @@ function BankSection({
         </p>
         {accounts.length > 1 && (
           <select
-            className="input mt-3 w-64"
+            className="select mt-3 w-64"
             value={accountId}
             onChange={(e) => setAccountId(e.target.value)}
             aria-label="Account to import into"
@@ -1890,7 +1892,7 @@ function BankSection({
                   {formatMoney(t.amountMinor)}
                 </span>
                 <select
-                  className="input w-56 py-1 text-xs"
+                  className="select w-56 py-1 text-xs"
                   value={matchPicks[t.id] ?? ""}
                   onChange={(e) => setMatchPicks((p) => ({ ...p, [t.id]: e.target.value }))}
                   aria-label={`Match ${t.description} against payment`}
@@ -2287,7 +2289,7 @@ function CashSection({ customers }: { customers: { id: string; name: string }[] 
           <>
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <select
-                className="rounded border bg-transparent px-2 py-1.5"
+                className="select"
                 value={customerId}
                 onChange={(e) => setCustomerId(e.target.value)}
                 aria-label="Customer"

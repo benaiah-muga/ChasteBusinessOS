@@ -10,13 +10,15 @@ interface ModuleInfo {
   label: string;
   description: string;
   href: string | null;
+  /** Platform spine: the switchboard can never turn it off. */
+  protected?: boolean;
 }
 
 /**
  * The module switchboard. Saving goes through the governed iam.setModules
- * capability (identity-class), so changes land in the Approvals inbox and
- * apply after a human with iam.admin approves - the UI never flips the
- * switch directly.
+ * capability: a human admin applies changes directly under their own
+ * authority (fully audited); the workmate proposing the same change lands
+ * it in the Approvals inbox. Protected spine rows render as locked-on.
  */
 export function ModulesManager() {
   const [catalog, setCatalog] = useState<ModuleInfo[]>([]);
@@ -86,6 +88,7 @@ export function ModulesManager() {
           <p className="text-xs text-stone-500">
             Switch platform surfaces on or off for this organization.
             Disabled modules disappear from navigation, APIs, and agent tools.
+            Core platform modules stay on; they run the switchboard itself.
           </p>
         </div>
         {usingDefaults && catalog.length > 0 && (
@@ -103,10 +106,14 @@ export function ModulesManager() {
       <ul className="divide-y divide-stone-100">
         {catalog.map((m) => {
           const on = enabled.has(m.id);
+          const locked = Boolean(m.protected);
           return (
             <li key={m.id} className="flex items-center justify-between gap-4 px-5 py-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-stone-900">{m.label}</p>
+                <p className="text-sm font-medium text-stone-900">
+                  {m.label}
+                  {locked && <span className="ml-2 align-middle text-[11px] font-normal tracking-wide text-stone-400 uppercase">core</span>}
+                </p>
                 <p className="truncate text-xs text-stone-500">{m.description}</p>
               </div>
               <button
@@ -114,11 +121,12 @@ export function ModulesManager() {
                 role="switch"
                 aria-checked={on}
                 aria-label={`${on ? "Disable" : "Enable"} ${m.label}`}
-                disabled={busy}
+                disabled={busy || locked}
+                title={locked ? "Core platform module, always on" : undefined}
                 onClick={() => toggle(m.id)}
-                className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors duration-150 ${
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-150 ${
                   on ? "bg-gold-700" : "bg-stone-300"
-                }`}
+                } ${locked ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
               >
                 <span
                   className={`absolute top-0.5 flex size-5 items-center justify-center rounded-full bg-white shadow transition-all duration-150 ${

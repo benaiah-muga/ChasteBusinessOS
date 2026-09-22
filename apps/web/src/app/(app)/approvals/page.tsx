@@ -22,6 +22,7 @@ interface Approval {
   payload: unknown;
   rationale: string;
   createdAt: string;
+  raisedBy?: { name: string; kind: "agent" | "human" };
 }
 
 export default function ApprovalsPage() {
@@ -103,6 +104,21 @@ export default function ApprovalsPage() {
               <header className="flex flex-wrap items-center gap-2.5 border-b border-stone-100 bg-stone-50/60 px-5 py-3">
                 <RiskBadge risk={a.riskClass} />
                 <span className="font-mono text-[13px] font-medium text-stone-800">{a.capabilityId}</span>
+                {a.raisedBy && (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      a.raisedBy.kind === "agent" ? "bg-violet-100 text-violet-800" : "bg-stone-200 text-stone-700"
+                    }`}
+                    title={
+                      a.raisedBy.kind === "agent"
+                        ? `Raised by the workmate acting for ${a.raisedBy.name}`
+                        : "Raised by a person in your organization"
+                    }
+                  >
+                    {a.raisedBy.kind === "agent" ? "agent · for " : "human · "}
+                    {a.raisedBy.name}
+                  </span>
+                )}
                 <time className="ml-auto text-xs whitespace-nowrap text-stone-400" dateTime={a.createdAt}>
                   {new Date(a.createdAt).toLocaleString()}
                 </time>

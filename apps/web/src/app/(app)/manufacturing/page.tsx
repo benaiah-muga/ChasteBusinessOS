@@ -13,6 +13,7 @@ import {
   type ActionNoticeState,
 } from "@/components/ui";
 import { formatDateTime, formatMoney } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 import { IconChevronDown, IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
@@ -82,6 +83,7 @@ const qty = (t: number) => (t / 1000).toFixed(3);
 const pct = (t: number) => `${(t / 10000).toFixed(1)}%`;
 
 export default function ManufacturingPage() {
+  useMoneySync();
   const __enabled = useModuleEnabled("manufacturing");
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);

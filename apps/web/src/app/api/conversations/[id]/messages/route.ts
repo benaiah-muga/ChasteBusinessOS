@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import {
   conversationMembers,
   conversations,
   getDb,
   messages,
   organizations,
-  tickets,
   users,
 } from "@chaste/db";
-import { MODELS, OpenAiCompatAdapter } from "@chaste/ai";
+import { OpenAiCompatAdapter } from "@chaste/ai";
 import { runAgentLoop } from "@chaste/kernel";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
+import { resolveOrgClient } from "@/server/ai-config";
 import { getResolvedUser } from "@/server/session";
 
 type Params = { params: Promise<{ id: string }> };
@@ -61,16 +61,18 @@ export async function GET(_req: Request, { params }: Params) {
       {
         id: messages.id,
         senderType: messages.senderType,
+        senderUserId: messages.senderUserId,
         body: messages.body,
         createdAt: messages.createdAt,
+        editedAt: messages.editedAt,
         mentions: messages.mentions,
       },
     )
     .from(messages)
-    .where(eq(messages.conversationId, id))
+    .where(and(eq(messages.conversationId, id), isNull(messages.deletedAt)))
     .orderBy(asc(messages.createdAt))
     .limit(200);
-  return NextResponse.json({ conversation: conv, messages: rows });
+  return NextResponse.json({ conversation: conv, messages: rows, me: resolved.userId });
 }
 
 const mentionSchema = z.object({
@@ -143,8 +145,9 @@ export async function POST(req: Request, { params }: Params) {
 
     const agentCtx = actorFromResolved(resolved, { asAgent: true });
     if (agentCtx) {
+      const org = await resolveOrgClient(db, resolved.orgId, "primary");
       const result = await runAgentLoop(
-        new OpenAiCompatAdapter({ model: MODELS.primary() }),
+        new OpenAiCompatAdapter({ client: org.client, model: org.model }),
         registry,
         executor,
         agentCtx,
@@ -155,9 +158,17 @@ export async function POST(req: Request, { params }: Params) {
           maxSteps: 5,
         },
         {
+          // Escalation goes through the governed capability, not a raw
+          // insert: the same permission check and ledger entry as when the
+          // workmate files a ticket anywhere else.
           file: async (orgId, title, description) => {
-            const [created] = await db.insert(tickets).values({ orgId, title, description }).returning({ id: tickets.id });
-            return { id: created!.id };
+            const result = await executor.execute("support.createTicket", agentCtx, {
+              title,
+              description,
+              origin: "capability_gap",
+            });
+            if (!result.ok || !result.data) throw new Error(result.error ?? "ticket could not be filed");
+            return { id: (result.data as { ticketId: string }).ticketId };
           },
         },
       );

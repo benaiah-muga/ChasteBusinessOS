@@ -3,11 +3,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { appsForOrg, tileStyle, type AppInfo } from "./_shell/apps";
-import { IconSearch } from "@/components/icons";
+import { useQuickCreate, type QuickCreateEntityId } from "./quick-create";
+import { IconPlus, IconSearch } from "@/components/icons";
 import { cn } from "@/lib/format";
 
 type Command =
-  | { kind: "app"; app: AppInfo };
+  | { kind: "app"; app: AppInfo; key: string }
+  | { kind: "create"; entity: QuickCreateEntityId; label: string; key: string };
+
+const CREATE_COMMANDS: { entity: QuickCreateEntityId; label: string; module: string }[] = [
+  { entity: "customer", label: "New customer", module: "crm" },
+  { entity: "product", label: "New product", module: "inventory" },
+  { entity: "vendor", label: "New vendor", module: "purchasing" },
+];
 
 export function CommandPalette({
   open,
@@ -19,6 +27,7 @@ export function CommandPalette({
   enabledModules?: ReadonlySet<string> | null;
 }) {
   const router = useRouter();
+  const quickCreate = useQuickCreate();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,8 +38,14 @@ export function CommandPalette({
     const apps = appsForOrg(enabledModules).filter(
       (a) => !q || a.name.toLowerCase().includes(q) || a.tagline.toLowerCase().includes(q),
     );
+    const creates = CREATE_COMMANDS.filter(
+      (c) =>
+        (!enabledModules || enabledModules.has(c.module)) &&
+        (!q || "new".includes(q) || c.label.toLowerCase().includes(q)),
+    ).map((c) => ({ kind: "create" as const, entity: c.entity, label: c.label, key: c.label }));
     return [
-      ...apps.map((app) => ({ kind: "app" as const, app })),
+      ...creates,
+      ...apps.map((app) => ({ kind: "app" as const, app, key: app.id })),
     ];
   }, [query, enabledModules]);
 
@@ -53,6 +68,7 @@ export function CommandPalette({
   function run(cmd: Command) {
     onClose();
     if (cmd.kind === "app") router.push(cmd.app.href);
+    else quickCreate.open(cmd.entity);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -96,7 +112,7 @@ export function CommandPalette({
             const isActive = i === active;
             return (
               <button
-                key={cmd.app.id}
+                key={cmd.key}
                 type="button"
                 role="option"
                 aria-selected={isActive}
@@ -110,13 +126,19 @@ export function CommandPalette({
               >
                 <span
                   aria-hidden="true"
-                  style={tileStyle()}
-                  className={cn("flex size-7 shrink-0 items-center justify-center rounded-lg", isActive && "scale-105")}
+                  style={cmd.kind === "app" ? tileStyle() : undefined}
+                  className={cn(
+                    "flex size-7 shrink-0 items-center justify-center rounded-lg",
+                    cmd.kind === "create" ? "border border-dashed border-stone-300 bg-white text-stone-500" : "",
+                    isActive && "scale-105",
+                  )}
                 >
-                  <cmd.app.icon className="size-4" />
+                  {cmd.kind === "create" ? <IconPlus className="size-4" /> : <cmd.app.icon className="size-4" />}
                 </span>
-                <span className="flex-1 font-medium">{cmd.app.name}</span>
-                <span className="truncate text-xs text-stone-400">{cmd.app.tagline}</span>
+                <span className="flex-1 font-medium">{cmd.kind === "create" ? cmd.label : cmd.app.name}</span>
+                <span className="truncate text-xs text-stone-400">
+                  {cmd.kind === "create" ? "quick create" : cmd.app.tagline}
+                </span>
               </button>
             );
           })}

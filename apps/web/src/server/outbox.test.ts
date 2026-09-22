@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { approvals, createDb, customers, notifications, organizations, outboxMessages, type Database } from "@chaste/db";
+import { approvals, createDb, customers, notifications, organizations, outboxMessages, users, type Database } from "@chaste/db";
 import { logger } from "@chaste/kernel";
 import { DbApprovalFlow } from "./kernel";
 import { enqueueOutboxMessage, processOneOutbox, reconcileOutboxMessage } from "./outbox";
@@ -88,6 +88,11 @@ describe("durable external outbox", () => {
     vi.stubEnv("NOTIFICATION_WEBHOOK_URL", "https://notify.example.test/hook");
     vi.stubEnv("SMTP_HOST", "smtp.example.test");
     vi.stubEnv("SMTP_TO", "ops@example.test");
+    const [requester] = await db
+      .insert(users)
+      .values({ email: `outbox-${orgId.slice(0, 8)}@example.test`, name: "Owner" })
+      .returning();
+    const requesterId = requester!.id;
     const flow = new DbApprovalFlow(db);
     await flow.submit(
       {
@@ -97,7 +102,9 @@ describe("durable external outbox", () => {
         rationale: "A human must approve this payment before it is posted.",
       },
       {
-        actor: { type: "agent", id: crypto.randomUUID(), orgId, permissions: new Set(["accounting.recordPayment"]) },
+        // Attribution (ADR 0055): an agent's actor id is the principal it
+        // works for, so the approvals FK now requires a real user row.
+        actor: { type: "agent", id: requesterId, orgId, permissions: new Set(["accounting.recordPayment"]) },
         now: new Date(),
         services: {},
       },
@@ -107,6 +114,8 @@ describe("durable external outbox", () => {
       .from(outboxMessages)
       .where(and(eq(outboxMessages.orgId, orgId), eq(outboxMessages.status, "pending")));
     expect(rows.map((row) => row.kind).sort()).toEqual(["email", "webhook"]);
+    await db.delete(approvals).where(eq(approvals.requestedByUserId, requesterId));
+    await db.delete(users).where(eq(users.id, requesterId));
   });
 
   it("rechecks a marketing recipient before dispatch and does not call SMTP after unsubscribe", async () => {
