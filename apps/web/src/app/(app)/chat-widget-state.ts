@@ -4,20 +4,23 @@ import { useSyncExternalStore } from "react";
 
 /**
  * Chat dock modes, shared app-wide so any surface can drive the dock:
- * - "input": horizontal floating input bar at the lower center (default,
- *   visible on every page)
+ * - "hover": hidden until the pointer rests near the bottom edge of the
+ *   screen; the floating input bar rises into view and stays while the
+ *   pointer is over it (default)
+ * - "input": horizontal floating input bar at the lower center, always
+ *   visible on every page
  * - "bubble": shrunk to a bubble at the lower right
  * - "open": expanded chat panel overlaying the lower right
  * - "pinned": chat panel pinned to the right edge as part of the layout;
  *   AppShell reserves its width so nothing behind it is obstructed
  */
 
-export type ChatDockMode = "input" | "bubble" | "open" | "pinned";
+export type ChatDockMode = "hover" | "input" | "bubble" | "open" | "pinned";
 
 const STORAGE_KEY = "chaste.chatDockMode";
-const VALID: ChatDockMode[] = ["input", "bubble", "open", "pinned"];
+const VALID: ChatDockMode[] = ["hover", "input", "bubble", "open", "pinned"];
 
-let mode: ChatDockMode = "input";
+let mode: ChatDockMode = "hover";
 const listeners = new Set<() => void>();
 
 function set(next: ChatDockMode) {

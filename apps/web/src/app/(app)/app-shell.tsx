@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/client";
 import { EnabledModulesProvider } from "./_shell/module-context";
+import { QuickCreateProvider } from "./quick-create";
 import { resolveEnabledModules } from "./_shell/modules";
 import { resolveApp, tileStyle } from "./_shell/apps";
 import { usePinnedApps } from "./_shell/pins";
@@ -28,8 +29,9 @@ import {
 import { Avatar } from "@/components/ui";
 import { LogoMark } from "@/components/logo";
 import { ThemeMenu } from "@/components/theme";
-import { cn, setDisplayCurrency } from "@/lib/format";
-import { CURRENCIES, usePrefs, type CurrencyCode } from "@/lib/prefs";
+import { cn, setActiveCurrency } from "@/lib/format";
+import { applyOrgDefault, useMoneySync } from "@/lib/money";
+import { usePrefs } from "@/lib/prefs";
 
 const authClient = createAuthClient();
 
@@ -37,6 +39,8 @@ interface ShellProps {
   children: ReactNode;
   user: { name: string; email: string };
   orgName: string;
+  /** The active org's base currency; the default presentation currency. */
+  orgCurrency: string;
   pendingApprovals: number;
   /** Server-rendered org switcher form (server action). */
   orgSwitcher?: ReactNode;
@@ -45,7 +49,7 @@ interface ShellProps {
   baseCurrency: string;
 }
 
-export function AppShell({ children, user, orgName, pendingApprovals, orgSwitcher, enabledModules, baseCurrency }: ShellProps) {
+export function AppShell({ children, user, orgName, orgCurrency, pendingApprovals, orgSwitcher, enabledModules, baseCurrency }: ShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [launcherOpen, setLauncherOpen] = useState(false);
@@ -56,9 +60,19 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
   const dockMode = useChatDockMode();
   const chatPinned = dockMode === "pinned";
   const inputMode = dockMode === "input";
-  const initialCurrency = CURRENCIES.some((currency) => currency.code === baseCurrency) ? (baseCurrency as CurrencyCode) : "USD";
-  const [prefs] = usePrefs({ currency: initialCurrency });
-  setDisplayCurrency(prefs.currency);
+  // Presentation currency: the org's base currency by default, with the
+  // device preference as an override ("org" follows the org base). The
+  // shared money store applies it per page via useMoneySync.
+  const [prefs] = usePrefs();
+  useMoneySync();
+  const base = orgCurrency || baseCurrency;
+
+  useEffect(() => {
+    applyOrgDefault(base);
+  }, [base]);
+  useEffect(() => {
+    setActiveCurrency(prefs.currency === "org" ? base : prefs.currency);
+  }, [prefs.currency, base]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -286,6 +300,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
 
   return (
     <EnabledModulesProvider value={enabledModules}>
+      <QuickCreateProvider>
       <div className="min-h-screen">
         <a
           href="#main"
@@ -390,6 +405,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
         <AppsLauncher open={launcherOpen} onClose={() => setLauncherOpen(false)} enabledModules={enabled} />
         <ChatWidget />
       </div>
+      </QuickCreateProvider>
     </EnabledModulesProvider>
   );
 }

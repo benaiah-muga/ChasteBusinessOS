@@ -13,7 +13,8 @@ import {
   StatCard,
   type ActionNoticeState,
 } from "@/components/ui";
-import { formatMoney } from "@/lib/format";
+import { cn, formatMoney, toMinor } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 import { IconBox, IconSearch } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
@@ -24,6 +25,7 @@ type Tab = "overview" | "catalog" | "new";
 interface Item {
   sku: string;
   name: string;
+  kind?: string;
   unitLabel: string;
   salePriceMinor?: number;
   imageUrl?: string | null;
@@ -52,13 +54,15 @@ interface Payload {
 const qty = (t: number) => (t / 1000).toFixed(3);
 
 export default function ProductsPage() {
+  useMoneySync();
   const enabled = useModuleEnabled("inventory");
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ sku: "", name: "", unitLabel: "", salePrice: "", openingQty: "", barcode: "", imageUrl: "", tags: "" });
+  const [form, setForm] = useState({ sku: "", name: "", unitLabel: "", salePrice: "", reorder: "", openingQty: "", barcode: "", imageUrl: "", tags: "" });
+  const [isService, setIsService] = useState(false);
   const [editTarget, setEditTarget] = useState<Item | null>(null);
   const [editForm, setEditForm] = useState({ name: "", unitLabel: "", salePrice: "", barcode: "", imageUrl: "", tags: "" });
 
@@ -71,6 +75,22 @@ export default function ProductsPage() {
   useEffect(() => {
     if (enabled) void load();
   }, [enabled, load]);
+
+  // Module defaults prefill the create form (Settings > Modules > Inventory).
+  useEffect(() => {
+    void (async () => {
+      const res = await callApi<{ settings?: { defaultUnitLabel?: string; defaultReorderPointUnits?: number } }>(
+        "/api/module-settings?module=inventory",
+      );
+      const s = res.data?.settings;
+      if (!s) return;
+      setForm((f) => ({
+        ...f,
+        unitLabel: f.unitLabel || (s.defaultUnitLabel ?? ""),
+        reorder: f.reorder || (s.defaultReorderPointUnits != null && s.defaultReorderPointUnits > 0 ? String(s.defaultReorderPointUnits) : ""),
+      }));
+    })();
+  }, []);
 
   // Inventory actions are governed; 202 means the kernel parked it for approval.
   const post = useCallback(
@@ -107,8 +127,10 @@ export default function ProductsPage() {
         action: "createItem",
         sku,
         name,
+        kind: isService ? "service" : "goods",
         unitLabel: form.unitLabel.trim() || undefined,
-        salePriceMinor: Math.round(Number(form.salePrice || "0") * 100),
+        salePriceMinor: toMinor(form.salePrice),
+        reorderPointThousandths: isService ? 0 : Math.round(Number(form.reorder || "0") * 1000),
         barcode: form.barcode.trim() || undefined,
         imageUrl: form.imageUrl.trim() || undefined,
         tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
@@ -117,9 +139,10 @@ export default function ProductsPage() {
     );
     if (!ok) return;
 
-    const openingQty = Math.round(Number(form.openingQty || "0") * 1000);
+    const openingQty = isService ? 0 : Math.round(Number(form.openingQty || "0") * 1000);
     if (openingQty > 0) await post({ action: "adjustStock", sku, quantityDelta: openingQty, note: "Opening stock" }, "Record opening stock");
-    setForm({ sku: "", name: "", unitLabel: "", salePrice: "", openingQty: "", barcode: "", imageUrl: "", tags: "" });
+    setForm({ sku: "", name: "", unitLabel: "", salePrice: "", reorder: "", openingQty: "", barcode: "", imageUrl: "", tags: "" });
+    setIsService(false);
   }
 
   async function archive(sku: string): Promise<void> {
@@ -282,6 +305,11 @@ export default function ProductsPage() {
                       <span className="flex items-center gap-2">
                         {i.imageUrl ? <img src={i.imageUrl} alt="" className="size-6 rounded object-cover" /> : null}
                         {i.name}
+                        {i.kind === "service" && (
+                          <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-800">
+                            service
+                          </span>
+                        )}
                         {i.tags && i.tags.length > 0 && (
                           <span className="text-xs opacity-50" title={i.tags.join(", ")}>
                             {i.tags.slice(0, 2).join(", ")}
@@ -354,6 +382,18 @@ export default function ProductsPage() {
                 value={form.unitLabel}
                 onChange={(e) => setForm({ ...form, unitLabel: e.target.value })}
               />
+              <label
+                className="flex cursor-pointer items-center gap-1.5 rounded border border-stone-200 px-2 py-1.5 text-xs text-stone-600"
+                title="Services sell without stock tracking, reservations, or reorder points"
+              >
+                <input
+                  type="checkbox"
+                  checked={isService}
+                  onChange={(e) => setIsService(e.target.checked)}
+                  className="accent-gold-700"
+                />
+                Service (no stock)
+              </label>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <input
@@ -364,10 +404,20 @@ export default function ProductsPage() {
                 onChange={(e) => setForm({ ...form, salePrice: e.target.value })}
               />
               <input
-                className="w-36 rounded border bg-transparent px-2 py-1.5 text-right"
+                className={cn("w-28 rounded border bg-transparent px-2 py-1.5 text-right", isService && "opacity-40")}
+                placeholder="Reorder at"
+                aria-label="Reorder point in units"
+                title="Stock level that triggers a reorder signal"
+                value={isService ? "" : form.reorder}
+                disabled={isService}
+                onChange={(e) => setForm({ ...form, reorder: e.target.value })}
+              />
+              <input
+                className={cn("w-36 rounded border bg-transparent px-2 py-1.5 text-right", isService && "opacity-40")}
                 placeholder="Opening qty"
                 aria-label="Opening stock quantity in units"
-                value={form.openingQty}
+                value={isService ? "" : form.openingQty}
+                disabled={isService}
                 onChange={(e) => setForm({ ...form, openingQty: e.target.value })}
               />
               <input

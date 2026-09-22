@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import {
   conversationMembers,
   conversations,
   getDb,
   messages,
   organizations,
-  tickets,
   users,
 } from "@chaste/db";
 import { OpenAiCompatAdapter, resolveClient } from "@chaste/ai";
@@ -23,7 +22,7 @@ async function loadConversation(id: string, orgId: string) {
   const [conv] = await db
     .select()
     .from(conversations)
-    .where(and(eq(conversations.id, id), eq(conversations.orgId, orgId)))
+    .where(and(eq(conversations.id, id), eq(conversations.orgId, orgId), isNull(conversations.deletedAt)))
     .limit(1);
   return conv ?? null;
 }
@@ -62,16 +61,18 @@ export async function GET(_req: Request, { params }: Params) {
       {
         id: messages.id,
         senderType: messages.senderType,
+        senderUserId: messages.senderUserId,
         body: messages.body,
         createdAt: messages.createdAt,
+        editedAt: messages.editedAt,
         mentions: messages.mentions,
       },
     )
     .from(messages)
-    .where(eq(messages.conversationId, id))
+    .where(and(eq(messages.conversationId, id), eq(messages.orgId, resolved.orgId), isNull(messages.deletedAt)))
     .orderBy(asc(messages.createdAt))
     .limit(200);
-  return NextResponse.json({ conversation: conv, messages: rows });
+  return NextResponse.json({ conversation: conv, messages: rows, me: resolved.userId });
 }
 
 const mentionSchema = z.object({
@@ -128,7 +129,7 @@ export async function POST(req: Request, { params }: Params) {
     const history = await db
       .select({ senderType: messages.senderType, senderUserId: messages.senderUserId, body: messages.body })
       .from(messages)
-      .where(eq(messages.conversationId, id))
+      .where(and(eq(messages.conversationId, id), eq(messages.orgId, resolved.orgId), isNull(messages.deletedAt)))
       .orderBy(asc(messages.createdAt))
       .limit(30);
     const transcript = history
@@ -157,9 +158,17 @@ export async function POST(req: Request, { params }: Params) {
           maxSteps: 5,
         },
         {
+          // Escalation goes through the governed capability, not a raw
+          // insert: the same permission check and ledger entry as when the
+          // workmate files a ticket anywhere else.
           file: async (orgId, title, description) => {
-            const [created] = await db.insert(tickets).values({ orgId, title, description }).returning({ id: tickets.id });
-            return { id: created!.id };
+            const result = await executor.execute("support.createTicket", agentCtx, {
+              title,
+              description,
+              origin: "capability_gap",
+            });
+            if (!result.ok || !result.data) throw new Error(result.error ?? "ticket could not be filed");
+            return { id: (result.data as { ticketId: string }).ticketId };
           },
         },
       );

@@ -780,7 +780,9 @@ const createPurchaseRequest = (deps: ModuleDeps) =>
           title: input.title,
           justification: input.justification,
           estimatedAmountMinor: input.estimatedAmountMinor ?? null,
-          requestedByUserId: ctx.actor.type === "human" ? ctx.actor.id : null,
+          // Attribution: an agent's actor id is the principal it works for,
+          // so requests always carry the human they belong to.
+          requestedByUserId: ctx.actor.id,
         })
         .returning({ id: purchaseRequests.id });
       return { requestId: row!.id };

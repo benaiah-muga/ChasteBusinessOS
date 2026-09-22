@@ -1,5 +1,9 @@
 import OpenAI from "openai";
 
+/** The OpenAI-compatible client type, re-exported so consumers can type
+ *  org-resolved clients without depending on openai directly. */
+export type OpenAIClient = OpenAI;
+
 /**
  * Model providers and routing. Started life as "nim.ts" when NVIDIA NIM was
  * the only provider; every OpenAI-compatible provider (NIM, OpenRouter,

@@ -24,13 +24,32 @@ export function hasPermission(actor: { permissions: ReadonlySet<string> }, permi
 }
 
 export class DefaultPolicyEngine implements PolicyEngine {
-  async evaluate(ctx: ActionContext, cap: Capability, _input: unknown): Promise<PolicyDecision> {
+  async evaluate(
+    ctx: ActionContext,
+    cap: Capability,
+    _input: unknown,
+    opts: { humanGates?: ReadonlySet<RiskClass> | "*" } = {},
+  ): Promise<PolicyDecision> {
     if (!hasPermission(ctx.actor, cap.permission)) {
       return { allowed: false, requiresApproval: false, reason: `missing permission: ${cap.permission}` };
     }
 
-    // Hard gates that no policy can relax.
+    // A permitted human acting in the product executes under their own
+    // authority: the audit trail is the control, and routing every click
+    // through the approvals inbox makes the human approve themselves. Gates
+    // exist for actors nobody can trust implicitly: the workmate, routines,
+    // system jobs. An org can re-impose dual control (maker-checker) for
+    // humans per risk class via opts.humanGates; that is a strictness knob,
+    // never a default.
+    const strict = opts.humanGates === "*" || opts.humanGates?.has(cap.risk);
     if (cap.risk === "identity" || cap.risk === "destructive") {
+      if (ctx.actor.type === "human" && !strict) {
+        return {
+          allowed: true,
+          requiresApproval: false,
+          reason: `human authority: ${ctx.actor.id ?? "user"} executes directly`,
+        };
+      }
       return {
         allowed: true,
         requiresApproval: true,
@@ -64,12 +83,34 @@ export interface OrgPolicyRule {
   capabilityPattern: string;
   maxRiskAutonomous: RiskClass;
   moneyThresholdMinor?: number;
+  /**
+   * Risk classes that require dual control even for humans (maker-checker
+   * strict mode); "*" covers every class. Empty/undefined keeps the default:
+   * permitted humans act directly under their own authority (ADR 0055).
+   */
+  requiresApprovalFor?: string[];
 }
 
 function matchesPattern(pattern: string, capabilityId: string): boolean {
   if (pattern === "*" || pattern === "*.*") return true;
   if (pattern.endsWith(".*")) return capabilityId.startsWith(pattern.slice(0, -1));
   return pattern === capabilityId;
+}
+
+/** Union of the matching rules' human-gate risk classes; null when none. */
+function humanGateSet(
+  rules: OrgPolicyRule[],
+  capabilityId: string,
+): ReadonlySet<RiskClass> | "*" | null {
+  let set: Set<RiskClass> | null = null;
+  for (const rule of rules) {
+    if (!matchesPattern(rule.capabilityPattern, capabilityId)) continue;
+    for (const risk of rule.requiresApprovalFor ?? []) {
+      if (risk === "*") return "*";
+      if (risk in RISK_RANK) (set ??= new Set<RiskClass>()).add(risk as RiskClass);
+    }
+  }
+  return set;
 }
 
 /**
@@ -80,10 +121,13 @@ export class OrgPolicyEngine implements PolicyEngine {
   constructor(private readonly loadRules: (orgId: string) => Promise<OrgPolicyRule[]>) {}
 
   async evaluate(ctx: ActionContext, cap: Capability, input: unknown): Promise<PolicyDecision> {
-    const base = await new DefaultPolicyEngine().evaluate(ctx, cap, input);
-    if (!base.allowed || cap.risk === "identity" || cap.risk === "destructive") return base;
-
     const rules = await this.loadRules(ctx.actor.orgId);
+    const humanGates = humanGateSet(rules, cap.id);
+    const base = await new DefaultPolicyEngine().evaluate(ctx, cap, input, { humanGates: humanGates ?? undefined });
+    // A gate here (agent hard gates, or strict-mode human gates) is final:
+    // the rule walk below may add gates, never remove one.
+    if (!base.allowed || base.requiresApproval) return base;
+
     const matching = rules.filter((r) => matchesPattern(r.capabilityPattern, cap.id));
     // Most specific pattern wins: "purchasing.createPurchaseOrder" beats
     // "purchasing.*" beats the onboarding blanket "*". Ties resolve to the
@@ -98,17 +142,17 @@ export class OrgPolicyEngine implements PolicyEngine {
 
     // Money actions are governed by amount thresholds below, not by the
     // blanket risk cap, otherwise every retail sale needs sign-off.
-    if (rule && cap.risk !== "money" && RISK_RANK[cap.risk] > RISK_RANK[rule.maxRiskAutonomous]) {
+    if (ctx.actor.type !== "human" && rule && cap.risk !== "money" && RISK_RANK[cap.risk] > RISK_RANK[rule.maxRiskAutonomous]) {
       return { allowed: true, requiresApproval: true, reason: `org policy caps autonomy at "${rule.maxRiskAutonomous}"` };
     }
 
     if (cap.risk === "money") {
       const threshold = rule?.moneyThresholdMinor ?? cap.moneyThresholdMinor ?? 0;
       const amount = cap.moneyAmount ? cap.moneyAmount(input as never) : null;
-      const gated = ctx.actor.type === "agent" || threshold > 0;
-      // Null amount gates even humans when a threshold is configured: the
-      // org asked for sign-off on money, we cannot prove this action is
-      // below it, so it waits for approval. Fail closed, never open.
+      const humanStrict = humanGates === "*" || humanGates?.has("money") === true;
+      const gated = ctx.actor.type === "agent" || (ctx.actor.type === "human" && humanStrict);
+      // Null amount gates when the actor is gated at all: we cannot prove
+      // this action is below it, so it waits for approval. Fail closed.
       if (gated && (amount === null || amount > threshold)) {
         return {
           allowed: true,
@@ -133,7 +177,11 @@ export function approvalRequestFor(
   return {
     capabilityId: cap.id,
     riskClass: cap.risk,
-    payload: input,
+    // Secret-class inputs (credentials) are redacted symmetrically: the
+    // stored approval payload and the re-execution verification payload
+    // both carry the marker, so approval still verifies exactly while no
+    // secret ever lands in the approvals table or the inbox UI.
+    payload: cap.risk === "secret" ? "[REDACTED: secret-class]" : input,
     rationale: decision.reason,
   };
 }

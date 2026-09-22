@@ -196,23 +196,28 @@ const orderConfirm = (deps: ModuleDeps) =>
         // N15: lock every item identity this order touches, in a stable
         // order, before checking availability. Two concurrent confirms (or
         // a POS sale) serialize on the item rows instead of both reading
-        // the same availability and double-claiming the last unit.
+        // the same availability and double-claiming the last unit. Kinds
+        // ride along: service lines commit without touching stock.
         const itemIds = [...new Set(lines.filter((l) => l.itemId).map((l) => l.itemId!))].sort();
+        const kindById = new Map<string, string>();
         if (itemIds.length > 0) {
-          await tx
-            .select({ id: items.id })
+          const locked = await tx
+            .select({ id: items.id, kind: items.kind })
             .from(items)
             .where(and(eq(items.orgId, ctx.actor.orgId), inArray(items.id, itemIds)))
             .orderBy(items.id)
             .for("update");
+          for (const row of locked) kindById.set(row.id, row.kind);
         }
 
         // Aggregate demand by inventory identity, then spend one running
         // availability budget per item - repeated lines can no longer each
-        // claim the same stock (N15).
+        // claim the same stock (N15). Service lines stay out of the budget:
+        // there is nothing to run out of.
         const demand = new Map<string, number>();
         for (const line of lines) {
           if (!line.itemId) continue;
+          if (kindById.get(line.itemId) === "service") continue;
           demand.set(line.itemId, (demand.get(line.itemId) ?? 0) + line.quantity);
         }
         const budget = new Map<string, number>();
@@ -226,6 +231,13 @@ const orderConfirm = (deps: ModuleDeps) =>
         for (const line of lines) {
           if (!line.itemId) continue;
           wantedTotal += line.quantity;
+          if (kindById.get(line.itemId) === "service") {
+            // A service line is committed in full the moment the order
+            // confirms: delivery later just marks it invoiced.
+            plan.push({ line, take: line.quantity });
+            reservedTotal += line.quantity;
+            continue;
+          }
           const available = budget.get(line.itemId) ?? 0;
           const take = Math.max(0, Math.min(line.quantity, available));
           budget.set(line.itemId, available - take);
@@ -241,6 +253,13 @@ const orderConfirm = (deps: ModuleDeps) =>
 
         for (const { line, take } of plan) {
           if (take <= 0 || !line.itemId) continue;
+          if (kindById.get(line.itemId) === "service") {
+            await tx
+              .update(salesOrderLines)
+              .set({ reservedThousandths: take })
+              .where(eq(salesOrderLines.id, line.id));
+            continue;
+          }
           await tx.insert(stockReservations).values({
             orgId: ctx.actor.orgId,
             itemId: line.itemId,
@@ -316,16 +335,33 @@ const orderDeliver = (deps: ModuleDeps) =>
           .orderBy(salesOrderLines.id);
         const byId = new Map(lines.map((l) => [l.id, l]));
 
+        // Item kinds for the lines that reference items: service lines ship
+        // no stock, they just join the invoice.
+        const deliverItemIds = [...new Set(lines.filter((l) => l.itemId).map((l) => l.itemId!))];
+        const kindById = new Map<string, string>();
+        if (deliverItemIds.length > 0) {
+          const kindRows = await tx
+            .select({ id: items.id, kind: items.kind })
+            .from(items)
+            .where(and(eq(items.orgId, ctx.actor.orgId), inArray(items.id, deliverItemIds)));
+          for (const row of kindRows) kindById.set(row.id, row.kind);
+        }
+
+        // Deliver everything still open by default - including service
+        // lines, which is how a mixed order lands as one invoice.
         const requested =
-          input.lines ??
-          lines.filter((l) => l.itemId).map((l) => ({ lineId: l.id, quantityThousandths: Number.MAX_SAFE_INTEGER }));
+          input.lines ?? lines.map((l) => ({ lineId: l.id, quantityThousandths: Number.MAX_SAFE_INTEGER }));
         const invoiceLines: Array<{ description: string; quantity: number; unitPriceMinor: number; taxMinor: number }> = [];
 
         for (const req of requested) {
           const line = byId.get(req.lineId);
           if (!line) throw new Error(`line ${req.lineId} not on this order`);
-          if (!line.itemId) throw new Error(`line "${line.description}" is a service line; deliver it outside inventory`);
-          const undelivered = line.reservedThousandths - line.deliveredThousandths;
+          const isService = !line.itemId || kindById.get(line.itemId) === "service";
+          // Stock-backed lines deliver against reservations; service lines
+          // commit their full quantity at confirm (or are bare service
+          // lines, which were never "reserved" at all).
+          const reserved = line.itemId && !isService ? line.reservedThousandths : line.quantity;
+          const undelivered = reserved - line.deliveredThousandths;
           if (undelivered <= 0) throw new Error(`line "${line.description}" has nothing left reserved and undelivered`);
           const deliver = req.quantityThousandths === Number.MAX_SAFE_INTEGER ? undelivered : req.quantityThousandths;
           if (deliver > undelivered) {
@@ -334,47 +370,50 @@ const orderDeliver = (deps: ModuleDeps) =>
             );
           }
 
-          // Consume this line's open reservations oldest-first.
-          let remaining = deliver;
-          const open = await tx
-            .select()
-            .from(stockReservations)
-            .where(
-              and(
-                eq(stockReservations.orgId, ctx.actor.orgId),
-                eq(stockReservations.itemId, line.itemId),
-                eq(stockReservations.refType, "sales_order"),
-                eq(stockReservations.refId, order.id),
-                eq(stockReservations.status, "open"),
-              ),
-            )
-            .orderBy(stockReservations.createdAt);
-          for (const res of open) {
-            if (remaining <= 0) break;
-            const take = Math.min(remaining, res.quantityThousandths);
-            if (take === res.quantityThousandths) {
-              await tx.update(stockReservations).set({ status: "consumed" }).where(eq(stockReservations.id, res.id));
-            } else {
-              await tx
-                .update(stockReservations)
-                .set({ quantityThousandths: res.quantityThousandths - take })
-                .where(eq(stockReservations.id, res.id));
+          if (!isService) {
+            // Consume this line's open reservations oldest-first.
+            let remaining = deliver;
+            const open = await tx
+              .select()
+              .from(stockReservations)
+              .where(
+                and(
+                  eq(stockReservations.orgId, ctx.actor.orgId),
+                  eq(stockReservations.itemId, line.itemId!),
+                  eq(stockReservations.refType, "sales_order"),
+                  eq(stockReservations.refId, order.id),
+                  eq(stockReservations.status, "open"),
+                ),
+              )
+              .orderBy(stockReservations.createdAt);
+            for (const res of open) {
+              if (remaining <= 0) break;
+              const take = Math.min(remaining, res.quantityThousandths);
+              if (take === res.quantityThousandths) {
+                await tx.update(stockReservations).set({ status: "consumed" }).where(eq(stockReservations.id, res.id));
+              } else {
+                await tx
+                  .update(stockReservations)
+                  .set({ quantityThousandths: res.quantityThousandths - take })
+                  .where(eq(stockReservations.id, res.id));
+              }
+              remaining -= take;
             }
-            remaining -= take;
-          }
-          if (remaining > 0) throw new Error(`reservation for line "${line.description}" vanished; refusing to oversell`);
+            if (remaining > 0) throw new Error(`reservation for line "${line.description}" vanished; refusing to oversell`);
 
-          await applyStockDelta(tx, {
-            orgId: ctx.actor.orgId,
-            itemId: line.itemId!,
-            quantityDelta: -deliver,
-            reason: "sale",
-            note: `sales order #${order.number}`,
-            refType: "sales_order",
-            refId: order.id,
-            actorType: ctx.actor.type,
-            actorId: ctx.actor.id,
-          });
+            await applyStockDelta(tx, {
+              orgId: ctx.actor.orgId,
+              itemId: line.itemId!,
+              quantityDelta: -deliver,
+              reason: "sale",
+              note: `sales order #${order.number}`,
+              refType: "sales_order",
+              refId: order.id,
+              actorType: ctx.actor.type,
+              actorId: ctx.actor.id,
+            });
+          }
+
           await tx
             .update(salesOrderLines)
             .set({ deliveredThousandths: line.deliveredThousandths + deliver })

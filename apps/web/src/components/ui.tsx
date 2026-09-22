@@ -14,6 +14,22 @@ import {
   IconX,
 } from "@/components/icons";
 
+/* ---------------------------------- Select --------------------------------- */
+
+/**
+ * Styled dropdown. Applies the shared `.select` chrome (custom chevron,
+ * focus ring) so every dropdown in the app matches; pass width or text-size
+ * utilities via className. Native popup on purpose: best keyboard, screen
+ * reader, and mobile behavior with zero JS.
+ */
+export function Select({ className, children, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select {...rest} className={cn("select", className)}>
+      {children}
+    </select>
+  );
+}
+
 /* ---------------------------------- Button --------------------------------- */
 
 type ButtonTone = "primary" | "secondary" | "danger" | "dangerSecondary" | "ghost";

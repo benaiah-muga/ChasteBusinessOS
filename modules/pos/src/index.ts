@@ -166,6 +166,9 @@ const completeSale = (deps: ModuleDeps) =>
               .where(and(eq(items.orgId, ctx.actor.orgId), eq(items.sku, l.sku)))
               .limit(1);
             if (!item) throw new Error(`no stocked item with SKU ${l.sku}`);
+            // Services sell without stock: they bypass the availability
+            // budget and simply ride the invoice like any other line.
+            if (item.kind === "service") continue;
             resolved.push({ itemId: item.id, sku: l.sku, quantity: l.quantity });
           }
           const itemIds = [...new Set(resolved.map((r) => r.itemId))].sort();

@@ -24,21 +24,27 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string) {
   const [owner] = await db.insert(users).values({ email: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`, name: "Owner" }).returning();
   if (!owner) throw new Error("owner insert failed");
   const { orgId } = await runOnboarding(db, { userId: owner.id, userEmail: owner.email, orgName, businessDescription: "A register-front business that takes returns gracefully and markets honestly." });
-  return { orgId, ownerCtx: { actor: { type: "human" as const, id: owner.id, orgId, permissions: new Set(["*"]) }, now: new Date(), services: {} } };
+  return {
+    orgId,
+    ownerCtx: { actor: { type: "human" as const, id: owner.id, orgId, permissions: new Set(["*"]) }, now: new Date(), services: {} },
+    agentCtx: { actor: { type: "agent" as const, id: owner.id, orgId, permissions: new Set(["*"]) }, now: new Date(), services: {} },
+  };
 }
 
 async function shiftsScenario(): Promise<string> {
   const db = getDb().db;
   const ex = buildExecutor(db, buildRegistry(db));
-  const { orgId, ownerCtx } = await seedOrg(db, "M13 Register Co");
+  const { orgId, ownerCtx, agentCtx } = await seedOrg(db, "M13 Register Co");
   const session = data(await ex.execute("pos.openSession", ownerCtx, { register: "front-1" }));
   await ex.execute("inventory.createItem", ownerCtx, { sku: "M13-MUG", name: "Mug", salePriceMinor: 150_00 });
   await ex.execute("inventory.adjustStock", ownerCtx, { sku: "M13-MUG", quantityDelta: 20_000, note: "opening" });
   const sale = data(await ex.execute("pos.completeSale", ownerCtx, { sessionId: session.sessionId, lines: [{ description: "Mug", quantity: 2_000, unitPriceMinor: 150_00, taxMinor: 0, sku: "M13-MUG" }], method: "cash" }));
   ok(`sale ${sale.invoiceNumber} taken ${sale.totalMinor} minor on register front-1`);
   const [inv] = await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.posSessionId, session.sessionId));
-  const gated = await ex.execute("pos.returnSale", ownerCtx, { invoiceId: inv!.id, reason: "chipped mug - customer return" });
-  ok("return waits for a human whatever the size", Boolean(gated.pendingApproval));
+  // The workmate proposing a return is gated; a human at the register is
+  // their own authority (ADR 0055). The gate is proven with an agent actor.
+  const gated = await ex.execute("pos.returnSale", agentCtx, { invoiceId: inv!.id, reason: "chipped mug - customer return" });
+  ok("agent-proposed return waits for a human whatever the size", Boolean(gated.pendingApproval));
   const gate = (await db.select().from(approvals).where(and(eq(approvals.orgId, orgId), eq(approvals.status, "pending")))).at(-1);
   if (!gate) throw new Error("gated but no approval row");
   const ret = data(await ex.execute("pos.returnSale", ownerCtx, gate.payload, { approvedApprovalId: gate.id }));

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { conversations, conversationMembers, getDb, messages } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
 import { missingPermission } from "@/server/route-guards";
@@ -22,6 +22,8 @@ export async function GET() {
       kind: conversations.kind,
       title: conversations.title,
       agentEnabled: conversations.agentEnabled,
+      archivedAt: conversations.archivedAt,
+      createdByUserId: conversations.createdByUserId,
     })
     .from(conversations)
     .innerJoin(
@@ -31,7 +33,7 @@ export async function GET() {
         eq(conversationMembers.userId, resolved.userId),
       ),
     )
-    .where(eq(conversations.orgId, resolved.orgId))
+    .where(and(eq(conversations.orgId, resolved.orgId), isNull(conversations.deletedAt)))
     .orderBy(desc(conversations.createdAt));
 
   const withLast = await Promise.all(
@@ -39,7 +41,7 @@ export async function GET() {
       const [last] = await db
         .select({ createdAt: messages.createdAt, body: messages.body })
         .from(messages)
-        .where(eq(messages.conversationId, c.id))
+        .where(and(eq(messages.conversationId, c.id), isNull(messages.deletedAt)))
         .orderBy(desc(messages.createdAt))
         .limit(1);
       return {
@@ -47,11 +49,13 @@ export async function GET() {
         kind: c.kind,
         title: c.title,
         agentEnabled: c.agentEnabled,
+        archivedAt: c.archivedAt?.toISOString() ?? null,
+        createdByMe: c.createdByUserId === resolved.userId,
         lastMessage: last ? { at: last.createdAt.toISOString(), body: last.body.slice(0, 80) } : null,
       };
     }),
   );
-  return NextResponse.json({ conversations: withLast });
+  return NextResponse.json({ conversations: withLast, me: resolved.userId });
 }
 
 const createSchema = z.object({

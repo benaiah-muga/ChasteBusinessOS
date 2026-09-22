@@ -1,6 +1,7 @@
 {
+  "id": null,
+  "prevId": null,
   "version": "7",
-  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
@@ -427,6 +428,48 @@
       "version": "7",
       "when": 1789813700955,
       "tag": "0060_melted_vermin",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1789926524029,
+      "tag": "0061_ledger_session_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1789935009903,
+      "tag": "0062_module_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1789961259879,
+      "tag": "0063_messaging_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1789963273177,
+      "tag": "0064_item_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1790010000000,
+      "tag": "0065_authored_docs",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "6",
+      "when": 1790011000000,
+      "tag": "0066_org_branding",
       "breakpoints": true
     }
   ]

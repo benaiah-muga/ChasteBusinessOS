@@ -9,6 +9,8 @@ import {
   type ModuleGate,
 } from "@chaste/kernel";
 import { createDb, memberships, organizations, users, type Database } from "@chaste/db";
+import { PROTECTED_MODULE_IDS as IAM_PROTECTED } from "@chaste/module-iam";
+import { ALL_MODULE_IDS, PROTECTED_MODULE_IDS as SHELL_PROTECTED } from "../app/(app)/_shell/modules";
 import { buildRegistry, createDbModuleGate } from "./kernel";
 
 /**
@@ -16,8 +18,11 @@ import { buildRegistry, createDbModuleGate } from "./kernel";
  *  - a disabled module's capabilities are refused by the executor for every
  *    actor type, even with "*" permissions and a valid payload
  *  - scopedToModules removes disabled tools so agent loops never see them
- *  - iam.setModules is identity-class: always approval-gated, reversible via
- *    the previousModules snapshot carried in its output
+ *  - protected spine modules (iam, routines, signals) are always enabled:
+ *    the gate reports them on and every save path unions them back in
+ *  - iam.setModules is identity-class: a permitted human applies it directly
+ *    under their own authority (ADR 0055); agents are gated into the inbox
+ *  - the previous set rides along in the output for exact restoration
  */
 
 const url = process.env.DATABASE_URL ?? "postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2";
@@ -123,6 +128,13 @@ describe("module switchboard", () => {
 });
 
 describe("iam.setModules governance", () => {
+  it("shell catalog and iam module agree on the protected spine", () => {
+    expect([...SHELL_PROTECTED].sort()).toEqual([...IAM_PROTECTED].sort());
+    for (const id of IAM_PROTECTED) {
+      expect(ALL_MODULE_IDS).toContain(id);
+    }
+  });
+
   function makeGatedExecutor() {
     const store = new Map<string, { payload: unknown; capabilityId: string }>();
     let seq = 0;
@@ -147,27 +159,17 @@ describe("iam.setModules governance", () => {
     return executor;
   }
 
-  it("is identity-class: humans and agents are gated, approval applies it", async () => {
+  it("applies directly for a permitted human; the workmate still needs approval", async () => {
     const executor = makeGatedExecutor();
 
-    const humanAttempt = await executor.execute(
+    // A permitted human IS the human authority: no self-approval detour (ADR 0055).
+    const humanApply = await executor.execute(
       "iam.setModules",
       ctxWith("human", ["iam.admin"]),
       { modules: ["accounting", "crm", "iam"] },
     );
-    // Gated attempts come back not-ok with the request attached for the inbox.
-    expect(humanAttempt.ok).toBe(false);
-    expect(humanAttempt.pendingApproval?.capabilityId).toBe("iam.setModules");
-
-    // Approve the same payload through the governed path.
-    const approved = await executor.execute(
-      "iam.setModules",
-      ctxWith("human", ["iam.admin"]),
-      { modules: ["accounting", "crm", "iam"] },
-      { approvedApprovalId: "apr-1" },
-    );
-    expect(approved.ok).toBe(true);
-    const data = approved.data as { previousModules: string[] };
+    expect(humanApply.ok).toBe(true);
+    const data = humanApply.data as { previousModules: string[]; enabledModules: string[] };
     expect(data.previousModules).toContain("support");
 
     // With crm now on, the gate flips for the next execution.
@@ -176,8 +178,40 @@ describe("iam.setModules governance", () => {
       ctxWith("human", ["crm.write"]),
       { name: "Post-toggle Acme" },
     );
-    console.log("PROBE", JSON.stringify(probe));
     expect(probe.ok).toBe(true);
+
+    // An agent proposing the same change is gated into the inbox.
+    const agentAttempt = await executor.execute(
+      "iam.setModules",
+      ctxWith("agent", ["iam.admin"]),
+      { modules: ["accounting"] },
+    );
+    expect(agentAttempt.ok).toBe(false);
+    expect(agentAttempt.pendingApproval?.capabilityId).toBe("iam.setModules");
+  });
+
+  it("never drops the protected spine modules, whatever the caller sends", async () => {
+    const executor = makeGatedExecutor();
+
+    const applied = await executor.execute(
+      "iam.setModules",
+      ctxWith("human", ["iam.admin"]),
+      // Deliberately omits iam, routines, and signals: the historical
+      // deadlock came from exactly this payload shape.
+      { modules: ["accounting", "crm"] },
+    );
+    expect(applied.ok).toBe(true);
+    const data = applied.data as { enabledModules: string[] };
+    for (const id of ["iam", "routines", "signals"]) {
+      expect(data.enabledModules).toContain(id);
+    }
+
+    // And the module gate agrees, even reading the raw org row.
+    const gate = createDbModuleGate(db);
+    for (const id of ["iam", "routines", "signals"]) {
+      expect(await gate.isEnabled(orgId, id)).toBe(true);
+    }
+    expect(await gate.isEnabled(orgId, "messaging")).toBe(false);
   });
 
   it("carries the previous set for its inverse", async () => {

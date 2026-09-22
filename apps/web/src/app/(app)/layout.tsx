@@ -19,7 +19,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const [orgs, pendingRows] = await Promise.all([
     db
-      .select({ id: organizations.id, name: organizations.name })
+      .select({ id: organizations.id, name: organizations.name, baseCurrency: organizations.baseCurrency })
       .from(memberships)
       .innerJoin(organizations, eq(organizations.id, memberships.orgId))
       .where(eq(memberships.userId, resolved.userId)),
@@ -42,6 +42,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <AppShell
       user={{ name: resolved.name ?? "", email: resolved.email }}
       orgName={activeOrg?.name ?? ""}
+      orgCurrency={activeOrg?.baseCurrency ?? "USD"}
       pendingApprovals={pendingApprovals}
       enabledModules={resolved.enabledModules ?? null}
       baseCurrency={resolved.baseCurrency ?? "USD"}

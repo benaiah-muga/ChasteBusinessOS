@@ -12,6 +12,140 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **Documents you write, not just ingest.** New Write tab: rich text
+  documents with a full formatting toolbar (headings, lists, tables,
+  images), debounced autosave with a Saved indicator, live presence of
+  other editors, and soft locks so two people never clobber each other.
+  Draft keystrokes live outside the hash-chained ledger on purpose
+  (ADR 0056); publishing a version stays governed and append-only.
+- **Version history you can trust.** Every publish archives the prior
+  content as an immutable, noted version. Compare any two versions side by
+  side, and restore an older one without ever deleting: restoration
+  snapshots the current content first, so undoing is another restore.
+- **Templates with fill-in fields.** Four built-ins (blank note, business
+  letter, meeting notes, quote) plus save-your-own: wrap any value in
+  double braces and it becomes a form field. The assistant can pre-fill
+  fields from what the org has told it, and unfilled fields keep their
+  tokens so nothing is silently blank.
+- **AI writing assist, review-before-apply.** Select text and improve,
+  fix grammar, change tone, shorten, expand or translate it; continue
+  drafting from the cursor; ask questions about the document and get
+  answers grounded only in what it says. Suggestions never touch the
+  document without an explicit Apply. Uses the organization's configured
+  model provider.
+- **Memory manager.** Settings > AI & automation lists what the workmate
+  has learned about the organization (profile facts, SOPs, decisions,
+  document knowledge) with search; deleting an entry is governed
+  (documents.deleteOrgMemory, destructive-class) so agent-proposed wipes
+  wait for a person.
+- **Spell and grammar checking in the editor.** Harper runs locally in a
+  Web Worker: wavy underlines with suggestions, ignore, and add-to-
+  dictionary (kept on the device). Off switch in Settings under writing
+  aids.
+- **Org-branded invoices and quotes.** Upload a logo, pick an accent
+  color, choose classic or modern layout, and set the footer small print;
+  any sales order then prints as a clean, branded invoice straight to PDF.
+- **.docx export and print-styled PDF** for authored documents.
+- **Print branding is governed.** iam.setOrgBranding rides the capability
+  pipeline: agent-proposed branding changes wait for a human, and the
+  ledger records who changed what.
+
+### Fixed
+- **Document and suggestion counts were silently zero.** Correlated count
+  subqueries interpolated unqualified column names, so a subquery like
+  `where document_id = id` compared a table to itself and always returned
+  0. Authored-document version counts and the long-standing open-coding-
+  suggestions count now qualify their columns explicitly.
+- **Deleted conversations and messages could still leak through detail paths.**
+  Conversation lists, reads, sends, and the workmate transcript now exclude
+  deleted records, and mention notifications stay inside the conversation.
+- **Partial print-branding updates could erase saved fields.** Omitting a
+  logo, accent, footer, or layout now preserves the organization's existing
+  value.
+
+### Changed
+- **Dropdowns stop looking generic.** Every `<select>` in the app now shares
+  one chrome: browser default chrome removed, a custom chevron, aligned
+  padding, and the shared gold focus ring. A `Select` primitive lands in the
+  UI kit so future dropdowns inherit it for free.
+- **The floating AI bar can live on hover.** A new "Hover reveal" dock mode
+  (now the default) keeps the bar out of the way until the pointer rests
+  near the bottom edge of the screen: the bar rises into view, stays while
+  you are using it or while the workmate is working, and hides again when
+  you move away. A subtle handle at the bottom edge marks the trigger, it
+  is reachable by keyboard (Tab reveals and focuses the input), and tapping
+  elsewhere dismisses it. The previous always-visible bar remains available
+  as the "Floating bar" dock choice in the workmate's preferences.
+- **Humans act under their own authority (ADR 0055).** A permitted human
+  executing an identity- or destructive-class action in the UI applies it
+  directly, fully audited, instead of being asked to approve their own
+  click in the Approvals inbox. Approval gates now target the workmate and
+  system jobs: identity/destructive always, money above thresholds. Orgs
+  can re-impose dual control for humans per risk class via the org policy
+  rules (`requiresApprovalFor`), and the workmate's proposals still land in
+  the inbox exactly as before.
+- **The Approvals inbox and Event Ledger now say who acted.** Approval
+  cards carry an actor chip ("agent · for <name>" vs "human · <name>"), and
+  agent-driven ledger rows show the session they came from
+  (`ledger_events.session_id`, a new indexed column, deliberately not part
+  of the hash chain so old entries stay verifiable).
+
+### Fixed
+- **The module switchboard can no longer brick an organization.** Toggling
+  any module used to silently disable `iam`, `routines`, and `signals`
+  (they were missing from the UI catalog and dropped by the full-set save),
+  and the kernel then refused the very capability that could re-enable
+  them, surfacing only "Module "iam" is disabled for this organization"
+  with no recovery path. Those spine modules are now protected: rendered
+  locked-on in the switchboard, unioned into every save by
+  `iam.setModules`/`iam.restoreModules`, and always enabled in the kernel
+  module gate. The raw "disabled" error also got a friendly, actionable
+  mapping.
+- **Display currency actually works.** The Localization setting was writing a
+  preference that no page consumed; every money formatter hardcoded `$`.
+  Money now renders in the organization's base currency by default (a UGX
+  org sees `USh 8,000,000`, with ISO 4217 minor-unit digits: zero decimals
+  for UGX), and an explicit per-device choice in Settings wins on top.
+  Formatting and input parsing share one source of truth; stored minor
+  units are untouched (presentation only, no FX conversion).
+
+### Added
+- **Services are first-class.** Items now carry a kind: goods or service
+  (migration 0058). Create services from the product form or quick create
+  ("Service (no stock)"); they show a service badge in the catalog, refuse
+  stock adjustments, skip reservations and reorder machinery, sell at POS
+  without touching stock, and - the long-standing gap - sales orders
+  containing them now deliver completely: service lines (by SKU or bare
+  descriptions) join the delivery invoice instead of silently never
+  invoicing, and mixed orders finally reach "delivered" status.
+- **Messages get real CRUD.** Conversations can be renamed, given or stripped
+  of the workmate, archived and restored, left, and (channel creators)
+  soft-deleted; colleagues can be pulled into channels. Your own messages
+  can be edited (with an "edited" marker) and deleted (a tombstone everyone
+  sees), all hover-reachable. Twelve governed `messaging.*` capabilities
+  now cover the whole lifecycle - the workmate can use the same powers on
+  the record - and deleted/archived items stay out of sight while the audit
+  trail keeps every original (migration 0057).
+- **Module settings, governed end to end.** New Settings > Modules tab: the
+  module switchboard moves here next to per-module defaults (inventory's
+  default unit label and reorder point are first; they prefill the product
+  form immediately). Values are stored per org per module
+  (module_settings table, migration 0056), written only through the new
+  `iam.setModuleConfig` capability, and validated kernel-side against a
+  per-module schema registry, so agents and UI share one boundary.
+- **Governance tab: the missing policy editor.** Settings > Governance edits
+  the org's blanket autonomy policy through the new `iam.setOrgPolicy`
+  capability (identity-class): max autonomous risk for the workmate, the
+  payment threshold that forces sign-off, and ADR 0055's maker-checker
+  strict mode for humans, per risk class. Changes apply to the next action.
+- **Quick create, Odoo-style.** A "+" next to customer, product, and vendor
+  pickers (sales order lines, the purchase order builder, the deal convert
+  dialog) opens a compact creation modal without leaving the page, with
+  "Create", "Create & new", and "Cancel" buttons; the new record is selected
+  in the picker and the list refreshes underneath. The command palette
+  (Ctrl/Cmd+K) gains "New customer / product / vendor" entries, gated by the
+  organization's module switchboard. Every quick create rides the same
+  governed capability as the module's own page.
 - **The Chaste emblem ships.** The logo from `assets/` is now the favicon,
   the rail's home coin, the mobile top-bar home button, and the brand mark on
   the sign-in and setup screens.

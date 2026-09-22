@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, EmptyState, LoadingPage } from "@/components/ui";
-import { IconAlertTriangle, IconBot, IconChevronLeft, IconHash, IconPlus, IconSend, IconUser, IconX } from "@/components/icons";
+import { Badge, Button, ConfirmDialog, Dialog, EmptyState, LoadingPage, Notice, Switch } from "@/components/ui";
+import { IconAlertTriangle, IconBot, IconChevronLeft, IconHash, IconPlus, IconSend, IconSettings, IconTrash, IconUser, IconX } from "@/components/icons";
 import { cn, timeAgo } from "@/lib/format";
 import { callApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
@@ -13,13 +13,17 @@ interface Conversation {
   kind: string;
   title: string;
   agentEnabled: boolean;
+  archivedAt: string | null;
+  createdByMe: boolean;
   lastMessage: { at: string; body: string } | null;
 }
 interface Message {
   id: string;
   senderType: string;
+  senderUserId: string | null;
   body: string;
   createdAt: string;
+  editedAt: string | null;
   mentions?: { type: string; id: string }[] | null;
 }
 interface Person {
@@ -82,6 +86,16 @@ export default function MessagesPage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [me, setMe] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [addUserId, setAddUserId] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingBody, setEditingBody] = useState("");
+  const [confirmDeleteConv, setConfirmDeleteConv] = useState(false);
+  const [confirmDeleteMsg, setConfirmDeleteMsg] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const mentionCandidates =
     mentionQuery == null
@@ -126,26 +140,26 @@ export default function MessagesPage() {
 
   const loadConvs = useCallback(async () => {
     setLoadError(null);
-    const res = await callApi<{ conversations?: Conversation[] }>("/api/conversations");
+    const res = await callApi<{ conversations?: Conversation[]; me?: string }>("/api/conversations");
     if (!res.ok) {
       setLoadError(res.error?.title ?? "Couldn't load conversations");
       return;
     }
     const conversations = res.data?.conversations ?? [];
     setConvs(conversations);
-    setActiveId((cur) => cur ?? conversations[0]?.id ?? null);
+    if (res.data?.me) setMe(res.data.me);
+    setActiveId((cur) => cur ?? conversations.filter((c) => !c.archivedAt)[0]?.id ?? null);
+  }, []);
+
+  const refreshThread = useCallback(async (conversationId: string) => {
+    const d = await fetch(`/api/conversations/${conversationId}/messages`).then((r) => r.json());
+    setMsgs(d.messages ?? []);
   }, []);
 
   useEffect(() => {
-    void loadConvs();
-  }, [loadConvs]);
-
-  useEffect(() => {
     if (!activeId) return;
-    fetch(`/api/conversations/${activeId}/messages`)
-      .then((r) => r.json())
-      .then((d) => setMsgs(d.messages ?? []));
-  }, [activeId]);
+    void refreshThread(activeId);
+  }, [activeId, refreshThread]);
 
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
@@ -164,12 +178,46 @@ export default function MessagesPage() {
         body: JSON.stringify({ body, mentions: extractMentions(body, people) }),
       });
       // Refresh the thread, includes the agent's reply when it participates.
-      const refreshed = await fetch(`/api/conversations/${activeId}/messages`).then((r) => r.json());
-      setMsgs(refreshed.messages ?? []);
+      await refreshThread(activeId);
       void loadConvs();
     } finally {
       setSending(false);
     }
+  }
+
+  /** Conversation lifecycle (rename, archive, leave, delete, add member). */
+  async function convAction(action: string, extra: Record<string, unknown> = {}) {
+    if (!activeId) return null;
+    const res = await fetch(`/api/conversations/${activeId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, ...extra }),
+    });
+    const d = (await res.json().catch(() => ({}))) as { error?: string; pendingApproval?: boolean };
+    if (!res.ok) {
+      setActionNotice(d.error ?? "That didn't work.");
+      return null;
+    }
+    setActionNotice(null);
+    await loadConvs();
+    return d;
+  }
+
+  async function saveEdit() {
+    if (!editingId || !editingBody.trim()) return;
+    const res = await fetch(`/api/messages/${editingId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: editingBody.trim() }),
+    });
+    if (res.ok && activeId) await refreshThread(activeId);
+    setEditingId(null);
+  }
+
+  async function deleteMessage(messageId: string) {
+    const res = await fetch(`/api/messages/${messageId}`, { method: "DELETE" });
+    if (res.ok && activeId) await refreshThread(activeId);
+    setConfirmDeleteMsg(null);
   }
 
   async function createConv(e: React.FormEvent) {
@@ -185,9 +233,11 @@ export default function MessagesPage() {
       setComposerOpen(false);
       const data = await res.json();
       await loadConvs();
-      setActiveId(data.conversation.id);
+      setActiveId(data.conversationId);
     }
   }
+
+  const visibleConvs = (convs ?? []).filter((c) => (showArchived ? true : !c.archivedAt));
 
   if (convs === null) return <LoadingPage />;
 
@@ -222,14 +272,25 @@ export default function MessagesPage() {
         >
           <div className="flex items-center justify-between border-b border-stone-100 px-4 py-2.5">
             <h2 className="section-title">Conversations</h2>
-            <button
-              type="button"
-              aria-label="New conversation"
-              onClick={() => setComposerOpen((v) => !v)}
-              className="icon-btn size-6"
-            >
-              {composerOpen ? <IconX className="size-3.5" /> : <IconPlus className="size-4" />}
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-pressed={showArchived}
+                onClick={() => setShowArchived((v) => !v)}
+                title={showArchived ? "Hide archived" : "Show archived"}
+                className={cn("icon-btn size-6 text-[10px] font-medium", showArchived && "text-gold-800")}
+              >
+                ARCH
+              </button>
+              <button
+                type="button"
+                aria-label="New conversation"
+                onClick={() => setComposerOpen((v) => !v)}
+                className="icon-btn size-6"
+              >
+                {composerOpen ? <IconX className="size-3.5" /> : <IconPlus className="size-4" />}
+              </button>
+            </div>
           </div>
 
           {composerOpen && (
@@ -252,8 +313,8 @@ export default function MessagesPage() {
           )}
 
           <div className="min-h-0 flex-1 overflow-y-auto" role="listbox" aria-label="Conversations">
-            {convs.length === 0 && <p className="p-4 text-sm text-stone-400">No conversations yet.</p>}
-            {convs.map((c) => (
+            {visibleConvs.length === 0 && <p className="p-4 text-sm text-stone-400">No conversations yet.</p>}
+            {visibleConvs.map((c) => (
               <button
                 key={c.id}
                 type="button"
@@ -271,11 +332,19 @@ export default function MessagesPage() {
                   ) : (
                     <IconHash className={cn("size-3.5 shrink-0", activeId === c.id ? "text-gold-700" : "text-stone-400")} />
                   )}
-                  <span className="truncate text-sm font-medium text-stone-800">{c.title}</span>
-                  {c.agentEnabled && (
-                    <Badge tone="violet" className="ml-auto shrink-0">
-                      chaste
+                  <span className={cn("truncate text-sm font-medium text-stone-800", c.archivedAt && "text-stone-400 line-through")}>
+                    {c.title}
+                  </span>
+                  {c.archivedAt ? (
+                    <Badge tone="neutral" className="ml-auto shrink-0">
+                      archived
                     </Badge>
+                  ) : (
+                    c.agentEnabled && (
+                      <Badge tone="violet" className="ml-auto shrink-0">
+                        chaste
+                      </Badge>
+                    )
                   )}
                 </div>
                 {c.lastMessage && (
@@ -303,11 +372,26 @@ export default function MessagesPage() {
                   {activeConv.kind === "dm" ? "" : "#"}
                   {activeConv.title}
                 </h2>
+                {activeConv.archivedAt && <Badge tone="neutral">archived</Badge>}
                 {activeConv.agentEnabled && (
                   <Badge tone="violet">
                     <IconBot className="size-3" /> Chaste reads & acts here
                   </Badge>
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRenameValue(activeConv.title);
+                    setAddUserId("");
+                    setActionNotice(null);
+                    setSettingsOpen(true);
+                  }}
+                  aria-label="Conversation settings"
+                  title="Rename, members, archive"
+                  className="icon-btn ml-auto"
+                >
+                  <IconSettings className="size-4" />
+                </button>
               </header>
 
               <div ref={threadRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
@@ -316,8 +400,9 @@ export default function MessagesPage() {
                 )}
                 {msgs.map((m) => {
                   const isAgent = m.senderType === "agent";
+                  const mine = m.senderType === "human" && me != null && m.senderUserId === me;
                   return (
-                    <div key={m.id} className="flex gap-2.5">
+                    <div key={m.id} className="group flex gap-2.5">
                       {isAgent ? (
                         <span
                           aria-hidden="true"
@@ -333,18 +418,67 @@ export default function MessagesPage() {
                           {m.senderType.slice(0, 2)}
                         </span>
                       )}
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="mb-0.5 text-[11px] font-medium tracking-wide text-stone-400 uppercase">
                           {isAgent ? "Chaste · AI" : m.senderType} · {timeAgo(m.createdAt)}
+                          {m.editedAt && <span className="ml-1 normal-case">(edited)</span>}
                         </p>
-                        <div
-                          className={cn(
-                            "max-w-[85%] rounded-xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap",
-                            isAgent ? "bg-violet-50 text-violet-950" : "bg-stone-100 text-stone-800",
-                          )}
-                        >
-                          <Body body={m.body} />
-                        </div>
+                        {editingId === m.id ? (
+                          <div className="max-w-[85%] space-y-1.5">
+                            <textarea
+                              value={editingBody}
+                              onChange={(e) => setEditingBody(e.target.value)}
+                              rows={2}
+                              aria-label="Edit message"
+                              className="textarea text-sm"
+                              autoFocus
+                            />
+                            <div className="flex gap-1.5">
+                              <Button size="sm" onClick={() => void saveEdit()} disabled={!editingBody.trim()}>
+                                Save
+                              </Button>
+                              <Button size="sm" tone="ghost" onClick={() => setEditingId(null)}>
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-1.5">
+                            <div
+                              className={cn(
+                                "max-w-[85%] rounded-xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap",
+                                isAgent ? "bg-violet-50 text-violet-950" : "bg-stone-100 text-stone-800",
+                              )}
+                            >
+                              <Body body={m.body} />
+                            </div>
+                            {mine && (
+                              <span className="mt-1 hidden shrink-0 gap-0.5 group-hover:flex">
+                                <button
+                                  type="button"
+                                  aria-label="Edit message"
+                                  title="Edit"
+                                  onClick={() => {
+                                    setEditingId(m.id);
+                                    setEditingBody(m.body);
+                                  }}
+                                  className="icon-btn size-6"
+                                >
+                                  <IconSettings className="size-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label="Delete message"
+                                  title="Delete"
+                                  onClick={() => setConfirmDeleteMsg(m.id)}
+                                  className="icon-btn size-6 hover:text-red-700"
+                                >
+                                  <IconTrash className="size-3" />
+                                </button>
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -444,6 +578,144 @@ export default function MessagesPage() {
           )}
         </section>
       </div>
+
+      {activeConv && (
+        <Dialog
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          title={activeConv.kind === "dm" ? "Conversation" : `#${activeConv.title}`}
+          description="Membership and lifecycle for this conversation."
+        >
+          <div className="space-y-4">
+            {actionNotice && <Notice tone="error">{actionNotice}</Notice>}
+
+            {activeConv.kind === "channel" && (
+              <label className="block">
+                <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Name</span>
+                <div className="flex gap-2">
+                  <input
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    aria-label="Channel name"
+                    className="input"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={!renameValue.trim() || renameValue.trim() === activeConv.title}
+                    onClick={async () => {
+                      const r = await convAction("update", { title: renameValue.trim() });
+                      if (r) setActionNotice(null);
+                    }}
+                  >
+                    Rename
+                  </Button>
+                </div>
+              </label>
+            )}
+
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 px-3 py-2.5">
+              <div>
+                <p className="text-[13px] font-medium text-stone-900">Chaste participates</p>
+                <p className="text-[11px] leading-snug text-stone-400">
+                  The workmate reads this thread and acts when colleagues ask.
+                </p>
+              </div>
+              <Switch
+                checked={activeConv.agentEnabled}
+                onChange={(v) => void convAction("update", { agentEnabled: v })}
+                label=""
+              />
+            </div>
+
+            {activeConv.kind === "channel" && (
+              <label className="block">
+                <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Add a colleague</span>
+                <div className="flex gap-2">
+                  <select className="select" value={addUserId} onChange={(e) => setAddUserId(e.target.value)} aria-label="Person to add">
+                    <option value="">Choose person…</option>
+                    {people
+                      .filter((p) => p.type === "user")
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    disabled={!addUserId}
+                    onClick={async () => {
+                      const r = await convAction("addMember", { userId: addUserId });
+                      if (r) setAddUserId("");
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+              </label>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2 border-t border-stone-100 pt-3">
+              {activeConv.kind === "channel" && (
+                <Button
+                  size="sm"
+                  tone="secondary"
+                  onClick={async () => {
+                    const r = await convAction("archive", { archived: !activeConv.archivedAt });
+                    if (r) setSettingsOpen(false);
+                  }}
+                >
+                  {activeConv.archivedAt ? "Restore" : "Archive"}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                tone="secondary"
+                onClick={async () => {
+                  const r = await convAction("leave");
+                  if (r) {
+                    setSettingsOpen(false);
+                    setActiveId(null);
+                  }
+                }}
+              >
+                Leave
+              </Button>
+              {activeConv.kind === "channel" && activeConv.createdByMe && (
+                <Button size="sm" tone="danger" onClick={() => setConfirmDeleteConv(true)}>
+                  <IconTrash className="size-3.5" />
+                  Delete channel
+                </Button>
+              )}
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      <ConfirmDialog
+        open={confirmDeleteConv}
+        onClose={() => setConfirmDeleteConv(false)}
+        onConfirm={async () => {
+          const r = await convAction("delete");
+          setConfirmDeleteConv(false);
+          if (r) {
+            setSettingsOpen(false);
+            setActiveId(null);
+          }
+        }}
+        title={`Delete #${activeConv?.title ?? ""}?`}
+        body="It disappears from everyone's list. The audit trail keeps the record; this cannot be undone from the UI."
+        confirmLabel="Delete channel"
+      />
+
+      <ConfirmDialog
+        open={confirmDeleteMsg != null}
+        onClose={() => setConfirmDeleteMsg(null)}
+        onConfirm={() => confirmDeleteMsg && void deleteMessage(confirmDeleteMsg)}
+        title="Delete this message?"
+        body="It is replaced by a deletion marker for everyone. The audit trail keeps the original."
+        confirmLabel="Delete message"
+      />
     </AppFrame>
   );
 }

@@ -66,10 +66,9 @@ describe("integrated operational UI surfaces", () => {
   it("currency selection reaches the shared formatter", () => {
     const shell = source("src/app/(app)/app-shell.tsx");
     const format = source("src/lib/format.ts");
-    expect(shell).toContain("setDisplayCurrency");
+    expect(shell).toContain("setActiveCurrency");
     expect(shell).toContain("baseCurrency");
-    expect(format).toContain("CURRENCY_SYMBOLS");
-    expect(format).toContain("UGX: \"USh\"");
+    expect(format).toContain('UGX: "USh "');
     console.log("UI-CURRENCY-SURFACE-OK");
   });
 });

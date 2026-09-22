@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Switch } from "@/components/ui";
 import {
   IconArrowRight,
@@ -20,6 +20,88 @@ import { chatDock, chatDraft, useChatDockMode, type ChatDockMode } from "./chat-
 import { cn, timeAgo } from "@/lib/format";
 
 const DOCK_Z = "z-50";
+
+/** How long the revealed bar lingers after the pointer wanders off (ms). */
+const HOVER_HIDE_DELAY_MS = 260;
+
+/**
+ * The "hover" dock: the input bar stays out of the way until the pointer
+ * rests near the bottom edge of the screen, then rises into view and stays
+ * while it is hovered, focused, or the agent is working. The trigger strip
+ * is a real button so keyboard users can Tab to it and reveal the bar too.
+ */
+function HoverRevealDock({ busy, children }: { busy: boolean; children: ReactNode }) {
+  const [revealed, setRevealed] = useState(false);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+
+  function reveal() {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    setRevealed(true);
+  }
+
+  function scheduleHide() {
+    if (busy) return;
+    if (barRef.current?.contains(document.activeElement)) return;
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setRevealed(false), HOVER_HIDE_DELAY_MS);
+  }
+
+  useEffect(() => {
+    if (!revealed) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (barRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest("[data-chat-hover-strip]")) return;
+      setRevealed(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, [revealed]);
+
+  useEffect(
+    () => () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    },
+    [],
+  );
+
+  return (
+    <>
+      <button
+        type="button"
+        data-chat-hover-strip
+        aria-label="Show the workmate input bar"
+        title="Ask your workmate anything"
+        onFocus={reveal}
+        onPointerEnter={reveal}
+        className="fixed inset-x-0 bottom-0 z-40 flex h-8 cursor-default items-end justify-center bg-transparent"
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            "mb-1.5 h-1 w-24 rounded-full bg-stone-400/50 transition-opacity duration-200",
+            revealed ? "opacity-0" : "opacity-100",
+          )}
+        />
+      </button>
+      <div
+        ref={barRef}
+        onPointerEnter={reveal}
+        onPointerLeave={scheduleHide}
+        className={cn(
+          "fixed inset-x-0 bottom-20 z-50 flex justify-center px-4 transition-all duration-200 lg:bottom-5",
+          revealed || busy ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
+        )}
+      >
+        {children}
+      </div>
+    </>
+  );
+}
 
 /** Tracks one media query; SSR-safe (defaults to false until mounted). */
 function useMediaQuery(query: string): boolean {
@@ -59,7 +141,7 @@ function ChatDockBody() {
   return <ChatDockInner mode={effective} />;
 }
 
-function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" }) {
+function ChatDockInner({ mode }: { mode: "hover" | "input" | "bubble" | "open" | "pinned" }) {
   const { messages, busy, creator, queue, step, lastTool, sessionUsage } = useChat();
   const { send, stop } = useChatSend();
   const [input, setInput] = useState("");
@@ -328,63 +410,73 @@ function ChatDockInner({ mode }: { mode: "input" | "bubble" | "open" | "pinned" 
     );
   }
 
-  // Default: horizontal input bar floating at the lower center of every page.
+  // The floating input bar, shared by the "input" (always visible) and
+  // "hover" (revealed from the bottom edge) docks.
+  const inputBar = (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+      className="pointer-events-auto flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-stone-200 bg-white/90 p-2 pl-3 shadow-2xl ring-1 ring-black/5 backdrop-blur-md transition-all duration-150 focus-within:border-gold-400 focus-within:shadow-xl focus-within:ring-[4px] focus-within:ring-gold-600/10"
+    >
+      <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gold-800 text-white shadow-xs [&_svg]:size-4">
+        <IconSparkle className="size-4" />
+      </span>
+      <textarea
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            submit();
+          }
+        }}
+        rows={1}
+        aria-label="Message your workmate"
+        placeholder="Ask your workmate anything…"
+        className="max-h-24 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-stone-400"
+      />
+      {input.trim() && (
+        <button
+          type="submit"
+          aria-label={busy ? "Queue message" : "Send message"}
+          title={busy ? "The agent is working: this message will queue" : "Send message"}
+          className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-gold-700 text-white transition-colors duration-150 hover:bg-gold-800"
+        >
+          <IconArrowRight className="size-4" />
+        </button>
+      )}
+      <span className="mx-0.5 h-6 w-px shrink-0 bg-stone-200" aria-hidden="true" />
+      <button
+        type="button"
+        onClick={() => chatDock.set("open")}
+        title="Open chat panel"
+        aria-label="Open chat panel"
+        className="icon-btn mr-0.5 shrink-0"
+      >
+        <IconMaximize className="size-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => chatDock.set("bubble")}
+        title="Shrink to bubble"
+        aria-label="Shrink chat to bubble"
+        className="icon-btn mr-1 shrink-0"
+      >
+        <IconMinimize className="size-4" />
+      </button>
+    </form>
+  );
+
+  if (mode === "hover") {
+    return <HoverRevealDock busy={busy}>{inputBar}</HoverRevealDock>;
+  }
+
+  // "input": the same bar, always visible.
   return (
     <div className={`pointer-events-none fixed inset-x-0 bottom-20 lg:bottom-5 ${DOCK_Z} flex justify-center px-4`}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-        className="pointer-events-auto flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-stone-200 bg-white/90 p-2 pl-3 shadow-2xl ring-1 ring-black/5 backdrop-blur-md transition-all duration-150 focus-within:border-gold-400 focus-within:shadow-xl focus-within:ring-[4px] focus-within:ring-gold-600/10"
-      >
-        <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gold-800 text-white shadow-xs [&_svg]:size-4">
-          <IconSparkle className="size-4" />
-        </span>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          rows={1}
-          aria-label="Message your workmate"
-          placeholder="Ask your workmate anything…"
-          className="max-h-24 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-stone-400"
-        />
-        {input.trim() && (
-          <button
-            type="submit"
-            aria-label={busy ? "Queue message" : "Send message"}
-            title={busy ? "The agent is working: this message will queue" : "Send message"}
-            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-gold-700 text-white transition-colors duration-150 hover:bg-gold-800"
-          >
-            <IconArrowRight className="size-4" />
-          </button>
-        )}
-        <span className="mx-0.5 h-6 w-px shrink-0 bg-stone-200" aria-hidden="true" />
-        <button
-          type="button"
-          onClick={() => chatDock.set("open")}
-          title="Open chat panel"
-          aria-label="Open chat panel"
-          className="icon-btn mr-0.5 shrink-0"
-        >
-          <IconMaximize className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => chatDock.set("bubble")}
-          title="Shrink to bubble"
-          aria-label="Shrink chat to bubble"
-          className="icon-btn mr-1 shrink-0"
-        >
-          <IconMinimize className="size-4" />
-        </button>
-      </form>
+      {inputBar}
     </div>
   );
 }
@@ -501,6 +593,7 @@ function ConsolePreferences({ onDone }: { onDone: () => void }) {
         <div className="grid grid-cols-2 gap-1.5">
           {(
             [
+              ["hover", "Hover reveal"],
               ["input", "Floating bar"],
               ["bubble", "Bubble"],
               ["open", "Panel"],
@@ -514,6 +607,7 @@ function ConsolePreferences({ onDone }: { onDone: () => void }) {
               aria-pressed={dockMode === id}
               className={cn(
                 "cursor-pointer rounded-lg border px-3 py-2 text-[13px] font-medium transition-all duration-150",
+                id === "hover" && "col-span-2",
                 dockMode === id
                   ? "border-gold-500 bg-gold-50/60 text-gold-900"
                   : "border-stone-200 text-stone-600 hover:border-stone-300 hover:bg-stone-50",
@@ -523,6 +617,11 @@ function ConsolePreferences({ onDone }: { onDone: () => void }) {
             </button>
           ))}
         </div>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-stone-400">
+          Hover reveal keeps the bar hidden until you rest the pointer near
+          the bottom edge of the screen. It stays while you use it and while
+          the workmate is working.
+        </p>
       </section>
 
       <section aria-label="New conversation" className="mt-6">

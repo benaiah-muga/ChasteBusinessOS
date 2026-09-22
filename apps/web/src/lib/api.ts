@@ -38,6 +38,8 @@ function friendlyFromMessage(msg: string): { title: string; hint: string } | nul
     return { title: "This was already handled", hint: "Someone decided this first. Refresh to see the latest state." };
   if (/lack(s)? (authority|permission)|not permitted|forbidden/.test(m))
     return { title: "You don't have permission for this", hint: "Ask someone with the right role to perform it, role changes go through Approvals." };
+  if (/module ".+" is disabled/.test(m))
+    return { title: "That module is switched off", hint: "This surface is disabled for your organization. An org admin can re-enable it in Settings under Modules." };
   if (/threshold|approval required|needs? (human )?approval/.test(m))
     return { title: "This needs human approval", hint: "It's larger than policy allows autonomously, find it in the Approvals inbox." };
   if (/insufficient|not enough/.test(m))

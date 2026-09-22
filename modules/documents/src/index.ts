@@ -3,8 +3,12 @@ import { z } from "zod";
 import { embed, extractBillLinesFromText, parseDocumentImage } from "@chaste/ai";
 import {
   accounts,
+  authoredDocs,
+  authoredDocVersions,
   documentSuggestions,
   documents,
+  docDrafts,
+  docTemplates,
   documentVersions,
   memories,
   type Database,
@@ -346,9 +350,9 @@ const listDocuments = (deps: ModuleDeps) =>
           sourceType: documents.sourceType,
           createdAt: documents.createdAt,
           openSuggestions: sql<number>`(
-            select count(*)::int from ${documentSuggestions}
-            where ${documentSuggestions.documentId} = ${documents.id}
-              and ${documentSuggestions.status} = 'open'
+            select count(*)::int from "document_suggestions"
+            where "document_suggestions"."document_id" = "documents"."id"
+              and "document_suggestions"."status" = 'open'
           )`,
         })
         .from(documents)
@@ -432,6 +436,539 @@ const listVersions = (deps: ModuleDeps) =>
       });
     },
   });
+// ── Phase 4: authored documents ────────────────────────────────────────
+// Rich text the org writes itself. Publishing and restoring ride the
+// governed pipeline (audited, gated); keystroke autosave and presence are
+// deliberately OUTSIDE the ledger - see ADR 0056 - and live in the
+// /api/docs/[id]/workspace route, not here.
+
+const HTML_MAX = 2_000_000;
+const contentSchema = z.record(z.string(), z.unknown());
+const htmlSchema = z.string().max(HTML_MAX);
+
+/** Unique {{dotted.path}} tokens inside a template's text nodes. */
+export function extractPlaceholders(content: unknown): string[] {
+  const found = new Set<string>();
+  const text = JSON.stringify(content);
+  for (const m of text.matchAll(/\{\{\s*([a-zA-Z][\w.]{0,60})\s*\}\}/g)) found.add(m[1]!);
+  return [...found];
+}
+
+const createDoc = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.createDoc",
+    title: "Create authored document",
+    intent:
+      "Start a new rich text business document, optionally from a filled-in template, so staff can draft letters, quotes and notes in one place",
+    module: "documents",
+    risk: "write",
+    permission: "documents.write",
+    inverse: {
+      capabilityId: "documents.deleteDoc",
+      buildInput: (_input, output) => ({ documentId: output.documentId }),
+    },
+    input: z.object({
+      title: z.string().min(1).max(200),
+      content: contentSchema,
+      html: htmlSchema,
+      templateId: z.string().uuid().optional(),
+      intentId: z.string().optional(),
+    }),
+    output: z.object({ documentId: z.string() }),
+    execute: async (ctx, input) => {
+      if (input.templateId) {
+        const [tpl] = await deps.db
+          .select({ id: docTemplates.id })
+          .from(docTemplates)
+          .where(and(eq(docTemplates.id, input.templateId), eq(docTemplates.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!tpl) throw new Error("template not found");
+      }
+      const [row] = await deps.db
+        .insert(authoredDocs)
+        .values({
+          orgId: ctx.actor.orgId,
+          title: input.title,
+          contentJson: input.content,
+          html: input.html,
+          status: "draft",
+          templateId: input.templateId ?? null,
+          createdByActorType: ctx.actor.type,
+          createdByActorId: ctx.actor.id,
+        })
+        .returning({ id: authoredDocs.id });
+      return { documentId: row!.id };
+    },
+  });
+
+const listDocs = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.listDocs",
+    title: "List authored documents",
+    intent:
+      "Show the organization's authored documents with their publish status and how many versions each has, so staff can find and continue their writing",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({}),
+    output: z.object({
+      documents: z.array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          status: z.string(),
+          versions: z.number(),
+          templateId: z.string().nullable(),
+          updatedAt: z.date(),
+        }),
+      ),
+    }),
+    execute: async (ctx) => {
+      const rows = await deps.db
+        .select({
+          id: authoredDocs.id,
+          title: authoredDocs.title,
+          status: authoredDocs.status,
+          templateId: authoredDocs.templateId,
+          updatedAt: authoredDocs.updatedAt,
+          versions: sql<number>`(select count(*)::int from "authored_doc_versions" where "authored_doc_versions"."document_id" = "authored_docs"."id")`,
+        })
+        .from(authoredDocs)
+        .where(eq(authoredDocs.orgId, ctx.actor.orgId))
+        .orderBy(desc(authoredDocs.updatedAt))
+        .limit(200);
+      return { documents: rows.map((r) => ({ ...r, versions: Number(r.versions) })) };
+    },
+  });
+
+const getDoc = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.getDoc",
+    title: "Get authored document",
+    intent: "Read one authored document's current content, publish status and version count to open it in the editor",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({ documentId: z.string().uuid() }),
+    output: z.object({
+      document: z.object({
+        id: z.string(),
+        title: z.string(),
+        status: z.string(),
+        content: contentSchema,
+        html: z.string(),
+        templateId: z.string().nullable(),
+        versions: z.number(),
+        updatedAt: z.date(),
+      }),
+    }),
+    execute: async (ctx, input) => {
+      const [doc] = await deps.db
+        .select({
+          id: authoredDocs.id,
+          title: authoredDocs.title,
+          status: authoredDocs.status,
+          contentJson: authoredDocs.contentJson,
+          html: authoredDocs.html,
+          templateId: authoredDocs.templateId,
+          updatedAt: authoredDocs.updatedAt,
+          versions: sql<number>`(select count(*)::int from "authored_doc_versions" where "authored_doc_versions"."document_id" = "authored_docs"."id")`,
+        })
+        .from(authoredDocs)
+        .where(and(eq(authoredDocs.id, input.documentId), eq(authoredDocs.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!doc) throw new Error("document not found");
+      return {
+        document: {
+          id: doc.id,
+          title: doc.title,
+          status: doc.status,
+          content: doc.contentJson,
+          html: doc.html,
+          templateId: doc.templateId,
+          versions: Number(doc.versions),
+          updatedAt: doc.updatedAt,
+        },
+      };
+    },
+  });
+
+const saveDocVersion = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.saveDocVersion",
+    title: "Publish document version",
+    intent:
+      "Publish the current draft as a new immutable version: the prior content is archived in append-only history and the document becomes the latest",
+    module: "documents",
+    risk: "write",
+    permission: "documents.write",
+    // No inverse: publishing is append-only history; the reversal is
+    // restoring the archived version, which is itself a new version.
+    input: z.object({
+      documentId: z.string().uuid(),
+      title: z.string().min(1).max(200).optional(),
+      content: contentSchema,
+      html: htmlSchema,
+      note: z.string().max(500).optional(),
+    }),
+    output: z.object({ version: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.documentId}, 71))`);
+        const [doc] = await tx
+          .select()
+          .from(authoredDocs)
+          .where(and(eq(authoredDocs.id, input.documentId), eq(authoredDocs.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!doc) throw new Error("document not found");
+        const [maxRow] = await tx
+          .select({ maxV: sql<number>`coalesce(max(${authoredDocVersions.version}), 0)` })
+          .from(authoredDocVersions)
+          .where(eq(authoredDocVersions.documentId, doc.id));
+        const next = Number(maxRow?.maxV ?? 0) + 1;
+        await tx.insert(authoredDocVersions).values({
+          orgId: ctx.actor.orgId,
+          documentId: doc.id,
+          version: next,
+          contentJson: doc.contentJson,
+          html: doc.html,
+          note: input.note ?? null,
+          createdByActorType: ctx.actor.type,
+          createdByActorId: ctx.actor.id,
+        });
+        await tx
+          .update(authoredDocs)
+          .set({
+            title: input.title ?? doc.title,
+            contentJson: input.content,
+            html: input.html,
+            status: "published",
+            updatedAt: ctx.now,
+          })
+          .where(eq(authoredDocs.id, doc.id));
+        await tx.delete(docDrafts).where(eq(docDrafts.documentId, doc.id));
+        return { version: next };
+      });
+    },
+  });
+
+const listDocVersions = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.listDocVersions",
+    title: "List document versions",
+    intent: "Show an authored document's append-only version history with notes and authors, oldest to newest",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({ documentId: z.string().uuid() }),
+    output: z.object({
+      versions: z.array(
+        z.object({
+          version: z.number(),
+          note: z.string().nullable(),
+          createdBy: z.string().nullable(),
+          createdAt: z.string(),
+        }),
+      ),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const rows = await tx
+          .select({
+            version: authoredDocVersions.version,
+            note: authoredDocVersions.note,
+            createdByActorType: authoredDocVersions.createdByActorType,
+            createdByActorId: authoredDocVersions.createdByActorId,
+            createdAt: authoredDocVersions.createdAt,
+          })
+          .from(authoredDocVersions)
+          .where(and(eq(authoredDocVersions.orgId, ctx.actor.orgId), eq(authoredDocVersions.documentId, input.documentId)))
+          .orderBy(authoredDocVersions.version);
+        return {
+          versions: rows.map((r) => ({
+            version: r.version,
+            note: r.note,
+            createdBy: r.createdByActorType === "agent" ? "workmate" : r.createdByActorId,
+            createdAt: r.createdAt.toISOString(),
+          })),
+        };
+      });
+    },
+  });
+
+const getDocVersion = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.getDocVersion",
+    title: "Get document version",
+    intent: "Read one archived version's full content to compare versions side by side or preview a restoration",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({ documentId: z.string().uuid(), version: z.number().int().min(1) }),
+    output: z.object({
+      version: z.number(),
+      content: contentSchema,
+      html: z.string(),
+      note: z.string().nullable(),
+      createdAt: z.string(),
+    }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(authoredDocVersions)
+          .where(
+            and(
+              eq(authoredDocVersions.orgId, ctx.actor.orgId),
+              eq(authoredDocVersions.documentId, input.documentId),
+              eq(authoredDocVersions.version, input.version),
+            ),
+          )
+          .limit(1);
+        if (!row) throw new Error(`no version ${input.version}`);
+        return {
+          version: row.version,
+          content: row.contentJson,
+          html: row.html,
+          note: row.note,
+          createdAt: row.createdAt.toISOString(),
+        };
+      });
+    },
+  });
+
+const restoreDocVersion = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.restoreDocVersion",
+    title: "Restore document version",
+    intent:
+      "Bring an older version's content back as the document's current state, snapshotting what was there first so nothing is ever lost",
+    module: "documents",
+    risk: "write",
+    permission: "documents.write",
+    // No inverse, by design: restore never destroys - it appends the restored
+    // content as a new version after snapshotting the current one, so undoing
+    // a restore is another restore.
+    input: z.object({
+      documentId: z.string().uuid(),
+      sourceVersion: z.number().int().min(1),
+      note: z.string().max(500).optional(),
+    }),
+    output: z.object({ version: z.number() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.documentId}, 71))`);
+        const [doc] = await tx
+          .select()
+          .from(authoredDocs)
+          .where(and(eq(authoredDocs.id, input.documentId), eq(authoredDocs.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!doc) throw new Error("document not found");
+        const [src] = await tx
+          .select({ contentJson: authoredDocVersions.contentJson, html: authoredDocVersions.html })
+          .from(authoredDocVersions)
+          .where(
+            and(
+              eq(authoredDocVersions.documentId, doc.id),
+              eq(authoredDocVersions.version, input.sourceVersion),
+            ),
+          )
+          .limit(1);
+        if (!src) throw new Error(`no version ${input.sourceVersion}`);
+        const [maxRow] = await tx
+          .select({ maxV: sql<number>`coalesce(max(${authoredDocVersions.version}), 0)` })
+          .from(authoredDocVersions)
+          .where(eq(authoredDocVersions.documentId, doc.id));
+        const next = Number(maxRow?.maxV ?? 0) + 1;
+        await tx.insert(authoredDocVersions).values({
+          orgId: ctx.actor.orgId,
+          documentId: doc.id,
+          version: next,
+          contentJson: doc.contentJson,
+          html: doc.html,
+          note: input.note ?? `Restored from version ${input.sourceVersion}`,
+          createdByActorType: ctx.actor.type,
+          createdByActorId: ctx.actor.id,
+        });
+        await tx
+          .update(authoredDocs)
+          .set({ contentJson: src.contentJson, html: src.html, status: "published", updatedAt: ctx.now })
+          .where(eq(authoredDocs.id, doc.id));
+        await tx.delete(docDrafts).where(eq(docDrafts.documentId, doc.id));
+        return { version: next };
+      });
+    },
+  });
+
+const deleteDoc = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.deleteDoc",
+    title: "Delete authored document",
+    intent:
+      "Permanently remove an authored document together with its versions and drafts, used to clean up documents created by mistake",
+    module: "documents",
+    risk: "destructive",
+    permission: "documents.write",
+    input: z.object({ documentId: z.string().uuid() }),
+    output: z.object({ deleted: z.boolean() }),
+    execute: async (ctx, input) => {
+      const deleted = await deps.db
+        .delete(authoredDocs)
+        .where(and(eq(authoredDocs.id, input.documentId), eq(authoredDocs.orgId, ctx.actor.orgId)))
+        .returning({ id: authoredDocs.id });
+      return { deleted: deleted.length > 0 };
+    },
+  });
+
+const listTemplates = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.listTemplates",
+    title: "List document templates",
+    intent:
+      "Show the organization's document templates with the placeholders each one needs filled in, so staff can pick a starting point",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({}),
+    output: z.object({
+      templates: z.array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          description: z.string().nullable(),
+          placeholders: z.array(z.string()),
+          isSystem: z.string().nullable(),
+        }),
+      ),
+    }),
+    execute: async (ctx) => {
+      const rows = await deps.db
+        .select({
+          id: docTemplates.id,
+          name: docTemplates.name,
+          description: docTemplates.description,
+          placeholders: docTemplates.placeholders,
+          isSystem: docTemplates.isSystem,
+        })
+        .from(docTemplates)
+        .where(eq(docTemplates.orgId, ctx.actor.orgId))
+        .orderBy(desc(docTemplates.isSystem), docTemplates.name);
+      return {
+        templates: rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          placeholders: (r.placeholders as string[]) ?? [],
+          isSystem: r.isSystem,
+        })),
+      };
+    },
+  });
+
+const createTemplate = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.createTemplate",
+    title: "Create document template",
+    intent:
+      "Save a document's content as a reusable template with {{placeholder}} tokens so the organization can stamp out consistent documents",
+    module: "documents",
+    risk: "write",
+    permission: "documents.write",
+    inverse: {
+      capabilityId: "documents.deleteTemplate",
+      buildInput: (_input, output) => ({ templateId: output.templateId }),
+    },
+    input: z.object({
+      name: z.string().min(1).max(120),
+      description: z.string().max(300).optional(),
+      content: contentSchema,
+    }),
+    output: z.object({ templateId: z.string(), placeholders: z.array(z.string()) }),
+    execute: async (ctx, input) => {
+      const placeholders = extractPlaceholders(input.content);
+      const [row] = await deps.db
+        .insert(docTemplates)
+        .values({
+          orgId: ctx.actor.orgId,
+          name: input.name,
+          description: input.description ?? null,
+          contentJson: input.content,
+          placeholders,
+        })
+        .returning({ id: docTemplates.id });
+      return { templateId: row!.id, placeholders };
+    },
+  });
+
+const deleteTemplate = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.deleteTemplate",
+    title: "Delete document template",
+    intent:
+      "Remove a template from the organization's gallery; documents already created from it keep their content, and built-in templates cannot be removed",
+    module: "documents",
+    risk: "destructive",
+    permission: "documents.write",
+    // No inverse: a deleted template's content survives in every document
+    // spawned from it; recreating a template from one of those is the undo.
+    input: z.object({ templateId: z.string().uuid() }),
+    output: z.object({ deleted: z.boolean() }),
+    execute: async (ctx, input) => {
+      const [tpl] = await deps.db
+        .select({ id: docTemplates.id, isSystem: docTemplates.isSystem })
+        .from(docTemplates)
+        .where(and(eq(docTemplates.id, input.templateId), eq(docTemplates.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!tpl) throw new Error("template not found");
+      if (tpl.isSystem === "system") throw new Error("built-in templates cannot be deleted");
+      const deleted = await deps.db
+        .delete(docTemplates)
+        .where(eq(docTemplates.id, tpl.id))
+        .returning({ id: docTemplates.id });
+      return { deleted: deleted.length > 0 };
+    },
+  });
+
+const getTemplate = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.getTemplate",
+    title: "Get document template",
+    intent: "Read one template's full content and placeholders to fill it in and start a document from it",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({ templateId: z.string().uuid() }),
+    output: z.object({
+      template: z.object({
+        id: z.string(),
+        name: z.string(),
+        content: contentSchema,
+        placeholders: z.array(z.string()),
+      }),
+    }),
+    execute: async (ctx, input) => {
+      const [tpl] = await deps.db
+        .select({
+          id: docTemplates.id,
+          name: docTemplates.name,
+          contentJson: docTemplates.contentJson,
+          placeholders: docTemplates.placeholders,
+        })
+        .from(docTemplates)
+        .where(and(eq(docTemplates.id, input.templateId), eq(docTemplates.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!tpl) throw new Error("template not found");
+      return {
+        template: {
+          id: tpl.id,
+          name: tpl.name,
+          content: tpl.contentJson,
+          placeholders: (tpl.placeholders as string[]) ?? [],
+        },
+      };
+    },
+  });
+
 export function registerDocumentCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(createDocument(deps));
   registry.register(deleteDocument(deps));
@@ -441,5 +978,49 @@ export function registerDocumentCapabilities(registry: CapabilityRegistry, deps:
   registry.register(searchMemory(deps));
   registry.register(addVersion(deps));
   registry.register(listVersions(deps));
+  registry.register(deleteOrgMemory(deps));
+  registry.register(createDoc(deps));
+  registry.register(listDocs(deps));
+  registry.register(getDoc(deps));
+  registry.register(saveDocVersion(deps));
+  registry.register(listDocVersions(deps));
+  registry.register(getDocVersion(deps));
+  registry.register(restoreDocVersion(deps));
+  registry.register(deleteDoc(deps));
+  registry.register(listTemplates(deps));
+  registry.register(getTemplate(deps));
+  registry.register(createTemplate(deps));
+  registry.register(deleteTemplate(deps));
 }
+
+/**
+ * Curation for the org's semantic memory: remove an entry that is wrong,
+ * stale, or should never have been learned. Destructive-class on purpose -
+ * the workmate proposing a memory wipe waits for a person, and the ledger
+ * records what was removed (content preview, not embeddings).
+ */
+const deleteOrgMemory = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.deleteOrgMemory",
+    title: "Delete organization memory",
+    intent:
+      "Remove one entry from the organization's semantic memory because it is wrong, outdated, or should not be remembered, so searches and agent answers stop using it",
+    module: "documents",
+    risk: "destructive",
+    permission: "documents.write",
+    input: z.object({ memoryId: z.string().uuid() }),
+    output: z.object({ deleted: z.literal(true), kind: z.string().optional() }),
+    execute: async (ctx, input) => {
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [row] = await tx
+          .select({ id: memories.id, kind: memories.kind })
+          .from(memories)
+          .where(and(eq(memories.id, input.memoryId), eq(memories.orgId, ctx.actor.orgId)))
+          .limit(1);
+        if (!row) throw new Error("memory entry not found");
+        await tx.delete(memories).where(eq(memories.id, row.id));
+        return { deleted: true as const, kind: row.kind };
+      });
+    },
+  });
 export { createDocumentSignalProducer } from "./signals";

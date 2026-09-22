@@ -14,6 +14,7 @@ import {
   type ActionNoticeState,
 } from "@/components/ui";
 import { formatMoney, formatMoneyWhole, statusTone, timeAgo, toMinor } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 import { IconFileText, IconListTree, IconPlus, IconTrash } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
@@ -81,6 +82,7 @@ const OPEN_STAGES = ["lead", "qualified", "proposal", "negotiation"] as const;
 const emptyLine = { description: "", quantity: "1", unitPrice: "0.00", tax: "0.00", sku: "" };
 
 export default function SalesPage() {
+  useMoneySync();
   const enabled = useModuleEnabled("sales");
   const [data, setData] = useState<{
     quotes: Quote[];
@@ -384,7 +386,7 @@ export default function SalesPage() {
           <div className="space-y-2 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <select
-                className="rounded border bg-transparent px-2 py-1.5"
+                className="select"
                 aria-label="Customer"
                 value={quoteForm.customerId}
                 onChange={(e) => setQuoteForm({ ...quoteForm, customerId: e.target.value })}
@@ -443,7 +445,7 @@ export default function SalesPage() {
                 return (
                   <div key={i} className="flex flex-wrap items-center gap-2">
                     <select
-                      className="w-44 rounded border bg-transparent px-2 py-1.5"
+                      className="select w-44"
                       title="Pick a product to fill description and price"
                       aria-label={`Line ${i + 1} product`}
                       value={products.some((p) => p.sku === line.sku) ? line.sku : ""}
@@ -525,7 +527,7 @@ export default function SalesPage() {
       )}
 
       {tab === "new-order" && (
-        <NewOrderTab orders={orders} customers={customers} products={products} busy={busy} post={post} />
+        <NewOrderTab orders={orders} customers={customers} products={products} busy={busy} post={post} onDataChanged={load} />
       )}
 
     </AppFrame>

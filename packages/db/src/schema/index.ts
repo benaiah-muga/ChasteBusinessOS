@@ -142,6 +142,8 @@ export const ledgerEvents = pgTable(
     actorId: uuid("actor_id"),
     kind: text("kind").notNull(), // domain event type
     capabilityId: text("capability_id"),
+    /** Attribution context: the agent session that produced this event. Not hash-covered. */
+    sessionId: uuid("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
     payload: jsonb("payload").notNull(),
     prevHash: text("prev_hash"),
     hash: text("hash").notNull(),
@@ -293,6 +295,47 @@ export const policies = pgTable("policies", {
   requiresApprovalFor: jsonb("requires_approval_for").notNull().default([]),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Per-module configuration (one row per org per module), written only
+ *  through the governed iam.setModuleConfig capability. */
+export const moduleSettings = pgTable(
+  "module_settings",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    module: text("module").notNull(),
+    settings: jsonb("settings").notNull().default({}),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("module_settings_org_module_idx").on(t.orgId, t.module)],
+);
+
+/**
+ * Print branding (Phase 4): how the org's invoices, quotes and printed
+ * documents identify themselves. Written only through the governed
+ * iam.setOrgBranding capability; read by server-rendered print layouts.
+ */
+export const orgBranding = pgTable(
+  "org_branding",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Data-URL logo (png/jpeg/svg), ~200KB cap enforced at the boundary. */
+    logoDataUrl: text("logo_data_url"),
+    /** Hex accent color for rules and headings, e.g. "#b45309". */
+    accentColor: text("accent_color"),
+    /** Small print at the foot of every printed document. */
+    invoiceFooter: text("invoice_footer"),
+    /** Layout variant for the invoice/quote print templates. */
+    layout: text("layout").notNull().default("classic"), // classic | modern
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("org_branding_org_idx").on(t.orgId)],
+);
 
 /** Semantic memory store (pgvector). Tenant-scoped retrieval. */
 export const memories = pgTable(
@@ -742,6 +785,8 @@ export const items = pgTable(
     sku: text("sku").notNull(),
     name: text("name").notNull(),
     unitLabel: text("unit_label").notNull().default("unit"),
+    /** "goods" carries stock; "service" sells directly with no stock legs. */
+    kind: text("kind").notNull().default("goods"),
     /** Default selling price in minor units; pre-fills quote and invoice lines. */
     salePriceMinor: integer("sale_price_minor").notNull().default(0),
     /** Thousandths of a unit; 0 disables reorder alerts. */
@@ -970,6 +1015,9 @@ export const conversations = pgTable(
     title: text("title").notNull(),
     agentEnabled: boolean("agent_enabled").notNull().default(false),
     createdByUserId: uuid("created_by_user_id").references(() => users.id),
+    /** Lifecycle: hidden from the default list, restorable, never hard-dropped. */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [index("conversation_org_idx").on(t.orgId)],
@@ -1008,6 +1056,10 @@ export const messages = pgTable(
      * threads where it does not otherwise participate.
      */
     mentions: jsonb("mentions"),
+    /** Sender-only edits; the ledger records the edit action. */
+    editedAt: timestamp("edited_at", { withTimezone: true }),
+    /** Tombstone: the row stays for the audit trail, readers skip it. */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [index("message_conversation_idx").on(t.conversationId, t.createdAt)],
@@ -1152,6 +1204,132 @@ export const documentSuggestions = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("doc_suggestion_doc_idx").on(t.documentId, t.status)],
+);
+
+/**
+ * Authored documents (Phase 4): rich text the org writes itself, as opposed
+ * to ingested bills. Content is Tiptap JSON (CRDT-compatible shape) with a
+ * rendered HTML snapshot for cheap list/print reads. Publishing snapshots
+ * the current content into authoredDocVersions, which is append-only.
+ */
+export const authoredDocs = pgTable(
+  "authored_docs",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    /** Tiptap JSON document (ProseMirror node tree). */
+    contentJson: jsonb("content_json").notNull(),
+    /** Server-rendered HTML of the latest published version; drafts may be ahead. */
+    html: text("html").notNull().default(""),
+    status: text("status").notNull().default("draft"), // draft | published
+    templateId: uuid("template_id"),
+    /** Minor-unit total for price-bearing docs (quotes/invoices built here). */
+    totalMinor: integer("total_minor"),
+    currency: text("currency"),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("authored_doc_org_idx").on(t.orgId, t.status)],
+);
+
+/** Append-only published history for authored documents. */
+export const authoredDocVersions = pgTable(
+  "authored_doc_versions",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => authoredDocs.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    contentJson: jsonb("content_json").notNull(),
+    html: text("html").notNull(),
+    note: text("note"),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("authored_doc_version_idx").on(t.documentId, t.version)],
+);
+
+/**
+ * Ephemeral autosave workspace state (Phase 4). Deliberately OUTSIDE the
+ * ledger and outside version history: keystroke autosaves are noise, and
+ * flooding the append-only chain with them would defeat the audit signal.
+ * RLS tenant isolation still applies. One row per document+editor.
+ */
+export const docDrafts = pgTable(
+  "doc_drafts",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => authoredDocs.id, { onDelete: "cascade" }),
+    contentJson: jsonb("content_json").notNull(),
+    /** Monotonic client revision for lost-update detection. */
+    rev: integer("rev").notNull().default(1),
+    /** Soft lock: who holds the pen, and until when (heartbeat renews). */
+    lockedByUserId: uuid("locked_by_user_id"),
+    lockedByName: text("locked_by_name"),
+    lockUntil: timestamp("lock_until", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("doc_draft_doc_idx").on(t.documentId)],
+);
+
+/**
+ * Live editing presence (Phase 4). Ephemeral workspace state like drafts:
+ * a heartbeat writes a row, absence of a fresh row means "gone". RLS applies.
+ */
+export const docPresence = pgTable(
+  "doc_presence",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => authoredDocs.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    displayName: text("display_name").notNull(),
+    color: text("color").notNull().default("#b45309"),
+    seenAt: timestamp("seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("doc_presence_doc_user_idx").on(t.documentId, t.userId)],
+);
+
+/**
+ * Parameterized Tiptap templates (Phase 4). `contentJson` carries
+ * {{placeholder}} tokens inside text nodes; placeholders are derived from
+ * the content and filled through a form to spawn a document.
+ */
+export const docTemplates = pgTable(
+  "doc_templates",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    contentJson: jsonb("content_json").notNull(),
+    /** Resolved at seed time from the content; clients show a fill-in form. */
+    placeholders: jsonb("placeholders").notNull().default([]),
+    isSystem: text("is_system"), // null | 'system' for built-ins
+    createdAt: createdAt(),
+  },
+  (t) => [index("doc_template_org_idx").on(t.orgId)],
 );
 
 // ── HR (employees, leave, payroll) ──────────────────────────────────────

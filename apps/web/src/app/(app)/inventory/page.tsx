@@ -13,6 +13,7 @@ import {
   type ActionNoticeState,
 } from "@/components/ui";
 import { formatDateTime, formatMoney } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 import { IconChevronDown, IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
@@ -104,6 +105,7 @@ interface Payload {
 const qty = (t: number) => (t / 1000).toFixed(3);
 
 export default function InventoryPage() {
+  useMoneySync();
   const __enabled = useModuleEnabled("inventory");
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
@@ -488,7 +490,7 @@ export default function InventoryPage() {
               </table>
               <div className="flex flex-wrap items-center gap-2">
                 <select
-                  className="rounded border bg-transparent px-2 py-1.5"
+                  className="select"
                   value={vendorId}
                   onChange={(e) => setVendorId(e.target.value)}
                 >

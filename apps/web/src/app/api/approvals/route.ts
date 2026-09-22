@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { approvals, getDb } from "@chaste/db";
+import { approvals, getDb, users } from "@chaste/db";
 import { buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
 import { decideApproval } from "@/server/approvals";
 import { getResolvedUser } from "@/server/session";
@@ -18,6 +18,22 @@ export async function GET() {
     .where(and(eq(approvals.orgId, resolved.orgId), eq(approvals.status, "pending")))
     .limit(100);
 
+  // Attribution: whose action is waiting. The actor id doubles as the
+  // on-behalf user for agent-raised requests (the workmate acts as the
+  // human it works for); a sessionId marks the action as agent-originated.
+  const requesterIds = [...new Set(rows.map((r) => r.requestedByUserId).filter((v): v is string => Boolean(v)))];
+  const namesById = requesterIds.length
+    ? new Map(
+        (
+          await db
+            .select({ id: users.id, name: users.name, email: users.email })
+            .from(users)
+        )
+          .filter((u) => requesterIds.includes(u.id))
+          .map((u) => [u.id, u.name ?? u.email]),
+      )
+    : new Map<string, string>();
+
   // Authority filter: you may only see (and decide) gates for capabilities
   // your own permissions cover. An accountant never sees IAM requests.
   const visible = rows.filter((r) => {
@@ -25,7 +41,14 @@ export async function GET() {
     return cap ? hasPermissionFor({ permissions: resolved.permissions }, cap.permission) : false;
   });
   return NextResponse.json({
-    approvals: visible.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() })),
+    approvals: visible.map((a) => ({
+      ...a,
+      createdAt: a.createdAt.toISOString(),
+      raisedBy: {
+        name: (a.requestedByUserId && namesById.get(a.requestedByUserId)) || "Unknown",
+        kind: a.sessionId ? ("agent" as const) : ("human" as const),
+      },
+    })),
   });
 }
 

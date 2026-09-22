@@ -19,8 +19,9 @@ import { useRouter } from "next/navigation";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { WriteTab } from "./_write/write-tab";
 
-type Tab = "overview" | "library" | "ingest";
+type Tab = "overview" | "write" | "library" | "ingest";
 
 interface DocRow {
   id: string;
@@ -148,6 +149,7 @@ export default function DocumentsPage() {
       persistKey="documents"
       tabs={[
         { id: "overview", label: "Overview" },
+        { id: "write", label: "Write" },
         { id: "library", label: "Library", count: docs?.length || undefined },
         { id: "ingest", label: "Ingest" },
       ]}
@@ -204,6 +206,8 @@ export default function DocumentsPage() {
           </div>
         </div>
       )}
+
+      {tab === "write" && <WriteTab />}
 
       {tab === "ingest" && (
       <Card className="mb-8">

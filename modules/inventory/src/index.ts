@@ -45,13 +45,14 @@ const createItem = (deps: ModuleDeps) =>
     id: "inventory.createItem",
     title: "Create stock item",
     intent:
-      "Register a stocked product with a SKU and optional reorder point so quantities can be tracked",
+      "Register a product or service in the catalog: goods carry a SKU and optional reorder point so quantities can be tracked, services sell directly with no stock",
     module: "inventory",
     risk: "write",
     permission: "inventory.write",
     input: z.object({
       sku: z.string().min(1).max(40),
       name: z.string().min(1).max(120),
+      kind: z.enum(["goods", "service"]).default("goods"),
       unitLabel: z.string().max(20).default("unit"),
       salePriceMinor: z.number().int().nonnegative().default(0),
       reorderPointThousandths: z.number().int().nonnegative().default(0),
@@ -75,15 +76,19 @@ const createItem = (deps: ModuleDeps) =>
           .limit(1);
         if (barcodeDupe) throw new Error(`barcode "${input.barcode}" is already on another item`);
       }
+      // Services never stock: a reorder point on a service is meaningless
+      // and would fire phantom alerts, so it is dropped at the boundary.
+      const reorderPoint = input.kind === "service" ? 0 : input.reorderPointThousandths;
       const [row] = await deps.db
         .insert(items)
         .values({
           orgId: ctx.actor.orgId,
           sku: input.sku,
           name: input.name,
+          kind: input.kind,
           unitLabel: input.unitLabel,
           salePriceMinor: input.salePriceMinor,
-          reorderPointThousandths: input.reorderPointThousandths,
+          reorderPointThousandths: reorderPoint,
           imageUrl: input.imageUrl ?? null,
           tags: input.tags,
           barcode: input.barcode ?? null,
@@ -153,6 +158,7 @@ const adjustStock = (deps: ModuleDeps) =>
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const item = await itemBySku(tx, ctx.actor.orgId, input.sku);
         if (!item) throw new Error(`no item with SKU ${input.sku}`);
+        if (item.kind === "service") throw new Error(`"${item.name}" is a service; there is nothing to stock`);
         if (input.lotCode && input.quantityDelta < 0) {
           throw new Error("lotCode applies only to inward corrections");
         }
@@ -200,6 +206,7 @@ const stockReport = (deps: ModuleDeps) =>
         z.object({
           sku: z.string(),
           name: z.string(),
+          kind: z.string(),
           unitLabel: z.string(),
           salePriceMinor: z.number(),
           imageUrl: z.string().nullable(),
@@ -242,6 +249,7 @@ const stockReport = (deps: ModuleDeps) =>
         out.push({
           sku: item.sku,
           name: item.name,
+          kind: item.kind,
           unitLabel: item.unitLabel,
           salePriceMinor: item.salePriceMinor,
           imageUrl: item.imageUrl,

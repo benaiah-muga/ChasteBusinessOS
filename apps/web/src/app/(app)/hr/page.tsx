@@ -24,6 +24,7 @@ import {
   IconUsers,
 } from "@/components/icons";
 import { cn, formatDate, formatDateTime, formatMoney, formatMoneyWhole, statusTone } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
@@ -143,6 +144,7 @@ function fmtHours(minutes: number): string {
 }
 
 export default function HrPage() {
+  useMoneySync();
   const __enabled = useModuleEnabled("hr");
   const router = useRouter();
   const [tab, setTab] = useState<TabId>("overview");

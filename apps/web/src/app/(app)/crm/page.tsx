@@ -21,6 +21,8 @@ import {
   IconX,
 } from "@/components/icons";
 import { cn, formatDate, formatMoneyWhole, timeAgo, toMinor } from "@/lib/format";
+import { useMoneySync } from "@/lib/money";
+import { QuickCreateButton } from "../quick-create";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
@@ -80,6 +82,7 @@ interface TimelineState {
 
 // __MAIN__
 export default function CrmPage() {
+  useMoneySync();
   const __enabled = useModuleEnabled("crm");
   const [tab, setTab] = useState("overview");
   const [deals, setDeals] = useState<Deal[] | null>(null);
@@ -253,6 +256,7 @@ export default function CrmPage() {
             onMove={(id, stage) => void move(id, stage)}
             onNotice={setNotice}
             onReload={load}
+            onDataChanged={load}
           />
         )}
         {tab === "customers" && (
@@ -420,6 +424,7 @@ function DealsTab(props: {
   onMove: (dealId: string, stage: Stage) => void;
   onNotice: (n: ActionNoticeState) => void;
   onReload: () => Promise<void> | void;
+  onDataChanged?: () => void;
 }) {
   const { deals, busy } = props;
   const openDeals = deals.filter((d) => d.stage !== "won" && d.stage !== "lost");
@@ -696,19 +701,28 @@ function DealsTab(props: {
             onChange={(e) => setConvertCustomerName(e.target.value)}
           />
         ) : (
-          <select
-            className="input"
-            aria-label="Attach to existing customer"
-            value={convertCustomerId}
-            onChange={(e) => setConvertCustomerId(e.target.value)}
-          >
-            <option value="">Choose customer…</option>
-            {props.customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              className="select"
+              aria-label="Attach to existing customer"
+              value={convertCustomerId}
+              onChange={(e) => setConvertCustomerId(e.target.value)}
+            >
+              <option value="">Choose customer…</option>
+              {props.customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <QuickCreateButton
+              entity="customer"
+              onCreated={(r) => {
+                props.onDataChanged?.();
+                setConvertCustomerId(r.id);
+              }}
+            />
+          </div>
         )}
       </Dialog>
     </div>

@@ -55,6 +55,7 @@ could be affected. You cannot merge anything yourself; say so plainly.`;
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!resolved.orgId) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
   const ctx = actorFromResolved(resolved, { asAgent: true });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 

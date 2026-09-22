@@ -58,13 +58,15 @@ async function main() {
   const aging = await executor.execute("accounting.arAging", agentCtx, {});
   console.log("✓ aging:", JSON.stringify(aging.data?.buckets));
 
-  // Close last month (destructive → forced approval even for humans)
+  // Close last month. Destructive-class: the workmate proposing it waits for
+  // human approval; a permitted human in the UI acts under their own
+  // authority (ADR 0055), so the gate is proven with an agent actor.
   const lastMonth = new Date(Date.now() - 45 * 86_400_000);
-  const close = await executor.execute("accounting.closePeriod", humanCtx, {
+  const close = await executor.execute("accounting.closePeriod", agentCtx, {
     year: lastMonth.getUTCFullYear(),
     month: lastMonth.getUTCMonth() + 1,
   });
-  if (!close.pendingApproval) throw new Error("destructive close was not gated!");
+  if (!close.pendingApproval) throw new Error("destructive close was not gated for the agent!");
   console.log('✓ close period gated:', close.pendingApproval.rationale);
 
   const [pending] = await db
