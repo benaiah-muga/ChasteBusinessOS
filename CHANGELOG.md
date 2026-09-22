@@ -54,6 +54,9 @@ The full v1 changelog is preserved at the bottom of this file.
   instructs agents never to write them.
 
 ### Fixed
+- **The consolidated Needs you badge could undercount receipt remainders.**
+  The queue now includes those fetched work cards in its visible count as
+  soon as they arrive.
 - **Sign-up ended in a hung spinner with no explanation.** Under the
   verified-binding profile (N03) sign-up creates the account but skips
   auto sign-in, so `router.replace("/")` bounced off the auth guard straight

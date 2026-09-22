@@ -571,6 +571,8 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
   const [workCards, setWorkCards] = useState<WorkCard[] | null>(null);
   const [brief, setBrief] = useState<string | null>(null);
   const [briefState, setBriefState] = useState<"idle" | "loading" | "unavailable">("idle");
+  const receiptRemainderCount = workCards?.filter((card) => card.kind === "receipt_remainder").length ?? 0;
+  const queueCount = count + receiptRemainderCount;
 
   useEffect(() => {
     pilotBegin("home");
@@ -703,9 +705,9 @@ function NeedsYouQueue({ data, count }: { data: DashboardPayload; count: number 
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="figure-label">
           Needs you
-          {count > 0 && (
+          {queueCount > 0 && (
             <span className="tnum ml-2 inline-flex -translate-y-px items-center rounded-full bg-gold-100 px-2 py-0.5 text-[11px] text-gold-800">
-              {count}
+              {queueCount}
             </span>
           )}
         </p>
