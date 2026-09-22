@@ -8,3 +8,5 @@ export * from "./ledger";
 export * from "./executor";
 export * from "./loop";
 export * from "./logger";
+export * from "./run-contract";
+export * from "./replay";

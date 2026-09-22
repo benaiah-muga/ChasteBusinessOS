@@ -181,8 +181,14 @@ describe("worker-kill convergence (B03)", () => {
     }, "worker A's receipt to become durable");
 
     // Worker B arrives after the (simulated) death: the lease is long past
-    // expiry on B's clock, and A's heartbeat cannot out-run it.
-    await processOneJob(db, logger, { workerId: "worker-B", now: new Date(Date.now() + 120_000), leaseMs: 400 });
+    // expiry on B's clock. A heartbeat can briefly hold the row lock while
+    // B's SKIP LOCKED claim runs, so retry the claim until that transient
+    // lock window closes rather than mistaking it for a non-expired lease.
+    await until(async () => {
+      await processOneJob(db, logger, { workerId: "worker-B", now: new Date(Date.now() + 120_000), leaseMs: 400 });
+      const [current] = await db.select({ status: jobs.status, attempts: jobs.attempts }).from(jobs).where(eq(jobs.id, jobId));
+      return current?.status === "done" && current.attempts === 2;
+    }, "worker B to reclaim and finalize the expired lease");
 
     const [done] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(done!.status).toBe("done");

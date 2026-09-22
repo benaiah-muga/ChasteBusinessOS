@@ -27,6 +27,7 @@ describe("stripProviderPrefix", () => {
     expect(stripProviderPrefix("groq/llama-3")).toBe("llama-3");
     expect(stripProviderPrefix("mistral/large")).toBe("large");
     expect(stripProviderPrefix("zai/glm-4.7-flash")).toBe("glm-4.7-flash");
+    expect(stripProviderPrefix("openai/gpt-5")).toBe("gpt-5");
     expect(stripProviderPrefix("moonshotai/kimi-k2.6")).toBe("moonshotai/kimi-k2.6");
   });
 });
@@ -66,6 +67,18 @@ describe("resolveClient", () => {
     withEnv({}, () => {
       expect(() => nimClient()).toThrow(/NVIDIA_API_KEY/);
       expect(() => zaiClient()).toThrow(/ZAI_API_KEY/);
+    });
+  });
+
+  it("uses an explicit workspace runtime without reading process environment", () => {
+    withEnv({}, () => {
+      expect(
+        resolveClient("custom/model", {
+          provider: "custom",
+          apiKey: "workspace-key",
+          baseUrl: "https://gateway.example/v1",
+        }).baseURL,
+      ).toBe("https://gateway.example/v1");
     });
   });
 });

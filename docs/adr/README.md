@@ -56,6 +56,19 @@ the next number; superseded ones get a Status update, never deletion.
 | 0049 | Order-line budgets for receipts, returns, and bills | accepted |
 | 0050 | One inventory command service with item locks and count watermarks | accepted |
 | 0051 | Domain compensations, not generic journal reversal | accepted |
+| 0052 | Commit-time ledger enforcement | accepted |
+| 0053 | Identity lifecycle and widget containment | accepted |
+| 0054 | Durable agent run checkpoints | accepted |
+| 0055 | Read-only trajectory replay | accepted |
+| 0056 | Capability-gap contracts | accepted |
+| 0057 | Isolated Creator candidate pipeline | accepted |
+| 0058 | Harness composition stays above the capability kernel | accepted |
+| 0059 | Persist approved harness identity and inspect it by metadata | accepted |
+| 0060 | Resolve approved profiles before creating durable runs | accepted |
+| 0061 | Resolve approved harness bundles through explicit adapters | accepted |
+| 0062 | Govern harness composition approval through the existing approval path | accepted |
+| 0063 | Record controlled evolution release handoffs without executing Creator source | accepted |
+| 0064 | Record Creator canary outcomes as release evidence | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

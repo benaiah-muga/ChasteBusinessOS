@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveClient, stripProviderPrefix } from "@chaste/ai";
+import { getDb } from "@chaste/db";
+import { runtimeAiConfig } from "@/server/ai-settings";
 import { getResolvedUser } from "@/server/session";
 
 /**
@@ -12,11 +14,8 @@ import { getResolvedUser } from "@/server/session";
  * inventing one.
  */
 
-const NL_MODEL = process.env.MODEL_NL ?? "openrouter/stealth/union-alpha";
-const NL_FALLBACK_MODEL = process.env.MODEL_NL_FALLBACK ?? "openrouter/unbiased/pareto";
-
-async function briefWith(modelRef: string, list: string[]): Promise<string> {
-  const client = resolveClient(modelRef);
+async function briefWith(modelRef: string, list: string[], runtime: Awaited<ReturnType<typeof runtimeAiConfig>>["runtime"]): Promise<string> {
+  const client = resolveClient(modelRef, runtime);
   const completion = await client.chat.completions.create(
     {
       model: stripProviderPrefix(modelRef),
@@ -53,9 +52,10 @@ export async function POST(req: Request) {
   if (body.cards.length > 30) {
     return NextResponse.json({ error: "too many cards" }, { status: 400 });
   }
-  if (!process.env.OPENROUTER_API_KEY) {
+  const ai = await runtimeAiConfig(getDb().db, resolved.orgId);
+  if (!ai.runtime.apiKey) {
     return NextResponse.json(
-      { error: "summary unavailable", hint: "no OPENROUTER_API_KEY configured; the ranked list itself does not depend on it" },
+      { error: "summary unavailable", hint: "no workspace model credential is configured; the ranked list itself does not depend on it" },
       { status: 503 },
     );
   }
@@ -68,20 +68,22 @@ export async function POST(req: Request) {
   });
 
   try {
-    let brief = await briefWith(NL_MODEL, lines);
-    let usedModel = stripProviderPrefix(NL_MODEL);
+    const primary = ai.models.fast;
+    const fallback = ai.models.primary;
+    let brief = await briefWith(primary, lines, ai.runtime);
+    let usedModel = stripProviderPrefix(primary);
     if (!brief) {
-      // The primary slug rotated or returned nothing: take the successor model.
-      brief = await briefWith(NL_FALLBACK_MODEL, lines);
-      usedModel = stripProviderPrefix(NL_FALLBACK_MODEL);
+      // The fast model returned nothing: use the workspace primary model.
+      brief = await briefWith(fallback, lines, ai.runtime);
+      usedModel = stripProviderPrefix(fallback);
     }
     if (!brief) return NextResponse.json({ error: "summary unavailable" }, { status: 502 });
     return NextResponse.json({ brief, model: usedModel });
   } catch (err) {
     if (isModelUnavailable(err)) {
       try {
-        const brief = await briefWith(NL_FALLBACK_MODEL, lines);
-        if (brief) return NextResponse.json({ brief, model: stripProviderPrefix(NL_FALLBACK_MODEL) });
+        const brief = await briefWith(ai.models.primary, lines, ai.runtime);
+        if (brief) return NextResponse.json({ brief, model: stripProviderPrefix(ai.models.primary) });
       } catch {
         // fall through to the honest failure
       }

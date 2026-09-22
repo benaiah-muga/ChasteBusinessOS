@@ -2,6 +2,26 @@ export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  KES: "KSh",
+  EUR: "€",
+  GBP: "£",
+  TZS: "TSh",
+  UGX: "USh",
+};
+
+let displayCurrency = "USD";
+
+/** Sets the presentation currency without changing stored minor-unit values. */
+export function setDisplayCurrency(code: string): void {
+  if (CURRENCY_SYMBOLS[code]) displayCurrency = code;
+}
+
+function displaySymbol(): string {
+  return CURRENCY_SYMBOLS[displayCurrency] ?? CURRENCY_SYMBOLS.USD!;
+}
+
 /** Money is integer minor units everywhere; render once, consistently. */
 export function formatMoney(minor: number): string {
   const abs = Math.abs(minor) / 100;
@@ -9,7 +29,8 @@ export function formatMoney(minor: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  return minor < 0 ? `−$${body}` : `$${body}`;
+  const symbol = displaySymbol();
+  return minor < 0 ? `−${symbol}${body}` : `${symbol}${body}`;
 }
 
 /** Whole-dollar display for forecasts/pipeline where cents are noise. */
@@ -17,7 +38,8 @@ export function formatMoneyWhole(minor: number): string {
   const body = (Math.abs(minor) / 100).toLocaleString("en-US", {
     maximumFractionDigits: 0,
   });
-  return minor < 0 ? `−$${body}` : `$${body}`;
+  const symbol = displaySymbol();
+  return minor < 0 ? `−${symbol}${body}` : `${symbol}${body}`;
 }
 
 /** Parses a user-entered dollar amount into integer minor units. */

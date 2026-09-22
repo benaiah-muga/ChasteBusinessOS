@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { callApi, postApi } from "@/lib/api";
-import { Button } from "@/components/ui";
+import { Badge, Button, Card, CopyButton, EmptyState, LoadingPage } from "@/components/ui";
 import { APPS, tileStyle } from "../_shell/apps";
 import { appPins, MAX_PINS, usePinnedApps } from "../_shell/pins";
 import { useModuleEnabled } from "../_shell/module-context";
@@ -18,8 +18,8 @@ import {
   type Units,
   type WeekStart,
 } from "@/lib/prefs";
-import { IconMoon, IconPinTack, IconSun } from "@/components/icons";
-import { cn } from "@/lib/format";
+import { IconAlertTriangle, IconCheck, IconMoon, IconPinTack, IconSun } from "@/components/icons";
+import { cn, timeAgo } from "@/lib/format";
 
 const TABS = [
   { id: "appearance", label: "Appearance" },
@@ -27,6 +27,7 @@ const TABS = [
   { id: "localization", label: "Localization" },
   { id: "ai", label: "AI & automation" },
   { id: "routines", label: "Routines" },
+  { id: "runtime", label: "Runtime" },
 ] as const;
 
 /**
@@ -50,7 +51,85 @@ export default function SettingsPage() {
       {tab === "localization" && <LocalizationTab />}
       {tab === "ai" && <AiTab />}
       {tab === "routines" && <RoutinesTab />}
+      {tab === "runtime" && <RuntimeTab />}
     </AppFrame>
+  );
+}
+
+interface CompositionInspection {
+  id: string;
+  createdAt: string;
+  inspection: {
+    profile: { id: string; version: string; environment: string };
+    profileDigest: string;
+    compositionDigest: string;
+    bundles: Array<{ id: string; version: string; serviceIds: string[]; requiredBundleIds?: string[] }>;
+    patches: Array<{ id: string; version: string; configKeys: string[] }>;
+  };
+}
+
+function RuntimeTab() {
+  const [compositions, setCompositions] = useState<CompositionInspection[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void callApi<{ compositions?: CompositionInspection[] }>("/api/harness/compositions").then((res) => {
+      if (!res.ok) setError(res.error?.title ?? "Couldn't load runtime compositions");
+      setCompositions(res.data?.compositions ?? []);
+    });
+  }, []);
+
+  if (compositions === null) return <LoadingPage />;
+  if (error) return <EmptyState icon={<IconAlertTriangle />} title={error} hint="Runtime inspection is limited to operators who can approve harness compositions." />;
+  if (compositions.length === 0) {
+    return <EmptyState icon={<IconCheck />} title="No runtime compositions" hint="Approved profiles and bundles will appear here when a durable run is configured." />;
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <div>
+        <h2 className="section-title">Runtime compositions</h2>
+        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-stone-500">
+          The exact profile and approved bundles a durable run may mount. Inspection shows safe metadata and configuration keys, never patch values or credentials.
+        </p>
+      </div>
+      {compositions.map(({ id, createdAt, inspection }) => (
+        <Card key={id}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={inspection.profile.environment === "erp-prod" ? "red" : "blue"}>{inspection.profile.environment}</Badge>
+            <h3 className="text-[15px] font-semibold text-stone-900">{inspection.profile.id}</h3>
+            <span className="text-xs text-stone-400">v{inspection.profile.version} · {timeAgo(createdAt)}</span>
+          </div>
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+            <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+              <p className="text-[10px] font-semibold tracking-wider text-stone-400 uppercase">Profile digest</p>
+              <code className="mt-1 block break-all text-stone-700">{inspection.profileDigest}</code>
+              <CopyButton text={inspection.profileDigest} label="Copy" />
+            </div>
+            <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+              <p className="text-[10px] font-semibold tracking-wider text-stone-400 uppercase">Composition digest</p>
+              <code className="mt-1 block break-all text-stone-700">{inspection.compositionDigest}</code>
+              <CopyButton text={inspection.compositionDigest} label="Copy" />
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <p className="text-[11px] font-semibold text-stone-500">Approved bundles</p>
+              <ul className="mt-1 space-y-1 text-xs text-stone-700">
+                {inspection.bundles.map((bundle) => <li key={`${bundle.id}@${bundle.version}`}><code>{bundle.id}@{bundle.version}</code> · {bundle.serviceIds.length} service{bundle.serviceIds.length === 1 ? "" : "s"}</li>)}
+              </ul>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-stone-500">Configuration patches</p>
+              <ul className="mt-1 space-y-1 text-xs text-stone-700">
+                {inspection.patches.length === 0 ? <li className="text-stone-400">None</li> : inspection.patches.map((patch) => <li key={`${patch.id}@${patch.version}`}><code>{patch.id}@{patch.version}</code> · {patch.configKeys.length} key{patch.configKeys.length === 1 ? "" : "s"}</li>)}
+              </ul>
+            </div>
+          </div>
+          <p className="mt-3 font-mono text-[10px] text-stone-400">composition {id}</p>
+        </Card>
+      ))}
+    </div>
   );
 }
 
@@ -278,45 +357,177 @@ interface AiConfig {
   configured: boolean;
   baseUrl: string;
   models: { primary: string; fast: string; reasoning: string; embeddings: string };
+  keyHint?: string | null;
   source: string;
 }
+
+type AiProviderId = "nvidia" | "openrouter" | "groq" | "mistral" | "zai" | "openai" | "custom";
+
+const AI_PROVIDER_OPTIONS: Array<{ id: AiProviderId; label: string; baseUrl: string }> = [
+  { id: "nvidia", label: "NVIDIA NIM", baseUrl: "https://integrate.api.nvidia.com/v1" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1" },
+  { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1" },
+  { id: "zai", label: "Z.ai (GLM)", baseUrl: "https://api.z.ai/api/paas/v4" },
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  { id: "custom", label: "Custom OpenAI-compatible", baseUrl: "" },
+];
+
+const DEFAULT_AI_MODELS = {
+  primary: "moonshotai/kimi-k2.6",
+  fast: "meta/muse-glimmer-30b",
+  reasoning: "nvidia/nemotron-3-ultra-550b-a55b",
+  embeddings: "nvidia/nv-embedqa-e5-v5",
+};
 
 function AiTab() {
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [provider, setProvider] = useState<AiProviderId>("nvidia");
+  const [baseUrl, setBaseUrl] = useState(AI_PROVIDER_OPTIONS[0]!.baseUrl);
+  const [models, setModels] = useState(DEFAULT_AI_MODELS);
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  function applyConfig(next: AiConfig) {
+    const nextProvider = AI_PROVIDER_OPTIONS.some((option) => option.id === next.provider) ? (next.provider as AiProviderId) : "custom";
+    setConfig(next);
+    setProvider(nextProvider);
+    setBaseUrl(next.baseUrl);
+    setModels(next.models);
+    setApiKey("");
+  }
 
   useEffect(() => {
     void callApi<AiConfig>("/api/ai-config").then((res) => {
-      if (res.data) setConfig(res.data);
+      if (res.data) applyConfig(res.data);
       else setError(res.error?.title ?? "Could not load model configuration");
     });
   }, []);
 
+  function changeProvider(next: AiProviderId) {
+    const previousDefault = AI_PROVIDER_OPTIONS.find((option) => option.id === provider)?.baseUrl ?? "";
+    const nextDefault = AI_PROVIDER_OPTIONS.find((option) => option.id === next)?.baseUrl ?? "";
+    setProvider(next);
+    if (!baseUrl || baseUrl === previousDefault) setBaseUrl(nextDefault);
+  }
+
+  async function save() {
+    setBusy(true);
+    setNote(null);
+    const res = await postApi<AiConfig & { pendingApproval?: boolean }>("/api/ai-config", {
+      provider,
+      baseUrl,
+      models,
+      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+    });
+    setBusy(false);
+    if (res.status === 202) {
+      setNote("Configuration submitted for administrator approval.");
+    } else if (res.data && res.ok && "provider" in res.data) {
+      applyConfig(res.data);
+      setNote("Model configuration saved. New agent runs use it.");
+    } else {
+      setNote(res.error?.title ?? "Could not save model configuration.");
+    }
+  }
+
+  async function clearKey() {
+    if (!config?.configured) return;
+    setBusy(true);
+    setNote(null);
+    const res = await postApi<AiConfig & { pendingApproval?: boolean }>("/api/ai-config", {
+      provider,
+      baseUrl,
+      models,
+      clearApiKey: true,
+    });
+    setBusy(false);
+    if (res.status === 202) setNote("Key removal submitted for administrator approval.");
+    else if (res.data && res.ok && "provider" in res.data) {
+      applyConfig(res.data);
+      setNote("Workspace key cleared.");
+    } else setNote(res.error?.title ?? "Could not clear workspace key.");
+  }
+
+  function updateModel(field: keyof typeof DEFAULT_AI_MODELS, value: string) {
+    setModels((current) => ({ ...current, [field]: value }));
+  }
+
   return (
     <div className="max-w-2xl">
       <p className="mb-6 text-sm leading-relaxed text-stone-500">
-        Your workmate runs on models configured in the server environment -
-        keys never enter the browser, and the model reaches your business only
-        through the same governed capabilities you use.
+        Choose the provider and model roles used by this workspace. Credentials
+        are encrypted before storage, never returned to the browser, and every
+        change goes through the governed capability pipeline.
       </p>
 
       {!config ? (
         <p className="text-sm text-stone-400">{error ?? "Checking configuration…"}</p>
       ) : (
         <>
-          <div className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="section-title">Workspace model provider</h2>
+                <p className="mt-1 text-xs text-stone-500">Source: {config.source === "workspace" ? "workspace override" : "server environment"}</p>
+              </div>
+              {config.configured ? <Badge tone="green">connected {config.keyHint ?? ""}</Badge> : <Badge tone="amber">credential missing</Badge>}
+            </div>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm text-stone-600">
+                Provider
+                <select value={provider} onChange={(e) => changeProvider(e.target.value as AiProviderId)} className="select mt-1 w-full">
+                  {AI_PROVIDER_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="text-sm text-stone-600">
+                API key
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={config.keyHint ? `Current key ${config.keyHint}` : "Paste a provider key"}
+                  className="input mt-1 w-full"
+                  autoComplete="new-password"
+                />
+              </label>
+            </div>
+            <label className="mt-4 block text-sm text-stone-600">
+              Base URL
+              <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="input mt-1 w-full font-mono text-xs" placeholder="https://your-provider.example/v1" />
+              <span className="mt-1 block text-xs text-stone-400">Use a custom URL for a self-hosted or OpenAI-compatible gateway.</span>
+            </label>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {(
+                [
+                  ["primary", "Primary", "Conversations, drafting, and coding suggestions"],
+                  ["fast", "Fast", "Classifications and quick lookups"],
+                  ["reasoning", "Reasoning", "Deep multi-step analysis"],
+                  ["embeddings", "Embeddings", "Document search and memory"],
+                ] as const
+              ).map(([field, label, hint]) => (
+                <label key={field} className="text-sm text-stone-600">
+                  {label}
+                  <input value={models[field]} onChange={(e) => updateModel(field, e.target.value)} className="input mt-1 w-full font-mono text-xs" />
+                  <span className="mt-1 block text-[11px] text-stone-400">{hint}</span>
+                </label>
+              ))}
+            </div>
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <Button size="sm" loading={busy} onClick={() => void save()}>Save model configuration</Button>
+              <Button size="sm" tone="secondary" disabled={busy || !config.configured} onClick={() => void clearKey()}>Clear stored key</Button>
+              {note && <span className="text-xs text-stone-500">{note}</span>}
+            </div>
+          </Card>
+
+          <div className="mt-4 divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
             <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
               <dt className="text-stone-500">Provider</dt>
               <dd className="flex items-center gap-2 font-medium text-stone-900">
-                {config.provider === "openrouter"
-                  ? "OpenRouter"
-                  : config.provider === "groq"
-                    ? "Groq"
-                    : config.provider === "mistral"
-                      ? "Mistral"
-                      : config.provider === "zai"
-                        ? "Z.ai (GLM)"
-                        : "NVIDIA NIM"}
+                {AI_PROVIDER_OPTIONS.find((option) => option.id === config.provider)?.label ?? config.provider}
                 {config.configured ? (
                   <span className="badge badge-green">connected</span>
                 ) : (
@@ -334,19 +545,9 @@ function AiTab() {
             <ModelRow label="Embeddings" model={config.models.embeddings} hint="Document search and memory" />
           </div>
 
-          {!config.configured && (
-            <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              Set <code className="rounded bg-amber-100 px-1">NVIDIA_API_KEY</code> (or{" "}
-              <code className="rounded bg-amber-100 px-1">OPENROUTER_API_KEY</code> with{" "}
-              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=openrouter</code>, or{" "}
-              <code className="rounded bg-amber-100 px-1">GROQ_API_KEY</code> with{" "}
-              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=groq</code>, or{" "}
-              <code className="rounded bg-amber-100 px-1">MISTRAL_API_KEY</code> with{" "}
-              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=mistral</code>, or{" "}
-              <code className="rounded bg-amber-100 px-1">ZAI_API_KEY</code> with{" "}
-              <code className="rounded bg-amber-100 px-1">MODEL_PROVIDER=zai</code>) in the server environment.
-            </p>
-          )}
+          <p className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+            Coding-agent subscriptions are not imported from local CLI files. Use a detected Codex, OpenCode, or Kilo agent through Creator mode, or enter an API key / endpoint that this workspace is authorized to call.
+          </p>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <Link

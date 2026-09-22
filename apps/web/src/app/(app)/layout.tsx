@@ -44,6 +44,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       orgName={activeOrg?.name ?? ""}
       pendingApprovals={pendingApprovals}
       enabledModules={resolved.enabledModules ?? null}
+      baseCurrency={resolved.baseCurrency ?? "USD"}
       orgSwitcher={orgs.length > 1 ? <OrgSwitcher orgs={orgs} activeId={resolved.orgId} /> : undefined}
     >
       {children}

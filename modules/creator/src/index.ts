@@ -9,6 +9,7 @@ import {
 } from "@chaste/plugin-kit";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import { renderCapabilitySource, renderProposalDiff, renderRiskDoc, renderTestSkeleton } from "./scaffold";
+import { registerEvolutionCapabilities, verifyCapabilityGapTicket } from "./evolution";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -36,9 +37,11 @@ const submitProposal = (deps: ModuleDeps) =>
       diffText: z.string().min(10).max(100_000).describe("unified diff of the proposed change"),
       testEvidence: z.string().max(20_000).optional(),
       riskAssessment: z.string().min(10).max(4000),
+      gapTicketId: z.string().uuid().optional(),
     }),
     output: z.object({ proposalId: z.string() }),
     execute: async (ctx, input) => {
+      if (input.gapTicketId) await verifyCapabilityGapTicket(deps.db, ctx.actor.orgId, input.gapTicketId);
       const [row] = await deps.db
         .insert(creatorProposals)
         .values({
@@ -48,6 +51,7 @@ const submitProposal = (deps: ModuleDeps) =>
           diffText: input.diffText,
           testEvidence: input.testEvidence ?? null,
           riskAssessment: input.riskAssessment,
+          gapTicketId: input.gapTicketId ?? null,
           status: "in_review",
           sessionId: ctx.sessionId ?? null,
           proposedByActorType: ctx.actor.type,
@@ -110,6 +114,7 @@ const scaffoldInput = z.object({
   intent: z.string().min(20).max(500),
   risk: riskEnum,
   permission: z.string().min(3),
+  gapTicketId: z.string().uuid().optional(),
   inputFields: z
     .array(
       z.object({
@@ -139,6 +144,7 @@ const scaffoldCapability = (deps: ModuleDeps) =>
       proposalId: z.string().optional(),
     }),
     execute: async (ctx, input) => {
+      if (input.gapTicketId) await verifyCapabilityGapTicket(deps.db, ctx.actor.orgId, input.gapTicketId);
       const spec = {
         module: input.module,
         action: input.action,
@@ -165,6 +171,7 @@ const scaffoldCapability = (deps: ModuleDeps) =>
           diffText: renderProposalDiff(spec, filePath),
           testEvidence: renderTestSkeleton(spec),
           riskAssessment: renderRiskDoc(spec),
+          gapTicketId: input.gapTicketId ?? null,
           status: "in_review",
           sessionId: ctx.sessionId ?? null,
           proposedByActorType: ctx.actor.type,
@@ -433,4 +440,5 @@ export function registerCreatorCapabilities(registry: CapabilityRegistry, deps: 
   registry.register(installListing(deps));
   registry.register(uninstallListing(deps));
   registry.register(listMarketplace(deps));
+  registerEvolutionCapabilities(registry, deps);
 }

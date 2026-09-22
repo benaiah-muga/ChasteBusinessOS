@@ -1,5 +1,24 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
+import { getDb } from "@chaste/db";
+import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import {
+  AI_PROVIDER_IDS,
+  aiModelsSchema,
+  encryptProviderKey,
+  providerDefaults,
+  publicAiConfig,
+  storedAiConfigForOrg,
+} from "@/server/ai-settings";
+
+const bodySchema = z.object({
+  provider: z.enum(AI_PROVIDER_IDS),
+  baseUrl: z.string().url().max(500),
+  models: aiModelsSchema,
+  apiKey: z.string().trim().min(1).max(1000).optional(),
+  clearApiKey: z.boolean().optional(),
+});
 
 /**
  * Which model configuration the workmate actually runs on. Read-only: keys
@@ -8,39 +27,35 @@ import { getResolvedUser } from "@/server/session";
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  return NextResponse.json(await publicAiConfig(getDb().db, resolved.orgId));
+}
 
-  const providerEnv = process.env.MODEL_PROVIDER ?? "";
-  const provider = ["openrouter", "groq", "mistral", "zai"].includes(providerEnv) ? providerEnv : "nvidia";
-  const configured =
-    provider === "openrouter"
-      ? Boolean(process.env.OPENROUTER_API_KEY)
-      : provider === "groq"
-        ? Boolean(process.env.GROQ_API_KEY)
-        : provider === "mistral"
-          ? Boolean(process.env.MISTRAL_API_KEY)
-          : provider === "zai"
-            ? Boolean(process.env.ZAI_API_KEY)
-            : Boolean(process.env.NVIDIA_API_KEY);
+export async function POST(req: Request) {
+  const resolved = await getResolvedUser();
+  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const parsed = bodySchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "invalid model configuration" }, { status: 400 });
 
-  return NextResponse.json({
-    provider,
-    configured,
-    baseUrl:
-      provider === "openrouter"
-        ? "https://openrouter.ai/api/v1"
-        : provider === "groq"
-          ? "https://api.groq.com/openai/v1"
-          : provider === "mistral"
-            ? "https://api.mistral.ai/v1"
-            : provider === "zai"
-              ? (process.env.ZAI_BASE_URL ?? "https://api.z.ai/api/paas/v4")
-              : (process.env.NIM_BASE_URL ?? "https://integrate.api.nvidia.com/v1"),
-    models: {
-      primary: process.env.MODEL_PRIMARY ?? "moonshotai/kimi-k2.6",
-      fast: process.env.MODEL_FAST ?? "meta/muse-glimmer-30b",
-      reasoning: process.env.MODEL_REASONING ?? "nvidia/nemotron-3-ultra-550b-a55b",
-      embeddings: process.env.MODEL_EMBEDDINGS ?? "nvidia/nv-embedqa-e5-v5",
-    },
-    source: "environment",
-  });
+  const db = getDb().db;
+  const current = await storedAiConfigForOrg(db, resolved.orgId);
+  const apiKey = parsed.data.clearApiKey
+    ? null
+    : parsed.data.apiKey
+      ? encryptProviderKey(parsed.data.apiKey)
+      : current?.encryptedApiKey ?? null;
+  const rawKey = parsed.data.apiKey;
+  const input = {
+    provider: parsed.data.provider,
+    baseUrl: parsed.data.baseUrl || providerDefaults[parsed.data.provider],
+    models: parsed.data.models,
+    encryptedApiKey: apiKey,
+    keyHint: parsed.data.clearApiKey ? null : rawKey ? `••••${rawKey.slice(-4)}` : current?.keyHint ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+  const ctx = actorFromResolved(resolved);
+  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  const result = await buildExecutor(db, buildRegistry(db)).execute("settings.configureAiProvider", ctx, { config: input });
+  if (result.pendingApproval) return NextResponse.json({ pendingApproval: true, error: result.error }, { status: 202 });
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 });
+  return NextResponse.json({ ok: true, ...(await publicAiConfig(db, resolved.orgId)) });
 }

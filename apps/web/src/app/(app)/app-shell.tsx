@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/client";
@@ -28,7 +28,8 @@ import {
 import { Avatar } from "@/components/ui";
 import { LogoMark } from "@/components/logo";
 import { ThemeMenu } from "@/components/theme";
-import { cn } from "@/lib/format";
+import { cn, setDisplayCurrency } from "@/lib/format";
+import { CURRENCIES, usePrefs, type CurrencyCode } from "@/lib/prefs";
 
 const authClient = createAuthClient();
 
@@ -41,9 +42,10 @@ interface ShellProps {
   orgSwitcher?: ReactNode;
   /** The org's module switchboard; null means every standard module. */
   enabledModules: string[] | null;
+  baseCurrency: string;
 }
 
-export function AppShell({ children, user, orgName, pendingApprovals, orgSwitcher, enabledModules }: ShellProps) {
+export function AppShell({ children, user, orgName, pendingApprovals, orgSwitcher, enabledModules, baseCurrency }: ShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [launcherOpen, setLauncherOpen] = useState(false);
@@ -54,6 +56,9 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
   const dockMode = useChatDockMode();
   const chatPinned = dockMode === "pinned";
   const inputMode = dockMode === "input";
+  const initialCurrency = CURRENCIES.some((currency) => currency.code === baseCurrency) ? (baseCurrency as CurrencyCode) : "USD";
+  const [prefs] = usePrefs({ currency: initialCurrency });
+  setDisplayCurrency(prefs.currency);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -343,7 +348,7 @@ export function AppShell({ children, user, orgName, pendingApprovals, orgSwitche
             id="main"
             className={cn("mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:px-8 lg:pb-8", inputMode && "pb-32 lg:pb-24")}
           >
-            {children}
+            <Fragment key={prefs.currency}>{children}</Fragment>
           </main>
 
           {/* Mobile bottom navigation: the four anchors, thumb-reachable */}

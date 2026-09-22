@@ -52,3 +52,18 @@ export function pgEffectReceiptStore(db: Database["db"]): EffectReceiptStore {
     },
   };
 }
+
+export async function findActionReceiptId(
+  db: Database["db"],
+  orgId: string,
+  intentId: string,
+): Promise<string | null> {
+  return withOrgContext(db, orgId, async (tx) => {
+    const [row] = await tx
+      .select({ id: actionReceipts.id })
+      .from(actionReceipts)
+      .where(and(eq(actionReceipts.orgId, orgId), eq(actionReceipts.intentKey, `${orgId}:${intentId}`)))
+      .limit(1);
+    return row?.id ?? null;
+  });
+}
