@@ -11,9 +11,10 @@ import {
 } from "@chaste/db";
 import { nextRoutineRun, parseScheduleText } from "@chaste/erp-core";
 import { runAgentLoop, type ActionContext, type Actor, type Logger, type TicketSink } from "@chaste/kernel";
-import { OpenAiCompatAdapter, MODELS, resolveClient } from "@chaste/ai";
+import { OpenAiCompatAdapter, resolveClient } from "@chaste/ai";
 import { addTokenUsage, appendSessionEvent } from "@/server/session-events";
 import { buildExecutor, buildRegistry } from "@/server/kernel";
+import { runtimeAiConfig } from "@/server/ai-settings";
 
 /**
  * Routine execution (Paperclip-style recurring agent runs).
@@ -196,6 +197,7 @@ export async function executeRoutine(
       .from(organizations)
       .where(eq(organizations.id, routine.orgId))
       .limit(1);
+    const ai = await runtimeAiConfig(db, routine.orgId);
     const [created] = await db
       .insert(agentSessions)
       .values({
@@ -203,7 +205,7 @@ export async function executeRoutine(
         userId: null,
         title: `Routine: ${routine.name}`.slice(0, 80),
         mode: "assist",
-        modelRef: MODELS.primary(),
+        modelRef: ai.models.primary,
       })
       .returning({ id: agentSessions.id });
     session = created!;
@@ -211,8 +213,8 @@ export async function executeRoutine(
     const registry = buildRegistry(db).scopedToModules(null);
     const executor = buildExecutor(db, registry);
     const model = new OpenAiCompatAdapter({
-      client: resolveClient(MODELS.primary()),
-      model: MODELS.primary(),
+      client: resolveClient(ai.models.primary, ai.runtime),
+      model: ai.models.primary,
     });
     const ctx: ActionContext = {
       actor: routineActor(routine.orgId),

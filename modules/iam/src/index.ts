@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
-  aiSettings,
   invitations,
   memberships,
   moduleSettings,
@@ -13,8 +12,6 @@ import {
   roles,
   users,
   userRoles,
-  encryptSecret,
-  secretLast4,
 } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
@@ -378,7 +375,6 @@ export function registerIamCapabilities(registry: CapabilityRegistry, deps: Modu
   registry.register(setModuleConfig(deps));
   registry.register(setOrgPolicy(deps));
   registry.register(setOrgBranding(deps));
-  registry.register(setAiSettings(deps));
 }
 
 /**
@@ -470,8 +466,6 @@ const setOrgPolicy = (deps: ModuleDeps) =>
     },
   });
 
-const AI_PROVIDERS = ["nim", "openrouter", "groq", "mistral", "zai"] as const;
-
 /**
  * The organization's own AI configuration: which provider, which key, which
  * model per role. Secret-class: the key is encrypted at rest (AES-256-GCM),
@@ -539,67 +533,3 @@ const setOrgBranding = (deps: ModuleDeps) =>
     },
   });
 
-const setAiSettings = (deps: ModuleDeps) =>
-  defineCapability({
-    id: "iam.setAiSettings",
-    title: "Set organization AI settings",
-    intent:
-      "Choose which AI provider this organization uses, store its API key encrypted, and pick which model plays each role such as primary, fast or embeddings",
-    module: "iam",
-    risk: "secret",
-    permission: "iam.admin",
-    input: z.object({
-      provider: z.enum(AI_PROVIDERS).default("nim"),
-      apiKey: z.string().min(8).max(400).optional(),
-      baseUrl: z.string().url().max(300).optional(),
-      routing: z
-        .object({
-          primary: z.string().min(1).max(120).optional(),
-          fast: z.string().min(1).max(120).optional(),
-          reasoning: z.string().min(1).max(120).optional(),
-          embeddings: z.string().min(1).max(120).optional(),
-          ocr: z.string().min(1).max(120).optional(),
-        })
-        .default({}),
-    }),
-    output: z.object({ saved: z.literal(true), keyLast4: z.string().nullable() }),
-    execute: async (ctx, input) => {
-      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        const [existing] = await tx
-          .select({ encryptedApiKey: aiSettings.encryptedApiKey, keyLast4: aiSettings.keyLast4 })
-          .from(aiSettings)
-          .where(eq(aiSettings.orgId, ctx.actor.orgId))
-          .limit(1);
-        const keyPayload =
-          input.apiKey !== undefined
-            ? { encryptedApiKey: encryptSecret(input.apiKey), keyLast4: secretLast4(input.apiKey) }
-            : {
-                encryptedApiKey: existing?.encryptedApiKey ?? null,
-                keyLast4: existing?.keyLast4 ?? null,
-              };
-        const values = {
-          orgId: ctx.actor.orgId,
-          provider: input.provider,
-          ...keyPayload,
-          baseUrl: input.baseUrl ?? null,
-          modelRouting: input.routing,
-          updatedAt: new Date(),
-        };
-        await tx
-          .insert(aiSettings)
-          .values(values)
-          .onConflictDoUpdate({
-            target: aiSettings.orgId,
-            set: {
-              provider: values.provider,
-              encryptedApiKey: values.encryptedApiKey,
-              keyLast4: values.keyLast4,
-              baseUrl: values.baseUrl,
-              modelRouting: values.modelRouting,
-              updatedAt: values.updatedAt,
-            },
-          });
-        return { saved: true as const, keyLast4: values.keyLast4 };
-      });
-    },
-  });

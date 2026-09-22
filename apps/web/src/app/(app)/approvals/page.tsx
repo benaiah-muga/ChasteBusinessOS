@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Button,
+  Badge,
+  CopyButton,
   EmptyState,
   LoadingPage,
   ActionNotice,
@@ -23,6 +25,29 @@ interface Approval {
   rationale: string;
   createdAt: string;
   raisedBy?: { name: string; kind: "agent" | "human" };
+}
+
+function ApprovalContext({ approval }: { approval: Approval }) {
+  const payload = approval.payload as Record<string, unknown>;
+  if (approval.capabilityId === "harness.approveComposition") {
+    const digest = typeof payload.compositionDigest === "string" ? payload.compositionDigest : null;
+    return (
+      <div className="mb-4 rounded-lg border border-violet-200 bg-violet-50/60 px-3.5 py-3 text-xs text-violet-950">
+        <div className="flex items-center gap-2"><Badge tone="violet">Runtime composition</Badge><span>Exact profile and bundle identity must match before a durable run can mount.</span></div>
+        {digest && <div className="mt-2 flex flex-wrap items-center gap-1">Composition digest <code className="break-all">{digest}</code><CopyButton text={digest} label="Copy digest" /></div>}
+      </div>
+    );
+  }
+  if (approval.capabilityId.startsWith("creator.")) {
+    const digest = typeof payload.candidateDigest === "string" ? payload.candidateDigest : null;
+    return (
+      <div className="mb-4 rounded-lg border border-maroon-200 bg-maroon-50/60 px-3.5 py-3 text-xs text-maroon-950">
+        <div className="flex items-center gap-2"><Badge tone="gold">Creator release</Badge><span>Approval records a controlled artifact handoff; it does not install or execute source.</span></div>
+        {digest && <div className="mt-2 flex flex-wrap items-center gap-1">Candidate digest <code className="break-all">{digest}</code><CopyButton text={digest} label="Copy digest" /></div>}
+      </div>
+    );
+  }
+  return null;
 }
 
 export default function ApprovalsPage() {
@@ -125,6 +150,7 @@ export default function ApprovalsPage() {
               </header>
 
               <div className="p-5">
+                <ApprovalContext approval={a} />
                 {a.rationale && (
                   <blockquote className="mb-4 border-l-2 border-gold-300 pl-3.5 text-sm leading-relaxed text-stone-600 italic">
                     {a.rationale}

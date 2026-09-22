@@ -105,8 +105,8 @@ export function setPrefs(next: Partial<Prefs>) {
 }
 
 /** Subscribes to display preferences; safe to call from many components. */
-export function usePrefs(): [Prefs, (next: Partial<Prefs>) => void] {
-  const [prefs, update] = useState<Prefs>(DEFAULT_PREFS);
+export function usePrefs(initial?: Partial<Prefs>): [Prefs, (next: Partial<Prefs>) => void] {
+  const [prefs, update] = useState<Prefs>({ ...DEFAULT_PREFS, ...initial });
   useEffect(() => {
     const sync = (p: Prefs) => update(p);
     listeners.add(sync);

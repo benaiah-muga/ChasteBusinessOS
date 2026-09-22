@@ -3,14 +3,14 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { agentSessions, getDb, organizations } from "@chaste/db";
 import { hasPermission as hasPermissionFor, logger, runAgentLoop, type TicketSink } from "@chaste/kernel";
-import { OpenAiCompatAdapter, nimClient } from "@chaste/ai";
+import { OpenAiCompatAdapter, nimClient, resolveClient } from "@chaste/ai";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
-import { resolveOrgClient } from "@/server/ai-config";
 import { appendSessionEvent, addTokenUsage } from "@/server/session-events";
 import { drainSteering } from "@/server/steering";
 import { getResolvedUser } from "@/server/session";
 import { chatLimitForUser } from "@/server/rate-limit";
 import { resolveEnabledModules } from "@/app/(app)/_shell/modules";
+import { runtimeAiConfig } from "@/server/ai-settings";
 
 export const maxDuration = 300;
 
@@ -73,23 +73,20 @@ export async function POST(req: Request) {
   if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
   const db = getDb().db;
+  const ai = await runtimeAiConfig(db, ctx.actor.orgId);
   const registry = buildRegistry(db).scopedToModules(
     resolveEnabledModules(resolved.enabledModules),
   );
   const executor = buildExecutor(db, registry);
-  // The org's own AI configuration wins when present; env configuration is
-  // the fallback for orgs that have not set credentials.
-  const orgAi = await resolveOrgClient(db, resolved.orgId, "primary");
-  const usingOpenRouter = orgAi.provider === "openrouter";
-  const modelRef = orgAi.model;
+  const modelRef = ai.models.primary;
   const model = new OpenAiCompatAdapter({
-    client: orgAi.client,
+    client: resolveClient(modelRef, ai.runtime),
     model: modelRef,
     // Upstream shared pools (e.g. stealth/ox-alpha) throttle under load;
     // falling back to the primary NIM model keeps agent turns honest
     // instead of dying mid-conversation.
     fallback:
-      process.env.NVIDIA_API_KEY && usingOpenRouter
+      process.env.NVIDIA_API_KEY && ai.runtime.provider !== "nvidia"
         ? { client: nimClient(), model: process.env.MODEL_PRIMARY_NIM ?? "moonshotai/kimi-k2.6" }
         : undefined,
   });

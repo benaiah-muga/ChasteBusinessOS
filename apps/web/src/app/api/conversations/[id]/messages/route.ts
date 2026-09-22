@@ -9,11 +9,11 @@ import {
   organizations,
   users,
 } from "@chaste/db";
-import { OpenAiCompatAdapter } from "@chaste/ai";
+import { OpenAiCompatAdapter, resolveClient } from "@chaste/ai";
 import { runAgentLoop } from "@chaste/kernel";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
-import { resolveOrgClient } from "@/server/ai-config";
 import { getResolvedUser } from "@/server/session";
+import { runtimeAiConfig } from "@/server/ai-settings";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -145,9 +145,9 @@ export async function POST(req: Request, { params }: Params) {
 
     const agentCtx = actorFromResolved(resolved, { asAgent: true });
     if (agentCtx) {
-      const org = await resolveOrgClient(db, resolved.orgId, "primary");
+      const ai = await runtimeAiConfig(db, resolved.orgId);
       const result = await runAgentLoop(
-        new OpenAiCompatAdapter({ client: org.client, model: org.model }),
+        new OpenAiCompatAdapter({ client: resolveClient(ai.models.primary, ai.runtime), model: ai.models.primary }),
         registry,
         executor,
         agentCtx,

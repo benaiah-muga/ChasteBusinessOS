@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { creatorProposals, getDb } from "@chaste/db";
+import { creatorEvolutionOutcomes, creatorEvolutionReleases, creatorProposals, getDb } from "@chaste/db";
 import { hasPermission } from "@chaste/kernel";
 import { getResolvedUser } from "@/server/session";
 
@@ -22,8 +22,32 @@ export async function GET(req: Request) {
     )
     .orderBy(desc(creatorProposals.createdAt))
     .limit(50);
+  const releases = await db
+    .select()
+    .from(creatorEvolutionReleases)
+    .where(eq(creatorEvolutionReleases.orgId, resolved.orgId));
+  const outcomes = await db
+    .select()
+    .from(creatorEvolutionOutcomes)
+    .where(eq(creatorEvolutionOutcomes.orgId, resolved.orgId));
   return NextResponse.json({
-    proposals: rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString(), reviewedAt: r.reviewedAt?.toISOString() ?? null })),
+    proposals: rows.map((r) => ({
+      ...r,
+      createdAt: r.createdAt.toISOString(),
+      reviewedAt: r.reviewedAt?.toISOString() ?? null,
+      releases: releases
+        .filter((release) => release.proposalId === r.id)
+        .map((release) => ({
+          ...release,
+          stagedAt: release.stagedAt.toISOString(),
+          promotedAt: release.promotedAt?.toISOString() ?? null,
+          rolledBackAt: release.rolledBackAt?.toISOString() ?? null,
+          createdAt: release.createdAt.toISOString(),
+          outcomes: outcomes
+            .filter((outcome) => outcome.releaseId === release.id)
+            .map((outcome) => ({ ...outcome, observedAt: outcome.observedAt.toISOString(), createdAt: outcome.createdAt.toISOString() })),
+        })),
+    })),
   });
 }
 

@@ -74,6 +74,11 @@ export function formatMoneyWhole(minor: number): string {
   return wrapSign(groupDigits(minor, 0, 0), minor < 0);
 }
 
+/** Compatibility shim for callers of the older setter name. */
+export function setDisplayCurrency(code: string): void {
+  setActiveCurrency(code);
+}
+
 /** Parses a user-entered amount in presentation-currency major units. */
 export function toMinor(amount: string): number {
   return Math.round(Number(amount || "0") * 10 ** activeStyle.minorUnits);

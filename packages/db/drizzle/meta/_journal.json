@@ -1,6 +1,7 @@
 {
+  "id": null,
+  "prevId": null,
   "version": "7",
-  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
@@ -389,51 +390,86 @@
     },
     {
       "idx": 55,
-      "version": "6",
-      "when": 1789926524029,
-      "tag": "0055_ledger_session_id",
+      "version": "7",
+      "when": 1789769162215,
+      "tag": "0055_durable_agent_runs",
       "breakpoints": true
     },
     {
       "idx": 56,
-      "version": "6",
-      "when": 1789935009903,
-      "tag": "0056_module_settings",
+      "version": "7",
+      "when": 1789769905912,
+      "tag": "0056_durable_run_jobs",
       "breakpoints": true
     },
     {
       "idx": 57,
-      "version": "6",
-      "when": 1789961259879,
-      "tag": "0057_messaging_lifecycle",
+      "version": "7",
+      "when": 1789794725509,
+      "tag": "0057_famous_synch",
       "breakpoints": true
     },
     {
       "idx": 58,
-      "version": "6",
-      "when": 1789963273177,
-      "tag": "0058_item_kind",
+      "version": "7",
+      "when": 1789811135963,
+      "tag": "0058_illegal_gideon",
       "breakpoints": true
     },
     {
       "idx": 59,
-      "version": "6",
-      "when": 1790004571416,
-      "tag": "0059_ai_settings",
+      "version": "7",
+      "when": 1789813590425,
+      "tag": "0059_massive_captain_america",
       "breakpoints": true
     },
     {
       "idx": 60,
-      "version": "6",
-      "when": 1790010000000,
-      "tag": "0060_authored_docs",
+      "version": "7",
+      "when": 1789813700955,
+      "tag": "0060_melted_vermin",
       "breakpoints": true
     },
     {
       "idx": 61,
       "version": "6",
+      "when": 1789926524029,
+      "tag": "0061_ledger_session_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1789935009903,
+      "tag": "0062_module_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1789961259879,
+      "tag": "0063_messaging_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1789963273177,
+      "tag": "0064_item_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1790010000000,
+      "tag": "0065_authored_docs",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "6",
       "when": 1790011000000,
-      "tag": "0061_org_branding",
+      "tag": "0066_org_branding",
       "breakpoints": true
     }
   ]

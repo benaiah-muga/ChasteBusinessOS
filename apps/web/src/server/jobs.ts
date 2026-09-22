@@ -1,8 +1,13 @@
-import { sql } from "drizzle-orm";
-import { jobs, type Database } from "@chaste/db";
+import { and, eq, sql } from "drizzle-orm";
+import { approvals, jobs, type Database } from "@chaste/db";
 import type { ActionContext, Actor, Logger } from "@chaste/kernel";
 import { buildExecutor, buildRegistry } from "@/server/kernel";
 import { executeRoutine } from "@/server/routines";
+import { findActionReceiptId } from "@/server/effect-receipts";
+import {
+  transitionDurableRun,
+  transitionDurableStep,
+} from "@/server/durable-runs";
 
 /**
  * Durable capability-job queue. Jobs reference a registered capability by id
@@ -21,6 +26,9 @@ export interface ClaimedJob {
   maxAttempts: number;
   workerId: string;
   fencingToken: number;
+  runId: string | null;
+  runStepIndex: number | null;
+  approvedApprovalId: string | null;
 }
 
 export interface ProcessJobOptions {
@@ -43,6 +51,9 @@ export async function enqueueCapabilityJob(
     payload: unknown;
     createdByActorType?: string;
     createdByActorId?: string | null;
+    runId?: string | null;
+    runStepIndex?: number | null;
+    approvedApprovalId?: string | null;
   },
 ): Promise<string> {
   const [row] = await db
@@ -51,6 +62,9 @@ export async function enqueueCapabilityJob(
       orgId: input.orgId,
       type: input.type,
       payload: input.payload as object,
+      runId: input.runId ?? null,
+      runStepIndex: input.runStepIndex ?? null,
+      approvedApprovalId: input.approvedApprovalId ?? null,
       createdByActorType: input.createdByActorType ?? "system",
       createdByActorId: input.createdByActorId ?? null,
     })
@@ -109,7 +123,8 @@ export async function claimJob(
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, org_id, type, payload, attempts, max_attempts, fencing_token
+    RETURNING id, org_id, type, payload, attempts, max_attempts, fencing_token,
+      run_id, run_step_index, approved_approval_id
   `)) as unknown as { rows?: Record<string, unknown>[] } | Record<string, unknown>[];
   // postgres-js returns a plain array; other drivers wrap it in { rows }.
   const list = Array.isArray(result) ? result : (result.rows ?? []);
@@ -124,6 +139,9 @@ export async function claimJob(
     maxAttempts: Number(row.max_attempts),
     workerId,
     fencingToken: Number(row.fencing_token),
+    runId: row.run_id ? String(row.run_id) : null,
+    runStepIndex: row.run_step_index == null ? null : Number(row.run_step_index),
+    approvedApprovalId: row.approved_approval_id ? String(row.approved_approval_id) : null,
   };
 }
 
@@ -196,6 +214,25 @@ export async function processOneJob(
   }, Math.max(100, Math.floor(leaseMs / 3)));
   heartbeat.unref?.();
 
+  const durableRunId = job.runId;
+  const durableStepIndex = job.runStepIndex;
+  const durable = durableRunId !== null && durableStepIndex !== null;
+  if (durable) {
+    await transitionDurableRun(db, {
+      orgId: job.orgId,
+      runId: durableRunId,
+      status: "running",
+      currentStep: durableStepIndex,
+    });
+    await transitionDurableStep(db, {
+      orgId: job.orgId,
+      runId: durableRunId,
+      stepIndex: durableStepIndex,
+      status: "running",
+      approvalId: job.approvedApprovalId,
+    });
+  }
+
   try {
     if (job.type === "routines.executeRoutine") {
       // Scheduling happened at claim time (tickRoutines); the run itself
@@ -220,14 +257,50 @@ export async function processOneJob(
       services: {},
     };
     const executor = buildExecutor(db, registry);
-    const result = await executor.execute(job.type, ctx, job.payload);
+    const result = await executor.execute(job.type, ctx, job.payload, {
+      approvedApprovalId: job.approvedApprovalId ?? undefined,
+    });
     if (!result.ok) throw new Error(result.error ?? "capability failed");
+    if (job.approvedApprovalId) {
+      await db
+        .update(approvals)
+        .set({ status: "executed", decidedAt: new Date() })
+        .where(and(eq(approvals.id, job.approvedApprovalId), eq(approvals.status, "executing")));
+    }
+    if (durable) {
+      await transitionDurableStep(db, {
+        orgId: job.orgId,
+        runId: durableRunId!,
+        stepIndex: durableStepIndex!,
+        status: "committed",
+        output: result.data,
+        receiptId: await findActionReceiptId(db, job.orgId, job.id),
+        approvalId: job.approvedApprovalId,
+      });
+    }
     const finalized = !leaseLost && (await finalizeJob(db, job, { status: "done" }));
     if (!finalized) log2.warn("job completed after lease was lost; acknowledgement fenced");
     log2.info("job done", { attempts: job.attempts });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const exhausted = job.attempts >= job.maxAttempts || message.startsWith("unknown job capability:");
+    if (durable && exhausted) {
+      await transitionDurableStep(db, {
+        orgId: job.orgId,
+        runId: durableRunId!,
+        stepIndex: durableStepIndex!,
+        status: "failed",
+        error: message,
+        approvalId: job.approvedApprovalId,
+      });
+      await transitionDurableRun(db, {
+        orgId: job.orgId,
+        runId: job.runId!,
+        status: "failed",
+        currentStep: durableStepIndex!,
+        error: message,
+      });
+    }
     const finalized =
       !leaseLost &&
       (await finalizeJob(db, job, {

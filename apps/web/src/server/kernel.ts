@@ -48,6 +48,8 @@ import { registerRoutineCapabilities } from "@chaste/module-routines";
 import { registerSignalsCapabilities } from "@chaste/module-signals";
 import { pgEffectReceiptStore } from "./effect-receipts";
 import { enqueueOutboxMessage } from "./outbox";
+import { registerHarnessApprovalCapabilities } from "./harness-approval";
+import { registerAiSettingsCapabilities } from "./ai-settings";
 
 const registryCache = globalThis as unknown as {
   __chasteRegistry?: { version: string; registry: CapabilityRegistry };
@@ -111,7 +113,9 @@ export function composeRegistry(db: Database["db"]): CapabilityRegistry {
   registerSupportCapabilities(registry, { db });
   registerSkillCapabilities(registry);
   registerRoutineCapabilities(registry, { db });
-  // Signal producers compose here, at the app layer - modules never import
+  registerHarnessApprovalCapabilities(registry, { db });
+  registerAiSettingsCapabilities(registry, { db });
+  // Signal producers compose here, at the app layer — modules never import
   // each other for this (ADR 0034).
   registerSignalsCapabilities(registry, {
     producers: [
@@ -439,6 +443,8 @@ export function buildPolicyEngine(db: Database["db"]): OrgPolicyEngine {
 export function createDbModuleGate(db: Database["db"]) {
   return {
     async isEnabled(orgId: string, moduleId: string): Promise<boolean> {
+      // Settings is a platform surface, not an optional business module.
+      if (moduleId === "settings") return true;
       if (!orgId) return true;
       if ((PROTECTED_MODULE_IDS as readonly string[]).includes(moduleId)) return true;
       const [row] = await db
@@ -483,6 +489,8 @@ export interface ResolvedUser {
   permissions: Set<string>;
   /** The active org's enabled module ids; null means all standard modules. */
   enabledModules?: string[] | null;
+  /** Organization recording currency, used as the initial display currency. */
+  baseCurrency?: string | null;
 }
 
 /**
@@ -523,15 +531,16 @@ export async function resolveActorFromAuth(
     permissions = new Set(perms.map((p) => p.key));
   }
 
-  const enabledModules = membership
-    ? ((
+  const organization = membership
+    ? (
         await db
-          .select({ value: organizations.enabledModules })
+          .select({ value: organizations.enabledModules, baseCurrency: organizations.baseCurrency })
           .from(organizations)
           .where(eq(organizations.id, membership.orgId))
           .limit(1)
-      )[0]?.value as string[] | null | undefined) ?? null
-    : null;
+      )[0]
+    : undefined;
+  const enabledModules = (organization?.value as string[] | null | undefined) ?? null;
 
   return {
     userId: domainUser.id,
@@ -540,6 +549,7 @@ export async function resolveActorFromAuth(
     orgId: membership?.orgId ?? null,
     permissions,
     enabledModules,
+    baseCurrency: organization?.baseCurrency ?? null,
   };
 }
 
@@ -557,7 +567,7 @@ export async function resolveForOrg(
     .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoles.roleId))
     .where(and(eq(userRoles.userId, userId), eq(userRoles.orgId, orgId)));
   const [org] = await db
-    .select({ value: organizations.enabledModules })
+    .select({ value: organizations.enabledModules, baseCurrency: organizations.baseCurrency })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
@@ -568,6 +578,7 @@ export async function resolveForOrg(
     orgId,
     permissions: new Set(perms.map((p) => p.key)),
     enabledModules: (org?.value as string[] | null | undefined) ?? null,
+    baseCurrency: org?.baseCurrency ?? null,
   };
 }
 

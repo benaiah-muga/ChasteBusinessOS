@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createAuthClient } from "better-auth/client";
@@ -29,8 +29,9 @@ import {
 import { Avatar } from "@/components/ui";
 import { LogoMark } from "@/components/logo";
 import { ThemeMenu } from "@/components/theme";
-import { cn } from "@/lib/format";
-import { applyOrgDefault } from "@/lib/money";
+import { cn, setActiveCurrency } from "@/lib/format";
+import { applyOrgDefault, useMoneySync } from "@/lib/money";
+import { usePrefs } from "@/lib/prefs";
 
 const authClient = createAuthClient();
 
@@ -45,9 +46,10 @@ interface ShellProps {
   orgSwitcher?: ReactNode;
   /** The org's module switchboard; null means every standard module. */
   enabledModules: string[] | null;
+  baseCurrency: string;
 }
 
-export function AppShell({ children, user, orgName, orgCurrency, pendingApprovals, orgSwitcher, enabledModules }: ShellProps) {
+export function AppShell({ children, user, orgName, orgCurrency, pendingApprovals, orgSwitcher, enabledModules, baseCurrency }: ShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [launcherOpen, setLauncherOpen] = useState(false);
@@ -58,10 +60,19 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
   const dockMode = useChatDockMode();
   const chatPinned = dockMode === "pinned";
   const inputMode = dockMode === "input";
+  // Presentation currency: the org's base currency by default, with the
+  // device preference as an override ("org" follows the org base). The
+  // shared money store applies it per page via useMoneySync.
+  const [prefs] = usePrefs();
+  useMoneySync();
+  const base = orgCurrency || baseCurrency;
 
   useEffect(() => {
-    applyOrgDefault(orgCurrency);
-  }, [orgCurrency]);
+    applyOrgDefault(base);
+  }, [base]);
+  useEffect(() => {
+    setActiveCurrency(prefs.currency === "org" ? base : prefs.currency);
+  }, [prefs.currency, base]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -352,7 +363,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
             id="main"
             className={cn("mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:px-8 lg:pb-8", inputMode && "pb-32 lg:pb-24")}
           >
-            {children}
+            <Fragment key={prefs.currency}>{children}</Fragment>
           </main>
 
           {/* Mobile bottom navigation: the four anchors, thumb-reachable */}

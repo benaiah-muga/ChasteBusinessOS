@@ -3,7 +3,8 @@ import { and, eq, like } from "drizzle-orm";
 import { z } from "zod";
 import { authoredDocs, docTemplates, getDb, memories, withOrgContext } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
-import { resolveOrgClient } from "@/server/ai-config";
+import { runtimeAiConfig } from "@/server/ai-settings";
+import { resolveClient } from "@chaste/ai";
 
 /**
  * AI writing assist for authored documents (Phase 4). Selection actions,
@@ -66,10 +67,11 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
   const db = getDb().db;
-  const ai = await resolveOrgClient(db, resolved.orgId, "fast");
+  const runtime = await runtimeAiConfig(db, resolved.orgId);
+  const fastModel = runtime.models.fast;
   const call = async (system: string, user: string): Promise<string> => {
-    const res = await ai.client.chat.completions.create({
-      model: ai.model,
+    const res = await resolveClient(fastModel, runtime.runtime).chat.completions.create({
+      model: fastModel,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },

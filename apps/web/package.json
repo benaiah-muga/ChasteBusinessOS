@@ -14,6 +14,7 @@
     "@chaste/ai": "workspace:*",
     "@chaste/db": "workspace:*",
     "@chaste/erp-core": "workspace:*",
+    "@chaste/harness": "workspace:*",
     "@chaste/kernel": "workspace:*",
     "@chaste/module-accounting": "workspace:*",
     "@chaste/module-analytics": "workspace:*",

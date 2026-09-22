@@ -173,11 +173,16 @@ The Settings picker wrote a localStorage pref that zero pages consumed;
 > Status: all three shipped. 3.1 messaging lifecycle (twelve capabilities,
 > migration 0057). 3.2 services (items.kind, migration 0058; service-line
 > invoicing; POS bypass) plus the test-fixture advisory lock that fixed
-> parallel-suite DB contention. 3.3 AI settings (per-org credentials
-> encrypted at rest, model routing, test-connection, chat + channels agent
-> consumption, memory manager with governed deletion, kernel secret-class
-> ledger redaction; migration 0059). Remaining: one-line resolveOrgClient
-> swaps in support-agent, routines, summarize, OCR.
+> parallel-suite DB contention. 3.3 AI settings: shipped then RECONCILED
+> at merge time - main independently landed a fuller org AI provider
+> system (settings.configureAiProvider + runtimeAiConfig, stored in
+> organizations.settings), so that stack is the surviving runtime source
+> of truth; our duplicates (ai_settings table, iam.setAiSettings,
+> resolveOrgClient, /api/ai-settings, secretbox) were removed, keeping our
+> unique pieces: the memory manager with governed deletion, and the
+> kernel secret-class ledger redaction infrastructure. Merged migrations
+> renumbered to 0061+ after main's 0055-0060. Remaining: one-line
+> runtimeAiConfig swaps in support-agent and routines call sites.
 
 ### 3.1 Messaging - SHIPPED
 
@@ -215,7 +220,7 @@ with "service line" guards). Make them explicit:
 > heartbeat + soft locks via /api/docs/[id]/workspace, publish/restore as
 > governed append-only versions, side-by-side compare, .docx export,
 > print-styled PDF, AI assist panel (selection rewrites, continue-drafting,
-> grounded document Q&A) over resolveOrgClient, Harper spell check in a
+> grounded document Q&A) over the org's runtime AI config, Harper spell check in a
 > library-spawned worker with device-local dictionary and a Settings writing
 > aids toggle, built-in + custom templates with placeholder fill-in (AI
 > prefill from org memory), org print branding (iam.setOrgBranding) and the

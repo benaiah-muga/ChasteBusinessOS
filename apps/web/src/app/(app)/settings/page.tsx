@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { callApi, postApi } from "@/lib/api";
-import { Button, ConfirmDialog, Notice } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, CopyButton, EmptyState, LoadingPage } from "@/components/ui";
 import { APPS, tileStyle } from "../_shell/apps";
 import { appPins, MAX_PINS, usePinnedApps } from "../_shell/pins";
 import { useModuleEnabled } from "../_shell/module-context";
@@ -18,8 +18,8 @@ import {
   type Units,
   type WeekStart,
 } from "@/lib/prefs";
-import { IconMoon, IconPinTack, IconSun, IconTrash } from "@/components/icons";
-import { cn, minorToInput, toMinor } from "@/lib/format";
+import { IconAlertTriangle, IconCheck, IconMoon, IconPinTack, IconSun, IconTrash } from "@/components/icons";
+import { cn, minorToInput, timeAgo, toMinor } from "@/lib/format";
 import { useMoneySync } from "@/lib/money";
 
 const TABS = [
@@ -30,6 +30,7 @@ const TABS = [
   { id: "localization", label: "Localization" },
   { id: "ai", label: "AI & automation" },
   { id: "routines", label: "Routines" },
+  { id: "runtime", label: "Runtime" },
 ] as const;
 
 /**
@@ -53,9 +54,92 @@ export default function SettingsPage() {
       {tab === "modules" && <ModulesTab />}
       {tab === "governance" && <GovernanceTab />}
       {tab === "localization" && <LocalizationTab />}
-      {tab === "ai" && <AiTab />}
+      {tab === "ai" && (
+        <>
+          <AiTab />
+          <MemorySection />
+        </>
+      )}
       {tab === "routines" && <RoutinesTab />}
+      {tab === "runtime" && <RuntimeTab />}
     </AppFrame>
+  );
+}
+
+interface CompositionInspection {
+  id: string;
+  createdAt: string;
+  inspection: {
+    profile: { id: string; version: string; environment: string };
+    profileDigest: string;
+    compositionDigest: string;
+    bundles: Array<{ id: string; version: string; serviceIds: string[]; requiredBundleIds?: string[] }>;
+    patches: Array<{ id: string; version: string; configKeys: string[] }>;
+  };
+}
+
+function RuntimeTab() {
+  const [compositions, setCompositions] = useState<CompositionInspection[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void callApi<{ compositions?: CompositionInspection[] }>("/api/harness/compositions").then((res) => {
+      if (!res.ok) setError(res.error?.title ?? "Couldn't load runtime compositions");
+      setCompositions(res.data?.compositions ?? []);
+    });
+  }, []);
+
+  if (compositions === null) return <LoadingPage />;
+  if (error) return <EmptyState icon={<IconAlertTriangle />} title={error} hint="Runtime inspection is limited to operators who can approve harness compositions." />;
+  if (compositions.length === 0) {
+    return <EmptyState icon={<IconCheck />} title="No runtime compositions" hint="Approved profiles and bundles will appear here when a durable run is configured." />;
+  }
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      <div>
+        <h2 className="section-title">Runtime compositions</h2>
+        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-stone-500">
+          The exact profile and approved bundles a durable run may mount. Inspection shows safe metadata and configuration keys, never patch values or credentials.
+        </p>
+      </div>
+      {compositions.map(({ id, createdAt, inspection }) => (
+        <Card key={id}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={inspection.profile.environment === "erp-prod" ? "red" : "blue"}>{inspection.profile.environment}</Badge>
+            <h3 className="text-[15px] font-semibold text-stone-900">{inspection.profile.id}</h3>
+            <span className="text-xs text-stone-400">v{inspection.profile.version} · {timeAgo(createdAt)}</span>
+          </div>
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+            <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+              <p className="text-[10px] font-semibold tracking-wider text-stone-400 uppercase">Profile digest</p>
+              <code className="mt-1 block break-all text-stone-700">{inspection.profileDigest}</code>
+              <CopyButton text={inspection.profileDigest} label="Copy" />
+            </div>
+            <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+              <p className="text-[10px] font-semibold tracking-wider text-stone-400 uppercase">Composition digest</p>
+              <code className="mt-1 block break-all text-stone-700">{inspection.compositionDigest}</code>
+              <CopyButton text={inspection.compositionDigest} label="Copy" />
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <p className="text-[11px] font-semibold text-stone-500">Approved bundles</p>
+              <ul className="mt-1 space-y-1 text-xs text-stone-700">
+                {inspection.bundles.map((bundle) => <li key={`${bundle.id}@${bundle.version}`}><code>{bundle.id}@{bundle.version}</code> · {bundle.serviceIds.length} service{bundle.serviceIds.length === 1 ? "" : "s"}</li>)}
+              </ul>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-stone-500">Configuration patches</p>
+              <ul className="mt-1 space-y-1 text-xs text-stone-700">
+                {inspection.patches.length === 0 ? <li className="text-stone-400">None</li> : inspection.patches.map((patch) => <li key={`${patch.id}@${patch.version}`}><code>{patch.id}@{patch.version}</code> · {patch.configKeys.length} key{patch.configKeys.length === 1 ? "" : "s"}</li>)}
+              </ul>
+            </div>
+          </div>
+          <p className="mt-3 font-mono text-[10px] text-stone-400">composition {id}</p>
+        </Card>
+      ))}
+    </div>
   );
 }
 
@@ -448,29 +532,246 @@ function BrandingSection() {
 
 /* --------------------------------------------------------------- ai tab ---- */
 
-const AI_PROVIDERS = [
-  { id: "nim", label: "NVIDIA NIM" },
-  { id: "openrouter", label: "OpenRouter" },
-  { id: "groq", label: "Groq" },
-  { id: "mistral", label: "Mistral" },
-  { id: "zai", label: "Z.ai" },
-] as const;
+interface AiConfig {
+  provider: string;
+  configured: boolean;
+  baseUrl: string;
+  models: { primary: string; fast: string; reasoning: string; embeddings: string };
+  keyHint?: string | null;
+  source: string;
+}
 
-const AI_ROLES: { key: string; label: string; hint: string }[] = [
-  { key: "primary", label: "Primary", hint: "Conversations, drafting, agent turns" },
-  { key: "fast", label: "Fast", hint: "Classifications and quick lookups" },
-  { key: "reasoning", label: "Reasoning", hint: "Deep multi-step analysis" },
-  { key: "embeddings", label: "Embeddings", hint: "Document search and memory" },
-  { key: "ocr", label: "OCR", hint: "Document image parsing" },
+type AiProviderId = "nvidia" | "openrouter" | "groq" | "mistral" | "zai" | "openai" | "custom";
+
+const AI_PROVIDER_OPTIONS: Array<{ id: AiProviderId; label: string; baseUrl: string }> = [
+  { id: "nvidia", label: "NVIDIA NIM", baseUrl: "https://integrate.api.nvidia.com/v1" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+  { id: "groq", label: "Groq", baseUrl: "https://api.groq.com/openai/v1" },
+  { id: "mistral", label: "Mistral", baseUrl: "https://api.mistral.ai/v1" },
+  { id: "zai", label: "Z.ai (GLM)", baseUrl: "https://api.z.ai/api/paas/v4" },
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  { id: "custom", label: "Custom OpenAI-compatible", baseUrl: "" },
 ];
 
-interface OrgAiSettings {
-  provider: string;
-  keyLast4: string | null;
-  hasKey: boolean;
-  baseUrl: string | null;
-  routing: Record<string, string>;
+const DEFAULT_AI_MODELS = {
+  primary: "moonshotai/kimi-k2.6",
+  fast: "meta/muse-glimmer-30b",
+  reasoning: "nvidia/nemotron-3-ultra-550b-a55b",
+  embeddings: "nvidia/nv-embedqa-e5-v5",
+};
+
+function AiTab() {
+  const [config, setConfig] = useState<AiConfig | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [provider, setProvider] = useState<AiProviderId>("nvidia");
+  const [baseUrl, setBaseUrl] = useState(AI_PROVIDER_OPTIONS[0]!.baseUrl);
+  const [models, setModels] = useState(DEFAULT_AI_MODELS);
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  function applyConfig(next: AiConfig) {
+    const nextProvider = AI_PROVIDER_OPTIONS.some((option) => option.id === next.provider) ? (next.provider as AiProviderId) : "custom";
+    setConfig(next);
+    setProvider(nextProvider);
+    setBaseUrl(next.baseUrl);
+    setModels(next.models);
+    setApiKey("");
+  }
+
+  useEffect(() => {
+    void callApi<AiConfig>("/api/ai-config").then((res) => {
+      if (res.data) applyConfig(res.data);
+      else setError(res.error?.title ?? "Could not load model configuration");
+    });
+  }, []);
+
+  function changeProvider(next: AiProviderId) {
+    const previousDefault = AI_PROVIDER_OPTIONS.find((option) => option.id === provider)?.baseUrl ?? "";
+    const nextDefault = AI_PROVIDER_OPTIONS.find((option) => option.id === next)?.baseUrl ?? "";
+    setProvider(next);
+    if (!baseUrl || baseUrl === previousDefault) setBaseUrl(nextDefault);
+  }
+
+  async function save() {
+    setBusy(true);
+    setNote(null);
+    const res = await postApi<AiConfig & { pendingApproval?: boolean }>("/api/ai-config", {
+      provider,
+      baseUrl,
+      models,
+      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+    });
+    setBusy(false);
+    if (res.status === 202) {
+      setNote("Configuration submitted for administrator approval.");
+    } else if (res.data && res.ok && "provider" in res.data) {
+      applyConfig(res.data);
+      setNote("Model configuration saved. New agent runs use it.");
+    } else {
+      setNote(res.error?.title ?? "Could not save model configuration.");
+    }
+  }
+
+  async function clearKey() {
+    if (!config?.configured) return;
+    setBusy(true);
+    setNote(null);
+    const res = await postApi<AiConfig & { pendingApproval?: boolean }>("/api/ai-config", {
+      provider,
+      baseUrl,
+      models,
+      clearApiKey: true,
+    });
+    setBusy(false);
+    if (res.status === 202) setNote("Key removal submitted for administrator approval.");
+    else if (res.data && res.ok && "provider" in res.data) {
+      applyConfig(res.data);
+      setNote("Workspace key cleared.");
+    } else setNote(res.error?.title ?? "Could not clear workspace key.");
+  }
+
+  function updateModel(field: keyof typeof DEFAULT_AI_MODELS, value: string) {
+    setModels((current) => ({ ...current, [field]: value }));
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <p className="mb-6 text-sm leading-relaxed text-stone-500">
+        Choose the provider and model roles used by this workspace. Credentials
+        are encrypted before storage, never returned to the browser, and every
+        change goes through the governed capability pipeline.
+      </p>
+
+      {!config ? (
+        <p className="text-sm text-stone-400">{error ?? "Checking configuration…"}</p>
+      ) : (
+        <>
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="section-title">Workspace model provider</h2>
+                <p className="mt-1 text-xs text-stone-500">Source: {config.source === "workspace" ? "workspace override" : "server environment"}</p>
+              </div>
+              {config.configured ? <Badge tone="green">connected {config.keyHint ?? ""}</Badge> : <Badge tone="amber">credential missing</Badge>}
+            </div>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm text-stone-600">
+                Provider
+                <select value={provider} onChange={(e) => changeProvider(e.target.value as AiProviderId)} className="select mt-1 w-full">
+                  {AI_PROVIDER_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="text-sm text-stone-600">
+                API key
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={config.keyHint ? `Current key ${config.keyHint}` : "Paste a provider key"}
+                  className="input mt-1 w-full"
+                  autoComplete="new-password"
+                />
+              </label>
+            </div>
+            <label className="mt-4 block text-sm text-stone-600">
+              Base URL
+              <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="input mt-1 w-full font-mono text-xs" placeholder="https://your-provider.example/v1" />
+              <span className="mt-1 block text-xs text-stone-400">Use a custom URL for a self-hosted or OpenAI-compatible gateway.</span>
+            </label>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {(
+                [
+                  ["primary", "Primary", "Conversations, drafting, and coding suggestions"],
+                  ["fast", "Fast", "Classifications and quick lookups"],
+                  ["reasoning", "Reasoning", "Deep multi-step analysis"],
+                  ["embeddings", "Embeddings", "Document search and memory"],
+                ] as const
+              ).map(([field, label, hint]) => (
+                <label key={field} className="text-sm text-stone-600">
+                  {label}
+                  <input value={models[field]} onChange={(e) => updateModel(field, e.target.value)} className="input mt-1 w-full font-mono text-xs" />
+                  <span className="mt-1 block text-[11px] text-stone-400">{hint}</span>
+                </label>
+              ))}
+            </div>
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <Button size="sm" loading={busy} onClick={() => void save()}>Save model configuration</Button>
+              <Button size="sm" tone="secondary" disabled={busy || !config.configured} onClick={() => void clearKey()}>Clear stored key</Button>
+              {note && <span className="text-xs text-stone-500">{note}</span>}
+            </div>
+          </Card>
+
+          <div className="mt-4 divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white shadow-xs">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              <dt className="text-stone-500">Provider</dt>
+              <dd className="flex items-center gap-2 font-medium text-stone-900">
+                {AI_PROVIDER_OPTIONS.find((option) => option.id === config.provider)?.label ?? config.provider}
+                {config.configured ? (
+                  <span className="badge badge-green">connected</span>
+                ) : (
+                  <span className="badge badge-amber">key missing</span>
+                )}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              <dt className="text-stone-500">Endpoint</dt>
+              <dd className="truncate font-mono text-xs text-stone-600">{config.baseUrl}</dd>
+            </div>
+            <ModelRow label="Primary" model={config.models.primary} hint="Conversations, drafting, coding suggestions" />
+            <ModelRow label="Fast" model={config.models.fast} hint="Classifications and quick lookups" />
+            <ModelRow label="Reasoning" model={config.models.reasoning} hint="Deep multi-step analysis" />
+            <ModelRow label="Embeddings" model={config.models.embeddings} hint="Document search and memory" />
+          </div>
+
+          <p className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+            Coding-agent subscriptions are not imported from local CLI files. Use a detected Codex, OpenCode, or Kilo agent through Creator mode, or enter an API key / endpoint that this workspace is authorized to call.
+          </p>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            <Link
+              href="/proposals"
+              className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs transition-colors duration-150 hover:border-stone-300"
+            >
+              <p className="text-sm font-medium text-stone-900">Creator mode</p>
+              <p className="mt-1 text-xs leading-relaxed text-stone-500">
+                Connect a coding agent to propose capabilities as reviewed diffs.
+              </p>
+            </Link>
+            <Link
+              href="/sessions"
+              className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs transition-colors duration-150 hover:border-stone-300"
+            >
+              <p className="text-sm font-medium text-stone-900">Agent sessions</p>
+              <p className="mt-1 text-xs leading-relaxed text-stone-500">
+                Every model action, its capability, and its outcome - auditable forever.
+              </p>
+            </Link>
+          </div>
+        </>
+      )}
+
+      <div className="mt-8 border-t border-stone-100 pt-6">
+        <SoulSection />
+      </div>
+    </div>
+  );
 }
+
+function ModelRow({ label, model, hint }: { label: string; model: string; hint: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <dt className="text-sm text-stone-500">
+        {label}
+        <span className="block text-[11px] text-stone-400">{hint}</span>
+      </dt>
+      <dd className="truncate font-mono text-xs text-stone-600">{model}</dd>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ memory ------- */
 
 interface MemoryEntry {
   id: string;
@@ -480,43 +781,12 @@ interface MemoryEntry {
   createdAt: string;
 }
 
-function AiTab() {
-  const [payload, setPayload] = useState<{
-    settings: OrgAiSettings | null;
-    canEdit: boolean;
-    encryptionReady: boolean;
-    envFallback: { provider: string; models: Record<string, string>; keyConfigured: boolean };
-  } | null>(null);
-  const [provider, setProvider] = useState("nim");
-  const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [routing, setRouting] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "pending" | "info"; text: string } | null>(null);
+function MemorySection() {
   const [memory, setMemory] = useState<MemoryEntry[]>([]);
   const [memoryQuery, setMemoryQuery] = useState("");
   const [canEditMemory, setCanEditMemory] = useState(false);
   const [confirmMemoryId, setConfirmMemoryId] = useState<string | null>(null);
-
-  useEffect(() => {
-    void (async () => {
-      const res = await callApi<NonNullable<unknown>>("/api/ai-settings");
-      if (!res.data) return;
-      const d = res.data as {
-        settings: OrgAiSettings | null;
-        canEdit: boolean;
-        encryptionReady: boolean;
-        envFallback: { provider: string; models: Record<string, string>; keyConfigured: boolean };
-      };
-      setPayload(d);
-      if (d.settings) {
-        setProvider(d.settings.provider);
-        setBaseUrl(d.settings.baseUrl ?? "");
-        setRouting(d.settings.routing ?? {});
-      }
-    })();
-  }, []);
+  const [notice, setNotice] = useState<{ tone: "ok" | "error" | "pending"; text: string } | null>(null);
 
   const loadMemory = useCallback(async (q: string) => {
     const res = await callApi<{ memories?: MemoryEntry[]; canEdit?: boolean }>(
@@ -530,42 +800,6 @@ function AiTab() {
     void loadMemory("");
   }, [loadMemory]);
 
-  async function save() {
-    setSaving(true);
-    setNotice(null);
-    const res = await postApi<{ pendingApproval?: boolean }>("/api/ai-settings", {
-      provider,
-      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-      ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
-      routing: Object.fromEntries(Object.entries(routing).filter(([, v]) => v.trim() !== "")),
-    });
-    setSaving(false);
-    if (res.status === 202 || res.data?.pendingApproval) {
-      setNotice({ tone: "pending", text: "Change sent to the Approvals inbox." });
-      return;
-    }
-    if (!res.ok) {
-      setNotice({ tone: "error", text: res.error ? `${res.error.title}${res.error.hint ? ` - ${res.error.hint}` : ""}` : "Couldn't save." });
-      return;
-    }
-    setApiKey("");
-    setNotice({ tone: "ok", text: "Saved. The workmate's next turn uses it." });
-    void (async () => {
-      const fresh = await callApi<{ settings: OrgAiSettings | null }>("/api/ai-settings");
-      if (fresh.data) setPayload((p) => (p ? { ...p, settings: fresh.data!.settings } : p));
-    })();
-  }
-
-  async function testConnection() {
-    setTesting(true);
-    setNotice(null);
-    const res = await fetch("/api/ai-settings/test", { method: "POST" });
-    const d = (await res.json().catch(() => ({}))) as { ok?: boolean; model?: string; latencyMs?: number; error?: string; provider?: string };
-    setTesting(false);
-    if (d.ok) setNotice({ tone: "ok", text: `Connected via ${d.provider} (${d.model}) in ${d.latencyMs}ms.` });
-    else setNotice({ tone: "error", text: `Connection failed: ${d.error ?? "unknown error"}` });
-  }
-
   async function deleteMemory(id: string) {
     const res = await postApi<{ pendingApproval?: boolean }>("/api/memory", { action: "delete", memoryId: id });
     setConfirmMemoryId(null);
@@ -577,203 +811,72 @@ function AiTab() {
       setNotice({ tone: "error", text: res.error ? `${res.error.title}${res.error.hint ? ` - ${res.error.hint}` : ""}` : "Couldn't delete." });
       return;
     }
+    setNotice({ tone: "ok", text: "Forgotten." });
     void loadMemory(memoryQuery);
   }
 
-  const settings = payload?.settings ?? null;
-  const editDisabled = !payload?.canEdit;
-
   return (
-    <div className="max-w-2xl">
-      <Section
-        title="Provider & credentials"
-        hint="Your organization's own AI provider. The key is encrypted at rest, never shown again, and never sent to the browser; without one, the server's env configuration applies."
-      >
-        {!payload ? (
-          <div className="h-24 animate-pulse rounded-xl bg-stone-100" />
+    <Section
+      title="Memory"
+      hint="What the workmate has learned about the organization: profile facts, SOPs, decisions, preferences, and document knowledge. Entries wrong or stale? Remove them."
+    >
+      {notice && (
+        <p
+          role="status"
+          className={
+            notice.tone === "error"
+              ? "mb-3 rounded-lg bg-red-50 px-3.5 py-2.5 text-sm text-red-800"
+              : notice.tone === "pending"
+                ? "mb-3 rounded-lg bg-amber-50 px-3.5 py-2.5 text-sm text-amber-900"
+                : "mb-3 rounded-lg bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800"
+          }
+        >
+          {notice.text}
+        </p>
+      )}
+      <div className="rounded-xl border border-stone-200 bg-white shadow-xs">
+        <div className="flex items-center gap-2 border-b border-stone-100 px-3 py-2">
+          <input
+            value={memoryQuery}
+            onChange={(e) => {
+              setMemoryQuery(e.target.value);
+              void loadMemory(e.target.value);
+            }}
+            placeholder="Search memory…"
+            aria-label="Search organization memory"
+            className="input h-8 flex-1 text-xs"
+          />
+          <span className="text-[11px] whitespace-nowrap text-stone-400">{memory.length} shown</span>
+        </div>
+        {memory.length === 0 ? (
+          <p className="p-4 text-sm text-stone-400">Nothing remembered yet.</p>
         ) : (
-          <div className="max-w-xl space-y-4 rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
-            {!payload.encryptionReady && (
-              <Notice tone="pending">
-                Secret storage is not configured: ask the operator to set CHASTE_ENCRYPTION_KEY. Until then, org keys
-                cannot be saved and the server environment configuration applies.
-              </Notice>
-            )}
-            {settings?.hasKey && (
-              <p className="text-xs text-emerald-700">
-                Organization key on file: ••••{settings.keyLast4}. Leave the key field empty to keep it.
-              </p>
-            )}
-            <label className="block">
-              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Provider</span>
-              <select
-                className="select"
-                value={provider}
-                disabled={editDisabled}
-                aria-label="AI provider"
-                onChange={(e) => setProvider(e.target.value)}
-              >
-                {AI_PROVIDERS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">
-                API key {settings?.hasKey ? "(leave empty to keep current)" : ""}
-              </span>
-              <input
-                type="password"
-                value={apiKey}
-                disabled={editDisabled || !payload.encryptionReady}
-                placeholder={settings?.hasKey ? "••••" + settings.keyLast4 : "paste the provider API key"}
-                aria-label="Provider API key"
-                onChange={(e) => setApiKey(e.target.value)}
-                className="input font-mono"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Base URL (optional)</span>
-              <input
-                value={baseUrl}
-                disabled={editDisabled}
-                placeholder="https://integrate.api.nvidia.com/v1"
-                aria-label="Provider base URL override"
-                onChange={(e) => setBaseUrl(e.target.value)}
-                className="input font-mono"
-              />
-            </label>
-
-            <div>
-              <span className="mb-1.5 block text-[13px] font-medium text-stone-700">Model routing</span>
-              <div className="space-y-2.5">
-                {AI_ROLES.map((r) => (
-                  <label key={r.key} className="block">
-                    <span className="mb-1 flex items-baseline justify-between">
-                      <span className="text-[13px] font-medium text-stone-700">{r.label}</span>
-                      <span className="text-[11px] text-stone-400">{r.hint}</span>
-                    </span>
-                    <input
-                      value={routing[r.key] ?? ""}
-                      disabled={editDisabled}
-                      placeholder={payload.envFallback.models[r.key === "ocr" ? "primary" : r.key] ?? "server default"}
-                      aria-label={`Model for ${r.label}`}
-                      onChange={(e) => setRouting((prev) => ({ ...prev, [r.key]: e.target.value }))}
-                      className="input font-mono text-xs"
-                    />
-                  </label>
-                ))}
-              </div>
-              <span className="mt-1.5 block text-xs leading-relaxed text-stone-400">
-                Empty fields fall back to the server defaults listed below. A "provider/" prefix (for example
-                openrouter/) overrides the provider for that role.
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              {payload.canEdit && (
-                <>
-                  <Button size="sm" onClick={() => void save()} loading={saving} disabled={!payload.encryptionReady}>
-                    Save configuration
-                  </Button>
-                  <Button size="sm" tone="secondary" onClick={() => void testConnection()} loading={testing}>
-                    Test connection
-                  </Button>
-                </>
-              )}
-              {notice && (
-                <span
-                  className={cn(
-                    "text-xs",
-                    notice.tone === "ok"
-                      ? "text-emerald-700"
-                      : notice.tone === "pending"
-                        ? "text-amber-700"
-                        : notice.tone === "info"
-                          ? "text-stone-500"
-                          : "text-red-700",
-                  )}
-                  role="status"
-                >
-                  {notice.text}
-                </span>
-              )}
-              {editDisabled && <span className="text-xs text-stone-400">Only organization admins can change this.</span>}
-            </div>
-          </div>
+          <ul className="max-h-80 divide-y divide-stone-100 overflow-y-auto">
+            {memory.map((m) => (
+              <li key={m.id} className="flex items-start justify-between gap-3 px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-stone-500">
+                    {m.kind}
+                    {m.source ? <span className="font-normal text-stone-400"> · {m.source}</span> : null}
+                  </p>
+                  <p className="mt-0.5 line-clamp-2 text-sm text-stone-800">{m.preview}</p>
+                </div>
+                {canEditMemory && (
+                  <button
+                    type="button"
+                    aria-label="Delete memory entry"
+                    title="Forget this"
+                    onClick={() => setConfirmMemoryId(m.id)}
+                    className="icon-btn size-6 shrink-0 hover:text-red-700"
+                  >
+                    <IconTrash className="size-3" />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
-      </Section>
-
-      <Section
-        title="Memory"
-        hint="What the workmate has learned about the organization: profile facts, SOPs, decisions, preferences, and document knowledge. Entries wrong or stale? Remove them."
-      >
-        <div className="rounded-xl border border-stone-200 bg-white shadow-xs">
-          <div className="flex items-center gap-2 border-b border-stone-100 px-3 py-2">
-            <input
-              value={memoryQuery}
-              onChange={(e) => {
-                setMemoryQuery(e.target.value);
-                void loadMemory(e.target.value);
-              }}
-              placeholder="Search memory…"
-              aria-label="Search organization memory"
-              className="input h-8 flex-1 text-xs"
-            />
-            <span className="text-[11px] whitespace-nowrap text-stone-400">{memory.length} shown</span>
-          </div>
-          {memory.length === 0 ? (
-            <p className="p-4 text-sm text-stone-400">Nothing remembered yet.</p>
-          ) : (
-            <ul className="max-h-80 divide-y divide-stone-100 overflow-y-auto">
-              {memory.map((m) => (
-                <li key={m.id} className="flex items-start justify-between gap-3 px-3 py-2.5">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-stone-500">
-                      {m.kind}
-                      {m.source ? <span className="font-normal text-stone-400"> · {m.source}</span> : null}
-                    </p>
-                    <p className="mt-0.5 line-clamp-2 text-sm text-stone-800">{m.preview}</p>
-                  </div>
-                  {canEditMemory && (
-                    <button
-                      type="button"
-                      aria-label="Delete memory entry"
-                      title="Forget this"
-                      onClick={() => setConfirmMemoryId(m.id)}
-                      className="icon-btn size-6 shrink-0 hover:text-red-700"
-                    >
-                      <IconTrash className="size-3" />
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </Section>
-
-      <Section title="Server defaults" hint="What applies when this organization has not set its own configuration.">
-        <div className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white text-sm shadow-xs">
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <span className="text-stone-500">Provider</span>
-            <span className="font-medium text-stone-900">{payload?.envFallback.provider || "nim"}</span>
-          </div>
-          {Object.entries(payload?.envFallback.models ?? {}).map(([role, model]) => (
-            <div key={role} className="flex items-center justify-between gap-3 px-4 py-3">
-              <span className="text-stone-500 capitalize">{role}</span>
-              <span className="font-mono text-xs text-stone-700">{model}</span>
-            </div>
-          ))}
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <span className="text-stone-500">Env key</span>
-            <span className="text-stone-700">{payload?.envFallback.keyConfigured ? "configured" : "not set"}</span>
-          </div>
-        </div>
-      </Section>
-
+      </div>
       <ConfirmDialog
         open={confirmMemoryId != null}
         onClose={() => setConfirmMemoryId(null)}
@@ -782,10 +885,9 @@ function AiTab() {
         body="Searches and agent answers stop using it immediately. The audit trail records the removal."
         confirmLabel="Forget"
       />
-    </div>
+    </Section>
   );
 }
-
 
 /* -------------------------------------------------------------- shared ----- */
 
@@ -929,6 +1031,70 @@ function EmailSection() {
 
 /* --------------------------------------------------- soul + routines ---- */
 
+
+interface RoutineRow {
+  id: string;
+  name: string;
+  scheduleLabel: string;
+  triggerType: string;
+  enabled: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  webhookUrl: string | null;
+}
+
+function SoulSection() {
+  const [soul, setSoul] = useState<string>("");
+  const [loaded, setLoaded] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void callApi<{ agentSoul: string }>("/api/org", { method: "PUT" }).then((res) => {
+      if (res.data) setSoul(res.data.agentSoul ?? "");
+      setLoaded(true);
+    });
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    setNote(null);
+    const res = await callApi("/api/org", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentSoul: soul }),
+    });
+    setBusy(false);
+    setNote(res.ok ? "Saved. Your workmate picks it up on the next message." : (res.error?.title ?? "Could not save"));
+  }
+
+  return (
+    <Section
+      title="Agent persona (SOUL)"
+      hint="Standing instructions your workmate follows in every conversation: voice, tone, hard rules. It cannot override security, approvals, or financial integrity."
+    >
+      <div className="max-w-2xl">
+        <textarea
+          value={soul}
+          onChange={(e) => setSoul(e.target.value)}
+          disabled={!loaded}
+          rows={5}
+          aria-label="Agent persona instructions"
+          placeholder={"Example:\n- We are a hardware store; keep replies practical and short.\n- Always mention outstanding balances when discussing a customer.\n- Never recommend credit terms beyond Net 30."}
+          className="w-full resize-y rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm leading-relaxed outline-none placeholder:text-stone-400 focus:border-gold-500"
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <Button size="sm" loading={busy} onClick={() => void save()}>
+            Save persona
+          </Button>
+          {note && <span className="text-xs text-stone-500">{note}</span>}
+        </div>
+      </div>
+    </Section>
+  );
+}
 
 interface RoutineRow {
   id: string;
