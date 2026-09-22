@@ -55,7 +55,13 @@ const sendMessage = (deps: ModuleDeps) =>
       const [conv] = await deps.db
         .select({ id: conversations.id, title: conversations.title })
         .from(conversations)
-        .where(and(eq(conversations.id, input.conversationId), eq(conversations.orgId, ctx.actor.orgId)))
+        .where(
+          and(
+            eq(conversations.id, input.conversationId),
+            eq(conversations.orgId, ctx.actor.orgId),
+            isNull(conversations.deletedAt),
+          ),
+        )
         .limit(1);
       if (!conv) throw new Error("conversation not found");
       if (!(await isMember(deps.db, conv.id, ctx.actor.id))) {
@@ -82,7 +88,14 @@ const sendMessage = (deps: ModuleDeps) =>
           .where(eq(users.id, ctx.actor.id ?? ""))
           .limit(1);
         const senderLabel = sender?.name ?? sender?.email ?? "A colleague";
-        const mentionedUsers = input.mentions.filter((m) => m.type === "user" && m.id !== ctx.actor.id);
+        const conversationMemberRows = await deps.db
+          .select({ userId: conversationMembers.userId })
+          .from(conversationMembers)
+          .where(eq(conversationMembers.conversationId, conv.id));
+        const memberIds = new Set(conversationMemberRows.map((member) => member.userId));
+        const mentionedUsers = input.mentions.filter(
+          (m) => m.type === "user" && m.id !== ctx.actor.id && memberIds.has(m.id),
+        );
         for (const m of mentionedUsers) {
           await deps.db.insert(notifications).values({
             orgId: ctx.actor.orgId,
@@ -193,7 +206,13 @@ const readMessages = (deps: ModuleDeps) =>
       const [conv] = await deps.db
         .select({ id: conversations.id })
         .from(conversations)
-        .where(and(eq(conversations.id, input.conversationId), eq(conversations.orgId, ctx.actor.orgId)))
+        .where(
+          and(
+            eq(conversations.id, input.conversationId),
+            eq(conversations.orgId, ctx.actor.orgId),
+            isNull(conversations.deletedAt),
+          ),
+        )
         .limit(1);
       if (!conv) throw new Error("conversation not found");
       if (!(await isMember(deps.db, conv.id, ctx.actor.id))) {

@@ -501,7 +501,12 @@ const setOrgBranding = (deps: ModuleDeps) =>
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [existing] = await tx
-          .select({ logoDataUrl: orgBranding.logoDataUrl })
+          .select({
+            logoDataUrl: orgBranding.logoDataUrl,
+            accentColor: orgBranding.accentColor,
+            invoiceFooter: orgBranding.invoiceFooter,
+            layout: orgBranding.layout,
+          })
           .from(orgBranding)
           .where(eq(orgBranding.orgId, ctx.actor.orgId))
           .limit(1);
@@ -510,9 +515,9 @@ const setOrgBranding = (deps: ModuleDeps) =>
           // Omitting the logo keeps the stored one; send logoDataUrl: null
           // shape is impossible through zod optional, so clearing is explicit below.
           logoDataUrl: input.logoDataUrl ?? existing?.logoDataUrl ?? null,
-          accentColor: input.accentColor ?? null,
-          invoiceFooter: input.invoiceFooter ?? null,
-          layout: input.layout ?? "classic",
+          accentColor: input.accentColor ?? existing?.accentColor ?? null,
+          invoiceFooter: input.invoiceFooter ?? existing?.invoiceFooter ?? null,
+          layout: input.layout ?? existing?.layout ?? "classic",
           updatedAt: ctx.now,
         };
         await tx
@@ -532,4 +537,3 @@ const setOrgBranding = (deps: ModuleDeps) =>
       });
     },
   });
-

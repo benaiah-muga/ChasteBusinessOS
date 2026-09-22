@@ -614,6 +614,7 @@ const saveDocVersion = (deps: ModuleDeps) =>
     output: z.object({ version: z.number() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.documentId}, 71))`);
         const [doc] = await tx
           .select()
           .from(authoredDocs)
@@ -756,6 +757,7 @@ const restoreDocVersion = (deps: ModuleDeps) =>
     output: z.object({ version: z.number() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.documentId}, 71))`);
         const [doc] = await tx
           .select()
           .from(authoredDocs)

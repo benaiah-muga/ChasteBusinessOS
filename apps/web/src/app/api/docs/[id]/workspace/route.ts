@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, gt, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { docDrafts, docPresence, getDb, withOrgContext } from "@chaste/db";
+import { authoredDocs, docDrafts, docPresence, getDb, withOrgContext } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
 
 /**
@@ -29,6 +29,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
+  const parsedId = z.string().uuid().safeParse(id);
+  if (!parsedId.success) return NextResponse.json({ error: "invalid document id" }, { status: 400 });
+  const documentId = parsedId.data;
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
@@ -37,24 +40,31 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const lockUntil = new Date(Date.now() + LOCK_SECONDS * 1000);
 
   return withOrgContext(getDb().db, resolved.orgId, async (tx) => {
+    const [doc] = await tx
+      .select({ id: authoredDocs.id })
+      .from(authoredDocs)
+      .where(and(eq(authoredDocs.id, documentId), eq(authoredDocs.orgId, resolved.orgId!)))
+      .limit(1);
+    if (!doc) return NextResponse.json({ error: "document not found" }, { status: 404 });
+
     // Heartbeat presence.
     await tx
       .insert(docPresence)
-      .values({ orgId: resolved.orgId!, documentId: id, userId: me, displayName, seenAt: new Date() })
+      .values({ orgId: resolved.orgId!, documentId, userId: me, displayName, seenAt: new Date() })
       .onConflictDoUpdate({
         target: [docPresence.documentId, docPresence.userId],
         set: { displayName, seenAt: new Date() },
       });
 
     // Soft lock: take or renew mine (only a real draft row carries a lock).
-    const [draft] = await tx.select().from(docDrafts).where(eq(docDrafts.documentId, id)).limit(1);
+    const [draft] = await tx.select().from(docDrafts).where(eq(docDrafts.documentId, documentId)).limit(1);
     const lockFresh = draft?.lockUntil && draft.lockUntil.getTime() > Date.now();
     const lockHeldByOther = Boolean(draft && lockFresh && draft.lockedByUserId && draft.lockedByUserId !== me);
 
     if (lockHeldByOther) {
       return NextResponse.json({
         lock: { heldBy: draft!.lockedByName ?? "someone else", mine: false },
-        others: await others(tx, id, me),
+        others: await others(tx, documentId, me),
       });
     }
 
@@ -70,7 +80,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
               conflict: true,
               draft: { content: draft.contentJson, rev: draft.rev, updatedAt: draft.updatedAt.toISOString() },
               lock: { heldBy: displayName, mine: true },
-              others: await others(tx, id, me),
+              others: await others(tx, documentId, me),
             },
             { status: 409 },
           );
@@ -93,7 +103,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           .insert(docDrafts)
           .values({
             orgId: resolved.orgId!,
-            documentId: id,
+            documentId,
             contentJson: parsed.data.content,
             lockedByUserId: me,
             lockedByName: displayName,
@@ -110,13 +120,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         .where(eq(docDrafts.id, draft.id));
     }
 
-    const [fresh] = await tx.select().from(docDrafts).where(eq(docDrafts.documentId, id)).limit(1);
+    const [fresh] = await tx.select().from(docDrafts).where(eq(docDrafts.documentId, documentId)).limit(1);
 
     return NextResponse.json({
       lock: { heldBy: displayName, mine: true },
       savedRev,
       draft: fresh ? { content: fresh.contentJson, rev: fresh.rev, updatedAt: fresh.updatedAt.toISOString() } : null,
-      others: await others(tx, id, me),
+      others: await others(tx, documentId, me),
     });
   });
 }
@@ -126,12 +136,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
+  const parsedId = z.string().uuid().safeParse(id);
+  if (!parsedId.success) return NextResponse.json({ error: "invalid document id" }, { status: 400 });
+  const documentId = parsedId.data;
   return withOrgContext(getDb().db, resolved.orgId, async (tx) => {
-    await tx.delete(docPresence).where(and(eq(docPresence.documentId, id), eq(docPresence.userId, resolved.userId)));
+    await tx.delete(docPresence).where(and(eq(docPresence.documentId, documentId), eq(docPresence.userId, resolved.userId)));
     await tx
       .update(docDrafts)
       .set({ lockedByUserId: null, lockedByName: null, lockUntil: null })
-      .where(and(eq(docDrafts.documentId, id), eq(docDrafts.lockedByUserId, resolved.userId)));
+      .where(and(eq(docDrafts.documentId, documentId), eq(docDrafts.lockedByUserId, resolved.userId)));
     return NextResponse.json({ ok: true });
   });
 }

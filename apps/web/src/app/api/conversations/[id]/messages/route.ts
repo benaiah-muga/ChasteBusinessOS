@@ -22,7 +22,7 @@ async function loadConversation(id: string, orgId: string) {
   const [conv] = await db
     .select()
     .from(conversations)
-    .where(and(eq(conversations.id, id), eq(conversations.orgId, orgId)))
+    .where(and(eq(conversations.id, id), eq(conversations.orgId, orgId), isNull(conversations.deletedAt)))
     .limit(1);
   return conv ?? null;
 }
@@ -69,7 +69,7 @@ export async function GET(_req: Request, { params }: Params) {
       },
     )
     .from(messages)
-    .where(and(eq(messages.conversationId, id), isNull(messages.deletedAt)))
+    .where(and(eq(messages.conversationId, id), eq(messages.orgId, resolved.orgId), isNull(messages.deletedAt)))
     .orderBy(asc(messages.createdAt))
     .limit(200);
   return NextResponse.json({ conversation: conv, messages: rows, me: resolved.userId });
@@ -129,7 +129,7 @@ export async function POST(req: Request, { params }: Params) {
     const history = await db
       .select({ senderType: messages.senderType, senderUserId: messages.senderUserId, body: messages.body })
       .from(messages)
-      .where(eq(messages.conversationId, id))
+      .where(and(eq(messages.conversationId, id), eq(messages.orgId, resolved.orgId), isNull(messages.deletedAt)))
       .orderBy(asc(messages.createdAt))
       .limit(30);
     const transcript = history

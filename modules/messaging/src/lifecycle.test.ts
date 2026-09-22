@@ -131,6 +131,18 @@ describe("messaging conversation lifecycle", () => {
     expect(row?.deletedAt).toBeTruthy();
     const list = await run("messaging.listConversations", ctx(creatorId, ["messaging.read"]), {});
     expect(JSON.stringify(list)).not.toContain("delete-me");
+
+    const readDeleted = await run("messaging.readMessages", ctx(creatorId, ["messaging.read"]), {
+      conversationId: channel,
+      limit: 10,
+    });
+    expect(readDeleted).toMatchObject({ ok: false });
+
+    const sendDeleted = await run("messaging.sendMessage", ctx(creatorId, ["messaging.write"]), {
+      conversationId: channel,
+      body: "should be refused",
+    });
+    expect(sendDeleted).toMatchObject({ ok: false });
   });
 
   it("lets members leave and pulls colleagues in, organization members only", async () => {

@@ -33,7 +33,7 @@ export async function GET() {
         eq(conversationMembers.userId, resolved.userId),
       ),
     )
-    .where(and(eq(conversations.orgId, resolved.orgId)))
+    .where(and(eq(conversations.orgId, resolved.orgId), isNull(conversations.deletedAt)))
     .orderBy(desc(conversations.createdAt));
 
   const withLast = await Promise.all(

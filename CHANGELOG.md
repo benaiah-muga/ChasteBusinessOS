@@ -56,6 +56,12 @@ The full v1 changelog is preserved at the bottom of this file.
   `where document_id = id` compared a table to itself and always returned
   0. Authored-document version counts and the long-standing open-coding-
   suggestions count now qualify their columns explicitly.
+- **Deleted conversations and messages could still leak through detail paths.**
+  Conversation lists, reads, sends, and the workmate transcript now exclude
+  deleted records, and mention notifications stay inside the conversation.
+- **Partial print-branding updates could erase saved fields.** Omitting a
+  logo, accent, footer, or layout now preserves the organization's existing
+  value.
 
 ### Changed
 - **Dropdowns stop looking generic.** Every `<select>` in the app now shares
