@@ -1,3 +1,13 @@
+import process from "node:process";
+import { fileURLToPath, URL } from "node:url";
+
+const skipDevMigrations =
+  process.env.NODE_ENV === "development" && process.env.AUTO_MIGRATE_ON_BOOT !== "1";
+const migrationImport = "@chaste/db/migrate";
+const migrationTarget = skipDevMigrations
+  ? fileURLToPath(new URL("./src/noop-migrations.ts", import.meta.url))
+  : undefined;
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // The Docker image ships Next's traced standalone server and only the
@@ -8,6 +18,15 @@ const nextConfig = {
   cacheComponents: true,
   transpilePackages: ["@chaste/kernel", "@chaste/db", "@chaste/ai"],
   serverExternalPackages: ["postgres"],
+  ...(migrationTarget
+    ? {
+        turbopack: { resolveAlias: { [migrationImport]: "./apps/web/src/noop-migrations.ts" } },
+        webpack(config) {
+          config.resolve.alias[migrationImport] = migrationTarget;
+          return config;
+        },
+      }
+    : {}),
   async headers() {
     // Baseline hardening for every response. Next's App Router needs
     // 'unsafe-inline'/'unsafe-eval' for its hydration and dev runtime;

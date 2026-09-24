@@ -12,6 +12,18 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **Messages search and collaboration.** Conversations can be searched by channel name or latest preview, while a separate history search finds older messages and opens their surrounding thread. Messages now support per-member read positions and unread counts, private file attachments, emoji reactions, threaded replies, pinned messages, member-name lookup, and online or typing status refreshed in the background.
+- **A more comfortable Messages workspace.** The conversation list has Active and Archived filters, clearer loading and retry states, a guided first-channel empty state, and an explicit mobile path back to the list. Drafts save in the browser per conversation, the composer grows with its text and accepts attachments, and messages group by sender and day for easier scanning.
+- **Emoji in the message composer.** Choose from a compact emoji picker and insert at the current cursor position while writing.
+- **Focused built-in template catalog.** Documents now present one canonical built-in template per type. Invoice, quotation, receipt, and delivery note use the supplied Chaste paper layouts, with editable document numbers, date fields, dynamic line items, calculated amounts, and matching preview/print output.
+- **Business paper template system.** The 24 built-in document templates were redesigned around one professional anatomy: branded letterhead with a document title block, a ledger rule, party blocks, ruled data tables with right-aligned money columns, a compact totals block, and composed signature lines. One typesetting system now drives gallery thumbnails, live previews, the editor paper, and print/PDF output, and documents drawn freehand in the editor pick up the same treatment. Design groups dress the same anatomy per family: financial documents (quotations, invoices, receipts, vouchers, purchase orders) print a large ink title with dark ruled headers and a banded grand total; goods paper keeps light rules under a large title; people paper keeps the modest gold title. Fonts stay professional throughout.
+- **The studio form is the template's editor.** Using a template no longer opens the word editor: the studio saves the filled paper under its file name in place, keeps the form open with a saved status, offers Download PDF from the live preview at any point, and offers Save a copy after further edits.
+- **Template gallery categorization.** Category chips grouped under Financial, Operations, and People labels (plus Other) with live counts filter the gallery; each card leads with a real miniature of the template paper, its name, and a spec chip, with descriptions moved into the preview dialog.
+- **Mobile template studio tabs.** The template creation studio switches between Fields and Preview panes with a segmented tab bar on small screens instead of stacking both.
+- **Quick actions and document organization.** Every module frame now exposes a keyboard-friendly Quick actions menu for the most common work, while Documents adds folder paths, folder-aware libraries, and upload/create entry points across the workspace.
+- **Business document studio.** The editor now opens with page-like white paper, and the gallery includes three polished starting templates each for quotations, receipts, sales invoices, purchase orders, vouchers, delivery notes, employment contracts, and employment agreements.
+- **Template previews and guided creation.** Template cards now show a useful paper preview with separate View template and Use template actions. The creation studio supports live field editing, per-field visibility, template switching, searchable business-record pickers, folder placement, and an immediate preview before the document is created.
+- **Uploaded document viewer.** Uploaded PDFs and images can be opened inline from the library through an organization-scoped, no-store content endpoint, with a full-file link for formats that need the system viewer.
 - **Documents you write, not just ingest.** New Write tab: rich text
   documents with a full formatting toolbar (headings, lists, tables,
   images), debounced autosave with a Saved indicator, live presence of
@@ -51,6 +63,12 @@ The full v1 changelog is preserved at the bottom of this file.
   ledger records who changed what.
 
 ### Fixed
+- **Messages stayed on the loading screen.** The conversation list now loads on mount, and request failures leave loading state so the retry message can render.
+- **Templates outside the catalog were invisible in the gallery.** Built-in general templates (blank note, business letter, meeting notes, quote) and anything saved with Save as template lacked a catalog entry and silently skipped their cards; they now render under Other with their own paper thumbnails.
+- **Authored document creation now returns the created record reliably.** The document API returns capability results at the shape the editor expects, so template and blank-document creation navigate to the saved document instead of appearing to fail after persistence.
+- **Template seeding is organization-safe.** Built-in template discovery now scopes its existence check to the current organization, preventing templates in one workspace from suppressing another workspace's catalog.
+- **PDF pagination preserves business-document structure.** Export uses a dedicated print surface with saved page settings, repeating long-table headers, unbroken rows and signature blocks, responsive images, clean page backgrounds, and no trailing blank page.
+- **Upload failures are actionable.** The ingest form rejects unsupported files and files above 5 MB before upload, preserves the form, and explains how to recover.
 - **Document and suggestion counts were silently zero.** Correlated count
   subqueries interpolated unqualified column names, so a subquery like
   `where document_id = id` compared a table to itself and always returned
@@ -59,11 +77,24 @@ The full v1 changelog is preserved at the bottom of this file.
 - **Deleted conversations and messages could still leak through detail paths.**
   Conversation lists, reads, sends, and the workmate transcript now exclude
   deleted records, and mention notifications stay inside the conversation.
+- **Renaming a channel lost focus after one character.** Dialog focus setup and restoration now run only when the dialog opens or closes, so ordinary state updates keep the rename field active.
+- **Dev routes hung after Next reported Ready.** Default local development now aliases boot migration to a no-op, keeping Node-only migration and backup dependencies out of route compilation while preserving production migrations and explicit local opt-in.
 - **Partial print-branding updates could erase saved fields.** Omitting a
   logo, accent, footer, or layout now preserves the organization's existing
   value.
 
 ### Changed
+- **The desktop sidebar is less crowded.** Removed its two compact quick-action shortcuts; module actions remain available in the page header.
+- **Document studio entry points are quieter.** Removed the editor and upload shortcuts from the Documents top bar; invoices now prefill their issue date using the local calendar date, and generated numbers or references across document templates are labeled as editable.
+- **Built-in templates are code-owned.** Organizations that seeded templates under an older catalog automatically receive the redesigned papers on their next visit to Documents; custom templates are never touched.
+- **Boards support direct stage movement.** Projects tasks and hiring candidates can now be dragged between status or pipeline columns, with visible drop targets and existing keyboard/touch controls retained as fallbacks.
+- **Documents support direct folder filing.** Drag a document from the library onto any virtual folder, including Unfiled, with an immediate saved confirmation and the existing Organize action retained as a precise fallback.
+- **Module headers stay usable on small screens.** Shared quick actions now wrap into a full-width mobile row, and section tabs wrap without clipping or introducing a stray scrollbar; desktop headers retain their compact horizontal layout.
+- **Message composer controls share one input surface.** The paperclip, emoji picker, selected files, draft status, and send action sit together inside the composer border.
+- **Local web development skips boot-time database migration by default.** The existing `pnpm --filter @chaste/db db:migrate` setup command remains the explicit schema step; set `AUTO_MIGRATE_ON_BOOT=1` when a local dev start should apply migrations.
+- **Dark-mode stat cards use coherent semantic surfaces.** Accent, warning, danger, and success cards now switch to dark semantic fills and borders instead of retaining bright light-mode panels.
+- **Authored documents retain their working context.** Document type, linked business record, virtual folder, and page settings now survive drafts, published versions, restores, and reopen flows.
+- **Folders are first-class and tenant-scoped.** Empty and nested folders persist independently of documents, parent paths are real records, and rename or move operations update descendants atomically.
 - **Dropdowns stop looking generic.** Every `<select>` in the app now shares
   one chrome: browser default chrome removed, a custom chevron, aligned
   padding, and the shared gold focus ring. A `Select` primitive lands in the

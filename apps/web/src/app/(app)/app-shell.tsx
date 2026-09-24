@@ -29,6 +29,7 @@ import {
 import { Avatar } from "@/components/ui";
 import { LogoMark } from "@/components/logo";
 import { ThemeMenu } from "@/components/theme";
+import { QuickActionsMenu } from "@/components/quick-actions";
 import { cn, setActiveCurrency } from "@/lib/format";
 import { applyOrgDefault, useMoneySync } from "@/lib/money";
 import { usePrefs } from "@/lib/prefs";
@@ -344,6 +345,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
             <button type="button" onClick={() => setLauncherOpen(true)} aria-label="Applications" className="icon-btn">
               <IconGrid className="size-5" />
             </button>
+            <QuickActionsMenu appId={currentApp?.id ?? "documents"} compact />
             <div ref={mobileAccountRef} className="relative">
               <button
                 type="button"

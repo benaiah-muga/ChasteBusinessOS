@@ -21,10 +21,11 @@ function data(run: any) {
 async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string) {
   const [owner] = await db.insert(users).values({ email: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`, name: "Owner" }).returning();
   if (!owner) throw new Error("owner insert failed");
+  const runName = `${orgName} ${Date.now()} ${Math.random().toString(36).slice(2, 6)}`;
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName,
+    orgName: runName,
     businessDescription: "A trading company that wants its numbers explained, not dashboards admired.",
   });
   return { orgId, ownerId: owner.id, ownerCtx: { actor: { type: "human" as const, id: owner.id, orgId, permissions: new Set(["*"]) }, now: new Date(), services: {} } };

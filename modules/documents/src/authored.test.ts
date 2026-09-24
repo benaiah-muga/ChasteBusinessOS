@@ -42,7 +42,13 @@ afterAll(async () => {
 
 describe("authored documents (Phase 4)", () => {
   it("create, list and get round-trip content", async () => {
-    const created = await run("documents.createDoc", { title: "Service quote", content: DOC, html: "<p>Hello</p>" });
+    const created = await run("documents.createDoc", {
+      title: "Service quote",
+      content: DOC,
+      html: "<p>Hello</p>",
+      documentType: "quotation",
+      pageSettings: { size: "Letter", orientation: "landscape", margin: "compact" },
+    });
     expect(created.documentId).toBeTruthy();
     documentId = created.documentId;
 
@@ -54,6 +60,8 @@ describe("authored documents (Phase 4)", () => {
     expect(got.document.title).toBe("Service quote");
     expect(got.document.content.type).toBe("doc");
     expect(got.document.versions).toBe(0);
+    expect(got.document.documentType).toBe("quotation");
+    expect(got.document.pageSettings).toEqual({ size: "Letter", orientation: "landscape", margin: "compact" });
   });
 
   it("publishing archives append-only versions and clears the draft", async () => {
@@ -89,6 +97,35 @@ describe("authored documents (Phase 4)", () => {
     expect(got.document.content.type).toBe("doc");
     expect(got.document.content.content[0].content[0].text).toContain("customer.name");
     expect(v1.note).toBe("first");
+  });
+
+  it("persists nested folders, document metadata, and page settings", async () => {
+    const created = await run("documents.createFolder", { path: "Sales/2026/Quotes" });
+    expect(created.path).toBe("Sales/2026/Quotes");
+
+    const folders = await run("documents.listFolders", {});
+    expect(folders.folders.map((folder: { path: string }) => folder.path)).toEqual([
+      "Sales",
+      "Sales/2026",
+      "Sales/2026/Quotes",
+    ]);
+
+    const previous = await run("documents.updateDocMetadata", {
+      documentId,
+      title: "Service quote for Acme",
+      folder: "Sales/2026/Quotes",
+      linkedRecordType: "customer",
+      linkedRecordId: crypto.randomUUID(),
+      linkedRecordLabel: "Acme Limited",
+    });
+    expect(previous.previous.title).toBe("Service quote");
+
+    await run("documents.renameFolder", { path: "Sales", newPath: "Commercial" });
+    const moved = await run("documents.getDoc", { documentId });
+    expect(moved.document.folder).toBe("Commercial/2026/Quotes");
+    expect(moved.document.linkedRecordLabel).toBe("Acme Limited");
+
+    await expect(run("documents.deleteFolder", { path: "Commercial" })).rejects.toThrow(/move the documents/);
   });
 
   it("templates carry placeholders and refuse to delete built-ins", async () => {

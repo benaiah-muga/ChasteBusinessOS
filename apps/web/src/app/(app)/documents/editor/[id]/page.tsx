@@ -18,6 +18,7 @@ import { timeAgo } from "@/lib/format";
 import { TiptapEditor } from "../../_write/tiptap-editor";
 import { AiAssistPanel } from "../../_write/ai-panel";
 import { exportDocx } from "../../_write/docx-export";
+import { refineDocumentHtml } from "@/components/template-preview";
 
 /**
  * Authored-document editor (Phase 4): Tiptap writing surface with debounced
@@ -26,7 +27,8 @@ import { exportDocx } from "../../_write/docx-export";
  * restore, AI writing assist, .docx export and print-styled PDF.
  */
 
-type SaveState = "idle" | "dirty" | "saving" | "saved" | "conflict";
+type SaveState = "idle" | "dirty" | "saving" | "saved" | "error" | "conflict";
+type PageSettings = { size: "A4" | "Letter"; orientation: "portrait" | "landscape"; margin: "compact" | "normal" | "wide" };
 
 interface VersionRow {
   version: number;
@@ -43,11 +45,19 @@ interface DocPayload {
     content: Record<string, unknown>;
     html: string;
     templateId: string | null;
+    folder: string | null;
+    documentType: string | null;
+    linkedRecordLabel: string | null;
+    pageSettings: PageSettings;
     versions: number;
     updatedAt: string;
   } | null;
   versions: VersionRow[];
 }
+
+// Preview and print share one refinement pass: header rows become thead and
+// tables pick up the business paper classes the paper CSS keys on.
+const paperHtml = (html: string): string => refineDocumentHtml(html);
 
 export default function DocumentEditorPage() {
   const params = useParams<{ id: string }>();
@@ -72,11 +82,32 @@ export default function DocumentEditorPage() {
   const [compare, setCompare] = useState<{ a: string; b: string; aV: number; bV: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [printHtml, setPrintHtml] = useState("");
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [pageSettings, setPageSettings] = useState<PageSettings>({ size: "A4", orientation: "portrait", margin: "normal" });
+  const [mobileView, setMobileView] = useState<"edit" | "preview">("edit");
 
   const editorRef = useRef<Editor | null>(null);
   const pendingRef = useRef<Record<string, unknown> | null>(null);
   const revRef = useRef<number | undefined>(undefined);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const surface = document.createElement("div");
+    surface.className = "print-only";
+    surface.dataset.size = pageSettings.size;
+    surface.dataset.orientation = pageSettings.orientation;
+    surface.dataset.margin = pageSettings.margin;
+    if (boot?.document?.documentType) surface.dataset.docType = boot.document.documentType;
+    surface.innerHTML = printHtml;
+    const settings = document.createElement("style");
+    settings.media = "print";
+    settings.textContent = `@page { size: ${pageSettings.size} ${pageSettings.orientation}; margin: 0; }`;
+    document.body.append(settings, surface);
+    return () => {
+      settings.remove();
+      surface.remove();
+    };
+  }, [boot, pageSettings, printHtml]);
 
   // Boot: doc + versions, then one workspace tick to pick up any draft.
   useEffect(() => {
@@ -84,7 +115,7 @@ export default function DocumentEditorPage() {
     (async () => {
       const [docRes, wsRes] = await Promise.all([
         callApi<DocPayload>(`/api/docs/${documentId}`),
-        postApi<{ draft?: { content: Record<string, unknown>; rev: number } | null; lock?: { heldBy: string; mine: boolean }; others?: Array<{ userId: string; name: string }> }>(
+        postApi<{ draft?: { content: Record<string, unknown>; pageSettings?: PageSettings; rev: number } | null; lock?: { heldBy: string; mine: boolean }; others?: Array<{ userId: string; name: string }> }>(
           `/api/docs/${documentId}/workspace`,
           {},
         ),
@@ -104,8 +135,10 @@ export default function DocumentEditorPage() {
       if (draft?.content && Object.keys(draft.content).length > 0) {
         revRef.current = draft.rev;
         setInitialContent(draft.content);
+        setPageSettings(draft.pageSettings ?? doc.pageSettings);
       } else {
         setInitialContent(doc.content);
+        setPageSettings(doc.pageSettings);
       }
       setBoot(docRes.data);
       if (wsRes.data?.lock && !wsRes.data.lock.mine) setLockHolder(wsRes.data.lock.heldBy);
@@ -117,26 +150,35 @@ export default function DocumentEditorPage() {
   }, [documentId]);
 
   const saveDraft = useCallback(
-    async (json: Record<string, unknown>) => {
+    async (json: Record<string, unknown>, settings = pageSettings) => {
       if (lockHolder) return;
       setSaveState("saving");
       const res = await postApi<{ savedRev?: number }>(`/api/docs/${documentId}/workspace`, {
         content: json,
+        pageSettings: settings,
         rev: revRef.current,
       });
       if (res.status === 409) {
         setSaveState("conflict");
         return;
       }
-      if (res.ok && res.data?.savedRev) revRef.current = res.data.savedRev;
+      if (!res.ok) {
+        setSaveState("error");
+        return;
+      }
+      if (res.data?.savedRev) revRef.current = res.data.savedRev;
+      pendingRef.current = null;
       setSaveState("saved");
     },
-    [documentId, lockHolder],
+    [documentId, lockHolder, pageSettings],
   );
 
   const onDocChange = useCallback(
-    (json: Record<string, unknown>, _html: string) => {
+    (json: Record<string, unknown>, html: string) => {
       pendingRef.current = json;
+      const paper = paperHtml(html);
+      setPreviewHtml(paper);
+      setPrintHtml(paper);
       setSaveState("dirty");
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
@@ -147,13 +189,23 @@ export default function DocumentEditorPage() {
     [saveDraft],
   );
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !boot) return;
+    const json = editor.getJSON() as Record<string, unknown>;
+    pendingRef.current = json;
+    setSaveState("dirty");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => void saveDraft(json, pageSettings), 500);
+  }, [boot, pageSettings, saveDraft]);
+
   // Presence heartbeat + lock observation.
   useEffect(() => {
     if (!boot) return;
     const tick = setInterval(async () => {
       const res = await postApi<{ savedRev?: number; lock?: { heldBy: string; mine: boolean }; others?: Array<{ userId: string; name: string }> }>(
         `/api/docs/${documentId}/workspace`,
-        pendingRef.current ? { content: pendingRef.current } : {},
+        pendingRef.current ? { content: pendingRef.current, pageSettings, rev: revRef.current } : {},
       );
       if (!res.ok) return;
       if (pendingRef.current && res.data?.savedRev) {
@@ -165,7 +217,13 @@ export default function DocumentEditorPage() {
       if (res.data?.others) setOthers(res.data.others);
     }, 10_000);
     return () => clearInterval(tick);
-  }, [boot, documentId]);
+  }, [boot, documentId, pageSettings]);
+
+  useEffect(() => {
+    const previous = document.title;
+    if (title) document.title = `${title} | Chaste Business OS`;
+    return () => { document.title = previous; };
+  }, [title]);
 
   // Release presence + lock on exit.
   useEffect(() => {
@@ -189,6 +247,7 @@ export default function DocumentEditorPage() {
         title,
         content: editor.getJSON(),
         html: editor.getHTML(),
+        pageSettings,
         ...(publishNote.trim() ? { note: publishNote.trim() } : {}),
       });
       if (res.status === 202) {
@@ -262,7 +321,7 @@ export default function DocumentEditorPage() {
   function printNow() {
     const editor = editorRef.current;
     if (!editor) return;
-    setPrintHtml(editor.getHTML());
+    setPrintHtml(paperHtml(editor.getHTML()));
     requestAnimationFrame(() => window.print());
   }
 
@@ -270,10 +329,11 @@ export default function DocumentEditorPage() {
     dirty: "Unsaved changes",
     saving: "Saving…",
     saved: "Saved",
+    error: "Save interrupted: retry",
     conflict: "Edited elsewhere: reload to pick up the latest draft",
   };
 
-  if (!boot || !initialContent) {
+  if (!boot?.document || !initialContent) {
     return (
       <div className="p-6">
         <LoadingPage />
@@ -295,9 +355,12 @@ export default function DocumentEditorPage() {
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => void postApi(`/api/docs/${documentId}`, { action: "updateMetadata", title: title.trim() || "Untitled document" })}
             aria-label="Document title"
             className="min-w-48 flex-1 rounded border-none bg-transparent px-2 py-1 text-base font-semibold text-stone-900 outline-none hover:bg-stone-100 focus:bg-white"
           />
+          {boot.document.folder && <span className="hidden rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-medium text-stone-500 sm:inline">{boot.document.folder}</span>}
+          {boot.document.linkedRecordLabel && <span className="hidden max-w-48 truncate rounded-md border border-stone-200 bg-white px-2.5 py-1 text-[11px] text-stone-600 md:inline" title={boot.document.linkedRecordLabel}>Source: {boot.document.linkedRecordLabel}</span>}
           {others.length > 0 && (
             <span className="flex items-center gap-1">
               {others.map((o) => (
@@ -308,32 +371,35 @@ export default function DocumentEditorPage() {
             </span>
           )}
           {saveState !== "idle" && (
-            <span
-              className={cnSave(saveState)}
-              role="status"
-            >
-              {saveLabel[saveState]}
+            <span role="status" aria-live="polite" className={cnSave(saveState)}>
+              {saveState === "error" ? (
+                <button
+                  type="button"
+                  className="cursor-pointer underline underline-offset-2"
+                  onClick={() => {
+                    const editor = editorRef.current;
+                    if (editor) void saveDraft(editor.getJSON() as Record<string, unknown>);
+                  }}
+                >
+                  {saveLabel[saveState]}
+                </button>
+              ) : saveLabel[saveState]}
             </span>
           )}
-          <div className="ml-auto flex items-center gap-1.5">
-            <Button tone="ghost" size="sm" onClick={() => setVersionsOpen(true)}>
-              Versions {versions.length > 0 && `(${versions.length})`}
-            </Button>
-            <Button tone="ghost" size="sm" onClick={() => setTplOpen(true)}>
-              Save as template
-            </Button>
-            <Button tone="ghost" size="sm" onClick={() => void exportDocx(title, editorRef.current?.getJSON())}>
-              .docx
-            </Button>
-            <Button tone="ghost" size="sm" onClick={() => printNow()}>
-              Print / PDF
-            </Button>
-            <Button tone="ghost" size="sm" onClick={() => setAiOpen((v) => !v)} aria-pressed={aiOpen}>
-              Assist
-            </Button>
-            <Button size="sm" loading={publishBusy} onClick={() => setPublishOpen(true)}>
-              Publish version
-            </Button>
+          <div className="editor-header-actions">
+            <div className="editor-header-actions__group" aria-label="Page settings">
+              <select aria-label="Page size" value={pageSettings.size} onChange={(event) => setPageSettings((value) => ({ ...value, size: event.target.value as PageSettings["size"] }))} className="editor-select"><option>A4</option><option>Letter</option></select>
+              <select aria-label="Page orientation" value={pageSettings.orientation} onChange={(event) => setPageSettings((value) => ({ ...value, orientation: event.target.value as PageSettings["orientation"] }))} className="editor-select"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select>
+              <select aria-label="Page margins" value={pageSettings.margin} onChange={(event) => setPageSettings((value) => ({ ...value, margin: event.target.value as PageSettings["margin"] }))} className="editor-select"><option value="compact">Compact margins</option><option value="normal">Normal margins</option><option value="wide">Wide margins</option></select>
+            </div>
+            <div className="editor-header-actions__group" aria-label="Document actions">
+              <Button size="sm" loading={publishBusy} onClick={() => setPublishOpen(true)}>Publish version</Button>
+              <Button tone="ghost" size="sm" onClick={() => printNow()}>Print / PDF</Button>
+              <Button tone="ghost" size="sm" onClick={() => setVersionsOpen(true)}>Versions {versions.length > 0 && `(${versions.length})`}</Button>
+              <Button tone="ghost" size="sm" onClick={() => setTplOpen(true)}>Save as template</Button>
+              <Button tone="ghost" size="sm" onClick={() => void exportDocx(title, editorRef.current?.getJSON())}>.docx</Button>
+              <Button tone="ghost" size="sm" onClick={() => setAiOpen((v) => !v)} aria-pressed={aiOpen}>Assist</Button>
+            </div>
           </div>
         </div>
         {lockHolder && (
@@ -345,8 +411,13 @@ export default function DocumentEditorPage() {
         )}
       </div>
 
-      <div className="mx-auto flex w-full max-w-6xl flex-1 gap-4 px-4 py-4">
-        <div className="min-w-0 flex-1">
+      <div className="mx-auto w-full max-w-[96rem] flex-1 px-3 py-3 sm:px-4 sm:py-4">
+        <div className="editor-view-switch" role="tablist" aria-label="Editor view">
+          <button type="button" role="tab" aria-selected={mobileView === "edit"} onClick={() => setMobileView("edit")}>Edit</button>
+          <button type="button" role="tab" aria-selected={mobileView === "preview"} onClick={() => setMobileView("preview")}>Preview</button>
+        </div>
+        <div className="document-workbench">
+        <div className={mobileView === "preview" ? "document-workbench__editor is-mobile-hidden" : "document-workbench__editor"}>
           {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
           <TiptapEditor
             initialContent={initialContent}
@@ -354,17 +425,26 @@ export default function DocumentEditorPage() {
             onDocChange={onDocChange}
             onReady={(e) => {
               editorRef.current = e;
+              const paper = paperHtml(e.getHTML());
+              setPreviewHtml(paper);
+              setPrintHtml(paper);
             }}
           />
-          {/* Print surface: refreshed from the editor at print time. */}
-          <div className="print-only" dangerouslySetInnerHTML={{ __html: printHtml }} />
         </div>
 
+        <aside className={mobileView === "edit" ? "document-workbench__preview is-mobile-hidden" : "document-workbench__preview"} aria-label="Live document preview">
+          <div className="document-preview__bar"><span>Live preview</span><span>{pageSettings.size} | {pageSettings.orientation}</span></div>
+          <div className="document-preview__stage">
+            <article className="document-paper tiptap-focus" data-size={pageSettings.size} data-orientation={pageSettings.orientation} data-margin={pageSettings.margin} data-doc-type={boot.document.documentType ?? undefined} dangerouslySetInnerHTML={{ __html: previewHtml }} />
+          </div>
+        </aside>
+
         {aiOpen && (
-          <aside className="w-72 shrink-0 rounded-xl border border-stone-200 bg-white shadow-xs">
+          <aside className="document-workbench__assist">
             <AiAssistPanel editor={editorRef.current} documentId={documentId} />
           </aside>
         )}
+        </div>
       </div>
 
       {/* Publish dialog */}
@@ -473,6 +553,8 @@ function cnSave(state: SaveState): string {
       return "text-xs text-stone-500";
     case "conflict":
       return "text-xs font-medium text-amber-700";
+    case "error":
+      return "text-xs font-medium text-red-700";
     default:
       return "";
   }

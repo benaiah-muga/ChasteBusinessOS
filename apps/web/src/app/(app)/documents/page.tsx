@@ -20,6 +20,8 @@ import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
 import { WriteTab } from "./_write/write-tab";
+import { FolderTree } from "@/components/folder-tree";
+import { useTabParam } from "@/lib/tab-param";
 
 type Tab = "overview" | "write" | "library" | "ingest";
 
@@ -29,6 +31,7 @@ interface DocRow {
   status: string;
   sourceType: string;
   createdAt: string;
+  folder: string | null;
 }
 
 interface Suggestion {
@@ -47,9 +50,12 @@ interface DocDetail {
     title: string;
     status: string;
     sourceType: string;
+    mimeType: string | null;
+    sizeBytes: number | null;
     parseError: string | null;
     parsedMarkdown: string | null;
     createdAt: string;
+    folder: string | null;
   };
   suggestions: Suggestion[];
 }
@@ -65,9 +71,11 @@ export default function DocumentsPage() {
 
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
+  const [folder, setFolder] = useState("");
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [file, setFile] = useState<{ name: string; base64: string; mimeType: string } | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useTabParam(["overview", "write", "library", "ingest"] as const, "overview");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -107,19 +115,44 @@ export default function DocumentsPage() {
       return;
     }
     const ok = file
-      ? await action({ action: "create", title, fileBase64: file.base64, mimeType: file.mimeType }, "Upload")
-      : await action({ action: "create", title, text }, "Ingest text");
+      ? await action({ action: "create", title, folder: folder.trim() || undefined, fileBase64: file.base64, mimeType: file.mimeType }, "Upload")
+      : await action({ action: "create", title, folder: folder.trim() || undefined, text }, "Ingest text");
     if (ok) {
       setTitle("");
       setText("");
       setFile(null);
+      setFolder("");
     }
   }
 
   function readFile(f: File) {
+    const isSupported = f.type === "application/pdf" || f.type.startsWith("image/");
+    if (!isSupported) {
+      setFile(null);
+      setMessage({
+        tone: "error",
+        error: { title: "Choose an image or PDF", hint: `${f.name} is ${f.type || "an unknown file type"}. Upload a PDF, PNG, JPEG, or another image.` },
+      });
+      return;
+    }
+    if (f.size > 5 * 1024 * 1024) {
+      setFile(null);
+      setMessage({
+        tone: "error",
+        error: { title: "That file is larger than 5 MB", hint: "Compress the image or PDF, then try the upload again." },
+      });
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = () =>
-      setFile({ name: f.name, base64: String(reader.result).split(",")[1] ?? "", mimeType: f.type || "application/octet-stream" });
+    reader.onload = () => {
+      const base64 = String(reader.result).split(",")[1] ?? "";
+      if (!base64) {
+        setMessage({ tone: "error", error: { title: "The file could not be read", hint: "Choose the file again. If it still fails, save a fresh copy and retry." } });
+        return;
+      }
+      setFile({ name: f.name, base64, mimeType: f.type });
+    };
+    reader.onerror = () => setMessage({ tone: "error", error: { title: "The file could not be read", hint: "Choose the file again. If it still fails, save a fresh copy and retry." } });
     reader.readAsDataURL(f);
   }
 
@@ -286,6 +319,8 @@ export default function DocumentsPage() {
               className="textarea flex-1 resize-none font-mono text-xs"
               disabled={Boolean(file)}
             />
+            <label htmlFor="doc-folder" className="label mt-3">Folder path <span className="font-normal text-stone-400">(optional)</span></label>
+            <input id="doc-folder" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="Finance / 2026 / Supplier bills" className="input" />
           </div>
         </div>
         <div className="mt-4 flex justify-end border-t border-stone-100 pt-4">
@@ -307,11 +342,14 @@ export default function DocumentsPage() {
           hint="Ingest your first vendor bill above. Coding suggestions appear after parsing."
         />
       ) : (
-        <div className="table-shell mb-6">
+        <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
+          <FolderTree paths={docs.map((doc) => doc.folder).filter((path): path is string => Boolean(path))} active={activeFolder} onSelect={setActiveFolder} />
+          <div className="table-shell mb-6">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Title</th>
+                <th>Folder</th>
                 <th>Source</th>
                 <th>Status</th>
                 <th>When</th>
@@ -319,12 +357,13 @@ export default function DocumentsPage() {
               </tr>
             </thead>
             <tbody>
-              {docs.map((d) => (
+              {docs.filter((doc) => !activeFolder || doc.folder === activeFolder || doc.folder?.startsWith(`${activeFolder}/`)).map((d) => (
                 <tr
                   key={d.id}
                   className={cn(detail?.document.id === d.id && "bg-gold-50/50")}
                 >
                   <td className="font-medium text-stone-800">{d.title}</td>
+                  <td className="text-xs text-stone-500">{d.folder ?? "Unfiled"}</td>
                   <td className="font-mono text-xs text-stone-500">{d.sourceType}</td>
                   <td>
                     <Badge tone={statusTone(d.status)}>{d.status}</Badge>
@@ -345,6 +384,7 @@ export default function DocumentsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ))}
 
@@ -378,6 +418,27 @@ export default function DocumentsPage() {
             <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 font-mono text-xs break-words text-red-900">
               {detail.document.parseError}
             </p>
+          )}
+
+          {detail.document.sourceType === "upload" && detail.document.mimeType && (
+            <section className="document-source-viewer" aria-label="Uploaded document preview">
+              <div className="document-source-viewer__bar">
+                <div>
+                  <p className="font-semibold text-stone-800">Original upload</p>
+                  <p className="text-xs text-stone-500">{detail.document.mimeType}{detail.document.sizeBytes ? ` · ${(detail.document.sizeBytes / 1024 / 1024).toFixed(2)} MB` : ""}</p>
+                </div>
+                <a className="btn btn-secondary btn-sm" href={`/api/documents/${detail.document.id}/content`} target="_blank" rel="noreferrer">
+                  Open full file
+                </a>
+              </div>
+              {detail.document.mimeType === "application/pdf" ? (
+                <iframe title={`Preview of ${detail.document.title}`} className="document-source-viewer__pdf" src={`/api/documents/${detail.document.id}/content`} />
+              ) : detail.document.mimeType.startsWith("image/") ? (
+                <div className="document-source-viewer__image-wrap"><img className="document-source-viewer__image" src={`/api/documents/${detail.document.id}/content`} alt={`Preview of ${detail.document.title}`} /></div>
+              ) : (
+                <p className="p-5 text-sm text-stone-500">This file type can be opened in a new tab.</p>
+              )}
+            </section>
           )}
 
           {detail.suggestions.length > 0 ? (

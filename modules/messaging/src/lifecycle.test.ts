@@ -1,6 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { conversationMembers, conversations, createDb, memberships, messages, organizations, users, type Database } from "@chaste/db";
+import {
+  conversationMembers,
+  conversationPresence,
+  conversations,
+  createDb,
+  memberships,
+  messageAttachments,
+  messageReactions,
+  messages,
+  organizations,
+  users,
+  type Database,
+} from "@chaste/db";
 import { purgeTenantFinancials } from "@chaste/db";
 import { CapabilityRegistry, KernelExecutor, type LedgerStore, type ActionContext } from "@chaste/kernel";
 import { registerMessagingCapabilities, type ModuleDeps } from "./index";
@@ -207,5 +219,111 @@ describe("messaging message lifecycle", () => {
       limit: 30,
     })) as { ok: true; data: { messages: { body: string }[] } };
     expect(read.data.messages).toHaveLength(0);
+  });
+});
+
+describe("messaging collaboration features", () => {
+  it("stores read cursors, replies, reactions, pins, presence, and private attachments", async () => {
+    const channel = await makeChannel("collaboration-features", creatorId);
+    await db.db.insert(conversationMembers).values({ conversationId: channel, userId: memberId });
+
+    const people = await run("messaging.listPeople", ctx(memberId, ["messaging.read"]), {
+      query: "lifecycle-creator",
+      limit: 30,
+    }) as { ok: true; data: { people: { type: string; id: string }[] } };
+    expect(people.data.people).toContainEqual({ type: "user", id: creatorId, name: "lifecycle-creator" });
+    expect(people.data.people.some((person) => person.id === outsiderId)).toBe(false);
+
+    const root = (await run("messaging.sendMessage", ctx(creatorId, ["messaging.write"]), {
+      conversationId: channel,
+      body: "A searchable parent message",
+    })) as { ok: true; data: { messageId: string } };
+    const reply = await run("messaging.sendMessage", ctx(memberId, ["messaging.write"]), {
+      conversationId: channel,
+      body: "A threaded reply",
+      parentMessageId: root.data.messageId,
+    });
+    expect(reply).toMatchObject({ ok: true });
+    const [replyRow] = await db.db.select().from(messages).where(eq(messages.parentMessageId, root.data.messageId));
+    expect(replyRow?.body).toBe("A threaded reply");
+
+    const marked = await run("messaging.advanceReadCursor", ctx(memberId, ["messaging.write"]), { conversationId: channel });
+    expect(marked).toMatchObject({ ok: true });
+    const [member] = await db.db
+      .select({ lastReadAt: conversationMembers.lastReadAt })
+      .from(conversationMembers)
+      .where(and(eq(conversationMembers.conversationId, channel), eq(conversationMembers.userId, memberId)));
+    expect(member?.lastReadAt).toBeInstanceOf(Date);
+
+    const reacted = await run("messaging.setMessageReaction", ctx(memberId, ["messaging.write"]), {
+      messageId: root.data.messageId,
+      emoji: "👍",
+      active: true,
+    });
+    expect(reacted).toMatchObject({ ok: true });
+    const [reaction] = await db.db
+      .select()
+      .from(messageReactions)
+      .where(and(eq(messageReactions.messageId, root.data.messageId), eq(messageReactions.userId, memberId)));
+    expect(reaction?.emoji).toBe("👍");
+
+    const pinned = await run("messaging.setMessagePin", ctx(creatorId, ["messaging.write"]), {
+      messageId: root.data.messageId,
+      pinned: true,
+    });
+    expect(pinned).toMatchObject({ ok: true });
+    const [pinnedMessage] = await db.db.select().from(messages).where(eq(messages.id, root.data.messageId));
+    expect(pinnedMessage?.pinnedAt).toBeInstanceOf(Date);
+
+    const presence = await run("messaging.updateConversationPresence", ctx(memberId, ["messaging.write"]), {
+      conversationId: channel,
+      typing: true,
+    });
+    expect(presence).toMatchObject({ ok: true });
+    const [status] = await db.db
+      .select()
+      .from(conversationPresence)
+      .where(and(eq(conversationPresence.conversationId, channel), eq(conversationPresence.userId, memberId)));
+    expect(status?.typingUntil).toBeInstanceOf(Date);
+
+    const upload = (await run("messaging.uploadMessageAttachment", ctx(creatorId, ["messaging.write"]), {
+      conversationId: channel,
+      filename: "brief.txt",
+      mimeType: "text/plain",
+      contentBase64: Buffer.from("hello from a private attachment").toString("base64"),
+    })) as { ok: true; data: { attachmentId: string } };
+    const sentWithFile = await run("messaging.sendMessage", ctx(creatorId, ["messaging.write"]), {
+      conversationId: channel,
+      body: "",
+      attachmentIds: [upload.data.attachmentId],
+    });
+    expect(sentWithFile).toMatchObject({ ok: true });
+    const [attachment] = await db.db
+      .select()
+      .from(messageAttachments)
+      .where(eq(messageAttachments.id, upload.data.attachmentId));
+    expect(attachment?.messageId).toBeTruthy();
+    expect(attachment?.content.toString()).toBe("hello from a private attachment");
+  });
+
+  it("rejects a non-member's private attachment upload and reaction", async () => {
+    const channel = await makeChannel("private-features", creatorId);
+    const sent = (await run("messaging.sendMessage", ctx(creatorId, ["messaging.write"]), {
+      conversationId: channel,
+      body: "Member only",
+    })) as { ok: true; data: { messageId: string } };
+    const upload = await run("messaging.uploadMessageAttachment", ctx(outsiderId, ["messaging.write"]), {
+      conversationId: channel,
+      filename: "private.txt",
+      mimeType: "text/plain",
+      contentBase64: Buffer.from("no").toString("base64"),
+    });
+    const reaction = await run("messaging.setMessageReaction", ctx(outsiderId, ["messaging.write"]), {
+      messageId: sent.data.messageId,
+      emoji: "👀",
+      active: true,
+    });
+    expect(upload).toMatchObject({ ok: false });
+    expect(reaction).toMatchObject({ ok: false });
   });
 });

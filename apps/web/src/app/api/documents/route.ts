@@ -30,9 +30,12 @@ export async function GET(req: Request) {
         title: doc.title,
         status: doc.status,
         sourceType: doc.sourceType,
+        mimeType: doc.mimeType,
+        sizeBytes: doc.sizeBytes,
         parseError: doc.parseError,
         parsedMarkdown: doc.parsedMarkdown,
         createdAt: doc.createdAt.toISOString(),
+        folder: doc.folder,
       },
       suggestions,
     });
@@ -45,6 +48,7 @@ export async function GET(req: Request) {
       status: documents.status,
       sourceType: documents.sourceType,
       createdAt: documents.createdAt,
+      folder: documents.folder,
     })
     .from(documents)
     .where(eq(documents.orgId, orgId))
@@ -74,6 +78,7 @@ export async function POST(req: Request) {
     text?: string;
     fileBase64?: string;
     mimeType?: string;
+    folder?: string;
     documentId?: string;
     sync?: boolean;
     intentId?: string;
@@ -87,6 +92,7 @@ export async function POST(req: Request) {
     case "create": {
       const result = await executor.execute("documents.createDocument", ctx, {
         title: body.title ?? "",
+        folder: body.folder?.trim() || undefined,
         ...(body.fileBase64
           ? { fileBase64: body.fileBase64, mimeType: body.mimeType }
           : { text: body.text }),

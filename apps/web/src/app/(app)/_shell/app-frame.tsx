@@ -5,6 +5,7 @@ import Link from "next/link";
 import { resolveApp, tileStyle } from "./apps";
 import { IconChevronLeft } from "@/components/icons";
 import { cn } from "@/lib/format";
+import { QuickActionsMenu } from "@/components/quick-actions";
 
 export interface AppTab {
   id: string;
@@ -66,7 +67,7 @@ export function AppFrame({
   return (
     <div>
       <header className="module-band sticky top-14 z-20 mb-6 rounded-2xl px-4 py-3.5 sm:px-5 lg:top-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <Link
             href="/"
             aria-label="Back to dashboard"
@@ -102,11 +103,18 @@ export function AppFrame({
               <p className="mt-1.5 hidden truncate text-xs leading-4 text-[#b5aea4] sm:block">{description}</p>
             )}
           </div>
-          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+          <div className="flex min-w-0 max-w-full basis-full flex-wrap items-center gap-2 sm:basis-auto sm:flex-none">
+            <QuickActionsMenu appId={appId} />
+            {actions}
+          </div>
         </div>
 
         {tabs && (
-          <div role="tablist" aria-label={`${app?.name ?? appId} sections`} className="-mx-1 overflow-x-auto px-1 pt-3">
+          <div
+            role="tablist"
+            aria-label={`${app?.name ?? appId} sections`}
+            className="-mx-1 flex min-w-0 max-w-full flex-wrap gap-x-1 overflow-visible px-1 pt-3 sm:flex-nowrap sm:overflow-x-auto"
+          >
             {tabs.map((t) => (
               <button
                 key={t.id}
@@ -114,7 +122,7 @@ export function AppFrame({
                 role="tab"
                 aria-selected={t.id === activeTab}
                 onClick={() => onTabChange?.(t.id)}
-                className={cn("tab tab-band mr-4")}
+                className={cn("tab tab-band mr-3 shrink-0")}
               >
                 {t.label}
                 {t.count != null && (

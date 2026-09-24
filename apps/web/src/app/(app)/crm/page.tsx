@@ -26,6 +26,7 @@ import { QuickCreateButton } from "../quick-create";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { useTabParam } from "@/lib/tab-param";
 import { TasksTab } from "./tasks-tab";
 
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"] as const;
@@ -84,7 +85,7 @@ interface TimelineState {
 export default function CrmPage() {
   useMoneySync();
   const __enabled = useModuleEnabled("crm");
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useTabParam(["overview", "pipeline", "customers", "tasks"] as const, "overview");
   const [deals, setDeals] = useState<Deal[] | null>(null);
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [newTitle, setNewTitle] = useState("");
@@ -238,7 +239,7 @@ export default function CrmPage() {
           { id: "tasks", label: "Tasks" },
         ]}
         activeTab={tab}
-        onTabChange={setTab}
+        onTabChange={(id) => setTab(id as typeof tab)}
       >
         {tab === "overview" && <OverviewTab deals={deals} customers={customers} />}
         {tab === "pipeline" && (

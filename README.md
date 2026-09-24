@@ -75,7 +75,8 @@ docker run -d --name chaste-pgvector \
   -e POSTGRES_DB=chaste_os_v2 -p 5433:5432 pgvector/pgvector:pg16
 
 pnpm --filter @chaste/db db:migrate
-pnpm dev                    # http://localhost:3000
+pnpm dev                    # local dev defaults to AUTO_MIGRATE_ON_BOOT=0
+# To opt into boot migration locally: AUTO_MIGRATE_ON_BOOT=1 pnpm dev
 ```
 
 For a production-shaped local Docker run, use the full Compose stack instead:
@@ -138,12 +139,15 @@ automatically before any migration runs.
 ```sh
 git pull            # get the new version
 pnpm install
-pnpm dev            # or: pnpm build && pnpm start
+pnpm --filter @chaste/db db:migrate  # local development
+pnpm dev                              # local development, migrations are explicit
+pnpm build && pnpm start              # production, migrations run on boot
 ```
 
-That's it. The web server applies pending migrations once at boot, before it
-accepts requests (serialized across instances by a Postgres advisory lock),
-so you can't end up serving new code against an old schema.
+Production applies pending migrations once at boot before accepting requests
+(serialized across instances by a Postgres advisory lock), so a deployment
+doesn't serve new code against an old schema. Local development migrates
+explicitly to keep restarts quick.
 
 Controls and safety nets:
 
@@ -156,9 +160,12 @@ Controls and safety nets:
 - Set `CHASTE_STRICT_MIGRATION_BACKUP=1` in production to refuse migrating
   when a snapshot cannot be taken (e.g. `pg_dump` not installed and no
   container fallback available).
-- Set `AUTO_MIGRATE_ON_BOOT=0` if you prefer to migrate manually with
-  `pnpm --filter @chaste/db db:migrate`; the app then refuses to start in
-  production until the schema is current.
+- Local `pnpm dev` skips boot migration by default. Apply schema changes with
+  `pnpm --filter @chaste/db db:migrate`, or set `AUTO_MIGRATE_ON_BOOT=1` to
+  opt into boot migration during local development.
+- Production still migrates on boot by default. Set
+  `AUTO_MIGRATE_ON_BOOT=0` only when your release process runs migrations
+  separately before starting the new app version.
 - Upgrade notes for behavioral changes are in [CHANGELOG.md](CHANGELOG.md)
   under the version you're moving to.
 

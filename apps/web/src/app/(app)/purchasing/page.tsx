@@ -21,6 +21,7 @@ import { IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { useTabParam } from "@/lib/tab-param";
 
 type Tab = "overview" | "requests" | "orders" | "bills" | "vendors" | "intel";
 
@@ -126,7 +127,7 @@ export default function PurchasingPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useTabParam(["overview", "requests", "orders", "bills", "vendors", "intel"] as const, "overview");
 
   const [vendorForm, setVendorForm] = useState({ name: "", email: "" });
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
@@ -1539,4 +1540,3 @@ function VendorIntelSection({
     </div>
   );
 }
-

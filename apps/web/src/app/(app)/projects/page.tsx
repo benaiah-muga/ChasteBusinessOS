@@ -66,6 +66,8 @@ export default function ProjectsPage() {
   const [projectForm, setProjectForm] = useState({ name: "", due: "" });
   const [taskForm, setTaskForm] = useState({ title: "", assignee: "", due: "", priority: "medium" });
   const [archiveTarget, setArchiveTarget] = useState<Project | null>(null);
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [overStatus, setOverStatus] = useState<string | null>(null);
 
   const selected = projects?.find((p) => p.id === selectedId) ?? null;
 
@@ -165,6 +167,19 @@ export default function ProjectsPage() {
     const position = target && target.tasks.length > 0 ? Math.max(...target.tasks.map((t) => t.position)) + 1 : 0;
     const ok = await post({ action: "moveTask", taskId: task.id, status, position }, `Move “${task.title}” to ${status}`);
     if (ok) await loadBoard(selectedId);
+  }
+
+  function clearDragState(): void {
+    setDraggingTaskId(null);
+    setOverStatus(null);
+  }
+
+  function dropTask(status: string): void {
+    if (!draggingTaskId || busy) return;
+    const source = columns.flatMap((column) => column.tasks).find((task) => task.id === draggingTaskId);
+    const fromStatus = columns.find((column) => column.tasks.some((task) => task.id === draggingTaskId))?.status;
+    if (source && fromStatus) void moveTask(source, fromStatus, status);
+    clearDragState();
   }
 
   async function assignTask(task: BoardTask, assigneeUserId: string): Promise<void> {
@@ -372,17 +387,62 @@ export default function ProjectsPage() {
 
                 <div className="mt-4 grid gap-3 md:grid-cols-3">
                   {columns.map((col) => (
-                    <div key={col.status} className="rounded-lg bg-stone-50 p-2.5">
+                    <div
+                      key={col.status}
+                      role="region"
+                      aria-label={`${col.status} task column`}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (!busy) setOverStatus(col.status);
+                      }}
+                      onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                          setOverStatus((current) => (current === col.status ? null : current));
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        dropTask(col.status);
+                      }}
+                      className={cn(
+                        "rounded-lg border border-transparent bg-stone-50 p-2.5 transition-colors duration-100",
+                        overStatus === col.status && draggingTaskId && "border-gold-400 bg-gold-50/60",
+                      )}
+                    >
                       <p className="mb-2 text-xs font-semibold tracking-wide text-stone-400 uppercase">
                         {col.status} · {col.tasks.length}
                       </p>
                       <ul className="space-y-2">
                         {col.tasks.map((t) => (
-                          <li key={t.id} className="rounded-lg border border-stone-200 bg-white p-2.5 text-sm">
-                            <p className="font-medium text-stone-900">
-                              {t.parentTaskId && <span className="text-stone-400">↳ </span>}
-                              {t.title}
-                            </p>
+                          <li
+                            key={t.id}
+                            draggable={!busy}
+                            onDragStart={(e) => {
+                              e.dataTransfer.effectAllowed = "move";
+                              e.dataTransfer.setData("text/plain", t.id);
+                              setDraggingTaskId(t.id);
+                            }}
+                            onDragEnd={clearDragState}
+                            className={cn(
+                              "cursor-grab rounded-lg border border-stone-200 bg-white p-2.5 text-sm shadow-xs transition-shadow duration-150 hover:shadow-sm active:cursor-grabbing",
+                              draggingTaskId === t.id && "opacity-45",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="font-medium text-stone-900">
+                                {t.parentTaskId && <span className="text-stone-400">↳ </span>}
+                                {t.title}
+                              </p>
+                              <button
+                                type="button"
+                                draggable={!busy}
+                                aria-label={`Drag ${t.title} to another status`}
+                                className="shrink-0 cursor-grab text-[10px] font-semibold tracking-wide text-stone-400 uppercase hover:text-gold-700 active:cursor-grabbing"
+                                title="Drag to another status"
+                              >
+                                Move
+                              </button>
+                            </div>
                             <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-stone-400">
                               <Badge tone={t.priority === "high" ? "red" : t.priority === "low" ? "neutral" : "amber"}>
                                 {t.priority}
@@ -453,4 +513,3 @@ export default function ProjectsPage() {
     </AppFrame>
   );
 }
-

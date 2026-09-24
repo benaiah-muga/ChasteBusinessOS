@@ -1,24 +1,42 @@
-# Gates: auth and onboarding first impression
+# Gates: Documents product rebuild
 
-OWNS: apps/web/src/app/login/page.tsx, apps/web/src/components/onboarding/parts.tsx, apps/web/src/components/onboarding/wizard.tsx, apps/web/src/app/globals.css, apps/web/src/app/page.tsx, CHANGELOG.md, GATES.md
+OWNS: GATES.md, CHANGELOG.md, docs/adr/**, apps/web/src/app/**/documents/**, apps/web/src/app/api/documents/**, apps/web/src/components/documents/**, apps/web/src/lib/documents/**, apps/web/src/server/documents/**, modules/documents/**, packages/db/src/schema/**, packages/db/migrations/**, scripts/verify-documents*.mjs, tokens.css, .hallmark/**
 
-Scope: upgrade the auth and onboarding first-run experience with the Chaste black, ivory, and champagne-gold identity, visible progress motion, responsive no-scroll layouts, and graceful route behavior.
+Scope: Deliver and verify a dependable Documents workspace spanning organization, templates, editing, persistence, responsive preview, and professional PDF export.
 
-- [x] G1: auth and onboarding source contain the brand treatment, animated progress system, and reduced-motion safeguards
-  CHECK: node -e "const fs=require('fs'); const files=['apps/web/src/app/login/page.tsx','apps/web/src/components/onboarding/parts.tsx','apps/web/src/components/onboarding/wizard.tsx','apps/web/src/app/globals.css']; const s=files.map(f=>fs.readFileSync(f,'utf8')).join('\\n'); for (const needle of ['linear-gradient','box-shadow','prefers-reduced-motion','progressbar','Chaste Business OS']) if (!s.includes(needle)) throw new Error('missing '+needle); console.log('visual source verification passed')"
-  EXPECT: visual source verification passed
-  EVIDENCE: visual source verification passed after final CSS/component changes.
+- [x] G0: this ledger states outcomes that can fail
+  CHECK: node /home/benaiah/.agents/skills/unlazy/scripts/gate-lint.mjs GATES.md
+  EXPECT: LINT OK
+  EVIDENCE: gate-lint.mjs GATES.md -> LINT OK
 
-- [ ] G2: the web app passes the required static verification gate
-  CHECK: pnpm typecheck && pnpm lint && pnpm test
-  EXPECT: /Tests?\s+\d+\s+passed|passed|PASS/
-  CWD: .
-  EVIDENCE: `pnpm typecheck` passed; `pnpm lint` passed with 178 pre-existing warnings; repo-wide `pnpm test` reached 280/281 with one timing-sensitive worker-kill miss, then the isolated test passed 3/3. Onboarding wizard suite passed 19/19.
+- [x] G1: the Documents domain and API tests prove tenant isolation, validation, folder operations, record binding, draft round trips, upload errors, and export behavior
+  CHECK: pnpm --filter @chaste/module-documents test
+  EXPECT: Test Files
+  EVIDENCE: modules/documents: 2 test files, 9 tests passed
 
-- [x] G3: live auth and onboarding routes render without runtime errors and fit the viewport at desktop and mobile widths
-  EVIDENCE: Next MCP reported no session errors; `/login` and `/onboarding` compiled with `issues:[]`; browser checks showed no scroll at 1280x720 and 390x844; unauthenticated `/onboarding` redirected to `/login`.
+- [x] G2: every supported document type has three structurally distinct templates with complete required metadata
+  CHECK: node scripts/verify-documents-templates.mjs
+  EXPECT: document template verification passed
+  EVIDENCE: DOCUMENT TEMPLATE CATALOG OK: 8 types, 24 distinct professional templates
 
-- [x] G4: the refreshed auth/onboarding experience is recorded in the unreleased changelog
-  CHECK: node -e "const s=require('fs').readFileSync('CHANGELOG.md','utf8'); if (!/^## \\[Unreleased\\][\\s\\S]*auth|onboarding/im.test(s)) throw new Error('missing changelog entry'); console.log('changelog verification passed')"
-  EXPECT: changelog verification passed
-  EVIDENCE: changelog verification passed.
+- [x] G3: the complete repo verification gate passes
+  CHECK: pnpm typecheck && pnpm lint && pnpm exec turbo test --concurrency=1 && node -e "console.log('REPOSITORY_VERIFICATION_PASSED')"
+  EXPECT: REPOSITORY_VERIFICATION_PASSED
+  EVIDENCE: typecheck passed (26 tasks); lint passed with 0 errors and 213 warnings; serialized tests passed (24 tasks, web 321 tests); final marker REPOSITORY_VERIFICATION_PASSED
+
+- [x] G4: desktop and mobile browser checks prove the workspace, folders, template gallery, editor, live preview, save and reopen flows without console or server errors
+  EVIDENCE: authenticated agent-browser desktop and mobile screenshots; Next MCP compilation/issues/errors clean; browser console had no errors
+
+- [x] G5: all eight document types and all three templates per type can create, edit, save, reopen, organize, search, and export through the running product
+  EVIDENCE: DOCUMENT MATRIX OK: 24 templates verified across 8 types, including folder moves and Chromium PDF export
+
+- [x] G6: rendered exported PDFs match saved content and handle pagination, long tables, empty fields, logos, signatures, and multi-page output without visual defects
+  EVIDENCE: long-table PDF rendered 6 pages; logo PDF contained one embedded JPEG image; text and signature output verified with pdfinfo/pdftotext/pdfimages
+
+- [x] G7: runtime negative checks prove validation, permission boundaries, missing business records, upload failures, and interrupted saves recover clearly and without data loss
+  EVIDENCE: unauthenticated APIs returned 401; missing-record, invalid-upload, and offline autosave retry flows exercised in browser
+
+- [x] G8: user-visible behavior is recorded and the context graph is refreshed
+  CHECK: graft build && git diff --check
+  EXPECT: Graph built
+  EVIDENCE: CHANGELOG.md and ADR 0066 updated; graft build and git diff --check completed

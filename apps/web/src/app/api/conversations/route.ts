@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, gt, isNull, ne, or } from "drizzle-orm";
 import { conversations, conversationMembers, getDb, messages } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
 import { missingPermission } from "@/server/route-guards";
@@ -9,6 +9,7 @@ import { getResolvedUser } from "@/server/session";
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const orgId = resolved.orgId;
   const db = getDb().db;
 
   // Membership-scoped (N06): the list boundary must agree with the detail
@@ -24,6 +25,8 @@ export async function GET() {
       agentEnabled: conversations.agentEnabled,
       archivedAt: conversations.archivedAt,
       createdByUserId: conversations.createdByUserId,
+      joinedAt: conversationMembers.joinedAt,
+      lastReadAt: conversationMembers.lastReadAt,
     })
     .from(conversations)
     .innerJoin(
@@ -33,17 +36,32 @@ export async function GET() {
         eq(conversationMembers.userId, resolved.userId),
       ),
     )
-    .where(and(eq(conversations.orgId, resolved.orgId), isNull(conversations.deletedAt)))
-    .orderBy(desc(conversations.createdAt));
+    .where(and(eq(conversations.orgId, orgId), isNull(conversations.deletedAt)))
+    .orderBy(desc(conversations.createdAt))
+    .limit(100);
 
   const withLast = await Promise.all(
     rows.map(async (c) => {
-      const [last] = await db
-        .select({ createdAt: messages.createdAt, body: messages.body })
-        .from(messages)
-        .where(and(eq(messages.conversationId, c.id), isNull(messages.deletedAt)))
-        .orderBy(desc(messages.createdAt))
-        .limit(1);
+      const [last, unread] = await Promise.all([
+        db
+          .select({ createdAt: messages.createdAt, body: messages.body })
+          .from(messages)
+          .where(and(eq(messages.orgId, orgId), eq(messages.conversationId, c.id), isNull(messages.deletedAt)))
+          .orderBy(desc(messages.createdAt), desc(messages.id))
+          .limit(1),
+        db
+          .select({ unreadCount: count(messages.id) })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.conversationId, c.id),
+              eq(messages.orgId, orgId),
+              isNull(messages.deletedAt),
+              gt(messages.createdAt, c.lastReadAt ?? c.joinedAt),
+              or(isNull(messages.senderUserId), ne(messages.senderUserId, resolved.userId)),
+            ),
+          ),
+      ]);
       return {
         id: c.id,
         kind: c.kind,
@@ -51,7 +69,10 @@ export async function GET() {
         agentEnabled: c.agentEnabled,
         archivedAt: c.archivedAt?.toISOString() ?? null,
         createdByMe: c.createdByUserId === resolved.userId,
-        lastMessage: last ? { at: last.createdAt.toISOString(), body: last.body.slice(0, 80) } : null,
+        unreadCount: unread[0]?.unreadCount ?? 0,
+        lastMessage: last[0]
+          ? { at: last[0].createdAt.toISOString(), body: (last[0].body || "📎 Shared a file").slice(0, 80) }
+          : null,
       };
     }),
   );

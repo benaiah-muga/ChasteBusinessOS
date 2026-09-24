@@ -18,6 +18,7 @@ import { IconChevronDown, IconListTree } from "@/components/icons";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { useTabParam } from "@/lib/tab-param";
 
 type Tab = "overview" | "boms" | "production" | "orders" | "runs";
 
@@ -88,7 +89,7 @@ export default function ManufacturingPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useTabParam(["overview", "boms", "production", "orders", "runs"] as const, "overview");
 
   const [bomForm, setBomForm] = useState({
     assemblySku: "",
