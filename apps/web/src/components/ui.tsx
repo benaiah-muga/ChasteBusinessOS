@@ -204,7 +204,10 @@ export type ActionNoticeState =
 
 export function ActionNotice({ state, onDismiss }: { state: ActionNoticeState; onDismiss?: () => void }) {
   if (state.tone === "error") {
-    const e = state.error;
+    const e = state.error ?? {
+      title: "Something went wrong",
+      hint: "Try again in a moment. Nothing was changed.",
+    };
     return (
       <Notice tone="error" detail={e.detail ? <ErrorDetails text={e.detail} /> : undefined} onDismiss={onDismiss}>
         <span className="font-semibold">{e.title}.</span> {e.hint}
@@ -313,10 +316,10 @@ export function StatCard({
 }) {
   const tones = {
     default: "card",
-    accent: "border-gold-200 bg-gold-50/60",
-    warn: "border-amber-200 bg-amber-50/60",
-    danger: "border-red-200 bg-red-50/60",
-    success: "border-emerald-200 bg-emerald-50/60",
+    accent: "border-gold-200 bg-gold-50/60 dark:border-gold-700 dark:bg-gold-950/70",
+    warn: "border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/70",
+    danger: "border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-950/70",
+    success: "border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/70",
   };
   return (
     <div className={cn("rounded-xl border p-4 shadow-xs", tones[tone], className)}>
@@ -348,6 +351,11 @@ export function Dialog({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -355,7 +363,7 @@ export function Dialog({
     panelRef.current?.focus();
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     window.addEventListener("keydown", onKey);
     return () => {
@@ -363,7 +371,7 @@ export function Dialog({
       document.body.style.overflow = "";
       restoreRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

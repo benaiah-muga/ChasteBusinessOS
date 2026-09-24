@@ -7,6 +7,7 @@ import { type AnyPgColumn,
   jsonb,
   pgTable,
   primaryKey,
+  customType,
   text,
   timestamp,
   uniqueIndex,
@@ -18,6 +19,7 @@ export const EMBEDDING_DIM = Number(process.env.EMBEDDING_DIMENSIONS ?? 1024);
 
 const id = () => uuid("id").primaryKey().defaultRandom();
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
+const binary = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
 export const organizations = pgTable("organizations", {
   id: id(),
@@ -1033,6 +1035,7 @@ export const conversationMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+    lastReadAt: timestamp("last_read_at", { withTimezone: true }),
   },
   (t) => [primaryKey({ columns: [t.conversationId, t.userId] })],
 );
@@ -1056,6 +1059,9 @@ export const messages = pgTable(
      * threads where it does not otherwise participate.
      */
     mentions: jsonb("mentions"),
+    parentMessageId: uuid("parent_message_id"),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
+    pinnedByUserId: uuid("pinned_by_user_id").references(() => users.id),
     /** Sender-only edits; the ledger records the edit action. */
     editedAt: timestamp("edited_at", { withTimezone: true }),
     /** Tombstone: the row stays for the audit trail, readers skip it. */
@@ -1063,6 +1069,71 @@ export const messages = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("message_conversation_idx").on(t.conversationId, t.createdAt)],
+);
+
+export const messageAttachments = pgTable(
+  "message_attachments",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id").references(() => messages.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    content: binary("content").notNull(),
+    uploadedByUserId: uuid("uploaded_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("message_attachment_message_idx").on(t.messageId)],
+);
+
+export const messageReactions = pgTable(
+  "message_reactions",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    emoji: text("emoji").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.messageId, t.userId, t.emoji] }),
+    index("message_reaction_message_idx").on(t.messageId),
+  ],
+);
+
+export const conversationPresence = pgTable(
+  "conversation_presence",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    typingUntil: timestamp("typing_until", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.conversationId, t.userId] }),
+    index("conversation_presence_last_seen_idx").on(t.conversationId, t.lastSeenAt),
+  ],
 );
 
 // ── Purchasing workflow: request → review → RFQ → quotes → award ───────
@@ -1226,6 +1297,13 @@ export const authoredDocs = pgTable(
     html: text("html").notNull().default(""),
     status: text("status").notNull().default("draft"), // draft | published
     templateId: uuid("template_id"),
+    /** Virtual slash-separated folder path for document organization. */
+    folder: text("folder"),
+    documentType: text("document_type"),
+    linkedRecordType: text("linked_record_type"),
+    linkedRecordId: uuid("linked_record_id"),
+    linkedRecordLabel: text("linked_record_label"),
+    pageSettings: jsonb("page_settings").notNull().default({ size: "A4", orientation: "portrait", margin: "normal" }),
     /** Minor-unit total for price-bearing docs (quotes/invoices built here). */
     totalMinor: integer("total_minor"),
     currency: text("currency"),
@@ -1234,7 +1312,23 @@ export const authoredDocs = pgTable(
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("authored_doc_org_idx").on(t.orgId, t.status)],
+  (t) => [index("authored_doc_org_idx").on(t.orgId, t.status), index("authored_doc_org_folder_idx").on(t.orgId, t.folder)],
+);
+
+/** Empty folders are first-class so organization does not depend on a document existing. */
+export const docFolders = pgTable(
+  "doc_folders",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("doc_folder_org_path_idx").on(t.orgId, t.path)],
 );
 
 /** Append-only published history for authored documents. */
@@ -1251,6 +1345,7 @@ export const authoredDocVersions = pgTable(
     version: integer("version").notNull(),
     contentJson: jsonb("content_json").notNull(),
     html: text("html").notNull(),
+    pageSettings: jsonb("page_settings").notNull().default({ size: "A4", orientation: "portrait", margin: "normal" }),
     note: text("note"),
     createdByActorType: text("created_by_actor_type").notNull(),
     createdByActorId: uuid("created_by_actor_id"),
@@ -1276,6 +1371,7 @@ export const docDrafts = pgTable(
       .notNull()
       .references(() => authoredDocs.id, { onDelete: "cascade" }),
     contentJson: jsonb("content_json").notNull(),
+    pageSettings: jsonb("page_settings").notNull().default({ size: "A4", orientation: "portrait", margin: "normal" }),
     /** Monotonic client revision for lost-update detection. */
     rev: integer("rev").notNull().default(1),
     /** Soft lock: who holds the pen, and until when (heartbeat renews). */

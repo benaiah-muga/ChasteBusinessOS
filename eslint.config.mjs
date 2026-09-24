@@ -4,7 +4,8 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["**/node_modules/**", "**/.next/**", "**/dist/**", "**/.turbo/**", "**/next-env.d.ts", "packages/db/drizzle/**", "apps/web/public/**"],
+    // Tool state (.kilo, .codebuddy worktrees) mirrors the repo and is not project code.
+    ignores: ["**/node_modules/**", "**/.next/**", "**/dist/**", "**/.turbo/**", "**/next-env.d.ts", "packages/db/drizzle/**", "apps/web/public/**", ".kilo/**", ".codebuddy/**", "apps/web/graft/**"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

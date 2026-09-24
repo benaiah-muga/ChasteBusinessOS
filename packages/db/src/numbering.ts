@@ -48,3 +48,15 @@ export async function nextDocNumber(db: DbLike, orgId: string, kind: string): Pr
   if (next === undefined || next === null) throw new Error(`could not allocate a ${kind} number`);
   return Number(next);
 }
+
+/** Allocates a sequence for authored document types that do not have a domain table yet. */
+export async function nextAuthoredDocumentNumber(db: DbLike, orgId: string, kind: string): Promise<number> {
+  const next = await executeReturningNext(
+    db,
+    sql`INSERT INTO doc_counters (org_id, kind, "next") VALUES (${orgId}, ${`authored_${kind}`}, 1)
+        ON CONFLICT (org_id, kind) DO UPDATE SET "next" = doc_counters."next" + 1
+        RETURNING "next"`,
+  );
+  if (next === undefined || next === null) throw new Error(`could not allocate an authored ${kind} number`);
+  return Number(next);
+}

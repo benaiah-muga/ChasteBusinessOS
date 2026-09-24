@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { useTabParam } from "@/lib/tab-param";
 
 type Tab = "overview" | "sell" | "sessions";
 
@@ -72,7 +73,7 @@ export default function PosPage() {
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const [closeConfirm, setCloseConfirm] = useState(false);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useTabParam(["overview", "sell", "sessions"] as const, "overview");
   const [sales, setSales] = useState<PosSale[]>([]);
   const [summary, setSummary] = useState<ShiftSummary | null>(null);
 

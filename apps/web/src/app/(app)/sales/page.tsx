@@ -19,6 +19,7 @@ import { IconFileText, IconListTree, IconPlus, IconTrash } from "@/components/ic
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { useTabParam } from "@/lib/tab-param";
 import { NewOrderTab, OrdersListTab, type OrderRow } from "./orders-tab";
 
 type Tab = "overview" | "quotes" | "new" | "orders" | "new-order";
@@ -93,7 +94,7 @@ export default function SalesPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useTabParam(["overview", "quotes", "new", "orders", "new-order"] as const, "overview");
   const [filter, setFilter] = useState<StatusFilter>("all");
 
   const [quoteForm, setQuoteForm] = useState({

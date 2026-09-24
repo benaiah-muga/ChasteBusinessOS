@@ -47,6 +47,8 @@ export function HiringTab({ openings, applicants, busy, post, onChanged }: Hirin
   const [hireTarget, setHireTarget] = useState<ApplicantRow | null>(null);
   const [hireForm, setHireForm] = useState({ salary: "", leaveDays: "21" });
   const [rejectTarget, setRejectTarget] = useState<ApplicantRow | null>(null);
+  const [draggingApplicantId, setDraggingApplicantId] = useState<string | null>(null);
+  const [overStage, setOverStage] = useState<string | null>(null);
 
   const openOpenings = openings.filter((o) => o.status === "open");
   const activeId = selected ?? openOpenings[0]?.id ?? openings[0]?.id ?? null;
@@ -86,6 +88,18 @@ export function HiringTab({ openings, applicants, busy, post, onChanged }: Hirin
   async function moveStage(applicant: ApplicantRow, stage: string): Promise<void> {
     const ok = await post({ action: "moveApplicant", applicantId: applicant.id, stage }, `Move ${applicant.name} to ${stage}`);
     if (ok) await onChanged();
+  }
+
+  function clearDragState(): void {
+    setDraggingApplicantId(null);
+    setOverStage(null);
+  }
+
+  function dropApplicant(stage: string): void {
+    if (!draggingApplicantId || busy) return;
+    const applicant = pipeline.find((candidate) => candidate.id === draggingApplicantId);
+    if (applicant && applicant.stage !== stage) void moveStage(applicant, stage);
+    clearDragState();
   }
 
   async function hire(): Promise<void> {
@@ -253,6 +267,88 @@ export function HiringTab({ openings, applicants, busy, post, onChanged }: Hirin
               Add candidate
             </Button>
           </form>
+
+          {pipeline.some((candidate) => STAGES.includes(candidate.stage as (typeof STAGES)[number])) && (
+            <div>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="figure-label">Stage board</p>
+                <p className="text-xs text-stone-400">Drag a candidate between stages, or use the actions below.</p>
+              </div>
+              <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-3 sm:-mx-6 sm:px-6">
+                {STAGES.map((stage) => {
+                  const stageApplicants = pipeline.filter((candidate) => candidate.stage === stage);
+                  const isOver = overStage === stage;
+                  return (
+                    <section
+                      key={stage}
+                      role="region"
+                      aria-label={`${stage} candidates`}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (!busy) setOverStage(stage);
+                      }}
+                      onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                          setOverStage((current) => (current === stage ? null : current));
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        dropApplicant(stage);
+                      }}
+                      className={`flex w-64 shrink-0 snap-start flex-col rounded-xl border p-2.5 transition-colors duration-100 ${
+                        isOver && draggingApplicantId ? "border-gold-400 bg-gold-50/60" : "border-stone-200 bg-stone-50/70"
+                      }`}
+                    >
+                      <div className="mb-2.5 flex items-center gap-2 px-1.5 pt-1">
+                        <span className={`size-2 rounded-full ${stage === "applied" ? "bg-stone-400" : stage === "screening" ? "bg-amber-500" : stage === "interview" ? "bg-sky-500" : "bg-violet-500"}`} aria-hidden="true" />
+                        <h3 className="text-[13px] font-semibold text-stone-700">{stage}</h3>
+                        <span className="tnum ml-auto rounded-full bg-stone-200/80 px-1.5 py-px text-[11px] font-medium text-stone-600">
+                          {stageApplicants.length}
+                        </span>
+                      </div>
+                      <div className="flex min-h-20 flex-col gap-2">
+                        {stageApplicants.map((applicant) => (
+                          <article
+                            key={applicant.id}
+                            draggable={!busy}
+                            onDragStart={(e) => {
+                              e.dataTransfer.effectAllowed = "move";
+                              e.dataTransfer.setData("text/plain", applicant.id);
+                              setDraggingApplicantId(applicant.id);
+                            }}
+                            onDragEnd={clearDragState}
+                            className={`cursor-grab rounded-lg border border-stone-200 bg-white p-3 text-sm shadow-xs transition-shadow duration-150 hover:shadow-sm active:cursor-grabbing ${
+                              draggingApplicantId === applicant.id ? "opacity-45" : ""
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="truncate font-medium text-stone-900">{applicant.name}</p>
+                              <button
+                                type="button"
+                                draggable={!busy}
+                                aria-label={`Drag ${applicant.name} to another stage`}
+                                className="shrink-0 cursor-grab text-[10px] font-semibold tracking-wide text-stone-400 uppercase hover:text-gold-700 active:cursor-grabbing"
+                                title="Drag to another stage"
+                              >
+                                Move
+                              </button>
+                            </div>
+                            {applicant.note && <p className="mt-1 line-clamp-2 text-xs text-stone-500">{applicant.note}</p>}
+                          </article>
+                        ))}
+                        {stageApplicants.length === 0 && (
+                          <p className={`rounded-lg border border-dashed py-4 text-center text-xs ${isOver && draggingApplicantId ? "border-gold-300 text-gold-500" : "border-stone-200 text-stone-300"}`}>
+                            {isOver && draggingApplicantId ? "Drop to move here" : "No candidates"}
+                          </p>
+                        )}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {pipeline.length === 0 ? (
             <EmptyState icon={<IconUsers />} title="No candidates yet" hint="Add candidates above; they advance through screening, interview, then offer." />

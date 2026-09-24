@@ -8,6 +8,7 @@ import { callApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { postApi } from "@/lib/api";
 import { AppFrame } from "../_shell/app-frame";
+import { useTabParam } from "@/lib/tab-param";
 import { LibraryTab } from "./library-tab";
 
 type Tab = "overview" | "inbox" | "widget" | "library";
@@ -58,7 +59,7 @@ const SENDER_LABEL: Record<string, string> = {
 export default function SupportPage() {
   const __enabled = useModuleEnabled("support");
   const [convs, setConvs] = useState<ConversationRow[] | null>(null);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useTabParam(["overview", "inbox", "widget", "library"] as const, "overview");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [conv, setConv] = useState<ConversationRow | null>(null);
   const [msgs, setMsgs] = useState<SupportMessage[]>([]);

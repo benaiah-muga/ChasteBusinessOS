@@ -47,6 +47,12 @@ const bodySchema = z.discriminatedUnion("action", [
     content: contentSchema,
     html: z.string().max(2_000_000),
     templateId: z.string().uuid().optional(),
+    folder: z.string().max(300).optional(),
+    documentType: z.string().max(60).optional(),
+    linkedRecordType: z.string().max(60).optional(),
+    linkedRecordId: z.string().uuid().optional(),
+    linkedRecordLabel: z.string().max(240).optional(),
+    pageSettings: z.object({ size: z.enum(["A4", "Letter"]), orientation: z.enum(["portrait", "landscape"]), margin: z.enum(["compact", "normal", "wide"]) }).optional(),
     intentId: z.string().optional(),
   }),
   z.object({
@@ -56,6 +62,7 @@ const bodySchema = z.discriminatedUnion("action", [
     content: contentSchema,
     intentId: z.string().optional(),
   }),
+  z.object({ action: z.literal("delete"), documentId: z.string().uuid(), intentId: z.string().optional() }),
   z.object({ action: z.literal("deleteTemplate"), templateId: z.string().uuid(), intentId: z.string().optional() }),
 ]);
 
@@ -76,6 +83,8 @@ export async function POST(req: Request) {
         return executor.execute("documents.createDoc", ctx, parsed.data);
       case "createTemplate":
         return executor.execute("documents.createTemplate", ctx, parsed.data);
+      case "delete":
+        return executor.execute("documents.deleteDoc", ctx, { documentId: parsed.data.documentId });
       case "deleteTemplate":
         return executor.execute("documents.deleteTemplate", ctx, { templateId: parsed.data.templateId });
     }
@@ -88,5 +97,5 @@ export async function POST(req: Request) {
       { status: 202 },
     );
   }
-  return NextResponse.json({ ok: true, data: result.data });
+  return NextResponse.json(result.data ?? { ok: true });
 }

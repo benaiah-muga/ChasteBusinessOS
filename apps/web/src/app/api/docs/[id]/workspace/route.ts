@@ -21,6 +21,7 @@ const PRESENCE_WINDOW_SECONDS = 15;
 
 const bodySchema = z.object({
   content: z.record(z.string(), z.unknown()).optional(),
+  pageSettings: z.object({ size: z.enum(["A4", "Letter"]), orientation: z.enum(["portrait", "landscape"]), margin: z.enum(["compact", "normal", "wide"]) }).optional(),
   /** Client's known draft revision; mismatch means another writer advanced. */
   rev: z.number().int().min(1).optional(),
 });
@@ -78,7 +79,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           return NextResponse.json(
             {
               conflict: true,
-              draft: { content: draft.contentJson, rev: draft.rev, updatedAt: draft.updatedAt.toISOString() },
+              draft: { content: draft.contentJson, pageSettings: draft.pageSettings, rev: draft.rev, updatedAt: draft.updatedAt.toISOString() },
               lock: { heldBy: displayName, mine: true },
               others: await others(tx, documentId, me),
             },
@@ -89,6 +90,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           .update(docDrafts)
           .set({
             contentJson: parsed.data.content,
+            pageSettings: parsed.data.pageSettings ?? draft.pageSettings,
             rev: sql`${docDrafts.rev} + 1`,
             lockedByUserId: me,
             lockedByName: displayName,
@@ -105,6 +107,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
             orgId: resolved.orgId!,
             documentId,
             contentJson: parsed.data.content,
+            pageSettings: parsed.data.pageSettings,
             lockedByUserId: me,
             lockedByName: displayName,
             lockUntil,
@@ -125,7 +128,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({
       lock: { heldBy: displayName, mine: true },
       savedRev,
-      draft: fresh ? { content: fresh.contentJson, rev: fresh.rev, updatedAt: fresh.updatedAt.toISOString() } : null,
+      draft: fresh ? { content: fresh.contentJson, pageSettings: fresh.pageSettings, rev: fresh.rev, updatedAt: fresh.updatedAt.toISOString() } : null,
       others: await others(tx, documentId, me),
     });
   });

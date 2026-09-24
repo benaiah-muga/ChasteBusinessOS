@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { embed, extractBillLinesFromText, parseDocumentImage } from "@chaste/ai";
 import {
@@ -8,9 +8,22 @@ import {
   documentSuggestions,
   documents,
   docDrafts,
+  docFolders,
   docTemplates,
   documentVersions,
   memories,
+  customers,
+  employees,
+  invoiceLines,
+  invoices,
+  organizations,
+  poLines,
+  purchaseOrders,
+  quoteLines,
+  quotes,
+  salesOrderLines,
+  salesOrders,
+  vendors,
   type Database,
 } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
@@ -72,24 +85,27 @@ const createDocument = (deps: ModuleDeps) =>
     execute: async (ctx, input) => {
       const bytes = input.fileBase64 ? Math.floor(input.fileBase64.length / BASE64_CHARS_PER_BYTE) : null;
       if (bytes !== null && bytes > MAX_UPLOAD_BYTES) throw new Error("file exceeds the 5MB limit");
-      const [row] = await deps.db
-        .insert(documents)
-        .values({
-          orgId: ctx.actor.orgId,
-          title: input.title,
-          sourceType: input.fileBase64 ? "upload" : "text",
-          mimeType: input.mimeType ?? null,
-          sizeBytes: bytes,
-          contentBase64: input.fileBase64 ?? null,
-          rawText: input.text ?? null,
-          createdByActorType: ctx.actor.type,
-          createdByActorId: ctx.actor.id,
-        folder: (input as { folder?: string }).folder ?? null,
-    refType: (input as { refType?: string }).refType ?? null,
-    refId: (input as { refId?: string }).refId ?? null,
-    expiresAt: (input as { expiresAt?: Date | string }).expiresAt ? new Date((input as { expiresAt?: Date | string }).expiresAt as string) : null,})
-        .returning({ id: documents.id });
-      return { documentId: row!.id };
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [row] = await tx
+          .insert(documents)
+          .values({
+            orgId: ctx.actor.orgId,
+            title: input.title,
+            sourceType: input.fileBase64 ? "upload" : "text",
+            mimeType: input.mimeType ?? null,
+            sizeBytes: bytes,
+            contentBase64: input.fileBase64 ?? null,
+            rawText: input.text ?? null,
+            createdByActorType: ctx.actor.type,
+            createdByActorId: ctx.actor.id,
+            folder: input.folder ?? null,
+            refType: input.refType ?? null,
+            refId: input.refId ?? null,
+            expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          })
+          .returning({ id: documents.id });
+        return { documentId: row!.id };
+      });
     },
   });
 
@@ -445,6 +461,20 @@ const listVersions = (deps: ModuleDeps) =>
 const HTML_MAX = 2_000_000;
 const contentSchema = z.record(z.string(), z.unknown());
 const htmlSchema = z.string().max(HTML_MAX);
+const pageSettingsSchema = z.object({
+  size: z.enum(["A4", "Letter"]).default("A4"),
+  orientation: z.enum(["portrait", "landscape"]).default("portrait"),
+  margin: z.enum(["compact", "normal", "wide"]).default("normal"),
+});
+
+export function normalizeFolderPath(value: string): string {
+  return value
+    .split(/[\\/]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/")
+    .slice(0, 300);
+}
 
 /** Unique {{dotted.path}} tokens inside a template's text nodes. */
 export function extractPlaceholders(content: unknown): string[] {
@@ -472,6 +502,12 @@ const createDoc = (deps: ModuleDeps) =>
       content: contentSchema,
       html: htmlSchema,
       templateId: z.string().uuid().optional(),
+      folder: z.string().max(300).optional(),
+      documentType: z.string().max(60).optional(),
+      linkedRecordType: z.string().max(60).optional(),
+      linkedRecordId: z.string().uuid().optional(),
+      linkedRecordLabel: z.string().max(240).optional(),
+      pageSettings: pageSettingsSchema.optional(),
       intentId: z.string().optional(),
     }),
     output: z.object({ documentId: z.string() }),
@@ -493,6 +529,12 @@ const createDoc = (deps: ModuleDeps) =>
           html: input.html,
           status: "draft",
           templateId: input.templateId ?? null,
+          folder: input.folder ? normalizeFolderPath(input.folder) || null : null,
+          documentType: input.documentType ?? null,
+          linkedRecordType: input.linkedRecordType ?? null,
+          linkedRecordId: input.linkedRecordId ?? null,
+          linkedRecordLabel: input.linkedRecordLabel ?? null,
+          pageSettings: input.pageSettings,
           createdByActorType: ctx.actor.type,
           createdByActorId: ctx.actor.id,
         })
@@ -518,7 +560,12 @@ const listDocs = (deps: ModuleDeps) =>
           title: z.string(),
           status: z.string(),
           versions: z.number(),
-          templateId: z.string().nullable(),
+        templateId: z.string().nullable(),
+          folder: z.string().nullable(),
+          documentType: z.string().nullable(),
+          linkedRecordType: z.string().nullable(),
+          linkedRecordId: z.string().nullable(),
+          linkedRecordLabel: z.string().nullable(),
           updatedAt: z.date(),
         }),
       ),
@@ -530,6 +577,11 @@ const listDocs = (deps: ModuleDeps) =>
           title: authoredDocs.title,
           status: authoredDocs.status,
           templateId: authoredDocs.templateId,
+          folder: authoredDocs.folder,
+          documentType: authoredDocs.documentType,
+          linkedRecordType: authoredDocs.linkedRecordType,
+          linkedRecordId: authoredDocs.linkedRecordId,
+          linkedRecordLabel: authoredDocs.linkedRecordLabel,
           updatedAt: authoredDocs.updatedAt,
           versions: sql<number>`(select count(*)::int from "authored_doc_versions" where "authored_doc_versions"."document_id" = "authored_docs"."id")`,
         })
@@ -557,7 +609,13 @@ const getDoc = (deps: ModuleDeps) =>
         status: z.string(),
         content: contentSchema,
         html: z.string(),
-        templateId: z.string().nullable(),
+          templateId: z.string().nullable(),
+          folder: z.string().nullable(),
+          documentType: z.string().nullable(),
+          linkedRecordType: z.string().nullable(),
+          linkedRecordId: z.string().nullable(),
+          linkedRecordLabel: z.string().nullable(),
+          pageSettings: pageSettingsSchema,
         versions: z.number(),
         updatedAt: z.date(),
       }),
@@ -571,6 +629,12 @@ const getDoc = (deps: ModuleDeps) =>
           contentJson: authoredDocs.contentJson,
           html: authoredDocs.html,
           templateId: authoredDocs.templateId,
+          folder: authoredDocs.folder,
+          documentType: authoredDocs.documentType,
+          linkedRecordType: authoredDocs.linkedRecordType,
+          linkedRecordId: authoredDocs.linkedRecordId,
+          linkedRecordLabel: authoredDocs.linkedRecordLabel,
+          pageSettings: authoredDocs.pageSettings,
           updatedAt: authoredDocs.updatedAt,
           versions: sql<number>`(select count(*)::int from "authored_doc_versions" where "authored_doc_versions"."document_id" = "authored_docs"."id")`,
         })
@@ -586,6 +650,12 @@ const getDoc = (deps: ModuleDeps) =>
           content: doc.contentJson,
           html: doc.html,
           templateId: doc.templateId,
+          folder: doc.folder,
+          documentType: doc.documentType,
+          linkedRecordType: doc.linkedRecordType,
+          linkedRecordId: doc.linkedRecordId,
+          linkedRecordLabel: doc.linkedRecordLabel,
+          pageSettings: pageSettingsSchema.parse(doc.pageSettings),
           versions: Number(doc.versions),
           updatedAt: doc.updatedAt,
         },
@@ -610,6 +680,7 @@ const saveDocVersion = (deps: ModuleDeps) =>
       content: contentSchema,
       html: htmlSchema,
       note: z.string().max(500).optional(),
+      pageSettings: pageSettingsSchema.optional(),
     }),
     output: z.object({ version: z.number() }),
     execute: async (ctx, input) => {
@@ -632,6 +703,7 @@ const saveDocVersion = (deps: ModuleDeps) =>
           version: next,
           contentJson: doc.contentJson,
           html: doc.html,
+          pageSettings: doc.pageSettings,
           note: input.note ?? null,
           createdByActorType: ctx.actor.type,
           createdByActorId: ctx.actor.id,
@@ -643,6 +715,7 @@ const saveDocVersion = (deps: ModuleDeps) =>
             contentJson: input.content,
             html: input.html,
             status: "published",
+            pageSettings: input.pageSettings ?? doc.pageSettings,
             updatedAt: ctx.now,
           })
           .where(eq(authoredDocs.id, doc.id));
@@ -765,7 +838,11 @@ const restoreDocVersion = (deps: ModuleDeps) =>
           .limit(1);
         if (!doc) throw new Error("document not found");
         const [src] = await tx
-          .select({ contentJson: authoredDocVersions.contentJson, html: authoredDocVersions.html })
+          .select({
+            contentJson: authoredDocVersions.contentJson,
+            html: authoredDocVersions.html,
+            pageSettings: authoredDocVersions.pageSettings,
+          })
           .from(authoredDocVersions)
           .where(
             and(
@@ -786,13 +863,14 @@ const restoreDocVersion = (deps: ModuleDeps) =>
           version: next,
           contentJson: doc.contentJson,
           html: doc.html,
+          pageSettings: doc.pageSettings,
           note: input.note ?? `Restored from version ${input.sourceVersion}`,
           createdByActorType: ctx.actor.type,
           createdByActorId: ctx.actor.id,
         });
         await tx
           .update(authoredDocs)
-          .set({ contentJson: src.contentJson, html: src.html, status: "published", updatedAt: ctx.now })
+          .set({ contentJson: src.contentJson, html: src.html, pageSettings: src.pageSettings, status: "published", updatedAt: ctx.now })
           .where(eq(authoredDocs.id, doc.id));
         await tx.delete(docDrafts).where(eq(docDrafts.documentId, doc.id));
         return { version: next };
@@ -820,6 +898,284 @@ const deleteDoc = (deps: ModuleDeps) =>
     },
   });
 
+const listFolders = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.listFolders",
+    title: "List document folders",
+    intent: "List every virtual document folder, including empty folders, so the document library can preserve its navigation structure",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({}),
+    output: z.object({ folders: z.array(z.object({ id: z.string(), path: z.string() })) }),
+    execute: async (ctx) => {
+      const rows = await deps.db
+        .select({ id: docFolders.id, path: docFolders.path })
+        .from(docFolders)
+        .where(eq(docFolders.orgId, ctx.actor.orgId))
+        .orderBy(docFolders.path);
+      return { folders: rows };
+    },
+  });
+
+const createFolder = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.createFolder",
+    title: "Create document folder",
+    intent: "Create a named virtual folder so staff can organize documents before or after any files have been added",
+    module: "documents",
+    risk: "write",
+    permission: "documents.write",
+    inverse: { capabilityId: "documents.deleteFolder", buildInput: (_input, output) => ({ path: output.path }) },
+    input: z.object({ path: z.string().min(1).max(300) }),
+    output: z.object({ folderId: z.string(), path: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const path = normalizeFolderPath(input.path);
+      if (!path) throw new Error("folder name is required");
+      const [existing] = await tx
+        .select({ id: docFolders.id })
+        .from(docFolders)
+        .where(and(eq(docFolders.orgId, ctx.actor.orgId), eq(docFolders.path, path)))
+        .limit(1);
+      if (existing) throw new Error("a folder with that path already exists");
+      const segments = path.split("/");
+      const paths = segments.map((_, index) => segments.slice(0, index + 1).join("/"));
+      await tx
+        .insert(docFolders)
+        .values(paths.map((folderPath) => ({
+          orgId: ctx.actor.orgId,
+          path: folderPath,
+          createdByActorType: ctx.actor.type,
+          createdByActorId: ctx.actor.id,
+        })))
+        .onConflictDoNothing();
+      const [row] = await tx
+        .select({ id: docFolders.id })
+        .from(docFolders)
+        .where(and(eq(docFolders.orgId, ctx.actor.orgId), eq(docFolders.path, path)))
+        .limit(1);
+      return { folderId: row!.id, path };
+    }),
+  });
+
+const deleteFolder = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.deleteFolder",
+    title: "Delete empty document folder",
+    intent: "Remove an empty virtual folder while refusing to orphan documents or nested folders that still depend on it",
+    module: "documents",
+    risk: "destructive",
+    permission: "documents.write",
+    inverse: { capabilityId: "documents.createFolder", buildInput: (input) => ({ path: input.path }) },
+    input: z.object({ path: z.string().min(1).max(300) }),
+    output: z.object({ deleted: z.boolean(), path: z.string() }),
+    execute: async (ctx, input) => {
+      const path = normalizeFolderPath(input.path);
+      const [used] = await deps.db
+        .select({ id: authoredDocs.id })
+        .from(authoredDocs)
+        .where(and(
+          eq(authoredDocs.orgId, ctx.actor.orgId),
+          or(eq(authoredDocs.folder, path), ilike(authoredDocs.folder, `${path}/%`)),
+        ))
+        .limit(1);
+      const [nested] = await deps.db
+        .select({ id: docFolders.id })
+        .from(docFolders)
+        .where(and(eq(docFolders.orgId, ctx.actor.orgId), ilike(docFolders.path, `${path}/%`)))
+        .limit(1);
+      if (used || nested) throw new Error("move the documents and nested folders before deleting this folder");
+      const deleted = await deps.db
+        .delete(docFolders)
+        .where(and(eq(docFolders.orgId, ctx.actor.orgId), eq(docFolders.path, path)))
+        .returning({ id: docFolders.id });
+      return { deleted: deleted.length > 0, path };
+    },
+  });
+
+const renameFolder = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.renameFolder",
+    title: "Rename document folder",
+    intent: "Rename or move a virtual folder and every nested folder and document in one transaction without losing their location",
+    module: "documents",
+    risk: "write",
+    permission: "documents.write",
+    // No inverse declaration: the same operation with swapped paths is the
+    // reversal, but kernel conformance intentionally rejects self-inverses.
+    // Every rename is still an audited, atomic mutation.
+    input: z.object({ path: z.string().min(1).max(300), newPath: z.string().min(1).max(300) }),
+    output: z.object({ path: z.string(), movedTo: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const path = normalizeFolderPath(input.path);
+      const newPath = normalizeFolderPath(input.newPath);
+      if (!path || !newPath || path === newPath) throw new Error("choose a different folder path");
+      if (newPath.startsWith(`${path}/`)) throw new Error("a folder cannot be moved inside itself");
+      const orgId = ctx.actor.orgId;
+      const [source] = await tx
+        .select({ id: docFolders.id })
+        .from(docFolders)
+        .where(and(eq(docFolders.orgId, orgId), eq(docFolders.path, path)))
+        .limit(1);
+      if (!source) throw new Error("folder not found");
+      const [collision] = await tx
+        .select({ id: docFolders.id })
+        .from(docFolders)
+        .where(and(eq(docFolders.orgId, orgId), eq(docFolders.path, newPath)))
+        .limit(1);
+      if (collision) throw new Error("a folder with that path already exists");
+      await tx
+        .update(docFolders)
+        .set({ path: sql`${newPath} || substring(${docFolders.path} from ${path.length + 1}::integer)` })
+        .where(and(
+          eq(docFolders.orgId, orgId),
+          or(eq(docFolders.path, path), ilike(docFolders.path, `${path}/%`)),
+        ));
+      await tx
+        .update(authoredDocs)
+        .set({ folder: sql`${newPath} || substring(${authoredDocs.folder} from ${path.length + 1}::integer)`, updatedAt: ctx.now })
+        .where(and(
+          eq(authoredDocs.orgId, orgId),
+          or(eq(authoredDocs.folder, path), ilike(authoredDocs.folder, `${path}/%`)),
+        ));
+      return { path, movedTo: newPath };
+    }),
+  });
+
+const updateDocMetadata = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.updateDocMetadata",
+    title: "Update document details",
+    intent: "Rename or move an authored document and keep its source-record link accurate without changing the document body",
+    module: "documents",
+    risk: "write",
+    permission: "documents.write",
+    // No inverse declaration: metadata updates return the prior values so a
+    // caller can issue a compensating update without weakening audit detail.
+    input: z.object({
+      documentId: z.string().uuid(),
+      title: z.string().min(1).max(200).optional(),
+      folder: z.string().max(300).nullable().optional(),
+      linkedRecordType: z.string().max(60).nullable().optional(),
+      linkedRecordId: z.string().uuid().nullable().optional(),
+      linkedRecordLabel: z.string().max(240).nullable().optional(),
+    }),
+    output: z.object({
+      documentId: z.string(),
+      previous: z.object({
+        title: z.string(),
+        folder: z.string().nullable(),
+        linkedRecordType: z.string().nullable(),
+        linkedRecordId: z.string().nullable(),
+        linkedRecordLabel: z.string().nullable(),
+      }),
+    }),
+    execute: async (ctx, input) => {
+      const [current] = await deps.db
+        .select({
+          title: authoredDocs.title,
+          folder: authoredDocs.folder,
+          linkedRecordType: authoredDocs.linkedRecordType,
+          linkedRecordId: authoredDocs.linkedRecordId,
+          linkedRecordLabel: authoredDocs.linkedRecordLabel,
+        })
+        .from(authoredDocs)
+        .where(and(eq(authoredDocs.id, input.documentId), eq(authoredDocs.orgId, ctx.actor.orgId)))
+        .limit(1);
+      if (!current) throw new Error("document not found");
+      await deps.db
+        .update(authoredDocs)
+        .set({
+          ...(input.title !== undefined ? { title: input.title.trim() } : {}),
+          ...(input.folder !== undefined ? { folder: input.folder ? normalizeFolderPath(input.folder) || null : null } : {}),
+          ...(input.linkedRecordType !== undefined ? { linkedRecordType: input.linkedRecordType } : {}),
+          ...(input.linkedRecordId !== undefined ? { linkedRecordId: input.linkedRecordId } : {}),
+          ...(input.linkedRecordLabel !== undefined ? { linkedRecordLabel: input.linkedRecordLabel } : {}),
+          updatedAt: ctx.now,
+        })
+        .where(and(eq(authoredDocs.id, input.documentId), eq(authoredDocs.orgId, ctx.actor.orgId)));
+      return { documentId: input.documentId, previous: current };
+    },
+  });
+
+const recordTypeSchema = z.enum(["customer", "supplier", "employee", "invoice", "quote", "purchase_order", "sales_order"]);
+
+function displayMoney(minor: number, currency: string): string {
+  return new Intl.NumberFormat("en", { style: "currency", currency, maximumFractionDigits: 2 }).format(minor / 100);
+}
+
+const searchRecords = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "documents.searchRecords",
+    title: "Search records for a document",
+    intent: "Find a customer, supplier, employee, invoice, quote, or order and return only the fields needed to populate a document template",
+    module: "documents",
+    risk: "read",
+    permission: "documents.read",
+    input: z.object({ type: recordTypeSchema, query: z.string().max(120).default(""), id: z.string().uuid().optional() }),
+    output: z.object({
+      records: z.array(z.object({ id: z.string(), label: z.string(), detail: z.string(), values: z.record(z.string(), z.string()) })),
+    }),
+    execute: async (ctx, input) => {
+      const [org] = await deps.db
+        .select({ name: organizations.name, currency: organizations.baseCurrency })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.actor.orgId))
+        .limit(1);
+      const base = { "sender.name": org?.name ?? "", "employer.name": org?.name ?? "", "document.date": ctx.now.toISOString().slice(0, 10) };
+      const query = input.query.trim();
+      const exact = input.id ? eq(customers.id, input.id) : undefined;
+
+      if (input.type === "customer") {
+        const rows = await deps.db.select().from(customers).where(and(eq(customers.orgId, ctx.actor.orgId), input.id ? exact : query ? or(ilike(customers.name, `%${query}%`), ilike(customers.email, `%${query}%`)) : undefined)).orderBy(customers.name).limit(25);
+        return { records: rows.map((row) => ({ id: row.id, label: row.name, detail: row.email ?? "Customer", values: { ...base, "customer.name": row.name, "customer.email": row.email ?? "", "invoice.paymentInstructions": row.paymentTermDays ? `Payment due in ${row.paymentTermDays} days.` : "Payment due on receipt." } })) };
+      }
+      if (input.type === "supplier") {
+        const rows = await deps.db.select().from(vendors).where(and(eq(vendors.orgId, ctx.actor.orgId), input.id ? eq(vendors.id, input.id) : query ? or(ilike(vendors.name, `%${query}%`), ilike(vendors.email, `%${query}%`)) : undefined)).orderBy(vendors.name).limit(25);
+        return { records: rows.map((row) => ({ id: row.id, label: row.name, detail: row.email ?? "Supplier", values: { ...base, "supplier.name": row.name, "supplier.email": row.email ?? "", "purchaseOrder.paymentTerms": row.paymentTermDays ? `Net ${row.paymentTermDays}` : "Due on receipt" } })) };
+      }
+      if (input.type === "employee") {
+        const rows = await deps.db.select().from(employees).where(and(eq(employees.orgId, ctx.actor.orgId), input.id ? eq(employees.id, input.id) : query ? or(ilike(employees.name, `%${query}%`), ilike(employees.email, `%${query}%`), ilike(employees.title, `%${query}%`)) : undefined)).orderBy(employees.name).limit(25);
+        return { records: rows.map((row) => ({ id: row.id, label: row.name, detail: [row.title, row.department].filter(Boolean).join(" | ") || row.email || "Employee", values: { ...base, "employee.name": row.name, "employee.email": row.email ?? "", "employee.title": row.title ?? "", "employment.compensation": displayMoney(row.monthlySalaryMinor, org?.currency ?? "USD"), "employment.startDate": row.hiredAt.toISOString().slice(0, 10), "employment.leaveDays": String(row.annualLeaveDays), "employment.manager": "", "employment.location": "" } })) };
+      }
+      if (input.type === "invoice") {
+        const rows = await deps.db.select({ invoice: invoices, customer: customers }).from(invoices).innerJoin(customers, eq(customers.id, invoices.customerId)).where(and(eq(invoices.orgId, ctx.actor.orgId), input.id ? eq(invoices.id, input.id) : query ? or(ilike(customers.name, `%${query}%`), sql`${invoices.number}::text ILIKE ${`%${query}%`}`) : undefined)).orderBy(desc(invoices.createdAt)).limit(25);
+        return { records: await Promise.all(rows.map(async ({ invoice, customer }) => {
+          const lines = await deps.db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, invoice.id)).limit(3);
+          const values: Record<string, string> = { ...base, "customer.name": customer.name, "customer.email": customer.email ?? "", "invoice.number": String(invoice.number), "invoice.issuedAt": invoice.issuedAt?.toISOString().slice(0, 10) ?? "", "invoice.dueAt": invoice.dueAt?.toISOString().slice(0, 10) ?? "", "invoice.subtotal": displayMoney(invoice.subtotalMinor, invoice.currency), "invoice.tax": displayMoney(invoice.taxMinor, invoice.currency), "invoice.total": displayMoney(invoice.totalMinor, invoice.currency), "invoice.balance": displayMoney(invoice.totalMinor - invoice.paidMinor - invoice.creditedMinor, invoice.currency), "invoice.previousBalance": displayMoney(invoice.totalMinor, invoice.currency) };
+          lines.forEach((line, index) => { const n = index + 1; values[`invoice.line${n}.description`] = line.description; values[`invoice.line${n}.quantity`] = String(line.quantity / 1000); values[`invoice.line${n}.rate`] = displayMoney(line.unitPriceMinor, invoice.currency); values[`invoice.line${n}.amount`] = displayMoney(Math.round(line.quantity * line.unitPriceMinor / 1000), invoice.currency); });
+          return { id: invoice.id, label: `Invoice ${invoice.number} | ${customer.name}`, detail: `${invoice.status} | ${displayMoney(invoice.totalMinor, invoice.currency)}`, values };
+        })) };
+      }
+      if (input.type === "quote") {
+        const rows = await deps.db.select({ quote: quotes, customer: customers }).from(quotes).innerJoin(customers, eq(customers.id, quotes.customerId)).where(and(eq(quotes.orgId, ctx.actor.orgId), input.id ? eq(quotes.id, input.id) : query ? or(ilike(customers.name, `%${query}%`), sql`${quotes.number}::text ILIKE ${`%${query}%`}`) : undefined)).orderBy(desc(quotes.createdAt)).limit(25);
+        return { records: await Promise.all(rows.map(async ({ quote, customer }) => {
+          const lines = await deps.db.select().from(quoteLines).where(eq(quoteLines.quoteId, quote.id)).limit(3);
+          const values: Record<string, string> = { ...base, "customer.name": customer.name, "customer.email": customer.email ?? "", "quotation.number": String(quote.number), "quotation.validUntil": quote.expiresAt?.toISOString().slice(0, 10) ?? "", "quotation.subtotal": displayMoney(quote.subtotalMinor, quote.currency), "quotation.tax": displayMoney(quote.taxMinor, quote.currency), "quotation.total": displayMoney(quote.totalMinor, quote.currency), "quotation.objective": quote.memo ?? "" };
+          lines.forEach((line, index) => { const n = index + 1; values[`quotation.line${n}.description`] = line.description; values[`quotation.line${n}.quantity`] = String(line.quantity / 1000); values[`quotation.line${n}.rate`] = displayMoney(line.unitPriceMinor, quote.currency); values[`quotation.line${n}.amount`] = displayMoney(Math.round(line.quantity * line.unitPriceMinor / 1000), quote.currency); });
+          return { id: quote.id, label: `Quote ${quote.number} | ${customer.name}`, detail: `${quote.status} | ${displayMoney(quote.totalMinor, quote.currency)}`, values };
+        })) };
+      }
+      if (input.type === "purchase_order") {
+        const rows = await deps.db.select({ order: purchaseOrders, supplier: vendors }).from(purchaseOrders).innerJoin(vendors, eq(vendors.id, purchaseOrders.vendorId)).where(and(eq(purchaseOrders.orgId, ctx.actor.orgId), input.id ? eq(purchaseOrders.id, input.id) : query ? or(ilike(vendors.name, `%${query}%`), sql`${purchaseOrders.number}::text ILIKE ${`%${query}%`}`) : undefined)).orderBy(desc(purchaseOrders.createdAt)).limit(25);
+        return { records: await Promise.all(rows.map(async ({ order, supplier }) => {
+          const lines = await deps.db.select().from(poLines).where(eq(poLines.poId, order.id)).orderBy(poLines.position).limit(3);
+          const total = lines.reduce((sum, line) => sum + Math.round(line.quantity * line.unitPriceMinor / 1000), 0);
+          const values: Record<string, string> = { ...base, "supplier.name": supplier.name, "supplier.email": supplier.email ?? "", "purchaseOrder.number": String(order.number), "purchaseOrder.deliveryDate": order.promisedAt?.toISOString().slice(0, 10) ?? "", "purchaseOrder.total": displayMoney(total, org?.currency ?? "USD"), "purchaseOrder.scope": order.memo ?? "", "purchaseOrder.paymentTerms": supplier.paymentTermDays ? `Net ${supplier.paymentTermDays}` : "Due on receipt" };
+          lines.forEach((line, index) => { const n = index + 1; values[`purchaseOrder.line${n}.description`] = line.description; values[`purchaseOrder.line${n}.quantity`] = String(line.quantity / 1000); values[`purchaseOrder.line${n}.rate`] = displayMoney(line.unitPriceMinor, org?.currency ?? "USD"); values[`purchaseOrder.line${n}.amount`] = displayMoney(Math.round(line.quantity * line.unitPriceMinor / 1000), org?.currency ?? "USD"); });
+          return { id: order.id, label: `PO ${order.number} | ${supplier.name}`, detail: `${order.status} | ${displayMoney(total, org?.currency ?? "USD")}`, values };
+        })) };
+      }
+      const rows = await deps.db.select({ order: salesOrders, customer: customers }).from(salesOrders).innerJoin(customers, eq(customers.id, salesOrders.customerId)).where(and(eq(salesOrders.orgId, ctx.actor.orgId), input.id ? eq(salesOrders.id, input.id) : query ? or(ilike(customers.name, `%${query}%`), sql`${salesOrders.number}::text ILIKE ${`%${query}%`}`) : undefined)).orderBy(desc(salesOrders.createdAt)).limit(25);
+      return { records: await Promise.all(rows.map(async ({ order, customer }) => {
+        const lines = await deps.db.select().from(salesOrderLines).where(eq(salesOrderLines.orderId, order.id)).limit(3);
+        const values: Record<string, string> = { ...base, "customer.name": customer.name, "customer.email": customer.email ?? "", "salesOrder.number": String(order.number), "delivery.backorderNote": order.note ?? "" };
+        lines.forEach((line, index) => { const n = index + 1; values[`delivery.line${n}.description`] = line.description; values[`delivery.line${n}.ordered`] = String(line.quantity / 1000); values[`delivery.line${n}.delivered`] = String(line.deliveredThousandths / 1000); values[`delivery.item${n}`] = line.description; values[`delivery.quantity${n}`] = String(line.quantity / 1000); });
+        return { id: order.id, label: `Sales order ${order.number} | ${customer.name}`, detail: `${order.status}${order.backordered ? " | backordered" : ""}`, values };
+      })) };
+    },
+  });
+
 const listTemplates = (deps: ModuleDeps) =>
   defineCapability({
     id: "documents.listTemplates",
@@ -838,6 +1194,7 @@ const listTemplates = (deps: ModuleDeps) =>
           description: z.string().nullable(),
           placeholders: z.array(z.string()),
           isSystem: z.string().nullable(),
+          content: z.record(z.string(), z.unknown()),
         }),
       ),
     }),
@@ -849,6 +1206,7 @@ const listTemplates = (deps: ModuleDeps) =>
           description: docTemplates.description,
           placeholders: docTemplates.placeholders,
           isSystem: docTemplates.isSystem,
+          content: docTemplates.contentJson,
         })
         .from(docTemplates)
         .where(eq(docTemplates.orgId, ctx.actor.orgId))
@@ -860,6 +1218,7 @@ const listTemplates = (deps: ModuleDeps) =>
           description: r.description,
           placeholders: (r.placeholders as string[]) ?? [],
           isSystem: r.isSystem,
+          content: (r.content as Record<string, unknown>) ?? {},
         })),
       };
     },
@@ -987,6 +1346,12 @@ export function registerDocumentCapabilities(registry: CapabilityRegistry, deps:
   registry.register(getDocVersion(deps));
   registry.register(restoreDocVersion(deps));
   registry.register(deleteDoc(deps));
+  registry.register(listFolders(deps));
+  registry.register(createFolder(deps));
+  registry.register(deleteFolder(deps));
+  registry.register(renameFolder(deps));
+  registry.register(updateDocMetadata(deps));
+  registry.register(searchRecords(deps));
   registry.register(listTemplates(deps));
   registry.register(getTemplate(deps));
   registry.register(createTemplate(deps));

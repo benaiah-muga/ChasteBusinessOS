@@ -28,6 +28,7 @@ import { useMoneySync } from "@/lib/money";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { useTabParam } from "@/lib/tab-param";
 import { HiringTab, type ApplicantRow, type OpeningRow } from "./hiring-tab";
 
 type TabId = "overview" | "people" | "hiring" | "leave" | "time" | "payroll" | "expenses";
@@ -147,7 +148,7 @@ export default function HrPage() {
   useMoneySync();
   const __enabled = useModuleEnabled("hr");
   const router = useRouter();
-  const [tab, setTab] = useState<TabId>("overview");
+  const [tab, setTab] = useTabParam(["overview", "people", "hiring", "leave", "time", "payroll", "expenses"] as const, "overview");
   const [data, setData] = useState<HrPayload | null>(null);
   const [time, setTime] = useState<TimeReport>({ ...monthBounds(), rows: [] });
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1825,4 +1826,3 @@ function ExpensesTab() {
     </>
   );
 }
-

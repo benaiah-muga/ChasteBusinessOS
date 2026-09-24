@@ -471,6 +471,41 @@
       "when": 1790011000000,
       "tag": "0066_org_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1790108176350,
+      "tag": "0067_authored_doc_folders",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1790117368510,
+      "tag": "0068_document_workspaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1790140000000,
+      "tag": "0069_document_binary_compat",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1790263588114,
+      "tag": "0070_messaging_features",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1790264548348,
+      "tag": "0071_messaging_tenant_scope",
+      "breakpoints": true
     }
   ]
 }

@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import {
   conversationMembers,
   conversations,
   getDb,
+  messageAttachments,
+  messageReactions,
   messages,
   organizations,
   users,
+  withOrgContext,
 } from "@chaste/db";
 import { OpenAiCompatAdapter, resolveClient } from "@chaste/ai";
 import { runAgentLoop } from "@chaste/kernel";
@@ -46,9 +49,26 @@ async function assertMembership(conversationId: string, userId: string): Promise
   return Boolean(member);
 }
 
-export async function GET(_req: Request, { params }: Params) {
+const messageColumns = {
+  id: messages.id,
+  senderType: messages.senderType,
+  senderUserId: messages.senderUserId,
+  body: messages.body,
+  createdAt: messages.createdAt,
+  editedAt: messages.editedAt,
+  mentions: messages.mentions,
+  parentMessageId: messages.parentMessageId,
+  pinnedAt: messages.pinnedAt,
+};
+type MessageRow = Pick<
+  typeof messages.$inferSelect,
+  "id" | "senderType" | "senderUserId" | "body" | "createdAt" | "editedAt" | "mentions" | "parentMessageId" | "pinnedAt"
+>;
+
+export async function GET(req: Request, { params }: Params) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const orgId = resolved.orgId;
   const { id } = await params;
   const conv = await loadConversation(id, resolved.orgId);
   if (!conv) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -56,23 +76,159 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const rows = await getDb()
-    .db.select(
-      {
-        id: messages.id,
-        senderType: messages.senderType,
-        senderUserId: messages.senderUserId,
-        body: messages.body,
-        createdAt: messages.createdAt,
-        editedAt: messages.editedAt,
-        mentions: messages.mentions,
-      },
-    )
+  const db = getDb().db;
+  const base = and(eq(messages.conversationId, id), eq(messages.orgId, orgId), isNull(messages.deletedAt));
+  const paramsFromUrl = new URL(req.url).searchParams;
+  const aroundId = paramsFromUrl.get("around");
+  const beforeId = paramsFromUrl.get("before");
+  if (aroundId && !z.string().uuid().safeParse(aroundId).success) return NextResponse.json({ error: "invalid message cursor" }, { status: 400 });
+  if (beforeId && !z.string().uuid().safeParse(beforeId).success) return NextResponse.json({ error: "invalid message cursor" }, { status: 400 });
+  const limit = Math.min(Math.max(Number(paramsFromUrl.get("limit") ?? 60) || 60, 1), 100);
+  const pinnedMessages = await db
+    .select({ id: messages.id, body: messages.body, pinnedAt: messages.pinnedAt })
     .from(messages)
-    .where(and(eq(messages.conversationId, id), eq(messages.orgId, resolved.orgId), isNull(messages.deletedAt)))
-    .orderBy(asc(messages.createdAt))
-    .limit(200);
-  return NextResponse.json({ conversation: conv, messages: rows, me: resolved.userId });
+    .where(and(base, isNotNull(messages.pinnedAt)))
+    .orderBy(desc(messages.pinnedAt), desc(messages.id))
+    .limit(20);
+  let rows: MessageRow[];
+  let hasMore = false;
+  let nextCursor: string | null = null;
+
+  if (aroundId) {
+    const [target] = await db
+      .select(messageColumns)
+      .from(messages)
+      .where(and(base, eq(messages.id, aroundId)))
+      .limit(1);
+    if (!target) return NextResponse.json({ error: "message not found" }, { status: 404 });
+    const older = await db
+      .select(messageColumns)
+      .from(messages)
+      .where(
+        and(
+          base,
+          sql`(${messages.createdAt}, ${messages.id}) < (SELECT ${messages.createdAt}, ${messages.id} FROM ${messages} WHERE ${messages.id} = ${target.id})`,
+        ),
+      )
+      .orderBy(desc(messages.createdAt), desc(messages.id))
+      .limit(31);
+    const newer = await db
+      .select(messageColumns)
+      .from(messages)
+      .where(
+        and(
+          base,
+          sql`(${messages.createdAt}, ${messages.id}) > (SELECT ${messages.createdAt}, ${messages.id} FROM ${messages} WHERE ${messages.id} = ${target.id})`,
+        ),
+      )
+      .orderBy(asc(messages.createdAt), asc(messages.id))
+      .limit(30);
+    hasMore = older.length > 30;
+    if (hasMore) older.pop();
+    older.reverse();
+    rows = [...older, target, ...newer];
+    nextCursor = hasMore ? older[0]?.id ?? null : null;
+  } else {
+    const query = db
+      .select(messageColumns)
+      .from(messages)
+      .where(
+        and(
+          base,
+          beforeId
+            ? sql`(${messages.createdAt}, ${messages.id}) < (SELECT ${messages.createdAt}, ${messages.id} FROM ${messages} WHERE ${messages.id} = ${beforeId})`
+            : undefined,
+        ),
+      )
+      .orderBy(desc(messages.createdAt), desc(messages.id))
+      .limit(limit + 1);
+    const page = await query;
+    hasMore = page.length > limit;
+    if (hasMore) page.pop();
+    page.reverse();
+    rows = page;
+    nextCursor = hasMore ? page[0]?.id ?? null : null;
+  }
+
+  const messageIds = rows.map((message) => message.id);
+  const [attachments, reactions, readerRows] = await Promise.all([
+    messageIds.length
+      ? withOrgContext(db, orgId, async (tx) =>
+          await tx
+            .select({
+              id: messageAttachments.id,
+              messageId: messageAttachments.messageId,
+              filename: messageAttachments.filename,
+              mimeType: messageAttachments.mimeType,
+              sizeBytes: messageAttachments.sizeBytes,
+            })
+            .from(messageAttachments)
+            .where(and(eq(messageAttachments.orgId, orgId), inArray(messageAttachments.messageId, messageIds))),
+        )
+      : Promise.resolve([]),
+    messageIds.length
+      ? withOrgContext(db, orgId, async (tx) =>
+          await tx
+            .select({
+              messageId: messageReactions.messageId,
+              emoji: messageReactions.emoji,
+              userId: messageReactions.userId,
+              name: users.name,
+              email: users.email,
+            })
+            .from(messageReactions)
+            .innerJoin(users, eq(users.id, messageReactions.userId))
+            .where(and(eq(messageReactions.orgId, orgId), inArray(messageReactions.messageId, messageIds))),
+        )
+      : Promise.resolve([]),
+    db
+      .select({ userId: conversationMembers.userId, name: users.name, email: users.email, lastReadAt: conversationMembers.lastReadAt })
+      .from(conversationMembers)
+      .innerJoin(users, eq(users.id, conversationMembers.userId))
+      .where(eq(conversationMembers.conversationId, id)),
+  ]);
+
+  const reactionsByMessage = new Map<string, Map<string, { emoji: string; count: number; reactedByMe: boolean; names: string[] }>>();
+  for (const reaction of reactions) {
+    let byEmoji = reactionsByMessage.get(reaction.messageId);
+    if (!byEmoji) {
+      byEmoji = new Map();
+      reactionsByMessage.set(reaction.messageId, byEmoji);
+    }
+    const item = byEmoji.get(reaction.emoji) ?? { emoji: reaction.emoji, count: 0, reactedByMe: false, names: [] };
+    item.count += 1;
+    item.reactedByMe ||= reaction.userId === resolved.userId;
+    item.names.push(reaction.name ?? reaction.email);
+    byEmoji.set(reaction.emoji, item);
+  }
+  const attachmentsByMessage = new Map<string, typeof attachments>();
+  for (const attachment of attachments) {
+    if (!attachment.messageId) continue;
+    const list = attachmentsByMessage.get(attachment.messageId) ?? [];
+    list.push(attachment);
+    attachmentsByMessage.set(attachment.messageId, list);
+  }
+
+  const messagesWithExtras = rows.map((message) => ({
+    ...message,
+    reactions: [...(reactionsByMessage.get(message.id)?.values() ?? [])],
+    attachments: (attachmentsByMessage.get(message.id) ?? []).map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      href: `/api/message-attachments/${attachment.id}`,
+    })),
+  }));
+  const readers = readerRows.map((reader) => ({
+    userId: reader.userId,
+    name: reader.name ?? reader.email,
+    lastReadAt: reader.lastReadAt?.toISOString() ?? null,
+  }));
+  return NextResponse.json(
+    { conversation: conv, messages: messagesWithExtras, me: resolved.userId, readers, pinnedMessages, hasMore, nextCursor },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 const mentionSchema = z.object({
@@ -81,9 +237,11 @@ const mentionSchema = z.object({
 });
 
 const sendSchema = z.object({
-  body: z.string().min(1).max(8000),
+  body: z.string().max(8000),
   mentions: z.array(mentionSchema).max(20).optional(),
-});
+  parentMessageId: z.string().uuid().optional(),
+  attachmentIds: z.array(z.string().uuid()).max(5).optional(),
+}).refine((body) => Boolean(body.body.trim()) || Boolean(body.attachmentIds?.length), "write a message or attach a file");
 
 export async function POST(req: Request, { params }: Params) {
   const resolved = await getResolvedUser();
@@ -111,9 +269,14 @@ export async function POST(req: Request, { params }: Params) {
     conversationId: id,
     body: parsed.data.body,
     mentions: parsed.data.mentions,
+    parentMessageId: parsed.data.parentMessageId,
+    attachmentIds: parsed.data.attachmentIds,
   });
   if (!sent.ok && !sent.pendingApproval) {
     return NextResponse.json({ error: sent.error }, { status: 422 });
+  }
+  if (sent.pendingApproval) {
+    return NextResponse.json({ pendingApproval: true }, { status: 202 });
   }
 
   // The workmate answers in channels where it participates, and an explicit

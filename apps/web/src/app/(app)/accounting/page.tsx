@@ -29,6 +29,7 @@ import { useMoneySync } from "@/lib/money";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
+import { useTabParam } from "@/lib/tab-param";
 
 interface Entry {
   id: string;
@@ -157,16 +158,11 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-function initialTab(): TabId {
-  const hash = typeof window !== "undefined" ? window.location.hash.replace("#", "") : "";
-  return (TABS.find((t) => t.id === hash)?.id ?? "overview") as TabId;
-}
-
 export default function AccountingPage() {
   useMoneySync();
   const __enabled = useModuleEnabled("accounting");
   const router = useRouter();
-  const [tab, setTab] = useState<TabId>(initialTab);
+  const [tab, setTab] = useTabParam(TABS.map((item) => item.id), "overview");
   const [data, setData] = useState<Overview | null>(null);
   const [reports, setReports] = useState<Reports | null>(null);
   const [cash, setCash] = useState<CashBasis | null>(null);
@@ -2357,4 +2353,3 @@ function CashSection({ customers }: { customers: { id: string; name: string }[] 
     </section>
   );
 }
-

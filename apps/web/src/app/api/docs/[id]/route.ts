@@ -46,6 +46,7 @@ const bodySchema = z.discriminatedUnion("action", [
     content: contentSchema,
     html: z.string().max(2_000_000),
     note: z.string().max(500).optional(),
+    pageSettings: z.object({ size: z.enum(["A4", "Letter"]), orientation: z.enum(["portrait", "landscape"]), margin: z.enum(["compact", "normal", "wide"]) }).optional(),
     intentId: z.string().optional(),
   }),
   z.object({
@@ -55,6 +56,15 @@ const bodySchema = z.discriminatedUnion("action", [
     intentId: z.string().optional(),
   }),
   z.object({ action: z.literal("delete"), intentId: z.string().optional() }),
+  z.object({
+    action: z.literal("updateMetadata"),
+    title: z.string().min(1).max(200).optional(),
+    folder: z.string().max(300).nullable().optional(),
+    linkedRecordType: z.string().max(60).nullable().optional(),
+    linkedRecordId: z.string().uuid().nullable().optional(),
+    linkedRecordLabel: z.string().max(240).nullable().optional(),
+    intentId: z.string().optional(),
+  }),
 ]);
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -78,6 +88,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           content: parsed.data.content,
           html: parsed.data.html,
           ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
+          ...(parsed.data.pageSettings !== undefined ? { pageSettings: parsed.data.pageSettings } : {}),
         });
       case "restore":
         return executor.execute("documents.restoreDocVersion", ctx, {
@@ -87,6 +98,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         });
       case "delete":
         return executor.execute("documents.deleteDoc", ctx, { documentId: id });
+      case "updateMetadata":
+        return executor.execute("documents.updateDocMetadata", ctx, { documentId: id, ...parsed.data });
     }
   })();
 
@@ -97,5 +110,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       { status: 202 },
     );
   }
-  return NextResponse.json({ ok: true, data: result.data });
+  return NextResponse.json(result.data ?? { ok: true });
 }

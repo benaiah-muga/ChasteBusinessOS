@@ -75,6 +75,9 @@ function Toolbar({ editor, onImageFile }: ToolbarProps & { onImageFile: (f: File
           H{level}
         </ToolButton>
       ))}
+      <ToolButton title="Paragraph" active={editor.isActive("paragraph")} onClick={() => editor.chain().focus().setParagraph().run()}>
+        ¶
+      </ToolButton>
       <Divider />
       <ToolButton title="Bold" active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}>
         B
@@ -85,6 +88,9 @@ function Toolbar({ editor, onImageFile }: ToolbarProps & { onImageFile: (f: File
         onClick={() => editor.chain().focus().toggleItalic().run()}
       >
         <span className="italic">I</span>
+      </ToolButton>
+      <ToolButton title="Underline" active={editor.isActive("underline")} onClick={() => editor.chain().focus().toggleUnderline().run()}>
+        <span className="underline">U</span>
       </ToolButton>
       <ToolButton
         title="Strikethrough"
@@ -132,6 +138,9 @@ function Toolbar({ editor, onImageFile }: ToolbarProps & { onImageFile: (f: File
       <ToolButton title="Horizontal rule" onClick={() => editor.chain().focus().setHorizontalRule().run()}>
         ―
       </ToolButton>
+      <ToolButton title="Clear formatting" onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}>
+        Tx
+      </ToolButton>
       {editor.isActive("table") && (
         <>
           <Divider />
@@ -172,6 +181,7 @@ export interface TiptapEditorProps {
 
 export function TiptapEditor({ initialContent, harperEnabled, onDocChange, onReady }: TiptapEditorProps) {
   const [activeLint, setActiveLint] = useState<HarperActiveLint | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
   const lintAnchor = useRef<{ top: number; left: number }>({ top: 0, left: 0 });
 
   const editor = useEditor({
@@ -213,10 +223,11 @@ export function TiptapEditor({ initialContent, harperEnabled, onDocChange, onRea
 
   const insertImage = useCallback(
     (f: File) => {
-      if (!editor || f.size > IMAGE_MAX_BYTES) {
-        alert("Images up to 1MB are supported in documents.");
+      if (!editor || !f.type.startsWith("image/") || f.size > IMAGE_MAX_BYTES) {
+        setImageError("That image was not inserted. Choose a PNG, JPEG, GIF, or WebP file smaller than 1 MB.");
         return;
       }
+      setImageError(null);
       const reader = new FileReader();
       reader.onload = () => editor.chain().focus().setImage({ src: String(reader.result) }).run();
       reader.readAsDataURL(f);
@@ -227,15 +238,20 @@ export function TiptapEditor({ initialContent, harperEnabled, onDocChange, onRea
   if (!editor) return <div className="min-h-[55vh] animate-pulse bg-stone-50" aria-busy />;
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xs">
-      <Toolbar editor={editor} onImageFile={insertImage} />
-      <EditorContent
-        editor={editor}
-        onClick={() => {
-          // Popover closes on any click that did not land on a lint.
-          setActiveLint(null);
-        }}
-      />
+    <div className="relative overflow-hidden rounded-2xl border border-stone-200 bg-stone-100 p-2 shadow-xs sm:p-3">
+      {imageError && <p role="alert" className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{imageError}</p>}
+      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+        <Toolbar editor={editor} onImageFile={insertImage} />
+        <div className="mx-auto min-h-[55vh] max-w-4xl bg-white">
+          <EditorContent
+            editor={editor}
+            onClick={() => {
+              // Popover closes on any click that did not land on a lint.
+              setActiveLint(null);
+            }}
+          />
+        </div>
+      </div>
       {harperEnabled && activeLint && (
         <div
           className="absolute z-20 w-56 rounded-lg border border-stone-200 bg-white p-2 shadow-lg"
