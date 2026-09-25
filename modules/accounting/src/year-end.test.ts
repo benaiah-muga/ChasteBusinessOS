@@ -118,6 +118,15 @@ describe("N13 exceptional entries and posting eligibility", () => {
       { memo: "misposted march expense", lines: [{ accountCode: "5000", debitMinor: 50_000, creditMinor: 0 }, { accountCode: "1000", debitMinor: 0, creditMinor: 50_000 }] },
       originalAt,
     );
+    for (const taskKey of ["review_journal", "review_receivables", "review_payables", "review_tax"] as const) {
+      await run("accounting.updatePeriodCloseCheck", {
+        year: 2024,
+        month: 3,
+        taskKey,
+        completed: true,
+        note: "Reviewed in the year-end test fixture.",
+      });
+    }
     await run("accounting.closePeriod", { year: 2024, month: 3 });
 
     const { reversalEntryId } = await run("accounting.reverseEntry", { entryId });

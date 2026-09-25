@@ -9,6 +9,7 @@ const actionSchema = z.discriminatedUnion("action", [
     action: z.literal("create"),
     customerId: z.string().uuid(),
     memo: z.string().max(300).optional(),
+    expiresAt: z.string().date().optional(),
     lines: z
       .array(
         z.object({
@@ -61,7 +62,14 @@ export async function POST(req: Request) {
           : "accounting.expireQuote";
   const input =
     parsed.data.action === "create"
-      ? { customerId: parsed.data.customerId, memo: parsed.data.memo, lines: parsed.data.lines }
+      ? {
+          customerId: parsed.data.customerId,
+          memo: parsed.data.memo,
+          expiresAt: parsed.data.expiresAt
+            ? new Date(`${parsed.data.expiresAt}T23:59:59.999Z`).toISOString()
+            : undefined,
+          lines: parsed.data.lines,
+        }
       : parsed.data.action === "expire"
         ? {}
         : { quoteId: parsed.data.quoteId };

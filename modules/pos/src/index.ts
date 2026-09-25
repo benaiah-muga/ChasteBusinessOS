@@ -14,8 +14,9 @@ import {
 import { nextDocNumber } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import type { Database } from "@chaste/db";
+import { computeInvoiceTotals } from "@chaste/erp-core";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
-import { postEntry } from "@chaste/module-accounting/posting";
+import { baseCurrencyOf, postEntry } from "@chaste/module-accounting/posting";
 import { applyStockDelta, lockStockItems } from "@chaste/module-inventory";
 
 export interface ModuleDeps {
@@ -100,12 +101,7 @@ const completeSale = (deps: ModuleDeps) =>
     risk: "money",
     permission: "pos.sell",
     moneyThresholdMinor: 100_000,
-    // Same total computation as execute(): quantity is thousandths of a unit.
-    moneyAmount: (input) =>
-      input.lines.reduce(
-        (sum, l) => sum + Math.round((l.quantity * l.unitPriceMinor) / 1000) + l.taxMinor,
-        0,
-      ),
+    moneyAmount: (input) => computeInvoiceTotals(input.lines).totalMinor,
     // N12 (ADR 0051): the undo of a register sale is a register return -
     // it restores stock, the drawer and the money together. buildInput is
     // typed against completeSale's output, so a key the sale never returns
@@ -129,6 +125,16 @@ const completeSale = (deps: ModuleDeps) =>
       changeGivenMinor: z.number(),
     }),
     execute: async (ctx, input) => {
+      let totals: ReturnType<typeof computeInvoiceTotals>;
+      try {
+        totals = computeInvoiceTotals(input.lines);
+      } catch (error) {
+        if (error instanceof Error && error.message === "invoice must have a non-zero total") {
+          throw new Error("sale must have a non-zero total");
+        }
+        throw error;
+      }
+      const { subtotalMinor: subtotal, taxMinor: tax, totalMinor: total } = totals;
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [session] = await tx
           .select()
@@ -210,17 +216,9 @@ const completeSale = (deps: ModuleDeps) =>
           }
         }
 
-        let subtotal = 0;
-        let tax = 0;
-        for (const l of input.lines) {
-          subtotal += Math.round((l.quantity * l.unitPriceMinor) / 1000);
-          tax += l.taxMinor;
-        }
-        const total = subtotal + tax;
-        if (total <= 0) throw new Error("sale must have a non-zero total");
-
         const customerId = await walkInCustomerId(tx, ctx.actor.orgId);
         const invoiceNumber = await nextDocNumber(tx, ctx.actor.orgId, "invoice");
+        const currency = await baseCurrencyOf(tx, ctx.actor.orgId);
 
         const glLines = [
           { accountCode: "1000", debitMinor: total, creditMinor: 0 },
@@ -238,6 +236,7 @@ const completeSale = (deps: ModuleDeps) =>
             customerId,
             number: invoiceNumber,
             status: "paid",
+            currency,
             subtotalMinor: subtotal,
             taxMinor: tax,
             totalMinor: total,
@@ -252,6 +251,7 @@ const completeSale = (deps: ModuleDeps) =>
           memo: `POS sale #${invoiceNumber} (${input.method})`,
           sourceType: "pos_sale",
           sourceId: inv!.id,
+          currency,
           postedAt: ctx.now,
           lines: glLines,
         });

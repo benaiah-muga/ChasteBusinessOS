@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { getDb, poLines, purchaseOrders, purchaseRequests, rfqs, vendorBills, vendors } from "@chaste/db";
+import { getDb, organizations, poLines, purchaseOrders, purchaseRequests, rfqs, vendorBills, vendors } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 import { documentOutstanding } from "@/server/balances";
@@ -20,6 +20,8 @@ export async function GET() {
   const executor = buildExecutor(db, registry);
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+
+  const [organization] = await db.select({ baseCurrency: organizations.baseCurrency }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
 
   const vendorRows = await db.select().from(vendors).where(eq(vendors.orgId, orgId)).orderBy(asc(vendors.name));
   const vendorName = new Map(vendorRows.map((v) => [v.id, v.name]));
@@ -83,6 +85,7 @@ export async function GET() {
 
   void sql;
   return NextResponse.json({
+    baseCurrency: organization?.baseCurrency ?? "USD",
     vendors: vendorRows,
     orders: ordersUi,
     bills: billRows.map((b) => ({
@@ -92,6 +95,7 @@ export async function GET() {
       vendorRef: b.vendorRef,
       memo: b.memo,
       totalMinor: b.totalMinor,
+      currency: b.currency,
       paidMinor: b.paidMinor,
       creditedMinor: b.creditedMinor,
       status: b.status,
@@ -196,7 +200,7 @@ export async function POST(req: Request) {
       if (!body.poNumber) return NextResponse.json({ error: "poNumber is required" }, { status: 400 });
       return respond(await executor.execute("purchasing.listReceipts", ctx, { poNumber: body.poNumber as number }));
     case "createBill": {
-      const lines = body.lines as { description: string; quantity: number; unitPriceMinor: number; poLineNumber?: number }[] | undefined;
+      const lines = body.lines as { description: string; quantity: number; unitPriceMinor: number; taxCodeId?: string; poLineNumber?: number }[] | undefined;
       if (!body.vendorId || !lines?.length)
         return NextResponse.json({ error: "vendorId and lines are required" }, { status: 400 });
       return respond(
@@ -300,4 +304,3 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "invalid action" }, { status: 400 });
   }
 }
-

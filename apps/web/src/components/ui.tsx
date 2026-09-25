@@ -267,7 +267,7 @@ export function EmptyState({
         {icon}
       </div>
       <p className="text-sm font-medium text-stone-800">{title}</p>
-      {hint && <p className="mt-1 max-w-sm text-[13px] leading-relaxed text-stone-500">{hint}</p>}
+      {hint && <p className="mt-1 max-w-sm text-[13px] leading-relaxed text-stone-700">{hint}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );
@@ -281,7 +281,9 @@ export function Skeleton({ className }: { className?: string }) {
 
 export function LoadingPage() {
   return (
-    <div className="space-y-8" aria-busy="true" aria-label="Loading">
+    <div className="space-y-8" aria-busy="true">
+      <h1 className="sr-only">Loading workspace</h1>
+      <p className="sr-only" role="status">Loading workspace content.</p>
       <div className="flex items-center gap-3">
         <LogoMark size={34} className="brand-loader__coin" />
         <div className="space-y-1.5">
@@ -323,9 +325,9 @@ export function StatCard({
   };
   return (
     <div className={cn("rounded-xl border p-4 shadow-xs", tones[tone], className)}>
-      <p className="text-xs font-medium text-stone-500">{label}</p>
+      <p className="text-xs font-medium text-stone-700">{label}</p>
       <p className="tnum mt-1.5 text-lg font-semibold tracking-tight text-stone-900">{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-stone-500">{sub}</p>}
+      {sub && <p className="mt-0.5 text-xs text-stone-700">{sub}</p>}
     </div>
   );
 }

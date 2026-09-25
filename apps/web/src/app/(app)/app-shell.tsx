@@ -255,7 +255,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
       )}
 
       <div className="mt-auto flex flex-col items-center gap-1">
-        <DigitalClock className="tnum mb-1 text-[11px] leading-none font-medium text-stone-500" />
+        <DigitalClock className="tnum mb-1 text-[11px] leading-none font-medium text-stone-700" />
         <NotificationsBell align="left" />
         {railButton("Settings", <IconSettings className="size-5" />, () => router.push("/settings"), {
           active: pathname === "/settings",
@@ -325,7 +325,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
             <span className="min-w-0 flex-1 truncate px-1 text-sm font-semibold tracking-tight text-stone-900">
               {currentApp?.name || orgName || "Chaste"}
             </span>
-            <DigitalClock className="tnum mr-1 shrink-0 text-[11px] font-medium text-stone-500" />
+            <DigitalClock className="tnum mr-1 shrink-0 text-[11px] font-medium text-stone-700" />
             <button type="button" onClick={() => setPaletteOpen(true)} aria-label="Search" className="icon-btn">
               <IconSearch className="size-5" />
             </button>
@@ -363,7 +363,10 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
 
           <main
             id="main"
-            className={cn("mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:px-8 lg:pb-8", inputMode && "pb-32 lg:pb-24")}
+            className={cn(
+              "mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:px-8 md:pb-8",
+              inputMode && "pb-32 md:pb-24",
+            )}
           >
             <Fragment key={prefs.currency}>{children}</Fragment>
           </main>
@@ -371,7 +374,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
           {/* Mobile bottom navigation: the four anchors, thumb-reachable */}
           <nav
             aria-label="Primary"
-            className="fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch border-t border-stone-200 bg-white/95 backdrop-blur lg:hidden"
+            className="fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch border-t border-stone-200 bg-white/95 backdrop-blur md:hidden"
           >
             {(
               [
@@ -389,7 +392,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "relative flex flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors duration-100",
-                    active ? "text-gold-800" : "text-stone-400 hover:text-stone-600",
+                    active ? "text-gold-800" : "text-stone-600 hover:text-stone-800",
                   )}
                 >
                   <NavIcon className="size-5" />

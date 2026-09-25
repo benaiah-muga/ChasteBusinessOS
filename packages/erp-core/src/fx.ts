@@ -61,7 +61,10 @@ export function fxRateFromDecimal(input: string): FxRate | null {
   const raw = BigInt((intPart || "0") + fracPart);
   if (raw === 0n) return null;
   const d = gcd(raw, den);
-  return { num: Number(raw / d), den: Number(den / d) };
+  const num = raw / d;
+  const reducedDen = den / d;
+  if (num > BigInt(Number.MAX_SAFE_INTEGER) || reducedDen > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return { num: Number(num), den: Number(reducedDen) };
 }
 
 /** Formats a ratio back to a plain decimal string (audit display), ≤12 dp. */
@@ -71,8 +74,11 @@ export function fxRateToDecimal(rate: FxRate): string {
   const whole = N / D;
   let n = N % D;
   if (n === 0n) return whole.toString();
+  const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+  let precision = 12;
+  while (precision > 0 && (whole + 1n) * 10n ** BigInt(precision) > maxSafe) precision -= 1;
   let digits = "";
-  for (let i = 0; i < 12 && n !== 0n; i += 1) {
+  for (let i = 0; i < precision && n !== 0n; i += 1) {
     n *= 10n;
     digits += (n / D).toString();
     n %= D;
@@ -87,6 +93,9 @@ export function applyRate(
   amountMinor: number,
   rate: FxRate,
 ): { result: number; remainder: number } {
+  if (!Number.isSafeInteger(amountMinor) || !Number.isSafeInteger(rate.num) || !Number.isSafeInteger(rate.den) || rate.num <= 0 || rate.den <= 0) {
+    throw new Error("Amounts must be safe integers and FX rates must be positive safe integer ratios");
+  }
   const A = BigInt(Math.trunc(amountMinor));
   const D = BigInt(rate.den);
   const raw = A * BigInt(rate.num);
@@ -96,14 +105,41 @@ export function applyRate(
   const q = abs / D;
   const r = abs % D;
   if (r * 2n >= D) {
-    return { result: Number(sign * (q + 1n)), remainder: Number(sign * (r - D)) };
+    const result = sign * (q + 1n);
+    const remainder = sign * (r - D);
+    if (result > BigInt(Number.MAX_SAFE_INTEGER) || result < BigInt(Number.MIN_SAFE_INTEGER)) throw new Error("FX result exceeds the supported amount range");
+    return { result: Number(result), remainder: Number(remainder) };
   }
-  return { result: Number(sign * q), remainder: Number(sign * r) };
+  const result = sign * q;
+  const remainder = sign * r;
+  if (result > BigInt(Number.MAX_SAFE_INTEGER) || result < BigInt(Number.MIN_SAFE_INTEGER)) throw new Error("FX result exceeds the supported amount range");
+  return { result: Number(result), remainder: Number(remainder) };
 }
 
-/** Foreign minor → base minor at the given rate. */
-export function toBaseMinor(foreignMinor: number, rate: FxRate): number {
-  return applyRate(foreignMinor, rate).result;
+/** Converts foreign minor units to base minor units at a major-unit FX rate. */
+export function toBaseMinor(
+  foreignMinor: number,
+  rate: FxRate,
+  quoteCurrency = "USD",
+  baseCurrency = "USD",
+): number {
+  const quoteUnits = currencyMinorUnits(quoteCurrency);
+  const baseUnits = currencyMinorUnits(baseCurrency);
+  if (quoteUnits === null || baseUnits === null) throw new Error("unknown currency code for FX conversion");
+  if (!Number.isSafeInteger(foreignMinor) || !Number.isSafeInteger(rate.num) || !Number.isSafeInteger(rate.den) || rate.num <= 0 || rate.den <= 0) {
+    throw new Error("Amounts must be safe integers and FX rates must be positive safe integer ratios");
+  }
+  const numerator = BigInt(foreignMinor) * BigInt(rate.num) * 10n ** BigInt(baseUnits);
+  const denominator = BigInt(rate.den) * 10n ** BigInt(quoteUnits);
+  const negative = numerator < 0n;
+  const magnitude = negative ? -numerator : numerator;
+  let converted = magnitude / denominator;
+  if ((magnitude % denominator) * 2n >= denominator) converted += 1n;
+  if (negative) converted = -converted;
+  if (converted > BigInt(Number.MAX_SAFE_INTEGER) || converted < BigInt(Number.MIN_SAFE_INTEGER)) {
+    throw new Error("FX result exceeds the supported amount range");
+  }
+  return Number(converted);
 }
 
 /**
@@ -114,6 +150,8 @@ export function realizedGainLoss(
   foreignMinor: number,
   invoiceRate: FxRate,
   settleRate: FxRate,
+  quoteCurrency = "USD",
+  baseCurrency = "USD",
 ): number {
-  return toBaseMinor(foreignMinor, settleRate) - toBaseMinor(foreignMinor, invoiceRate);
+  return toBaseMinor(foreignMinor, settleRate, quoteCurrency, baseCurrency) - toBaseMinor(foreignMinor, invoiceRate, quoteCurrency, baseCurrency);
 }

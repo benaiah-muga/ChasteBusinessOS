@@ -211,7 +211,7 @@
 @layer components {
   /* ---------- Typography figures ---------- */
   .figure-label {
-    @apply text-[11px] font-semibold tracking-[0.08em] text-stone-400 uppercase;
+    @apply text-[11px] font-semibold tracking-[0.08em] text-stone-600 uppercase;
   }
   .tnum {
     font-variant-numeric: tabular-nums;
@@ -288,7 +288,7 @@
     @apply p-5;
   }
   .section-title {
-    @apply text-[13px] font-semibold tracking-wide text-stone-500;
+    @apply text-[13px] font-semibold tracking-wide text-stone-700;
   }
 
   /* ---------- Badges ---------- */

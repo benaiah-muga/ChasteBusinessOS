@@ -413,13 +413,14 @@ function ChatDockInner({ mode }: { mode: "hover" | "input" | "bubble" | "open" |
   // The floating input bar, shared by the "input" (always visible) and
   // "hover" (revealed from the bottom edge) docks.
   const inputBar = (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        submit();
-      }}
-      className="pointer-events-auto flex w-full max-w-2xl items-center gap-2 rounded-2xl border border-stone-200 bg-white/90 p-2 pl-3 shadow-2xl ring-1 ring-black/5 backdrop-blur-md transition-all duration-150 focus-within:border-gold-400 focus-within:shadow-xl focus-within:ring-[4px] focus-within:ring-gold-600/10"
-    >
+    <div role="region" aria-label="Workmate input" className="pointer-events-auto w-full max-w-2xl">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+        className="flex w-full items-center gap-2 rounded-2xl border border-stone-200 bg-white/90 p-2 pl-3 shadow-2xl ring-1 ring-black/5 backdrop-blur-md transition-all duration-150 focus-within:border-gold-400 focus-within:shadow-xl focus-within:ring-[4px] focus-within:ring-gold-600/10"
+      >
       <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gold-800 text-white shadow-xs [&_svg]:size-4">
         <IconSparkle className="size-4" />
       </span>
@@ -466,7 +467,8 @@ function ChatDockInner({ mode }: { mode: "hover" | "input" | "bubble" | "open" |
       >
         <IconMinimize className="size-4" />
       </button>
-    </form>
+      </form>
+    </div>
   );
 
   if (mode === "hover") {

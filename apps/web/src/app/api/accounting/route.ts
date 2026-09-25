@@ -9,6 +9,7 @@ import {
   payments,
   periods,
   salesTaxFilings,
+  organizations,
   vendorBills,
   vendors,
 } from "@chaste/db";
@@ -26,6 +27,7 @@ export async function GET() {
   if (denied) return denied;
   const orgId = resolved.orgId;
   const db = getDb().db;
+  const [org] = await db.select({ baseCurrency: organizations.baseCurrency }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
   const ctx = actorFromResolved(resolved, {});
   const executor = ctx ? buildExecutor(db, buildRegistry(db)) : null;
 
@@ -37,6 +39,7 @@ export async function GET() {
       reversalOfId: journalEntries.reversalOfId,
       postedAt: journalEntries.postedAt,
       actorType: journalEntries.postedByActorType,
+      currency: journalEntries.currency,
       debitMinor: sql<number>`coalesce(sum(${journalLines.debitMinor}), 0)`,
     })
     .from(journalEntries)
@@ -54,20 +57,20 @@ export async function GET() {
       paidMinor: invoices.paidMinor,
       issuedAt: invoices.issuedAt,
       dueAt: invoices.dueAt,
+      currency: invoices.currency,
     })
     .from(invoices)
     .where(and(eq(invoices.orgId, orgId), sql`${invoices.status} <> 'void'`, sql`${invoices.voidedAt} is null`))
-    // Bounded: an org with thousands of open invoices must not drag the
-    // dashboard; the aging buckets below aggregate what we fetched.
-    .orderBy(desc(invoices.issuedAt))
-    .limit(200);
+    .orderBy(desc(invoices.issuedAt));
 
   const now = new Date();
   const outstanding = openRows
     .map((r) => ({ ...r, outstandingMinor: documentOutstanding(r) }))
     .filter((r) => r.outstandingMinor > 0 && r.issuedAt !== null);
+  const baseCurrency = org?.baseCurrency ?? "USD";
+  const baseOutstanding = outstanding.filter((r) => r.currency === baseCurrency);
   const buckets = computeAging(
-    outstanding.map((r) => ({
+    baseOutstanding.map((r) => ({
       invoiceNumber: r.number,
       outstandingMinor: r.outstandingMinor,
       issuedAt: r.issuedAt as Date,
@@ -89,13 +92,13 @@ export async function GET() {
       totalMinor: vendorBills.totalMinor,
       creditedMinor: vendorBills.creditedMinor,
       paidMinor: vendorBills.paidMinor,
+      currency: vendorBills.currency,
       vendorName: vendors.name,
     })
     .from(vendorBills)
     .innerJoin(vendors, eq(vendors.id, vendorBills.vendorId))
     .where(and(eq(vendorBills.orgId, orgId), sql`${vendorBills.status} <> 'void'`))
-    .orderBy(desc(vendorBills.number))
-    .limit(30);
+    .orderBy(desc(vendorBills.number));
 
   const filings = await db
     .select({
@@ -111,7 +114,7 @@ export async function GET() {
     .limit(20);
 
   const customerRows = await db
-    .select({ id: customers.id, name: customers.name })
+    .select({ id: customers.id, name: customers.name, paymentTermDays: customers.paymentTermDays })
     .from(customers)
     .where(eq(customers.orgId, orgId))
     .orderBy(asc(customers.name));
@@ -125,6 +128,7 @@ export async function GET() {
     .select({
       id: payments.id,
       invoiceNumber: invoices.number,
+      currency: invoices.currency,
       amountMinor: payments.amountMinor,
       method: payments.method,
       receivedAt: payments.receivedAt,
@@ -134,6 +138,14 @@ export async function GET() {
     .where(eq(payments.orgId, orgId))
     .orderBy(desc(payments.receivedAt))
     .limit(50);
+  const agingInvoices = outstanding
+    .map((r) => ({
+      number: r.number,
+      currency: r.currency,
+      outstandingMinor: r.outstandingMinor,
+      ageDays: Math.floor((now.getTime() - (r.dueAt ?? (r.issuedAt as Date)).getTime()) / 86_400_000),
+    }))
+    .sort((a, b) => b.ageDays - a.ageDays);
 
   return NextResponse.json({
     entries: entries.map((e) => ({
@@ -142,11 +154,10 @@ export async function GET() {
       postedAt: e.postedAt.toISOString(),
     })),
     aging: buckets,
-    agingInvoices: outstanding.map((r) => ({
-      number: r.number,
-      outstandingMinor: r.outstandingMinor,
-      ageDays: Math.floor((now.getTime() - (r.dueAt ?? (r.issuedAt as Date)).getTime()) / 86_400_000),
-    })),
+    baseCurrency,
+    foreignReceivablesCount: outstanding.filter((r) => r.currency !== baseCurrency).length,
+    foreignPayablesCount: bills.filter((b) => b.currency !== baseCurrency && documentOutstanding(b) > 0).length,
+    agingInvoices,
     closedPeriods,
     bills: bills.map((b) => ({ ...b, outstandingMinor: documentOutstanding(b) })),
     filings: filings.map((f) => ({
@@ -192,11 +203,13 @@ export async function POST(req: Request) {
     invoiceNumber?: number;
     method?: "cash" | "bank_transfer" | "card";
     paymentId?: string;
+    taxReturnId?: string;
     invoiceId?: string;
     reason?: string;
     quoteCurrency?: string;
     rate?: string;
     effectiveAt?: string;
+    budgetScenarioId?: string;
   };
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
@@ -239,12 +252,8 @@ export async function POST(req: Request) {
     });
     return respond(result);
   }
-  if (body.action === "fileSalesTaxReturn" && body.periodFrom && body.periodTo && body.taxMinor) {
-    const result = await executor.execute("accounting.fileSalesTaxReturn", humanCtx, {
-      periodFrom: body.periodFrom as string,
-      periodTo: body.periodTo as string,
-      taxMinor: body.taxMinor as number,
-    });
+  if (body.action === "fileSalesTaxReturn" && body.taxReturnId) {
+    const result = await executor.execute("accounting.fileSalesTaxReturn", humanCtx, { taxReturnId: body.taxReturnId });
     return respond(result);
   }
   if (body.action === "customerStatement" && body.customerId) {
@@ -258,7 +267,7 @@ export async function POST(req: Request) {
     return respond(result);
   }
   if (body.action === "cashForecast") {
-    const result = await executor.execute("accounting.cashForecast", humanCtx, {});
+    const result = await executor.execute("accounting.cashForecast", humanCtx, { budgetScenarioId: body.budgetScenarioId });
     return respond(result);
   }
   if (body.action === "createInvoice" && body.customerId) {

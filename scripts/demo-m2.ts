@@ -62,6 +62,15 @@ async function main() {
   // human approval; a permitted human in the UI acts under their own
   // authority (ADR 0055), so the gate is proven with an agent actor.
   const lastMonth = new Date(Date.now() - 45 * 86_400_000);
+  for (const taskKey of ["review_journal", "review_receivables", "review_payables", "review_tax"] as const) {
+    await executor.execute("accounting.updatePeriodCloseCheck", humanCtx, {
+      year: lastMonth.getUTCFullYear(),
+      month: lastMonth.getUTCMonth() + 1,
+      taskKey,
+      completed: true,
+      note: "Reviewed in the M2 close workbench proof.",
+    });
+  }
   const close = await executor.execute("accounting.closePeriod", agentCtx, {
     year: lastMonth.getUTCFullYear(),
     month: lastMonth.getUTCMonth() + 1,

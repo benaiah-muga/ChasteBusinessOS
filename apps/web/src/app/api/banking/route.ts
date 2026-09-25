@@ -30,11 +30,13 @@ export async function GET() {
     .select({
       id: bankTransactions.id,
       bankAccountId: bankTransactions.bankAccountId,
+      currencyCode: bankAccounts.currencyCode,
       postedAt: bankTransactions.postedAt,
       amountMinor: bankTransactions.amountMinor,
       description: bankTransactions.description,
     })
     .from(bankTransactions)
+    .innerJoin(bankAccounts, eq(bankAccounts.id, bankTransactions.bankAccountId))
     .where(and(eq(bankTransactions.orgId, orgId), eq(bankTransactions.status, "unmatched")))
     .orderBy(desc(bankTransactions.postedAt))
     .limit(200);
@@ -47,6 +49,7 @@ export async function GET() {
       amountMinor: payments.amountMinor,
       receivedAt: payments.receivedAt,
       invoiceNumber: invoices.number,
+      currencyCode: invoices.currency,
       customerName: customers.name,
     })
     .from(payments)
@@ -60,11 +63,14 @@ export async function GET() {
   const matchedRows = await db
     .select({
       id: bankTransactions.id,
+      bankAccountId: bankTransactions.bankAccountId,
+      currencyCode: bankAccounts.currencyCode,
       postedAt: bankTransactions.postedAt,
       amountMinor: bankTransactions.amountMinor,
       description: bankTransactions.description,
     })
     .from(bankTransactions)
+    .innerJoin(bankAccounts, eq(bankAccounts.id, bankTransactions.bankAccountId))
     .where(and(eq(bankTransactions.orgId, orgId), eq(bankTransactions.status, "matched")))
     .orderBy(desc(bankTransactions.postedAt))
     .limit(100);
@@ -72,11 +78,14 @@ export async function GET() {
   const excludedRows = await db
     .select({
       id: bankTransactions.id,
+      bankAccountId: bankTransactions.bankAccountId,
+      currencyCode: bankAccounts.currencyCode,
       postedAt: bankTransactions.postedAt,
       amountMinor: bankTransactions.amountMinor,
       description: bankTransactions.description,
     })
     .from(bankTransactions)
+    .innerJoin(bankAccounts, eq(bankAccounts.id, bankTransactions.bankAccountId))
     .where(and(eq(bankTransactions.orgId, orgId), eq(bankTransactions.status, "excluded")))
     .orderBy(desc(bankTransactions.postedAt))
     .limit(100);
@@ -141,6 +150,7 @@ export async function POST(req: Request) {
       return respond(
         await executor.execute("accounting.addBankAccount", ctx, {
           name: body.name as string,
+          currencyCode: typeof body.currencyCode === "string" ? body.currencyCode : undefined,
           last4: (body.last4 as string) || undefined,
           balanceMinor: typeof body.balanceMinor === "number" ? body.balanceMinor : 0,
         }),

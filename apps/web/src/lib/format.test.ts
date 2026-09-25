@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { activeCurrencyCode, formatMoney, formatMoneyWhole, setActiveCurrency, toMinor } from "./format";
+import { activeCurrencyCode, formatMoney, formatMoneyWhole, minorToInputIn, setActiveCurrency, toMinor, toMinorIn } from "./format";
 import { formatMoneyIn } from "./prefs";
 
 afterEach(() => {
@@ -53,5 +53,21 @@ describe("money presentation", () => {
   it("formatMoneyIn honors minor units of the given code", () => {
     expect(formatMoneyIn("UGX", 8_000_000)).toBe("USh 8,000,000");
     expect(formatMoneyIn("USD", 123_456)).toBe("$1,234.56");
+  });
+
+  it("parses and prefills amounts in the document currency, including zero-decimal currencies", () => {
+    expect(toMinorIn("UGX", "1200")).toBe(1_200);
+    expect(toMinorIn("USD", "12.34")).toBe(1_234);
+    expect(toMinorIn("USD", "1.005")).toBe(101);
+    expect(toMinorIn("USD", ".5")).toBe(50);
+    expect(minorToInputIn("UGX", 1_200)).toBe("1200");
+    expect(minorToInputIn("USD", 1_234)).toBe("12.34");
+  });
+
+  it("rejects malformed currency codes and unsafe entered amounts", () => {
+    expect(Number.isNaN(toMinorIn("b@d", "10"))).toBe(true);
+    expect(Number.isNaN(toMinorIn("UGX", "9007199254740992"))).toBe(true);
+    expect(Number.isNaN(toMinorIn("USD", "1e3"))).toBe(true);
+    expect(minorToInputIn("UGX", Number.MAX_SAFE_INTEGER + 1)).toBe("");
   });
 });
