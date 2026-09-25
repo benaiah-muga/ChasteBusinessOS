@@ -2,6 +2,7 @@ import { type AnyPgColumn,
   bigint,
   bigserial,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -14,6 +15,7 @@ import { type AnyPgColumn,
   uuid,
   vector,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const EMBEDDING_DIM = Number(process.env.EMBEDDING_DIMENSIONS ?? 1024);
 
@@ -459,6 +461,9 @@ export const invoiceLines = pgTable(
     quantity: integer("quantity").notNull(), // thousandths of a unit
     unitPriceMinor: integer("unit_price_minor").notNull(),
     taxMinor: integer("tax_minor").notNull().default(0),
+    taxCodeId: uuid("tax_code_id").references(() => taxCodes.id, { onDelete: "set null" }),
+    taxRateBasisPoints: integer("tax_rate_basis_points"),
+    priceIncludesTax: boolean("price_includes_tax").notNull().default(false),
   },
   (t) => [index("invoice_line_invoice_idx").on(t.invoiceId)],
 );
@@ -591,6 +596,10 @@ export const vendorBillLines = pgTable(
     description: text("description").notNull(),
     quantity: integer("quantity").notNull(), // thousandths of a unit
     unitPriceMinor: integer("unit_price_minor").notNull(),
+    taxMinor: integer("tax_minor").notNull().default(0),
+    taxCodeId: uuid("tax_code_id").references(() => taxCodes.id, { onDelete: "set null" }),
+    taxRateBasisPoints: integer("tax_rate_basis_points"),
+    priceIncludesTax: boolean("price_includes_tax").notNull().default(false),
     expenseAccountCode: text("expense_account_code").notNull().default("6000"), // COA code
     poLineId: uuid("po_line_id"),
   },
@@ -610,9 +619,57 @@ export const vendorPayments = pgTable(
     amountMinor: integer("amount_minor").notNull(),
     method: text("method").notNull().default("bank_transfer"),
     entryId: uuid("entry_id"),
+    paymentRunId: uuid("payment_run_id").references(() => paymentRuns.id, { onDelete: "restrict" }),
+    status: text("status").notNull().default("settled"), // settled | instructed | reversed
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversalEntryId: uuid("reversal_entry_id"),
     paidAt: timestamp("paid_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("vendor_payment_org_idx").on(t.orgId, t.billId)],
+);
+
+export const paymentRuns = pgTable(
+  "payment_runs",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    reference: text("reference").notNull(),
+    currency: text("currency").notNull(),
+    totalMinor: bigint("total_minor", { mode: "number" }).notNull(),
+    status: text("status").notNull().default("draft"), // draft | cancelled | instructed | confirmed | reversed
+    journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id, { onDelete: "restrict" }),
+    memo: text("memo"),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    instructedAt: timestamp("instructed_at", { withTimezone: true }),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    reversalEntryId: uuid("reversal_entry_id").references(() => journalEntries.id, { onDelete: "restrict" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("payment_run_org_ref_idx").on(t.orgId, t.reference),
+    index("payment_run_org_status_idx").on(t.orgId, t.status),
+    check("payment_run_total_positive", sql`${t.totalMinor} > 0`),
+    check("payment_run_status_valid", sql`${t.status} IN ('draft', 'cancelled', 'instructed', 'confirmed', 'reversed')`),
+  ],
+);
+
+export const paymentRunLines = pgTable(
+  "payment_run_lines",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    paymentRunId: uuid("payment_run_id").notNull().references(() => paymentRuns.id, { onDelete: "cascade" }),
+    vendorBillId: uuid("vendor_bill_id").notNull().references(() => vendorBills.id, { onDelete: "restrict" }),
+    vendorPaymentId: uuid("vendor_payment_id").references(() => vendorPayments.id, { onDelete: "set null" }),
+    amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("payment_run_bill_idx").on(t.paymentRunId, t.vendorBillId),
+    index("payment_run_line_org_idx").on(t.orgId, t.paymentRunId),
+    check("payment_run_line_amount_positive", sql`${t.amountMinor} > 0`),
+  ],
 );
 
 // ── POS (point of sale) ─────────────────────────────────────────────────
@@ -913,6 +970,7 @@ export const poLines = pgTable(
     quantity: integer("quantity").notNull(), // thousandths
     unitPriceMinor: integer("unit_price_minor").notNull(),
     itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+    expenseAccountCode: text("expense_account_code").notNull().default("6000"),
     /**
      * Accepted quantity for service lines (no item, so no stock movements):
      * the milestone/quantity the vendor actually delivered (N16). Item lines
@@ -1002,6 +1060,93 @@ export const periods = pgTable(
     closedByActorId: uuid("closed_by_actor_id"),
   },
   (t) => [uniqueIndex("period_org_ym_idx").on(t.orgId, t.year, t.month)],
+);
+
+/** Saved budget revisions are immutable snapshots; edits create a new version. */
+export const budgetScenarios = pgTable(
+  "budget_scenarios",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    scenarioKey: text("scenario_key").notNull(),
+    name: text("name").notNull(),
+    fiscalYear: integer("fiscal_year").notNull(),
+    version: integer("version").notNull(),
+    currency: text("currency").notNull(),
+    assumptions: jsonb("assumptions").notNull().default({}),
+    isCurrent: boolean("is_current").notNull().default(true),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("budget_scenario_version_idx").on(t.orgId, t.scenarioKey, t.version),
+    index("budget_scenario_org_current_idx").on(t.orgId, t.fiscalYear, t.isCurrent),
+    check("budget_scenario_version_positive", sql`${t.version} > 0`),
+    check("budget_scenario_year_valid", sql`${t.fiscalYear} BETWEEN 2000 AND 2100`),
+  ],
+);
+
+export const budgetLines = pgTable(
+  "budget_lines",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    scenarioId: uuid("scenario_id").notNull().references(() => budgetScenarios.id, { onDelete: "cascade" }),
+    month: integer("month").notNull(),
+    accountCode: text("account_code").notNull(),
+    plannedMinor: bigint("planned_minor", { mode: "number" }).notNull(),
+    note: text("note"),
+  },
+  (t) => [
+    uniqueIndex("budget_line_scenario_period_account_idx").on(t.scenarioId, t.month, t.accountCode),
+    index("budget_line_org_scenario_idx").on(t.orgId, t.scenarioId),
+    check("budget_line_month_valid", sql`${t.month} BETWEEN 1 AND 12`),
+    check("budget_line_amount_nonnegative", sql`${t.plannedMinor} >= 0`),
+  ],
+);
+
+/** A user's reviewed close checklist item, with a stable, auditable state. */
+export const periodCloseChecks = pgTable(
+  "period_close_checks",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    month: integer("month").notNull(),
+    taskKey: text("task_key").notNull(),
+    completed: boolean("completed").notNull().default(false),
+    note: text("note"),
+    updatedByActorType: text("updated_by_actor_type").notNull(),
+    updatedByActorId: uuid("updated_by_actor_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("period_close_check_key_idx").on(t.orgId, t.year, t.month, t.taskKey),
+    check("period_close_year_valid", sql`${t.year} BETWEEN 2000 AND 2100`),
+    check("period_close_month_valid", sql`${t.month} BETWEEN 1 AND 12`),
+  ],
+);
+
+export const periodFxRevaluations = pgTable(
+  "period_fx_revaluations",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    month: integer("month").notNull(),
+    entryId: uuid("entry_id").references(() => journalEntries.id, { onDelete: "restrict" }),
+    reversalEntryId: uuid("reversal_entry_id").references(() => journalEntries.id, { onDelete: "restrict" }),
+    totalAdjustmentMinor: bigint("total_adjustment_minor", { mode: "number" }).notNull().default(0),
+    rateSnapshot: jsonb("rate_snapshot").notNull().default({}),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }).notNull().defaultNow(),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("period_fx_revaluation_org_month_idx").on(t.orgId, t.year, t.month),
+    check("period_fx_revaluation_year_valid", sql`${t.year} BETWEEN 2000 AND 2100`),
+    check("period_fx_revaluation_month_valid", sql`${t.month} BETWEEN 1 AND 12`),
+  ],
 );
 
 // ── Internal messaging ──────────────────────────────────────────────────
@@ -2641,9 +2786,8 @@ export const bankAllocations = pgTable(
 );
 
 /**
- * Filed sales-tax returns. One filing per period window: the overlap guard
- * on these rows is what stops double-remitting the same tax to the
- * authority, so it lives in data, not in anyone's memory.
+ * Tax settlement ledger links. Amendment settlements may share a period
+ * with their parent, but each return can settle only once.
  */
 export const salesTaxFilings = pgTable(
   "sales_tax_filings",
@@ -2654,6 +2798,7 @@ export const salesTaxFilings = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     periodFrom: timestamp("period_from", { withTimezone: true }).notNull(),
     periodTo: timestamp("period_to", { withTimezone: true }).notNull(),
+    taxReturnId: uuid("tax_return_id").references(() => taxReturns.id, { onDelete: "restrict" }),
     taxMinor: bigint("tax_minor", { mode: "number" }).notNull(),
     entryId: uuid("entry_id")
       .notNull()
@@ -2662,7 +2807,90 @@ export const salesTaxFilings = pgTable(
     filedByActorId: uuid("filed_by_actor_id"),
     createdAt: createdAt(),
   },
-  (t) => [index("sales_tax_filing_org_idx").on(t.orgId, t.periodFrom)],
+  (t) => [index("sales_tax_filing_org_idx").on(t.orgId, t.periodFrom), uniqueIndex("sales_tax_filing_return_idx").on(t.taxReturnId)],
+);
+
+export const taxProfiles = pgTable(
+  "tax_profiles",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    jurisdictionCode: text("jurisdiction_code").notNull(),
+    registrationNumber: text("registration_number"),
+    filingFrequency: text("filing_frequency").notNull().default("monthly"),
+    providerMode: text("provider_mode").notNull().default("manual"), // manual | connected
+    providerName: text("provider_name"),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("tax_profile_org_idx").on(t.orgId),
+    check("tax_profile_jurisdiction_format", sql`${t.jurisdictionCode} ~ '^[A-Z]{2}(-[A-Z0-9]{1,8})?$'`),
+    check("tax_profile_frequency_valid", sql`${t.filingFrequency} IN ('monthly', 'quarterly', 'annual')`),
+    check("tax_profile_provider_mode_valid", sql`${t.providerMode} IN ('manual', 'connected')`),
+  ],
+);
+
+/** Tax rules are configured per organization and snapshotted on documents. */
+export const taxCodes = pgTable(
+  "tax_codes",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    jurisdictionCode: text("jurisdiction_code").notNull(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    direction: text("direction").notNull(), // output | input
+    rateBasisPoints: integer("rate_basis_points").notNull(),
+    priceIncludesTax: boolean("price_includes_tax").notNull().default(false),
+    recoverable: boolean("recoverable").notNull().default(true),
+    liabilityAccountCode: text("liability_account_code").notNull().default("2100"),
+    assetAccountCode: text("asset_account_code").notNull().default("1205"),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("tax_code_org_code_idx").on(t.orgId, t.code),
+    index("tax_code_org_active_idx").on(t.orgId, t.active),
+    check("tax_code_jurisdiction_format", sql`${t.jurisdictionCode} ~ '^[A-Z]{2}(-[A-Z0-9]{1,8})?$'`),
+    check("tax_code_direction_valid", sql`${t.direction} IN ('output', 'input')`),
+    check("tax_code_rate_nonnegative", sql`${t.rateBasisPoints} BETWEEN 0 AND 1000000`),
+  ],
+);
+
+/** Return submission/evidence is distinct from paying the tax liability. */
+export const taxReturns = pgTable(
+  "tax_returns",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    jurisdictionCode: text("jurisdiction_code").notNull(),
+    periodFrom: timestamp("period_from", { withTimezone: true }).notNull(),
+    periodTo: timestamp("period_to", { withTimezone: true }).notNull(),
+    currency: text("currency").notNull(),
+    taxBreakdown: jsonb("tax_breakdown").notNull().default([]),
+    outputTaxMinor: bigint("output_tax_minor", { mode: "number" }).notNull(),
+    inputTaxMinor: bigint("input_tax_minor", { mode: "number" }).notNull(),
+    taxMinor: bigint("tax_minor", { mode: "number" }).notNull(),
+    status: text("status").notNull().default("draft"), // draft | submitted | unknown | accepted | rejected | amended | cancelled
+    submissionReference: text("submission_reference"),
+    acknowledgment: jsonb("acknowledgment"),
+    evidenceReference: text("evidence_reference"),
+    amendsReturnId: uuid("amends_return_id").references((): AnyPgColumn => taxReturns.id, { onDelete: "restrict" }),
+    settlementEntryId: uuid("settlement_entry_id").references(() => journalEntries.id, { onDelete: "restrict" }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+    createdByActorType: text("created_by_actor_type").notNull(),
+    createdByActorId: uuid("created_by_actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("tax_return_org_period_idx").on(t.orgId, t.periodFrom, t.periodTo),
+    index("tax_return_org_status_idx").on(t.orgId, t.status),
+    check("tax_return_window_valid", sql`${t.periodTo} > ${t.periodFrom}`),
+    check("tax_return_status_valid", sql`${t.status} IN ('draft', 'submitted', 'unknown', 'accepted', 'rejected', 'amended', 'cancelled')`),
+  ],
 );
 
 

@@ -38,6 +38,24 @@ describe("double-entry invariants (property-based)", () => {
     ).toThrow(/non-zero total/);
   });
 
+  it("rounds fractional quantities with integer minor units", () => {
+    expect(
+      computeInvoiceTotals([
+        { quantity: 500, unitPriceMinor: 101, taxMinor: 0 },
+        { quantity: 500, unitPriceMinor: 101, taxMinor: 0 },
+      ]),
+    ).toEqual({ subtotalMinor: 102, taxMinor: 0, totalMinor: 102 });
+  });
+
+  it("rejects invoice totals beyond safe integer precision", () => {
+    expect(() =>
+      computeInvoiceTotals([
+        { quantity: 1_000, unitPriceMinor: Number.MAX_SAFE_INTEGER, taxMinor: 0 },
+        { quantity: 1_000, unitPriceMinor: 1, taxMinor: 0 },
+      ]),
+    ).toThrow(/supported amount range/);
+  });
+
   it("every payment posting balances, for any amount", () => {
     const accounts = { cash: "1000", ar: "1100" };
     fc.assert(

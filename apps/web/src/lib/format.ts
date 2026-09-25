@@ -31,7 +31,7 @@ const SYMBOLS: Record<string, string> = {
 
 let activeStyle: CurrencyStyle = FALLBACK_STYLE;
 
-/** Style for a currency code, or null when the code is not recognized. */
+/** Style for a three-letter currency code, or null when its shape is invalid. */
 export function currencyStyleFor(code: string): CurrencyStyle | null {
   const up = code.toUpperCase();
   const minorUnits = currencyMinorUnits(up);
@@ -87,6 +87,32 @@ export function toMinor(amount: string): number {
 /** Minor units back to a plain major-unit string for input fields. */
 export function minorToInput(minor: number): string {
   return String(minor / 10 ** activeStyle.minorUnits);
+}
+
+/** Parses a major-unit input using the minor-unit exponent of its own currency. */
+export function toMinorIn(code: string, amount: string): number {
+  const style = currencyStyleFor(code);
+  const raw = amount.trim();
+  if (!style || !raw) return raw ? Number.NaN : 0;
+  const match = raw.match(/^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))$/);
+  if (!match) return Number.NaN;
+  const sign = match[1] === "-" ? -1n : 1n;
+  const whole = match[2] ?? "0";
+  const fraction = match[3] ?? match[4] ?? "";
+  const factor = 10n ** BigInt(style.minorUnits);
+  const retained = fraction.slice(0, style.minorUnits).padEnd(style.minorUnits, "0");
+  let minor = BigInt(whole) * factor + BigInt(retained || "0");
+  if (fraction.length > style.minorUnits && fraction[style.minorUnits]! >= "5") minor += 1n;
+  minor *= sign;
+  if (minor > BigInt(Number.MAX_SAFE_INTEGER) || minor < BigInt(Number.MIN_SAFE_INTEGER)) return Number.NaN;
+  return Number(minor);
+}
+
+/** Formats a minor-unit amount as an ungrouped input value in its own currency. */
+export function minorToInputIn(code: string, minor: number): string {
+  const style = currencyStyleFor(code);
+  if (!style || !Number.isSafeInteger(minor)) return "";
+  return (minor / 10 ** style.minorUnits).toFixed(style.minorUnits);
 }
 
 export function formatDate(iso: string): string {

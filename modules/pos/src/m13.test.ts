@@ -10,6 +10,7 @@ import {
   journalLines,
   organizations,
   posSessions,
+  payments,
   stockMovements,
   type Database,
   purgeTenantFinancials,
@@ -50,7 +51,7 @@ beforeAll(async () => {
     await purgeTenantFinancials(db.db, o.id);
     await db.db.delete(organizations).where(eq(organizations.id, o.id));
   }
-  await db.db.insert(organizations).values({ id: orgId, name: "POS Return Probe", slug: `pr-${orgId.slice(0, 8)}` });
+  await db.db.insert(organizations).values({ id: orgId, name: "POS Return Probe", slug: `pr-${orgId.slice(0, 8)}`, baseCurrency: "UGX" });
   await db.db.insert(accounts).values([
     { orgId, code: "1000", name: "Cash", type: "asset" },
     { orgId, code: "2100", name: "Sales Tax Payable", type: "liability" },
@@ -79,14 +80,22 @@ describe("pos returns (M13.1)", () => {
   });
 
   it("a returned sale refunds, credits, restocks, and keeps books balanced", async () => {
-    const sale = await run("pos.completeSale", {
+    const saleInput = {
       sessionId,
       lines: [{ description: "Return gadget", quantity: 2_000, unitPriceMinor: 200_00, taxMinor: 0, sku: "RET-GADGET" }],
-      method: "cash",
-    });
+      method: "cash" as const,
+    };
+    const saleCap = makeRegistry().require("pos.completeSale");
+    expect(saleCap.moneyAmount?.(saleInput)).toBe(400_00);
+    const sale = await run("pos.completeSale", saleInput);
     expect(sale.totalMinor).toBe(400_00);
 
-    const [inv] = await db.db.select({ id: invoices.id }).from(invoices).where(eq(invoices.posSessionId, sessionId));
+    const [inv] = await db.db.select({ id: invoices.id, currency: invoices.currency }).from(invoices).where(eq(invoices.posSessionId, sessionId));
+    expect(inv!.currency).toBe("UGX");
+    const [payment] = await db.db.select({ amountMinor: payments.amountMinor }).from(payments).where(eq(payments.invoiceId, inv!.id));
+    expect(payment!.amountMinor).toBe(400_00);
+    const [entry] = await db.db.select({ currency: journalEntries.currency }).from(journalEntries).where(eq(journalEntries.sourceId, inv!.id));
+    expect(entry!.currency).toBe("UGX");
     const returned = await run("pos.returnSale", { invoiceId: inv!.id, reason: "customer changed mind" });
     expect(returned.creditedMinor).toBe(400_00);
     expect(returned.restockedLines).toBe(1);

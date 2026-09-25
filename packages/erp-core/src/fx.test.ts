@@ -62,10 +62,8 @@ describe("fxRateFromDecimal", () => {
           const dec = fxRateToDecimal({ num, den });
           const r = fxRateFromDecimal(dec);
           if (!r) return false;
-          if (terminating(den)) {
-            // Value equality across unreduced forms.
-            return BigInt(r.num) * BigInt(den) === BigInt(num) * BigInt(r.den);
-          }
+          const exact = BigInt(r.num) * BigInt(den) === BigInt(num) * BigInt(r.den);
+          if (terminating(den) && exact) return true;
           return Math.abs(r.num / r.den - num / den) < 1e-9;
         },
       ),
@@ -84,6 +82,13 @@ describe("applyRate / toBaseMinor", () => {
     expect(toBaseMinor(1, { num: 1, den: 2 })).toBe(1);
     expect(toBaseMinor(-1, { num: 1, den: 2 })).toBe(-1);
     expect(toBaseMinor(5, { num: 1, den: 2 })).toBe(3); // 2.5 → 3
+  });
+
+  it("converts between currency minor-unit exponents using major-unit rates", () => {
+    expect(toBaseMinor(100, { num: 1, den: 100 }, "JPY", "USD")).toBe(100);
+    expect(toBaseMinor(1_000, { num: 27, den: 100_000 }, "UGX", "USD")).toBe(27);
+    expect(toBaseMinor(100, { num: 1_500, den: 1 }, "USD", "UGX")).toBe(1_500);
+    expect(toBaseMinor(1_000, { num: 325, den: 100 }, "KWD", "USD")).toBe(325);
   });
 
   it("reconstructs the exact product: result*den + |remainder|*sign == amount*num", () => {

@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   accounts,
@@ -9,6 +9,8 @@ import {
   journalLines,
   poLines,
   purchaseOrders,
+  paymentRunLines,
+  paymentRuns,
   purchaseRequests,
   rfqs,
   stockMovements,
@@ -16,19 +18,23 @@ import {
   vendorBills,
   vendorPayments,
   vendors,
+  taxCodes,
+  taxProfiles,
 } from "@chaste/db";
 import { nextDocNumber } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import {
   canAcceptPayment,
   computeAging,
-  computeInvoiceTotals,
   documentBalance,
+  calculateTaxLine,
   matchThreeWay,
+  validatePaymentRun,
+  type PaymentRunSelection,
 } from "@chaste/erp-core";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
-import { postEntry } from "@chaste/module-accounting/posting";
+import { baseCurrencyOf, postEntry } from "@chaste/module-accounting/posting";
 import { applyStockDelta, lockStockItems } from "@chaste/module-inventory";
 
 export interface ModuleDeps {
@@ -74,6 +80,10 @@ const billLineSchema = z.object({
     .regex(/^\d{4}$/)
     .default("6000")
     .describe("chart-of-accounts code the cost lands on, e.g. 5000 for COGS"),
+  taxMinor: z.number().int().nonnegative().optional(),
+  taxCodeId: z.string().uuid().optional(),
+}).refine((line) => line.taxCodeId === undefined || line.taxMinor === undefined, {
+  message: "use a configured tax code or a manual tax amount, not both",
 });
 
 /**
@@ -110,6 +120,53 @@ const createBill = (deps: ModuleDeps) =>
     output: z.object({ billNumber: z.number(), totalMinor: z.number(), entryId: z.string() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const profileRows = await tx.select({ jurisdictionCode: taxProfiles.jurisdictionCode }).from(taxProfiles).where(eq(taxProfiles.orgId, ctx.actor.orgId)).limit(1);
+        const resolvedLines = [];
+        for (const line of input.lines) {
+          if (line.taxCodeId) {
+            const profile = profileRows[0];
+            if (!profile) throw new Error("set the organization tax jurisdiction before using tax codes");
+            const [code] = await tx.select().from(taxCodes).where(and(
+              eq(taxCodes.id, line.taxCodeId),
+              eq(taxCodes.orgId, ctx.actor.orgId),
+              eq(taxCodes.active, true),
+            )).limit(1);
+            if (!code) throw new Error("tax code not found or inactive");
+            if (code.jurisdictionCode !== profile.jurisdictionCode) throw new Error("tax code jurisdiction does not match the organization tax profile");
+            if (code.direction !== "input") throw new Error(`tax code ${code.code} is configured for output tax`);
+            const amounts = calculateTaxLine(line.quantity, line.unitPriceMinor, code.rateBasisPoints, code.priceIncludesTax);
+            resolvedLines.push({
+              ...line,
+              taxMinor: amounts.taxMinor,
+              netMinor: amounts.netMinor,
+              grossMinor: amounts.grossMinor,
+              taxCodeId: code.id,
+              rateBasisPoints: code.rateBasisPoints,
+              priceIncludesTax: code.priceIncludesTax,
+              recoverable: code.recoverable,
+              assetAccountCode: code.assetAccountCode,
+              matchingUnitPriceMinor: code.priceIncludesTax ? calculateTaxLine(1_000, line.unitPriceMinor, code.rateBasisPoints, true).netMinor : line.unitPriceMinor,
+            });
+          } else {
+            const amounts = calculateTaxLine(line.quantity, line.unitPriceMinor, 0);
+            const taxMinor = line.taxMinor ?? 0;
+            const grossMinor = amounts.netMinor + taxMinor;
+            if (!Number.isSafeInteger(grossMinor)) throw new Error("bill line exceeds the supported amount range");
+            resolvedLines.push({
+              ...line,
+              taxMinor,
+              netMinor: amounts.netMinor,
+              grossMinor,
+              taxCodeId: null,
+              rateBasisPoints: null,
+              priceIncludesTax: false,
+              recoverable: true,
+              assetAccountCode: "1205",
+              matchingUnitPriceMinor: line.unitPriceMinor,
+            });
+          }
+        }
+
         // Three-way match when the bill references an order: order ↔ receipts ↔ bill.
         if (input.poNumber !== undefined) {
           const [po] = await tx
@@ -152,7 +209,7 @@ const createBill = (deps: ModuleDeps) =>
               receivedQty: accepted - returned - priorBilled,
               billedQty: bl.quantity,
               poUnitPriceMinor: pol.unitPriceMinor,
-              billUnitPriceMinor: bl.unitPriceMinor,
+              billUnitPriceMinor: resolvedLines[input.lines.indexOf(bl)]!.matchingUnitPriceMinor,
             });
             if (violations.length > 0) {
               throw new Error(
@@ -170,10 +227,14 @@ const createBill = (deps: ModuleDeps) =>
           .where(and(eq(vendors.id, input.vendorId), eq(vendors.orgId, ctx.actor.orgId)))
           .limit(1);
         if (!vendor) throw new Error("vendor not found");
+        const baseCurrency = await baseCurrencyOf(tx, ctx.actor.orgId);
 
-        const totals = computeInvoiceTotals(
-          input.lines.map((l) => ({ quantity: l.quantity, unitPriceMinor: l.unitPriceMinor, taxMinor: 0 })),
-        );
+        const totals = {
+          subtotalMinor: resolvedLines.reduce((sum, line) => sum + line.netMinor, 0),
+          taxMinor: resolvedLines.reduce((sum, line) => sum + line.taxMinor, 0),
+          totalMinor: resolvedLines.reduce((sum, line) => sum + line.grossMinor, 0),
+        };
+        if (![totals.subtotalMinor, totals.taxMinor, totals.totalMinor].every(Number.isSafeInteger)) throw new Error("bill total exceeds the supported amount range");
 
         const billNumber = await nextDocNumber(tx, ctx.actor.orgId, "vendor_bill");
 
@@ -189,11 +250,15 @@ const createBill = (deps: ModuleDeps) =>
         }
 
         const glLines = [
-          ...input.lines.map((l) => ({
+          ...resolvedLines.map((l) => ({
             accountCode: l.expenseAccountCode,
-            debitMinor: Math.round((l.quantity * l.unitPriceMinor) / 1000),
+            debitMinor: l.recoverable ? l.netMinor : l.grossMinor,
             creditMinor: 0,
           })),
+          ...Array.from(resolvedLines.reduce((grouped, line) => {
+            if (line.recoverable && line.taxMinor > 0) grouped.set(line.assetAccountCode, (grouped.get(line.assetAccountCode) ?? 0) + line.taxMinor);
+            return grouped;
+          }, new Map<string, number>()), ([accountCode, taxMinor]) => ({ accountCode, debitMinor: taxMinor, creditMinor: 0 })),
           { accountCode: "2000", debitMinor: 0, creditMinor: totals.totalMinor },
         ].filter((l) => l.debitMinor !== 0 || l.creditMinor !== 0);
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
@@ -215,6 +280,7 @@ const createBill = (deps: ModuleDeps) =>
                 ? new Date(ctx.now.getTime() + vendor.paymentTermDays * 86_400_000)
                 : ctx.now,
             status: "open",
+            currency: baseCurrency,
             totalMinor: totals.totalMinor,
             memo: input.memo ?? null,
             entryId,
@@ -223,11 +289,15 @@ const createBill = (deps: ModuleDeps) =>
           .returning({ id: vendorBills.id });
 
         await tx.insert(vendorBillLines).values(
-          input.lines.map((l) => ({
+          resolvedLines.map((l) => ({
             billId: bill!.id,
             description: l.description,
             quantity: l.quantity,
             unitPriceMinor: l.unitPriceMinor,
+            taxMinor: l.taxMinor,
+            taxCodeId: l.taxCodeId,
+            taxRateBasisPoints: l.rateBasisPoints,
+            priceIncludesTax: l.priceIncludesTax,
             expenseAccountCode: l.expenseAccountCode,
             poLineId:
               input.poNumber !== undefined && l.poLineNumber
@@ -288,6 +358,7 @@ const payBill = (deps: ModuleDeps) =>
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Vendor payment for bill ${bill.number} (${input.method})`,
           sourceType: "vendor_payment",
+          currency: bill.currency,
           postedAt: ctx.now,
           lines: glLines,
         });
@@ -349,6 +420,8 @@ const reverseVendorPayment = (deps: ModuleDeps) =>
           .where(and(eq(vendorPayments.id, input.vendorPaymentId), eq(vendorPayments.orgId, ctx.actor.orgId)))
           .limit(1);
         if (!payment) throw new Error("vendor payment not found");
+        if (payment.paymentRunId) throw new Error("this payment belongs to a supplier payment run; reverse the complete run instead");
+        if (payment.status === "reversed") throw new Error("vendor payment has already been reversed");
         if (!payment.entryId) throw new Error("vendor payment has no journal entry to reverse");
 
         // Unique at the business-operation level: retries and replays find
@@ -424,6 +497,217 @@ const reverseVendorPayment = (deps: ModuleDeps) =>
     },
   });
 
+const createPaymentRun = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.createPaymentRun",
+    title: "Create supplier payment run",
+    intent: "Select outstanding supplier bills into one same-currency payment run for review, approval, and a consolidated bank instruction",
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    inverse: { capabilityId: "purchasing.cancelPaymentRunDraft", buildInput: (_input, output) => ({ paymentRunId: output.paymentRunId }) },
+    input: z.object({ memo: z.string().max(500).optional(), lines: z.array(z.object({ billId: z.string().uuid(), amountMinor: z.number().int().positive() })).min(1).max(100) }),
+    output: z.object({ paymentRunId: z.string(), reference: z.string(), currency: z.string(), totalMinor: z.number(), billCount: z.number() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const ids = input.lines.map((line) => line.billId);
+      const rows = await tx.select().from(vendorBills).where(and(eq(vendorBills.orgId, ctx.actor.orgId), inArray(vendorBills.id, ids))).orderBy(asc(vendorBills.id)).for("update");
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const selection: PaymentRunSelection[] = input.lines.map((line) => {
+        const bill = byId.get(line.billId);
+        if (!bill || bill.status === "void" || bill.voidedAt) throw new Error(`bill ${line.billId} is unavailable for payment`);
+        return { billId: bill.id, currency: bill.currency, outstandingMinor: documentBalance(bill).outstandingMinor, payMinor: line.amountMinor };
+      });
+      const validated = validatePaymentRun(selection);
+      const number = await nextDocNumber(tx, ctx.actor.orgId, "payment_run");
+      const reference = `PR-${String(number).padStart(6, "0")}`;
+      const [run] = await tx.insert(paymentRuns).values({
+        orgId: ctx.actor.orgId,
+        reference,
+        currency: validated.currency,
+        totalMinor: validated.totalMinor,
+        memo: input.memo ?? null,
+        createdByActorType: ctx.actor.type,
+        createdByActorId: ctx.actor.id,
+      }).returning({ id: paymentRuns.id });
+      await tx.insert(paymentRunLines).values(validated.lines.map((line) => ({
+        orgId: ctx.actor.orgId,
+        paymentRunId: run!.id,
+        vendorBillId: line.billId,
+        amountMinor: line.payMinor,
+      })));
+      return { paymentRunId: run!.id, reference, currency: validated.currency, totalMinor: validated.totalMinor, billCount: validated.billCount };
+    }),
+  });
+
+const cancelPaymentRunDraft = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.cancelPaymentRunDraft",
+    title: "Cancel payment run draft",
+    intent: "Cancel a supplier payment run that has not been approved or sent as a bank instruction",
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    inverse: { capabilityId: "purchasing.restorePaymentRunDraft", buildInput: (input) => input },
+    input: z.object({ paymentRunId: z.string().uuid() }),
+    output: z.object({ paymentRunId: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const changed = await tx.update(paymentRuns).set({ status: "cancelled" }).where(and(eq(paymentRuns.id, input.paymentRunId), eq(paymentRuns.orgId, ctx.actor.orgId), eq(paymentRuns.status, "draft"))).returning({ id: paymentRuns.id });
+      if (!changed.length) throw new Error("draft payment run not found");
+      return { paymentRunId: input.paymentRunId };
+    }),
+  });
+
+const restorePaymentRunDraft = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.restorePaymentRunDraft",
+    title: "Restore payment run draft",
+    intent: "Restore a cancelled supplier payment run draft that has never been instructed to a bank",
+    module: "purchasing",
+    risk: "write",
+    permission: "purchasing.write",
+    inverse: { capabilityId: "purchasing.cancelPaymentRunDraft", buildInput: (input) => input },
+    input: z.object({ paymentRunId: z.string().uuid() }),
+    output: z.object({ paymentRunId: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const changed = await tx.update(paymentRuns).set({ status: "draft" }).where(and(eq(paymentRuns.id, input.paymentRunId), eq(paymentRuns.orgId, ctx.actor.orgId), eq(paymentRuns.status, "cancelled"))).returning({ id: paymentRuns.id });
+      if (!changed.length) throw new Error("cancelled draft payment run not found");
+      return { paymentRunId: input.paymentRunId };
+    }),
+  });
+
+const instructPaymentRun = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.instructPaymentRun",
+    title: "Approve payment instructions",
+    intent: "Approve a reviewed supplier payment run, post its bill settlements once, and prepare one consolidated bank instruction for later statement confirmation",
+    module: "purchasing",
+    risk: "money",
+    permission: "purchasing.post",
+    moneyAmount: () => null,
+    inverse: { capabilityId: "purchasing.reversePaymentRun", buildInput: (_input, output) => ({ paymentRunId: output.paymentRunId, reason: "undo supplier payment instruction" }) },
+    input: z.object({ paymentRunId: z.string().uuid() }),
+    output: z.object({ paymentRunId: z.string(), reference: z.string(), currency: z.string(), totalMinor: z.number(), entryId: z.string(), billCount: z.number(), status: z.literal("instructed") }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const [run] = await tx.select().from(paymentRuns).where(and(eq(paymentRuns.id, input.paymentRunId), eq(paymentRuns.orgId, ctx.actor.orgId))).limit(1).for("update");
+      if (!run || run.status !== "draft") throw new Error("only a draft payment run can be approved");
+      const lines = await tx.select({ lineId: paymentRunLines.id, billId: paymentRunLines.vendorBillId, amountMinor: paymentRunLines.amountMinor })
+        .from(paymentRunLines).where(and(eq(paymentRunLines.paymentRunId, run.id), eq(paymentRunLines.orgId, ctx.actor.orgId))).orderBy(asc(paymentRunLines.vendorBillId));
+      const billIds = lines.map((line) => line.billId);
+      const bills = await tx.select().from(vendorBills).where(and(eq(vendorBills.orgId, ctx.actor.orgId), inArray(vendorBills.id, billIds))).orderBy(asc(vendorBills.id)).for("update");
+      const byId = new Map(bills.map((bill) => [bill.id, bill]));
+      const current: PaymentRunSelection[] = lines.map((line) => {
+        const bill = byId.get(line.billId);
+        if (!bill || bill.status === "void" || bill.voidedAt) throw new Error("a selected bill is no longer payable");
+        return { billId: bill.id, currency: bill.currency, outstandingMinor: documentBalance(bill).outstandingMinor, payMinor: Number(line.amountMinor) };
+      });
+      const validated = validatePaymentRun(current);
+      if (validated.currency !== run.currency || validated.totalMinor !== Number(run.totalMinor)) throw new Error("payment run total changed; cancel this draft and review the current bills");
+      const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+        memo: `Supplier payment run ${run.reference}`,
+        sourceType: "supplier_payment_run",
+        sourceId: run.id,
+        currency: run.currency,
+        postedAt: ctx.now,
+        lines: [
+          { accountCode: "2000", debitMinor: validated.totalMinor, creditMinor: 0 },
+          { accountCode: "1000", debitMinor: 0, creditMinor: validated.totalMinor },
+        ],
+      });
+      for (const line of lines) {
+        const bill = byId.get(line.billId)!;
+        const amountMinor = Number(line.amountMinor);
+        const [payment] = await tx.insert(vendorPayments).values({
+          orgId: ctx.actor.orgId,
+          billId: bill.id,
+          amountMinor,
+          method: "bank_transfer",
+          entryId,
+          paymentRunId: run.id,
+          status: "instructed",
+          paidAt: ctx.now,
+        }).returning({ id: vendorPayments.id });
+        await tx.update(paymentRunLines).set({ vendorPaymentId: payment!.id }).where(eq(paymentRunLines.id, line.lineId));
+        const paidMinor = bill.paidMinor + amountMinor;
+        const balance = documentBalance({ ...bill, paidMinor });
+        await tx.update(vendorBills).set({ paidMinor, status: balance.fullySettled ? "paid" : bill.status }).where(eq(vendorBills.id, bill.id));
+      }
+      await tx.update(paymentRuns).set({ status: "instructed", journalEntryId: entryId, instructedAt: ctx.now }).where(eq(paymentRuns.id, run.id));
+      return { paymentRunId: run.id, reference: run.reference, currency: run.currency, totalMinor: validated.totalMinor, entryId, billCount: lines.length, status: "instructed" as const };
+    }),
+  });
+
+const reversePaymentRun = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.reversePaymentRun",
+    title: "Reverse supplier payment run",
+    intent: "Reverse an instructed but not bank-confirmed supplier payment run, restore every bill balance, and retain the original instruction and reversal evidence",
+    module: "purchasing",
+    risk: "money",
+    permission: "purchasing.post",
+    moneyAmount: () => null,
+    // Terminal compensation: reinstating a run would repeat a bank instruction; a corrected payment must be a new approved run.
+    input: z.object({ paymentRunId: z.string().uuid(), reason: z.string().min(3).max(500) }),
+    output: z.object({ paymentRunId: z.string(), reversalEntryId: z.string(), status: z.literal("reversed") }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const [run] = await tx.select().from(paymentRuns).where(and(eq(paymentRuns.id, input.paymentRunId), eq(paymentRuns.orgId, ctx.actor.orgId))).limit(1).for("update");
+      if (!run || run.status !== "instructed" || !run.journalEntryId) throw new Error("only an instructed, unconfirmed run can be reversed; confirmed payments require a refund or bank correction");
+      const [original] = await tx.select().from(journalEntries).where(and(eq(journalEntries.id, run.journalEntryId), eq(journalEntries.orgId, ctx.actor.orgId))).limit(1);
+      if (!original) throw new Error("payment run journal entry not found");
+      const journal = await tx.select({ accountId: journalLines.accountId, debitMinor: journalLines.debitMinor, creditMinor: journalLines.creditMinor }).from(journalLines).where(eq(journalLines.entryId, original.id));
+      const reversalEntryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+        memo: `Reverse payment run ${run.reference}: ${input.reason}`,
+        sourceType: "supplier_payment_run_reversal",
+        sourceId: run.id,
+        reversalOfId: original.id,
+        currency: original.currency,
+        postedAt: ctx.now,
+        lines: journal.map((line) => ({ accountId: line.accountId, debitMinor: line.creditMinor, creditMinor: line.debitMinor })),
+      });
+      const paymentLines = await tx.select().from(paymentRunLines).where(and(eq(paymentRunLines.paymentRunId, run.id), eq(paymentRunLines.orgId, ctx.actor.orgId)));
+      for (const line of paymentLines) {
+        const [bill] = await tx.select().from(vendorBills).where(and(eq(vendorBills.id, line.vendorBillId), eq(vendorBills.orgId, ctx.actor.orgId))).limit(1).for("update");
+        if (!bill || bill.paidMinor < Number(line.amountMinor)) throw new Error("bill payment balance changed; the run cannot be reversed safely");
+        const paidMinor = bill.paidMinor - Number(line.amountMinor);
+        const balance = documentBalance({ ...bill, paidMinor });
+        await tx.update(vendorBills).set({ paidMinor, status: balance.fullySettled ? "paid" : "open" }).where(eq(vendorBills.id, bill.id));
+        if (line.vendorPaymentId) await tx.update(vendorPayments).set({ status: "reversed", reversedAt: ctx.now, reversalEntryId }).where(eq(vendorPayments.id, line.vendorPaymentId));
+      }
+      await tx.update(paymentRuns).set({ status: "reversed", reversalEntryId }).where(eq(paymentRuns.id, run.id));
+      return { paymentRunId: run.id, reversalEntryId, status: "reversed" as const };
+    }),
+  });
+
+const listPaymentRuns = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "purchasing.listPaymentRuns",
+    title: "List supplier payment runs",
+    intent: "List draft, instructed, confirmed, and reversed supplier payment runs with their bill-level remittance details and reconciliation state",
+    module: "purchasing",
+    risk: "read",
+    permission: "purchasing.read",
+    input: z.object({}),
+    output: z.object({ runs: z.array(z.object({ id: z.string(), reference: z.string(), currency: z.string(), totalMinor: z.number(), status: z.string(), createdAt: z.string(), instructedAt: z.string().nullable(), confirmedAt: z.string().nullable(), entryId: z.string().nullable(), lines: z.array(z.object({ billId: z.string(), billNumber: z.number(), vendorName: z.string(), vendorRef: z.string().nullable(), amountMinor: z.number() })) })) }),
+    execute: async (ctx) => {
+      const runs = await deps.db.select().from(paymentRuns).where(eq(paymentRuns.orgId, ctx.actor.orgId)).orderBy(desc(paymentRuns.createdAt)).limit(50);
+      const ids = runs.map((run) => run.id);
+      const lines = ids.length ? await deps.db.select({ runId: paymentRunLines.paymentRunId, billId: vendorBills.id, billNumber: vendorBills.number, vendorName: vendors.name, vendorRef: vendorBills.vendorRef, amountMinor: paymentRunLines.amountMinor })
+        .from(paymentRunLines).innerJoin(vendorBills, eq(vendorBills.id, paymentRunLines.vendorBillId)).innerJoin(vendors, eq(vendors.id, vendorBills.vendorId))
+        .where(and(eq(paymentRunLines.orgId, ctx.actor.orgId), inArray(paymentRunLines.paymentRunId, ids))).orderBy(asc(vendorBills.number)) : [];
+      return { runs: runs.map((run) => ({
+        id: run.id,
+        reference: run.reference,
+        currency: run.currency,
+        totalMinor: Number(run.totalMinor),
+        status: run.status,
+        createdAt: run.createdAt.toISOString(),
+        instructedAt: run.instructedAt?.toISOString() ?? null,
+        confirmedAt: run.confirmedAt?.toISOString() ?? null,
+        entryId: run.journalEntryId,
+        lines: lines.filter((line) => line.runId === run.id).map((line) => ({ billId: line.billId, billNumber: line.billNumber, vendorName: line.vendorName, vendorRef: line.vendorRef, amountMinor: Number(line.amountMinor) })),
+      })) };
+    },
+  });
+
 const apAging = (deps: ModuleDeps) =>
   defineCapability({
     id: "purchasing.apAging",
@@ -481,6 +765,7 @@ const createPO = (deps: ModuleDeps) =>
             description: z.string().min(1),
             quantity: z.number().int().positive().describe("thousandths of a unit"),
             unitPriceMinor: z.number().int().nonnegative(),
+            expenseAccountCode: z.string().regex(/^\d{4}$/).default("6000"),
             sku: z.string().optional().describe("links the line to a stocked item for receipts"),
           }),
         )
@@ -523,6 +808,7 @@ const createPO = (deps: ModuleDeps) =>
             description: l.description,
             quantity: l.quantity,
             unitPriceMinor: l.unitPriceMinor,
+            expenseAccountCode: l.expenseAccountCode,
             itemId: l.sku ? (itemMap.get(l.sku) ?? null) : null,
             // N16: stable display position, fixed at creation and never
             // renumbered - "line 1" means this line forever.
@@ -1072,6 +1358,20 @@ const billCreditNote = (deps: ModuleDeps) =>
             `credit ${input.amountMinor} exceeds the open balance ${balance} (total ${bill.totalMinor} − paid ${bill.paidMinor} − credited ${bill.creditedMinor})`,
           );
         }
+        const taxRows = await tx
+          .select({ taxMinor: vendorBillLines.taxMinor })
+          .from(vendorBillLines)
+          .innerJoin(taxCodes, eq(taxCodes.id, vendorBillLines.taxCodeId))
+          .where(and(
+            eq(vendorBillLines.billId, bill.id),
+            eq(taxCodes.direction, "input"),
+            eq(taxCodes.recoverable, true),
+          ));
+        const recoverableTax = taxRows.reduce((sum, row) => sum + BigInt(row.taxMinor), 0n);
+        const taxCreditMinor = bill.totalMinor === 0
+          ? 0
+          : Number((BigInt(input.amountMinor) * recoverableTax * 2n + BigInt(bill.totalMinor)) / (2n * BigInt(bill.totalMinor)));
+        const expenseCreditMinor = input.amountMinor - taxCreditMinor;
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `Supplier credit on bill ${bill.number}: ${input.reason}`,
           sourceType: "vendor_credit_note",
@@ -1080,7 +1380,8 @@ const billCreditNote = (deps: ModuleDeps) =>
           postedAt: ctx.now,
           lines: [
             { accountCode: "2000", debitMinor: input.amountMinor, creditMinor: 0 },
-            { accountCode: "6000", debitMinor: 0, creditMinor: input.amountMinor },
+            { accountCode: "6000", debitMinor: 0, creditMinor: expenseCreditMinor },
+            ...(taxCreditMinor > 0 ? [{ accountCode: "1205", debitMinor: 0, creditMinor: taxCreditMinor }] : []),
           ],
         });
         const credited = bill.creditedMinor + input.amountMinor;
@@ -1693,6 +1994,12 @@ export function registerPurchasingCapabilities(registry: CapabilityRegistry, dep
   registry.register(createBill(deps));
   registry.register(payBill(deps));
   registry.register(reverseVendorPayment(deps));
+  registry.register(createPaymentRun(deps));
+  registry.register(cancelPaymentRunDraft(deps));
+  registry.register(restorePaymentRunDraft(deps));
+  registry.register(instructPaymentRun(deps));
+  registry.register(reversePaymentRun(deps));
+  registry.register(listPaymentRuns(deps));
   registry.register(apAging(deps));
   registry.register(billCreditNote(deps));
   registry.register(closePurchaseOrder(deps));

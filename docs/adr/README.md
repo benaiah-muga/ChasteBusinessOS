@@ -69,6 +69,11 @@ the next number; superseded ones get a Status update, never deletion.
 | 0062 | Govern harness composition approval through the existing approval path | accepted |
 | 0063 | Record controlled evolution release handoffs without executing Creator source | accepted |
 | 0064 | Record Creator canary outcomes as release evidence | accepted |
+| 0065 | Tenant model providers and currency presentation | accepted |
+| 0066 | Document workspaces and virtual folders | accepted |
+| 0067 | Business paper design system | accepted |
+| 0068 | Messaging conversation UX and capabilities | accepted |
+| 0069 | Accounting workbenches separate planning, review, submission, and settlement | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

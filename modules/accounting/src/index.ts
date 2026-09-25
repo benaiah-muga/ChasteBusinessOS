@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, gt, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   accounts,
   bankAccounts,
   bankAllocations,
   bankTransactions,
+  budgetScenarios,
   customers,
   expenseClaims,
   expensePolicies,
@@ -19,19 +20,26 @@ import {
   recurringInvoices,
   recurringInvoiceRuns,
   salesTaxFilings,
+  taxCodes,
+  taxProfiles,
+  taxReturns,
   journalEntries,
   journalLines,
   organizations,
   payments,
   periods,
+  periodCloseChecks,
+  periodFxRevaluations,
+  paymentRuns,
   vendorBills,
+  vendorBillLines,
+  vendorPayments,
 } from "@chaste/db";
 import { nextDocNumber } from "@chaste/db";
 import { withOrgContext } from "@chaste/db";
 import { baseCurrencyOf, lockPeriodsForOrg, postEntry } from "./posting";
 import {
   buildCashFlowStatement,
-  buildInvoiceEntryLines,
   buildPaymentEntryLines,
   buildThirteenWeekForecast,
   cashBalanceFromEntries,
@@ -41,6 +49,10 @@ import {
   computeIncomeStatement,
   computeInvoiceTotals,
   computeYearEndClose,
+  applyBasisPointUplift,
+  calculateTaxLine,
+  fxRevaluationDeltaMinor,
+  calculateTaxSettlementDelta,
   canAcceptPayment,
   currencyMinorUnits,
   documentBalance,
@@ -60,6 +72,7 @@ import {
 } from "@chaste/erp-core";
 import type { Database } from "@chaste/db";
 import { defineCapability, type ActionContext, type CapabilityRegistry } from "@chaste/kernel";
+import { registerBudgetCapabilities } from "./budget";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -84,12 +97,16 @@ async function latestRate(
     .select({ num: fxRates.rateNum, den: fxRates.rateDen })
     .from(fxRates)
     .where(
-      and(eq(fxRates.orgId, orgId), eq(fxRates.base, base), eq(fxRates.quote, quote)),
+      and(
+        eq(fxRates.orgId, orgId),
+        eq(fxRates.base, base),
+        eq(fxRates.quote, quote),
+        lte(fxRates.effectiveAt, at),
+      ),
     )
     .orderBy(desc(fxRates.effectiveAt))
     .limit(1);
   if (!row || row.den === undefined) return null;
-  void at;
   return { num: Number(row.num), den: Number(row.den) };
 }
 
@@ -117,8 +134,94 @@ const lineSchema = z.object({
   description: z.string().min(1),
   quantity: z.number().int().positive().describe("thousandths of a unit; 1000 = one unit"),
   unitPriceMinor: z.number().int().nonnegative(),
-  taxMinor: z.number().int().nonnegative().default(0),
+  taxMinor: z.number().int().nonnegative().optional(),
+  taxCodeId: z.string().uuid().optional(),
+}).refine((line) => line.taxCodeId === undefined || line.taxMinor === undefined, {
+  message: "use a configured tax code or a manual tax amount, not both",
 });
+
+type TaxableLineInput = { description: string; quantity: number; unitPriceMinor: number; taxMinor?: number; taxCodeId?: string };
+type ResolvedTaxLine = Omit<TaxableLineInput, "taxMinor" | "taxCodeId"> & {
+  netMinor: number;
+  taxMinor: number;
+  grossMinor: number;
+  rateBasisPoints: number | null;
+  priceIncludesTax: boolean;
+  taxCodeId: string | null;
+  liabilityAccountCode: string;
+  assetAccountCode: string;
+  recoverable: boolean;
+};
+
+async function resolveTaxLines(
+  tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0],
+  orgId: string,
+  lines: TaxableLineInput[],
+  direction: "output" | "input",
+): Promise<ResolvedTaxLine[]> {
+  const profileRows = await tx.select({ jurisdictionCode: taxProfiles.jurisdictionCode }).from(taxProfiles).where(eq(taxProfiles.orgId, orgId)).limit(1);
+  const profile = profileRows[0];
+  const resolved: ResolvedTaxLine[] = [];
+  for (const line of lines) {
+    if (line.taxCodeId) {
+      if (!profile) throw new Error("set the organization tax jurisdiction before using tax codes");
+      const [code] = await tx.select().from(taxCodes).where(and(
+        eq(taxCodes.id, line.taxCodeId),
+        eq(taxCodes.orgId, orgId),
+        eq(taxCodes.active, true),
+      )).limit(1);
+      if (!code) throw new Error("tax code not found or inactive");
+      if (code.jurisdictionCode !== profile.jurisdictionCode) throw new Error("tax code jurisdiction does not match the organization tax profile");
+      if (code.direction !== direction) throw new Error(`tax code ${code.code} is configured for ${code.direction} tax`);
+      const amounts = calculateTaxLine(line.quantity, line.unitPriceMinor, code.rateBasisPoints, code.priceIncludesTax);
+      resolved.push({
+        ...line,
+        taxMinor: amounts.taxMinor,
+        netMinor: amounts.netMinor,
+        grossMinor: amounts.grossMinor,
+        rateBasisPoints: code.rateBasisPoints,
+        priceIncludesTax: code.priceIncludesTax,
+        taxCodeId: code.id,
+        liabilityAccountCode: code.liabilityAccountCode,
+        assetAccountCode: code.assetAccountCode,
+        recoverable: code.recoverable,
+      });
+      continue;
+    }
+    const base = calculateTaxLine(line.quantity, line.unitPriceMinor, 0);
+    const taxMinor = line.taxMinor ?? 0;
+    const grossMinor = base.netMinor + taxMinor;
+    if (!Number.isSafeInteger(grossMinor)) throw new Error("line total exceeds the supported amount range");
+    resolved.push({
+      ...line,
+      taxMinor,
+      netMinor: base.netMinor,
+      grossMinor,
+      rateBasisPoints: null,
+      priceIncludesTax: false,
+      taxCodeId: null,
+      liabilityAccountCode: direction === "output" ? "2100" : "1205",
+      assetAccountCode: "1205",
+      recoverable: true,
+    });
+  }
+  return resolved;
+}
+
+function sumResolvedTaxLines(lines: ResolvedTaxLine[]) {
+  const amounts = {
+    subtotalMinor: lines.reduce((sum, line) => sum + BigInt(line.netMinor), 0n),
+    taxMinor: lines.reduce((sum, line) => sum + BigInt(line.taxMinor), 0n),
+    totalMinor: lines.reduce((sum, line) => sum + BigInt(line.grossMinor), 0n),
+  };
+  const safeMax = BigInt(Number.MAX_SAFE_INTEGER);
+  if (Object.values(amounts).some((amount) => amount > safeMax)) throw new Error("document total exceeds the supported amount range");
+  return {
+    subtotalMinor: Number(amounts.subtotalMinor),
+    taxMinor: Number(amounts.taxMinor),
+    totalMinor: Number(amounts.totalMinor),
+  };
+}
 
 /**
  * Shared sales-document posting path: inserts the invoice + lines and posts
@@ -132,7 +235,7 @@ export async function insertInvoiceWithPosting(
   input: {
     customerId: string;
     memo?: string;
-    lines: Array<{ description: string; quantity: number; unitPriceMinor: number; taxMinor?: number }>;
+    lines: Array<{ description: string; quantity: number; unitPriceMinor: number; taxMinor?: number; taxCodeId?: string }>;
     currency?: string;
     fxRate?: string;
     /** Overrides the customer's payment-term default. */
@@ -146,9 +249,8 @@ export async function insertInvoiceWithPosting(
     .limit(1);
   if (cust.length === 0) throw new Error("customer not found");
 
-  const totals = computeInvoiceTotals(
-    input.lines.map((l) => ({ ...l, taxMinor: l.taxMinor ?? 0 })),
-  );
+  const resolvedLines = await resolveTaxLines(tx, ctx.actor.orgId, input.lines, "output");
+  const totals = sumResolvedTaxLines(resolvedLines);
   const base = await baseCurrencyOf(tx, ctx.actor.orgId);
   let currency = base;
   let rateSnapshot: FxRate | null = null;
@@ -195,19 +297,25 @@ export async function insertInvoiceWithPosting(
     .returning({ id: invoices.id });
 
   await tx.insert(invoiceLines).values(
-    input.lines.map((l) => ({
+    resolvedLines.map((l) => ({
       invoiceId: inv!.id,
       description: l.description,
       quantity: l.quantity,
       unitPriceMinor: l.unitPriceMinor,
-      taxMinor: l.taxMinor ?? 0,
+      taxMinor: l.taxMinor,
+      taxCodeId: l.taxCodeId,
+      taxRateBasisPoints: l.rateBasisPoints,
+      priceIncludesTax: l.priceIncludesTax,
     })),
   );
 
-  const lines = buildInvoiceEntryLines(
-    { ar: "1100", revenue: "4000", taxPayable: "2100" },
-    { totals },
-  );
+  const taxByAccount = new Map<string, number>();
+  for (const line of resolvedLines) taxByAccount.set(line.liabilityAccountCode, (taxByAccount.get(line.liabilityAccountCode) ?? 0) + line.taxMinor);
+  const lines = [
+    { accountCode: "1100", debitMinor: totals.totalMinor, creditMinor: 0 },
+    ...resolvedLines.map((line) => ({ accountCode: "4000", debitMinor: 0, creditMinor: line.netMinor })),
+    ...Array.from(taxByAccount, ([accountCode, taxMinor]) => ({ accountCode, debitMinor: 0, creditMinor: taxMinor })),
+  ].filter((line) => line.debitMinor !== 0 || line.creditMinor !== 0);
   const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
     memo: `Invoice ${number}${currency !== base ? ` (${currency})` : ""}`,
     sourceType: "invoice",
@@ -371,8 +479,8 @@ const recordPayment = (deps: ModuleDeps) =>
         if (invRate && invRate.den === settleRate.den && invRate.num === settleRate.num) {
           // Same rate: no realized gain/loss possible.
         }
-        const cashBase = toBaseMinor(input.amountMinor, settleRate);
-        const bookedBase = invRate ? toBaseMinor(input.amountMinor, invRate) : cashBase;
+        const cashBase = toBaseMinor(input.amountMinor, settleRate, inv.currency, base);
+        const bookedBase = invRate ? toBaseMinor(input.amountMinor, invRate, inv.currency, base) : cashBase;
         const gl = cashBase - bookedBase;
 
         const clearingId = await ensureAccount(
@@ -697,7 +805,7 @@ const trialBalance = (deps: ModuleDeps) =>
     permission: "accounting.read",
     input: z.object({}),
     output: z.object({
-      lines: z.array(z.object({ code: z.string(), name: z.string(), debitMinor: z.number(), creditMinor: z.number() })),
+      lines: z.array(z.object({ code: z.string(), name: z.string(), currency: z.string(), debitMinor: z.number(), creditMinor: z.number() })),
       balanced: z.boolean(),
     }),
     execute: async (ctx) => {
@@ -705,23 +813,31 @@ const trialBalance = (deps: ModuleDeps) =>
         .select({
           code: accounts.code,
           name: accounts.name,
-          debitMinor: sql<number>`coalesce(sum(${journalLines.debitMinor}), 0)`,
-          creditMinor: sql<number>`coalesce(sum(${journalLines.creditMinor}), 0)`,
+          currency: journalEntries.currency,
+          debitMinor: sql<string>`coalesce(sum(${journalLines.debitMinor}), 0)::text`,
+          creditMinor: sql<string>`coalesce(sum(${journalLines.creditMinor}), 0)::text`,
         })
         .from(accounts)
-        .leftJoin(journalLines, eq(journalLines.accountId, accounts.id))
-        .leftJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
+        .innerJoin(journalLines, eq(journalLines.accountId, accounts.id))
+        .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
         .where(and(eq(accounts.orgId, ctx.actor.orgId), sql`${journalEntries.orgId} = ${ctx.actor.orgId}`))
-        .groupBy(accounts.code, accounts.name)
-        .orderBy(accounts.code);
-      let debits = 0;
-      let credits = 0;
+        .groupBy(accounts.code, accounts.name, journalEntries.currency)
+        .orderBy(accounts.code, journalEntries.currency);
+      const totalsByCurrency = new Map<string, { debits: bigint; credits: bigint }>();
       const lines = rows.map((r) => {
-        debits += Number(r.debitMinor);
-        credits += Number(r.creditMinor);
-        return { code: r.code, name: r.name, debitMinor: Number(r.debitMinor), creditMinor: Number(r.creditMinor) };
+        const debit = BigInt(r.debitMinor);
+        const credit = BigInt(r.creditMinor);
+        const limit = BigInt(Number.MAX_SAFE_INTEGER);
+        if (debit > limit || credit > limit) throw new Error("trial balance exceeds the supported amount range");
+        const debitMinor = Number(debit);
+        const creditMinor = Number(credit);
+        const totals = totalsByCurrency.get(r.currency) ?? { debits: 0n, credits: 0n };
+        totals.debits += debit;
+        totals.credits += credit;
+        totalsByCurrency.set(r.currency, totals);
+        return { code: r.code, name: r.name, currency: r.currency, debitMinor, creditMinor };
       });
-      return { lines, balanced: debits === credits };
+      return { lines, balanced: [...totalsByCurrency.values()].every((t) => t.debits === t.credits) };
     },
   });
 
@@ -852,6 +968,7 @@ const listInvoices = (deps: ModuleDeps) =>
           customerId: z.string(),
           customerName: z.string(),
           status: z.string(),
+          currency: z.string(),
           totalMinor: z.number(),
           paidMinor: z.number(),
           creditedMinor: z.number(),
@@ -868,6 +985,7 @@ const listInvoices = (deps: ModuleDeps) =>
           customerId: invoices.customerId,
           customerName: customers.name,
           status: invoices.status,
+          currency: invoices.currency,
           totalMinor: invoices.totalMinor,
           paidMinor: invoices.paidMinor,
           creditedMinor: invoices.creditedMinor,
@@ -923,6 +1041,7 @@ const arAging = (deps: ModuleDeps) =>
       const rows = await deps.db
         .select({
           number: invoices.number,
+          currency: invoices.currency,
           totalMinor: invoices.totalMinor,
           paidMinor: invoices.paidMinor,
           creditedMinor: invoices.creditedMinor,
@@ -957,10 +1076,186 @@ const arAging = (deps: ModuleDeps) =>
         invoices: receivables.map((r) => ({
           number: r.invoiceNumber,
           outstandingMinor: r.outstandingMinor,
-          ageDays: Math.floor((ctx.now.getTime() - r.issuedAt.getTime()) / DAY),
+          ageDays: Math.floor((ctx.now.getTime() - (r.dueAt ?? r.issuedAt).getTime()) / DAY),
         })),
       };
     },
+  });
+
+const closeTaskDefinitions = [
+  { key: "review_journal", label: "Review journal activity", detail: "Scan unusual entries and confirm corrections are posted in the right period." },
+  { key: "review_receivables", label: "Review receivables", detail: "Check aged invoices, credits, and expected collections." },
+  { key: "review_payables", label: "Review payables", detail: "Check supplier bills, purchase commitments, and payment instructions." },
+  { key: "review_tax", label: "Review tax position", detail: "Confirm output and recoverable input tax are complete for the period." },
+] as const;
+
+async function loadPeriodCloseReadiness(
+  tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0],
+  orgId: string,
+  year: number,
+  month: number,
+) {
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 1));
+  const [unmatched] = await tx.select({ count: sql<number>`count(*)::integer` }).from(bankTransactions).where(and(
+    eq(bankTransactions.orgId, orgId),
+    gte(bankTransactions.postedAt, start),
+    lt(bankTransactions.postedAt, end),
+    eq(bankTransactions.status, "unmatched"),
+  ));
+  const base = await baseCurrencyOf(tx, orgId);
+  const foreignRows = await tx.select({
+    currency: invoices.currency,
+    outstanding: sql<string>`coalesce(sum(greatest(${invoices.totalMinor} - ${invoices.paidMinor} - ${invoices.creditedMinor}, 0)), 0)::text`,
+  }).from(invoices).where(and(
+    eq(invoices.orgId, orgId),
+    sql`${invoices.currency} <> ${base}`,
+    lt(invoices.issuedAt, end),
+    sql`${invoices.issuedAt} is not null`,
+    sql`${invoices.status} <> 'void'`,
+    sql`${invoices.voidedAt} is null`,
+  )).groupBy(invoices.currency);
+  const currenciesWithExposure = foreignRows.filter((row) => BigInt(row.outstanding) > 0n).map((row) => row.currency);
+  const [revaluation] = await tx.select().from(periodFxRevaluations).where(and(
+    eq(periodFxRevaluations.orgId, orgId),
+    eq(periodFxRevaluations.year, year),
+    eq(periodFxRevaluations.month, month),
+  )).limit(1);
+  const reversedEntries = revaluation?.entryId
+    ? await tx.select({ id: journalEntries.id }).from(journalEntries).where(and(eq(journalEntries.orgId, orgId), eq(journalEntries.reversalOfId, revaluation.entryId))).limit(1)
+    : [];
+  const fxReviewed = currenciesWithExposure.length === 0 || Boolean(revaluation && !revaluation.reversedAt && reversedEntries.length === 0);
+  const savedChecks = await tx.select().from(periodCloseChecks).where(and(
+    eq(periodCloseChecks.orgId, orgId), eq(periodCloseChecks.year, year), eq(periodCloseChecks.month, month),
+  ));
+  const byTask = new Map(savedChecks.map((check) => [check.taskKey, check]));
+  const tasks = [
+    ...closeTaskDefinitions.map((definition) => {
+      const check = byTask.get(definition.key);
+      return { ...definition, completed: check?.completed ?? false, note: check?.note ?? null, blocking: !(check?.completed ?? false), status: check?.completed ? "complete" : "needs_review" };
+    }),
+    {
+      key: "bank_reconciliation",
+      label: "Reconcile bank activity",
+      detail: Number(unmatched?.count ?? 0) > 0 ? `${Number(unmatched?.count ?? 0)} statement line(s) remain unmatched.` : "No unmatched statement lines in this period.",
+      completed: Number(unmatched?.count ?? 0) === 0,
+      note: null,
+      blocking: Number(unmatched?.count ?? 0) > 0,
+      status: Number(unmatched?.count ?? 0) > 0 ? "blocked" : "complete",
+    },
+    {
+      key: "fx_revaluation",
+      label: "Revalue foreign receivables",
+      detail: currenciesWithExposure.length > 0 ? `Open foreign receivables: ${currenciesWithExposure.join(", ")}.` : "No open foreign receivables need period-end revaluation.",
+      completed: fxReviewed,
+      note: null,
+      blocking: !fxReviewed,
+      status: fxReviewed ? "complete" : "needs_revaluation",
+    },
+  ];
+  const blockers = tasks.filter((task) => task.blocking).map((task) => task.key);
+  return { year, month, start: start.toISOString(), end: new Date(end.getTime() - 1).toISOString(), tasks, blockers, readyToClose: blockers.length === 0, unmatchedLineCount: Number(unmatched?.count ?? 0), currenciesWithExposure };
+}
+
+const periodCloseWorkbench = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.periodCloseWorkbench",
+    title: "Review period close readiness",
+    intent: "Show the month's reconciliation blockers, FX review, and accountant sign-off checklist before the period can be sealed",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: closePeriodInput,
+    output: z.object({ year: z.number(), month: z.number(), start: z.string(), end: z.string(), tasks: z.array(z.object({ key: z.string(), label: z.string(), detail: z.string(), completed: z.boolean(), note: z.string().nullable(), blocking: z.boolean(), status: z.string() })), blockers: z.array(z.string()), readyToClose: z.boolean(), unmatchedLineCount: z.number(), currenciesWithExposure: z.array(z.string()) }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, (tx) => loadPeriodCloseReadiness(tx, ctx.actor.orgId, input.year, input.month)),
+  });
+
+const periodCloseCheckInput = z.object({
+  year: closePeriodInput.shape.year,
+  month: closePeriodInput.shape.month,
+  taskKey: z.enum(["review_journal", "review_receivables", "review_payables", "review_tax"]),
+  completed: z.boolean(),
+  note: z.string().max(500).optional(),
+});
+
+const periodCloseCheckOutput = z.object({
+  updated: z.literal(true),
+  previousCompleted: z.boolean(),
+  previousNote: z.string().nullable(),
+});
+
+type PeriodCloseCheckInput = z.infer<typeof periodCloseCheckInput>;
+
+async function persistPeriodCloseCheck(deps: ModuleDeps, ctx: ActionContext, input: PeriodCloseCheckInput) {
+  return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+    const [previous] = await tx.select().from(periodCloseChecks).where(and(
+      eq(periodCloseChecks.orgId, ctx.actor.orgId),
+      eq(periodCloseChecks.year, input.year),
+      eq(periodCloseChecks.month, input.month),
+      eq(periodCloseChecks.taskKey, input.taskKey),
+    )).limit(1).for("update");
+    await tx.insert(periodCloseChecks).values({
+      orgId: ctx.actor.orgId,
+      year: input.year,
+      month: input.month,
+      taskKey: input.taskKey,
+      completed: input.completed,
+      note: input.note ?? null,
+      updatedByActorType: ctx.actor.type,
+      updatedByActorId: ctx.actor.id,
+      updatedAt: ctx.now,
+    }).onConflictDoUpdate({
+      target: [periodCloseChecks.orgId, periodCloseChecks.year, periodCloseChecks.month, periodCloseChecks.taskKey],
+      set: { completed: input.completed, note: input.note ?? null, updatedByActorType: ctx.actor.type, updatedByActorId: ctx.actor.id, updatedAt: ctx.now },
+    });
+    return { updated: true as const, previousCompleted: previous?.completed ?? false, previousNote: previous?.note ?? null };
+  });
+}
+
+const updatePeriodCloseCheck = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.updatePeriodCloseCheck",
+    title: "Update close checklist",
+    intent: "Record or undo an accountant's explicit review of journals, receivables, payables, or tax for one month-end close",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    inverse: {
+      capabilityId: "accounting.restorePeriodCloseCheck",
+      buildInput: (input, output) => ({
+        year: input.year,
+        month: input.month,
+        taskKey: input.taskKey,
+        completed: output.previousCompleted,
+        note: output.previousNote ?? undefined,
+      }),
+    },
+    input: periodCloseCheckInput,
+    output: periodCloseCheckOutput,
+    execute: (ctx, input) => persistPeriodCloseCheck(deps, ctx, input),
+  });
+
+const restorePeriodCloseCheck = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.restorePeriodCloseCheck",
+    title: "Restore close checklist state",
+    intent: "Restore the prior accountant sign-off state for a month-end close checklist item while retaining the new change in the audit history",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    inverse: {
+      capabilityId: "accounting.updatePeriodCloseCheck",
+      buildInput: (input, output) => ({
+        year: input.year,
+        month: input.month,
+        taskKey: input.taskKey,
+        completed: output.previousCompleted,
+        note: output.previousNote ?? undefined,
+      }),
+    },
+    input: periodCloseCheckInput,
+    output: periodCloseCheckOutput,
+    execute: (ctx, input) => persistPeriodCloseCheck(deps, ctx, input),
   });
 
 const closePeriod = (deps: ModuleDeps) =>
@@ -984,6 +1279,8 @@ const closePeriod = (deps: ModuleDeps) =>
       // posting landed first or it refuses the sealed month.
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         await lockPeriodsForOrg(tx, ctx.actor.orgId);
+        const readiness = await loadPeriodCloseReadiness(tx, ctx.actor.orgId, input.year, input.month);
+        if (!readiness.readyToClose) throw new Error(`complete the close checklist first: ${readiness.blockers.join(", ")}`);
         await tx
           .insert(periods)
           .values({ orgId: ctx.actor.orgId, year: input.year, month: input.month, closedByActorId: ctx.actor.id })
@@ -1277,12 +1574,129 @@ const unrealizedFxExposure = (deps: ModuleDeps) =>
             outstandingForeignMinor: outstanding,
             latestRateNum: rate?.num ?? null,
             latestRateDen: rate?.den ?? null,
-            outstandingBaseMinor: rate ? toBaseMinor(outstanding, rate) : null,
+            outstandingBaseMinor: rate ? toBaseMinor(outstanding, rate, r.currency, base) : null,
           });
         }
         return { exposures };
       });
     },
+  });
+
+const revalueForeignReceivables = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.revalueForeignReceivables",
+    title: "Revalue foreign receivables",
+    intent: "Post a balanced month-end foreign-exchange adjustment for open foreign-currency receivables using the latest rate effective on the period-end date",
+    module: "accounting",
+    risk: "money",
+    permission: "accounting.post",
+    moneyAmount: () => null,
+    inverse: { capabilityId: "accounting.reversePeriodFxRevaluation", buildInput: (_input, output) => ({ revaluationId: output.revaluationId, reason: "undo period-end FX revaluation" }) },
+    input: closePeriodInput,
+    output: z.object({ revaluationId: z.string(), entryId: z.string().nullable(), totalAdjustmentMinor: z.number(), currencies: z.array(z.object({ currency: z.string(), foreignMinor: z.number(), historicalBaseMinor: z.number(), closeBaseMinor: z.number(), adjustmentMinor: z.number(), rateNum: z.number(), rateDen: z.number() })), alreadyReviewed: z.boolean() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const base = await baseCurrencyOf(tx, ctx.actor.orgId);
+      const nextMonth = new Date(Date.UTC(input.year, input.month, 1));
+      const periodEnd = new Date(nextMonth.getTime() - 1);
+      const rows = await tx.select({
+        currency: invoices.currency,
+        totalMinor: invoices.totalMinor,
+        paidMinor: invoices.paidMinor,
+        creditedMinor: invoices.creditedMinor,
+        fxRateNum: invoices.fxRateNum,
+        fxRateDen: invoices.fxRateDen,
+      }).from(invoices).where(and(
+        eq(invoices.orgId, ctx.actor.orgId),
+        sql`${invoices.currency} <> ${base}`,
+        lt(invoices.issuedAt, nextMonth),
+        sql`${invoices.status} <> 'void'`,
+        sql`${invoices.voidedAt} is null`,
+      ));
+      const totals = new Map<string, { foreignMinor: number; historicalBaseMinor: number }>();
+      for (const row of rows) {
+        const outstanding = documentBalance({ totalMinor: row.totalMinor, paidMinor: row.paidMinor, creditedMinor: row.creditedMinor }).outstandingMinor;
+        if (outstanding <= 0) continue;
+        if (row.fxRateNum === null || row.fxRateDen === null) throw new Error(`invoice in ${row.currency} has no historical FX snapshot`);
+        const previous = totals.get(row.currency) ?? { foreignMinor: 0, historicalBaseMinor: 0 };
+        previous.foreignMinor += outstanding;
+        previous.historicalBaseMinor += toBaseMinor(outstanding, { num: Number(row.fxRateNum), den: row.fxRateDen }, row.currency, base);
+        totals.set(row.currency, previous);
+      }
+      const currencies = [] as Array<{ currency: string; foreignMinor: number; historicalBaseMinor: number; closeBaseMinor: number; adjustmentMinor: number; rateNum: number; rateDen: number }>;
+      for (const [currency, values] of [...totals.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+        const rate = await latestRate(tx, ctx.actor.orgId, base, currency, periodEnd);
+        if (!rate) throw new Error(`no ${base}/${currency} rate effective at period end; record a close rate before revaluation`);
+        const closeBaseMinor = toBaseMinor(values.foreignMinor, rate, currency, base);
+        currencies.push({ currency, ...values, closeBaseMinor, adjustmentMinor: fxRevaluationDeltaMinor(values.foreignMinor, values.historicalBaseMinor, closeBaseMinor), rateNum: rate.num, rateDen: rate.den });
+      }
+      const totalAdjustmentMinor = currencies.reduce((sum, row) => sum + row.adjustmentMinor, 0);
+      if (!Number.isSafeInteger(totalAdjustmentMinor)) throw new Error("FX adjustment exceeds the supported amount range");
+      const [existing] = await tx.select().from(periodFxRevaluations).where(and(
+        eq(periodFxRevaluations.orgId, ctx.actor.orgId), eq(periodFxRevaluations.year, input.year), eq(periodFxRevaluations.month, input.month),
+      )).limit(1).for("update");
+      if (existing && !existing.reversedAt) throw new Error("this period already has an FX revaluation; reverse it before recalculating");
+      let entryId: string | null = null;
+      if (totalAdjustmentMinor !== 0) {
+        await ensureAccount(tx, ctx.actor.orgId, "7910", "Unrealized FX gain", "income");
+        await ensureAccount(tx, ctx.actor.orgId, "7911", "Unrealized FX loss", "expense");
+        entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `FX revaluation ${input.year}-${String(input.month).padStart(2, "0")}`,
+          sourceType: "fx_revaluation",
+          postedAt: periodEnd,
+          currency: base,
+          lines: totalAdjustmentMinor > 0
+            ? [{ accountCode: "1100", debitMinor: totalAdjustmentMinor, creditMinor: 0 }, { accountCode: "7910", debitMinor: 0, creditMinor: totalAdjustmentMinor }]
+            : [{ accountCode: "7911", debitMinor: -totalAdjustmentMinor, creditMinor: 0 }, { accountCode: "1100", debitMinor: 0, creditMinor: -totalAdjustmentMinor }],
+        });
+      }
+      const snapshot = currencies.map(({ currency, rateNum, rateDen, foreignMinor, historicalBaseMinor, closeBaseMinor }) => ({ currency, rateNum, rateDen, foreignMinor, historicalBaseMinor, closeBaseMinor }));
+      let revaluationId: string;
+      if (existing) {
+        const [updated] = await tx.update(periodFxRevaluations).set({ entryId, reversalEntryId: null, reversedAt: null, totalAdjustmentMinor, rateSnapshot: snapshot, reviewedAt: ctx.now }).where(eq(periodFxRevaluations.id, existing.id)).returning({ id: periodFxRevaluations.id });
+        revaluationId = updated!.id;
+      } else {
+        const [created] = await tx.insert(periodFxRevaluations).values({ orgId: ctx.actor.orgId, year: input.year, month: input.month, entryId, totalAdjustmentMinor, rateSnapshot: snapshot, reviewedAt: ctx.now }).returning({ id: periodFxRevaluations.id });
+        revaluationId = created!.id;
+      }
+      return { revaluationId, entryId, totalAdjustmentMinor, currencies, alreadyReviewed: Boolean(existing && !existing.reversedAt) };
+    }),
+  });
+
+const reversePeriodFxRevaluation = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.reversePeriodFxRevaluation",
+    title: "Reverse FX revaluation",
+    intent: "Reverse a period-end FX revaluation with an equal and opposite immutable journal entry so the close can be recalculated from corrected rates",
+    module: "accounting",
+    risk: "money",
+    permission: "accounting.post",
+    moneyAmount: () => null,
+    inverse: { capabilityId: "accounting.revalueForeignReceivables", buildInput: (_input, output) => ({ year: output.year, month: output.month }) },
+    input: z.object({ revaluationId: z.string().uuid(), reason: z.string().min(3).max(500) }),
+    output: z.object({ entryId: z.string().nullable(), year: z.number(), month: z.number() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const [row] = await tx.select().from(periodFxRevaluations).where(and(
+        eq(periodFxRevaluations.id, input.revaluationId), eq(periodFxRevaluations.orgId, ctx.actor.orgId),
+      )).limit(1).for("update");
+      if (!row || row.reversedAt) throw new Error("FX revaluation not found or already reversed");
+      let entryId: string | null = null;
+      if (row.entryId) {
+        const [original] = await tx.select().from(journalEntries).where(and(eq(journalEntries.id, row.entryId), eq(journalEntries.orgId, ctx.actor.orgId))).limit(1);
+        if (!original) throw new Error("FX revaluation journal entry not found");
+        const lines = await tx.select({ accountId: journalLines.accountId, debitMinor: journalLines.debitMinor, creditMinor: journalLines.creditMinor }).from(journalLines).where(eq(journalLines.entryId, row.entryId));
+        entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
+          memo: `Reverse FX revaluation ${row.year}-${String(row.month).padStart(2, "0")}: ${input.reason}`,
+          sourceType: "fx_revaluation_reversal",
+          sourceId: row.id,
+          reversalOfId: original.id,
+          currency: original.currency,
+          postedAt: ctx.now,
+          lines: lines.map((line) => ({ accountId: line.accountId, debitMinor: line.creditMinor, creditMinor: line.debitMinor })),
+        });
+      }
+      await tx.update(periodFxRevaluations).set({ reversedAt: ctx.now, reversalEntryId: entryId }).where(eq(periodFxRevaluations.id, row.id));
+      return { entryId, year: row.year, month: row.month };
+    }),
   });
 
 
@@ -1496,6 +1910,7 @@ const quoteList = (deps: ModuleDeps) =>
           totalMinor: z.number(),
           customerId: z.string(),
           createdAt: z.date(),
+          expiresAt: z.date().nullable(),
           invoiceId: z.string().nullable(),
         }),
       ),
@@ -1509,6 +1924,7 @@ const quoteList = (deps: ModuleDeps) =>
           totalMinor: quotes.totalMinor,
           customerId: quotes.customerId,
           createdAt: quotes.createdAt,
+          expiresAt: quotes.expiresAt,
           invoiceId: quotes.convertedInvoiceId,
         })
         .from(quotes)
@@ -2022,18 +2438,19 @@ const addBankAccount = (deps: ModuleDeps) =>
     // is simply left dormant rather than erased.
     input: z.object({
       name: z.string().min(1),
-      currencyCode: z.string().length(3).uppercase().default("USD"),
+      currencyCode: z.string().length(3).uppercase().refine((code) => currencyMinorUnits(code) !== null).optional(),
       last4: z.string().regex(/^\d{4}$/).optional(),
       balanceMinor: z.number().int().default(0),
     }),
     output: z.object({ bankAccountId: z.string() }),
     execute: async (ctx, input) => {
+      const currencyCode = input.currencyCode ?? (await baseCurrencyOf(deps.db, ctx.actor.orgId));
       const [row] = await deps.db
         .insert(bankAccounts)
         .values({
           orgId: ctx.actor.orgId,
           name: input.name,
-          currencyCode: input.currencyCode,
+          currencyCode,
           last4: input.last4 ?? null,
           balanceMinor: input.balanceMinor,
         })
@@ -2343,6 +2760,18 @@ const matchBankTransaction = (deps: ModuleDeps) =>
             amountMinor: unexplained,
             note: input.note ?? null,
           });
+          const [paymentRun] = await tx.select({ id: paymentRuns.id }).from(paymentRuns).where(and(
+            eq(paymentRuns.orgId, ctx.actor.orgId),
+            eq(paymentRuns.journalEntryId, e.id),
+            eq(paymentRuns.status, "instructed"),
+          )).limit(1);
+          if (paymentRun && cashNet < 0) {
+            await tx.update(paymentRuns).set({ status: "confirmed", confirmedAt: ctx.now }).where(eq(paymentRuns.id, paymentRun.id));
+            await tx.update(vendorPayments).set({ status: "settled" }).where(and(
+              eq(vendorPayments.paymentRunId, paymentRun.id),
+              eq(vendorPayments.status, "instructed"),
+            ));
+          }
         }
 
         const allocatedMinor =
@@ -2613,12 +3042,246 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 function dateWindow(fromIso: string, toIso: string): { start: Date; end: Date } {
   const start = new Date(`${fromIso}T00:00:00Z`);
   const endExclusive = new Date(`${toIso}T00:00:00Z`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(endExclusive.getTime())) {
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(endExclusive.getTime()) ||
+    start.toISOString().slice(0, 10) !== fromIso ||
+    endExclusive.toISOString().slice(0, 10) !== toIso
+  ) {
     throw new Error("dates must be YYYY-MM-DD");
   }
   if (endExclusive < start) throw new Error("`to` is before `from`");
   endExclusive.setUTCDate(endExclusive.getUTCDate() + 1); // include the `to` day
   return { start, end: endExclusive };
+}
+
+async function salesTaxWindow(
+  tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0],
+  orgId: string,
+  fromIso: string,
+  toIso: string,
+) {
+  const { start, end } = dateWindow(fromIso, toIso);
+  const baseCurrency = await baseCurrencyOf(tx, orgId);
+  const invoiceRows = await tx
+    .select({ currency: invoices.currency, subtotalMinor: invoices.subtotalMinor, taxMinor: invoices.taxMinor })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.orgId, orgId),
+        gte(invoices.issuedAt, start),
+        lt(invoices.issuedAt, end),
+        sql`${invoices.status} <> 'void'`,
+        sql`${invoices.voidedAt} is null`,
+      ),
+    );
+  const outputTaxRows = await tx
+    .select({
+      currency: invoices.currency,
+      quantity: invoiceLines.quantity,
+      unitPriceMinor: invoiceLines.unitPriceMinor,
+      taxMinor: invoiceLines.taxMinor,
+      taxRateBasisPoints: invoiceLines.taxRateBasisPoints,
+      priceIncludesTax: invoiceLines.priceIncludesTax,
+      code: taxCodes.code,
+      name: taxCodes.name,
+    })
+    .from(invoiceLines)
+    .innerJoin(invoices, eq(invoices.id, invoiceLines.invoiceId))
+    .leftJoin(taxCodes, eq(taxCodes.id, invoiceLines.taxCodeId))
+    .where(and(
+      eq(invoices.orgId, orgId),
+      gte(invoices.issuedAt, start),
+      lt(invoices.issuedAt, end),
+      sql`${invoices.status} <> 'void'`,
+      sql`${invoices.voidedAt} is null`,
+    ));
+  const creditRows = await tx
+    .select({
+      sourceId: journalEntries.sourceId,
+      currency: journalEntries.currency,
+      code: accounts.code,
+      debitMinor: sql<string>`coalesce(sum(${journalLines.debitMinor}), 0)::text`,
+    })
+    .from(journalEntries)
+    .innerJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
+    .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+    .where(
+      and(
+        eq(journalEntries.orgId, orgId),
+        eq(journalEntries.sourceType, "invoice_credit_note"),
+        gte(journalEntries.postedAt, start),
+        lt(journalEntries.postedAt, end),
+        inArray(accounts.code, ["4000", "2100"]),
+      ),
+    )
+    .groupBy(journalEntries.sourceId, journalEntries.currency, accounts.code);
+
+  const inputTaxRows = await tx
+    .select({
+      currency: vendorBills.currency,
+      quantity: vendorBillLines.quantity,
+      unitPriceMinor: vendorBillLines.unitPriceMinor,
+      taxMinor: vendorBillLines.taxMinor,
+      taxRateBasisPoints: vendorBillLines.taxRateBasisPoints,
+      priceIncludesTax: vendorBillLines.priceIncludesTax,
+      code: taxCodes.code,
+      name: taxCodes.name,
+    })
+    .from(vendorBillLines)
+    .innerJoin(vendorBills, eq(vendorBills.id, vendorBillLines.billId))
+    .innerJoin(taxCodes, eq(taxCodes.id, vendorBillLines.taxCodeId))
+    .where(and(
+      eq(vendorBills.orgId, orgId),
+      gte(vendorBills.billDate, start),
+      lt(vendorBills.billDate, end),
+      eq(taxCodes.direction, "input"),
+      eq(taxCodes.recoverable, true),
+      sql`${vendorBills.status} <> 'void'`,
+    ));
+
+  const supplierCreditRows = await tx
+    .select({
+      sourceId: journalEntries.sourceId,
+      currency: journalEntries.currency,
+      creditMinor: sql<string>`coalesce(sum(${journalLines.creditMinor}), 0)::text`,
+    })
+    .from(journalEntries)
+    .innerJoin(journalLines, eq(journalLines.entryId, journalEntries.id))
+    .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+    .where(and(
+      eq(journalEntries.orgId, orgId),
+      eq(journalEntries.sourceType, "vendor_credit_note"),
+      gte(journalEntries.postedAt, start),
+      lt(journalEntries.postedAt, end),
+      eq(accounts.code, "1205"),
+    ))
+    .groupBy(journalEntries.sourceId, journalEntries.currency);
+
+  let taxableSales = 0n;
+  let taxCollected = 0n;
+  let recoverableInputTax = 0n;
+  let unsupportedForeignCount = 0;
+  const breakdown = new Map<string, {
+    code: string;
+    name: string;
+    direction: "output" | "input";
+    rateBasisPoints: number | null;
+    priceIncludesTax: boolean;
+    recoverable: boolean;
+    taxableBaseMinor: bigint;
+    taxMinor: bigint;
+    lineCount: number;
+  }>();
+  const addBreakdown = (line: {
+    code: string;
+    name: string;
+    direction: "output" | "input";
+    rateBasisPoints: number | null;
+    priceIncludesTax: boolean;
+    recoverable: boolean;
+    taxableBaseMinor: bigint;
+    taxMinor: bigint;
+  }) => {
+    const key = `${line.direction}:${line.code}`;
+    const prior = breakdown.get(key);
+    breakdown.set(key, {
+      ...line,
+      taxableBaseMinor: (prior?.taxableBaseMinor ?? 0n) + line.taxableBaseMinor,
+      taxMinor: (prior?.taxMinor ?? 0n) + line.taxMinor,
+      lineCount: (prior?.lineCount ?? 0) + 1,
+    });
+  };
+  for (const invoice of invoiceRows) {
+    if (invoice.currency !== baseCurrency) {
+      unsupportedForeignCount += 1;
+      continue;
+    }
+    taxableSales += BigInt(invoice.subtotalMinor);
+    taxCollected += BigInt(invoice.taxMinor);
+  }
+  for (const line of outputTaxRows) {
+    if (line.currency !== baseCurrency) continue;
+    const amounts = calculateTaxLine(line.quantity, line.unitPriceMinor, line.taxRateBasisPoints ?? 0, line.priceIncludesTax);
+    addBreakdown({
+      code: line.code ?? "MANUAL",
+      name: line.name ?? "Manual tax",
+      direction: "output",
+      rateBasisPoints: line.taxRateBasisPoints,
+      priceIncludesTax: line.priceIncludesTax,
+      recoverable: false,
+      taxableBaseMinor: BigInt(amounts.netMinor),
+      taxMinor: BigInt(line.taxMinor),
+    });
+  }
+  for (const billLine of inputTaxRows) {
+    if (billLine.currency !== baseCurrency) {
+      unsupportedForeignCount += 1;
+      continue;
+    }
+    recoverableInputTax += BigInt(billLine.taxMinor);
+    const amounts = calculateTaxLine(billLine.quantity, billLine.unitPriceMinor, billLine.taxRateBasisPoints ?? 0, billLine.priceIncludesTax);
+    addBreakdown({
+      code: billLine.code ?? "MANUAL",
+      name: billLine.name ?? "Manual tax",
+      direction: "input",
+      rateBasisPoints: billLine.taxRateBasisPoints,
+      priceIncludesTax: billLine.priceIncludesTax,
+      recoverable: true,
+      taxableBaseMinor: BigInt(amounts.netMinor),
+      taxMinor: BigInt(billLine.taxMinor),
+    });
+  }
+  const foreignCreditNotes = new Set<string>();
+  for (const credit of creditRows) {
+    if (credit.currency !== baseCurrency) {
+      foreignCreditNotes.add(credit.sourceId ?? "unknown");
+      continue;
+    }
+    const amount = BigInt(credit.debitMinor);
+    if (credit.code === "4000") {
+      taxableSales -= amount;
+      addBreakdown({ code: "CREDIT_NOTE_ADJUSTMENT", name: "Sales credit note adjustments", direction: "output", rateBasisPoints: null, priceIncludesTax: false, recoverable: false, taxableBaseMinor: -amount, taxMinor: 0n });
+    }
+    if (credit.code === "2100") {
+      taxCollected -= amount;
+      addBreakdown({ code: "CREDIT_NOTE_ADJUSTMENT", name: "Sales credit note adjustments", direction: "output", rateBasisPoints: null, priceIncludesTax: false, recoverable: false, taxableBaseMinor: 0n, taxMinor: -amount });
+    }
+  }
+  for (const credit of supplierCreditRows) {
+    if (credit.currency !== baseCurrency) {
+      foreignCreditNotes.add(credit.sourceId ?? "unknown");
+      continue;
+    }
+    recoverableInputTax -= BigInt(credit.creditMinor);
+    addBreakdown({ code: "SUPPLIER_CREDIT_ADJUSTMENT", name: "Supplier credit note adjustments", direction: "input", rateBasisPoints: null, priceIncludesTax: false, recoverable: true, taxableBaseMinor: 0n, taxMinor: -BigInt(credit.creditMinor) });
+  }
+  unsupportedForeignCount += foreignCreditNotes.size;
+  const netTax = taxCollected - recoverableInputTax;
+  const min = BigInt(Number.MIN_SAFE_INTEGER);
+  const max = BigInt(Number.MAX_SAFE_INTEGER);
+  if ([taxableSales, taxCollected, recoverableInputTax, netTax].some((amount) => amount < min || amount > max)) {
+    throw new Error("sales tax report exceeds the supported amount range");
+  }
+  const taxBreakdown = [...breakdown.values()].map((line) => {
+    if ([line.taxableBaseMinor, line.taxMinor].some((amount) => amount < min || amount > max)) throw new Error("tax code breakdown exceeds the supported amount range");
+    return { ...line, taxableBaseMinor: Number(line.taxableBaseMinor), taxMinor: Number(line.taxMinor) };
+  });
+  const outputBreakdownTax = taxBreakdown.filter((line) => line.direction === "output").reduce((sum, line) => sum + BigInt(line.taxMinor), 0n);
+  const inputBreakdownTax = taxBreakdown.filter((line) => line.direction === "input").reduce((sum, line) => sum + BigInt(line.taxMinor), 0n);
+  const salesBreakdownBase = taxBreakdown.filter((line) => line.direction === "output").reduce((sum, line) => sum + BigInt(line.taxableBaseMinor), 0n);
+  if (outputBreakdownTax !== taxCollected || inputBreakdownTax !== recoverableInputTax || salesBreakdownBase !== taxableSales) {
+    throw new Error("tax code breakdown does not reconcile to the jurisdiction return totals");
+  }
+  return {
+    baseCurrency,
+    taxableSalesMinor: Number(taxableSales),
+    taxCollectedMinor: Number(taxCollected),
+    recoverableInputTaxMinor: Number(recoverableInputTax),
+    netTaxMinor: Number(netTax),
+    unsupportedForeignCount,
+    taxBreakdown,
+  };
 }
 
 const salesTaxReport = (deps: ModuleDeps) =>
@@ -2634,39 +3297,309 @@ const salesTaxReport = (deps: ModuleDeps) =>
     output: z.object({
       taxableSalesMinor: z.number(),
       taxCollectedMinor: z.number(),
-      /** Collected-side only: vendor bill lines carry no tax column today. */
-      basis: z.literal("invoice-tax-minor"),
+      recoverableInputTaxMinor: z.number(),
+      netTaxMinor: z.number(),
+      baseCurrency: z.string(),
+      unsupportedForeignCount: z.number().int().nonnegative(),
+      basis: z.literal("tax-code-and-document-snapshots"),
     }),
     execute: async (ctx, input) => {
-      const { start, end } = dateWindow(input.from, input.to);
-      const [row] = await deps.db
-        .select({
-          taxable: sql<number>`coalesce(sum(${invoices.subtotalMinor}), 0)`,
-          tax: sql<number>`coalesce(sum(${invoices.taxMinor}), 0)`,
-        })
-        .from(invoices)
-        .where(
-          and(
-            eq(invoices.orgId, ctx.actor.orgId),
-            gte(invoices.issuedAt, start),
-            lt(invoices.issuedAt, end),
-            sql`${invoices.status} <> 'void'`,
-          ),
-        );
-      return {
-        taxableSalesMinor: Number(row?.taxable ?? 0),
-        taxCollectedMinor: Number(row?.tax ?? 0),
-        basis: "invoice-tax-minor" as const,
-      };
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => ({
+        ...(await salesTaxWindow(tx, ctx.actor.orgId, input.from, input.to)),
+        basis: "tax-code-and-document-snapshots" as const,
+      }));
     },
+  });
+
+const createTaxProfile = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.createTaxProfile",
+    title: "Set tax jurisdiction",
+    intent: "Set the organization's tax jurisdiction and filing cadence before applying tax codes or preparing a jurisdiction-specific return",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.admin",
+    inverse: { capabilityId: "accounting.removeTaxProfile", buildInput: (_input, output) => ({ profileId: output.profileId }) },
+    input: z.object({ jurisdictionCode: z.string().regex(/^[A-Z]{2}(-[A-Z0-9]{1,8})?$/), registrationNumber: z.string().max(100).optional(), filingFrequency: z.enum(["monthly", "quarterly", "annual"]) }),
+    output: z.object({ profileId: z.string(), jurisdictionCode: z.string(), registrationNumber: z.string().nullable(), filingFrequency: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const [existing] = await tx.select({ id: taxProfiles.id }).from(taxProfiles).where(eq(taxProfiles.orgId, ctx.actor.orgId)).limit(1);
+      if (existing) throw new Error("a tax profile is already set; use the Settings workflow to change it after existing tax codes and returns are reviewed");
+      const [profile] = await tx.insert(taxProfiles).values({
+        orgId: ctx.actor.orgId,
+        jurisdictionCode: input.jurisdictionCode,
+        registrationNumber: input.registrationNumber ?? null,
+        filingFrequency: input.filingFrequency,
+        providerMode: "manual",
+      }).returning({ id: taxProfiles.id });
+      return { profileId: profile!.id, jurisdictionCode: input.jurisdictionCode, registrationNumber: input.registrationNumber ?? null, filingFrequency: input.filingFrequency };
+    }),
+  });
+
+const removeTaxProfile = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.removeTaxProfile",
+    title: "Remove unused tax profile",
+    intent: "Remove an unused tax jurisdiction setup when no tax codes or return history depend on it",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.admin",
+    inverse: { capabilityId: "accounting.createTaxProfile", buildInput: (_input, output) => ({ jurisdictionCode: output.jurisdictionCode, registrationNumber: output.registrationNumber ?? undefined, filingFrequency: output.filingFrequency }) },
+    input: z.object({ profileId: z.string().uuid() }),
+    output: z.object({ jurisdictionCode: z.string(), registrationNumber: z.string().nullable(), filingFrequency: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const [profile] = await tx.select().from(taxProfiles).where(and(eq(taxProfiles.id, input.profileId), eq(taxProfiles.orgId, ctx.actor.orgId))).limit(1).for("update");
+      if (!profile) throw new Error("tax profile not found");
+      const [codes] = await tx.select({ count: sql<number>`count(*)::integer` }).from(taxCodes).where(eq(taxCodes.orgId, ctx.actor.orgId));
+      const [returns] = await tx.select({ count: sql<number>`count(*)::integer` }).from(taxReturns).where(eq(taxReturns.orgId, ctx.actor.orgId));
+      if (Number(codes?.count ?? 0) > 0 || Number(returns?.count ?? 0) > 0) throw new Error("tax profiles with codes or return history must be retained for audit");
+      await tx.delete(taxProfiles).where(eq(taxProfiles.id, profile.id));
+      return { jurisdictionCode: profile.jurisdictionCode, registrationNumber: profile.registrationNumber, filingFrequency: profile.filingFrequency };
+    }),
+  });
+
+const createTaxCode = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.createTaxCode",
+    title: "Create tax code",
+    intent: "Create a jurisdiction-scoped output or recoverable input tax rule whose exact rate and treatment are snapshotted on each posted document",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.admin",
+    inverse: { capabilityId: "accounting.archiveTaxCode", buildInput: (_input, output) => ({ taxCodeId: output.taxCodeId }) },
+    input: z.object({ code: z.string().min(1).max(24).regex(/^[A-Z0-9_-]+$/), name: z.string().min(2).max(100), direction: z.enum(["output", "input"]), rateBasisPoints: z.number().int().min(0).max(1_000_000), priceIncludesTax: z.boolean().default(false), recoverable: z.boolean().default(true) }),
+    output: z.object({ taxCodeId: z.string(), code: z.string(), jurisdictionCode: z.string(), direction: z.string(), rateBasisPoints: z.number() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const [profile] = await tx.select({ jurisdictionCode: taxProfiles.jurisdictionCode }).from(taxProfiles).where(eq(taxProfiles.orgId, ctx.actor.orgId)).limit(1);
+      if (!profile) throw new Error("set a tax jurisdiction before creating tax codes");
+      const [row] = await tx.insert(taxCodes).values({
+        orgId: ctx.actor.orgId,
+        jurisdictionCode: profile.jurisdictionCode,
+        code: input.code,
+        name: input.name,
+        direction: input.direction,
+        rateBasisPoints: input.rateBasisPoints,
+        priceIncludesTax: input.priceIncludesTax,
+        recoverable: input.direction === "input" && input.recoverable,
+      }).returning({ id: taxCodes.id });
+      return { taxCodeId: row!.id, code: input.code, jurisdictionCode: profile.jurisdictionCode, direction: input.direction, rateBasisPoints: input.rateBasisPoints };
+    }),
+  });
+
+const archiveTaxCode = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.archiveTaxCode",
+    title: "Archive tax code",
+    intent: "Stop offering a tax code on new transactions while retaining its document snapshots and return history",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.admin",
+    inverse: { capabilityId: "accounting.activateTaxCode", buildInput: (input) => input },
+    input: z.object({ taxCodeId: z.string().uuid() }),
+    output: z.object({ taxCodeId: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const changed = await tx.update(taxCodes).set({ active: false }).where(and(eq(taxCodes.id, input.taxCodeId), eq(taxCodes.orgId, ctx.actor.orgId), eq(taxCodes.active, true))).returning({ id: taxCodes.id });
+      if (changed.length === 0) throw new Error("active tax code not found");
+      return { taxCodeId: input.taxCodeId };
+    }),
+  });
+
+const activateTaxCode = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.activateTaxCode",
+    title: "Reactivate tax code",
+    intent: "Restore an archived tax code for new transactions while preserving its immutable historical tax snapshots",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.admin",
+    inverse: { capabilityId: "accounting.archiveTaxCode", buildInput: (input) => input },
+    input: z.object({ taxCodeId: z.string().uuid() }),
+    output: z.object({ taxCodeId: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const changed = await tx.update(taxCodes).set({ active: true }).where(and(eq(taxCodes.id, input.taxCodeId), eq(taxCodes.orgId, ctx.actor.orgId), eq(taxCodes.active, false))).returning({ id: taxCodes.id });
+      if (changed.length === 0) throw new Error("archived tax code not found");
+      return { taxCodeId: input.taxCodeId };
+    }),
+  });
+
+async function insertTaxReturnSnapshot(
+  tx: Parameters<Parameters<Database["db"]["transaction"]>[0]>[0],
+  ctx: ActionContext,
+  input: { periodFrom: string; periodTo: string; amendsReturnId?: string },
+) {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${ctx.actor.orgId}), hashtext('tax-returns'))`);
+  const [profile] = await tx.select({ jurisdictionCode: taxProfiles.jurisdictionCode }).from(taxProfiles).where(eq(taxProfiles.orgId, ctx.actor.orgId)).limit(1);
+  if (!profile) throw new Error("set a jurisdiction-specific tax profile before preparing a return");
+  const report = await salesTaxWindow(tx, ctx.actor.orgId, input.periodFrom, input.periodTo);
+  if (report.unsupportedForeignCount > 0) throw new Error("return preparation is blocked while foreign-currency tax documents need conversion");
+  const { start, end } = dateWindow(input.periodFrom, input.periodTo);
+  let amended: string | null = null;
+  if (input.amendsReturnId) {
+    const [original] = await tx.select().from(taxReturns).where(and(eq(taxReturns.id, input.amendsReturnId), eq(taxReturns.orgId, ctx.actor.orgId))).limit(1);
+    if (!original || !["accepted", "rejected"].includes(original.status)) throw new Error("only an accepted or rejected return can be amended");
+    if (original.periodFrom.getTime() !== start.getTime() || original.periodTo.getTime() !== end.getTime()) throw new Error("amended return must use the original filing window");
+    amended = original.id;
+  } else {
+    const [overlap] = await tx.select({ id: taxReturns.id }).from(taxReturns).where(and(
+      eq(taxReturns.orgId, ctx.actor.orgId), lt(taxReturns.periodFrom, end), gt(taxReturns.periodTo, start), sql`${taxReturns.status} <> 'cancelled'`,
+    )).limit(1);
+    if (overlap) throw new Error("an overlapping return already exists; prepare an amendment to correct it");
+    const [legacySettlement] = await tx.select({ id: salesTaxFilings.id }).from(salesTaxFilings).where(and(
+      eq(salesTaxFilings.orgId, ctx.actor.orgId), lt(salesTaxFilings.periodFrom, end), gt(salesTaxFilings.periodTo, start), isNull(salesTaxFilings.taxReturnId),
+    )).limit(1);
+    if (legacySettlement) throw new Error("this period already has a ledger settlement without a return snapshot; review its filing history before preparing another return");
+  }
+  const [row] = await tx.insert(taxReturns).values({
+    orgId: ctx.actor.orgId,
+    jurisdictionCode: profile.jurisdictionCode,
+    periodFrom: start,
+    periodTo: end,
+    currency: report.baseCurrency,
+    taxBreakdown: report.taxBreakdown,
+    outputTaxMinor: report.taxCollectedMinor,
+    inputTaxMinor: report.recoverableInputTaxMinor,
+    taxMinor: report.netTaxMinor,
+    status: "draft",
+    amendsReturnId: amended,
+    createdByActorType: ctx.actor.type,
+    createdByActorId: ctx.actor.id,
+  }).returning({ id: taxReturns.id });
+  return { taxReturnId: row!.id, periodFrom: input.periodFrom, periodTo: input.periodTo, currency: report.baseCurrency, outputTaxMinor: report.taxCollectedMinor, inputTaxMinor: report.recoverableInputTaxMinor, taxMinor: report.netTaxMinor, taxBreakdown: report.taxBreakdown, status: "draft" as const, amendsReturnId: amended };
+}
+
+const createTaxReturn = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.createTaxReturn",
+    title: "Prepare tax return",
+    intent: "Prepare and save a jurisdiction-specific return snapshot for review before submitting it through the tax authority's portal or a connected provider",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    inverse: { capabilityId: "accounting.cancelTaxReturnDraft", buildInput: (_input, output) => ({ taxReturnId: output.taxReturnId }) },
+    input: z.object({ periodFrom: isoDate, periodTo: isoDate, amendsReturnId: z.string().uuid().optional() }),
+    output: z.object({
+      taxReturnId: z.string(), periodFrom: z.string(), periodTo: z.string(), currency: z.string(),
+      outputTaxMinor: z.number(), inputTaxMinor: z.number(), taxMinor: z.number(),
+      taxBreakdown: z.array(z.object({ code: z.string(), name: z.string(), direction: z.enum(["output", "input"]), rateBasisPoints: z.number().nullable(), priceIncludesTax: z.boolean(), recoverable: z.boolean(), taxableBaseMinor: z.number(), taxMinor: z.number(), lineCount: z.number() })),
+      status: z.literal("draft"), amendsReturnId: z.string().nullable(),
+    }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, (tx) => insertTaxReturnSnapshot(tx, ctx, input)),
+  });
+
+const cancelTaxReturnDraft = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.cancelTaxReturnDraft",
+    title: "Cancel tax return draft",
+    intent: "Mark an unsent tax return draft as cancelled while preserving the prepared snapshot for the audit trail",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    inverse: { capabilityId: "accounting.restoreTaxReturnDraft", buildInput: (input) => input },
+    input: z.object({ taxReturnId: z.string().uuid() }),
+    output: z.object({ taxReturnId: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const changed = await tx.update(taxReturns).set({ status: "cancelled" }).where(and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, ctx.actor.orgId), eq(taxReturns.status, "draft"))).returning({ id: taxReturns.id });
+      if (!changed.length) throw new Error("unsent return draft not found");
+      return { taxReturnId: input.taxReturnId };
+    }),
+  });
+
+const restoreTaxReturnDraft = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.restoreTaxReturnDraft",
+    title: "Restore tax return draft",
+    intent: "Restore a cancelled tax return draft that has never been submitted to an external authority",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    inverse: { capabilityId: "accounting.cancelTaxReturnDraft", buildInput: (input) => input },
+    input: z.object({ taxReturnId: z.string().uuid() }),
+    output: z.object({ taxReturnId: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const changed = await tx.update(taxReturns).set({ status: "draft" }).where(and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, ctx.actor.orgId), eq(taxReturns.status, "cancelled"))).returning({ id: taxReturns.id });
+      if (!changed.length) throw new Error("cancelled draft not found");
+      return { taxReturnId: input.taxReturnId };
+    }),
+  });
+
+const recordTaxReturnSubmission = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.recordTaxReturnSubmission",
+    title: "Record tax return submission",
+    intent: "Record the reference and evidence after a human submits this prepared return through the jurisdiction's external tax portal",
+    module: "accounting",
+    risk: "money",
+    permission: "accounting.post",
+    moneyAmount: () => null,
+    // External portal submissions cannot be rolled back. A correction is a separate amended return after authority review.
+    input: z.object({ taxReturnId: z.string().uuid(), submissionReference: z.string().min(1).max(200), evidenceReference: z.string().min(1).max(500) }),
+    output: z.object({ taxReturnId: z.string(), status: z.literal("submitted"), submissionReference: z.string(), submittedAt: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const [profile] = await tx.select({ providerMode: taxProfiles.providerMode }).from(taxProfiles).where(eq(taxProfiles.orgId, ctx.actor.orgId)).limit(1);
+      if (profile?.providerMode === "connected") throw new Error("no tax authority provider is configured; switch to manual recording or complete the jurisdiction integration");
+      const changed = await tx.update(taxReturns).set({ status: "submitted", submissionReference: input.submissionReference, evidenceReference: input.evidenceReference, submittedAt: ctx.now })
+        .where(and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, ctx.actor.orgId), eq(taxReturns.status, "draft"))).returning({ id: taxReturns.id });
+      if (!changed.length) throw new Error("only an unsent draft can be marked submitted; an unknown result must be reconciled before retrying");
+      return { taxReturnId: input.taxReturnId, status: "submitted" as const, submissionReference: input.submissionReference, submittedAt: ctx.now.toISOString() };
+    }),
+  });
+
+const createTaxReturnAmendment = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.createTaxReturnAmendment",
+    title: "Prepare amended tax return",
+    intent: "Prepare a new return version for the same filing window after an authority submission, preserving the original return and its acknowledgment",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.write",
+    inverse: { capabilityId: "accounting.cancelTaxReturnDraft", buildInput: (_input, output) => ({ taxReturnId: output.taxReturnId }) },
+    input: z.object({ taxReturnId: z.string().uuid() }),
+    output: z.object({ taxReturnId: z.string(), periodFrom: z.string(), periodTo: z.string(), status: z.literal("draft") }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const [original] = await tx.select().from(taxReturns).where(and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, ctx.actor.orgId))).limit(1).for("update");
+      if (!original || !["accepted", "rejected"].includes(original.status)) throw new Error("only an accepted or rejected return can be amended");
+      const [existingAmendment] = await tx.select({ id: taxReturns.id }).from(taxReturns).where(and(
+        eq(taxReturns.orgId, ctx.actor.orgId),
+        eq(taxReturns.amendsReturnId, original.id),
+        sql`${taxReturns.status} <> 'cancelled'`,
+      )).limit(1);
+      if (existingAmendment) throw new Error("this return already has an active amendment");
+      const from = original.periodFrom.toISOString().slice(0, 10);
+      const to = new Date(original.periodTo.getTime() - 86_400_000).toISOString().slice(0, 10);
+      const created = await insertTaxReturnSnapshot(tx, ctx, { periodFrom: from, periodTo: to, amendsReturnId: original.id });
+      return { taxReturnId: created.taxReturnId, periodFrom: created.periodFrom, periodTo: created.periodTo, status: "draft" as const };
+    }),
+  });
+
+const recordTaxReturnAcknowledgment = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.recordTaxReturnAcknowledgment",
+    title: "Record tax authority acknowledgment",
+    intent: "Attach an accepted, rejected, or uncertain authority acknowledgment and its evidence to a submitted return without changing the submitted figures",
+    module: "accounting",
+    risk: "write",
+    permission: "accounting.admin",
+    // Authority responses are external evidence. A corrected outcome must be recorded as a new evidence event.
+    input: z.object({ taxReturnId: z.string().uuid(), status: z.enum(["accepted", "rejected", "unknown"]), acknowledgmentReference: z.string().max(200).optional(), details: z.string().max(1000).optional(), evidenceReference: z.string().max(500).optional() }),
+    output: z.object({ taxReturnId: z.string(), status: z.string(), acknowledgedAt: z.string() }),
+    execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const changed = await tx.update(taxReturns).set({
+        status: input.status,
+        acknowledgment: { details: input.details ?? null, reference: input.acknowledgmentReference ?? null },
+        evidenceReference: input.evidenceReference ?? undefined,
+        acknowledgedAt: ctx.now,
+      }).where(and(eq(taxReturns.id, input.taxReturnId), eq(taxReturns.orgId, ctx.actor.orgId), inArray(taxReturns.status, ["submitted", "unknown"]))).returning({ id: taxReturns.id });
+      if (!changed.length) throw new Error("only submitted or unresolved returns can receive an acknowledgment");
+      return { taxReturnId: input.taxReturnId, status: input.status, acknowledgedAt: ctx.now.toISOString() };
+    }),
   });
 
 const fileSalesTaxReturn = (deps: ModuleDeps) =>
   defineCapability({
     id: "accounting.fileSalesTaxReturn",
-    title: "File sales tax return",
+    title: "Record sales tax settlement",
     intent:
-      "Record a filed sales-tax return by debiting Sales Tax Payable for the remitted tax, netting out what invoices accrued, and sealing the window against double filing",
+      "Settle the net sales tax liability by clearing output tax payable against recoverable input tax and cash or a tax refund receivable; external return submission is recorded separately",
     module: "accounting",
     risk: "money",
     permission: "accounting.post",
@@ -2677,17 +3610,56 @@ const fileSalesTaxReturn = (deps: ModuleDeps) =>
       capabilityId: "accounting.reverseEntry",
       buildInput: (_input, output) => ({ entryId: output.entryId ?? "" }),
     },
-    input: z.object({
-      periodFrom: isoDate,
-      periodTo: isoDate,
-      taxMinor: z.number().int().positive(),
-    }),
-    output: z.object({ filingId: z.string(), entryId: z.string(), taxMinor: z.number() }),
+    input: z.object({ taxReturnId: z.string().uuid() }),
+    output: z.object({ filingId: z.string(), taxReturnId: z.string(), entryId: z.string(), taxMinor: z.number() }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
-        const { start, end } = dateWindow(input.periodFrom, input.periodTo);
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${ctx.actor.orgId}), hashtext('tax-returns'))`);
+        const [taxReturn] = await tx.select().from(taxReturns).where(and(
+          eq(taxReturns.id, input.taxReturnId),
+          eq(taxReturns.orgId, ctx.actor.orgId),
+        )).limit(1).for("update");
+        if (!taxReturn || !["submitted", "accepted"].includes(taxReturn.status)) {
+          throw new Error("only a submitted or accepted tax return can be settled");
+        }
+        if (taxReturn.settlementEntryId) throw new Error("this tax return already has a recorded settlement");
+        const start = taxReturn.periodFrom;
+        const end = taxReturn.periodTo;
+        const outputTaxMinor = Number(taxReturn.outputTaxMinor);
+        const inputTaxMinor = Number(taxReturn.inputTaxMinor);
+        const taxMinor = Number(taxReturn.taxMinor);
+        if (![outputTaxMinor, inputTaxMinor, taxMinor].every(Number.isSafeInteger) || outputTaxMinor < 0 || inputTaxMinor < 0 || outputTaxMinor - inputTaxMinor !== taxMinor) {
+          throw new Error("the saved return tax totals do not balance; review the return before settlement");
+        }
+        const lineageIds = new Set<string>();
+        let parentId = taxReturn.amendsReturnId;
+        let settledBaseline: { outputTaxMinor: number; inputTaxMinor: number } | null = null;
+        while (parentId) {
+          if (lineageIds.has(parentId)) throw new Error("return amendment chain contains a cycle");
+          lineageIds.add(parentId);
+          const [parent] = await tx.select({ id: taxReturns.id, amendsReturnId: taxReturns.amendsReturnId, outputTaxMinor: taxReturns.outputTaxMinor, inputTaxMinor: taxReturns.inputTaxMinor, settlementEntryId: taxReturns.settlementEntryId })
+            .from(taxReturns).where(and(eq(taxReturns.id, parentId), eq(taxReturns.orgId, ctx.actor.orgId))).limit(1);
+          if (!parent) throw new Error("the original return in this amendment chain no longer exists");
+          if (!settledBaseline && parent.settlementEntryId) {
+            settledBaseline = { outputTaxMinor: Number(parent.outputTaxMinor), inputTaxMinor: Number(parent.inputTaxMinor) };
+          }
+          parentId = parent.amendsReturnId;
+        }
+        const [activeChild] = await tx.select({ id: taxReturns.id }).from(taxReturns).where(and(
+          eq(taxReturns.orgId, ctx.actor.orgId),
+          eq(taxReturns.amendsReturnId, taxReturn.id),
+          sql`${taxReturns.status} <> 'cancelled'`,
+        )).limit(1);
+        if (activeChild) throw new Error("settle the latest active return in this amendment chain");
+        const baselineOutput = settledBaseline?.outputTaxMinor ?? 0;
+        const baselineInput = settledBaseline?.inputTaxMinor ?? 0;
+        const { outputDeltaMinor: outputDelta, inputDeltaMinor: inputDelta, taxDeltaMinor: taxDelta } = calculateTaxSettlementDelta(
+          { outputTaxMinor, inputTaxMinor },
+          { outputTaxMinor: baselineOutput, inputTaxMinor: baselineInput },
+        );
+        if (outputDelta === 0 && inputDelta === 0) throw new Error("this return has no new tax balance to settle");
         const overlapping = await tx
-          .select({ id: salesTaxFilings.id })
+          .select({ id: salesTaxFilings.id, taxReturnId: salesTaxFilings.taxReturnId })
           .from(salesTaxFilings)
           .where(
             and(
@@ -2699,22 +3671,27 @@ const fileSalesTaxReturn = (deps: ModuleDeps) =>
             ),
           )
           .limit(1);
-        if (overlapping.length > 0) {
-          throw new Error(`period ${input.periodFrom}…${input.periodTo} overlaps an already-filed return`);
+        if (overlapping.some((filing) => !filing.taxReturnId || !lineageIds.has(filing.taxReturnId))) {
+          throw new Error(`period ${start.toISOString().slice(0, 10)} to ${new Date(end.getTime() - 86_400_000).toISOString().slice(0, 10)} overlaps an already-filed return`);
         }
 
-        // Invoice collection credited 2100 (Sales Tax Payable); the filing
-        // debits that same account so the liability nets to zero. Remitting
-        // means cash leaves, so the balancing side is 1000 Cash - the same
-        // convention payBill uses when money goes out.
+        // Return settlement clears output VAT against recoverable input VAT.
+        // Cash moves only for the net payable; an overpayment is a receivable.
+        if (taxDelta < 0) await ensureAccount(tx, ctx.actor.orgId, "1206", "Tax refund receivable", "asset");
+        const settlementLines = [
+          { accountCode: "2100", debitMinor: Math.max(outputDelta, 0), creditMinor: Math.max(-outputDelta, 0) },
+          { accountCode: "1205", debitMinor: Math.max(-inputDelta, 0), creditMinor: Math.max(inputDelta, 0) },
+          ...(taxDelta > 0
+            ? [{ accountCode: "1000", debitMinor: 0, creditMinor: taxDelta }]
+            : [{ accountCode: "1206", debitMinor: -taxDelta, creditMinor: 0 }]),
+        ].filter((line) => line.debitMinor !== 0 || line.creditMinor !== 0);
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
-          memo: `Sales tax filing ${input.periodFrom} → ${input.periodTo}`,
+          memo: `Sales tax settlement ${start.toISOString().slice(0, 10)} → ${new Date(end.getTime() - 86_400_000).toISOString().slice(0, 10)}`,
           sourceType: "sales_tax_filing",
+          sourceId: taxReturn.id,
+          currency: taxReturn.currency,
           postedAt: ctx.now,
-          lines: [
-            { accountCode: "2100", debitMinor: input.taxMinor, creditMinor: 0 },
-            { accountCode: "1000", debitMinor: 0, creditMinor: input.taxMinor },
-          ],
+          lines: settlementLines,
         });
 
         const [filing] = await tx
@@ -2723,14 +3700,16 @@ const fileSalesTaxReturn = (deps: ModuleDeps) =>
             orgId: ctx.actor.orgId,
             periodFrom: start,
             periodTo: end,
-            taxMinor: input.taxMinor,
+            taxReturnId: taxReturn.id,
+            taxMinor: taxDelta,
             entryId,
             filedByActorType: ctx.actor.type,
             filedByActorId: ctx.actor.id,
           })
           .returning({ id: salesTaxFilings.id });
 
-        return { filingId: filing!.id, entryId, taxMinor: input.taxMinor };
+        await tx.update(taxReturns).set({ settlementEntryId: entryId, settledAt: ctx.now }).where(eq(taxReturns.id, taxReturn.id));
+        return { filingId: filing!.id, taxReturnId: taxReturn.id, entryId, taxMinor: taxDelta };
       });
     },
   });
@@ -2779,7 +3758,10 @@ const creditNote = (deps: ModuleDeps) =>
           );
         }
 
-        const revenueShare = Math.round((input.amountMinor * (inv.totalMinor - inv.taxMinor)) / inv.totalMinor);
+        const revenueShare = Number(
+          (BigInt(input.amountMinor) * BigInt(inv.totalMinor - inv.taxMinor) + BigInt(inv.totalMinor) / 2n) /
+            BigInt(inv.totalMinor),
+        );
         const taxShare = input.amountMinor - revenueShare;
         // Zero-tax invoices have no tax leg; an empty 0/0 line is rejected.
         const mirrorLines = [
@@ -2804,6 +3786,7 @@ const creditNote = (deps: ModuleDeps) =>
           sourceId: inv.id,
           reversalOfId: origEntry?.id ?? null,
           postedAt: ctx.now,
+          currency: inv.currency,
           lines: mirrorLines,
         });
         const credited = inv.creditedMinor + input.amountMinor;
@@ -2837,9 +3820,14 @@ const customerStatement = (deps: ModuleDeps) =>
     permission: "accounting.read",
     input: z.object({ customerId: z.string().uuid() }),
     output: z.object({
-      openingBalanceMinor: z.number(),
-      closingBalanceMinor: z.number(),
-      rows: z.array(statementRow),
+      currencies: z.array(
+        z.object({
+          currency: z.string(),
+          openingBalanceMinor: z.number(),
+          closingBalanceMinor: z.number(),
+          rows: z.array(statementRow),
+        }),
+      ),
     }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
@@ -2848,14 +3836,16 @@ const customerStatement = (deps: ModuleDeps) =>
             id: invoices.id,
             number: invoices.number,
             totalMinor: invoices.totalMinor,
+            currency: invoices.currency,
             creditedMinor: invoices.creditedMinor,
+            status: invoices.status,
             issuedAt: invoices.issuedAt,
             createdAt: invoices.createdAt,
             voidedAt: invoices.voidedAt,
           })
           .from(invoices)
           .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.customerId, input.customerId)));
-        const live = invRows.filter((i) => !i.voidedAt);
+        const live = invRows.filter((i) => !i.voidedAt && (i.status === "sent" || i.status === "paid"));
         const invoiceIds = new Set(live.map((i) => i.id));
         const payRows = invoiceIds.size
           ? await tx
@@ -2885,40 +3875,44 @@ const customerStatement = (deps: ModuleDeps) =>
               )
           : [];
 
-        type Row = { date: Date; kind: string; ref: string; amountMinor: number };
+        type Row = { date: Date; kind: string; ref: string; amountMinor: number; currency: string };
         const rows: Row[] = [];
         for (const i of live) {
           // Gross: credits appear as their own statement lines below.
-          rows.push({ date: i.issuedAt ?? i.createdAt, kind: "invoice", ref: `Invoice #${i.number}`, amountMinor: i.totalMinor });
+          rows.push({ date: i.issuedAt ?? i.createdAt, kind: "invoice", ref: `Invoice #${i.number}`, amountMinor: i.totalMinor, currency: i.currency });
           const credited = creditRows.filter((c) => c.sourceId === i.id);
           for (const c of credited) {
             const amount = c.creditMinor - c.debitMinor;
-            rows.push({ date: c.postedAt, kind: "credit_note", ref: `Credit on invoice #${i.number}`, amountMinor: -amount });
+            rows.push({ date: c.postedAt, kind: "credit_note", ref: `Credit on invoice #${i.number}`, amountMinor: -amount, currency: i.currency });
           }
         }
         for (const p of payRows) {
           if (!invoiceIds.has(p.invoiceId)) continue;
-          rows.push({ date: p.receivedAt, kind: "payment", ref: "Payment received", amountMinor: -p.amountMinor });
+          const invoice = live.find((i) => i.id === p.invoiceId);
+          if (invoice) rows.push({ date: p.receivedAt, kind: "payment", ref: "Payment received", amountMinor: -p.amountMinor, currency: invoice.currency });
         }
         // One clock basis (N13) means same-instant rows are normal - the
         // statement orders them by business sequence, not wall-clock luck:
         // the invoice exists before money or credit can touch it.
         const KIND_ORDER: Record<string, number> = { invoice: 0, payment: 1, credit_note: 2 };
-        rows.sort(
-          (a, b) =>
-            a.date.getTime() - b.date.getTime() ||
-            (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9) ||
-            a.kind.localeCompare(b.kind),
-        );
-        let running = 0;
-        const rendered = rows.map((r) => {
-          running += r.amountMinor;
-          return { date: r.date.toISOString(), kind: r.kind, ref: r.ref, amountMinor: r.amountMinor, balanceMinor: running };
+        const byCurrency = new Map<string, Row[]>();
+        for (const row of rows) byCurrency.set(row.currency, [...(byCurrency.get(row.currency) ?? []), row]);
+        const currencies = [...byCurrency.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([currency, currencyRows]) => {
+          currencyRows.sort(
+            (a, b) =>
+              a.date.getTime() - b.date.getTime() ||
+              (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9) ||
+              a.kind.localeCompare(b.kind),
+          );
+          let running = 0;
+          const rendered = currencyRows.map((r) => {
+            running += r.amountMinor;
+            return { date: r.date.toISOString(), kind: r.kind, ref: r.ref, amountMinor: r.amountMinor, balanceMinor: running };
+          });
+          return { currency, openingBalanceMinor: 0, closingBalanceMinor: running, rows: rendered };
         });
         return {
-          openingBalanceMinor: 0,
-          closingBalanceMinor: running,
-          rows: rendered,
+          currencies,
         };
       });
     },
@@ -2944,6 +3938,7 @@ const buildReminders = (deps: ModuleDeps) =>
         z.object({
           customerId: z.string(),
           customerName: z.string(),
+          currency: z.string(),
           overdueCount: z.number(),
           oldestDaysOverdue: z.number(),
           totalOverdueMinor: z.number(),
@@ -2958,6 +3953,7 @@ const buildReminders = (deps: ModuleDeps) =>
             invoiceId: invoices.id,
             number: invoices.number,
             totalMinor: invoices.totalMinor,
+            currency: invoices.currency,
             paidMinor: invoices.paidMinor,
             creditedMinor: invoices.creditedMinor,
             dueAt: invoices.dueAt,
@@ -2977,7 +3973,7 @@ const buildReminders = (deps: ModuleDeps) =>
           )
           .limit(500);
 
-        const perCustomer = new Map<string, { name: string; count: number; total: number; oldest: number }>();
+        const perCustomerCurrency = new Map<string, { customerId: string; name: string; currency: string; count: number; total: number; oldest: number }>();
         for (const r of rows) {
           const balance = r.totalMinor - r.paidMinor - r.creditedMinor;
           if (balance <= 0) continue;
@@ -2985,21 +3981,30 @@ const buildReminders = (deps: ModuleDeps) =>
           if (!due) continue;
           const daysOverdue = Math.floor((ctx.now.getTime() - due.getTime()) / 86_400_000);
           if (daysOverdue <= 0) continue;
-          const e = perCustomer.get(r.customerId) ?? { name: r.customerName, count: 0, total: 0, oldest: 0 };
+          const key = `${r.customerId}:${r.currency}`;
+          const e = perCustomerCurrency.get(key) ?? { customerId: r.customerId, name: r.customerName, currency: r.currency, count: 0, total: 0, oldest: 0 };
           e.count += 1;
           e.total += balance;
           e.oldest = Math.max(e.oldest, daysOverdue);
-          perCustomer.set(r.customerId, e);
+          perCustomerCurrency.set(key, e);
         }
-        const reminders = [...perCustomer.entries()].map(([customerId, e]) => ({
-          customerId,
+        const reminders = [...perCustomerCurrency.values()].map((e) => {
+          const minorUnits = currencyMinorUnits(e.currency) ?? 2;
+          const amount = (e.total / 10 ** minorUnits).toLocaleString("en-US", {
+            minimumFractionDigits: minorUnits,
+            maximumFractionDigits: minorUnits,
+          });
+          return {
+          customerId: e.customerId,
           customerName: e.name,
+          currency: e.currency,
           overdueCount: e.count,
           oldestDaysOverdue: e.oldest,
           totalOverdueMinor: e.total,
-          message: `Hi ${e.name} - a friendly nudge that ${e.count} invoice${e.count === 1 ? "" : "s"} totalling $${(e.total / 100).toFixed(2)} ${e.count === 1 ? "is" : "are"} now ${e.oldest} day${e.oldest === 1 ? "" : "s"} past due. If you have already sent payment, thank you and please disregard; otherwise we would appreciate it at your earliest convenience.`,
-        }));
-        reminders.sort((a, b) => b.totalOverdueMinor - a.totalOverdueMinor);
+          message: `Hi ${e.name} - a friendly nudge that ${e.count} invoice${e.count === 1 ? "" : "s"} totalling ${e.currency} ${amount} ${e.count === 1 ? "is" : "are"} now ${e.oldest} day${e.oldest === 1 ? "" : "s"} past due. If you have already sent payment, thank you and please disregard; otherwise we would appreciate it at your earliest convenience.`,
+        };
+        });
+        reminders.sort((a, b) => b.oldestDaysOverdue - a.oldestDaysOverdue || a.customerName.localeCompare(b.customerName) || a.currency.localeCompare(b.currency));
         return { reminders };
       });
     },
@@ -3011,7 +4016,7 @@ async function loadCashFlowEntries(
   orgId: string,
 ) {
   const entryRows = await tx
-    .select({ id: journalEntries.id, postedAt: journalEntries.postedAt })
+    .select({ id: journalEntries.id, postedAt: journalEntries.postedAt, currency: journalEntries.currency })
     .from(journalEntries)
     .where(eq(journalEntries.orgId, orgId));
   const lineRows = await tx
@@ -3027,8 +4032,8 @@ async function loadCashFlowEntries(
     .innerJoin(journalEntries, eq(journalEntries.id, journalLines.entryId))
     .where(eq(journalEntries.orgId, orgId));
   type CashLine = { accountCode: string; accountType: "asset" | "liability" | "equity" | "income" | "expense"; debitMinor: number; creditMinor: number };
-  const byEntry = new Map<string, { occurredAt: Date; lines: CashLine[] }>();
-  for (const e of entryRows) byEntry.set(e.id, { occurredAt: e.postedAt, lines: [] });
+  const byEntry = new Map<string, { occurredAt: Date; currency: string; lines: CashLine[] }>();
+  for (const e of entryRows) byEntry.set(e.id, { occurredAt: e.postedAt, currency: e.currency, lines: [] });
   for (const l of lineRows) {
     const b = byEntry.get(l.entryId);
     // accounts.type is a text column; the ledger only ever holds COA types.
@@ -3053,6 +4058,7 @@ const cashFlow = (deps: ModuleDeps) =>
       netMinor: z.number(),
       cashBalanceMinor: z.number(),
       ties: z.boolean(),
+      unsupportedCurrencies: z.array(z.string()),
       operating: z.object({ inflowMinor: z.number(), outflowMinor: z.number(), netMinor: z.number(), entries: z.number() }),
       investing: z.object({ inflowMinor: z.number(), outflowMinor: z.number(), netMinor: z.number(), entries: z.number() }),
       financing: z.object({ inflowMinor: z.number(), outflowMinor: z.number(), netMinor: z.number(), entries: z.number() }),
@@ -3060,7 +4066,12 @@ const cashFlow = (deps: ModuleDeps) =>
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const entries = await loadCashFlowEntries(tx, ctx.actor.orgId);
-        return buildCashFlowStatement(entries, { cashCodes: input.cashAccountCodes, openingMinor: 0 });
+        const baseCurrency = await baseCurrencyOf(tx, ctx.actor.orgId);
+        const baseEntries = entries.filter((entry) => entry.currency === baseCurrency);
+        return {
+          ...buildCashFlowStatement(baseEntries, { cashCodes: input.cashAccountCodes, openingMinor: 0 }),
+          unsupportedCurrencies: [...new Set(entries.filter((entry) => entry.currency !== baseCurrency).map((entry) => entry.currency))],
+        };
       });
     },
   });
@@ -3074,12 +4085,15 @@ const cashForecast = (deps: ModuleDeps) =>
     module: "accounting",
     risk: "read",
     permission: "accounting.read",
-    input: z.object({ cashAccountCodes: z.array(z.string()).default(["1000"]) }),
+    input: z.object({ cashAccountCodes: z.array(z.string()).default(["1000"]), budgetScenarioId: z.string().uuid().optional() }),
     output: z.object({
       startMinor: z.number(),
       finalMinor: z.number(),
       lowestCloseMinor: z.number(),
       lowestWeekIndex: z.number(),
+      scenarioName: z.string().nullable(),
+      minimumCashBufferMinor: z.number(),
+      unsupportedCurrencies: z.array(z.string()),
       weeks: z.array(
         z.object({
           weekStart: z.string(),
@@ -3092,23 +4106,67 @@ const cashForecast = (deps: ModuleDeps) =>
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const entries = await loadCashFlowEntries(tx, ctx.actor.orgId);
-        const startMinor = cashBalanceFromEntries(entries, input.cashAccountCodes);
+        const baseCurrency = await baseCurrencyOf(tx, ctx.actor.orgId);
+        const baseEntries = entries.filter((entry) => entry.currency === baseCurrency);
+        const unsupportedCurrencies = new Set(entries.filter((entry) => entry.currency !== baseCurrency).map((entry) => entry.currency));
+        const startMinor = cashBalanceFromEntries(baseEntries, input.cashAccountCodes);
+        let scenarioName: string | null = null;
+        let collectionDelayDays = 0;
+        let spendUpliftBasisPoints = 0;
+        let expectedMonthlyInflowMinor = 0;
+        let expectedMonthlyOutflowMinor = 0;
+        let minimumCashBufferMinor = 0;
+        if (input.budgetScenarioId) {
+          const [scenario] = await tx.select().from(budgetScenarios).where(and(eq(budgetScenarios.id, input.budgetScenarioId), eq(budgetScenarios.orgId, ctx.actor.orgId))).limit(1);
+          if (!scenario) throw new Error("budget scenario not found");
+          if (scenario.currency !== baseCurrency) throw new Error("cash scenario currency must match the organization's base currency");
+          const assumptions = z.object({
+            collectionDelayDays: z.number().int().min(0).max(180).default(0),
+            spendUpliftBasisPoints: z.number().int().min(0).max(20_000).default(0),
+            expectedMonthlyInflowMinor: z.number().int().nonnegative().default(0),
+            expectedMonthlyOutflowMinor: z.number().int().nonnegative().default(0),
+            minimumCashBufferMinor: z.number().int().nonnegative().default(0),
+          }).parse(scenario.assumptions);
+          scenarioName = scenario.name;
+          collectionDelayDays = assumptions.collectionDelayDays;
+          spendUpliftBasisPoints = assumptions.spendUpliftBasisPoints;
+          expectedMonthlyInflowMinor = assumptions.expectedMonthlyInflowMinor;
+          expectedMonthlyOutflowMinor = assumptions.expectedMonthlyOutflowMinor;
+          minimumCashBufferMinor = assumptions.minimumCashBufferMinor;
+        }
         const arRows = await tx
-          .select({ dueAt: invoices.dueAt, issuedAt: invoices.issuedAt, totalMinor: invoices.totalMinor, paidMinor: invoices.paidMinor, creditedMinor: invoices.creditedMinor })
+          .select({ currency: invoices.currency, dueAt: invoices.dueAt, issuedAt: invoices.issuedAt, totalMinor: invoices.totalMinor, paidMinor: invoices.paidMinor, creditedMinor: invoices.creditedMinor })
           .from(invoices)
           .where(and(eq(invoices.orgId, ctx.actor.orgId), eq(invoices.status, "sent"), sql`${invoices.voidedAt} IS NULL`));
         const apRows = await tx
-          .select({ dueAt: vendorBills.dueAt, createdAt: vendorBills.createdAt, totalMinor: vendorBills.totalMinor, paidMinor: vendorBills.paidMinor, creditedMinor: vendorBills.creditedMinor })
+          .select({ currency: vendorBills.currency, dueAt: vendorBills.dueAt, createdAt: vendorBills.createdAt, totalMinor: vendorBills.totalMinor, paidMinor: vendorBills.paidMinor, creditedMinor: vendorBills.creditedMinor })
           .from(vendorBills)
           .where(and(eq(vendorBills.orgId, ctx.actor.orgId), eq(vendorBills.status, "open"), sql`${vendorBills.voidedAt} IS NULL`));
         const flows = [] as Array<{ dueAt: Date; amountMinor: number; kind: "inflow" | "outflow" }>;
         for (const r of arRows) {
+          if (r.currency !== baseCurrency) {
+            unsupportedCurrencies.add(r.currency);
+            continue;
+          }
           const bal = r.totalMinor - r.paidMinor - r.creditedMinor;
-          if (bal > 0) flows.push({ dueAt: r.dueAt ?? r.issuedAt ?? ctx.now, amountMinor: bal, kind: "inflow" });
+          if (bal > 0) {
+            const dueAt = new Date(r.dueAt ?? r.issuedAt ?? ctx.now);
+            dueAt.setUTCDate(dueAt.getUTCDate() + collectionDelayDays);
+            flows.push({ dueAt, amountMinor: bal, kind: "inflow" });
+          }
         }
         for (const r of apRows) {
+          if (r.currency !== baseCurrency) {
+            unsupportedCurrencies.add(r.currency);
+            continue;
+          }
           const bal = r.totalMinor - r.paidMinor - r.creditedMinor;
-          if (bal > 0) flows.push({ dueAt: r.dueAt ?? r.createdAt, amountMinor: bal, kind: "outflow" });
+          if (bal > 0) flows.push({ dueAt: r.dueAt ?? r.createdAt, amountMinor: applyBasisPointUplift(bal, spendUpliftBasisPoints), kind: "outflow" });
+        }
+        for (let monthOffset = 0; monthOffset < 4; monthOffset += 1) {
+          const dueAt = new Date(Date.UTC(ctx.now.getUTCFullYear(), ctx.now.getUTCMonth() + monthOffset, 15));
+          if (expectedMonthlyInflowMinor > 0) flows.push({ dueAt, amountMinor: expectedMonthlyInflowMinor, kind: "inflow" });
+          if (expectedMonthlyOutflowMinor > 0) flows.push({ dueAt, amountMinor: applyBasisPointUplift(expectedMonthlyOutflowMinor, spendUpliftBasisPoints), kind: "outflow" });
         }
         const forecast = buildThirteenWeekForecast(startMinor, flows, ctx.now);
         return {
@@ -3116,6 +4174,9 @@ const cashForecast = (deps: ModuleDeps) =>
           finalMinor: forecast.finalMinor,
           lowestCloseMinor: forecast.lowestCloseMinor,
           lowestWeekIndex: forecast.lowestWeekIndex,
+          scenarioName,
+          minimumCashBufferMinor,
+          unsupportedCurrencies: [...unsupportedCurrencies].sort(),
           weeks: forecast.weeks.map((w) => ({
             weekStart: w.weekStart.toISOString(),
             inflowMinor: w.inflowMinor,
@@ -3153,6 +4214,7 @@ const setExpensePolicy = (deps: ModuleDeps) =>
   });
 
 export function registerAccountingCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
+  registerBudgetCapabilities(registry, deps);
   registry.register(addBankAccount(deps));
   registry.register(importBankFeed(deps));
   registry.register(deleteBankTransaction(deps));
@@ -3163,10 +4225,23 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(bankReconciliation(deps));
   registry.register(bankSummary(deps));
   registry.register(salesTaxReport(deps));
+  registry.register(createTaxProfile(deps));
+  registry.register(removeTaxProfile(deps));
+  registry.register(createTaxCode(deps));
+  registry.register(archiveTaxCode(deps));
+  registry.register(activateTaxCode(deps));
+  registry.register(createTaxReturn(deps));
+  registry.register(cancelTaxReturnDraft(deps));
+  registry.register(restoreTaxReturnDraft(deps));
+  registry.register(recordTaxReturnSubmission(deps));
+  registry.register(createTaxReturnAmendment(deps));
+  registry.register(recordTaxReturnAcknowledgment(deps));
   registry.register(fileSalesTaxReturn(deps));
   registry.register(generateDueInvoices(deps));
   registry.register(recordFxRate(deps));
   registry.register(unrealizedFxExposure(deps));
+  registry.register(revalueForeignReceivables(deps));
+  registry.register(reversePeriodFxRevaluation(deps));
   registry.register(quoteCreate(deps));
   registry.register(quoteAccept(deps));
   registry.register(quoteDecline(deps));
@@ -3194,6 +4269,9 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(cashForecast(deps));
   registry.register(trialBalance(deps));
   registry.register(arAging(deps));
+  registry.register(periodCloseWorkbench(deps));
+  registry.register(updatePeriodCloseCheck(deps));
+  registry.register(restorePeriodCloseCheck(deps));
   registry.register(closePeriod(deps));
   registry.register(reopenPeriod(deps));
   registry.register(incomeStatement(deps));

@@ -25,7 +25,7 @@ export function DigitalClock({ className }: { className?: string }) {
   return (
     <time dateTime={now.toISOString()} title={now.toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" })} className={className}>
       {hhmm}
-      <span className="text-stone-400">:{ss}</span>
+      <span className="text-stone-700">:{ss}</span>
     </time>
   );
 }

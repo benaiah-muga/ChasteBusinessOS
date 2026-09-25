@@ -45,6 +45,13 @@ async function runOn(deps: ModuleDeps, ctx: ActionContext, id: string, input: un
   return cap.execute(ctx, input);
 }
 
+async function closeWithReview(deps: ModuleDeps, ctx: ActionContext, year: number, month: number) {
+  for (const taskKey of ["review_journal", "review_receivables", "review_payables", "review_tax"] as const) {
+    await runOn(deps, ctx, "accounting.updatePeriodCloseCheck", { year, month, taskKey, completed: true });
+  }
+  return runOn(deps, ctx, "accounting.closePeriod", { year, month });
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function purgeProbeOrgs(): Promise<void> {
@@ -122,11 +129,27 @@ afterAll(async () => {
 });
 
 describe("closed-period enforcement (N13)", () => {
+  it("requires explicit journal, receivable, payable, and tax reviews before closing", async () => {
+    const orgId = crypto.randomUUID();
+    await db.db.insert(organizations).values({ id: orgId, name: "Period Guard Probe Checklist", slug: `pg-check-${orgId.slice(0, 8)}` });
+    const deps = makeDeps();
+    const ctx = payCtx(orgId);
+    const initial = await runOn(deps, ctx, "accounting.periodCloseWorkbench", { year, month });
+    expect(initial.blockers).toContain("review_journal");
+    await expect(runOn(deps, ctx, "accounting.closePeriod", { year, month })).rejects.toThrow(/complete the close checklist first/);
+    await closeWithReview(deps, ctx, year, month);
+    const closed = await db.db.select().from(periods).where(and(eq(periods.orgId, orgId), eq(periods.year, year), eq(periods.month, month)));
+    expect(closed).toHaveLength(1);
+    await runOn(deps, ctx, "accounting.reopenPeriod", { year, month });
+    await purgeTenantFinancials(db.db, orgId);
+    await db.db.delete(organizations).where(eq(organizations.id, orgId));
+  });
+
   it("refuses to reimburse an expense claim into a sealed month, then allows it after reopen", async () => {
     const depsA = makeDeps();
     const ctx = payCtx(orgA, claimantUserId);
 
-    await runOn(depsA, ctx, "accounting.closePeriod", { year, month });
+    await closeWithReview(depsA, ctx, year, month);
 
     await expect(runOn(depsA, ctx, "accounting.payExpenseClaim", { claimId, amountMinor: 5_000 })).rejects.toThrow(
       new RegExp(`period ${year}-${String(month).padStart(2, "0")} is closed`),
@@ -247,7 +270,7 @@ describe("closed-period enforcement (N13)", () => {
     });
     await sleep(60); // let the holder take the lock first
     const t0 = Date.now();
-    await runOn(depsC, ctx, "accounting.closePeriod", { year, month });
+    await closeWithReview(depsC, ctx, year, month);
     const elapsed = Date.now() - t0;
     await hold;
     expect(elapsed).toBeGreaterThanOrEqual(250);
@@ -273,7 +296,7 @@ describe("closed-period enforcement (N13)", () => {
         memo: "race invoice",
         lines: [{ description: "Consulting", quantity: 1_000, unitPriceMinor: 12_000 }],
       }),
-      runOn(depsC, ctx, "accounting.closePeriod", { year, month }),
+      closeWithReview(depsC, ctx, year, month),
     ]);
 
     expect(closeSettled.status).toBe("fulfilled");

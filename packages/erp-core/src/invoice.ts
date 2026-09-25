@@ -13,17 +13,22 @@ export interface InvoiceTotals {
 }
 
 export function computeInvoiceTotals(lines: InvoiceLineInput[]): InvoiceTotals {
-  let subtotal = 0;
-  let tax = 0;
+  let subtotal = 0n;
+  let tax = 0n;
   for (const line of lines) {
     if (!Number.isSafeInteger(line.quantity) || line.quantity <= 0) throw new Error("invalid quantity");
     if (!Number.isSafeInteger(line.unitPriceMinor) || line.unitPriceMinor < 0) throw new Error("invalid unit price");
     if (!Number.isSafeInteger(line.taxMinor) || line.taxMinor < 0) throw new Error("invalid tax");
-    subtotal += Math.round((line.quantity * line.unitPriceMinor) / 1000);
-    tax += line.taxMinor;
+    const numerator = BigInt(line.quantity) * BigInt(line.unitPriceMinor);
+    subtotal += (numerator + 500n) / 1000n;
+    tax += BigInt(line.taxMinor);
   }
-  const totals = { subtotalMinor: subtotal, taxMinor: tax, totalMinor: subtotal + tax };
-  if (totals.totalMinor <= 0) throw new Error("invoice must have a non-zero total");
+  const total = subtotal + tax;
+  if (total <= 0n) throw new Error("invoice must have a non-zero total");
+  if ([subtotal, tax, total].some((amount) => amount > BigInt(Number.MAX_SAFE_INTEGER))) {
+    throw new Error("invoice total exceeds the supported amount range");
+  }
+  const totals = { subtotalMinor: Number(subtotal), taxMinor: Number(tax), totalMinor: Number(total) };
   return totals;
 }
 

@@ -88,12 +88,14 @@ describe("statements + reminders (M10.2)", () => {
     await run("accounting.creditNote", { invoiceId: inv.invoiceId, amountMinor: 30_00, reason: "goodwill adjustment" });
 
     const stmt = await run("accounting.customerStatement", { customerId });
-    const kinds = stmt.rows.map((r: { kind: string }) => r.kind);
+    expect(stmt.currencies).toHaveLength(1);
+    const statement = stmt.currencies[0]!;
+    const kinds = statement.rows.map((r: { kind: string }) => r.kind);
     expect(kinds).toEqual(["invoice", "payment", "credit_note"]);
-    expect(stmt.closingBalanceMinor).toBe(200_00 - 50_00 - 30_00);
-    const dates = stmt.rows.map((r: { date: string }) => r.date);
+    expect(statement.closingBalanceMinor).toBe(200_00 - 50_00 - 30_00);
+    const dates = statement.rows.map((r: { date: string }) => r.date);
     expect([...dates].sort()).toEqual(dates);
-    expect(stmt.rows.at(-1)!.balanceMinor).toBe(stmt.closingBalanceMinor);
+    expect(statement.rows.at(-1)!.balanceMinor).toBe(statement.closingBalanceMinor);
   });
 
   it("reminders skip opt-outs and draft honest overdue messages", async () => {

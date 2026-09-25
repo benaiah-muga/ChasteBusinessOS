@@ -14,7 +14,8 @@ import {
   StatCard,
   type ActionNoticeState,
 } from "@/components/ui";
-import { formatDate, formatMoney, timeAgo } from "@/lib/format";
+import { formatDate, formatMoney, minorToInputIn, timeAgo, toMinorIn } from "@/lib/format";
+import { formatMoneyIn } from "@/lib/prefs";
 import { useMoneySync } from "@/lib/money";
 import { QuickCreateButton } from "../quick-create";
 import { IconListTree } from "@/components/icons";
@@ -22,6 +23,7 @@ import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
 import { useTabParam } from "@/lib/tab-param";
+import { PaymentRunsSection } from "./payment-runs-section";
 
 type Tab = "overview" | "requests" | "orders" | "bills" | "vendors" | "intel";
 
@@ -51,6 +53,7 @@ interface Bill {
   creditedMinor: number;
   status: string;
   dueMinor: number;
+  currency: string;
   createdAt: string;
 }
 interface Vendor {
@@ -73,6 +76,7 @@ interface Product {
   avgUnitCostMinor?: number;
 }
 interface Payload {
+  baseCurrency?: string;
   vendors?: Vendor[];
   orders?: PurchaseOrder[];
   bills?: Bill[];
@@ -141,8 +145,9 @@ export default function PurchasingPage() {
     vendorId: "",
     vendorRef: "",
     poNumber: "",
-    lines: [{ description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "" }],
+    lines: [{ description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "", taxCodeId: "" }],
   });
+  const [inputTaxCodes, setInputTaxCodes] = useState<{ id: string; code: string; name: string; rateBasisPoints: number; priceIncludesTax: boolean; active: boolean }[]>([]);
   const [payAmount, setPayAmount] = useState<Record<string, string>>({});
   const [creditTarget, setCreditTarget] = useState<Bill | null>(null);
   const [creditForm, setCreditForm] = useState({ amount: "", reason: "" });
@@ -169,6 +174,14 @@ export default function PurchasingPage() {
   useEffect(() => {
     if (enabled) void load();
   }, [enabled, load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void callApi<{ codes?: { id: string; code: string; name: string; direction: "input" | "output"; rateBasisPoints: number; priceIncludesTax: boolean; active: boolean }[] }>("/api/accounting/tax").then((res) => {
+      if (!cancelled && res.ok) setInputTaxCodes((res.data?.codes ?? []).filter((code) => code.active && code.direction === "input"));
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const post = useCallback(
     async (body: Record<string, unknown>, label: string): Promise<boolean> => {
@@ -198,6 +211,7 @@ export default function PurchasingPage() {
   const vendors = data.vendors ?? [];
   const orders = data.orders ?? [];
   const bills = data.bills ?? [];
+  const baseCurrency = data.baseCurrency ?? "USD";
   const requests = data.requests ?? [];
 
   return (
@@ -216,6 +230,7 @@ export default function PurchasingPage() {
       activeTab={tab}
       onTabChange={(id) => setTab(id as Tab)}
     >
+      <h1 className="sr-only">Purchasing and procurement</h1>
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
 
       {tab === "overview" && (
@@ -612,7 +627,7 @@ export default function PurchasingPage() {
                   const lines = poForm.lines.map((l) => ({
                     description: l.description,
                     quantity: Math.round(Number(l.quantity || "0") * 1000),
-                    unitPriceMinor: Math.round(Number(l.unitPrice || "0") * 100),
+                    unitPriceMinor: toMinorIn(baseCurrency, l.unitPrice || "0"),
                     sku: l.sku || undefined,
                   }));
                   void post({ action: "createPurchaseOrder", vendorId: poForm.vendorId, memo: poForm.memo, lines }, "Draft order").then((ok) => {
@@ -733,7 +748,9 @@ export default function PurchasingPage() {
             <CardTitle>Record vendor bill</CardTitle>
             <div className="space-y-2 text-sm">
               <div className="flex flex-wrap gap-2">
+                <label className="sr-only" htmlFor="bill-vendor">Vendor</label>
                 <select
+                  id="bill-vendor"
                   className="select"
                   value={billForm.vendorId}
                   onChange={(e) => setBillForm({ ...billForm, vendorId: e.target.value })}
@@ -749,7 +766,9 @@ export default function PurchasingPage() {
                   value={billForm.vendorRef}
                   onChange={(e) => setBillForm({ ...billForm, vendorRef: e.target.value })}
                 />
+                <label className="sr-only" htmlFor="bill-po-number">Purchase order number for three-way matching</label>
                 <input
+                  id="bill-po-number"
                   className="w-28 rounded border bg-transparent px-2 py-1.5"
                   placeholder="PO # (match)"
                   title="When set, every line must reference a PO line number and passes three-way matching"
@@ -781,7 +800,7 @@ export default function PurchasingPage() {
                   />
                   <input
                     className="w-24 rounded border bg-transparent px-2 py-1.5"
-                    placeholder="Unit price"
+                    placeholder={`Unit price · ${baseCurrency}`}
                     value={l.unitPrice}
                     onChange={(e) => {
                       const next = [...billForm.lines];
@@ -801,6 +820,14 @@ export default function PurchasingPage() {
                       }}
                     />
                   )}
+                  {inputTaxCodes.length > 0 && <select className="select max-w-40" aria-label={`Input tax code for bill line ${i + 1}`} value={l.taxCodeId} onChange={(e) => {
+                    const next = [...billForm.lines];
+                    next[i] = { ...l, taxCodeId: e.target.value };
+                    setBillForm({ ...billForm, lines: next });
+                  }}>
+                    <option value="">No input tax</option>
+                    {inputTaxCodes.map((code) => <option key={code.id} value={code.id}>{code.code} · {(code.rateBasisPoints / 100).toFixed(2)}%</option>)}
+                  </select>}
                 </div>
               ))}
               <Button
@@ -811,6 +838,7 @@ export default function PurchasingPage() {
                     description: l.description,
                     quantity: Math.round(Number(l.quantity || "0") * 1000),
                     unitPriceMinor: Math.round(Number(l.unitPrice || "0") * 100),
+                    taxCodeId: l.taxCodeId || undefined,
                     poLineNumber: hasPo ? Number(l.poLineNumber || "0") || undefined : undefined,
                   }));
                   void post(
@@ -824,13 +852,13 @@ export default function PurchasingPage() {
                     "Record bill",
                   ).then((ok) => {
                     if (ok)
-                      setBillForm({ vendorId: "", vendorRef: "", poNumber: "", lines: [{ description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "" }] });
+                      setBillForm({ vendorId: "", vendorRef: "", poNumber: "", lines: [{ description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "", taxCodeId: "" }] });
                   });
                 }}
               >
                 Record bill
               </Button>
-              <p className="text-xs opacity-50">
+              <p className="text-xs text-stone-600">
                 Bills matched to a purchase order pass three-way matching (ordered vs received vs billed) before posting.
               </p>
             </div>
@@ -842,31 +870,43 @@ export default function PurchasingPage() {
               {data.apAging?.buckets ? (
                 <>
                   <div>
-                    <div className="opacity-50">Current</div>
-                    <div className="font-medium tabular-nums">{formatMoney(data.apAging.buckets.current)}</div>
+                    <div className="text-stone-600">Current</div>
+                    <div className="font-medium tabular-nums">{formatMoneyIn(baseCurrency, data.apAging.buckets.current)}</div>
                   </div>
                   <div>
-                    <div className="opacity-50">31–60 days</div>
-                    <div className="font-medium tabular-nums">{formatMoney(data.apAging.buckets.d30)}</div>
+                    <div className="text-stone-600">31–60 days</div>
+                    <div className="font-medium tabular-nums">{formatMoneyIn(baseCurrency, data.apAging.buckets.d30)}</div>
                   </div>
                   <div>
-                    <div className="opacity-50">61–90 days</div>
-                    <div className="font-medium tabular-nums">{formatMoney(data.apAging.buckets.d60)}</div>
+                    <div className="text-stone-600">61–90 days</div>
+                    <div className="font-medium tabular-nums">{formatMoneyIn(baseCurrency, data.apAging.buckets.d60)}</div>
                   </div>
                   <div>
-                    <div className="opacity-50">90+ days</div>
-                    <div className="font-medium tabular-nums">{formatMoney(data.apAging.buckets.d90plus)}</div>
+                    <div className="text-stone-600">90+ days</div>
+                    <div className="font-medium tabular-nums">{formatMoneyIn(baseCurrency, data.apAging.buckets.d90plus)}</div>
                   </div>
                   <div>
-                    <div className="opacity-50">Total outstanding</div>
-                    <div className="font-semibold tabular-nums">{formatMoney(data.apAging.buckets.totalOutstanding)}</div>
+                    <div className="text-stone-600">Total outstanding</div>
+                    <div className="font-semibold tabular-nums">{formatMoneyIn(baseCurrency, data.apAging.buckets.totalOutstanding)}</div>
                   </div>
                 </>
               ) : (
-                <div className="opacity-50">No outstanding bills.</div>
+                <div className="text-stone-600">No outstanding bills.</div>
               )}
             </div>
           </Card>
+
+          <PaymentRunsSection
+            bills={bills.filter((bill) => bill.dueMinor > 0).map((bill) => ({
+              id: bill.id,
+              number: bill.number,
+              vendorName: bill.vendorName,
+              vendorRef: bill.vendorRef,
+              dueMinor: bill.dueMinor,
+              currency: bill.currency,
+            }))}
+            onRefresh={() => void load()}
+          />
 
           {bills.length === 0 ? (
             <EmptyState
@@ -891,29 +931,32 @@ export default function PurchasingPage() {
                 <tbody>
                   {bills.map((b) => (
                     <tr key={b.number} className="border-t">
+                      {(() => {
+                        const paymentAmountMinor = toMinorIn(b.currency, payAmount[String(b.number)] ?? "");
+                        return <>
                       <td className="whitespace-nowrap py-1.5 opacity-70">#{b.number}</td>
                       <td>{b.vendorName}</td>
-                      <td className="text-right tabular-nums">{formatMoney(b.totalMinor)}</td>
-                      <td className="text-right tabular-nums">{formatMoney(b.paidMinor)}</td>
-                      <td className="text-right font-medium tabular-nums">{formatMoney(b.dueMinor)}</td>
+                      <td className="text-right tabular-nums">{formatMoneyIn(b.currency, b.totalMinor)}</td>
+                      <td className="text-right tabular-nums">{formatMoneyIn(b.currency, b.paidMinor)}</td>
+                      <td className="text-right font-medium tabular-nums">{formatMoneyIn(b.currency, b.dueMinor)}</td>
                       <td className="text-right">
                         {b.dueMinor > 0 ? (
                           <span className="inline-flex items-center gap-1">
                             <input
-                              className="w-20 rounded border bg-transparent px-1 py-0.5 text-right"
-                              placeholder={(b.dueMinor / 100).toFixed(2)}
+                                className="w-20 rounded border bg-transparent px-1 py-0.5 text-right"
+                                placeholder={minorToInputIn(b.currency, b.dueMinor)}
                               value={payAmount[String(b.number)] ?? ""}
                               onChange={(e) => setPayAmount({ ...payAmount, [String(b.number)]: e.target.value })}
                             />
                             <Button
                               size="sm"
-                              disabled={busy || !Number(payAmount[String(b.number)])}
+                              disabled={busy || !Number.isSafeInteger(paymentAmountMinor) || paymentAmountMinor <= 0 || paymentAmountMinor > b.dueMinor}
                               onClick={() =>
                                 void post(
                                   {
                                     action: "payBill",
                                     billNumber: b.number,
-                                    amountMinor: Math.round(Number(payAmount[String(b.number)] || "0") * 100),
+                                    amountMinor: paymentAmountMinor,
                                   },
                                   `Payment on #${b.number}`,
                                 ).then((ok) => ok && setPayAmount((p) => ({ ...p, [String(b.number)]: "" })))
@@ -927,7 +970,7 @@ export default function PurchasingPage() {
                               disabled={busy}
                               onClick={() => {
                                 setCreditTarget(b);
-                                setCreditForm({ amount: (b.dueMinor / 100).toFixed(2), reason: "" });
+                                setCreditForm({ amount: minorToInputIn(b.currency, b.dueMinor), reason: "" });
                               }}
                             >
                               Credit
@@ -939,6 +982,8 @@ export default function PurchasingPage() {
                           <Badge tone="green">paid</Badge>
                         )}
                       </td>
+                        </>;
+                      })()}
                     </tr>
                   ))}
                 </tbody>
@@ -1113,7 +1158,7 @@ export default function PurchasingPage() {
                   {
                     action: "billCreditNote",
                     billId: creditTarget.id,
-                    amountMinor: Math.round(Number(creditForm.amount || "0") * 100),
+                    amountMinor: creditTarget.currency ? toMinorIn(creditTarget.currency, creditForm.amount || "0") : 0,
                     reason: creditForm.reason.trim(),
                   },
                   `Credit bill #${creditTarget.number}`,
