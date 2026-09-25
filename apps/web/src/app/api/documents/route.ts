@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
-import { getDb, documentSuggestions, documents, vendors } from "@chaste/db";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { accounts, getDb, customers, documentSuggestions, documents, vendors } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { enqueueCapabilityJob } from "@/server/jobs";
@@ -24,6 +24,11 @@ export async function GET(req: Request) {
       .from(documentSuggestions)
       .where(and(eq(documentSuggestions.orgId, orgId), eq(documentSuggestions.documentId, id)))
       .orderBy(desc(documentSuggestions.createdAt));
+    const accountCodes = [...new Set(suggestions.map((suggestion) => suggestion.suggestedAccountCode))];
+    const accountRows = accountCodes.length
+      ? await db.select({ code: accounts.code, name: accounts.name }).from(accounts).where(and(eq(accounts.orgId, orgId), inArray(accounts.code, accountCodes)))
+      : [];
+    const accountNames = new Map(accountRows.map((account) => [account.code, account.name]));
     return NextResponse.json({
       document: {
         id: doc.id,
@@ -32,9 +37,18 @@ export async function GET(req: Request) {
         sourceType: doc.sourceType,
         parseError: doc.parseError,
         parsedMarkdown: doc.parsedMarkdown,
+        rawText: doc.rawText,
+        mimeType: doc.mimeType,
+        hasSource: Boolean(doc.contentBase64 || doc.rawText),
+        refType: doc.refType,
+        refId: doc.refId,
         createdAt: doc.createdAt.toISOString(),
       },
-      suggestions,
+      suggestions: suggestions.map((suggestion) => ({
+        ...suggestion,
+        accountName: accountNames.get(suggestion.suggestedAccountCode) ?? null,
+        matchedOn: Array.isArray(suggestion.matchedOn) ? suggestion.matchedOn : [],
+      })),
     });
   }
 
@@ -44,6 +58,8 @@ export async function GET(req: Request) {
       title: documents.title,
       status: documents.status,
       sourceType: documents.sourceType,
+      refType: documents.refType,
+      refId: documents.refId,
       createdAt: documents.createdAt,
     })
     .from(documents)
@@ -56,9 +72,17 @@ export async function GET(req: Request) {
     .from(vendors)
     .where(eq(vendors.orgId, orgId));
 
+  const customerList = await db
+    .select({ id: customers.id, name: customers.name })
+    .from(customers)
+    .where(and(eq(customers.orgId, orgId), isNull(customers.deactivatedAt)))
+    .orderBy(asc(customers.name))
+    .limit(500);
+
   return NextResponse.json({
     documents: rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
     vendors: vendorList,
+    customers: customerList,
   });
 }
 
@@ -74,6 +98,7 @@ export async function POST(req: Request) {
     text?: string;
     fileBase64?: string;
     mimeType?: string;
+    refId?: string;
     documentId?: string;
     sync?: boolean;
     intentId?: string;
@@ -87,6 +112,7 @@ export async function POST(req: Request) {
     case "create": {
       const result = await executor.execute("documents.createDocument", ctx, {
         title: body.title ?? "",
+        ...(body.refId ? { refType: "customer", refId: body.refId } : {}),
         ...(body.fileBase64
           ? { fileBase64: body.fileBase64, mimeType: body.mimeType }
           : { text: body.text }),

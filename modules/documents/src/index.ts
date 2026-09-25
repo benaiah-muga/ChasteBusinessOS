@@ -1,10 +1,11 @@
-import { and, desc, eq, ilike, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { embed, extractBillLinesFromText, parseDocumentImage } from "@chaste/ai";
 import {
   accounts,
   authoredDocs,
   authoredDocVersions,
+  customers,
   documentSuggestions,
   documents,
   docDrafts,
@@ -67,11 +68,20 @@ const createDocument = (deps: ModuleDeps) =>
         mimeType: z.string().regex(/^[\w.+-]+\/[\w.+-]+$/).optional(),
       })
       .refine((v) => Boolean(v.text) !== Boolean(v.fileBase64), "provide exactly one of text or fileBase64")
-      .refine((v) => !v.fileBase64 || v.mimeType, "uploads need a mime type"),
+      .refine((v) => !v.fileBase64 || v.mimeType, "uploads need a mime type")
+      .refine((v) => Boolean(v.refType) === Boolean(v.refId), "related records need both a type and an id"),
     output: z.object({ documentId: z.string() }),
     execute: async (ctx, input) => {
       const bytes = input.fileBase64 ? Math.floor(input.fileBase64.length / BASE64_CHARS_PER_BYTE) : null;
       if (bytes !== null && bytes > MAX_UPLOAD_BYTES) throw new Error("file exceeds the 5MB limit");
+      if (input.refType === "customer" && input.refId) {
+        const [customer] = await deps.db
+          .select({ id: customers.id })
+          .from(customers)
+          .where(and(eq(customers.orgId, ctx.actor.orgId), eq(customers.id, input.refId), isNull(customers.deactivatedAt)))
+          .limit(1);
+        if (!customer) throw new Error("related customer not found or inactive in this organization");
+      }
       const [row] = await deps.db
         .insert(documents)
         .values({
@@ -189,12 +199,13 @@ const suggestCoding = (deps: ModuleDeps) =>
     }),
     output: z.object({
       suggestions: z.array(
-        z.object({
-          description: z.string(),
-          quantityThousandths: z.number(),
-          unitPriceMinor: z.number(),
-          suggestedAccountCode: z.string(),
-          matchScore: z.number(),
+      z.object({
+        description: z.string(),
+        quantityThousandths: z.number(),
+        unitPriceMinor: z.number(),
+        suggestedAccountCode: z.string(),
+        matchScore: z.number(),
+        matchedOn: z.array(z.string()),
         }),
       ),
     }),
@@ -222,7 +233,7 @@ const suggestCoding = (deps: ModuleDeps) =>
 
       const coded = lines.map((line) => {
         const match = suggestExpenseAccount(line.description, coa);
-        return { ...line, suggestedAccountCode: match.code, matchScore: match.score };
+        return { ...line, suggestedAccountCode: match.code, matchScore: match.score, matchedOn: match.matchedOn };
       });
 
       await withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
@@ -238,7 +249,7 @@ const suggestCoding = (deps: ModuleDeps) =>
             unitPriceMinor: s.unitPriceMinor,
             suggestedAccountCode: s.suggestedAccountCode,
             matchScore: s.matchScore,
-            matchedOn: [],
+            matchedOn: s.matchedOn,
           })),
         );
       });
@@ -250,6 +261,7 @@ const suggestCoding = (deps: ModuleDeps) =>
           unitPriceMinor: s.unitPriceMinor,
           suggestedAccountCode: s.suggestedAccountCode,
           matchScore: s.matchScore,
+          matchedOn: s.matchedOn,
         })),
       };
     },

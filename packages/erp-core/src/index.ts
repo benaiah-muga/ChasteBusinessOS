@@ -23,6 +23,7 @@ export * from "./coding";
 export * from "./payroll";
 export * from "./cash-basis";
 export * from "./year-end";
+export * from "./cash-tender";
 export * from "./bom";
 export * from "./manufacturing";
 export * from "./routines";

@@ -376,11 +376,11 @@ export function Dialog({
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          "overlay-panel fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-stone-200 bg-white p-5 shadow-xl outline-none",
+          "overlay-panel scrollbar-subtle fixed top-1/2 left-1/2 z-50 max-h-[calc(100dvh-1rem)] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl border border-stone-200 bg-white p-5 shadow-xl outline-none",
           width,
         )}
       >
-        <div className="mb-1 flex items-start justify-between gap-4">
+        <div className="sticky top-0 z-10 -mx-5 -mt-5 mb-1 flex items-start justify-between gap-4 border-b border-stone-200 bg-white px-5 pt-5 pb-3">
           <h2 className="text-[15px] font-semibold text-stone-900">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close dialog" className="icon-btn -mt-1 -mr-1">
             <IconX className="size-4" />
@@ -484,11 +484,13 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   ariaLabel,
+  disabled = false,
 }: {
   options: { value: T; label: string; icon?: ReactNode }[];
   value: T;
   onChange: (v: T) => void;
   ariaLabel: string;
+  disabled?: boolean;
 }) {
   return (
     <div role="radiogroup" aria-label={ariaLabel} className="inline-flex rounded-lg bg-stone-100 p-0.5">
@@ -498,9 +500,11 @@ export function SegmentedControl<T extends string>({
           type="button"
           role="radio"
           aria-checked={value === o.value}
+          disabled={disabled}
           onClick={() => onChange(o.value)}
           className={cn(
-            "inline-flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-all duration-150",
+            "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50",
+            !disabled && "cursor-pointer",
             value === o.value ? "bg-white text-stone-900 shadow-xs" : "text-stone-500 hover:text-stone-800",
           )}
         >

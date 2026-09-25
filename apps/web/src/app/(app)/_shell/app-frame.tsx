@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import Link from "next/link";
 import { resolveApp, tileStyle } from "./apps";
 import { IconChevronLeft } from "@/components/icons";
@@ -43,6 +43,7 @@ export function AppFrame({
 }) {
   const app = resolveApp(appId);
   const Icon = app?.icon;
+  const activeTabRef = useRef<HTMLButtonElement>(null);
 
   // Deep link (?tab=) wins on mount; afterwards the last choice is remembered.
   useEffect(() => {
@@ -62,6 +63,10 @@ export function AppFrame({
       // Session-only memory when storage is unavailable.
     }
   }, [persistKey, activeTab]);
+
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeTab]);
 
   return (
     <div>
@@ -106,15 +111,41 @@ export function AppFrame({
         </div>
 
         {tabs && (
-          <div role="tablist" aria-label={`${app?.name ?? appId} sections`} className="-mx-1 overflow-x-auto px-1 pt-3">
+          <div
+            role="tablist"
+            aria-label={`${app?.name ?? appId} sections`}
+            className="scrollbar-hidden -mx-1 flex w-full min-w-0 flex-nowrap gap-3 overflow-x-auto overflow-y-hidden px-1 pt-3"
+          >
             {tabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
                 aria-selected={t.id === activeTab}
+                ref={t.id === activeTab ? activeTabRef : undefined}
+                aria-controls={activeTab === t.id ? `${persistKey ?? appId}-${t.id}-panel` : undefined}
+                id={`${persistKey ?? appId}-${t.id}-tab`}
+                tabIndex={t.id === activeTab ? 0 : -1}
+                data-tab-id={t.id}
                 onClick={() => onTabChange?.(t.id)}
-                className={cn("tab tab-band mr-4")}
+                onKeyDown={(event) => {
+                  const buttons = Array.from(
+                    event.currentTarget.closest('[role="tablist"]')?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
+                  );
+                  const currentIndex = buttons.indexOf(event.currentTarget);
+                  let nextIndex: number;
+                  if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % buttons.length;
+                  else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+                  else if (event.key === "Home") nextIndex = 0;
+                  else if (event.key === "End") nextIndex = buttons.length - 1;
+                  else return;
+                  event.preventDefault();
+                  const next = buttons[nextIndex];
+                  next?.focus();
+                  next?.scrollIntoView({ block: "nearest", inline: "nearest" });
+                  if (next?.dataset.tabId) onTabChange?.(next.dataset.tabId);
+                }}
+                className={cn("tab tab-band shrink-0")}
               >
                 {t.label}
                 {t.count != null && (
@@ -127,7 +158,14 @@ export function AppFrame({
           </div>
         )}
       </header>
-      {children}
+      <div
+        role={activeTab ? "tabpanel" : undefined}
+        id={`${persistKey ?? appId}-${activeTab ?? "content"}-panel`}
+        aria-labelledby={activeTab ? `${persistKey ?? appId}-${activeTab}-tab` : undefined}
+        tabIndex={0}
+      >
+        {children}
+      </div>
     </div>
   );
 }

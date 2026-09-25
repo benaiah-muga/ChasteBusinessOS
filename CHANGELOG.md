@@ -12,6 +12,15 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- CRM customer search and active, inactive, and all views, with mobile customer cards that keep timeline and deactivation actions visible.
+- CRM customer profiles combine related deals, tasks, invoices, quotes, payments, linked documents, notes, ownership, tags, and quick email or follow-up actions.
+- CRM saved filters, stale follow-up and owner views, duplicate suggestions, bulk owner and tag updates, and selected-customer CSV export.
+- POS product search by name, SKU, or barcode; stock-aware cart quantities; custom line items; and a structured return request dialog.
+- POS customer lookup with purchase history, cash tender and change calculation, shareable receipts, and register-scoped carts saved locally while offline.
+- Approval cards with plain-language summaries, affected-field previews, linked document shortcuts, and recent decision history with audit-ledger links.
+- Document library search and status filters, mobile document cards, explicit loading and error states, and file type and size validation.
+- Document review pairs the original source with extracted lines and coding suggestions, shows matched terms and account names, and supports linking new ingests to a customer.
+- Horizontally scrolling app tabs with arrow-key navigation and selected-tab semantics.
 - **Documents you write, not just ingest.** New Write tab: rich text
   documents with a full formatting toolbar (headings, lists, tables,
   images), debounced autosave with a Saved indicator, live presence of
@@ -64,6 +73,12 @@ The full v1 changelog is preserved at the bottom of this file.
   value.
 
 ### Changed
+- CRM forecast assumptions now show every stage rate, and monetary inputs use the workspace currency.
+- CRM profile and bulk changes run through reversible, audited capability actions; duplicate matches remain review suggestions and are never merged automatically.
+- POS preserves a cart when a sale fails or needs approval, prevents closing a register with an open cart, and labels drawer totals separately from cash sales. Returns now request approval with an audited reason.
+- POS checkout blocks register actions while offline and explains that saved carts require a connection before posting. Loyalty points are shown as unavailable until the workspace configures a program.
+- Document match counts are presented as lexical evidence, not confidence percentages; the review view explains when the parser does not provide extraction confidence.
+- Mobile CRM, POS, and document lists use cards so key values and actions stay in view.
 - **Dropdowns stop looking generic.** Every `<select>` in the app now shares
   one chrome: browser default chrome removed, a custom chevron, aligned
   padding, and the shared gold focus ring. A `Select` primitive lands in the

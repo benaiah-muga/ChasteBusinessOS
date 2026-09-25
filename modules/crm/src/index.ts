@@ -1,6 +1,6 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { customers, deals, invoices, payments, quotes, tasks } from "@chaste/db";
+import { customers, deals, documents, invoices, memberships, payments, quotes, tasks } from "@chaste/db";
 import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import { findDuplicate } from "@chaste/erp-core";
@@ -76,6 +76,157 @@ const deactivateCustomer = (deps: ModuleDeps) =>
         .set({ deactivatedAt: ctx.now })
         .where(and(eq(customers.id, input.customerId), eq(customers.orgId, ctx.actor.orgId)));
       return { deactivated: true };
+    },
+  });
+
+const customerProfileSnapshot = z.object({
+  customerId: z.string().uuid(),
+  ownerUserId: z.string().uuid().nullable(),
+  tags: z.array(z.string().max(40)),
+  notes: z.string().nullable(),
+});
+
+const applyCustomerProfileSnapshots = (
+  deps: ModuleDeps,
+  id: `crm.${string}`,
+  title: string,
+  intent: string,
+  inverseId: `crm.${string}`,
+) =>
+  defineCapability({
+    id,
+    title,
+    intent,
+    module: "crm",
+    risk: "write",
+    permission: "crm.write",
+    inverse: {
+      capabilityId: inverseId,
+      buildInput: (_input, output) => ({ profiles: output.previous }),
+    },
+    input: z.object({ profiles: z.array(customerProfileSnapshot).min(1).max(100) }),
+    output: z.object({ updatedCount: z.number().int(), previous: z.array(customerProfileSnapshot) }),
+    execute: async (ctx, input) => {
+      const owners = [...new Set(input.profiles.map((profile) => profile.ownerUserId).filter((owner): owner is string => owner !== null))];
+      if (owners.length) {
+        const currentMembers = await deps.db
+          .select({ userId: memberships.userId })
+          .from(memberships)
+          .where(and(eq(memberships.orgId, ctx.actor.orgId), inArray(memberships.userId, owners)));
+        if (currentMembers.length !== owners.length) throw new Error("a previous owner is no longer a member of this organization");
+      }
+      return deps.db.transaction(async (tx) => {
+        const ids = [...new Set(input.profiles.map((profile) => profile.customerId))];
+        const rows = await tx
+          .select({ id: customers.id, ownerUserId: customers.ownerUserId, tags: customers.tags, notes: customers.notes })
+          .from(customers)
+          .where(and(eq(customers.orgId, ctx.actor.orgId), inArray(customers.id, ids)));
+        if (rows.length !== ids.length) throw new Error("one or more customers were not found in this organization");
+        const previous = rows.map((row) => ({
+          customerId: row.id,
+          ownerUserId: row.ownerUserId,
+          tags: row.tags,
+          notes: row.notes,
+        }));
+        for (const profile of input.profiles) {
+          await tx
+            .update(customers)
+            .set({ ownerUserId: profile.ownerUserId, tags: profile.tags, notes: profile.notes, updatedAt: ctx.now })
+            .where(and(eq(customers.orgId, ctx.actor.orgId), eq(customers.id, profile.customerId)));
+        }
+        return { updatedCount: input.profiles.length, previous };
+      });
+    },
+  });
+
+const restoreCustomerProfiles = (deps: ModuleDeps) =>
+  applyCustomerProfileSnapshots(
+    deps,
+    "crm.restoreCustomerProfiles",
+    "Restore customer profile details",
+    "Restore customer owners, tags, and notes to their previous recorded values",
+    "crm.reapplyCustomerProfiles",
+  );
+
+const reapplyCustomerProfiles = (deps: ModuleDeps) =>
+  applyCustomerProfileSnapshots(
+    deps,
+    "crm.reapplyCustomerProfiles",
+    "Reapply customer profile details",
+    "Reapply recorded customer owners, tags, and notes after restoring a profile change",
+    "crm.restoreCustomerProfiles",
+  );
+
+const updateCustomerProfiles = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "crm.updateCustomerProfiles",
+    title: "Update customer profiles",
+    intent: "Assign a customer owner or update tags and notes across selected CRM records",
+    module: "crm",
+    risk: "write",
+    permission: "crm.write",
+    inverse: {
+      capabilityId: "crm.restoreCustomerProfiles",
+      buildInput: (_input, output) => ({ profiles: output.previous }),
+    },
+    input: z
+      .object({
+        customerIds: z.array(z.string().uuid()).min(1).max(100),
+        ownerUserId: z.string().uuid().nullable().optional(),
+        addTags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+        removeTags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+        notes: z.string().max(4000).nullable().optional(),
+      })
+      .refine(
+        (input) => input.ownerUserId !== undefined || input.notes !== undefined || Boolean(input.addTags?.length || input.removeTags?.length),
+        "provide at least one profile change",
+      ),
+    output: z.object({ updatedCount: z.number().int(), previous: z.array(customerProfileSnapshot) }),
+    execute: async (ctx, input) => {
+      const customerIds = [...new Set(input.customerIds)];
+      if (input.ownerUserId) {
+        const [member] = await deps.db
+          .select({ userId: memberships.userId })
+          .from(memberships)
+          .where(and(eq(memberships.orgId, ctx.actor.orgId), eq(memberships.userId, input.ownerUserId)))
+          .limit(1);
+        if (!member) throw new Error("the selected owner is not a member of this organization");
+      }
+      return deps.db.transaction(async (tx) => {
+        const rows = await tx
+          .select({ id: customers.id, ownerUserId: customers.ownerUserId, tags: customers.tags, notes: customers.notes })
+          .from(customers)
+          .where(and(eq(customers.orgId, ctx.actor.orgId), inArray(customers.id, customerIds)));
+        if (rows.length !== customerIds.length) throw new Error("one or more customers were not found in this organization");
+        const previous = rows.map((row) => ({
+          customerId: row.id,
+          ownerUserId: row.ownerUserId,
+          tags: row.tags,
+          notes: row.notes,
+        }));
+        const add = new Set((input.addTags ?? []).map((tag) => tag.trim().toLocaleLowerCase()));
+        const remove = new Set((input.removeTags ?? []).map((tag) => tag.trim().toLocaleLowerCase()));
+        for (const row of rows) {
+          const retained = row.tags.filter((tag) => !remove.has(tag.toLocaleLowerCase()));
+          const seen = new Set(retained.map((tag) => tag.toLocaleLowerCase()));
+          const tags = [...retained, ...(input.addTags ?? []).map((tag) => tag.trim()).filter((tag) => {
+            const normalized = tag.toLocaleLowerCase();
+            if (!add.has(normalized) || seen.has(normalized)) return false;
+            seen.add(normalized);
+            return true;
+          })];
+          await tx
+            .update(customers)
+            .set({
+              ...(input.ownerUserId !== undefined ? { ownerUserId: input.ownerUserId } : {}),
+              tags,
+              ...(input.notes !== undefined ? { notes: input.notes } : {}),
+              updatedAt: ctx.now,
+            })
+            .where(and(eq(customers.orgId, ctx.actor.orgId), eq(customers.id, row.id)));
+        }
+        return { updatedCount: rows.length, previous };
+      });
     },
   });
 
@@ -472,6 +623,20 @@ const customerTimeline = (deps: ModuleDeps) =>
         entries.push({ kind: "task", date: t.doneAt ?? t.dueAt ?? t.createdAt, refId: t.id, summary: `Task "${t.title}"${t.doneAt ? " (done)" : ""}` });
       }
 
+      const documentRows = await deps.db
+        .select({ id: documents.id, title: documents.title, status: documents.status, updatedAt: documents.updatedAt })
+        .from(documents)
+        .where(and(eq(documents.orgId, ctx.actor.orgId), eq(documents.refType, "customer"), eq(documents.refId, owned.id)))
+        .limit(limit);
+      for (const document of documentRows) {
+        entries.push({
+          kind: "document",
+          date: document.updatedAt,
+          refId: document.id,
+          summary: `Document "${document.title}" (${document.status})`,
+        });
+      }
+
       entries.sort((a, b) => b.date.getTime() - a.date.getTime());
       return {
         entries: entries.slice(0, limit).map((e) => ({
@@ -487,6 +652,9 @@ const customerTimeline = (deps: ModuleDeps) =>
 export function registerCrmCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(createCustomer(deps));
   registry.register(deactivateCustomer(deps));
+  registry.register(updateCustomerProfiles(deps));
+  registry.register(restoreCustomerProfiles(deps));
+  registry.register(reapplyCustomerProfiles(deps));
   registry.register(listCustomers(deps));
   registry.register(createDeal(deps));
   registry.register(moveDealStage(deps));

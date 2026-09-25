@@ -471,6 +471,13 @@
       "when": 1790011000000,
       "tag": "0066_org_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1790363070838,
+      "tag": "0067_sparkling_sabretooth",
+      "breakpoints": true
     }
   ]
 }

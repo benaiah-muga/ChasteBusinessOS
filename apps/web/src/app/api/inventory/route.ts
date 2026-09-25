@@ -65,8 +65,19 @@ export async function GET(req: Request) {
     }),
   );
 
-  const itemRows = await db.select({ id: items.id, sku: items.sku }).from(items).where(eq(items.orgId, orgId));
+  const itemRows = await db
+    .select({
+      id: items.id,
+      sku: items.sku,
+      kind: items.kind,
+      unitLabel: items.unitLabel,
+      salePriceMinor: items.salePriceMinor,
+      barcode: items.barcode,
+    })
+    .from(items)
+    .where(eq(items.orgId, orgId));
   const skuOf = new Map(itemRows.map((r) => [r.id, r.sku]));
+  const itemBySku = new Map(itemRows.map(({ sku, ...item }) => [sku, item]));
 
   const locations = await db
     .select()
@@ -106,7 +117,7 @@ export async function GET(req: Request) {
     ? await db.select().from(stockTransferLines).where(inArray(stockTransferLines.transferId, transferIds))
     : [];
   return NextResponse.json({
-    items: reportItems,
+    items: reportItems.map((item) => ({ ...item, ...itemBySku.get(item.sku) })),
     totalValueMinor: (stock.data as { totalValueMinor?: number } | undefined)?.totalValueMinor ?? 0,
     reorderAlerts,
     locations,
@@ -284,4 +295,3 @@ function respond(result: { ok: boolean; data?: unknown; error?: string; pendingA
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 422 });
   return NextResponse.json({ ok: true, data: result.data });
 }
-

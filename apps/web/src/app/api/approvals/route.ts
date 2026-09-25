@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { approvals, getDb, users } from "@chaste/db";
+import { approvals, documents, getDb, users } from "@chaste/db";
 import { buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
 import { decideApproval } from "@/server/approvals";
 import { getResolvedUser } from "@/server/session";
@@ -12,16 +12,26 @@ export async function GET() {
   const db = getDb().db;
   const registry = buildRegistry(db);
 
-  const rows = await db
+  const [rows, historyRows] = await Promise.all([
+    db
     .select()
     .from(approvals)
     .where(and(eq(approvals.orgId, resolved.orgId), eq(approvals.status, "pending")))
-    .limit(100);
+    .orderBy(desc(approvals.createdAt))
+    .limit(100),
+    db
+      .select()
+      .from(approvals)
+      .where(and(eq(approvals.orgId, resolved.orgId), inArray(approvals.status, ["approved", "executed", "rejected", "expired"])))
+      .orderBy(desc(approvals.decidedAt))
+      .limit(25),
+  ]);
 
   // Attribution: whose action is waiting. The actor id doubles as the
   // on-behalf user for agent-raised requests (the workmate acts as the
   // human it works for); a sessionId marks the action as agent-originated.
-  const requesterIds = [...new Set(rows.map((r) => r.requestedByUserId).filter((v): v is string => Boolean(v)))];
+  const allRows = [...rows, ...historyRows];
+  const requesterIds = [...new Set(allRows.flatMap((row) => [row.requestedByUserId, row.decidedByUserId]).filter((value): value is string => Boolean(value)))];
   const namesById = requesterIds.length
     ? new Map(
         (
@@ -36,20 +46,44 @@ export async function GET() {
 
   // Authority filter: you may only see (and decide) gates for capabilities
   // your own permissions cover. An accountant never sees IAM requests.
-  const visible = rows.filter((r) => {
+  const visible = allRows.filter((r) => {
     const cap = registry.get(r.capabilityId);
     return cap ? hasPermissionFor({ permissions: resolved.permissions }, cap.permission) : false;
   });
-  return NextResponse.json({
-    approvals: visible.map((a) => ({
-      ...a,
-      createdAt: a.createdAt.toISOString(),
-      raisedBy: {
-        name: (a.requestedByUserId && namesById.get(a.requestedByUserId)) || "Unknown",
-        kind: a.sessionId ? ("agent" as const) : ("human" as const),
-      },
-    })),
+  const documentIds = [...new Set(visible.flatMap((approval) => collectDocumentIds(approval.payload)))];
+  const relatedDocuments = documentIds.length
+    ? await db.select({ id: documents.id, title: documents.title }).from(documents).where(and(eq(documents.orgId, resolved.orgId), inArray(documents.id, documentIds)))
+    : [];
+  const documentById = new Map(relatedDocuments.map((document) => [document.id, document]));
+  const present = (approval: (typeof visible)[number]) => ({
+    ...approval,
+    createdAt: approval.createdAt.toISOString(),
+    decidedAt: approval.decidedAt?.toISOString() ?? null,
+    raisedBy: {
+      name: (approval.requestedByUserId && namesById.get(approval.requestedByUserId)) || "Unknown",
+      kind: approval.sessionId ? ("agent" as const) : ("human" as const),
+    },
+    decidedBy: approval.decidedByUserId ? namesById.get(approval.decidedByUserId) ?? "Unknown" : null,
+    relatedDocuments: collectDocumentIds(approval.payload).flatMap((id) => {
+      const document = documentById.get(id);
+      return document ? [document] : [];
+    }),
   });
+  return NextResponse.json({
+    approvals: visible.filter((approval) => approval.status === "pending").map(present),
+    history: visible.filter((approval) => approval.status !== "pending").map(present),
+  });
+}
+
+function collectDocumentIds(value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+  if (Array.isArray(value)) return value.flatMap(collectDocumentIds);
+  const record = value as Record<string, unknown>;
+  const ids = Object.entries(record).flatMap(([key, entry]) => {
+    if (["documentId", "sourceDocumentId"].includes(key) && typeof entry === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry)) return [entry];
+    return entry && typeof entry === "object" ? collectDocumentIds(entry) : [];
+  });
+  return [...new Set(ids)];
 }
 
 const decideSchema = z.object({

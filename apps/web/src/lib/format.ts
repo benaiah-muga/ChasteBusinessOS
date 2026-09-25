@@ -52,6 +52,10 @@ export function activeCurrencyCode(): string {
   return activeStyle.code;
 }
 
+export function activeCurrencyMinorUnits(): number {
+  return activeStyle.minorUnits;
+}
+
 function groupDigits(minor: number, minDecimals: number, maxDecimals: number): string {
   const major = Math.abs(minor) / 10 ** activeStyle.minorUnits;
   return major.toLocaleString("en-US", {

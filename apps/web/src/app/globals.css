@@ -187,6 +187,27 @@
   }
 }
 
+@layer utilities {
+  .scrollbar-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-subtle {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-stone-400) transparent;
+  }
+  .scrollbar-subtle::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-subtle::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: var(--color-stone-400);
+  }
+}
+
 @layer components {
   /* ---------- Typography figures ---------- */
   .figure-label {

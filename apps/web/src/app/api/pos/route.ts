@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
-import { getDb, invoices, posSessions } from "@chaste/db";
+import { customers, getDb, invoiceLines, invoices, payments, posSessions } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
@@ -26,11 +26,34 @@ export async function GET() {
       creditedMinor: invoices.creditedMinor,
       memo: invoices.memo,
       createdAt: invoices.createdAt,
+      customerId: invoices.customerId,
+      customerName: customers.name,
+      paymentMethod: payments.method,
     })
     .from(invoices)
+    .leftJoin(customers, eq(invoices.customerId, customers.id))
+    .leftJoin(payments, eq(payments.invoiceId, invoices.id))
     .where(and(eq(invoices.orgId, resolved.orgId), isNotNull(invoices.posSessionId)))
     .orderBy(desc(invoices.number))
     .limit(20);
+  const saleLines = saleRows.length
+    ? await getDb()
+        .db.select({
+          invoiceId: invoiceLines.invoiceId,
+          description: invoiceLines.description,
+          quantity: invoiceLines.quantity,
+          unitPriceMinor: invoiceLines.unitPriceMinor,
+          taxMinor: invoiceLines.taxMinor,
+        })
+        .from(invoiceLines)
+        .where(inArray(invoiceLines.invoiceId, saleRows.map((sale) => sale.id)))
+    : [];
+  const linesByInvoice = new Map<string, typeof saleLines>();
+  for (const line of saleLines) {
+    const current = linesByInvoice.get(line.invoiceId) ?? [];
+    current.push(line);
+    linesByInvoice.set(line.invoiceId, current);
+  }
   return NextResponse.json({
     sessions: rows.map((s) => ({
       ...s,
@@ -44,6 +67,10 @@ export async function GET() {
       totalMinor: s.totalMinor,
       creditedMinor: s.creditedMinor,
       memo: s.memo,
+      customerId: s.customerId,
+      customerName: s.customerName,
+      method: s.paymentMethod ?? (s.memo?.match(/POS \((cash|card)\)/)?.[1] ?? "cash"),
+      lines: linesByInvoice.get(s.id) ?? [],
       createdAt: s.createdAt.toISOString(),
     })),
   });
@@ -58,12 +85,15 @@ const actionSchema = z.discriminatedUnion("action", [
     action: z.literal("sale"),
     sessionId: z.string(),
     method: z.enum(["cash", "card"]).default("cash"),
+    customerId: z.string().uuid().optional(),
+    cashReceivedMinor: z.number().int().nonnegative().optional(),
     lines: z
       .array(
         z.object({
           description: z.string().min(1),
           quantity: z.number().int().positive(),
           unitPriceMinor: z.number().int().nonnegative(),
+          sku: z.string().min(1).max(80).optional(),
         }),
       )
       .min(1),
@@ -115,6 +145,8 @@ export async function POST(req: Request) {
     result = await executor.execute("pos.completeSale", humanCtx, {
       sessionId: body.data.sessionId,
       method: body.data.method,
+      ...(body.data.customerId ? { customerId: body.data.customerId } : {}),
+      ...(body.data.cashReceivedMinor !== undefined ? { cashReceivedMinor: body.data.cashReceivedMinor } : {}),
       lines: body.data.lines,
     });
   } else if (body.data.action === "returnSale") {

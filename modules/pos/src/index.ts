@@ -1,8 +1,9 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   customers,
   invoices,
+  invoiceLines,
   items,
   payments,
   posSessions,
@@ -17,6 +18,7 @@ import type { Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import { postEntry } from "@chaste/module-accounting/posting";
 import { applyStockDelta, lockStockItems } from "@chaste/module-inventory";
+import { calculateCashTender } from "@chaste/erp-core";
 
 export interface ModuleDeps {
   db: Database["db"];
@@ -117,15 +119,20 @@ const completeSale = (deps: ModuleDeps) =>
         reason: `undo of POS sale #${output.invoiceNumber}`,
       }),
     },
-    input: z.object({
-      sessionId: z.string(),
-      lines: z.array(saleLineSchema).min(1),
-      method: z.enum(["cash", "card"]).default("cash"),
-    }),
+    input: z
+      .object({
+        sessionId: z.string(),
+        lines: z.array(saleLineSchema).min(1),
+        method: z.enum(["cash", "card"]).default("cash"),
+        customerId: z.string().uuid().optional(),
+        cashReceivedMinor: z.number().int().nonnegative().optional(),
+      })
+      .refine((input) => input.method === "cash" || input.cashReceivedMinor === undefined, "cash received only applies to cash sales"),
     output: z.object({
       invoiceId: z.string(),
       invoiceNumber: z.number(),
       totalMinor: z.number(),
+      tenderedMinor: z.number(),
       changeGivenMinor: z.number(),
     }),
     execute: async (ctx, input) => {
@@ -219,7 +226,20 @@ const completeSale = (deps: ModuleDeps) =>
         const total = subtotal + tax;
         if (total <= 0) throw new Error("sale must have a non-zero total");
 
-        const customerId = await walkInCustomerId(tx, ctx.actor.orgId);
+        const tender = input.method === "cash"
+          ? calculateCashTender(total, input.cashReceivedMinor)
+          : { tenderedMinor: total, changeGivenMinor: 0 };
+        let customerId = input.customerId;
+        if (customerId) {
+          const [customer] = await tx
+            .select({ id: customers.id })
+            .from(customers)
+            .where(and(eq(customers.id, customerId), eq(customers.orgId, ctx.actor.orgId), isNull(customers.deactivatedAt)))
+            .limit(1);
+          if (!customer) throw new Error("customer not found or inactive in this organization");
+        } else {
+          customerId = await walkInCustomerId(tx, ctx.actor.orgId);
+        }
         const invoiceNumber = await nextDocNumber(tx, ctx.actor.orgId, "invoice");
 
         const glLines = [
@@ -247,6 +267,14 @@ const completeSale = (deps: ModuleDeps) =>
             memo: `POS (${input.method})`,
           })
           .returning({ id: invoices.id });
+
+        await tx.insert(invoiceLines).values(input.lines.map((line) => ({
+          invoiceId: inv!.id,
+          description: line.description,
+          quantity: line.quantity,
+          unitPriceMinor: line.unitPriceMinor,
+          taxMinor: line.taxMinor,
+        })));
 
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
           memo: `POS sale #${invoiceNumber} (${input.method})`,
@@ -291,7 +319,13 @@ const completeSale = (deps: ModuleDeps) =>
             .where(eq(posSessions.id, session.id));
         }
 
-        return { invoiceId: inv!.id, invoiceNumber, totalMinor: total, changeGivenMinor: 0 };
+        return {
+          invoiceId: inv!.id,
+          invoiceNumber,
+          totalMinor: total,
+          tenderedMinor: tender.tenderedMinor,
+          changeGivenMinor: tender.changeGivenMinor,
+        };
       });
     },
   });

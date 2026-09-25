@@ -399,6 +399,9 @@ export const customers = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     email: text("email"),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    tags: text("tags").array().notNull().default([]),
+    notes: text("notes"),
     /** Confirmed orders beyond this AR ceiling route to refusal (M9); null = no limit. */
     creditLimitMinor: integer("credit_limit_minor"),
     /** Net-days applied to new invoices; null/0 = due on issue (M10). */
@@ -409,8 +412,9 @@ export const customers = pgTable(
     marketingOptOut: boolean("marketing_opt_out").notNull().default(false),
     deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
     createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("customer_org_idx").on(t.orgId, t.name)],
+  (t) => [index("customer_org_idx").on(t.orgId, t.name), index("customer_org_owner_idx").on(t.orgId, t.ownerUserId)],
 );
 
 export const invoices = pgTable(
