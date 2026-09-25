@@ -128,7 +128,7 @@ export default function SalesPage() {
   const [productLoadError, setProductLoadError] = useState<AppError | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useTabParam(["overview", "quotes", "new", "orders", "new-order"] as const, "overview");
+  const [tab, setTab] = useTabParam(["overview", "quotes", "new", "orders", "new-order", "customers"] as const, "overview");
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [quoteSearch, setQuoteSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");

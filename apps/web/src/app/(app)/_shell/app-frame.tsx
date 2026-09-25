@@ -206,7 +206,9 @@ export function AppFrame({
             )}
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            <QuickActionsMenu appId={appId} />
+            <div className="hidden lg:block">
+              <QuickActionsMenu appId={appId} />
+            </div>
             {actions}
           </div>
         </div>
