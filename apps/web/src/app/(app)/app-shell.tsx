@@ -29,7 +29,6 @@ import {
 import { Avatar } from "@/components/ui";
 import { LogoMark } from "@/components/logo";
 import { ThemeMenu } from "@/components/theme";
-import { QuickActionsMenu } from "@/components/quick-actions";
 import { cn, setActiveCurrency } from "@/lib/format";
 import { applyOrgDefault, useMoneySync } from "@/lib/money";
 import { usePrefs } from "@/lib/prefs";
@@ -325,7 +324,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
             <span className="min-w-0 flex-1 truncate px-1 text-sm font-semibold tracking-tight text-stone-900">
               {currentApp?.name || orgName || "Chaste"}
             </span>
-            <DigitalClock className="tnum mr-1 shrink-0 text-[11px] font-medium text-stone-700" />
+            <DigitalClock className="tnum mr-1 hidden shrink-0 text-[11px] font-medium text-stone-700 min-[360px]:block" />
             <button type="button" onClick={() => setPaletteOpen(true)} aria-label="Search" className="icon-btn">
               <IconSearch className="size-5" />
             </button>
@@ -345,7 +344,6 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
             <button type="button" onClick={() => setLauncherOpen(true)} aria-label="Applications" className="icon-btn">
               <IconGrid className="size-5" />
             </button>
-            <QuickActionsMenu appId={currentApp?.id ?? "documents"} compact />
             <div ref={mobileAccountRef} className="relative">
               <button
                 type="button"
@@ -363,10 +361,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
 
           <main
             id="main"
-            className={cn(
-              "mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:px-8 md:pb-8",
-              inputMode && "pb-32 md:pb-24",
-            )}
+            className={cn("mx-auto max-w-7xl px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:px-8 lg:pb-8", inputMode && "pb-32 lg:pb-24")}
           >
             <Fragment key={prefs.currency}>{children}</Fragment>
           </main>
@@ -374,7 +369,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
           {/* Mobile bottom navigation: the four anchors, thumb-reachable */}
           <nav
             aria-label="Primary"
-            className="fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch border-t border-stone-200 bg-white/95 backdrop-blur md:hidden"
+            className="fixed inset-x-0 bottom-0 z-30 flex h-16 items-stretch border-t border-stone-200 bg-white/95 backdrop-blur lg:hidden"
           >
             {(
               [
@@ -392,7 +387,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "relative flex flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors duration-100",
-                    active ? "text-gold-800" : "text-stone-600 hover:text-stone-800",
+                    active ? "text-gold-800" : "text-stone-700 hover:text-stone-900",
                   )}
                 >
                   <NavIcon className="size-5" />
@@ -408,7 +403,9 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
 
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} enabledModules={enabled} />
         <AppsLauncher open={launcherOpen} onClose={() => setLauncherOpen(false)} enabledModules={enabled} />
-        <ChatWidget />
+        <aside aria-label="Workmate">
+          <ChatWidget />
+        </aside>
       </div>
       </QuickCreateProvider>
     </EnabledModulesProvider>

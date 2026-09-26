@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
-import { getDb, invoices, posSessions } from "@chaste/db";
+import { customers, getDb, invoiceLines, invoices, payments, posReturnLines, posReturns, posSessions, stockMovements } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
@@ -26,11 +26,62 @@ export async function GET() {
       creditedMinor: invoices.creditedMinor,
       memo: invoices.memo,
       createdAt: invoices.createdAt,
+      customerId: invoices.customerId,
+      customerName: customers.name,
     })
     .from(invoices)
+    .leftJoin(customers, eq(invoices.customerId, customers.id))
     .where(and(eq(invoices.orgId, resolved.orgId), isNotNull(invoices.posSessionId)))
     .orderBy(desc(invoices.number))
     .limit(20);
+  const saleLines = saleRows.length
+    ? await getDb()
+        .db.select({
+          id: invoiceLines.id,
+          invoiceId: invoiceLines.invoiceId,
+          itemId: invoiceLines.itemId,
+          description: invoiceLines.description,
+          quantity: invoiceLines.quantity,
+          unitPriceMinor: invoiceLines.unitPriceMinor,
+          taxMinor: invoiceLines.taxMinor,
+        })
+        .from(invoiceLines)
+        .where(inArray(invoiceLines.invoiceId, saleRows.map((sale) => sale.id)))
+    : [];
+  const paymentRows = saleRows.length
+    ? await getDb().db.select({ invoiceId: payments.invoiceId, method: payments.method }).from(payments).where(inArray(payments.invoiceId, saleRows.map((sale) => sale.id)))
+    : [];
+  const saleIds = saleRows.map((sale) => sale.id);
+  const [returnLines, returnHeaders, stockRows] = saleIds.length
+    ? await Promise.all([
+        getDb().db.select({ invoiceLineId: posReturnLines.invoiceLineId, quantity: posReturnLines.quantity }).from(posReturnLines).where(and(eq(posReturnLines.orgId, resolved.orgId), inArray(posReturnLines.invoiceLineId, saleLines.map((line) => line.id)))),
+        getDb().db.select({ invoiceId: posReturns.invoiceId, refundMinor: posReturns.refundMinor }).from(posReturns).where(and(eq(posReturns.orgId, resolved.orgId), inArray(posReturns.invoiceId, saleIds))),
+        getDb().db.select({ invoiceId: stockMovements.refId, itemId: stockMovements.itemId, quantityDelta: stockMovements.quantityDelta }).from(stockMovements).where(and(eq(stockMovements.orgId, resolved.orgId), eq(stockMovements.refType, "invoice"), inArray(stockMovements.refId, saleIds))),
+      ])
+    : [[], [], []];
+  const methodsByInvoice = new Map<string, string[]>();
+  for (const payment of paymentRows) {
+    const methods = methodsByInvoice.get(payment.invoiceId) ?? [];
+    if (!methods.includes(payment.method)) methods.push(payment.method);
+    methodsByInvoice.set(payment.invoiceId, methods);
+  }
+  const linesByInvoice = new Map<string, typeof saleLines>();
+  for (const line of saleLines) {
+    const current = linesByInvoice.get(line.invoiceId) ?? [];
+    current.push(line);
+    linesByInvoice.set(line.invoiceId, current);
+  }
+  const returnedQuantityByLine = new Map<string, number>();
+  for (const line of returnLines) returnedQuantityByLine.set(line.invoiceLineId, (returnedQuantityByLine.get(line.invoiceLineId) ?? 0) + line.quantity);
+  const structuredCreditByInvoice = new Map<string, number>();
+  for (const row of returnHeaders) structuredCreditByInvoice.set(row.invoiceId, (structuredCreditByInvoice.get(row.invoiceId) ?? 0) + row.refundMinor);
+  const stockItemIdsByInvoice = new Map<string, Set<string>>();
+  for (const leg of stockRows) {
+    if (leg.quantityDelta >= 0 || !leg.invoiceId) continue;
+    const itemIds = stockItemIdsByInvoice.get(leg.invoiceId) ?? new Set<string>();
+    itemIds.add(leg.itemId);
+    stockItemIdsByInvoice.set(leg.invoiceId, itemIds);
+  }
   return NextResponse.json({
     sessions: rows.map((s) => ({
       ...s,
@@ -44,6 +95,25 @@ export async function GET() {
       totalMinor: s.totalMinor,
       creditedMinor: s.creditedMinor,
       memo: s.memo,
+      customerId: s.customerId,
+      customerName: s.customerName,
+      method: methodsByInvoice.get(s.id)?.join(" + ") ?? (s.memo?.match(/POS \((cash|card|mobile_money)\)/)?.[1] ?? "cash"),
+      unallocatedCreditMinor: Math.max(0, s.creditedMinor - (structuredCreditByInvoice.get(s.id) ?? 0)),
+      returnMode: s.creditedMinor > (structuredCreditByInvoice.get(s.id) ?? 0)
+        ? "credit-review"
+        : [...(stockItemIdsByInvoice.get(s.id) ?? [])].some((itemId) => !(linesByInvoice.get(s.id) ?? []).some((line) => line.itemId === itemId))
+          ? "legacy-full"
+          : "itemized",
+      lines: (linesByInvoice.get(s.id) ?? []).map((line) => ({
+        id: line.id,
+        itemId: line.itemId,
+        description: line.description,
+        quantity: line.quantity,
+        unitPriceMinor: line.unitPriceMinor,
+        taxMinor: line.taxMinor,
+        returnedQuantity: returnedQuantityByLine.get(line.id) ?? 0,
+        stockTracked: line.itemId !== null && (stockItemIdsByInvoice.get(s.id)?.has(line.itemId) ?? false),
+      })),
       createdAt: s.createdAt.toISOString(),
     })),
   });
@@ -58,12 +128,19 @@ const actionSchema = z.discriminatedUnion("action", [
     action: z.literal("sale"),
     sessionId: z.string(),
     method: z.enum(["cash", "card"]).default("cash"),
+    customerId: z.string().uuid().optional(),
+    cashReceivedMinor: z.number().int().nonnegative().optional(),
+    tenders: z.array(z.object({
+      method: z.enum(["cash", "card", "mobile_money"]),
+      amountMinor: z.number().int().positive(),
+    })).min(1).max(3).optional(),
     lines: z
       .array(
         z.object({
           description: z.string().min(1),
           quantity: z.number().int().positive(),
           unitPriceMinor: z.number().int().nonnegative(),
+          sku: z.string().min(1).max(80).optional(),
         }),
       )
       .min(1),
@@ -72,11 +149,14 @@ const actionSchema = z.discriminatedUnion("action", [
     action: z.literal("close"),
     sessionId: z.string(),
     countedCashMinor: z.number().int().nonnegative(),
+    varianceReason: z.string().trim().min(3).max(500).optional(),
   }),
   z.object({
     action: z.literal("returnSale"),
     invoiceId: z.string().uuid(),
     reason: z.string().min(3).max(500),
+    refundMethod: z.enum(["cash", "card", "mobile_money"]),
+    lines: z.array(z.object({ invoiceLineId: z.string().uuid(), quantity: z.number().int().positive() })).min(1).optional(),
   }),
   z.object({
     action: z.literal("shiftSummary"),
@@ -115,6 +195,9 @@ export async function POST(req: Request) {
     result = await executor.execute("pos.completeSale", humanCtx, {
       sessionId: body.data.sessionId,
       method: body.data.method,
+      ...(body.data.customerId ? { customerId: body.data.customerId } : {}),
+      ...(body.data.cashReceivedMinor !== undefined ? { cashReceivedMinor: body.data.cashReceivedMinor } : {}),
+      ...(body.data.tenders ? { tenders: body.data.tenders } : {}),
       lines: body.data.lines,
     });
   } else if (body.data.action === "returnSale") {
@@ -123,6 +206,8 @@ export async function POST(req: Request) {
     result = await executor.execute("pos.returnSale", humanCtx, {
       invoiceId: body.data.invoiceId,
       reason: body.data.reason,
+      refundMethod: body.data.refundMethod,
+      ...(body.data.lines ? { lines: body.data.lines } : {}),
     });
   } else if (body.data.action === "shiftSummary") {
     result = await executor.execute("pos.shiftSummary", humanCtx, {
@@ -132,6 +217,7 @@ export async function POST(req: Request) {
     result = await executor.execute("pos.closeSession", humanCtx, {
       sessionId: body.data.sessionId,
       countedCashMinor: body.data.countedCashMinor,
+      ...(body.data.varianceReason ? { varianceReason: body.data.varianceReason } : {}),
     });
   }
 

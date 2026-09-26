@@ -513,6 +513,69 @@
       "when": 1790327551492,
       "tag": "0072_faithful_red_wolf",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790363070838,
+      "tag": "0073_sparkling_sabretooth",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790372184729,
+      "tag": "0074_steep_miek",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790374915004,
+      "tag": "0075_simple_phantom_reporter",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1790375699711,
+      "tag": "0076_last_omega_flight",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1790396741728,
+      "tag": "0077_funny_bloodaxe",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1790399303182,
+      "tag": "0078_calm_dinosaurs",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1790408193555,
+      "tag": "0079_late_mindworm",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1790452033241,
+      "tag": "0080_swift_ricochet",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1790453308881,
+      "tag": "0081_sturdy_the_spike",
+      "breakpoints": true
     }
   ]
 }

@@ -1,13 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   accounts,
   createDb,
   customers,
+  invoiceLines,
   invoices,
   items,
   journalEntries,
+  journalLines,
   organizations,
+  posReturnLines,
+  posReturns,
   posSessions,
   stockMovements,
   type Database,
@@ -160,5 +164,102 @@ describe("N12 POS inverse round-trip", () => {
     await expect(
       run("pos.returnSale", { invoiceId: sale.invoiceId, reason: "second return attempt" }),
     ).rejects.toThrow(/nothing left to return/);
+  });
+
+  it("returns selected quantities, restores matching stock, and allocates line tax across repeat returns", async () => {
+    const before = await onHand();
+    const sale = await run("pos.completeSale", {
+      sessionId,
+      lines: [
+        { description: "Taxed widget", quantity: 2000, unitPriceMinor: 1000, taxMinor: 3, sku: SKU },
+        { description: "Taxed widget", quantity: 3000, unitPriceMinor: 500, taxMinor: 5, sku: SKU },
+      ],
+      method: "card",
+    });
+    expect(sale.totalMinor).toBe(3508);
+    expect(await onHand()).toBe(before - 5000);
+    const saleLines = await db.db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, sale.invoiceId));
+    const firstLine = saleLines.find((line) => line.quantity === 2000)!;
+    const secondLine = saleLines.find((line) => line.quantity === 3000)!;
+
+    const firstHalf = await run("pos.returnSale", {
+      invoiceId: sale.invoiceId,
+      reason: "return one taxed unit",
+      refundMethod: "card",
+      lines: [{ invoiceLineId: firstLine.id, quantity: 1000 }],
+    });
+    expect(firstHalf).toMatchObject({ refundMinor: 1002, creditedMinor: 1002, restockedLines: 1 });
+    expect(await onHand()).toBe(before - 4000);
+
+    const firstRemainder = await run("pos.returnSale", {
+      invoiceId: sale.invoiceId,
+      reason: "return remaining first unit",
+      refundMethod: "card",
+      lines: [{ invoiceLineId: firstLine.id, quantity: 1000 }],
+    });
+    expect(firstRemainder.refundMinor).toBe(1001);
+    expect(await onHand()).toBe(before - 3000);
+
+    const secondPart = await run("pos.returnSale", {
+      invoiceId: sale.invoiceId,
+      reason: "return two of three units",
+      refundMethod: "card",
+      lines: [{ invoiceLineId: secondLine.id, quantity: 1000 }],
+    });
+    expect(secondPart.refundMinor).toBe(502);
+    expect(await onHand()).toBe(before - 2000);
+
+    const secondRemainder = await run("pos.returnSale", {
+      invoiceId: sale.invoiceId,
+      reason: "return remaining two units",
+      refundMethod: "card",
+      lines: [{ invoiceLineId: secondLine.id, quantity: 2000 }],
+    });
+    expect(secondRemainder.refundMinor).toBe(1003);
+    expect(secondRemainder.creditedMinor).toBe(3508);
+    expect(await onHand()).toBe(before);
+    await expect(run("pos.returnSale", {
+      invoiceId: sale.invoiceId,
+      reason: "try to return an extra unit",
+      lines: [{ invoiceLineId: secondLine.id, quantity: 1000 }],
+    })).rejects.toThrow(/nothing left to return/);
+
+    const headers = await db.db.select().from(posReturns).where(eq(posReturns.invoiceId, sale.invoiceId));
+    expect(headers.reduce((sum, row) => sum + row.refundMinor, 0)).toBe(3508);
+    expect(headers.every((row) => row.refundMethod === "card")).toBe(true);
+    const returnIds = headers.map((row) => row.id);
+    const returnedLines = await db.db.select().from(posReturnLines).where(and(eq(posReturnLines.orgId, orgId), inArray(posReturnLines.returnId, returnIds)));
+    expect(returnedLines.reduce((sum, row) => sum + row.quantity, 0)).toBe(5000);
+    expect(returnedLines.reduce((sum, row) => sum + row.subtotalMinor, 0)).toBe(3500);
+    expect(returnedLines.reduce((sum, row) => sum + row.taxMinor, 0)).toBe(8);
+    const [unbalanced] = await db.db
+      .select({ amount: sql<number>`coalesce(sum(${journalLines.debitMinor} - ${journalLines.creditMinor}), 0)` })
+      .from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(and(eq(journalEntries.orgId, orgId), inArray(journalEntries.id, headers.map((row) => row.entryId))));
+    expect(Number(unbalanced?.amount ?? 0)).toBe(0);
+
+    const summary = await run("pos.shiftSummary", { sessionId });
+    expect(summary.refundTotals).toEqual(expect.arrayContaining([{ method: "card", amountMinor: 3508 }]));
+  });
+
+  it("keeps older stock sales on the safe full-return path when lines are not linked", async () => {
+    const before = await onHand();
+    const sale = await run("pos.completeSale", {
+      sessionId,
+      lines: [{ description: SKU, quantity: 1000, unitPriceMinor: 5000, taxMinor: 0, sku: SKU }],
+      method: "card",
+    });
+    await db.db.update(invoiceLines).set({ itemId: null }).where(eq(invoiceLines.invoiceId, sale.invoiceId));
+    const [saleLine] = await db.db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, sale.invoiceId));
+    await expect(run("pos.returnSale", {
+      invoiceId: sale.invoiceId,
+      reason: "try partial return on an old sale",
+      lines: [{ invoiceLineId: saleLine!.id, quantity: 500 }],
+    })).rejects.toThrow(/full return option/);
+
+    const returned = await run("pos.returnSale", { invoiceId: sale.invoiceId, reason: "return older sale in full" });
+    expect(returned).toMatchObject({ refundMinor: 5000, creditedMinor: 5000, restockedLines: 1 });
+    expect(await onHand()).toBe(before);
   });
 });

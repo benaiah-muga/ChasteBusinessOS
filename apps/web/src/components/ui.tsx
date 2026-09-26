@@ -204,10 +204,7 @@ export type ActionNoticeState =
 
 export function ActionNotice({ state, onDismiss }: { state: ActionNoticeState; onDismiss?: () => void }) {
   if (state.tone === "error") {
-    const e = state.error ?? {
-      title: "Something went wrong",
-      hint: "Try again in a moment. Nothing was changed.",
-    };
+    const e = state.error;
     return (
       <Notice tone="error" detail={e.detail ? <ErrorDetails text={e.detail} /> : undefined} onDismiss={onDismiss}>
         <span className="font-semibold">{e.title}.</span> {e.hint}
@@ -267,7 +264,7 @@ export function EmptyState({
         {icon}
       </div>
       <p className="text-sm font-medium text-stone-800">{title}</p>
-      {hint && <p className="mt-1 max-w-sm text-[13px] leading-relaxed text-stone-700">{hint}</p>}
+      {hint && <p className="mt-1 max-w-sm text-[13px] leading-relaxed text-stone-500">{hint}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );
@@ -281,9 +278,7 @@ export function Skeleton({ className }: { className?: string }) {
 
 export function LoadingPage() {
   return (
-    <div className="space-y-8" aria-busy="true">
-      <h1 className="sr-only">Loading workspace</h1>
-      <p className="sr-only" role="status">Loading workspace content.</p>
+    <div className="space-y-8" aria-busy="true" aria-label="Loading">
       <div className="flex items-center gap-3">
         <LogoMark size={34} className="brand-loader__coin" />
         <div className="space-y-1.5">
@@ -309,27 +304,55 @@ export function StatCard({
   sub,
   tone = "default",
   className,
+  onClick,
+  actionLabel,
+  selected,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   tone?: "default" | "accent" | "warn" | "danger" | "success";
   className?: string;
+  onClick?: () => void;
+  actionLabel?: string;
+  selected?: boolean;
 }) {
   const tones = {
     default: "card",
     accent: "border-gold-200 bg-gold-50/60 dark:border-gold-700 dark:bg-gold-950/70",
     warn: "border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/70",
     danger: "border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-950/70",
-    success: "border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/70",
+    success: "stat-card-success border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/70",
   };
-  return (
-    <div className={cn("rounded-xl border p-4 shadow-xs", tones[tone], className)}>
-      <p className="text-xs font-medium text-stone-700">{label}</p>
-      <p className="tnum mt-1.5 text-lg font-semibold tracking-tight text-stone-900">{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-stone-700">{sub}</p>}
-    </div>
+  const content = (
+    <>
+      <p className="text-xs font-medium text-stone-700 dark:text-stone-300">{label}</p>
+      <p className="tnum mt-1.5 text-lg font-semibold tracking-tight text-stone-900 dark:text-stone-100">{value}</p>
+      {sub && <p className="mt-0.5 text-xs text-stone-700 dark:text-stone-300">{sub}</p>}
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={selected}
+        className={cn(
+          "group relative w-full rounded-xl border p-4 text-left shadow-xs outline-none transition hover:border-gold-300 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-gold-600 focus-visible:ring-offset-2 active:translate-y-px",
+          tones[tone],
+          selected && "ring-2 ring-gold-500 ring-offset-1",
+          className,
+        )}
+      >
+        {content}
+        {actionLabel && <span className="sr-only">{actionLabel}</span>}
+        <span aria-hidden="true" className="absolute top-3 right-3 text-sm text-stone-400 transition group-hover:translate-x-0.5 group-hover:text-gold-800">→</span>
+      </button>
+    );
+  }
+
+  return <div className={cn("rounded-xl border p-4 shadow-xs", tones[tone], className)}>{content}</div>;
 }
 
 /* ---------------------------------- Dialog ---------------------------------- */
@@ -362,7 +385,10 @@ export function Dialog({
   useEffect(() => {
     if (!open) return;
     restoreRef.current = document.activeElement as HTMLElement | null;
-    panelRef.current?.focus();
+    const autoFocusTarget = panelRef.current?.querySelector<HTMLElement>(
+      "[data-dialog-autofocus], input:not([type='hidden']):not([disabled]), textarea:not([disabled]), select:not([disabled])",
+    );
+    (autoFocusTarget ?? panelRef.current)?.focus({ preventScroll: true });
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCloseRef.current();
@@ -386,11 +412,11 @@ export function Dialog({
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          "overlay-panel fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-stone-200 bg-white p-5 shadow-xl outline-none",
+          "overlay-panel scrollbar-subtle fixed top-1/2 left-1/2 z-50 max-h-[calc(100dvh-1rem)] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl border border-stone-200 bg-white p-5 shadow-xl outline-none",
           width,
         )}
       >
-        <div className="mb-1 flex items-start justify-between gap-4">
+        <div className="sticky top-0 z-10 -mx-5 -mt-5 mb-5 flex items-start justify-between gap-4 border-b border-stone-200 bg-white px-5 pt-5 pb-3">
           <h2 className="text-[15px] font-semibold text-stone-900">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close dialog" className="icon-btn -mt-1 -mr-1">
             <IconX className="size-4" />
@@ -494,11 +520,13 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   ariaLabel,
+  disabled = false,
 }: {
   options: { value: T; label: string; icon?: ReactNode }[];
   value: T;
   onChange: (v: T) => void;
   ariaLabel: string;
+  disabled?: boolean;
 }) {
   return (
     <div role="radiogroup" aria-label={ariaLabel} className="inline-flex rounded-lg bg-stone-100 p-0.5">
@@ -508,9 +536,11 @@ export function SegmentedControl<T extends string>({
           type="button"
           role="radio"
           aria-checked={value === o.value}
+          disabled={disabled}
           onClick={() => onChange(o.value)}
           className={cn(
-            "inline-flex cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-all duration-150",
+            "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50",
+            !disabled && "cursor-pointer",
             value === o.value ? "bg-white text-stone-900 shadow-xs" : "text-stone-500 hover:text-stone-800",
           )}
         >

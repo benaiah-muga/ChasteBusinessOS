@@ -21,6 +21,7 @@ import {
 import { IconAlertTriangle, IconCheck, IconMoon, IconPinTack, IconSun, IconTrash } from "@/components/icons";
 import { cn, minorToInput, timeAgo, toMinor } from "@/lib/format";
 import { useMoneySync } from "@/lib/money";
+import { CodingPlansCard } from "./coding-plans";
 
 const TABS = [
   { id: "appearance", label: "Appearance" },
@@ -643,6 +644,8 @@ function AiTab() {
         change goes through the governed capability pipeline.
       </p>
 
+      <CodingPlansCard />
+
       {!config ? (
         <p className="text-sm text-stone-400">{error ?? "Checking configuration…"}</p>
       ) : (
@@ -724,10 +727,6 @@ function AiTab() {
             <ModelRow label="Reasoning" model={config.models.reasoning} hint="Deep multi-step analysis" />
             <ModelRow label="Embeddings" model={config.models.embeddings} hint="Document search and memory" />
           </div>
-
-          <p className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-            Coding-agent subscriptions are not imported from local CLI files. Use a detected Codex, OpenCode, or Kilo agent through Creator mode, or enter an API key / endpoint that this workspace is authorized to call.
-          </p>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <Link

@@ -74,91 +74,6 @@ The full v1 changelog is preserved at the bottom of this file.
   pipeline: agent-proposed branding changes wait for a human, and the
   ledger records who changed what.
 
-### Fixed
-- **Messages stayed on the loading screen.** The conversation list now loads on mount, and request failures leave loading state so the retry message can render.
-- **Templates outside the catalog were invisible in the gallery.** Built-in general templates (blank note, business letter, meeting notes, quote) and anything saved with Save as template lacked a catalog entry and silently skipped their cards; they now render under Other with their own paper thumbnails.
-- **Authored document creation now returns the created record reliably.** The document API returns capability results at the shape the editor expects, so template and blank-document creation navigate to the saved document instead of appearing to fail after persistence.
-- **Template seeding is organization-safe.** Built-in template discovery now scopes its existence check to the current organization, preventing templates in one workspace from suppressing another workspace's catalog.
-- **PDF pagination preserves business-document structure.** Export uses a dedicated print surface with saved page settings, repeating long-table headers, unbroken rows and signature blocks, responsive images, clean page backgrounds, and no trailing blank page.
-- **Upload failures are actionable.** The ingest form rejects unsupported files and files above 5 MB before upload, preserves the form, and explains how to recover.
-- **Accounting scenario math stays within exact integer limits.** Budget
-  comparisons use integer-safe rounding for utilization and reject derived
-  values outside the supported amount range.
-- **Supplier bill forms are easier to read and use with assistive technology.**
-  Aging labels and payment guidance have stronger dark-mode contrast, and the
-  vendor and purchase-order controls have accessible names.
-- **Document and suggestion counts were silently zero.** Correlated count
-  subqueries interpolated unqualified column names, so a subquery like
-  `where document_id = id` compared a table to itself and always returned
-  0. Authored-document version counts and the long-standing open-coding-
-  suggestions count now qualify their columns explicitly.
-- **Deleted conversations and messages could still leak through detail paths.**
-  Conversation lists, reads, sends, and the workmate transcript now exclude
-  deleted records, and mention notifications stay inside the conversation.
-- **Renaming a channel lost focus after one character.** Dialog focus setup and restoration now run only when the dialog opens or closes, so ordinary state updates keep the rename field active.
-- **Dev routes hung after Next reported Ready.** Default local development now aliases boot migration to a no-op, keeping Node-only migration and backup dependencies out of route compilation while preserving production migrations and explicit local opt-in.
-- **Partial print-branding updates could erase saved fields.** Omitting a
-  logo, accent, footer, or layout now preserves the organization's existing
-  value.
-
-### Changed
-- **The desktop sidebar is less crowded.** Removed its two compact quick-action shortcuts; module actions remain available in the page header.
-- **Document studio entry points are quieter.** Removed the editor and upload shortcuts from the Documents top bar; invoices now prefill their issue date using the local calendar date, and generated numbers or references across document templates are labeled as editable.
-- **Built-in templates are code-owned.** Organizations that seeded templates under an older catalog automatically receive the redesigned papers on their next visit to Documents; custom templates are never touched.
-- **Boards support direct stage movement.** Projects tasks and hiring candidates can now be dragged between status or pipeline columns, with visible drop targets and existing keyboard/touch controls retained as fallbacks.
-- **Documents support direct folder filing.** Drag a document from the library onto any virtual folder, including Unfiled, with an immediate saved confirmation and the existing Organize action retained as a precise fallback.
-- **Module headers stay usable on small screens.** Shared quick actions now wrap into a full-width mobile row, and section tabs wrap without clipping or introducing a stray scrollbar; desktop headers retain their compact horizontal layout.
-- **Message composer controls share one input surface.** The paperclip, emoji picker, selected files, draft status, and send action sit together inside the composer border.
-- **Local web development skips boot-time database migration by default.** The existing `pnpm --filter @chaste/db db:migrate` setup command remains the explicit schema step; set `AUTO_MIGRATE_ON_BOOT=1` when a local dev start should apply migrations.
-- **Dark-mode stat cards use coherent semantic surfaces.** Accent, warning, danger, and success cards now switch to dark semantic fills and borders instead of retaining bright light-mode panels.
-- **Authored documents retain their working context.** Document type, linked business record, virtual folder, and page settings now survive drafts, published versions, restores, and reopen flows.
-- **Folders are first-class and tenant-scoped.** Empty and nested folders persist independently of documents, parent paths are real records, and rename or move operations update descendants atomically.
-- **Dropdowns stop looking generic.** Every `<select>` in the app now shares
-  one chrome: browser default chrome removed, a custom chevron, aligned
-  padding, and the shared gold focus ring. A `Select` primitive lands in the
-  UI kit so future dropdowns inherit it for free.
-- **The floating AI bar can live on hover.** A new "Hover reveal" dock mode
-  (now the default) keeps the bar out of the way until the pointer rests
-  near the bottom edge of the screen: the bar rises into view, stays while
-  you are using it or while the workmate is working, and hides again when
-  you move away. A subtle handle at the bottom edge marks the trigger, it
-  is reachable by keyboard (Tab reveals and focuses the input), and tapping
-  elsewhere dismisses it. The previous always-visible bar remains available
-  as the "Floating bar" dock choice in the workmate's preferences.
-- **Humans act under their own authority (ADR 0055).** A permitted human
-  executing an identity- or destructive-class action in the UI applies it
-  directly, fully audited, instead of being asked to approve their own
-  click in the Approvals inbox. Approval gates now target the workmate and
-  system jobs: identity/destructive always, money above thresholds. Orgs
-  can re-impose dual control for humans per risk class via the org policy
-  rules (`requiresApprovalFor`), and the workmate's proposals still land in
-  the inbox exactly as before.
-- **The Approvals inbox and Event Ledger now say who acted.** Approval
-  cards carry an actor chip ("agent · for <name>" vs "human · <name>"), and
-  agent-driven ledger rows show the session they came from
-  (`ledger_events.session_id`, a new indexed column, deliberately not part
-  of the hash chain so old entries stay verifiable).
-
-### Fixed
-- **The module switchboard can no longer brick an organization.** Toggling
-  any module used to silently disable `iam`, `routines`, and `signals`
-  (they were missing from the UI catalog and dropped by the full-set save),
-  and the kernel then refused the very capability that could re-enable
-  them, surfacing only "Module "iam" is disabled for this organization"
-  with no recovery path. Those spine modules are now protected: rendered
-  locked-on in the switchboard, unioned into every save by
-  `iam.setModules`/`iam.restoreModules`, and always enabled in the kernel
-  module gate. The raw "disabled" error also got a friendly, actionable
-  mapping.
-- **Display currency actually works.** The Localization setting was writing a
-  preference that no page consumed; every money formatter hardcoded `$`.
-  Money now renders in the organization's base currency by default (a UGX
-  org sees `USh 8,000,000`, with ISO 4217 minor-unit digits: zero decimals
-  for UGX), and an explicit per-device choice in Settings wins on top.
-  Formatting and input parsing share one source of truth; stored minor
-  units are untouched (presentation only, no FX conversion).
-
-### Added
 - **Services are first-class.** Items now carry a kind: goods or service
   (migration 0058). Create services from the product form or quick create
   ("Service (no stock)"); they show a service badge in the catalog, refuse
@@ -206,98 +121,6 @@ The full v1 changelog is preserved at the bottom of this file.
   opens the same account menu as the desktop rail (identity, org switcher,
   sign out).
 
-### Changed
-- **Module chrome rides the inked band.** Every module's header (breadcrumb,
-  description, tabs, actions) is now the brand's dark cover plate: "Home /
-  Accounting" is written large in paper and gold instead of an easy-to-miss
-  grey whisper, with the tabs styled for the dark surface.
-- **Icons match the notifications bell.** The shared icon base draws at the
-  bell's stroke weight, so every icon across the rail, launcher, tabs and
-  page bodies carries the same confident weight.
-- **The dashboard keeps one attention list.** The separate "My work" card is
-  gone; "Needs you" is the single queue (receipt remainders folded in) and
-  the "Brief me" button lives in its header in the brand ink instead of grey.
-- **One brand identity across the product (ADR-0054).** The gateway's warm
-  paper + inked band + burnished gold palette is now the product-wide system:
-  `stone-*` re-pointed to warm paper greys, the accent ramp renamed and
-  re-pointed to `gold-*` (the `maroon-*` name is retired), and the four-theme
-  picker removed from settings, the command palette and the rail - Light,
-  Dark and System remain. The inked `#111416` band (masthead, login hero,
-  setup header, support widget) is a brand constant in both modes; the auth
-  pages are tokenized and drop the `.auth-surface` light-mode pin, so the
-  gateway now follows the mode like every other page. Primary buttons are the
-  gateway's ink style (inverting in dark mode), and `dark:` utilities now
-  follow the attribute-based mode via a custom variant.
-- **One color for app icons.** Every tile in the apps catalogue, the command
-  palette, the app frame header, and the rail's pinned/recent apps renders in
-  the single brand ink (`#111416` with paper icon) instead of per-app hues;
-  rail icons moved to the same dark ink. (ADR-0054 continuation.)
-- **No em dashes anywhere.** All 1,251 em dashes across docs, source
-  comments, and UI copy were replaced with hyphens, and `AGENTS.md` now
-  instructs agents never to write them.
-
-### Fixed
-- **The consolidated Needs you badge could undercount receipt remainders.**
-  The queue now includes those fetched work cards in its visible count as
-  soon as they arrive.
-- **Sign-up ended in a hung spinner with no explanation.** Under the
-  verified-binding profile (N03) sign-up creates the account but skips
-  auto sign-in, so `router.replace("/")` bounced off the auth guard straight
-  back to `/login` while the submit button read "Please wait…" forever. The
-  form now detects the no-session response and shows a "Check your inbox"
-  state with the address and next steps, and an unverified sign-in attempt
-  maps to "we just sent a fresh link" instead of a raw better-auth error.
-- **Auth and onboarding rendered broken under dark mode.** The login form and
-  the setup wizard are authored as a fixed warm-paper composition (hardcoded
-  ink hero, cream panels), but the tokens they use for inputs, cards and text
-  (`white`, `ink`, `sand-*`, `cream`, `gold-*`) flip with `data-mode` - dark
-  mode produced near-black inputs on the cream card, charcoal path cards, and
-  washed-out headings. An `.auth-surface` scope now re-pins those tokens to
-  the designed light values (and paints the page canvas to match), so the
-  gateway reads identically in both modes.
-- **Onboarding was cut off on large screens.** The wizard pinned itself to
-  `100svh` with `overflow: hidden`, so on a short desktop window the step
-  content (path cards, profile form) clipped with no way to scroll - the same
-  content scrolled fine on small screens. The page now scrolls naturally and
-  the context column sticks beside it; the login page drops its viewport lock
-  the same way.
-- **My Work remainders read full outstanding (W0.5).** The receipt-remainder
-  query correlated receipt lines with a bare `"id"` (Drizzle renders an
-  embedded column unqualified, so the subquery compared each receipt's
-  `po_line_id` against its *own* id and always summed zero) - every card
-  read the full order as outstanding. The correlation is now explicit, the
-  remainder subtracts returns net of receipts (a returned delivery demotes
-  the order to partial in the domain but read as received here), quantities
-  print in units instead of raw thousandths, PO data is gated on
-  `purchasing.read` like every other surface, a non-throwing
-  `signals.list` failure shows the honest unavailable card, and the dead
-  severity term in the ranker is gone (signals.list already sorts red
-  first). Pinned by amount-asserting route tests.
-- **Concurrent vendor-payment reversals double-refunded (N12).** The
-  already-reversed check ran before the bill row lock, so two concurrent
-  reversals both passed it and both mirrored (surfacing as a `RangeError`
-  on negative paidMinor). The check now runs after the bill lock is
-  acquired - the loser sees the winner's committed reversal - and the bill
-  read is org-scoped. Pinned by a `Promise.allSettled` racer (exactly one
-  mirror; proven to fail on the old order).
-- **`accounting.recordPayment` declared a dead inverse.** It pointed at
-  `accounting.reverseEntry`, which refuses payment entries by design, so any
-  kernel-driven undo of a payment failed. It now points at
-  `accounting.reversePayment` (same pattern as payBill →
-  reverseVendorPayment), pinned by a buildInput-from-actual-output test.
-- **Queue/worker-kill fixtures vs the append-only ledger (N09).**
-  `jobs.test.ts` teardown deleted `ledger_events` raw, which the commit-time
-  immutability triggers refuse - it now purges through the declared
-  maintenance helper; the worker-kill "after the receipt" case synchronized
-  on effect-start rather than receipt durability and flaked under load when
-  the replacement read before the receipt landed - it now waits for the
-  receipt row.
-- **Client intent stamp bypass (B02).** `withIntentId` kept any present
-  `intentId` key without checking its type, so `{intentId: undefined}` (or a
-  number, or `""`) sailed through unstamped and executed with no identity.
-  Only non-empty strings win now; everything else is stamped fresh.
-
-### Added
 - **Workspace model provider and currency controls.** Administrators can now
   choose supported providers or an OpenAI-compatible endpoint, configure model
   roles, rotate or clear an encrypted workspace key, and use the active
@@ -374,23 +197,6 @@ The full v1 changelog is preserved at the bottom of this file.
   workflow, alternatives (reconciliation workspace, checkout deferred) and
   the measurement plan; owner confirmation unlocks the UI build.
 
-### Changed
-- **Auth and onboarding first impression.** Reworked the first-run surfaces around
-  the Chaste black, ivory, and champagne-gold identity with a responsive split auth
-  composition, orbital brand mark, reduced-motion-safe entrance motion, persistent
-  onboarding status header, glowing linear-gradient progress bar, and clearer
-  recovery copy while preserving the existing setup paths and governed API flow.
-- **sign-in is sealed until the email is verified; unverified sessions
-  inherit nothing (N03).** Domain identities are pre-provisioned (SCIM,
-  invitations) and bind by email, so a password sign-up for that email used
-  to walk straight into memberships without owning the mailbox. Sign-in now
-  requires verification (the link is re-sent on each sign-in attempt), and
-  an unverified session resolves to a bare identity - no memberships, no
-  permissions - until the address is verified or proven by a trusted IdP.
-  Existing unverified accounts receive a fresh verification email at their
-  next sign-in attempt.
-
-### Added
 - **SCIM provisioning tokens expire (0054).** Tokens used to be valid until
   manually deactivated. New tokens live 90 days by default (1–365
   configurable), expired tokens are refused outright, and rotation is
@@ -547,7 +353,214 @@ The full v1 changelog is preserved at the bottom of this file.
   (202 → Approvals inbox); everything else executes the same governed
   capabilities the agent uses.
 
+- **Recoverable queue leases and recurring occurrence receipts (T03/T06).**
+  Capability jobs now have availability timestamps, expiring worker leases,
+  fencing tokens, heartbeat renewal and capped exponential retry backoff;
+  stale workers cannot finalize reclaimed rows, and queued capability retries
+  reuse the job's governed action intent. Recurring invoices now persist a
+  unique `(org, template, scheduled instant)` occurrence and create the
+  invoice plus schedule advancement transactionally, so the same occurrence
+  cannot bill twice. Covered by queue lease/fencing and recurring-invoice
+  integration tests; external provider delivery is handled by the B03 outbox
+  slice below.
+- **Durable outbound notification outbox (B03).** Approval and support
+  notification intents now commit before webhook/SMTP delivery, carry stable
+  provider operation IDs, and preserve uncertain provider outcomes for
+  explicit reconciliation instead of automatic duplicate sends.
+- **Atomic unit of work for governed payments (B02)**:
+  `executeAtomically` runs one action's mutation, audit fact and action
+  receipt inside a single transaction - modules nest via savepoints - with a
+  `failOnAuditError` executor mode so an audit failure rolls the whole unit
+  back instead of reporting an unproven outcome. `api/accounting` `payBill`
+  adopts it whenever the client sends `intentId`, and the accounting page
+  generates one identity per confirmed intent. Pinned by tests proving
+  commit+replay in one unit and full rollback on crash-after-write.
+- **Honest effect semantics and action receipts in the kernel (B02 slice)**:
+  `KernelExecutor` validates capability output against its declared schema -
+  a write returning invalid output now reports `outcome: "unknown"` instead
+  of `ok: true`, and an audit append failure after a committed write reports
+  unknown instead of a retryable failure (closing the F01/F02 reproductions
+  in the evidence register). New `EffectReceiptStore` seam +
+  `action_receipts` table (migration 0035, tenant-RLS policy included) give
+  every action an idempotent identity: with `ctx.intentId`, retries serve
+  the stored receipt - a committed effect replays its receipt instead of
+  re-executing, a reused key with a changed payload conflicts, and an
+  unproven outcome reconciles rather than double-posting. Wired through
+  `buildExecutor`; `api/accounting` mutations accept `intentId`. Pinned by
+  six kernel tests and three integration tests including the
+  payment-crash-retry money case.
+- **Least-privilege runtime database role** (`@chaste/db/roles`): `chaste_app`
+  - NOBYPASSRLS, DML-only, no DDL - provisioned idempotently with grants on
+  existing tables and default privileges for future ones, so the application
+  can stop running as the superuser migration owner (migration 0014's stated
+  intent, previously never wired up: the deployed database had a single
+  superuser role, making RLS inert). `runMigrations` accepts
+  `MIGRATION_DATABASE_URL` for separated owner credentials. The role's
+  security contract (tenant-scoped reads, fail-closed without context, no
+  cross-tenant writes, no DDL) is pinned by five tests in
+  `packages/db/src/runtime-role.test.ts`. The application's own role flip is
+  deliberately not done yet - it requires the entry-point context audit (S01).
+- **W0 evidence register** (`docs/W0_EVIDENCE_REGISTER.md`): F01–F17 and
+  N01–N10 revalidated at the current commit with executed probes where
+  possible - F01 (committed write reported as failure when the audit append
+  fails), F02 (capability output schema not enforced at the executor
+  boundary), F05 (agent-loop trajectory events silently unpersisted,
+  reproduced from test logs), N09 (no database-enforced ledger balance or
+  posted-line immutability, reproduced on a fixture database), and N11's
+  AR side (full payment accepted past credit-adjusted outstanding). The
+  remaining findings carry source-confirmed status with their named
+  reproduction still pending.
+- **The module test suites now actually run.** Nineteen module `.test.ts`
+  files across fifteen packages existed but were invisible to
+  `pnpm test` (only manufacturing and signals declared a `test` script, and
+  the web Vitest config did not discover them). Every module package now has
+  a Vitest project with per-run database fixtures, `vitest` declared as a
+  devDependency, and the lockfile regenerated; `pnpm test` executes all
+  22 module test files plus `web` and `db`. The `turbo test` task is no
+  longer cached, since results depend on live database state.
+
+- Personal Codex and OpenCode plan connections. Users can sign into Codex with its device flow or connect an authenticated OpenCode server, choose a personal default, and see request and provider-reported token usage.
+- Personal coding-plan controls now appear before shared model settings, so people can find their own inference connection quickly and manage it even when workspace provider settings are unavailable.
+- Coding-plan inference for Buzz, internal chat assistance, support drafting, document writing assist, and My Work summaries. User-started runs use the selected personal plan; scheduled runs continue to use the workspace provider.
+- Coding-agent business tools connect through a short-lived, signed MCP grant scoped to the user's permissions, enabled modules, session, and tools already exposed to that agent. Tool calls still pass through the kernel executor and audit ledger.
+- CRM customer search and active, inactive, and all views, with mobile customer cards that keep timeline and deactivation actions visible.
+- CRM customer profiles combine related deals, tasks, invoices, quotes, payments, linked documents, notes, ownership, tags, and quick email or follow-up actions.
+- CRM customer profiles include an editable customer name saved with an audited undo path.
+- CRM follow-up drafts use recent invoices, quotes, and tasks as source context, show links to those records, stay editable, and only open an email composer after a deliberate user action.
+- CRM customer cards and wide-table rows now open the profile across their main surface, with selection, email, next-step, and record actions kept independent.
+- Accounting receivables aging cards filter the underlying invoice list by age range, keep the active range visible, and offer a one-tap reset.
+- CRM customer import uses editable row cards on phones, keeping validation, duplicate choices, and import selection visible without horizontal table scrolling.
+- Summary cards across CRM, Sales, POS, Products, Inventory, Documents, Support, Purchasing, Manufacturing, and HR now show a clear action affordance and open the relevant list, status filter, or workflow. Sales pipeline metrics deep-link into the filtered CRM pipeline.
+- Document summary cards open the library with matching parsed, awaiting-parse, or recent-document filters. Support summary cards open the inbox with the matching conversation status selected.
+- CRM saved filters, stale follow-up and owner views, duplicate suggestions, bulk owner and tag updates, and selected-customer CSV export.
+- CRM saved views now sync with the workspace, can be shared or pinned, and show live result counts. Customer cards and profiles show their next action; profiles also include preferred contact method, do-not-contact status, owner, and last editor. A guided customer CSV preview supports column mapping, duplicate review, inline fixes, and reversible import.
+- CRM duplicate review compares contact and name details, previews linked activity, preserves existing record links, and offers an immediate audited undo. On phones, comparison cards fit the dialog width and wrap full customer names so similar records stay distinguishable.
+- POS product search by name, SKU, or barcode; stock-aware cart quantities; custom line items; and a structured return request dialog.
+- POS empty-register quick add captures price, barcode, and optional opening stock, and explains when zero stock or an approval means the item cannot be sold yet. Less-used unit and SKU fields stay behind More details.
+- Inventory stock value now leads with a plain-language estimate and keeps moving-average and ledger details in an expandable explanation.
+- Inventory stock levels keep Add item beside the heading on phones, then focus the item name field in the creation flow.
+- POS customer lookup with purchase history, cash tender and change calculation, split cash/card/mobile-money tenders, shareable printable receipts, a selected refund destination, and register-scoped offline carts that can be parked and resumed from the same device.
+- POS sale history opens a receipt preview with print, download, email-draft, and messaging-share actions. Return review selects item quantities, previews the refund, traces prior returned quantities, and restores only stock tied to the original sale lines. Older sales without line-to-stock links keep a full-return path, and unlinked prior credits require accounting review.
+- POS shift closeout shows captured sales by tender alongside the separate drawer expectation, counts cash by denomination, requires a note for variances, and repeats the figures in a final review. Inventory empty states point to setup actions, and the overview surfaces draft transfers alongside counts, reservations, and reorder work.
+- Products & Services can import a mapped catalog CSV from the catalog screen, preview likely SKU or barcode duplicates, import services without a supplied SKU, and undo a recent batch while preserving item history.
+- Approval cards with plain-language summaries, affected-field previews, linked document shortcuts, and recent decision history with audit-ledger links.
+- Document library search and status filters, mobile document cards, explicit loading and error states, and file type and size validation.
+- Document review pairs the original source with extracted lines and coding suggestions, shows matched terms and account names, and supports linking new ingests to a customer.
+- Horizontally scrolling app tabs with arrow-key navigation and selected-tab semantics.
+- Messages loads its conversations on entry, gives connection failures a retry action, and guides first-time users into creating a conversation.
+- App sections remain visible as horizontally scrollable tabs on phones, with a swipe hint when the full set does not fit.
+- Mobile app headers now include a shared Ask workmate action. Sales summary cards fill the phone width cleanly, and the Workmate composer grows to fit prompts instead of showing a clipped one-line field.
+- Inventory cycle counts can start from a location, barcode scan, or selected products; the count sheet tracks progress and requires a review of every variance before posting.
+- Inventory transfer and reservation forms now search location names, item names, SKUs, and barcodes, with available quantity shown before selection.
+- Inventory Locations groups transfers and reservations into collapsible work areas with clear pending and active counts, keeping setup and movement workflows easy to scan on phones.
+  document without an explicit Apply. Uses the user's selected coding plan
+  for user-started runs, or the organization's configured model provider.
+
 ### Fixed
+- **Messages stayed on the loading screen.** The conversation list now loads on mount, and request failures leave loading state so the retry message can render.
+- **Templates outside the catalog were invisible in the gallery.** Built-in general templates (blank note, business letter, meeting notes, quote) and anything saved with Save as template lacked a catalog entry and silently skipped their cards; they now render under Other with their own paper thumbnails.
+- **Authored document creation now returns the created record reliably.** The document API returns capability results at the shape the editor expects, so template and blank-document creation navigate to the saved document instead of appearing to fail after persistence.
+- **Template seeding is organization-safe.** Built-in template discovery now scopes its existence check to the current organization, preventing templates in one workspace from suppressing another workspace's catalog.
+- **PDF pagination preserves business-document structure.** Export uses a dedicated print surface with saved page settings, repeating long-table headers, unbroken rows and signature blocks, responsive images, clean page backgrounds, and no trailing blank page.
+- **Upload failures are actionable.** The ingest form rejects unsupported files and files above 5 MB before upload, preserves the form, and explains how to recover.
+- **Accounting scenario math stays within exact integer limits.** Budget
+  comparisons use integer-safe rounding for utilization and reject derived
+  values outside the supported amount range.
+- **Supplier bill forms are easier to read and use with assistive technology.**
+  Aging labels and payment guidance have stronger dark-mode contrast, and the
+  vendor and purchase-order controls have accessible names.
+- **Document and suggestion counts were silently zero.** Correlated count
+  subqueries interpolated unqualified column names, so a subquery like
+  `where document_id = id` compared a table to itself and always returned
+  0. Authored-document version counts and the long-standing open-coding-
+  suggestions count now qualify their columns explicitly.
+- **Deleted conversations and messages could still leak through detail paths.**
+  Conversation lists, reads, sends, and the workmate transcript now exclude
+  deleted records, and mention notifications stay inside the conversation.
+- **Renaming a channel lost focus after one character.** Dialog focus setup and restoration now run only when the dialog opens or closes, so ordinary state updates keep the rename field active.
+- **Dev routes hung after Next reported Ready.** Default local development now aliases boot migration to a no-op, keeping Node-only migration and backup dependencies out of route compilation while preserving production migrations and explicit local opt-in.
+- **Partial print-branding updates could erase saved fields.** Omitting a
+  logo, accent, footer, or layout now preserves the organization's existing
+  value.
+
+- **The module switchboard can no longer brick an organization.** Toggling
+  any module used to silently disable `iam`, `routines`, and `signals`
+  (they were missing from the UI catalog and dropped by the full-set save),
+  and the kernel then refused the very capability that could re-enable
+  them, surfacing only "Module "iam" is disabled for this organization"
+  with no recovery path. Those spine modules are now protected: rendered
+  locked-on in the switchboard, unioned into every save by
+  `iam.setModules`/`iam.restoreModules`, and always enabled in the kernel
+  module gate. The raw "disabled" error also got a friendly, actionable
+  mapping.
+- **Display currency actually works.** The Localization setting was writing a
+  preference that no page consumed; every money formatter hardcoded `$`.
+  Money now renders in the organization's base currency by default (a UGX
+  org sees `USh 8,000,000`, with ISO 4217 minor-unit digits: zero decimals
+  for UGX), and an explicit per-device choice in Settings wins on top.
+  Formatting and input parsing share one source of truth; stored minor
+  units are untouched (presentation only, no FX conversion).
+
+- **The consolidated Needs you badge could undercount receipt remainders.**
+  The queue now includes those fetched work cards in its visible count as
+  soon as they arrive.
+- **Sign-up ended in a hung spinner with no explanation.** Under the
+  verified-binding profile (N03) sign-up creates the account but skips
+  auto sign-in, so `router.replace("/")` bounced off the auth guard straight
+  back to `/login` while the submit button read "Please wait…" forever. The
+  form now detects the no-session response and shows a "Check your inbox"
+  state with the address and next steps, and an unverified sign-in attempt
+  maps to "we just sent a fresh link" instead of a raw better-auth error.
+- **Auth and onboarding rendered broken under dark mode.** The login form and
+  the setup wizard are authored as a fixed warm-paper composition (hardcoded
+  ink hero, cream panels), but the tokens they use for inputs, cards and text
+  (`white`, `ink`, `sand-*`, `cream`, `gold-*`) flip with `data-mode` - dark
+  mode produced near-black inputs on the cream card, charcoal path cards, and
+  washed-out headings. An `.auth-surface` scope now re-pins those tokens to
+  the designed light values (and paints the page canvas to match), so the
+  gateway reads identically in both modes.
+- **Onboarding was cut off on large screens.** The wizard pinned itself to
+  `100svh` with `overflow: hidden`, so on a short desktop window the step
+  content (path cards, profile form) clipped with no way to scroll - the same
+  content scrolled fine on small screens. The page now scrolls naturally and
+  the context column sticks beside it; the login page drops its viewport lock
+  the same way.
+- **My Work remainders read full outstanding (W0.5).** The receipt-remainder
+  query correlated receipt lines with a bare `"id"` (Drizzle renders an
+  embedded column unqualified, so the subquery compared each receipt's
+  `po_line_id` against its *own* id and always summed zero) - every card
+  read the full order as outstanding. The correlation is now explicit, the
+  remainder subtracts returns net of receipts (a returned delivery demotes
+  the order to partial in the domain but read as received here), quantities
+  print in units instead of raw thousandths, PO data is gated on
+  `purchasing.read` like every other surface, a non-throwing
+  `signals.list` failure shows the honest unavailable card, and the dead
+  severity term in the ranker is gone (signals.list already sorts red
+  first). Pinned by amount-asserting route tests.
+- **Concurrent vendor-payment reversals double-refunded (N12).** The
+  already-reversed check ran before the bill row lock, so two concurrent
+  reversals both passed it and both mirrored (surfacing as a `RangeError`
+  on negative paidMinor). The check now runs after the bill lock is
+  acquired - the loser sees the winner's committed reversal - and the bill
+  read is org-scoped. Pinned by a `Promise.allSettled` racer (exactly one
+  mirror; proven to fail on the old order).
+- **`accounting.recordPayment` declared a dead inverse.** It pointed at
+  `accounting.reverseEntry`, which refuses payment entries by design, so any
+  kernel-driven undo of a payment failed. It now points at
+  `accounting.reversePayment` (same pattern as payBill →
+  reverseVendorPayment), pinned by a buildInput-from-actual-output test.
+- **Queue/worker-kill fixtures vs the append-only ledger (N09).**
+  `jobs.test.ts` teardown deleted `ledger_events` raw, which the commit-time
+  immutability triggers refuse - it now purges through the declared
+  maintenance helper; the worker-kill "after the receipt" case synchronized
+  on effect-start rather than receipt durability and flaked under load when
+  the replacement read before the receipt landed - it now waits for the
+  receipt row.
+- **Client intent stamp bypass (B02).** `withIntentId` kept any present
+  `intentId` key without checking its type, so `{intentId: undefined}` (or a
+  number, or `""`) sailed through unstamped and executed with no identity.
+  Only non-empty strings win now; everything else is stamped fresh.
+
 - **POS sales patched their journal entry after posting (N09).** The sale
   entry was inserted before the invoice row existed, so the register code
   reached back to stamp `source_id` on a posted ledger row. The invoice is
@@ -729,72 +742,111 @@ The full v1 changelog is preserved at the bottom of this file.
   (`@chaste/db` gains a `test-fixture` export and `runMigrations` accepts
   `backup: false` for fresh fixtures.)
 
-### Added
-- **Recoverable queue leases and recurring occurrence receipts (T03/T06).**
-  Capability jobs now have availability timestamps, expiring worker leases,
-  fencing tokens, heartbeat renewal and capped exponential retry backoff;
-  stale workers cannot finalize reclaimed rows, and queued capability retries
-  reuse the job's governed action intent. Recurring invoices now persist a
-  unique `(org, template, scheduled instant)` occurrence and create the
-  invoice plus schedule advancement transactionally, so the same occurrence
-  cannot bill twice. Covered by queue lease/fencing and recurring-invoice
-  integration tests; external provider delivery is handled by the B03 outbox
-  slice below.
-- **Durable outbound notification outbox (B03).** Approval and support
-  notification intents now commit before webhook/SMTP delivery, carry stable
-  provider operation IDs, and preserve uncertain provider outcomes for
-  explicit reconciliation instead of automatic duplicate sends.
-- **Atomic unit of work for governed payments (B02)**:
-  `executeAtomically` runs one action's mutation, audit fact and action
-  receipt inside a single transaction - modules nest via savepoints - with a
-  `failOnAuditError` executor mode so an audit failure rolls the whole unit
-  back instead of reporting an unproven outcome. `api/accounting` `payBill`
-  adopts it whenever the client sends `intentId`, and the accounting page
-  generates one identity per confirmed intent. Pinned by tests proving
-  commit+replay in one unit and full rollback on crash-after-write.
-- **Honest effect semantics and action receipts in the kernel (B02 slice)**:
-  `KernelExecutor` validates capability output against its declared schema -
-  a write returning invalid output now reports `outcome: "unknown"` instead
-  of `ok: true`, and an audit append failure after a committed write reports
-  unknown instead of a retryable failure (closing the F01/F02 reproductions
-  in the evidence register). New `EffectReceiptStore` seam +
-  `action_receipts` table (migration 0035, tenant-RLS policy included) give
-  every action an idempotent identity: with `ctx.intentId`, retries serve
-  the stored receipt - a committed effect replays its receipt instead of
-  re-executing, a reused key with a changed payload conflicts, and an
-  unproven outcome reconciles rather than double-posting. Wired through
-  `buildExecutor`; `api/accounting` mutations accept `intentId`. Pinned by
-  six kernel tests and three integration tests including the
-  payment-crash-retry money case.
-- **Least-privilege runtime database role** (`@chaste/db/roles`): `chaste_app`
-  - NOBYPASSRLS, DML-only, no DDL - provisioned idempotently with grants on
-  existing tables and default privileges for future ones, so the application
-  can stop running as the superuser migration owner (migration 0014's stated
-  intent, previously never wired up: the deployed database had a single
-  superuser role, making RLS inert). `runMigrations` accepts
-  `MIGRATION_DATABASE_URL` for separated owner credentials. The role's
-  security contract (tenant-scoped reads, fail-closed without context, no
-  cross-tenant writes, no DDL) is pinned by five tests in
-  `packages/db/src/runtime-role.test.ts`. The application's own role flip is
-  deliberately not done yet - it requires the entry-point context audit (S01).
-- **W0 evidence register** (`docs/W0_EVIDENCE_REGISTER.md`): F01–F17 and
-  N01–N10 revalidated at the current commit with executed probes where
-  possible - F01 (committed write reported as failure when the audit append
-  fails), F02 (capability output schema not enforced at the executor
-  boundary), F05 (agent-loop trajectory events silently unpersisted,
-  reproduced from test logs), N09 (no database-enforced ledger balance or
-  posted-line immutability, reproduced on a fixture database), and N11's
-  AR side (full payment accepted past credit-adjusted outstanding). The
-  remaining findings carry source-confirmed status with their named
-  reproduction still pending.
-- **The module test suites now actually run.** Nineteen module `.test.ts`
-  files across fifteen packages existed but were invisible to
-  `pnpm test` (only manufacturing and signals declared a `test` script, and
-  the web Vitest config did not discover them). Every module package now has
-  a Vitest project with per-run database fixtures, `vitest` declared as a
-  devDependency, and the lockfile regenerated; `pnpm test` executes all
-  22 module test files plus `web` and `db`. The `turbo test` task is no
-  longer cached, since results depend on live database state.
+- Switching app sections no longer scrolls page content behind the sticky app header; the tab rail now reveals the selected section horizontally.
+- The floating mobile Workmate bubble no longer covers app cards when the app header already offers Ask workmate.
+- Hidden mobile Workmate controls no longer intercept taps on app cards and actions.
+- POS sell content now gives barcode search the first position, collapses optional customer lookup, prevents phone-width overflow, and keeps the focused next-scan field above the sticky checkout. The cart bar shows the full total, separates Review cart from Complete sale, and opens the line list on demand.
+- POS split-payment rows now give each tender a readable full-width method selector on small screens, with the amount and remove action kept together. The sticky checkout explains whether payment allocation or cash received is short.
+- The Products & Services catalog stacks its heading, import action, and search field on narrow screens instead of overflowing horizontally.
+- Dialog rerenders no longer steal focus from text fields. Dialogs focus their first usable input without scrolling content under the sticky title, and descriptions now begin below the title without overlap.
+- Dialog overlays now cover floating chat controls, keeping modal fields and actions clear on phones.
+- Saving a CRM view now uses a focused review dialog with the active filter summary and matching customer count; on phones the filter panel collapses while saved filters remain applied.
+- Customer name changes now update the CRM record through the governed profile capability and remain reversible with the original customer name in the audit snapshot.
+- Coding-plan connection and MCP routes now use the Next.js 16.3 default Node runtime, which is compatible with this project's Cache Components configuration.
+- Messages now loads the conversation list on entry and shows a recoverable error state if that request fails, instead of staying on the loading skeleton.
+
+### Changed
+- **The desktop sidebar is less crowded.** Removed its two compact quick-action shortcuts; module actions remain available in the page header.
+- **Document studio entry points are quieter.** Removed the editor and upload shortcuts from the Documents top bar; invoices now prefill their issue date using the local calendar date, and generated numbers or references across document templates are labeled as editable.
+- **Built-in templates are code-owned.** Organizations that seeded templates under an older catalog automatically receive the redesigned papers on their next visit to Documents; custom templates are never touched.
+- **Boards support direct stage movement.** Projects tasks and hiring candidates can now be dragged between status or pipeline columns, with visible drop targets and existing keyboard/touch controls retained as fallbacks.
+- **Documents support direct folder filing.** Drag a document from the library onto any virtual folder, including Unfiled, with an immediate saved confirmation and the existing Organize action retained as a precise fallback.
+- **Module headers stay usable on small screens.** Shared quick actions now wrap into a full-width mobile row, and section tabs wrap without clipping or introducing a stray scrollbar; desktop headers retain their compact horizontal layout.
+- **Message composer controls share one input surface.** The paperclip, emoji picker, selected files, draft status, and send action sit together inside the composer border.
+- **Local web development skips boot-time database migration by default.** The existing `pnpm --filter @chaste/db db:migrate` setup command remains the explicit schema step; set `AUTO_MIGRATE_ON_BOOT=1` when a local dev start should apply migrations.
+- **Dark-mode stat cards use coherent semantic surfaces.** Accent, warning, danger, and success cards now switch to dark semantic fills and borders instead of retaining bright light-mode panels.
+- **Authored documents retain their working context.** Document type, linked business record, virtual folder, and page settings now survive drafts, published versions, restores, and reopen flows.
+- **Folders are first-class and tenant-scoped.** Empty and nested folders persist independently of documents, parent paths are real records, and rename or move operations update descendants atomically.
+- **Dropdowns stop looking generic.** Every `<select>` in the app now shares
+  one chrome: browser default chrome removed, a custom chevron, aligned
+  padding, and the shared gold focus ring. A `Select` primitive lands in the
+  UI kit so future dropdowns inherit it for free.
+- **The floating AI bar can live on hover.** A new "Hover reveal" dock mode
+  (now the default) keeps the bar out of the way until the pointer rests
+  near the bottom edge of the screen: the bar rises into view, stays while
+  you are using it or while the workmate is working, and hides again when
+  you move away. A subtle handle at the bottom edge marks the trigger, it
+  is reachable by keyboard (Tab reveals and focuses the input), and tapping
+  elsewhere dismisses it. The previous always-visible bar remains available
+  as the "Floating bar" dock choice in the workmate's preferences.
+- **Humans act under their own authority (ADR 0055).** A permitted human
+  executing an identity- or destructive-class action in the UI applies it
+  directly, fully audited, instead of being asked to approve their own
+  click in the Approvals inbox. Approval gates now target the workmate and
+  system jobs: identity/destructive always, money above thresholds. Orgs
+  can re-impose dual control for humans per risk class via the org policy
+  rules (`requiresApprovalFor`), and the workmate's proposals still land in
+  the inbox exactly as before.
+- **The Approvals inbox and Event Ledger now say who acted.** Approval
+  cards carry an actor chip ("agent · for <name>" vs "human · <name>"), and
+  agent-driven ledger rows show the session they came from
+  (`ledger_events.session_id`, a new indexed column, deliberately not part
+  of the hash chain so old entries stay verifiable).
+
+- **Module chrome rides the inked band.** Every module's header (breadcrumb,
+  description, tabs, actions) is now the brand's dark cover plate: "Home /
+  Accounting" is written large in paper and gold instead of an easy-to-miss
+  grey whisper, with the tabs styled for the dark surface.
+- **Icons match the notifications bell.** The shared icon base draws at the
+  bell's stroke weight, so every icon across the rail, launcher, tabs and
+  page bodies carries the same confident weight.
+- **The dashboard keeps one attention list.** The separate "My work" card is
+  gone; "Needs you" is the single queue (receipt remainders folded in) and
+  the "Brief me" button lives in its header in the brand ink instead of grey.
+- **One brand identity across the product (ADR-0054).** The gateway's warm
+  paper + inked band + burnished gold palette is now the product-wide system:
+  `stone-*` re-pointed to warm paper greys, the accent ramp renamed and
+  re-pointed to `gold-*` (the `maroon-*` name is retired), and the four-theme
+  picker removed from settings, the command palette and the rail - Light,
+  Dark and System remain. The inked `#111416` band (masthead, login hero,
+  setup header, support widget) is a brand constant in both modes; the auth
+  pages are tokenized and drop the `.auth-surface` light-mode pin, so the
+  gateway now follows the mode like every other page. Primary buttons are the
+  gateway's ink style (inverting in dark mode), and `dark:` utilities now
+  follow the attribute-based mode via a custom variant.
+- **One color for app icons.** Every tile in the apps catalogue, the command
+  palette, the app frame header, and the rail's pinned/recent apps renders in
+  the single brand ink (`#111416` with paper icon) instead of per-app hues;
+  rail icons moved to the same dark ink. (ADR-0054 continuation.)
+- **No em dashes anywhere.** All 1,251 em dashes across docs, source
+  comments, and UI copy were replaced with hyphens, and `AGENTS.md` now
+  instructs agents never to write them.
+
+- **Auth and onboarding first impression.** Reworked the first-run surfaces around
+  the Chaste black, ivory, and champagne-gold identity with a responsive split auth
+  composition, orbital brand mark, reduced-motion-safe entrance motion, persistent
+  onboarding status header, glowing linear-gradient progress bar, and clearer
+  recovery copy while preserving the existing setup paths and governed API flow.
+- **sign-in is sealed until the email is verified; unverified sessions
+  inherit nothing (N03).** Domain identities are pre-provisioned (SCIM,
+  invitations) and bind by email, so a password sign-up for that email used
+  to walk straight into memberships without owning the mailbox. Sign-in now
+  requires verification (the link is re-sent on each sign-in attempt), and
+  an unverified session resolves to a bare identity - no memberships, no
+  permissions - until the address is verified or proven by a trusted IdP.
+  Existing unverified accounts receive a fresh verification email at their
+  next sign-in attempt.
+
+- CRM forecast assumptions now show every stage rate, and monetary inputs use the workspace currency.
+- CRM profile and bulk changes run through reversible, audited capability actions; duplicate matches remain review suggestions and are never merged automatically.
+- POS preserves a cart when a sale fails or needs approval, prevents closing a register with an open cart, and labels drawer totals separately from cash sales. Returns now request approval with an audited reason.
+- POS stores explicitly queued offline sales on the device, marks them as unposted, and lets staff review and send them after reconnecting with an idempotent retry identity.
+- POS checkout blocks register actions while offline and explains that saved carts require a connection before posting. Loyalty points are shown as unavailable until the workspace configures a program.
+- Document match counts are presented as lexical evidence, not confidence percentages; the review view explains when the parser does not provide extraction confidence.
+- Mobile CRM, POS, and document lists use cards so key values and actions stay in view.
+- Mobile app sections use visible, horizontally scrollable tabs again, and narrow app headers wrap action buttons instead of overflowing the page.
+- CRM customer filters and create/import actions fit 320px screens without horizontal scrolling, and saved-view creation stays closed until requested.
+- Empty Products & Services catalogs point to add and spreadsheet-import actions instead of reporting stock as healthy.
 
 ## [0.5.0] - 2026-09-09
 

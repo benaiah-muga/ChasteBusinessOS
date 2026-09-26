@@ -5,6 +5,7 @@ import { authoredDocs, docTemplates, getDb, memories, withOrgContext } from "@ch
 import { getResolvedUser } from "@/server/session";
 import { runtimeAiConfig } from "@/server/ai-settings";
 import { resolveClient } from "@chaste/ai";
+import { generateWithCodingPlanText } from "@/server/coding-agent-adapter";
 
 /**
  * AI writing assist for authored documents (Phase 4). Selection actions,
@@ -67,9 +68,12 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
   const db = getDb().db;
-  const runtime = await runtimeAiConfig(db, resolved.orgId);
+  const runtime = await runtimeAiConfig(db, resolved.orgId, resolved.userId);
   const fastModel = runtime.models.fast;
   const call = async (system: string, user: string): Promise<string> => {
+    if (runtime.codingAgentConnection) {
+      return (await generateWithCodingPlanText({ db, connection: runtime.codingAgentConnection, system, prompt: user })).text;
+    }
     const res = await resolveClient(fastModel, runtime.runtime).chat.completions.create({
       model: fastModel,
       messages: [

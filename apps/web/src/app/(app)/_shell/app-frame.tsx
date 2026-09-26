@@ -3,16 +3,28 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { resolveApp, tileStyle } from "./apps";
-import { IconChevronLeft } from "@/components/icons";
-import { cn } from "@/lib/format";
+import { IconChevronLeft, IconSparkle } from "@/components/icons";
 import { QuickActionsMenu } from "@/components/quick-actions";
+import { cn } from "@/lib/format";
+import { chatDock, chatDraft } from "../chat-widget-state";
 
 export interface AppTab {
   id: string;
   label: string;
   /** Optional live count rendered as a quiet pill next to the label. */
   count?: number;
-  mobileQuick?: boolean;
+}
+
+function revealTabHorizontally(container: HTMLDivElement | null, tab: HTMLButtonElement | null) {
+  if (!container || !tab) return;
+  const containerRect = container.getBoundingClientRect();
+  const tabRect = tab.getBoundingClientRect();
+  const delta = tabRect.left < containerRect.left
+    ? tabRect.left - containerRect.left
+    : tabRect.right > containerRect.right
+      ? tabRect.right - containerRect.right
+      : 0;
+  if (delta !== 0) container.scrollBy({ left: delta, behavior: "smooth" });
 }
 
 /**
@@ -30,6 +42,7 @@ export function AppFrame({
   activeTab,
   onTabChange,
   persistKey,
+  workmatePrompt,
   actions,
   children,
 }: {
@@ -40,105 +53,29 @@ export function AppFrame({
   activeTab?: string;
   onTabChange?: (id: string) => void;
   persistKey?: string;
+  workmatePrompt?: string;
   actions?: ReactNode;
   children: ReactNode;
 }) {
   const app = resolveApp(appId);
   const Icon = app?.icon;
-  const mobileTabScroller = useRef<HTMLElement>(null);
-  const mobileTabTrack = useRef<HTMLDivElement>(null);
-  const [mobileCanScrollLeft, setMobileCanScrollLeft] = useState(false);
-  const [mobileCanScrollRight, setMobileCanScrollRight] = useState(false);
-  const markedQuickTabs = tabs?.filter((tab) => tab.mobileQuick) ?? [];
-  const mobileQuickTabs =
-    markedQuickTabs.length > 0 ? markedQuickTabs : (tabs?.slice(0, 3) ?? []);
-  const mobileTabs = [
-    ...mobileQuickTabs,
-    ...(tabs ?? []).filter((tab) => !mobileQuickTabs.includes(tab)),
-  ];
-  const mobileTabSignature = mobileTabs
-    .map((tab) => `${tab.id}:${tab.label}:${tab.count ?? ""}`)
-    .join("|");
+  const activeTabRef = useRef<HTMLButtonElement>(null);
+  const previousTabRef = useRef(activeTab);
+  const tabListRef = useRef<HTMLDivElement>(null);
+  const [tabsOverflow, setTabsOverflow] = useState(false);
+  const tabSignature = tabs?.map((tab) => `${tab.id}:${tab.label}:${tab.count ?? ""}`).join("|") ?? "";
 
-  useEffect(() => {
-    const scroller = mobileTabScroller.current;
-    const track = mobileTabTrack.current;
-    if (!scroller) return;
-
-    const revealActiveTab = () => {
-      if (!activeTab || scroller.clientWidth === 0) return;
-      const activeButton = Array.from(
-        scroller.querySelectorAll<HTMLButtonElement>("[data-app-tab]"),
-      ).find((button) => button.dataset.appTab === activeTab);
-      if (!activeButton) return;
-
-      const scrollerBounds = scroller.getBoundingClientRect();
-      const buttonBounds = activeButton.getBoundingClientRect();
-      if (
-        buttonBounds.left < scrollerBounds.left ||
-        buttonBounds.right > scrollerBounds.right
-      ) {
-        scroller.scrollLeft += buttonBounds.left - scrollerBounds.left;
-      }
-    };
-
-    const updateScrollState = () => {
-      setMobileCanScrollLeft(scroller.scrollLeft > 1);
-      setMobileCanScrollRight(
-        scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1,
-      );
-    };
-    let pendingFrame: number | null = null;
-    const syncLayout = () => {
-      updateScrollState();
-      if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
-      pendingFrame = window.requestAnimationFrame(() => {
-        pendingFrame = null;
-        revealActiveTab();
-      });
-    };
-
-    syncLayout();
-    scroller.addEventListener("scroll", updateScrollState, { passive: true });
-    window.addEventListener("resize", syncLayout);
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(syncLayout);
-    observer?.observe(scroller);
-    if (track) observer?.observe(track);
-    return () => {
-      scroller.removeEventListener("scroll", updateScrollState);
-      window.removeEventListener("resize", syncLayout);
-      observer?.disconnect();
-      if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
-    };
-  }, [activeTab, mobileTabSignature]);
-
-  function revealMobileTabs() {
-    const scroller = mobileTabScroller.current;
-    if (!scroller) return;
-    const direction = mobileCanScrollRight ? 1 : -1;
-    const reduceMotion =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    scroller.scrollBy({
-      left: direction * Math.max(160, Math.floor(scroller.clientWidth * 0.72)),
-      behavior: reduceMotion ? "auto" : "smooth",
-    });
+  function askWorkmate() {
+    chatDraft.set(workmatePrompt ?? `Help me with ${app?.name ?? appId}. What should I work on next?`);
+    chatDock.set("open");
   }
 
   // Deep link (?tab=) wins on mount; afterwards the last choice is remembered.
   useEffect(() => {
     if (!persistKey || !onTabChange || !activeTab) return;
     const fromUrl = new URLSearchParams(window.location.search).get("tab");
-    const known = (id: string | null) =>
-      id && tabs?.some((t) => t.id === id) ? id : null;
-    const target =
-      known(fromUrl) ??
-      (fromUrl
-        ? null
-        : known(localStorage.getItem(`chaste-app-tab:${persistKey}`)));
+    const known = (id: string | null) => (id && tabs?.some((t) => t.id === id) ? id : null);
+    const target = known(fromUrl) ?? (fromUrl ? null : known(localStorage.getItem(`chaste-app-tab:${persistKey}`)));
     if (target && target !== activeTab) onTabChange(target);
     // Run once on mount: URL wins, then the remembered tab.
   }, []);
@@ -152,10 +89,28 @@ export function AppFrame({
     }
   }, [persistKey, activeTab]);
 
+  useEffect(() => {
+    if (previousTabRef.current !== activeTab) {
+      window.scrollTo({ top: 0, behavior: "auto" });
+      previousTabRef.current = activeTab;
+    }
+    revealTabHorizontally(tabListRef.current, activeTabRef.current);
+  }, [activeTab]);
+
+  useEffect(() => {
+    const element = tabListRef.current;
+    if (!element) return;
+    const measure = () => setTabsOverflow(element.scrollWidth > element.clientWidth + 2);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [tabSignature]);
+
   return (
     <div>
       <header className="module-band sticky top-14 z-20 mb-6 rounded-2xl px-4 py-3.5 sm:px-5 lg:top-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <Link
             href="/"
             aria-label="Back to dashboard"
@@ -172,127 +127,68 @@ export function AppFrame({
             {Icon && <Icon className="size-5" />}
           </span>
           <div className="min-w-0 flex-1">
-            <nav
-              aria-label="Breadcrumb"
-              className="min-w-0 overflow-hidden text-[13px] leading-none"
-            >
-              <ol className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                <li className="hidden shrink-0 sm:list-item">
-                  <Link
-                    href="/"
-                    className="font-medium text-[#d2aa6a] hover:text-[#e5c585] hover:underline"
-                  >
+            <nav aria-label="Breadcrumb" className="hidden text-[13px] leading-none sm:block">
+              <ol className="flex items-center gap-1.5">
+                <li>
+                  <Link href="/" className="font-medium text-[#d2aa6a] hover:text-[#e5c585] hover:underline">
                     Home
                   </Link>
                 </li>
-                <li
-                  aria-hidden="true"
-                  className="hidden shrink-0 text-[#8f8c87] sm:list-item"
-                >
-                  /
-                </li>
-                <li
-                  aria-current="page"
-                  className="min-w-0 truncate whitespace-nowrap text-sm font-semibold tracking-[-0.01em] text-[#f7f1e8] min-[360px]:text-[15px]"
-                >
-                  {app?.name ?? appId}
-                </li>
               </ol>
             </nav>
+            <h1 className="mt-1 text-[15px] leading-5 font-semibold tracking-[-0.01em] text-[#f7f1e8]">{app?.name ?? appId}</h1>
             {description && (
-              <p className="mt-1.5 hidden truncate text-xs leading-4 text-[#b5aea4] sm:block">
-                {description}
-              </p>
+              <p className="mt-1.5 hidden truncate text-xs leading-4 text-[#b5aea4] sm:block">{description}</p>
             )}
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            <div className="hidden lg:block">
-              <QuickActionsMenu appId={appId} />
-            </div>
-            {actions}
+          <button type="button" onClick={askWorkmate} className="btn btn-md btn-secondary lg:hidden">
+            <IconSparkle className="size-3.5" />
+            Ask workmate
+          </button>
+          <div className="hidden lg:block">
+            <QuickActionsMenu appId={appId} />
           </div>
+          {actions && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0">{actions}</div>}
         </div>
 
         {tabs && (
-          <div className="pt-3 lg:hidden">
-            <div className="flex min-w-0 items-center gap-1">
-              <nav
-                id={`${appId}-mobile-sections`}
-                ref={mobileTabScroller}
-                aria-label={`${app?.name ?? appId} sections`}
-                className="flex min-w-0 flex-1 items-stretch overflow-x-auto overscroll-x-contain [scrollbar-width:none]"
-              >
-                <div
-                  ref={mobileTabTrack}
-                  className="flex w-max min-w-full items-stretch gap-1"
-                >
-                  {mobileTabs.map((tab) => {
-                    const selected = tab.id === activeTab;
-                    return (
-                      <button
-                        key={tab.id}
-                        data-app-tab={tab.id}
-                        type="button"
-                        aria-current={selected ? "page" : undefined}
-                        onClick={() => onTabChange?.(tab.id)}
-                        className={cn(
-                          "flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d2aa6a]",
-                          selected
-                            ? "border-[#d2aa6a] text-[#f7f1e8]"
-                            : "border-transparent text-[#b5aea4] hover:text-[#f7f1e8]",
-                        )}
-                      >
-                        <span>{tab.label}</span>
-                        {tab.count != null && (
-                          <span className="tnum rounded-full bg-white/10 px-1.5 py-px text-[10px] text-[#e8e2d8]">
-                            {tab.count}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </nav>
-              {(mobileCanScrollLeft || mobileCanScrollRight) && (
-                <button
-                  type="button"
-                  aria-controls={`${appId}-mobile-sections`}
-                  aria-label={
-                    mobileCanScrollRight
-                      ? `Show more ${app?.name ?? appId} sections`
-                      : `Show previous ${app?.name ?? appId} sections`
-                  }
-                  title={
-                    mobileCanScrollRight
-                      ? "Show more sections"
-                      : "Show previous sections"
-                  }
-                  onClick={revealMobileTabs}
-                  className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-[#c9c2b8] transition-colors hover:bg-white/[0.08] hover:text-[#f7f1e8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d2aa6a]"
-                >
-                  <IconChevronLeft
-                    className={`size-4 transition-transform duration-150 ${mobileCanScrollRight ? "rotate-180" : ""}`}
-                  />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {tabs && (
-          <div
-            role="tablist"
-            aria-label={`${app?.name ?? appId} sections`}
-            className="-mx-1 hidden max-w-full flex-nowrap gap-4 overflow-x-auto overflow-y-hidden px-1 pt-3 [scrollbar-width:none] lg:flex"
-          >
-            {tabs.map((t) => (
+          <>
+            <div
+              ref={tabListRef}
+              role="tablist"
+              aria-label={`${app?.name ?? appId} sections`}
+              className="scrollbar-subtle -mx-1 flex w-full min-w-0 flex-nowrap gap-3 overflow-x-auto overflow-y-hidden px-1 pt-3"
+            >
+              {tabs.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
                 aria-selected={t.id === activeTab}
+                ref={t.id === activeTab ? activeTabRef : undefined}
+                aria-controls={activeTab === t.id ? `${persistKey ?? appId}-${t.id}-panel` : undefined}
+                id={`${persistKey ?? appId}-${t.id}-tab`}
+                tabIndex={t.id === activeTab ? 0 : -1}
+                data-tab-id={t.id}
                 onClick={() => onTabChange?.(t.id)}
-                className={cn("tab tab-band shrink-0 whitespace-nowrap")}
+                onKeyDown={(event) => {
+                  const buttons = Array.from(
+                    event.currentTarget.closest('[role="tablist"]')?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [],
+                  );
+                  const currentIndex = buttons.indexOf(event.currentTarget);
+                  let nextIndex: number;
+                  if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % buttons.length;
+                  else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+                  else if (event.key === "Home") nextIndex = 0;
+                  else if (event.key === "End") nextIndex = buttons.length - 1;
+                  else return;
+                  event.preventDefault();
+                  const next = buttons[nextIndex];
+                  next?.focus();
+                  revealTabHorizontally(tabListRef.current, next ?? null);
+                  if (next?.dataset.tabId) onTabChange?.(next.dataset.tabId);
+                }}
+                className={cn("tab tab-band shrink-0")}
               >
                 {t.label}
                 {t.count != null && (
@@ -300,27 +196,26 @@ export function AppFrame({
                     {t.count}
                   </span>
                 )}
-              </button>
-            ))}
-          </div>
+                </button>
+              ))}
+            </div>
+            {tabsOverflow && <p aria-hidden="true" className="pt-1 text-right text-[10px] leading-none text-[#b5aea4] sm:hidden">Swipe horizontally for more sections →</p>}
+          </>
         )}
       </header>
-      {children}
+      <div
+        role={activeTab ? "tabpanel" : undefined}
+        id={`${persistKey ?? appId}-${activeTab ?? "content"}-panel`}
+        aria-labelledby={activeTab ? `${persistKey ?? appId}-${activeTab}-tab` : undefined}
+        tabIndex={0}
+      >
+        {children}
+      </div>
     </div>
   );
 }
 
 /** Page-level container for non-app destinations (dashboard, system pages). */
-export function Page({
-  children,
-  wide,
-}: {
-  children: ReactNode;
-  wide?: boolean;
-}) {
-  return (
-    <div className={wide ? "mx-auto max-w-7xl" : "mx-auto max-w-6xl"}>
-      {children}
-    </div>
-  );
+export function Page({ children, wide }: { children: ReactNode; wide?: boolean }) {
+  return <div className={wide ? "mx-auto max-w-7xl" : "mx-auto max-w-6xl"}>{children}</div>;
 }

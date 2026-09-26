@@ -1,0 +1,1 @@
+ALTER TABLE "pos_sessions" ADD COLUMN "variance_reason" text;

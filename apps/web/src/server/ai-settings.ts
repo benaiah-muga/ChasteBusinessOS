@@ -1,9 +1,12 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { organizations, type Database } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
 import type { ModelProviderId, RuntimeProviderConfig } from "@chaste/ai";
+import { decryptProviderKey } from "./ai-secrets";
+import { getDefaultCodingAgentConnection } from "./coding-agent-connections";
+
+export { decryptProviderKey, encryptProviderKey } from "./ai-secrets";
 
 export const AI_PROVIDER_IDS = ["nvidia", "openrouter", "groq", "mistral", "zai", "openai", "custom"] as const;
 export const aiProviderIdSchema = z.enum(AI_PROVIDER_IDS);
@@ -72,29 +75,6 @@ function envKey(provider: ModelProviderId): string | undefined {
   return name ? process.env[name] : undefined;
 }
 
-function masterKey(): Buffer {
-  const secret = process.env.AI_CONFIG_ENCRYPTION_KEY ?? process.env.BETTER_AUTH_SECRET;
-  if (!secret) throw new Error("AI_CONFIG_ENCRYPTION_KEY or BETTER_AUTH_SECRET is required");
-  return createHash("sha256").update(secret).digest();
-}
-
-/** Encrypts provider credentials before they enter the kernel payload or database. */
-export function encryptProviderKey(value: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", masterKey(), iv);
-  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return `v1:${iv.toString("base64url")}:${tag.toString("base64url")}:${ciphertext.toString("base64url")}`;
-}
-
-export function decryptProviderKey(value: string): string {
-  const [version, ivText, tagText, ciphertextText] = value.split(":");
-  if (version !== "v1" || !ivText || !tagText || !ciphertextText) throw new Error("invalid encrypted provider key");
-  const decipher = createDecipheriv("aes-256-gcm", masterKey(), Buffer.from(ivText, "base64url"));
-  decipher.setAuthTag(Buffer.from(tagText, "base64url"));
-  return Buffer.concat([decipher.update(Buffer.from(ciphertextText, "base64url")), decipher.final()]).toString("utf8");
-}
-
 function orgSettings(settings: unknown): Record<string, unknown> {
   return settings && typeof settings === "object" && !Array.isArray(settings)
     ? { ...(settings as Record<string, unknown>) }
@@ -137,13 +117,15 @@ export async function publicAiConfig(db: Database["db"], orgId: string) {
   };
 }
 
-export async function runtimeAiConfig(db: Database["db"], orgId: string) {
+export async function runtimeAiConfig(db: Database["db"], orgId: string, userId?: string) {
+  const codingAgentConnection = userId ? await getDefaultCodingAgentConnection(db, orgId, userId) : null;
   const stored = await storedAiConfigForOrg(db, orgId);
   if (!stored) {
     const env = envAiConfig();
     return {
       runtime: { provider: env.provider, apiKey: envKey(env.provider), baseUrl: env.baseUrl } satisfies RuntimeProviderConfig,
-      models: env.models,
+      models: { ...env.models, ...(codingAgentConnection?.provider === "opencode" && codingAgentConnection.modelId ? { primary: codingAgentConnection.modelId } : {}) },
+      codingAgentConnection,
     };
   }
   let apiKey: string | undefined;
@@ -156,7 +138,8 @@ export async function runtimeAiConfig(db: Database["db"], orgId: string) {
   }
   return {
     runtime: { provider: stored.provider, apiKey, baseUrl: stored.baseUrl } satisfies RuntimeProviderConfig,
-    models: stored.models,
+    models: { ...stored.models, ...(codingAgentConnection?.provider === "opencode" && codingAgentConnection.modelId ? { primary: codingAgentConnection.modelId } : {}) },
+    codingAgentConnection,
   };
 }
 

@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { findDuplicate, normalizeCustomerName, normalizeEmail } from "./duplicates.js";
+import { findDuplicate, normalizeCustomerName, normalizeEmail, normalizePhone } from "./duplicates.js";
 
 describe("normalizeCustomerName", () => {
   it("strips legal suffixes, punctuation, and case", () => {
@@ -49,6 +49,15 @@ describe("findDuplicate", () => {
     });
   });
 
+  it("matches normalized phone numbers across punctuation and country prefixes", () => {
+    expect(findDuplicate([{ name: "Northwind", phone: "+256 772 123 456" }], { name: "Different", phone: "0772-123-456" })).toMatchObject({ duplicate: true, reason: "phone" });
+  });
+
+  it("warns on a conservative fuzzy name match", () => {
+    expect(findDuplicate([{ name: "Northwind Construction" }], { name: "Northwind Construcion" })).toMatchObject({ duplicate: true, reason: "similar name" });
+    expect(findDuplicate([{ name: "John Smith" }], { name: "John Smyth" }).duplicate).toBe(false);
+  });
+
   it("different names with different emails never match", () => {
     expect(
       findDuplicate([{ name: "Globex", email: "g@x.com" }], { name: "Initech", email: "i@y.com" }).duplicate,
@@ -85,5 +94,12 @@ describe("normalizeEmail", () => {
     expect(normalizeEmail("  Bill@Acme.COM ")).toBe("bill@acme.com");
     expect(normalizeEmail(null)).toBeNull();
     expect(normalizeEmail("   ")).toBeNull();
+  });
+});
+
+describe("normalizePhone", () => {
+  it("keeps a stable national suffix and rejects short fragments", () => {
+    expect(normalizePhone("+256 (772) 123-456")).toBe("772123456");
+    expect(normalizePhone("12345")).toBeNull();
   });
 });

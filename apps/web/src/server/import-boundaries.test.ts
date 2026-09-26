@@ -50,7 +50,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.delete(items).where(eq(items.orgId, orgId));
   await db.delete(customers).where(eq(customers.orgId, orgId));
-  await db.delete(organizations).where(eq(organizations.id, orgId));
+  // Kernel execution writes append-only ledger events for imports, so this
+  // probe workspace stays as the immutable parent of its test audit history.
   await db.delete(users).where(eq(users.id, userId));
   await pg.client.end();
 });

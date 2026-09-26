@@ -11,6 +11,7 @@ import { getResolvedUser } from "@/server/session";
 import { chatLimitForUser } from "@/server/rate-limit";
 import { resolveEnabledModules } from "@/app/(app)/_shell/modules";
 import { runtimeAiConfig } from "@/server/ai-settings";
+import { createCodingAgentAdapter } from "@/server/coding-agent-adapter";
 
 export const maxDuration = 300;
 
@@ -73,23 +74,14 @@ export async function POST(req: Request) {
   if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
   const db = getDb().db;
-  const ai = await runtimeAiConfig(db, ctx.actor.orgId);
+  const ai = await runtimeAiConfig(db, ctx.actor.orgId, resolved.userId);
   const registry = buildRegistry(db).scopedToModules(
     resolveEnabledModules(resolved.enabledModules),
   );
   const executor = buildExecutor(db, registry);
-  const modelRef = ai.models.primary;
-  const model = new OpenAiCompatAdapter({
-    client: resolveClient(modelRef, ai.runtime),
-    model: modelRef,
-    // Upstream shared pools (e.g. stealth/ox-alpha) throttle under load;
-    // falling back to the primary NIM model keeps agent turns honest
-    // instead of dying mid-conversation.
-    fallback:
-      process.env.NVIDIA_API_KEY && ai.runtime.provider !== "nvidia"
-        ? { client: nimClient(), model: process.env.MODEL_PRIMARY_NIM ?? "moonshotai/kimi-k2.6" }
-        : undefined,
-  });
+  const modelRef = ai.codingAgentConnection
+    ? `${ai.codingAgentConnection.provider}:${ai.codingAgentConnection.modelId ?? "plan-default"}`
+    : ai.models.primary;
 
   let sessionId = body.data.sessionId;
   if (sessionId) {
@@ -123,6 +115,23 @@ export async function POST(req: Request) {
     sessionId = session!.id;
   }
   ctx.sessionId = sessionId;
+  const model = ai.codingAgentConnection
+    ? await createCodingAgentAdapter({
+        db,
+        connection: ai.codingAgentConnection,
+        sessionId,
+        toolAccess: true,
+      })
+    : new OpenAiCompatAdapter({
+        client: resolveClient(modelRef, ai.runtime),
+        model: modelRef,
+        // API-key workspaces retain their provider fallback. A selected
+        // coding plan never silently changes to a different billing source.
+        fallback:
+          process.env.NVIDIA_API_KEY && ai.runtime.provider !== "nvidia"
+            ? { client: nimClient(), model: process.env.MODEL_PRIMARY_NIM ?? "moonshotai/kimi-k2.6" }
+            : undefined,
+      });
 
   const [org] = await db
     .select({ name: organizations.name, soul: organizations.agentSoul })
@@ -183,6 +192,7 @@ export async function POST(req: Request) {
           controller.close();
           return;
         }
+        const codingPlan = Boolean(ai.codingAgentConnection);
         const result = await runAgentLoop(
           model,
           registry,
@@ -192,14 +202,16 @@ export async function POST(req: Request) {
             sessionId,
             systemPrompt:
               systemPromptFor(org?.name ?? "your organization", org?.soul ?? null) +
-              (wantsCreator ? creatorAddendum : ""),
+              (wantsCreator ? creatorAddendum : "") +
+              (codingPlan ? "\n\nYou can use Chaste business tools through the connected workspace tool bridge. Use only those tools for business data and actions. Ask for missing details in your reply when needed, and never switch to tools outside Chaste." : ""),
             userGoal: body.data!.message,
-            maxSteps,
+            maxSteps: codingPlan ? 1 : maxSteps,
+            noCapabilityNote: codingPlan ? null : undefined,
             // A client disconnect (Stop button or tab close) cancels the
             // in-flight model call and the loop between steps.
             signal: req.signal,
             contextWindow: Number(process.env.MODEL_CONTEXT_WINDOW ?? 131_072),
-            ask: {
+            ask: codingPlan ? undefined : {
               deliver: async (question) => {
                 send({
                   type: "ask",
@@ -237,7 +249,7 @@ export async function POST(req: Request) {
               }
             },
           },
-          ticketSink,
+          codingPlan ? undefined : ticketSink,
         );
         await appendSessionEvent(db, sessionId, "assistant", { text: result.finalMessage });
         // Token accounting incl. cached prompt tokens (KV-cache hit rate);

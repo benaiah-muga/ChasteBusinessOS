@@ -89,7 +89,8 @@ export const FIELD_SYNONYMS: Record<"customers" | "products", Record<string, str
   products: {
     sku: ["sku", "code", "item code", "product code", "item", "id"],
     name: ["name", "product", "product name", "item name", "description", "title"],
-    unitLabel: ["unit", "unit label", "uom", "unit of measure"],
+    type: ["type", "kind", "item type", "product type", "service or product"],
+    unitLabel: ["unit", "unit label", "uom", "unit of measure", "service unit", "billing unit", "billing basis"],
     salePrice: ["price", "sale price", "unit price", "selling price", "amount", "rate"],
     barcode: ["barcode", "bar code", "ean", "upc"],
   },
@@ -97,7 +98,7 @@ export const FIELD_SYNONYMS: Record<"customers" | "products", Record<string, str
 
 export const REQUIRED_FIELDS: Record<"customers" | "products", string[]> = {
   customers: ["name"],
-  products: ["sku", "name"],
+  products: ["name"],
 };
 
 const norm = (s: string) =>

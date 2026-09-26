@@ -21,6 +21,7 @@ import { appendSessionEvent } from "./session-events";
 import { buildExecutor } from "./kernel";
 import { checkRateLimit } from "./rate-limit";
 import { runtimeAiConfig } from "./ai-settings";
+import { createCodingAgentAdapter } from "./coding-agent-adapter";
 
 /**
  * Draft-only customer care agent (ADR 0025).
@@ -197,7 +198,10 @@ export async function draftSupportReply(input: {
     throw new SupportDraftError("support tools are unavailable", 409);
   }
 
-  const ai = await runtimeAiConfig(db, resolved.orgId);
+  const ai = await runtimeAiConfig(db, resolved.orgId, resolved.userId);
+  const modelRef = ai.codingAgentConnection
+    ? `${ai.codingAgentConnection.provider}:${ai.codingAgentConnection.modelId ?? "plan-default"}`
+    : ai.models.primary;
 
   const [session] = await db
     .insert(agentSessions)
@@ -206,7 +210,7 @@ export async function draftSupportReply(input: {
       userId: resolved.userId,
       title: `Support: ${context.subject}`.slice(0, 80),
       mode: "assist",
-      modelRef: ai.models.primary,
+      modelRef,
     })
     .returning({ id: agentSessions.id });
 
@@ -230,10 +234,12 @@ export async function draftSupportReply(input: {
 
   const adapter =
     input.adapter ??
-    new OpenAiCompatAdapter({
-      client: resolveClient(ai.models.primary, ai.runtime),
-      model: ai.models.primary,
-    });
+    (ai.codingAgentConnection
+      ? await createCodingAgentAdapter({ db, connection: ai.codingAgentConnection, sessionId: session!.id, toolAccess: true })
+      : new OpenAiCompatAdapter({
+          client: resolveClient(ai.models.primary, ai.runtime),
+          model: ai.models.primary,
+        }));
 
   const result = await runAgentLoop(adapter, loopRegistry, buildExecutor(db, loopRegistry), ctx, {
     sessionId: session!.id,

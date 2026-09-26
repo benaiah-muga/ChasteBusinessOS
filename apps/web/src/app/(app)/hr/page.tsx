@@ -1403,18 +1403,24 @@ function OverviewTab({
           label="Headcount"
           value={totalStaff}
           sub={`${activeStaff.length} active · ${formatMoneyWhole(monthlyCostMinor)}/mo in salaries`}
+          onClick={() => onTabChange("people")}
+          actionLabel="Open the people list"
         />
         <StatCard
           label="Leave awaiting your decision"
           value={pendingLeave.length}
           sub={pendingLeave.length > 0 ? "Decisions feed payroll proration" : "Nothing pending"}
           tone={pendingLeave.length > 0 ? "warn" : "default"}
+          onClick={() => onTabChange("leave")}
+          actionLabel="Review leave requests"
         />
         <StatCard
           label={`Hours ${periodLabel}`}
           value={fmtHours(approvedMinutes)}
           sub={pendingMinutes > 0 ? `${fmtHours(pendingMinutes)} more awaiting approval` : "All logged hours approved"}
           tone={pendingMinutes > 0 ? "warn" : "success"}
+          onClick={() => onTabChange("time")}
+          actionLabel="Review team time entries"
         />
         <StatCard
           label="Latest payroll run"
@@ -1432,6 +1438,8 @@ function OverviewTab({
           tone={
             !latestRun ? "default" : latestRun.status === "executed" ? "success" : latestRun.status === "voided" ? "danger" : "accent"
           }
+          onClick={() => onTabChange("payroll")}
+          actionLabel="Open payroll runs"
         />
       </div>
 

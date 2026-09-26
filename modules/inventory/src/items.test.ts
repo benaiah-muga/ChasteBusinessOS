@@ -119,4 +119,24 @@ describe("service items", () => {
       run("inventory.adjustStock", { sku: "SVC-01", quantityDelta: 1_000, note: "should not stock" }),
     ).rejects.toThrow(/is a service; there is nothing to stock/);
   });
+
+  it("imports reviewed products and services, skips duplicate codes, and supports undo", async () => {
+    const imported = await run("inventory.importItems", {
+      rows: [
+        { rowNumber: 2, sku: "BULK-PRODUCT", name: "Bulk product", kind: "goods", unitLabel: "box", salePriceMinor: 1_250, reorderPointThousandths: 2_000, barcode: null, tags: ["bulk"] },
+        { rowNumber: 3, sku: "BULK-SERVICE", name: "Bulk service", kind: "service", unitLabel: "hour", salePriceMinor: 8_000, reorderPointThousandths: 0, barcode: null, tags: [] },
+        { rowNumber: 4, sku: "bulk-product", name: "Duplicate product", kind: "goods", unitLabel: "unit", salePriceMinor: 2_000, reorderPointThousandths: 0, barcode: null, tags: [] },
+      ],
+    });
+    expect(imported).toMatchObject({ imported: 2, skippedDuplicateRows: [4] });
+    const [service] = await db.db.select().from(items).where(eq(items.sku, "BULK-SERVICE"));
+    expect(service).toMatchObject({ kind: "service", unitLabel: "hour", reorderPointThousandths: 0, barcode: null });
+    const undone = await run("inventory.undoItemImport", { itemIds: imported.createdIds });
+    expect(undone.archived).toBe(2);
+    const [archived] = await db.db.select().from(items).where(eq(items.id, imported.createdIds[0]));
+    expect(archived?.archivedAt).toBeTruthy();
+    await run("inventory.restoreItemImport", { itemIds: undone.itemIds });
+    const [restored] = await db.db.select().from(items).where(eq(items.id, imported.createdIds[0]));
+    expect(restored?.archivedAt).toBeNull();
+  });
 });

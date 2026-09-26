@@ -3,6 +3,7 @@ import { resolveClient, stripProviderPrefix } from "@chaste/ai";
 import { getDb } from "@chaste/db";
 import { runtimeAiConfig } from "@/server/ai-settings";
 import { getResolvedUser } from "@/server/session";
+import { generateWithCodingPlanText } from "@/server/coding-agent-adapter";
 
 /**
  * P01: deterministic ranking decides the list; the model only writes the
@@ -52,8 +53,9 @@ export async function POST(req: Request) {
   if (body.cards.length > 30) {
     return NextResponse.json({ error: "too many cards" }, { status: 400 });
   }
-  const ai = await runtimeAiConfig(getDb().db, resolved.orgId);
-  if (!ai.runtime.apiKey) {
+  const db = getDb().db;
+  const ai = await runtimeAiConfig(db, resolved.orgId, resolved.userId);
+  if (!ai.runtime.apiKey && !ai.codingAgentConnection) {
     return NextResponse.json(
       { error: "summary unavailable", hint: "no workspace model credential is configured; the ranked list itself does not depend on it" },
       { status: 503 },
@@ -66,6 +68,25 @@ export async function POST(req: Request) {
     const kind = typeof c.kind === "string" ? c.kind : "item";
     return `- [${kind}] ${title}: ${detail}`;
   });
+
+  if (ai.codingAgentConnection) {
+    try {
+      const result = await generateWithCodingPlanText({
+        db,
+        connection: ai.codingAgentConnection,
+        system: "You write a two-sentence brief of a business team's pending work for its home page. Group what belongs together, name concrete counts, never invent items that are not in the list, never give advice.",
+        prompt: `Pending work:\n${lines.join("\n")}`,
+      });
+      if (!result.text) return NextResponse.json({ error: "summary unavailable" }, { status: 502 });
+      return NextResponse.json({
+        brief: result.text,
+        model: `${ai.codingAgentConnection.provider}:${ai.codingAgentConnection.modelId ?? "plan-default"}`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "model call failed";
+      return NextResponse.json({ error: "summary unavailable", detail: message }, { status: 502 });
+    }
+  }
 
   try {
     const primary = ai.models.fast;

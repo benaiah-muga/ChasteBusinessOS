@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDb } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { draftCrmFollowUp } from "@/server/crm-assist";
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -22,6 +23,13 @@ const actionSchema = z.discriminatedUnion("action", [
     note: z.string().max(2000).optional(),
   }),
   z.object({ action: z.literal("completeTask"), taskId: z.string().uuid() }),
+  z.object({ action: z.literal("draftFollowUp"), customerId: z.string().uuid() }),
+  z.object({
+    action: z.literal("updateTaskDetails"),
+    taskId: z.string().uuid(),
+    dueAt: z.string().datetime().nullable().optional(),
+    assigneeUserId: z.string().uuid().nullable().optional(),
+  }),
 ]);
 
 export async function GET(req: Request) {
@@ -60,8 +68,17 @@ export async function POST(req: Request) {
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   const d = parsed.data;
-  const capId =
-    d.action === "convertLead" ? "crm.convertLead" : d.action === "createTask" ? "crm.createTask" : "crm.completeTask";
+  if (d.action === "draftFollowUp") {
+    const drafted = await draftCrmFollowUp({
+      db,
+      resolved,
+      customerId: d.customerId,
+    });
+    return NextResponse.json(drafted.body, { status: drafted.status });
+  }
+  const capId = d.action === "convertLead" ? "crm.convertLead"
+    : d.action === "createTask" ? "crm.createTask"
+      : d.action === "completeTask" ? "crm.completeTask" : "crm.updateTaskDetails";
   const input =
     d.action === "convertLead"
       ? {
@@ -79,7 +96,8 @@ export async function POST(req: Request) {
             refId: d.refId,
             note: d.note,
           }
-        : { taskId: d.taskId };
+        : d.action === "completeTask" ? { taskId: d.taskId }
+          : { taskId: d.taskId, ...(d.dueAt !== undefined ? { dueAt: d.dueAt } : {}), ...(d.assigneeUserId !== undefined ? { assigneeUserId: d.assigneeUserId } : {}) };
 
   const result = await buildExecutor(db, buildRegistry(db)).execute(capId, ctx, input);
   if (!result.ok) {
