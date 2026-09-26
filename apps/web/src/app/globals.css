@@ -31,8 +31,8 @@
   --color-stone-100: #f4efe6;
   --color-stone-200: #e7dfd0;
   --color-stone-300: #d7cdbc;
-  --color-stone-400: #a89d8c;
-  --color-stone-500: #8f877b;
+  --color-stone-400: #70685f;
+  --color-stone-500: #635c53;
   --color-stone-600: #756f66;
   --color-stone-700: #5c564e;
   --color-stone-800: #4a4640;
@@ -91,8 +91,8 @@
   --color-stone-100: #23201c;
   --color-stone-200: #322d28;
   --color-stone-300: #47413a;
-  --color-stone-400: #6e675e;
-  --color-stone-500: #8d857a;
+  --color-stone-400: #9e9588;
+  --color-stone-500: #a69d92;
   --color-stone-600: #a89f93;
   --color-stone-700: #c2bab0;
   --color-stone-800: #d9d3cb;
@@ -143,6 +143,10 @@
 }
 [data-mode="dark"] .badge-violet {
   @apply bg-violet-950 text-violet-300;
+}
+[data-mode="dark"] .stat-card-success {
+  border-color: #34503c;
+  background-color: #17271e;
 }
 [data-mode="dark"] .btn-danger {
   @apply bg-red-500 text-stone-50 hover:bg-red-400 active:bg-red-300;
@@ -347,7 +351,7 @@
 
   /* ---------- Overlays ---------- */
   .overlay-backdrop {
-    @apply fixed inset-0 z-40 bg-stone-950/40 backdrop-blur-[2px];
+    @apply fixed inset-0 z-[70] bg-stone-950/40 backdrop-blur-[2px];
     animation: overlay-in 150ms ease-out;
   }
   .overlay-panel {
@@ -645,4 +649,9 @@
   .print-only ol { list-style: decimal; padding-left: 1.4rem; }
   .print-only table { border-collapse: collapse; width: 100%; }
   .print-only th, .print-only td { border: 1px solid #d6d3d1; padding: 0.35rem 0.55rem; text-align: left; }
+}
+
+@media (max-width: 1023px) {
+  body:has(.module-band) [data-chat-launcher],
+  body:has(.module-band) [data-chat-hover-strip] { display: none; }
 }

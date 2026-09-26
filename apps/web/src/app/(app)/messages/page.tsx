@@ -83,6 +83,7 @@ export default function MessagesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const newTitleRef = useRef<HTMLInputElement>(null);
   const [people, setPeople] = useState<Person[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -143,6 +144,7 @@ export default function MessagesPage() {
     const res = await callApi<{ conversations?: Conversation[]; me?: string }>("/api/conversations");
     if (!res.ok) {
       setLoadError(res.error?.title ?? "Couldn't load conversations");
+      setConvs([]);
       return;
     }
     const conversations = res.data?.conversations ?? [];
@@ -150,6 +152,15 @@ export default function MessagesPage() {
     if (res.data?.me) setMe(res.data.me);
     setActiveId((cur) => cur ?? conversations.filter((c) => !c.archivedAt)[0]?.id ?? null);
   }, []);
+
+  function startConversation() {
+    setComposerOpen(true);
+    requestAnimationFrame(() => newTitleRef.current?.focus());
+  }
+
+  useEffect(() => {
+    void loadConvs();
+  }, [loadConvs]);
 
   const refreshThread = useCallback(async (conversationId: string) => {
     const d = await fetch(`/api/conversations/${conversationId}/messages`).then((r) => r.json());
@@ -285,7 +296,7 @@ export default function MessagesPage() {
               <button
                 type="button"
                 aria-label="New conversation"
-                onClick={() => setComposerOpen((v) => !v)}
+                onClick={() => composerOpen ? setComposerOpen(false) : startConversation()}
                 className="icon-btn size-6"
               >
                 {composerOpen ? <IconX className="size-3.5" /> : <IconPlus className="size-4" />}
@@ -296,6 +307,7 @@ export default function MessagesPage() {
           {composerOpen && (
             <form onSubmit={createConv} className="space-y-2.5 border-b border-stone-100 bg-stone-50/60 p-3">
               <input
+                ref={newTitleRef}
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
                 placeholder="Channel name…"
@@ -313,7 +325,16 @@ export default function MessagesPage() {
           )}
 
           <div className="min-h-0 flex-1 overflow-y-auto" role="listbox" aria-label="Conversations">
-            {visibleConvs.length === 0 && <p className="p-4 text-sm text-stone-400">No conversations yet.</p>}
+            {visibleConvs.length === 0 && (
+              <div className="space-y-3 p-4">
+                <p className="text-sm text-stone-500">{loadError ? "Conversation list unavailable." : convs.length === 0 ? "No conversations yet." : "No active conversations."}</p>
+                {convs.length === 0 && !loadError && (
+                  <Button tone="secondary" size="sm" className="w-full" onClick={startConversation}>
+                    <IconPlus className="size-3.5" /> Start a conversation
+                  </Button>
+                )}
+              </div>
+            )}
             {visibleConvs.map((c) => (
               <button
                 key={c.id}
@@ -356,7 +377,7 @@ export default function MessagesPage() {
         </aside>
 
         {/* Thread */}
-        <section className={cn("card flex min-h-0 flex-col overflow-hidden p-0", !activeId && convs.length > 0 ? "hidden lg:flex" : "flex")}>
+        <section className={cn("card flex min-h-0 flex-col overflow-hidden p-0", !activeId ? "hidden lg:flex" : "flex")}>
           {activeConv ? (
             <>
               <header className="flex items-center gap-2 border-b border-stone-100 px-4 py-2.5">
@@ -573,7 +594,15 @@ export default function MessagesPage() {
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center p-6 text-sm text-stone-400">
-              Select a conversation to read it.
+              {convs.length === 0 && !loadError ? (
+                <div className="max-w-sm space-y-3 text-center">
+                  <p className="text-base font-semibold text-stone-800">Start your first conversation</p>
+                  <p>Bring your team together in a channel, with Chaste available when you include the AI workmate.</p>
+                  <Button tone="secondary" onClick={startConversation}>Create conversation</Button>
+                </div>
+              ) : (
+                "Select a conversation to read it."
+              )}
             </div>
           )}
         </section>

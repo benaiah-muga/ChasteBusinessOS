@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Switch } from "@/components/ui";
 import {
   IconArrowRight,
@@ -92,6 +92,8 @@ function HoverRevealDock({ busy, children }: { busy: boolean; children: ReactNod
         ref={barRef}
         onPointerEnter={reveal}
         onPointerLeave={scheduleHide}
+        aria-hidden={!(revealed || busy)}
+        inert={!(revealed || busy)}
         className={cn(
           "fixed inset-x-0 bottom-20 z-50 flex justify-center px-4 transition-all duration-200 lg:bottom-5",
           revealed || busy ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
@@ -137,7 +139,7 @@ export function ChatWidget() {
 function ChatDockBody() {
   const mode = useChatDockMode();
   const isPhone = useMediaQuery("(max-width: 1023px)");
-  const effective: ChatDockMode = mode === "pinned" && isPhone ? "open" : mode;
+  const effective: ChatDockMode = isPhone && (mode === "pinned" || mode === "input") ? "bubble" : mode;
   return <ChatDockInner mode={effective} />;
 }
 
@@ -145,7 +147,19 @@ function ChatDockInner({ mode }: { mode: "hover" | "input" | "bubble" | "open" |
   const { messages, busy, creator, queue, step, lastTool, sessionUsage } = useChat();
   const { send, stop } = useChatSend();
   const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useAutoScroll(messages);
+
+  useLayoutEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    textarea.style.overflowY = "hidden";
+    textarea.style.height = "auto";
+    const maxHeight = 144;
+    const desiredHeight = Math.max(44, textarea.scrollHeight + 4);
+    textarea.style.height = `${Math.min(maxHeight, desiredHeight)}px`;
+    textarea.style.overflowY = desiredHeight > maxHeight ? "auto" : "hidden";
+  }, [input, mode]);
 
   // Dashboard quick actions drop a prompt into the shared draft; adopt it.
   const draft = chatDraft.get();
@@ -230,10 +244,11 @@ function ChatDockInner({ mode }: { mode: "hover" | "input" | "bubble" | "open" |
             submit();
           }
         }}
-        rows={1}
+        ref={inputRef}
+        rows={2}
         aria-label="Message your workmate"
         placeholder={busy ? "Queue a message, it sends when the agent finishes…" : "Message…"}
-        className="max-h-28 min-w-0 flex-1 resize-none rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-sm outline-none placeholder:text-stone-400 focus:border-gold-500"
+        className="min-h-11 max-h-36 min-w-0 flex-1 resize-none overflow-y-hidden rounded-lg border border-stone-200 bg-white px-2.5 py-2 text-sm leading-5 outline-none placeholder:text-stone-400 focus:border-gold-500"
       />
       <div className="mt-1.5 flex items-center justify-between gap-2 pl-1">
         <span className="flex items-center gap-1.5 text-[10px] text-stone-400">
@@ -400,6 +415,7 @@ function ChatDockInner({ mode }: { mode: "hover" | "input" | "bubble" | "open" |
       <button
         type="button"
         onClick={() => chatDock.set("open")}
+        data-chat-launcher
         aria-label="Open chat"
         title="Chat with your workmate"
         className={`fixed right-5 bottom-20 lg:bottom-5 ${DOCK_Z} flex size-14 cursor-pointer items-center justify-center rounded-full bg-gold-800 text-white shadow-xl ring-1 ring-black/10 transition-transform duration-150 hover:scale-105 hover:bg-gold-900`}
@@ -432,10 +448,11 @@ function ChatDockInner({ mode }: { mode: "hover" | "input" | "bubble" | "open" |
             submit();
           }
         }}
-        rows={1}
+        ref={inputRef}
+        rows={2}
         aria-label="Message your workmate"
         placeholder="Ask your workmate anything…"
-        className="max-h-24 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-stone-400"
+        className="min-h-11 max-h-36 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-stone-400"
       />
       {input.trim() && (
         <button

@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FIELD_SYNONYMS, REQUIRED_FIELDS, guessMapping, parseCsv } from "@/lib/csv";
-import { postApi } from "@/lib/api";
+import { callApi, postApi } from "@/lib/api";
 import { cn } from "@/lib/format";
 import {
   IconAlertTriangle,
@@ -45,6 +45,7 @@ const FIELD_LABELS: Record<string, string> = {
   unitLabel: "Unit",
   salePrice: "Sale price",
   barcode: "Barcode",
+  type: "Product or service",
 };
 
 const FIELD_NOTES: Record<string, string> = {
@@ -52,6 +53,7 @@ const FIELD_NOTES: Record<string, string> = {
   salePrice: "Plain amount, e.g. 24.99.",
   paymentTermDays: "Whole days, e.g. 30.",
   unitLabel: "e.g. unit, box, kg.",
+  type: "Use product or service. Service rows may omit SKU and receive an automatic service code.",
 };
 
 const MAX_ROWS = 5_000;
@@ -68,6 +70,9 @@ interface ImportResult {
   inserted: number;
   skippedDuplicates: number;
   errors: RowError[];
+  createdIds?: string[];
+  undone?: boolean;
+  undoMessage?: string;
 }
 
 export interface ImportOutcome {
@@ -78,11 +83,15 @@ export interface ImportOutcome {
 export function CsvImportPanel({
   onImported,
   onSkipped,
+  initialEntity,
+  onChanged,
 }: {
   onImported: (outcome: ImportOutcome) => void;
   onSkipped: () => void;
+  initialEntity?: Entity;
+  onChanged?: () => void;
 }) {
-  const [entity, setEntity] = useState<Entity>("customers");
+  const [entity, setEntity] = useState<Entity>(initialEntity ?? "customers");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [mapping, setMapping] = useState<Record<string, string | null>>({});
@@ -92,7 +101,18 @@ export function CsvImportPanel({
   const [result, setResult] = useState<ImportResult | null>(null);
   const [failure, setFailure] = useState<{ title: string; hint: string; detail?: string } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [existingProducts, setExistingProducts] = useState<Array<{ sku: string; barcode: string | null }>>([]);
+  const [serviceCodePrefix, setServiceCodePrefix] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (entity !== "products") return;
+    let active = true;
+    void callApi<{ items?: Array<{ sku: string; barcode?: string | null }> }>("/api/inventory").then((res) => {
+      if (active) setExistingProducts((res.data?.items ?? []).map((item) => ({ sku: item.sku, barcode: item.barcode ?? null })));
+    });
+    return () => { active = false; };
+  }, [entity]);
 
   const fields = useMemo(() => Object.keys(FIELD_SYNONYMS[entity]), [entity]);
   const required = REQUIRED_FIELDS[entity];
@@ -110,7 +130,18 @@ export function CsvImportPanel({
         const v = (row[col] ?? "").trim();
         if (v !== "") out[f] = v;
       }
-      const missingField = required.find((f) => !out[f]);
+      const typeValue = (out.type ?? "product").trim().toLowerCase();
+      const serviceRow = ["service", "services"].includes(typeValue);
+      if (entity === "products" && out.type && !["product", "goods", "service", "services"].includes(typeValue)) {
+        problems.push({ row: line, field: "type", message: `Use product or service, not "${out.type}".` });
+        return;
+      }
+      if (entity === "products" && serviceRow) {
+        if (!out.sku) out.sku = `${serviceCodePrefix || "SVC-IMPORT"}-${String(line).padStart(4, "0")}`;
+        if (!out.unitLabel) out.unitLabel = "hour";
+      }
+      const missingField = required.find((f) => !out[f])
+        ?? (entity === "products" && !serviceRow && !out.sku ? "sku" : undefined);
       if (missingField) {
         problems.push({
           row: line,
@@ -123,14 +154,40 @@ export function CsvImportPanel({
         problems.push({ row: line, field: "email", message: `"${out.email}" is not a valid email.` });
         return;
       }
-      if (out.salePrice && Number.isNaN(Number(out.salePrice.replace(/[,\s]/g, "")))) {
-        problems.push({ row: line, field: "salePrice", message: `"${out.salePrice}" is not a number.` });
+      if (out.salePrice && !/^\d+(?:\.\d{1,2})?$/.test(out.salePrice.replace(/[,\s]/g, ""))) {
+        problems.push({ row: line, field: "salePrice", message: `"${out.salePrice}" must be a non-negative amount with at most two decimals.` });
+        return;
+      }
+      if (entity === "products" && out.sku && out.sku.length > 40) {
+        problems.push({ row: line, field: "sku", message: "SKU must be 40 characters or fewer." });
+        return;
+      }
+      if (entity === "products" && out.unitLabel && out.unitLabel.length > 20) {
+        problems.push({ row: line, field: "unitLabel", message: "Unit label must be 20 characters or fewer." });
+        return;
+      }
+      if (entity === "products" && out.barcode && (out.barcode.length < 3 || out.barcode.length > 64)) {
+        problems.push({ row: line, field: "barcode", message: "Barcode must be between 3 and 64 characters." });
         return;
       }
       payload.push(out);
     });
     return { payload, problems };
-  }, [rows, mapping, fields, required]);
+  }, [rows, mapping, fields, required, entity]);
+  const duplicateProductCount = useMemo(() => {
+    if (entity !== "products") return 0;
+    const skus = new Set(existingProducts.map((item) => item.sku.trim().toLowerCase()));
+    const barcodes = new Set(existingProducts.map((item) => item.barcode?.trim().toLowerCase()).filter((item): item is string => Boolean(item)));
+    let duplicates = 0;
+    for (const row of prepared.payload) {
+      const sku = row.sku?.trim().toLowerCase();
+      const barcode = row.barcode?.trim().toLowerCase();
+      if ((sku && skus.has(sku)) || (barcode && barcodes.has(barcode))) duplicates += 1;
+      if (sku) skus.add(sku);
+      if (barcode) barcodes.add(barcode);
+    }
+    return duplicates;
+  }, [entity, existingProducts, prepared.payload]);
 
   function reset() {
     setHeaders([]);
@@ -140,6 +197,7 @@ export function CsvImportPanel({
     setParseError(null);
     setResult(null);
     setFailure(null);
+    setServiceCodePrefix("");
   }
 
   function switchEntity(next: Entity) {
@@ -170,6 +228,7 @@ export function CsvImportPanel({
       return;
     }
     setFileName(file.name);
+    setServiceCodePrefix(`SVC-${crypto.randomUUID().slice(0, 6).toUpperCase()}`);
     setHeaders(table.headers);
     setRows(table.rows);
     setMapping(guessMapping(entity, table.headers));
@@ -179,15 +238,49 @@ export function CsvImportPanel({
     setBusy(true);
     setFailure(null);
     setResult(null);
-    const res = await postApi<ImportResult>("/api/import", { entity, rows: prepared.payload });
-    if (!res.ok || !res.data) {
-      setFailure(res.error ?? { title: "That didn't work", hint: "Try again in a moment." });
+    try {
+      const res = await postApi<ImportResult>("/api/import", { entity, rows: prepared.payload });
+      if (!res.ok || !res.data) {
+        setFailure(res.error ?? { title: "That didn't work", hint: "Try again in a moment." });
+        return;
+      }
+      setResult(res.data);
+      onChanged?.();
+      if (res.data.inserted > 0) onImported({ entity, inserted: res.data.inserted });
+    } catch {
+      setFailure({ title: "The import could not reach the server", hint: "Your file is still here. Check your connection and try again." });
+    } finally {
       setBusy(false);
-      return;
     }
-    setResult(res.data);
-    setBusy(false);
-    if (res.data.inserted > 0) onImported({ entity, inserted: res.data.inserted });
+  }
+
+  async function undoImport() {
+    const currentResult = result;
+    const ids = currentResult?.createdIds;
+    if (!currentResult || !ids?.length) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      const res = await postApi<{ undone: number; remaining: number }>("/api/import", { entity, action: "undo", importIds: ids });
+      if (!res.ok || !res.data) {
+        setFailure(res.error ?? { title: "This import could not be undone", hint: "Try again, or review the imported records before continuing." });
+        return;
+      }
+      setResult({
+        ...currentResult,
+        inserted: Math.max(0, currentResult.inserted - res.data.undone),
+        createdIds: res.data.remaining > 0 ? ids : [],
+        undone: res.data.remaining === 0,
+        undoMessage: res.data.remaining > 0
+          ? `${res.data.undone} archived. ${res.data.remaining} record${res.data.remaining === 1 ? " was" : "s were"} changed after import and remain active.`
+          : `Undid the import. ${res.data.undone} record${res.data.undone === 1 ? " was" : "s were"} safely archived.`,
+      });
+      onChanged?.();
+    } catch {
+      setFailure({ title: "Undo could not reach the server", hint: "The imported records are unchanged. Check your connection and try again." });
+    } finally {
+      setBusy(false);
+    }
   }
 
   /* ── 1. The file ─────────────────────────────────────────────────────── */
@@ -195,7 +288,7 @@ export function CsvImportPanel({
   if (headers.length === 0) {
     return (
       <div>
-        <div className="mb-4 inline-flex rounded-lg bg-sand-100 p-0.5" role="tablist" aria-label="What are you importing?">
+        {!initialEntity && <div className="mb-4 inline-flex rounded-lg bg-sand-100 p-0.5" role="tablist" aria-label="What are you importing?">
           {ENTITIES.map((e) => (
             <button
               key={e.id}
@@ -214,7 +307,7 @@ export function CsvImportPanel({
               <span className="hidden text-[11px] text-ink-muted/70 sm:inline">{e.hint}</span>
             </button>
           ))}
-        </div>
+        </div>}
 
         <div
           onDragOver={(e) => {
@@ -297,9 +390,9 @@ export function CsvImportPanel({
               </>
             ) : (
               <>
-                We need a <strong className="font-semibold text-ink">SKU</strong> and a{" "}
-                <strong className="font-semibold text-ink">name</strong>. Price, unit and barcode
-                are optional.
+                We need a <strong className="font-semibold text-ink">name</strong>. Products also
+                need a SKU. Services can leave SKU blank and receive an automatic service code.
+                Type, price, unit and barcode can be mapped when present.
               </>
             )}
           </span>
@@ -455,6 +548,12 @@ export function CsvImportPanel({
         </p>
       )}
 
+      {duplicateProductCount > 0 && (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900" role="status">
+          {duplicateProductCount} row{duplicateProductCount === 1 ? " looks" : "s look"} like an existing SKU or barcode. Those rows will be skipped automatically; you can change the code in your file and import again.
+        </p>
+      )}
+
       {failure && (
         <div className="mt-4">
           <RecoverBlock title={failure.title}>
@@ -479,21 +578,28 @@ export function CsvImportPanel({
         <div className="mt-4 rounded-lg border border-sand-200 bg-cream p-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-ink">
             <IconCheck className="size-4 text-gold-600" />
-            {result.inserted > 0
+            {result.undone
+              ? "This import was undone"
+              : result.inserted > 0
               ? `${result.inserted.toLocaleString()} ${entity === "customers" ? "customers" : "products"} imported`
               : "Nothing new was imported"}
           </p>
           <ul className="mt-2 space-y-1 text-[13px] text-ink-muted">
-            {result.skippedDuplicates > 0 && (
+            {!result.undone && result.skippedDuplicates > 0 && (
               <li>
                 {result.skippedDuplicates.toLocaleString()} already existed{" "}
                 {result.skippedDuplicates === 1 ? "(left as it was)" : "(left as they were)"}.
               </li>
             )}
-            {result.errors.length > 0 && (
+            {!result.undone && result.errors.length > 0 && (
               <li>{result.errors.length.toLocaleString()} rows were set aside - see below.</li>
             )}
           </ul>
+          {result.undoMessage && <p className="mt-2 text-[13px] text-ink-muted">{result.undoMessage}</p>}
+
+          {!result.undone && result.createdIds?.length ? <button type="button" disabled={busy} onClick={() => void undoImport()} className={cn(ghostButtonClass, "mt-3")}>
+            {busy ? <Spinner /> : null} Undo this import
+          </button> : null}
 
           {result.errors.length > 0 && (
             <div className="mt-3 max-h-40 overflow-y-auto rounded-md bg-sand-50 p-3">

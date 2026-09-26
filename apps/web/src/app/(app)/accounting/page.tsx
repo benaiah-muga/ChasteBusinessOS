@@ -30,6 +30,9 @@ import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
 
+const ACCOUNTING_WORKMATE_PROMPT =
+  "Walk me through my current financial position: cash, receivables, payables, and anything overdue.";
+
 interface Entry {
   id: string;
   memo: string;
@@ -180,6 +183,7 @@ export default function AccountingPage() {
   const [closeOpen, setCloseOpen] = useState(false);
   const [payTarget, setPayTarget] = useState<Overview["bills"][number] | null>(null);
   const [reverseTarget, setReverseTarget] = useState<Entry | null>(null);
+  const [focusInvoiceId, setFocusInvoiceId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -202,12 +206,41 @@ export default function AccountingPage() {
     setData(ov.data);
     setReports(rp.data);
     setCash(cb);
-    setBanking(bk);
+    setBanking(bk ? {
+      ...bk,
+      accounts: Array.isArray(bk.accounts) ? bk.accounts : [],
+      unmatched: Array.isArray(bk.unmatched) ? bk.unmatched : [],
+      matched: Array.isArray(bk.matched) ? bk.matched : [],
+      excluded: Array.isArray(bk.excluded) ? bk.excluded : [],
+      payments: Array.isArray(bk.payments) ? bk.payments : [],
+      summary: {
+        accounts: Array.isArray(bk.summary?.accounts) ? bk.summary.accounts : [],
+        unmatchedCount: Number.isSafeInteger(bk.summary?.unmatchedCount) ? bk.summary.unmatchedCount : 0,
+      },
+    } : null);
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const invoiceId = new URLSearchParams(window.location.search).get("recordPayment");
+    if (invoiceId) {
+      setFocusInvoiceId(invoiceId);
+      setTab("receivables");
+    }
+  }, []);
+
+  const handleInvoiceFocusHandled = useCallback((found: boolean) => {
+    setFocusInvoiceId(null);
+    if (!found) {
+      setNotice({ tone: "error", error: { title: "Invoice unavailable", hint: "It may have been paid or changed since this follow-up was created." } });
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("recordPayment");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   function changeTab(id: string) {
     setTab(id as TabId);
@@ -298,20 +331,21 @@ export default function AccountingPage() {
     void (async () => {
       const { chatDock, chatDraft } = await import("../chat-widget-state");
       chatDock.set("open");
-      chatDraft.set("Walk me through my current financial position: cash, receivables, payables, and anything overdue.");
+      chatDraft.set(ACCOUNTING_WORKMATE_PROMPT);
     })();
   }
 
   return (
     <AppFrame
       appId="accounting"
+      workmatePrompt={ACCOUNTING_WORKMATE_PROMPT}
       description="Entries are immutable - corrections are mirror reversals. Sealed periods refuse new postings."
       tabs={[
         { id: "overview", label: "Overview" },
         { id: "journal", label: "Journal" },
         { id: "receivables", label: "Receivables", count: data?.agingInvoices.length || undefined },
         { id: "payables", label: "Payables", count: data?.bills.filter((b) => b.outstandingMinor > 0).length || undefined },
-        { id: "bank", label: "Bank", count: banking?.summary.unmatchedCount || undefined },
+        { id: "bank", label: "Bank", count: banking?.summary?.unmatchedCount || undefined },
         { id: "tax", label: "Tax" },
         { id: "reports", label: "Reports" },
         { id: "periods", label: "Periods & close" },
@@ -323,7 +357,7 @@ export default function AccountingPage() {
           <button
             type="button"
             onClick={askWorkmate}
-            className="btn btn-md btn-secondary"
+            className="btn btn-md btn-secondary hidden lg:inline-flex"
             title="Ask your workmate about your position"
           >
             <IconSparkle className="size-3.5" />
@@ -369,6 +403,8 @@ export default function AccountingPage() {
           customers={data.customers ?? []}
           busy={busy}
           onAction={action}
+          focusInvoiceId={focusInvoiceId}
+          onInvoiceFocusHandled={handleInvoiceFocusHandled}
         />
       )}
 
@@ -778,6 +814,8 @@ function ReceivablesSection({
   customers,
   busy,
   onAction,
+  focusInvoiceId,
+  onInvoiceFocusHandled,
 }: {
   a: Overview["aging"];
   agingInvoices: Overview["agingInvoices"];
@@ -786,6 +824,8 @@ function ReceivablesSection({
   customers: { id: string; name: string }[];
   busy: boolean;
   onAction: (payload: Record<string, unknown>, label: string) => Promise<void>;
+  focusInvoiceId: string | null;
+  onInvoiceFocusHandled: (found: boolean) => void;
 }) {
   const [emailFor, setEmailFor] = useState<number | null>(null);
   const [emailTo, setEmailTo] = useState("");
@@ -810,6 +850,18 @@ function ReceivablesSection({
   const [creditForm, setCreditForm] = useState({ amount: "", reason: "" });
   const [reverseFor, setReverseFor] = useState<PaymentRow | null>(null);
   const [reverseReason, setReverseReason] = useState("");
+
+  useEffect(() => {
+    if (!focusInvoiceId) return;
+    const invoice = invoices.find((entry) => entry.id === focusInvoiceId);
+    if (!invoice || invoice.outstandingMinor <= 0 || invoice.status === "void") {
+      onInvoiceFocusHandled(false);
+      return;
+    }
+    setPayFor(invoice);
+    setPayAmount((invoice.outstandingMinor / 100).toFixed(2));
+    onInvoiceFocusHandled(true);
+  }, [focusInvoiceId, invoices, onInvoiceFocusHandled]);
 
   async function sendInvoice(number: number) {
     setEmailBusy(true);
@@ -2357,4 +2409,3 @@ function CashSection({ customers }: { customers: { id: string; name: string }[] 
     </section>
   );
 }
-

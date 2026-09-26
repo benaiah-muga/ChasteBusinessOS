@@ -304,27 +304,55 @@ export function StatCard({
   sub,
   tone = "default",
   className,
+  onClick,
+  actionLabel,
+  selected,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   tone?: "default" | "accent" | "warn" | "danger" | "success";
   className?: string;
+  onClick?: () => void;
+  actionLabel?: string;
+  selected?: boolean;
 }) {
   const tones = {
     default: "card",
     accent: "border-gold-200 bg-gold-50/60",
     warn: "border-amber-200 bg-amber-50/60",
     danger: "border-red-200 bg-red-50/60",
-    success: "border-emerald-200 bg-emerald-50/60",
+    success: "stat-card-success border-emerald-200 bg-emerald-50/60",
   };
-  return (
-    <div className={cn("rounded-xl border p-4 shadow-xs", tones[tone], className)}>
+  const content = (
+    <>
       <p className="text-xs font-medium text-stone-500">{label}</p>
       <p className="tnum mt-1.5 text-lg font-semibold tracking-tight text-stone-900">{value}</p>
       {sub && <p className="mt-0.5 text-xs text-stone-500">{sub}</p>}
-    </div>
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={selected}
+        className={cn(
+          "group relative w-full rounded-xl border p-4 text-left shadow-xs outline-none transition hover:border-gold-300 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-gold-600 focus-visible:ring-offset-2 active:translate-y-px",
+          tones[tone],
+          selected && "ring-2 ring-gold-500 ring-offset-1",
+          className,
+        )}
+      >
+        {content}
+        {actionLabel && <span className="sr-only">{actionLabel}</span>}
+        <span aria-hidden="true" className="absolute top-3 right-3 text-sm text-stone-400 transition group-hover:translate-x-0.5 group-hover:text-gold-800">→</span>
+      </button>
+    );
+  }
+
+  return <div className={cn("rounded-xl border p-4 shadow-xs", tones[tone], className)}>{content}</div>;
 }
 
 /* ---------------------------------- Dialog ---------------------------------- */
@@ -348,14 +376,22 @@ export function Dialog({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
     restoreRef.current = document.activeElement as HTMLElement | null;
-    panelRef.current?.focus();
+    const autoFocusTarget = panelRef.current?.querySelector<HTMLElement>(
+      "[data-dialog-autofocus], input:not([type='hidden']):not([disabled]), textarea:not([disabled]), select:not([disabled])",
+    );
+    (autoFocusTarget ?? panelRef.current)?.focus();
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     window.addEventListener("keydown", onKey);
     return () => {
@@ -363,7 +399,7 @@ export function Dialog({
       document.body.style.overflow = "";
       restoreRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

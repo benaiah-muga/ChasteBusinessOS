@@ -235,8 +235,19 @@ export default function DocumentsPage() {
   const query = search.trim().toLowerCase();
   const visibleDocs = (docs ?? []).filter((document) => {
     const matchesQuery = !query || `${document.title} ${document.sourceType} ${document.status}`.toLowerCase().includes(query);
-    return matchesQuery && (statusFilter === "all" || document.status === statusFilter);
+    const matchesStatus = statusFilter === "all"
+      || (statusFilter === "__parsed__" && statusTone(document.status) === "green")
+      || (statusFilter === "__awaiting__" && statusTone(document.status) === "amber")
+      || (statusFilter === "__this_week__" && new Date(document.createdAt).getTime() > Date.now() - 7 * 86400000)
+      || document.status === statusFilter;
+    return matchesQuery && matchesStatus;
   });
+
+  function openDocumentView(filter: string) {
+    setTab("library");
+    setSearch("");
+    setStatusFilter(filter);
+  }
 
   return (
     <AppFrame
@@ -263,10 +274,10 @@ export default function DocumentsPage() {
       {tab === "overview" && (
         <div>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Documents" value={docs === null ? "Loading…" : docs.length} />
-            <StatCard label="Parsed" value={docs === null ? "Loading…" : parsedCount} tone="success" />
-            <StatCard label="Awaiting parse" value={docs === null ? "Loading…" : pendingCount} tone={pendingCount > 0 ? "warn" : "default"} />
-            <StatCard label="This week" value={docs === null ? "Loading…" : docs.filter((d) => new Date(d.createdAt).getTime() > Date.now() - 7 * 86400000).length} />
+            <StatCard label="Documents" value={docs === null ? "Loading…" : docs.length} onClick={() => openDocumentView("all")} actionLabel="Open the full document library" />
+            <StatCard label="Parsed" value={docs === null ? "Loading…" : parsedCount} tone="success" onClick={() => openDocumentView("__parsed__")} actionLabel="Review documents that finished parsing" />
+            <StatCard label="Awaiting parse" value={docs === null ? "Loading…" : pendingCount} tone={pendingCount > 0 ? "warn" : "default"} onClick={() => openDocumentView("__awaiting__")} actionLabel="Review documents awaiting parsing" />
+            <StatCard label="This week" value={docs === null ? "Loading…" : docs.filter((d) => new Date(d.createdAt).getTime() > Date.now() - 7 * 86400000).length} onClick={() => openDocumentView("__this_week__")} actionLabel="Review documents added in the last seven days" />
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
@@ -423,6 +434,9 @@ export default function DocumentsPage() {
             <div className="flex flex-wrap items-center gap-2">
               <Select aria-label="Filter documents by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="w-full sm:w-auto">
                 <option value="all">All statuses</option>
+                <option value="__parsed__">Parsed</option>
+                <option value="__awaiting__">Awaiting parse</option>
+                <option value="__this_week__">Added this week</option>
                 {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
               </Select>
               {search || statusFilter !== "all" ? (

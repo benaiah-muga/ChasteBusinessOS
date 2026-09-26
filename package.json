@@ -7,7 +7,7 @@
     "build": "turbo build",
     "lint": "eslint .",
     "typecheck": "turbo typecheck",
-    "test": "turbo test",
+    "test": "turbo test --concurrency=1",
     "demo": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-agent.ts",
     "demo:slice": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-slice.ts",
     "format": "prettier --write .",

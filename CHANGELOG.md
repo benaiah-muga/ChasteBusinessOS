@@ -12,15 +12,31 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- Personal Codex and OpenCode plan connections. Users can sign into Codex with its device flow or connect an authenticated OpenCode server, choose a personal default, and see request and provider-reported token usage.
+- Coding-plan inference for Buzz, internal chat assistance, support drafting, document writing assist, and My Work summaries. User-started runs use the selected personal plan; scheduled runs continue to use the workspace provider.
+- Coding-agent business tools connect through a short-lived, signed MCP grant scoped to the user's permissions, enabled modules, session, and tools already exposed to that agent. Tool calls still pass through the kernel executor and audit ledger.
 - CRM customer search and active, inactive, and all views, with mobile customer cards that keep timeline and deactivation actions visible.
 - CRM customer profiles combine related deals, tasks, invoices, quotes, payments, linked documents, notes, ownership, tags, and quick email or follow-up actions.
+- CRM customer profiles include an editable customer name saved with an audited undo path.
+- CRM customer cards and wide-table rows now open the profile across their main surface, with selection, email, next-step, and record actions kept independent.
+- Summary cards across CRM, Sales, POS, Products, Inventory, Documents, Support, Purchasing, Manufacturing, and HR now show a clear action affordance and open the relevant list, status filter, or workflow. Sales pipeline metrics deep-link into the filtered CRM pipeline.
+- Document summary cards open the library with matching parsed, awaiting-parse, or recent-document filters. Support summary cards open the inbox with the matching conversation status selected.
 - CRM saved filters, stale follow-up and owner views, duplicate suggestions, bulk owner and tag updates, and selected-customer CSV export.
+- CRM saved views now sync with the workspace, can be shared or pinned, and show live result counts. Customer records show their next action, preferred contact method, do-not-contact status, owner, and last editor. A guided customer CSV preview supports column mapping, duplicate review, inline fixes, and reversible import.
+- CRM duplicate review compares contact and name details side by side, previews linked activity, preserves existing record links, and offers an immediate audited undo.
 - POS product search by name, SKU, or barcode; stock-aware cart quantities; custom line items; and a structured return request dialog.
-- POS customer lookup with purchase history, cash tender and change calculation, shareable receipts, and register-scoped carts saved locally while offline.
+- POS customer lookup with purchase history, cash tender and change calculation, split cash/card/mobile-money tenders, shareable printable receipts, a selected refund destination, and register-scoped offline carts that can be parked and resumed from the same device.
+- POS shift closeout supports denomination counting and requires a note for drawer variances. Inventory empty states point to setup actions, and the overview surfaces draft transfers alongside counts, reservations, and reorder work.
+- Products & Services can import a mapped catalog CSV from the catalog screen, preview likely SKU or barcode duplicates, import services without a supplied SKU, and undo a recent batch while preserving item history.
 - Approval cards with plain-language summaries, affected-field previews, linked document shortcuts, and recent decision history with audit-ledger links.
 - Document library search and status filters, mobile document cards, explicit loading and error states, and file type and size validation.
 - Document review pairs the original source with extracted lines and coding suggestions, shows matched terms and account names, and supports linking new ingests to a customer.
 - Horizontally scrolling app tabs with arrow-key navigation and selected-tab semantics.
+- Messages loads its conversations on entry, gives connection failures a retry action, and guides first-time users into creating a conversation.
+- App sections remain visible as horizontally scrollable tabs on phones, with a swipe hint when the full set does not fit.
+- Mobile app headers now include a shared Ask workmate action. Sales summary cards fill the phone width cleanly, and the Workmate composer grows to fit prompts instead of showing a clipped one-line field.
+- Inventory cycle counts can start from a location, barcode scan, or selected products; the count sheet tracks progress and requires a review of every variance before posting.
+- Inventory transfer and reservation forms now search location names, item names, SKUs, and barcodes, with available quantity shown before selection.
 - **Documents you write, not just ingest.** New Write tab: rich text
   documents with a full formatting toolbar (headings, lists, tables,
   images), debounced autosave with a Saved indicator, live presence of
@@ -40,8 +56,8 @@ The full v1 changelog is preserved at the bottom of this file.
   fix grammar, change tone, shorten, expand or translate it; continue
   drafting from the cursor; ask questions about the document and get
   answers grounded only in what it says. Suggestions never touch the
-  document without an explicit Apply. Uses the organization's configured
-  model provider.
+  document without an explicit Apply. Uses the user's selected coding plan
+  for user-started runs, or the organization's configured model provider.
 - **Memory manager.** Settings > AI & automation lists what the workmate
   has learned about the organization (profile facts, SOPs, decisions,
   document knowledge) with search; deleting an entry is governed
@@ -60,6 +76,15 @@ The full v1 changelog is preserved at the bottom of this file.
   ledger records who changed what.
 
 ### Fixed
+- Switching app sections no longer scrolls page content behind the sticky app header; the tab rail now reveals the selected section horizontally.
+- The floating mobile Workmate bubble no longer covers app cards when the app header already offers Ask workmate.
+- Hidden mobile Workmate controls no longer intercept taps on app cards and actions.
+- The Products & Services catalog stacks its heading, import action, and search field on narrow screens instead of overflowing horizontally.
+- Dialog rerenders no longer steal focus from text fields. Dialogs focus their first usable input when they open and restore the prior focus only when they close.
+- Dialog overlays now cover floating chat controls, keeping modal fields and actions clear on phones.
+- Customer name changes now update the CRM record through the governed profile capability and remain reversible with the original customer name in the audit snapshot.
+- Coding-plan connection and MCP routes now use the Next.js 16.3 default Node runtime, which is compatible with this project's Cache Components configuration.
+- Messages now loads the conversation list on entry and shows a recoverable error state if that request fails, instead of staying on the loading skeleton.
 - **Document and suggestion counts were silently zero.** Correlated count
   subqueries interpolated unqualified column names, so a subquery like
   `where document_id = id` compared a table to itself and always returned
@@ -76,9 +101,13 @@ The full v1 changelog is preserved at the bottom of this file.
 - CRM forecast assumptions now show every stage rate, and monetary inputs use the workspace currency.
 - CRM profile and bulk changes run through reversible, audited capability actions; duplicate matches remain review suggestions and are never merged automatically.
 - POS preserves a cart when a sale fails or needs approval, prevents closing a register with an open cart, and labels drawer totals separately from cash sales. Returns now request approval with an audited reason.
+- POS stores explicitly queued offline sales on the device, marks them as unposted, and lets staff review and send them after reconnecting with an idempotent retry identity.
 - POS checkout blocks register actions while offline and explains that saved carts require a connection before posting. Loyalty points are shown as unavailable until the workspace configures a program.
 - Document match counts are presented as lexical evidence, not confidence percentages; the review view explains when the parser does not provide extraction confidence.
 - Mobile CRM, POS, and document lists use cards so key values and actions stay in view.
+- Mobile app sections use visible, horizontally scrollable tabs again, and narrow app headers wrap action buttons instead of overflowing the page.
+- CRM customer filters and create/import actions fit 320px screens without horizontal scrolling, and saved-view creation stays closed until requested.
+- Empty Products & Services catalogs point to add and spreadsheet-import actions instead of reporting stock as healthy.
 - **Dropdowns stop looking generic.** Every `<select>` in the app now shares
   one chrome: browser default chrome removed, a custom chevron, aligned
   padding, and the shared gold focus ring. A `Select` primitive lands in the

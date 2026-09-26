@@ -11,6 +11,7 @@ import { AppFrame } from "../_shell/app-frame";
 import { LibraryTab } from "./library-tab";
 
 type Tab = "overview" | "inbox" | "widget" | "library";
+type InboxFilter = "all" | "open" | "escalated" | "resolved";
 
 interface ConversationRow {
   id: string;
@@ -59,6 +60,7 @@ export default function SupportPage() {
   const __enabled = useModuleEnabled("support");
   const [convs, setConvs] = useState<ConversationRow[] | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+  const [inboxFilter, setInboxFilter] = useState<InboxFilter>("all");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [conv, setConv] = useState<ConversationRow | null>(null);
   const [msgs, setMsgs] = useState<SupportMessage[]>([]);
@@ -281,9 +283,25 @@ export default function SupportPage() {
 
   if (!__enabled) return <ModuleDisabled label="Customer care" />;
 
-  const openCount = (convs ?? []).filter((c) => c.status === "open").length;
-  const escalatedCount = (convs ?? []).filter((c) => c.status === "escalated").length;
-  const resolvedCount = (convs ?? []).filter((c) => c.status === "resolved").length;
+  const conversations = convs ?? [];
+  const openCount = conversations.filter((c) => c.status === "open").length;
+  const escalatedCount = conversations.filter((c) => c.status === "escalated").length;
+  const resolvedCount = conversations.filter((c) => c.status === "resolved").length;
+  const visibleConvs = conversations.filter((conversation) => inboxFilter === "all" || conversation.status === inboxFilter);
+
+  function openInbox(filter: InboxFilter) {
+    setTab("inbox");
+    setInboxFilter(filter);
+    setDraft(null);
+    const next = filter === "all" ? conversations[0] : conversations.find((conversation) => conversation.status === filter);
+    if (next) {
+      setActiveId(next.id);
+    } else {
+      setActiveId(null);
+      setConv(null);
+      setMsgs([]);
+    }
+  }
 
   return (
     <AppFrame
@@ -310,10 +328,10 @@ export default function SupportPage() {
       {tab === "overview" && (
         <div className="mb-6">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Open inquiries" value={openCount} tone={openCount > 0 ? "warn" : "success"} />
-            <StatCard label="Escalated" value={escalatedCount} tone={escalatedCount > 0 ? "warn" : "default"} />
-            <StatCard label="Resolved" value={resolvedCount} tone="success" />
-            <StatCard label="Conversations" value={convs?.length ?? 0} />
+            <StatCard label="Open inquiries" value={openCount} tone={openCount > 0 ? "warn" : "success"} onClick={() => openInbox("open")} actionLabel="Open inquiries awaiting a reply" />
+            <StatCard label="Escalated" value={escalatedCount} tone={escalatedCount > 0 ? "warn" : "default"} onClick={() => openInbox("escalated")} actionLabel="Review escalated conversations" />
+            <StatCard label="Resolved" value={resolvedCount} tone="success" onClick={() => openInbox("resolved")} actionLabel="Review resolved conversations" />
+            <StatCard label="Conversations" value={conversations.length} onClick={() => openInbox("all")} actionLabel="Open all conversations" />
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
@@ -381,15 +399,32 @@ export default function SupportPage() {
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 pt-0 lg:grid-cols-[320px_1fr]">
         {/* Inbox list */}
         <aside className="min-h-0 overflow-y-auto rounded-xl border border-stone-200 bg-white shadow-xs">
-          {convs.length === 0 ? (
+          <div role="group" aria-label="Filter conversations" className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b border-stone-100 bg-white p-2">
+            {(["all", "open", "escalated", "resolved"] as const).map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                aria-pressed={inboxFilter === filter}
+                onClick={() => openInbox(filter)}
+                className={cn(
+                  "shrink-0 rounded-full px-2.5 py-1.5 text-xs font-medium transition-colors",
+                  inboxFilter === filter ? "bg-gold-100 text-gold-950" : "text-stone-500 hover:bg-stone-100 hover:text-stone-800",
+                )}
+              >
+                {filter === "all" ? `All ${conversations.length}` : `${filter[0]!.toUpperCase()}${filter.slice(1)} ${conversations.filter((conversation) => conversation.status === filter).length}`}
+              </button>
+            ))}
+          </div>
+          {visibleConvs.length === 0 ? (
             <EmptyState
               icon={<IconAlertTriangle className="size-5" />}
-              title="No conversations yet"
-              hint="Open one per customer inquiry so every answer stays on the record."
+              title={conversations.length === 0 ? "No conversations yet" : `No ${inboxFilter} conversations`}
+              hint={conversations.length === 0 ? "Open one per customer inquiry so every answer stays on the record." : "Choose another status to review conversations in your inbox."}
+              action={conversations.length > 0 && inboxFilter !== "all" ? <Button tone="secondary" size="sm" onClick={() => openInbox("all")}>Show all conversations</Button> : undefined}
             />
           ) : (
             <ul className="divide-y divide-stone-100">
-              {convs.map((c) => (
+              {visibleConvs.map((c) => (
                 <li key={c.id}>
                   <button
                     type="button"

@@ -52,14 +52,21 @@ describe("integrated operational UI surfaces", () => {
     console.log("UI-RELEASE-CONTROLS-OK");
   });
 
-  it("AI settings expose workspace provider controls without importing CLI secrets", () => {
+  it("AI settings expose workspace credentials and personal coding-plan connections", () => {
     const page = source("src/app/(app)/settings/page.tsx");
+    const connections = source("src/app/(app)/settings/coding-plans.tsx");
     const route = source("src/app/api/ai-config/route.ts");
+    const connectionRoute = source("src/app/api/ai-connections/route.ts");
     expect(page).toContain("Workspace model provider");
     expect(page).toContain("Custom OpenAI-compatible");
-    expect(page).toContain("Coding-agent subscriptions are not imported");
+    expect(page).toContain("Coding-plan connections");
+    expect(connections).toContain("Connect Codex plan");
+    expect(connections).toContain("Connect OpenCode");
+    expect(connections).toContain("Scheduled and background work continues to use the workspace provider");
     expect(route).toContain('settings.configureAiProvider');
     expect(route).toContain("encryptedApiKey");
+    expect(connectionRoute).toContain("connect_opencode");
+    expect(connectionRoute).toContain("poll_codex_login");
     console.log("UI-AI-CONFIG-SURFACE-OK");
   });
 

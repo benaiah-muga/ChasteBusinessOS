@@ -61,6 +61,35 @@ export const users = pgTable("users", {
   createdAt: createdAt(),
 });
 
+export const codingAgentConnections = pgTable(
+  "coding_agent_connections",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    endpoint: text("endpoint"),
+    encryptedCredential: text("encrypted_credential"),
+    modelId: text("model_id"),
+    status: text("status").notNull().default("connected"),
+    isDefault: boolean("is_default").notNull().default(false),
+    runCount: bigint("run_count", { mode: "number" }).notNull().default(0),
+    inputTokens: bigint("input_tokens", { mode: "number" }).notNull().default(0),
+    outputTokens: bigint("output_tokens", { mode: "number" }).notNull().default(0),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("coding_agent_connection_org_user_provider_idx").on(t.orgId, t.userId, t.provider),
+    index("coding_agent_connection_owner_idx").on(t.orgId, t.userId),
+  ],
+);
+
 export const memberships = pgTable(
   "memberships",
   {
@@ -399,7 +428,11 @@ export const customers = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     email: text("email"),
+    phone: text("phone"),
+    preferredContactMethod: text("preferred_contact_method").notNull().default("email"),
+    doNotContact: boolean("do_not_contact").notNull().default(false),
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
     tags: text("tags").array().notNull().default([]),
     notes: text("notes"),
     /** Confirmed orders beyond this AR ceiling route to refusal (M9); null = no limit. */
@@ -410,11 +443,13 @@ export const customers = pgTable(
     reminderOptOut: boolean("reminder_opt_out").notNull().default(false),
     /** Opted out of marketing sends (M13); honored at send time. */
     marketingOptOut: boolean("marketing_opt_out").notNull().default(false),
+    mergedIntoCustomerId: uuid("merged_into_customer_id").references((): AnyPgColumn => customers.id, { onDelete: "set null" }),
+    mergedAt: timestamp("merged_at", { withTimezone: true }),
     deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("customer_org_idx").on(t.orgId, t.name), index("customer_org_owner_idx").on(t.orgId, t.ownerUserId)],
+  (t) => [index("customer_org_idx").on(t.orgId, t.name), index("customer_org_owner_idx").on(t.orgId, t.ownerUserId), index("customer_org_merge_idx").on(t.orgId, t.mergedIntoCustomerId)],
 );
 
 export const invoices = pgTable(
@@ -745,6 +780,7 @@ export const posSessions = pgTable(
     countedCashMinor: integer("counted_cash_minor"),
     expectedCashMinor: integer("expected_cash_minor").notNull().default(0),
     varianceMinor: integer("variance_minor"),
+    varianceReason: text("variance_reason"),
     openedByUserId: uuid("opened_by_user_id").references(() => users.id),
     closedByUserId: uuid("closed_by_user_id").references(() => users.id),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
@@ -775,6 +811,23 @@ export const deals = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("deal_org_stage_idx").on(t.orgId, t.stage)],
+);
+
+export const crmCustomerViews = pgTable(
+  "crm_customer_views",
+  {
+    id: id(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    filters: jsonb("filters").$type<{ status: "active" | "inactive" | "all"; owner: string; staleOnly: boolean; duplicateOnly: boolean; tag: string }>().notNull(),
+    isShared: boolean("is_shared").notNull().default(true),
+    isPinned: boolean("is_pinned").notNull().default(false),
+    createdByUserId: uuid("created_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    updatedByUserId: uuid("updated_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("crm_customer_view_org_name_idx").on(t.orgId, t.name), index("crm_customer_view_org_pin_idx").on(t.orgId, t.isPinned)],
 );
 
 // ── Inventory (append-only stock ledger) ────────────────────────────────

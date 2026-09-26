@@ -43,7 +43,7 @@ const actionSchema = z.discriminatedUnion("action", [
     valueMinor: z.number().int().nonnegative(),
     customerId: z.string().optional(),
   }),
-  z.object({ action: z.literal("move"), dealId: z.string(), stage: z.string() }),
+  z.object({ action: z.literal("move"), dealId: z.string(), stage: z.string(), lostReason: z.string().trim().min(3).max(500).optional() }),
 ]);
 
 export async function POST(req: Request) {
@@ -79,6 +79,7 @@ export async function POST(req: Request) {
   const result = await executor.execute("crm.moveDealStage", humanCtx, {
     dealId: body.data.dealId,
     stage: body.data.stage,
+    lostReason: body.data.lostReason,
   });
   return respond(result);
 }

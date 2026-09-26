@@ -4,6 +4,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import {
   conversationMembers,
   conversations,
+  agentSessions,
   getDb,
   messages,
   organizations,
@@ -14,6 +15,8 @@ import { runAgentLoop } from "@chaste/kernel";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 import { runtimeAiConfig } from "@/server/ai-settings";
+import { createCodingAgentAdapter } from "@/server/coding-agent-adapter";
+import { addTokenUsage, appendSessionEvent } from "@/server/session-events";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -143,19 +146,36 @@ export async function POST(req: Request, { params }: Params) {
       .where(eq(organizations.id, resolved.orgId))
       .limit(1);
 
-    const agentCtx = actorFromResolved(resolved, { asAgent: true });
+    const ai = await runtimeAiConfig(db, resolved.orgId, resolved.userId);
+    const modelRef = ai.codingAgentConnection
+      ? `${ai.codingAgentConnection.provider}:${ai.codingAgentConnection.modelId ?? "plan-default"}`
+      : ai.models.primary;
+    const [agentSession] = await db.insert(agentSessions).values({
+      orgId: resolved.orgId,
+      userId: resolved.userId,
+      title: `Chat: ${conv.title}`.slice(0, 80),
+      mode: "assist",
+      modelRef,
+    }).returning({ id: agentSessions.id });
+    const agentCtx = actorFromResolved(resolved, { asAgent: true, sessionId: agentSession!.id });
     if (agentCtx) {
-      const ai = await runtimeAiConfig(db, resolved.orgId);
+      const model = ai.codingAgentConnection
+        ? await createCodingAgentAdapter({ db, connection: ai.codingAgentConnection, sessionId: agentSession!.id, toolAccess: true })
+        : new OpenAiCompatAdapter({ client: resolveClient(ai.models.primary, ai.runtime), model: ai.models.primary });
       const result = await runAgentLoop(
-        new OpenAiCompatAdapter({ client: resolveClient(ai.models.primary, ai.runtime), model: ai.models.primary }),
+        model,
         registry,
         executor,
         agentCtx,
         {
-          sessionId: crypto.randomUUID(),
+          sessionId: agentSession!.id,
           systemPrompt: `You are Chaste, the AI workmate in the internal chat "${conv.title}" of an ERP organization. You can use capabilities when a colleague asks for something operational. Be concise and collegial.${orgRow?.profileDescription ? `\nBusiness context: ${orgRow.profileDescription}` : ""}`,
           userGoal: `Recent conversation:\n${transcript}\n\nRespond to the latest message as Chaste. Post your reply using messaging.sendMessage to conversation ${id}.`,
-          maxSteps: 5,
+          maxSteps: ai.codingAgentConnection ? 1 : 5,
+          noCapabilityNote: ai.codingAgentConnection ? null : undefined,
+          onEvent: (event) => {
+            void appendSessionEvent(db, agentSession!.id, event.role, event.content as object);
+          },
         },
         {
           // Escalation goes through the governed capability, not a raw
@@ -172,6 +192,8 @@ export async function POST(req: Request, { params }: Params) {
           },
         },
       );
+      await appendSessionEvent(db, agentSession!.id, "assistant", { text: result.finalMessage });
+      await addTokenUsage(db, agentSession!.id, result.usage);
       agentReply = result.finalMessage || null;
     }
   }

@@ -34,6 +34,7 @@ interface PosSession {
   expectedCashMinor: number | null;
   countedCashMinor: number | null;
   varianceMinor: number | null;
+  varianceReason?: string | null;
   openedAt: string;
   closedAt: string | null;
 }
@@ -51,6 +52,7 @@ interface CatalogItem {
   salePriceMinor: number;
   barcode: string | null;
   availableThousandths: number;
+  tags: string[];
 }
 interface PosSale {
   id: string;
@@ -83,9 +85,32 @@ const posDraftSchema = z.object({
   customerId: z.union([z.string().uuid(), z.literal("")]),
   method: z.enum(["cash", "card"]),
   cashReceived: z.string().max(32),
+  splitMode: z.boolean().default(false),
+  splitTenders: z.array(z.object({ method: z.enum(["cash", "card", "mobile_money"]), amount: z.string().max(32) })).max(3).default([]),
   awaitingApproval: z.boolean(),
 });
 type PosDraft = z.infer<typeof posDraftSchema>;
+const parkedCartSchema = posDraftSchema.omit({ awaitingApproval: true }).extend({
+  id: z.string().uuid(),
+  parkedAt: z.string(),
+  customerName: z.string(),
+});
+type ParkedCart = z.infer<typeof parkedCartSchema>;
+const queuedSaleSchema = z.object({
+  id: z.string().uuid(),
+  intentId: z.string().uuid(),
+  sessionId: z.string().uuid(),
+  lines: posDraftSchema.shape.lines,
+  customerId: z.union([z.string().uuid(), z.literal("")]),
+  method: z.enum(["cash", "card"]),
+  tenders: z.array(z.object({ method: z.enum(["cash", "card", "mobile_money"]), amountMinor: z.number().int().positive() })).min(1).max(3),
+  cashReceivedMinor: z.number().int().nonnegative().nullable(),
+  totalMinor: z.number().int().positive(),
+  queuedAt: z.string(),
+  status: z.enum(["queued", "failed"]),
+  errorMessage: z.string().max(500).nullable(),
+});
+type QueuedSale = z.infer<typeof queuedSaleSchema>;
 interface ShiftSummary {
   register: string;
   status: string;
@@ -101,6 +126,7 @@ interface PosActionData {
   totalMinor?: number;
   tenderedMinor?: number;
   changeGivenMinor?: number;
+  tenders?: Array<{ method: string; amountMinor: number }>;
   expectedCashMinor?: number;
   varianceMinor?: number;
   creditedMinor?: number;
@@ -117,15 +143,28 @@ export default function PosPage() {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogUpdatedAt, setCatalogUpdatedAt] = useState<string | null>(null);
   const [catalogQuery, setCatalogQuery] = useState("");
   const catalogInputRef = useRef<HTMLInputElement>(null);
+  const [favoriteSkus, setFavoriteSkus] = useState<string[]>([]);
   const [float, setFloat] = useState("100");
   const [line, setLine] = useState({ description: "", price: "" });
   const [customLineOpen, setCustomLineOpen] = useState(false);
+  const [quickProductOpen, setQuickProductOpen] = useState(false);
+  const [quickProduct, setQuickProduct] = useState({ name: "", sku: "", barcode: "", price: "", unitLabel: "unit" });
+  const [activeLineIndex, setActiveLineIndex] = useState<number | null>(null);
   const [lines, setLines] = useState<SaleLine[]>([]);
   const [salePendingApproval, setSalePendingApproval] = useState(false);
   const [method, setMethod] = useState<"cash" | "card">("cash");
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitTenders, setSplitTenders] = useState<Array<{ method: "cash" | "card" | "mobile_money"; amount: string }>>([
+    { method: "cash", amount: "" },
+    { method: "card", amount: "" },
+  ]);
   const [counted, setCounted] = useState("");
+  const [countByDenomination, setCountByDenomination] = useState(false);
+  const [denominationCounts, setDenominationCounts] = useState<Record<string, string>>({});
+  const [varianceReason, setVarianceReason] = useState("");
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [busy, setBusy] = useState(false);
   const [closeConfirm, setCloseConfirm] = useState(false);
@@ -134,6 +173,7 @@ export default function PosPage() {
   const [summary, setSummary] = useState<ShiftSummary | null>(null);
   const [returnTarget, setReturnTarget] = useState<PosSale | null>(null);
   const [returnReason, setReturnReason] = useState("");
+  const [refundMethod, setRefundMethod] = useState<"cash" | "card" | "mobile_money">("cash");
   const [customers, setCustomers] = useState<PosCustomer[]>([]);
   const [customerError, setCustomerError] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState("");
@@ -144,10 +184,18 @@ export default function PosPage() {
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [draftToRestore, setDraftToRestore] = useState<PosDraft | null>(null);
+  const [parkedCarts, setParkedCarts] = useState<ParkedCart[]>([]);
+  const [parkedCartsLoaded, setParkedCartsLoaded] = useState(false);
+  const [queuedSales, setQueuedSales] = useState<QueuedSale[]>([]);
+  const [queuedSalesLoaded, setQueuedSalesLoaded] = useState(false);
+  const [queuedSaleBusyId, setQueuedSaleBusyId] = useState<string | null>(null);
+  const [discardQueuedId, setDiscardQueuedId] = useState<string | null>(null);
+  const wasOnline = useRef(true);
 
   const openSession = sessions?.find((s) => s.status === "open") ?? null;
   const openSessionId = openSession?.id ?? null;
   const selectedCustomer = customers.find((customer) => customer.id === customerId) ?? null;
+  const currentWorkspaceParkedCarts = parkedCarts.filter((cart) => sessions?.some((session) => session.id === cart.sessionId));
 
   const load = useCallback(async () => {
     const res = await callApi<{ sessions?: PosSession[]; sales?: PosSale[] }>("/api/pos");
@@ -178,14 +226,74 @@ export default function PosPage() {
     }
     setDraftLoaded(true);
     const updateOnline = () => setOnline(navigator.onLine);
+    const reportOnline = () => {
+      setOnline(true);
+      setNotice({ tone: "pending", text: "Connection restored. Review queued sales and send them when you are ready." });
+    };
     updateOnline();
-    window.addEventListener("online", updateOnline);
+    window.addEventListener("online", reportOnline);
     window.addEventListener("offline", updateOnline);
     return () => {
-      window.removeEventListener("online", updateOnline);
+      window.removeEventListener("online", reportOnline);
       window.removeEventListener("offline", updateOnline);
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("chaste.pos.favorite-items.v1");
+      const parsed: unknown = stored ? JSON.parse(stored) : [];
+      if (Array.isArray(parsed) && parsed.every((sku): sku is string => typeof sku === "string")) setFavoriteSkus(parsed.slice(0, 30));
+    } catch {
+      localStorage.removeItem("chaste.pos.favorite-items.v1");
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("chaste.pos.favorite-items.v1", JSON.stringify(favoriteSkus));
+  }, [favoriteSkus]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("chaste.pos.parked-carts.v1");
+      const parsed = z.array(parkedCartSchema).max(20).safeParse(stored ? JSON.parse(stored) : []);
+      if (parsed.success) setParkedCarts(parsed.data);
+      else localStorage.removeItem("chaste.pos.parked-carts.v1");
+    } catch {
+      localStorage.removeItem("chaste.pos.parked-carts.v1");
+    }
+    setParkedCartsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!parkedCartsLoaded) return;
+    try {
+      localStorage.setItem("chaste.pos.parked-carts.v1", JSON.stringify(parkedCarts));
+    } catch {
+      setNotice({ tone: "error", error: { title: "Parked carts could not be saved", hint: "Free some browser storage or keep this sale open before continuing." } });
+    }
+  }, [parkedCarts, parkedCartsLoaded]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("chaste.pos.queued-sales.v1");
+      const parsed = z.array(queuedSaleSchema).max(20).safeParse(stored ? JSON.parse(stored) : []);
+      if (parsed.success) setQueuedSales(parsed.data);
+      else localStorage.removeItem("chaste.pos.queued-sales.v1");
+    } catch {
+      localStorage.removeItem("chaste.pos.queued-sales.v1");
+    }
+    setQueuedSalesLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!queuedSalesLoaded) return;
+    try {
+      localStorage.setItem("chaste.pos.queued-sales.v1", JSON.stringify(queuedSales));
+    } catch {
+      setNotice({ tone: "error", error: { title: "Queued sales could not be saved", hint: "Free browser storage before taking an offline sale." } });
+    }
+  }, [queuedSales, queuedSalesLoaded]);
 
   useEffect(() => {
     if (!sessions || !draftLoaded) return;
@@ -198,6 +306,8 @@ export default function PosPage() {
       setCustomerId(draftToRestore.customerId);
       setMethod(draftToRestore.method);
       setCashReceived(draftToRestore.cashReceived);
+      setSplitMode(draftToRestore.splitMode);
+      setSplitTenders(draftToRestore.splitTenders);
       setSalePendingApproval(draftToRestore.awaitingApproval);
     } else {
       localStorage.removeItem("chaste.pos.cart.v1");
@@ -215,12 +325,14 @@ export default function PosPage() {
         customerId,
         method,
         cashReceived,
+        splitMode,
+        splitTenders,
         awaitingApproval: salePendingApproval,
       }));
     } else {
       localStorage.removeItem("chaste.pos.cart.v1");
     }
-  }, [draftReady, openSessionId, lines, customerId, method, cashReceived, salePendingApproval]);
+  }, [draftReady, openSessionId, lines, customerId, method, cashReceived, splitMode, splitTenders, salePendingApproval]);
 
   useEffect(() => {
     let active = true;
@@ -253,12 +365,18 @@ export default function PosPage() {
     }
     setCatalogError(null);
     setCatalog(res.data?.items ?? []);
+    setCatalogUpdatedAt(new Date().toISOString());
     setCatalogLoading(false);
   }, [inventoryEnabled]);
 
   useEffect(() => {
     void loadCatalog();
   }, [loadCatalog]);
+
+  useEffect(() => {
+    if (online && !wasOnline.current) void loadCatalog();
+    wasOnline.current = online;
+  }, [online, loadCatalog]);
 
   useEffect(() => {
     if (tab !== "sell" || !openSessionId) return;
@@ -273,10 +391,34 @@ export default function PosPage() {
     return () => window.removeEventListener("keydown", focusCatalog);
   }, [tab, openSessionId]);
 
+  useEffect(() => {
+    if (tab !== "sell" || !openSessionId || catalog.length === 0 || lines.length > 0) return;
+    requestAnimationFrame(() => catalogInputRef.current?.focus());
+  }, [tab, openSessionId, catalog.length, lines.length]);
+
   const loadSummary = useCallback(async (sessionId: string) => {
     const res = await postApi<{ data?: ShiftSummary }>("/api/pos", { action: "shiftSummary", sessionId });
     setSummary(res.data?.data ?? null);
   }, []);
+
+  useEffect(() => {
+    if (tab !== "sell" || !openSessionId) return;
+    const onShortcut = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key === "Enter") {
+        event.preventDefault();
+        document.getElementById("pos-complete-sale")?.click();
+      } else if (event.ctrlKey && event.key === "Backspace" && activeLineIndex !== null) {
+        event.preventDefault();
+        setLines((current) => current.filter((_, index) => index !== activeLineIndex));
+        setActiveLineIndex(null);
+      } else if (event.altKey && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        document.getElementById("pos-park-cart")?.click();
+      }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, [tab, openSessionId, activeLineIndex]);
 
   // Re-derived whenever sessions reload so a fresh sale is counted immediately.
   useEffect(() => {
@@ -317,26 +459,28 @@ export default function PosPage() {
                 tone: "error",
                 error: {
                   title: `Drawer variance of ${formatMoney(variance)} recorded`,
-                  hint: `Expected ${formatMoney(drawerExpected)}. The difference is flagged for review and can't be edited away.`,
-                  detail: `POS close-session\nexpected cash: ${drawerExpected}\nvariance: ${variance}`,
+                  hint: `Expected ${formatMoney(drawerExpected)}. Your explanation is attached to this shift for review.`,
+                  detail: `POS close-session\nexpected cash: ${drawerExpected}\nvariance: ${variance}\nreason: ${String(payload.varianceReason ?? "")}`,
                 },
               },
         );
       } else if (payload.action === "sale" && res.data?.data) {
         const d = res.data.data;
         setSalePendingApproval(false);
+        const paymentSummary = d.tenders?.map((tender) => `${tender.method.replace("_", " ")} ${formatMoney(tender.amountMinor)}`).join(" + ") ?? String(payload.method);
         setReceiptText([
           `Chaste BusinessOS · Sale #${d.invoiceNumber ?? ""}`,
           `Date: ${new Date().toLocaleString()}`,
           `Customer: ${selectedCustomer?.name ?? "Walk-in customer"}`,
           ...lines.map((saleLine) => `${saleLine.quantity / 1000} × ${saleLine.description} · ${formatMoney(Math.round(saleLine.quantity * saleLine.unitPriceMinor / 1000))}`),
           `Total: ${formatMoney(d.totalMinor ?? 0)}`,
-          `Tender: ${String(payload.method)}${payload.method === "cash" ? ` · received ${formatMoney(d.tenderedMinor ?? d.totalMinor ?? 0)} · change ${formatMoney(d.changeGivenMinor ?? 0)}` : ""}`,
+          `Payment: ${paymentSummary}`,
+          ...(d.changeGivenMinor ? [`Cash received: ${formatMoney(d.tenderedMinor ?? d.totalMinor ?? 0)}`, `Change: ${formatMoney(d.changeGivenMinor)}`] : []),
           "Thank you for your purchase.",
         ].join("\n"));
         setNotice({
           tone: "success",
-          text: `Sale${d.invoiceNumber ? ` #${d.invoiceNumber}` : ""} recorded for ${formatMoney(d.totalMinor ?? 0)} (${String(payload.method)}).${(d.changeGivenMinor ?? 0) > 0 ? ` Change due ${formatMoney(d.changeGivenMinor ?? 0)}.` : ""}`,
+          text: `Sale${d.invoiceNumber ? ` #${d.invoiceNumber}` : ""} recorded for ${formatMoney(d.totalMinor ?? 0)} (${paymentSummary}).${(d.changeGivenMinor ?? 0) > 0 ? ` Change due ${formatMoney(d.changeGivenMinor ?? 0)}.` : ""}`,
         });
       } else {
         setNotice({ tone: "success", text: `${label} done.` });
@@ -353,6 +497,7 @@ export default function PosPage() {
     try {
       if (navigator.share) {
         await navigator.share({ title: "Purchase receipt", text });
+        setNotice({ tone: "success", text: "Receipt shared." });
       } else {
         await navigator.clipboard.writeText(text);
         setNotice({ tone: "success", text: "Receipt copied. Paste it into a message to share." });
@@ -361,6 +506,31 @@ export default function PosPage() {
       if (error instanceof Error && error.name === "AbortError") return;
       setNotice({ tone: "error", error: { title: "Could not share receipt", hint: "Check the browser share permissions, or try again from a secure connection." } });
     }
+  }
+
+  function downloadReceipt(text: string) {
+    const saleNumber = /Sale #?(\d+)/.exec(text.split("\n")[0] ?? "")?.[1] ?? "copy";
+    const href = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `receipt-${saleNumber}.txt`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(href), 1_000);
+    setNotice({ tone: "success", text: "Receipt downloaded." });
+  }
+
+  function printReceipt(text: string) {
+    const printWindow = window.open("", "_blank", "width=480,height=640");
+    if (!printWindow) {
+      setNotice({ tone: "error", error: { title: "Receipt window was blocked", hint: "Allow pop-ups for this app, or download the receipt instead." } });
+      return;
+    }
+    printWindow.opener = null;
+    const escaped = text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    printWindow.document.write(`<html><head><title>Receipt</title><style>body{font:14px/1.5 ui-monospace,monospace;padding:24px;white-space:pre-wrap}@media print{body{padding:0}}</style></head><body>${escaped}</body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => printWindow.print(), 200);
   }
 
   async function returnSale(): Promise<void> {
@@ -380,6 +550,7 @@ export default function PosPage() {
         action: "returnSale",
         invoiceId: returnTarget.id,
         reason: trimmed,
+        refundMethod,
       });
       if (res.status === 202) {
         setNotice({
@@ -395,7 +566,7 @@ export default function PosPage() {
         const d = res.data.data;
         setNotice({
           tone: "success",
-          text: `Return posted - ${formatMoney(d.creditedMinor)} credited, ${d.restockedLines} line${d.restockedLines === 1 ? "" : "s"} restocked.`,
+          text: `Return posted - ${formatMoney(d.creditedMinor)} credited to ${refundMethod.replaceAll("_", " ")}, ${d.restockedLines} line${d.restockedLines === 1 ? "" : "s"} restocked.`,
         });
         setReturnTarget(null);
         setReturnReason("");
@@ -430,16 +601,36 @@ export default function PosPage() {
   const total = lines.reduce((s, l) => s + Math.round((l.quantity * l.unitPriceMinor) / 1000), 0);
   const parsedTender = method === "cash" && cashReceived.trim() ? toMinor(cashReceived) : total;
   const tenderedMinor = Number.isSafeInteger(parsedTender) && parsedTender >= 0 ? parsedTender : 0;
-  const changeDueMinor = Math.max(0, tenderedMinor - total);
+  const splitAmounts = splitTenders.map((tender) => tender.amount.trim() ? toMinor(tender.amount) : 0);
+  const splitAllocatedMinor = splitAmounts.reduce((sum, amount) => sum + (Number.isSafeInteger(amount) && amount > 0 ? amount : 0), 0);
+  const splitCashAllocatedMinor = splitTenders.reduce((sum, tender, index) => sum + (tender.method === "cash" ? splitAmounts[index] ?? 0 : 0), 0);
+  const splitCashReceivedMinor = cashReceived.trim() ? toMinor(cashReceived) : splitCashAllocatedMinor;
+  const checkoutReady = splitMode
+    ? splitTenders.length > 1 && splitTenders.every((tender, index) => tender.amount.trim() !== "" && (splitAmounts[index] ?? 0) > 0) && splitAllocatedMinor === total && (splitCashAllocatedMinor === 0 || splitCashReceivedMinor >= splitCashAllocatedMinor)
+    : method !== "cash" || tenderedMinor >= total;
+  const changeDueMinor = splitMode
+    ? Math.max(0, splitCashReceivedMinor - splitCashAllocatedMinor)
+    : Math.max(0, tenderedMinor - total);
   const currencyDigits = activeCurrencyMinorUnits();
   const currencyScale = 10 ** currencyDigits;
+  const denominationMinorValues = (currencyDigits === 0
+    ? [50000, 20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50]
+    : [100, 50, 20, 10, 5, 1, 0.5, 0.25]).map((amount) => Math.round(amount * currencyScale));
+  const denominationTotalMinor = denominationMinorValues.reduce((sum, amount) => {
+    const count = Number(denominationCounts[String(amount)] ?? "");
+    return sum + (Number.isSafeInteger(count) && count > 0 ? count * amount : 0);
+  }, 0);
+  const hasCashCount = countByDenomination
+    ? Object.values(denominationCounts).some((value) => value !== "")
+    : counted !== "";
+  const countedCashMinor = countByDenomination ? denominationTotalMinor : counted.trim() ? toMinor(counted) : 0;
   const cashPresets = currencyDigits === 0
     ? [{ label: "+1,000", amountMinor: 1000 }, { label: "+5,000", amountMinor: 5000 }]
     : [{ label: "+5", amountMinor: 5 * currencyScale }, { label: "+10", amountMinor: 10 * currencyScale }];
   const expectedCash = openSession ? openSession.openingFloatMinor + (openSession.expectedCashMinor ?? 0) : 0;
-  const liveVariance = counted ? toMinor(counted) - expectedCash : null;
+  const liveVariance = hasCashCount ? countedCashMinor - expectedCash : null;
   const catalogResults = catalogQuery.trim()
-    ? catalog.filter((item) => `${item.name} ${item.sku} ${item.barcode ?? ""}`.toLowerCase().includes(catalogQuery.trim().toLowerCase())).slice(0, 8)
+    ? catalog.filter((item) => `${item.name} ${item.sku} ${item.kind} ${item.barcode ?? ""} ${item.tags.join(" ")}`.toLowerCase().includes(catalogQuery.trim().toLowerCase())).slice(0, 8)
     : [];
   const customerResults = customerQuery.trim()
     ? customers.filter((customer) => `${customer.name} ${customer.email ?? ""}`.toLowerCase().includes(customerQuery.trim().toLowerCase())).slice(0, 6)
@@ -462,7 +653,78 @@ export default function PosPage() {
     setCustomerId("");
     setCustomerQuery("");
     setCashReceived("");
+    setSplitMode(false);
+    setSplitTenders([{ method: "cash", amount: "" }, { method: "card", amount: "" }]);
     setSalePendingApproval(false);
+  }
+
+  function parkCurrentCart() {
+    if (lines.length === 0 || !openSessionId || salePendingApproval) return;
+    if (parkedCarts.length >= 20) {
+      setNotice({ tone: "error", error: { title: "Parked cart limit reached", hint: "Resume or remove a parked cart before parking another. Up to 20 carts are kept on this device." } });
+      return;
+    }
+    const parked: ParkedCart = {
+      id: crypto.randomUUID(),
+      parkedAt: new Date().toISOString(),
+      sessionId: openSessionId,
+      lines,
+      customerId,
+      customerName: selectedCustomer?.name ?? "Walk-in customer",
+      method,
+      cashReceived,
+      splitMode,
+      splitTenders,
+    };
+    setParkedCarts((current) => [parked, ...current]);
+    clearCart();
+    setNotice({ tone: "success", text: `Cart for ${parked.customerName} parked on this device.` });
+  }
+
+  function resumeParkedCart(parked: ParkedCart) {
+    if (lines.length > 0) return;
+    setLines(parked.lines);
+    setCustomerId(customers.some((customer) => customer.id === parked.customerId) ? parked.customerId : "");
+    setMethod(parked.method);
+    setCashReceived(parked.cashReceived);
+    setSplitMode(parked.splitMode);
+    setSplitTenders(parked.splitTenders);
+    setSalePendingApproval(false);
+    setParkedCarts((current) => current.filter((cart) => cart.id !== parked.id));
+    setNotice({ tone: "success", text: `Cart for ${parked.customerName} resumed. Review stock and total before checkout.` });
+    requestAnimationFrame(() => catalogInputRef.current?.focus());
+  }
+
+  async function createQuickProduct(): Promise<void> {
+    const name = quickProduct.name.trim();
+    const sku = quickProduct.sku.trim() || `POS-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    if (!name) return;
+    setBusy(true);
+    try {
+      const response = await postApi("/api/inventory", {
+        action: "createItem",
+        sku,
+        name,
+        unitLabel: quickProduct.unitLabel.trim() || "unit",
+        salePriceMinor: toMinor(quickProduct.price),
+        barcode: quickProduct.barcode.trim() || undefined,
+      });
+      if (response.status === 202) {
+        setNotice({ tone: "pending", text: `Adding ${name} is waiting for approval.` });
+        return;
+      }
+      if (!response.ok) {
+        setNotice({ tone: "error", error: response.error ?? { title: "Could not add product", hint: "Review the item details and try again." } });
+        return;
+      }
+      setQuickProduct({ name: "", sku: "", barcode: "", price: "", unitLabel: "unit" });
+      setQuickProductOpen(false);
+      setNotice({ tone: "success", text: `${name} is in the catalog. Scan its barcode or search to add it to this sale.` });
+      await loadCatalog();
+      requestAnimationFrame(() => catalogInputRef.current?.focus());
+    } finally {
+      setBusy(false);
+    }
   }
 
   function addCatalogItem(item: CatalogItem) {
@@ -498,6 +760,129 @@ export default function PosPage() {
     setLines((current) => current.map((lineItem, lineIndex) => lineIndex === index ? { ...lineItem, quantity } : lineItem));
   }
 
+  async function completeCurrentSale(): Promise<void> {
+    if (!openSession || lines.length === 0 || salePendingApproval || !online || !checkoutReady) return;
+    const tenders = splitMode
+      ? splitTenders.map((tender, index) => ({ method: tender.method, amountMinor: splitAmounts[index] ?? 0 }))
+      : [{ method, amountMinor: total }];
+    const tenderSummary = [...new Set(tenders.map((tender) => tender.method))].join(" + ");
+    const result = await post({
+      action: "sale",
+      sessionId: openSession.id,
+      method,
+      lines,
+      tenders,
+      ...(customerId ? { customerId } : {}),
+      ...(splitMode ? (splitCashAllocatedMinor > 0 ? { cashReceivedMinor: splitCashReceivedMinor } : {}) : method === "cash" ? { cashReceivedMinor: tenderedMinor } : {}),
+    }, `Sale ${formatMoney(total)} (${tenderSummary})`);
+    if (result.ok) {
+      setLines([]);
+      setCashReceived("");
+      setSplitMode(false);
+      setSplitTenders([{ method: "cash", amount: "" }, { method: "card", amount: "" }]);
+      setActiveLineIndex(null);
+    }
+  }
+
+  function queueCurrentSaleOffline(): void {
+    if (!openSession || online || lines.length === 0 || salePendingApproval || !checkoutReady || total <= 0) return;
+    if (!queuedSalesLoaded || queuedSales.length >= 20) {
+      setNotice({ tone: "error", error: { title: queuedSalesLoaded ? "Offline sale queue is full" : "Offline storage is still loading", hint: queuedSalesLoaded ? "Send or discard a queued sale before adding another. Up to 20 sales are kept on this device." : "Wait a moment, then try again." } });
+      return;
+    }
+    const tenders = splitMode
+      ? splitTenders.map((tender, index) => ({ method: tender.method, amountMinor: splitAmounts[index] ?? 0 }))
+      : [{ method, amountMinor: total }];
+    const queued: QueuedSale = {
+      id: crypto.randomUUID(),
+      intentId: crypto.randomUUID(),
+      sessionId: openSession.id,
+      lines,
+      customerId,
+      method,
+      tenders,
+      cashReceivedMinor: splitMode
+        ? splitCashAllocatedMinor > 0 ? splitCashReceivedMinor : null
+        : method === "cash" ? tenderedMinor : null,
+      totalMinor: total,
+      queuedAt: new Date().toISOString(),
+      status: "queued",
+      errorMessage: null,
+    };
+    const next = [queued, ...queuedSales];
+    try {
+      localStorage.setItem("chaste.pos.queued-sales.v1", JSON.stringify(next));
+    } catch {
+      setNotice({ tone: "error", error: { title: "Offline sale could not be saved", hint: "Free browser storage before taking an offline sale. Nothing was charged." } });
+      return;
+    }
+    setQueuedSales(next);
+    clearCart();
+    setNotice({ tone: "pending", text: `Sale saved to this device for ${formatMoney(queued.totalMinor)}. It has not been charged or deducted from stock.` });
+  }
+
+  async function retryQueuedSale(queued: QueuedSale): Promise<void> {
+    if (!online || queuedSaleBusyId) return;
+    const session = sessions?.find((candidate) => candidate.id === queued.sessionId);
+    if (!session || session.status !== "open") {
+      const message = "The register used for this queued sale is no longer open. Open that register or contact your manager before sending it.";
+      setQueuedSales((current) => current.map((sale) => sale.id === queued.id ? { ...sale, status: "failed", errorMessage: message } : sale));
+      setNotice({ tone: "error", error: { title: "Register session is closed", hint: message } });
+      return;
+    }
+    setQueuedSaleBusyId(queued.id);
+    try {
+      const response = await postApi<{ data?: PosActionData }>("/api/pos", {
+        intentId: queued.intentId,
+        action: "sale",
+        sessionId: queued.sessionId,
+        method: queued.method,
+        lines: queued.lines,
+        tenders: queued.tenders,
+        ...(queued.customerId ? { customerId: queued.customerId } : {}),
+        ...(queued.cashReceivedMinor !== null ? { cashReceivedMinor: queued.cashReceivedMinor } : {}),
+      });
+      if (response.status === 202) {
+        setQueuedSales((current) => current.filter((sale) => sale.id !== queued.id));
+        setNotice({ tone: "pending", text: `Sale for ${formatMoney(queued.totalMinor)} was submitted and is awaiting approval. Check Approvals before taking payment again.` });
+        await load();
+        return;
+      }
+      if (!response.ok || !response.data?.data) {
+        const message = response.error?.hint ?? "Review current stock, prices, and register status before retrying.";
+        setQueuedSales((current) => current.map((sale) => sale.id === queued.id ? { ...sale, status: "failed", errorMessage: message } : sale));
+        setNotice({ tone: "error", error: response.error ?? { title: "Queued sale was not posted", hint: message } });
+        return;
+      }
+      const result = response.data.data;
+      const customerName = customers.find((customer) => customer.id === queued.customerId)?.name ?? "Walk-in customer";
+      const paymentSummary = result.tenders?.map((tender) => `${tender.method.replace("_", " ")} ${formatMoney(tender.amountMinor)}`).join(" + ") ?? queued.method;
+      setReceiptText([
+        `Chaste BusinessOS · Sale #${result.invoiceNumber ?? ""}`,
+        `Date: ${new Date().toLocaleString()}`,
+        `Customer: ${customerName}`,
+        ...queued.lines.map((saleLine) => `${saleLine.quantity / 1000} × ${saleLine.description} · ${formatMoney(Math.round(saleLine.quantity * saleLine.unitPriceMinor / 1000))}`),
+        `Total: ${formatMoney(result.totalMinor ?? queued.totalMinor)}`,
+        `Payment: ${paymentSummary}`,
+        ...(result.changeGivenMinor ? [`Cash received: ${formatMoney(result.tenderedMinor ?? queued.totalMinor)}`, `Change: ${formatMoney(result.changeGivenMinor)}`] : []),
+        "Thank you for your purchase.",
+      ].join("\n"));
+      setQueuedSales((current) => current.filter((sale) => sale.id !== queued.id));
+      setNotice({ tone: "success", text: `Queued sale${result.invoiceNumber ? ` #${result.invoiceNumber}` : ""} posted for ${formatMoney(result.totalMinor ?? queued.totalMinor)}. Stock and prices were checked again.` });
+      await load();
+    } finally {
+      setQueuedSaleBusyId(null);
+      router.refresh();
+    }
+  }
+
+  function discardQueuedSale(): void {
+    if (!discardQueuedId) return;
+    setQueuedSales((current) => current.filter((sale) => sale.id !== discardQueuedId));
+    setDiscardQueuedId(null);
+    setNotice({ tone: "success", text: "Queued sale discarded. Nothing was charged or posted." });
+  }
+
   if (!__enabled) return <ModuleDisabled label="Point of sale" />;
 
   const openSessions = sessions.filter((s) => s.status === "open");
@@ -524,15 +909,32 @@ export default function PosPage() {
       {notice && <ActionNotice state={notice} onDismiss={() => setNotice(null)} />}
       {!online && (
         <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
-          <span><strong>Offline mode.</strong> Cart edits are saved on this device. Sales and register actions wait until you reconnect.</span>
-          <span className="text-xs">Never submitted automatically</span>
+          <span><strong>Offline mode.</strong> Cart and catalog stay available on this device. You can queue an unposted sale, then review and send it after reconnecting.</span>
+          <span className="text-xs">Stock last checked {catalogUpdatedAt ? timeAgo(catalogUpdatedAt) : "before this session"}</span>
         </div>
+      )}
+      {queuedSales.length > 0 && (
+        <Card className="mb-4 border-amber-200 bg-amber-50/50">
+          <CardTitle right={<Badge tone="amber">{queuedSales.length} on this device</Badge>}>Offline sales queue</CardTitle>
+          <p className="mb-3 text-xs leading-relaxed text-stone-600">These sales are not posted, charged, or deducted from stock yet. Sending rechecks the register, current prices, and available stock. A safe retry uses the same request identity.</p>
+          <ul className="divide-y divide-amber-100">
+            {queuedSales.map((queued) => {
+              const session = sessions?.find((candidate) => candidate.id === queued.sessionId);
+              return <li key={queued.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><strong className="text-sm text-stone-900">{formatMoney(queued.totalMinor)}</strong><Badge tone={queued.status === "failed" ? "red" : "amber"}>{queued.status === "failed" ? "Needs review" : "Not posted"}</Badge></div><p className="mt-0.5 text-xs text-stone-600">{queued.lines.length} line{queued.lines.length === 1 ? "" : "s"} · {session?.register ?? "Original register"} · saved {timeAgo(queued.queuedAt)}</p>{queued.errorMessage && <p className="mt-1 text-xs text-red-800">{queued.errorMessage}</p>}</div>
+                <div className="flex shrink-0 gap-2"><Button size="sm" disabled={!online || queuedSaleBusyId !== null} loading={queuedSaleBusyId === queued.id} onClick={() => void retryQueuedSale(queued)}>{queued.status === "failed" ? "Retry sale" : "Send sale"}</Button><Button tone="ghost" size="sm" disabled={queuedSaleBusyId !== null} onClick={() => setDiscardQueuedId(queued.id)}>Discard</Button></div>
+              </li>;
+            })}
+          </ul>
+        </Card>
       )}
       {receiptText && (
         <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-950">
           <span>Receipt ready{selectedCustomer ? ` for ${selectedCustomer.name}` : " to share"}.</span>
-          <div className="flex gap-2">
-            <Button tone="secondary" size="sm" onClick={() => void shareReceipt(receiptText)}>Share receipt</Button>
+          <div className="flex flex-wrap gap-1">
+            <Button tone="ghost" size="sm" onClick={() => printReceipt(receiptText)}>Print</Button>
+            <Button tone="ghost" size="sm" onClick={() => downloadReceipt(receiptText)}>Download</Button>
+            <Button tone="secondary" size="sm" onClick={() => void shareReceipt(receiptText)}>Share</Button>
             <Button tone="ghost" size="sm" onClick={() => setReceiptText(null)}>Dismiss</Button>
           </div>
         </div>
@@ -552,17 +954,23 @@ export default function PosPage() {
               value={openSession ? openSession.register : "closed"}
               sub={openSession ? `open since ${timeAgo(openSession.openedAt)}` : "no session running"}
               tone={openSession ? "success" : "default"}
+              onClick={() => setTab("sell")}
+              actionLabel={openSession ? "Open checkout for this register" : "Set up and open the register"}
             />
-            <StatCard label="Expected in drawer" value={openSession ? formatMoney(expectedCash) : "-"} />
+            <StatCard label="Expected in drawer" value={openSession ? formatMoney(expectedCash) : "-"} onClick={() => setTab("sessions")} actionLabel="Review register session totals" />
             <StatCard
               label="Closed today"
               value={closedToday.length}
               sub={varianceSessions.length > 0 ? `${varianceSessions.length} variance flag` : undefined}
+              onClick={() => setTab("sessions")}
+              actionLabel="Review register sessions closed today"
             />
             <StatCard
               label="Variance flags"
               value={varianceSessions.length}
               tone={varianceSessions.length > 0 ? "warn" : "default"}
+              onClick={() => setTab("sessions")}
+              actionLabel="Review register variance reports"
             />
           </div>
 
@@ -685,7 +1093,7 @@ export default function PosPage() {
             {!online && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Products already in the cart stay available. Register lookups need a connection.</p>}
             {inventoryEnabled ? (
               <div>
-                <label htmlFor="pos-catalog-search" className="label">Find a product</label>
+                <label htmlFor="pos-catalog-search" className="label">Scan or find a product <span className="font-normal text-stone-400">· press / to focus, Enter to add</span></label>
                 <div className="relative">
                   <IconSearch aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-stone-400" />
                   <input
@@ -719,6 +1127,17 @@ export default function PosPage() {
                     </button>
                   )}
                 </div>
+                {catalog.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Quick product filters">
+                    <button type="button" className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50" onClick={() => setCatalogQuery("")}>All</button>
+                    <button type="button" className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50" onClick={() => setCatalogQuery("service")}>Services</button>
+                    {favoriteSkus.map((sku) => {
+                      const item = catalog.find((candidate) => candidate.sku === sku);
+                      return item ? <button key={sku} type="button" className="rounded-full border border-gold-200 bg-gold-50 px-3 py-1.5 text-xs font-medium text-gold-900" onClick={() => addCatalogItem(item)}>★ {item.name}</button> : null;
+                    })}
+                    {[...new Set(catalog.flatMap((item) => item.tags))].slice(0, 5).map((tag) => <button key={tag} type="button" className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs text-stone-600 hover:bg-stone-50" onClick={() => setCatalogQuery(tag)}>{tag}</button>)}
+                  </div>
+                )}
                 <div aria-live="polite" className="mt-2">
                   {catalogError ? (
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -733,12 +1152,12 @@ export default function PosPage() {
                         {catalogResults.map((item) => {
                           const outOfStock = item.kind !== "service" && item.availableThousandths <= 0;
                           return (
-                            <li key={item.sku}>
+                            <li key={item.sku} className="flex items-stretch">
                               <button
                                 type="button"
                                 disabled={busy || salePendingApproval || outOfStock}
                                 onClick={() => addCatalogItem(item)}
-                                className="flex min-h-14 w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-stone-50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-gold-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-stone-50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-gold-600 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 <span className="min-w-0">
                                   <span className="block truncate text-sm font-medium text-stone-900">{item.name}</span>
@@ -751,6 +1170,7 @@ export default function PosPage() {
                                   <span className="text-[11px] text-stone-500">per {item.unitLabel}</span>
                                 </span>
                               </button>
+                              <button type="button" aria-label={`${favoriteSkus.includes(item.sku) ? "Remove from" : "Add to"} favorites: ${item.name}`} aria-pressed={favoriteSkus.includes(item.sku)} onClick={() => setFavoriteSkus((current) => current.includes(item.sku) ? current.filter((sku) => sku !== item.sku) : [...current, item.sku].slice(-30))} className="w-11 shrink-0 border-l border-stone-100 text-lg text-gold-700 hover:bg-gold-50">{favoriteSkus.includes(item.sku) ? "★" : "☆"}</button>
                             </li>
                           );
                         })}
@@ -761,7 +1181,11 @@ export default function PosPage() {
                   ) : catalogLoading ? (
                     <p className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-500">Loading product catalog…</p>
                   ) : catalog.length === 0 ? (
-                    <p className="rounded-lg bg-stone-50 px-3 py-2 text-xs text-stone-500">No products in the catalog yet. Add a custom line or create products in Inventory.</p>
+                    <div className="rounded-xl border border-dashed border-stone-300 bg-stone-50/70 p-4">
+                      <p className="text-sm font-semibold text-stone-900">Set up this register</p>
+                      <p className="mt-1 text-xs leading-relaxed text-stone-600">Add a first item with its selling price and barcode, or bring in your existing spreadsheet.</p>
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row"><Button size="sm" onClick={() => setQuickProductOpen(true)}>Add a product</Button><Button size="sm" tone="secondary" onClick={() => router.push("/products")}>Import spreadsheet</Button><Button size="sm" tone="ghost" onClick={() => router.push("/inventory")}>Open Inventory</Button></div>
+                    </div>
                   ) : (
                     <p className="px-1 text-xs text-stone-500">Scan a barcode or type a few characters. Press Enter to add the first match, or / to focus search.</p>
                   )}
@@ -860,6 +1284,7 @@ export default function PosPage() {
                             onChange={(event) => updateQuantity(i, event.target.value)}
                             aria-label={`Quantity for ${l.description}`}
                             disabled={busy || salePendingApproval}
+                            onFocus={() => setActiveLineIndex(i)}
                             className="input h-8 w-20 px-2 text-center tnum"
                           />
                           <span>{catalogItem?.unitLabel ?? "unit"}</span>
@@ -874,6 +1299,7 @@ export default function PosPage() {
                       aria-label={`Remove ${l.description}`}
                       className="icon-btn size-8 shrink-0 text-stone-500 hover:text-red-600"
                       disabled={busy || salePendingApproval}
+                      onFocus={() => setActiveLineIndex(i)}
                     >
                       <IconTrash className="size-3.5" />
                     </button>
@@ -883,13 +1309,27 @@ export default function PosPage() {
               </ul>
             )}
 
-            <div className="mt-4 flex items-baseline justify-between">
-              <span className="text-sm text-stone-500">Cart · {lines.length} line{lines.length === 1 ? "" : "s"}</span>
-              <span className="tnum text-2xl font-semibold tracking-tight">{formatMoney(total)}</span>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <div><span className="text-sm text-stone-500">Cart · {lines.length} line{lines.length === 1 ? "" : "s"}</span><span className="tnum ml-3 text-2xl font-semibold tracking-tight">{formatMoney(total)}</span></div>
+              {lines.length > 0 && <Button id="pos-park-cart" tone="secondary" size="sm" disabled={busy || salePendingApproval} onClick={parkCurrentCart}>Park cart <span className="ml-1 text-[10px] opacity-65">Alt+P</span></Button>}
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <SegmentedControl
+            {currentWorkspaceParkedCarts.length > 0 && <section className="mt-4 rounded-lg border border-stone-200 bg-stone-50/70 p-3" aria-label="Parked carts">
+              <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-semibold text-stone-800">Parked carts <span className="ml-1 text-xs font-normal text-stone-500">{currentWorkspaceParkedCarts.length} on this device</span></h3><span className="text-[11px] text-stone-500">Not shared with coworkers</span></div>
+              <ul className="mt-2 divide-y divide-stone-200">
+                {currentWorkspaceParkedCarts.map((cart) => {
+                  const cartTotal = cart.lines.reduce((sum, item) => sum + Math.round(item.quantity * item.unitPriceMinor / 1000), 0);
+                  return <li key={cart.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                    <div className="min-w-0"><p className="truncate text-sm font-medium text-stone-800">{cart.customerName} · {cart.lines.length} line{cart.lines.length === 1 ? "" : "s"}</p><p className="text-xs text-stone-500">{formatMoney(cartTotal)} · {new Date(cart.parkedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p></div>
+                    <div className="flex gap-2"><Button tone="secondary" size="sm" disabled={lines.length > 0 || busy || salePendingApproval} onClick={() => resumeParkedCart(cart)}>Resume</Button><Button tone="ghost" size="sm" disabled={busy} onClick={() => setParkedCarts((current) => current.filter((entry) => entry.id !== cart.id))}>Remove</Button></div>
+                  </li>;
+                })}
+              </ul>
+              {lines.length > 0 && <p className="mt-1 text-xs text-stone-500">Park or finish the current cart before resuming another.</p>}
+            </section>}
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+              {!splitMode && <SegmentedControl
                 ariaLabel="Payment method"
                 value={method}
                 onChange={setMethod}
@@ -898,9 +1338,46 @@ export default function PosPage() {
                   { value: "cash", label: "Cash", icon: <IconCash className="size-3.5" /> },
                   { value: "card", label: "Card", icon: <IconCard className="size-3.5" /> },
                 ]}
-              />
+              />}
+              <Button tone="secondary" size="sm" disabled={busy || salePendingApproval} onClick={() => {
+                setSplitMode((enabled) => !enabled);
+                setCashReceived("");
+                setSplitTenders([{ method: "cash", amount: "" }, { method: "card", amount: "" }]);
+              }}>{splitMode ? "Single payment" : "Split payment"}</Button>
             </div>
-            {method === "cash" && (
+            {splitMode ? (
+              <div className="mt-4 space-y-3 rounded-lg border border-stone-200 bg-stone-50/70 p-3">
+                <div className="flex items-center justify-between text-sm"><span className="font-medium text-stone-800">Payment allocation</span><span className="tnum text-stone-600">{formatMoney(splitAllocatedMinor)} of {formatMoney(total)}</span></div>
+                {splitTenders.map((tender, index) => (
+                  <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(7rem,0.8fr)_auto] items-end gap-2">
+                    <label className="label">Type
+                      <select className="select mt-1" value={tender.method} disabled={busy || salePendingApproval} onChange={(event) => setSplitTenders((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, method: event.target.value as typeof entry.method } : entry))}>
+                        <option value="cash">Cash</option><option value="card">Card</option><option value="mobile_money">Mobile money</option>
+                      </select>
+                    </label>
+                    <label className="label">Amount
+                      <input className="input mt-1 text-right tnum" type="number" min="0" step={currencyDigits === 0 ? "1" : "0.01"} inputMode="decimal" value={tender.amount} placeholder="0" disabled={busy || salePendingApproval} onChange={(event) => setSplitTenders((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, amount: event.target.value } : entry))} />
+                    </label>
+                    <button type="button" className="icon-btn size-10 text-stone-500 hover:text-red-600" aria-label={`Remove ${tender.method.replace("_", " ")} payment`} disabled={splitTenders.length <= 2 || busy || salePendingApproval} onClick={() => setSplitTenders((current) => current.filter((_, entryIndex) => entryIndex !== index))}><IconTrash className="size-3.5" /></button>
+                  </div>
+                ))}
+                {splitTenders.length < 3 && <button type="button" className="text-sm font-medium text-emerald-800 underline" disabled={busy || salePendingApproval} onClick={() => {
+                  const used = new Set(splitTenders.map((entry) => entry.method));
+                  const next = (["cash", "card", "mobile_money"] as const).find((candidate) => !used.has(candidate));
+                  if (next) setSplitTenders((current) => [...current, { method: next, amount: "" }]);
+                }}>+ Add payment method</button>}
+                <div className={cn("flex justify-between border-t border-stone-200 pt-2 text-sm font-semibold", splitAllocatedMinor === total ? "text-emerald-800" : "text-amber-800")}>
+                  <span>{splitAllocatedMinor < total ? `Remaining ${formatMoney(total - splitAllocatedMinor)}` : splitAllocatedMinor > total ? `Over by ${formatMoney(splitAllocatedMinor - total)}` : "Fully allocated"}</span>
+                  {splitCashAllocatedMinor > 0 && <span>Cash portion {formatMoney(splitCashAllocatedMinor)}</span>}
+                </div>
+                {splitCashAllocatedMinor > 0 && <div className="grid gap-3 border-t border-stone-200 pt-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                  <label className="label" htmlFor="pos-split-cash-received">Cash received
+                    <input id="pos-split-cash-received" className="input mt-1 text-base tnum" type="number" min="0" step={currencyDigits === 0 ? "1" : "0.01"} inputMode="decimal" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={minorToInput(splitCashAllocatedMinor)} disabled={busy || salePendingApproval} />
+                  </label>
+                  <span className={cn("pb-2 text-sm font-semibold", splitCashReceivedMinor < splitCashAllocatedMinor ? "text-red-700" : "text-emerald-800")}>{splitCashReceivedMinor < splitCashAllocatedMinor ? `Cash short by ${formatMoney(splitCashAllocatedMinor - splitCashReceivedMinor)}` : `Change due ${formatMoney(changeDueMinor)}`}</span>
+                </div>}
+              </div>
+            ) : method === "cash" && (
               <div className="mt-4 rounded-lg border border-stone-200 bg-stone-50/70 p-3">
                 <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
                   <label className="label" htmlFor="pos-cash-received">Cash received
@@ -918,18 +1395,13 @@ export default function PosPage() {
               </div>
             )}
             <Button
+              id="pos-complete-sale"
               className="mt-4 min-h-11 w-full"
               loading={busy}
-              disabled={lines.length === 0 || salePendingApproval || !online || (method === "cash" && tenderedMinor < total)}
-              onClick={async () => {
-                const result = await post({ action: "sale", sessionId: openSession.id, method, lines, ...(customerId ? { customerId } : {}), ...(method === "cash" ? { cashReceivedMinor: tenderedMinor } : {}) }, `Sale ${formatMoney(total)} (${method})`);
-                if (result.ok) {
-                  setLines([]);
-                  setCashReceived("");
-                }
-              }}
+              disabled={lines.length === 0 || salePendingApproval || !checkoutReady || total <= 0 || (!online && queuedSales.length >= 20)}
+              onClick={() => online ? void completeCurrentSale() : queueCurrentSaleOffline()}
             >
-              Complete sale · {formatMoney(total)}
+              {online ? `Complete sale · ${formatMoney(total)}` : `Queue sale · ${formatMoney(total)}`} <span className="ml-1 text-xs font-normal opacity-75">{online ? "Ctrl+Enter" : "Not charged"}</span>
             </Button>
           </Card>
 
@@ -956,11 +1428,25 @@ export default function PosPage() {
             <input
               id="counted"
               value={counted}
-              onChange={(e) => setCounted(e.target.value)}
+              onChange={(e) => { setCounted(e.target.value); setVarianceReason(""); }}
               inputMode="decimal"
               placeholder="Count the drawer…"
               className="input"
+              disabled={countByDenomination}
             />
+            <button type="button" className="mt-2 text-xs font-medium text-emerald-800 underline" onClick={() => {
+              setCountByDenomination((enabled) => !enabled);
+              setCounted("");
+              setDenominationCounts({});
+              setVarianceReason("");
+            }}>{countByDenomination ? "Enter one total instead" : "Count by denomination"}</button>
+            {countByDenomination && <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg border border-stone-200 bg-stone-50 p-3 sm:grid-cols-3">
+              {denominationMinorValues.map((amount) => <label key={amount} className="label flex items-center justify-between gap-2 text-xs">
+                <span className="tnum whitespace-nowrap">{formatMoney(amount)}</span>
+                <input className="input h-9 w-16 px-2 text-right tnum" type="number" min="0" max="10000" step="1" inputMode="numeric" aria-label={`${formatMoney(amount)} notes or coins`} value={denominationCounts[String(amount)] ?? ""} onChange={(event) => { setDenominationCounts((current) => ({ ...current, [String(amount)]: event.target.value })); setVarianceReason(""); }} />
+              </label>)}
+              <div className="col-span-2 flex justify-between border-t border-stone-200 pt-2 text-sm font-semibold sm:col-span-3"><span>Counted total</span><span className="tnum">{formatMoney(denominationTotalMinor)}</span></div>
+            </div>}
             {liveVariance !== null && (
               <p
                 className={cn(
@@ -973,10 +1459,14 @@ export default function PosPage() {
                 {liveVariance === 0 ? "Balanced, matches expected cash." : `Variance preview: ${formatMoney(liveVariance)}`}
               </p>
             )}
+            {liveVariance !== null && liveVariance !== 0 && <label className="label mt-3 block" htmlFor="pos-variance-reason">Explain the variance
+              <textarea id="pos-variance-reason" className="input mt-1 min-h-20 resize-y" maxLength={500} value={varianceReason} onChange={(event) => setVarianceReason(event.target.value)} placeholder="For example: one cash refund was entered after the count." />
+              <span className="mt-1 block text-xs font-normal text-stone-500">This note is saved with the closed shift for review.</span>
+            </label>}
             <Button
               tone="dangerSecondary"
               className="mt-4 w-full"
-              disabled={!counted || lines.length > 0 || busy}
+              disabled={!hasCashCount || (liveVariance !== null && liveVariance !== 0 && varianceReason.trim().length < 3) || lines.length > 0 || busy}
               onClick={() => setCloseConfirm(true)}
             >
               <IconLock className="size-3.5" />
@@ -1031,7 +1521,7 @@ export default function PosPage() {
                       <span className="text-xs text-stone-500" title={new Date(sale.createdAt).toLocaleString()}>{timeAgo(sale.createdAt)}</span>
                       <div className="flex gap-2">
                         <Button tone="ghost" size="sm" onClick={() => void shareReceipt(receiptForSale(sale))}>Share receipt</Button>
-                        {returnable ? <Button tone="secondary" size="sm" disabled={busy || !online} onClick={() => { setReturnTarget(sale); setReturnReason(""); }}><IconUndo className="size-3.5" /> Return</Button> : <span className="self-center text-xs text-stone-400">No return balance</span>}
+                        {returnable ? <Button tone="secondary" size="sm" disabled={busy || !online} onClick={() => { setReturnTarget(sale); setReturnReason(""); setRefundMethod(sale.method.split(" + ")[0] === "card" ? "card" : sale.method.split(" + ")[0] === "mobile_money" ? "mobile_money" : "cash"); }}><IconUndo className="size-3.5" /> Return</Button> : <span className="self-center text-xs text-stone-400">No return balance</span>}
                       </div>
                     </div>
                   </li>
@@ -1070,7 +1560,7 @@ export default function PosPage() {
                         <td className="text-right">
                           <div className="inline-flex gap-1">
                             <Button tone="ghost" size="sm" onClick={() => void shareReceipt(receiptForSale(sale))}>Share</Button>
-                            <Button tone="secondary" size="sm" disabled={!returnable || busy || !online} onClick={() => { setReturnTarget(sale); setReturnReason(""); }}><IconUndo className="size-3.5" />Return</Button>
+                            <Button tone="secondary" size="sm" disabled={!returnable || busy || !online} onClick={() => { setReturnTarget(sale); setReturnReason(""); setRefundMethod(sale.method.split(" + ")[0] === "card" ? "card" : sale.method.split(" + ")[0] === "mobile_money" ? "mobile_money" : "cash"); }}><IconUndo className="size-3.5" />Return</Button>
                           </div>
                         </td>
                       </tr>
@@ -1102,6 +1592,7 @@ export default function PosPage() {
                     <div><dt className="text-xs text-stone-500">Expected in drawer</dt><dd className="tnum font-medium">{formatMoney(s.openingFloatMinor + (s.expectedCashMinor ?? 0))}</dd></div>
                     <div><dt className="text-xs text-stone-500">Counted</dt><dd className="tnum font-medium">{s.countedCashMinor !== null ? formatMoney(s.countedCashMinor) : "-"}</dd></div>
                     <div className="col-span-2"><dt className="text-xs text-stone-500">Variance</dt><dd className={cn("tnum font-medium", s.varianceMinor ? "text-red-700" : "")}>{s.varianceMinor !== null ? formatMoney(s.varianceMinor) : "Not reconciled"}</dd></div>
+                    {s.varianceReason && <div className="col-span-2"><dt className="text-xs text-stone-500">Close note</dt><dd className="text-sm">{s.varianceReason}</dd></div>}
                   </dl>
                 </li>
               ))}
@@ -1116,6 +1607,7 @@ export default function PosPage() {
                     <th className="text-right">Expected in drawer</th>
                     <th className="text-right">Counted</th>
                     <th className="text-right">Variance</th>
+                    <th>Close note</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1133,6 +1625,7 @@ export default function PosPage() {
                       <td className={cn("num", s.varianceMinor ? "font-semibold text-red-700" : "")}>
                         {s.varianceMinor !== null ? formatMoney(s.varianceMinor) : "-"}
                       </td>
+                      <td className="max-w-xs truncate text-xs text-stone-500" title={s.varianceReason ?? ""}>{s.varianceReason ?? "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1143,17 +1636,25 @@ export default function PosPage() {
           <EmptyState icon={<IconCash />} title="No register sessions yet" hint="Open a register from the Sell tab to start ringing sales." />
         ))}
 
+      {tab === "sell" && openSession && lines.length > 0 && (
+        <div className="fixed inset-x-3 bottom-20 z-30 rounded-xl border border-stone-200 bg-white/95 p-2 shadow-lg backdrop-blur sm:hidden">
+          <div className="flex items-center gap-2"><div className="min-w-0 flex-1 pl-2"><p className="text-[10px] uppercase tracking-wide text-stone-500">{lines.length} line{lines.length === 1 ? "" : "s"}</p><p className="tnum truncate text-lg font-semibold text-stone-900">{formatMoney(total)}</p></div><Button className="min-h-11 flex-1" loading={busy} disabled={salePendingApproval || !checkoutReady || total <= 0 || (!online && queuedSales.length >= 20)} onClick={() => online ? void completeCurrentSale() : queueCurrentSaleOffline()}>{!checkoutReady && splitMode ? `Remaining ${formatMoney(Math.max(0, total - splitAllocatedMinor))}` : !checkoutReady && method === "cash" ? `Due ${formatMoney(total - tenderedMinor)}` : online ? `Checkout · ${formatMoney(total)}` : `Queue · ${formatMoney(total)}`}</Button></div>
+        </div>
+      )}
+
       <ConfirmDialog
         open={closeConfirm}
         onClose={() => setCloseConfirm(false)}
         onConfirm={async () => {
           setCloseConfirm(false);
           const result = await post(
-            { action: "close", sessionId: openSession?.id, countedCashMinor: toMinor(counted) },
+            { action: "close", sessionId: openSession?.id, countedCashMinor, ...(liveVariance !== null && liveVariance !== 0 ? { varianceReason: varianceReason.trim() } : {}) },
             "Close session",
           );
           if (result.ok) {
             setCounted("");
+            setVarianceReason("");
+            setDenominationCounts({});
             setLines([]);
           }
         }}
@@ -1161,14 +1662,23 @@ export default function PosPage() {
         body={
           <>
             Expected cash is <strong className="text-stone-900">{formatMoney(expectedCash)}</strong>; you counted{" "}
-            <strong className="text-stone-900">{formatMoney(toMinor(counted))}</strong>.{" "}
+            <strong className="text-stone-900">{formatMoney(countedCashMinor)}</strong>.{" "}
             {liveVariance !== null && liveVariance !== 0
-              ? `The ${formatMoney(liveVariance)} variance will be recorded and flagged, it can't be edited away later.`
+              ? `The ${formatMoney(liveVariance)} variance and your note, “${varianceReason.trim()}”, will be recorded for review.`
               : "The drawer balances; closing posts the reconciliation."}
           </>
         }
         confirmLabel="Close & reconcile"
         busy={busy}
+      />
+      <ConfirmDialog
+        open={discardQueuedId !== null}
+        onClose={() => setDiscardQueuedId(null)}
+        onConfirm={discardQueuedSale}
+        title="Discard this queued sale?"
+        body="This sale has not been sent, charged, or posted. Discarding removes its local copy from this device."
+        confirmLabel="Discard sale"
+        busy={queuedSaleBusyId !== null}
       />
       <Dialog
         open={Boolean(returnTarget)}
@@ -1217,7 +1727,9 @@ export default function PosPage() {
                 <span>Remaining return balance</span>
                 <span className="tnum">{formatMoney(Math.max(0, returnTarget.totalMinor - returnTarget.creditedMinor))}</span>
               </div>
+              <p className="mt-2 text-xs text-stone-500">Original tender: {returnTarget.method}</p>
             </div>
+            <label className="label mb-4">Refund destination<select className="select mt-1" value={refundMethod} onChange={(event) => setRefundMethod(event.target.value as typeof refundMethod)}><option value="cash">Cash</option><option value="card">Card reversal</option><option value="mobile_money">Mobile money</option></select><span className="mt-1 block text-xs font-normal text-stone-500">Cash refunds reduce this open drawer. Non-cash refunds leave drawer cash unchanged.</span></label>
             <label htmlFor="return-reason" className="label">Reason for return</label>
             <textarea
               id="return-reason"
@@ -1232,6 +1744,21 @@ export default function PosPage() {
             <p className="mt-1 text-right text-xs text-stone-400" aria-live="polite">{returnReason.length}/500</p>
           </div>
         )}
+      </Dialog>
+      <Dialog
+        open={quickProductOpen}
+        onClose={() => { if (!busy) setQuickProductOpen(false); }}
+        title="Add a product to the register"
+        description="Set a price and barcode now. You can complete stock details in Products & Services later."
+        footer={<Button tone="secondary" disabled={busy} onClick={() => setQuickProductOpen(false)}>Cancel</Button>}
+      >
+        <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void createQuickProduct(); }}>
+          <label className="label">Product name<input autoFocus className="input mt-1" value={quickProduct.name} onChange={(event) => setQuickProduct({ ...quickProduct, name: event.target.value })} required maxLength={120} /></label>
+          <div className="grid grid-cols-2 gap-3"><label className="label">Price<input className="input mt-1 tnum" type="number" min="0" step="0.01" inputMode="decimal" value={quickProduct.price} onChange={(event) => setQuickProduct({ ...quickProduct, price: event.target.value })} required /></label><label className="label">Unit<input className="input mt-1" value={quickProduct.unitLabel} onChange={(event) => setQuickProduct({ ...quickProduct, unitLabel: event.target.value })} /></label></div>
+          <label className="label">Barcode <span className="font-normal text-stone-400">(optional)</span><input className="input mt-1 font-mono" value={quickProduct.barcode} onChange={(event) => setQuickProduct({ ...quickProduct, barcode: event.target.value })} /></label>
+          <label className="label">SKU <span className="font-normal text-stone-400">(optional)</span><input className="input mt-1 font-mono" placeholder="Generated automatically if blank" value={quickProduct.sku} onChange={(event) => setQuickProduct({ ...quickProduct, sku: event.target.value })} /></label>
+          <Button type="submit" className="w-full" loading={busy} disabled={!quickProduct.name.trim() || !quickProduct.price.trim()}>Save product</Button>
+        </form>
       </Dialog>
     </AppFrame>
   );

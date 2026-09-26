@@ -226,6 +226,7 @@ export async function POST(req: Request) {
         await executor.execute("inventory.createCycleCount", ctx, {
           note: str("note"),
           skus: Array.isArray(body.skus) ? (body.skus as string[]) : undefined,
+          locationId: str("locationId"),
         }),
       );
     case "recordCycleCounts": {

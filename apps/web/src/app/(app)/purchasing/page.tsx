@@ -1272,15 +1272,17 @@ function PurchasingOverview({ data, goTo }: { data: Payload; goTo: (tab: Tab) =>
   return (
     <div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <StatCard label="Open POs" value={openOrders.length} sub={openValue > 0 ? formatMoney(openValue) : undefined} />
+        <StatCard label="Open POs" value={openOrders.length} sub={openValue > 0 ? formatMoney(openValue) : undefined} onClick={() => goTo("orders")} actionLabel="Review open purchase orders" />
         <StatCard
           label="Requests pending"
           value={pendingRequests.length}
           tone={pendingRequests.length > 0 ? "warn" : "default"}
+          onClick={() => goTo("requests")}
+          actionLabel="Review purchase requests awaiting a decision"
         />
-        <StatCard label="Spend this month" value={formatMoney(spendThisMonth)} />
-        <StatCard label="Payables outstanding" value={formatMoney(outstanding)} />
-        <StatCard label="Vendors" value={vendors.length} />
+        <StatCard label="Spend this month" value={formatMoney(spendThisMonth)} onClick={() => goTo("bills")} actionLabel="Review this month's vendor bills" />
+        <StatCard label="Payables outstanding" value={formatMoney(outstanding)} onClick={() => goTo("bills")} actionLabel="Review bills with a remaining balance" />
+        <StatCard label="Vendors" value={vendors.length} onClick={() => goTo("vendors")} actionLabel="Open the vendor list" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -1539,4 +1541,3 @@ function VendorIntelSection({
     </div>
   );
 }
-

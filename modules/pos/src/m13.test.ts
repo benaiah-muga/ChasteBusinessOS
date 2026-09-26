@@ -9,6 +9,7 @@ import {
   journalEntries,
   journalLines,
   organizations,
+  payments,
   posSessions,
   stockMovements,
   type Database,
@@ -110,5 +111,72 @@ describe("pos returns (M13.1)", () => {
   it("shift summary reports session totals", async () => {
     const summary = await run("pos.shiftSummary", { sessionId });
     expect(summary).toMatchObject({ register: "main", salesCount: 1, takingsMinor: 400_00 });
+  });
+
+  it("allocates split payments exactly and adds only the cash share to the drawer", async () => {
+    const [splitSession] = await db.db.insert(posSessions).values({ orgId, register: "split-test" }).returning({ id: posSessions.id });
+    const sale = await run("pos.completeSale", {
+      sessionId: splitSession!.id,
+      lines: [{ description: "Return gadget", quantity: 1_000, unitPriceMinor: 200_00, taxMinor: 0, sku: "RET-GADGET" }],
+      tenders: [
+        { method: "cash", amountMinor: 75_00 },
+        { method: "card", amountMinor: 125_00 },
+      ],
+      cashReceivedMinor: 80_00,
+    });
+    expect(sale).toMatchObject({ totalMinor: 200_00, changeGivenMinor: 5_00 });
+    expect(sale.tenders).toEqual([
+      { method: "cash", amountMinor: 75_00 },
+      { method: "card", amountMinor: 125_00 },
+    ]);
+
+    const rows = await db.db.select({ method: payments.method, amountMinor: payments.amountMinor }).from(payments).where(eq(payments.invoiceId, sale.invoiceId));
+    expect(rows).toEqual(expect.arrayContaining([
+      { method: "cash", amountMinor: 75_00 },
+      { method: "card", amountMinor: 125_00 },
+    ]));
+    const [session] = await db.db.select({ expectedCashMinor: posSessions.expectedCashMinor }).from(posSessions).where(eq(posSessions.id, splitSession!.id));
+    expect(session?.expectedCashMinor).toBe(75_00);
+  });
+
+  it("leaves the cash drawer unchanged when a split sale is refunded to mobile money", async () => {
+    const [refundSession] = await db.db.insert(posSessions).values({ orgId, register: "refund-destination-test" }).returning({ id: posSessions.id });
+    const sale = await run("pos.completeSale", {
+      sessionId: refundSession!.id,
+      lines: [{ description: "Return gadget", quantity: 1_000, unitPriceMinor: 200_00, taxMinor: 0, sku: "RET-GADGET" }],
+      tenders: [
+        { method: "cash", amountMinor: 50_00 },
+        { method: "card", amountMinor: 150_00 },
+      ],
+    });
+    const returned = await run("pos.returnSale", {
+      invoiceId: sale.invoiceId,
+      reason: "customer requested mobile refund",
+      refundMethod: "mobile_money",
+    });
+    expect(returned).toMatchObject({ creditedMinor: 200_00, refundMethod: "mobile_money" });
+    const [drawer] = await db.db.select({ expectedCashMinor: posSessions.expectedCashMinor }).from(posSessions).where(eq(posSessions.id, refundSession!.id));
+    expect(drawer?.expectedCashMinor).toBe(50_00);
+  });
+
+  it("rejects a split payment with an uncovered balance", async () => {
+    await expect(run("pos.completeSale", {
+      sessionId,
+      lines: [{ description: "Return gadget", quantity: 1_000, unitPriceMinor: 200_00, taxMinor: 0, sku: "RET-GADGET" }],
+      tenders: [{ method: "card", amountMinor: 150_00 }],
+    })).rejects.toThrow(/tender allocations must exactly cover/);
+  });
+
+  it("requires and preserves an explanation when the counted drawer differs", async () => {
+    const [varianceSession] = await db.db.insert(posSessions).values({ orgId, register: "variance-test" }).returning({ id: posSessions.id });
+    await expect(run("pos.closeSession", { sessionId: varianceSession!.id, countedCashMinor: 100_00 })).rejects.toThrow(/reason is required/);
+    const closed = await run("pos.closeSession", {
+      sessionId: varianceSession!.id,
+      countedCashMinor: 100_00,
+      varianceReason: "A cash refund was not in the starting count.",
+    });
+    expect(closed).toMatchObject({ expectedCashMinor: 0, varianceMinor: 100_00, flagged: true });
+    const [session] = await db.db.select({ varianceReason: posSessions.varianceReason }).from(posSessions).where(eq(posSessions.id, varianceSession!.id));
+    expect(session?.varianceReason).toBe("A cash refund was not in the starting count.");
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ActionNotice,
   Badge,
@@ -54,7 +55,7 @@ interface Product {
 }
 
 const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined", "expired"] as const;
-type StatusFilter = "all" | (typeof QUOTE_STATUSES)[number];
+type StatusFilter = "all" | "open" | (typeof QUOTE_STATUSES)[number];
 
 /**
  * Quote decisions carry stronger semantics than the shared mapping assumes
@@ -84,6 +85,7 @@ const emptyLine = { description: "", quantity: "1", unitPrice: "0.00", tax: "0.0
 export default function SalesPage() {
   useMoneySync();
   const enabled = useModuleEnabled("sales");
+  const router = useRouter();
   const [data, setData] = useState<{
     quotes: Quote[];
     customers: Customer[];
@@ -95,6 +97,7 @@ export default function SalesPage() {
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [filter, setFilter] = useState<StatusFilter>("all");
+  const [focusQuoteId, setFocusQuoteId] = useState<string | null>(null);
 
   const [quoteForm, setQuoteForm] = useState({
     customerId: "",
@@ -124,6 +127,22 @@ export default function SalesPage() {
   useEffect(() => {
     if (enabled) void load();
   }, [enabled, load]);
+
+  useEffect(() => {
+    const quoteId = new URLSearchParams(window.location.search).get("focusQuote");
+    if (quoteId) {
+      setFocusQuoteId(quoteId);
+      setFilter("all");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!focusQuoteId || !data || tab !== "quotes" || !data.quotes.some((quote) => quote.id === focusQuoteId)) return;
+    const timeout = window.setTimeout(() => {
+      document.getElementById(`sales-quote-${focusQuoteId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [data, focusQuoteId, tab]);
 
   // Quotes are governed money actions; 202 means the kernel parked it for approval.
   const post = useCallback(
@@ -225,7 +244,11 @@ export default function SalesPage() {
     0,
   );
 
-  const visibleQuotes = filter === "all" ? quotes : quotes.filter((q) => q.status === filter);
+  const visibleQuotes = filter === "all"
+    ? quotes
+    : filter === "open"
+      ? quotes.filter((quote) => quote.status === "draft" || quote.status === "sent")
+      : quotes.filter((q) => q.status === filter);
 
   return (
     <AppFrame
@@ -247,24 +270,31 @@ export default function SalesPage() {
       {tab === "overview" && (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Open quotes" value={openQuotes.length} sub={`${formatMoneyWhole(openValueMinor)} awaiting decision`} />
+            <StatCard label="Open quotes" value={openQuotes.length} sub={`${formatMoneyWhole(openValueMinor)} awaiting decision`} onClick={() => { setTab("quotes"); setFilter("open"); }} actionLabel="Review draft and sent quotes" />
             <StatCard
               label="Accepted"
               value={accepted.length}
               sub={conversion === null ? "No decided quotes yet" : `${conversion}% of decided quotes`}
               tone={accepted.length > 0 ? "success" : "default"}
+              onClick={() => { setTab("quotes"); setFilter("accepted"); }}
+              actionLabel="Review accepted quotes"
             />
             <StatCard
               label="Pipeline value"
               value={formatMoneyWhole(pipelineValueMinor)}
               sub={`${openDeals.length} open deal${openDeals.length === 1 ? "" : "s"} from CRM`}
+              onClick={() => router.push("/crm?tab=pipeline&dealFilter=open")}
+              actionLabel="Open the CRM open-deals pipeline"
             />
-            <StatCard label="Weighted forecast" value={formatMoneyWhole(weightedForecastMinor)} sub="Stage-probability weighted" />
+            <StatCard label="Weighted forecast" value={formatMoneyWhole(weightedForecastMinor)} sub="Stage-probability weighted" onClick={() => router.push("/crm?tab=pipeline&dealFilter=open")} actionLabel="Review deals included in the CRM forecast" />
             <StatCard
               label="Open orders"
               value={openOrders.length}
               sub={`${formatMoneyWhole(openOrders.reduce((s, o) => s + o.totalMinor, 0))} committed`}
               tone={openOrders.length > 0 ? "success" : "default"}
+              className="col-span-2 lg:col-span-1"
+              onClick={() => setTab("orders")}
+              actionLabel="Review open sales orders"
             />
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
@@ -326,6 +356,7 @@ export default function SalesPage() {
               options={[
                 { value: "all", label: "All" },
                 ...QUOTE_STATUSES.map((s) => ({ value: s, label: s[0]!.toUpperCase() + s.slice(1) })),
+                { value: "open", label: "Open" },
               ]}
             />
             <Button
@@ -349,31 +380,33 @@ export default function SalesPage() {
             />
           ) : (
             visibleQuotes.map((q) => (
-              <Card key={q.id}>
-                <CardTitle right={<Badge tone={toneFor(q.status)}>{q.status}</Badge>}>
-                  Quote #{q.number} - {customerName.get(q.customerId) ?? "Unknown customer"}
-                </CardTitle>
-                <p className="text-xs opacity-60">
-                  {formatMoney(q.totalMinor)} · created {timeAgo(q.createdAt)}
-                  {q.invoiceId ? " · converted to an invoice" : ""}
-                </p>
-                {q.status === "sent" && (
-                  <div className="mt-2 flex justify-end gap-2">
-                    <Button
-                      size="sm"
-                      tone="secondary"
-                      disabled={busy}
-                      aria-label={`Decline quote #${q.number}`}
-                      onClick={() => void decide(q.id, "decline", q.number)}
-                    >
-                      Decline
-                    </Button>
-                    <Button size="sm" disabled={busy} aria-label={`Accept quote #${q.number}`} onClick={() => void decide(q.id, "accept", q.number)}>
-                      Accept &amp; invoice
-                    </Button>
-                  </div>
-                )}
-              </Card>
+              <div id={`sales-quote-${q.id}`} key={q.id} className={focusQuoteId === q.id ? "rounded-xl ring-2 ring-gold-400" : undefined}>
+                <Card>
+                  <CardTitle right={<Badge tone={toneFor(q.status)}>{q.status}</Badge>}>
+                    Quote #{q.number} - {customerName.get(q.customerId) ?? "Unknown customer"}
+                  </CardTitle>
+                  <p className="text-xs opacity-60">
+                    {formatMoney(q.totalMinor)} · created {timeAgo(q.createdAt)}
+                    {q.invoiceId ? " · converted to an invoice" : ""}
+                  </p>
+                  {q.status === "sent" && (
+                    <div className="mt-2 flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        tone="secondary"
+                        disabled={busy}
+                        aria-label={`Decline quote #${q.number}`}
+                        onClick={() => void decide(q.id, "decline", q.number)}
+                      >
+                        Decline
+                      </Button>
+                      <Button size="sm" disabled={busy} aria-label={`Accept quote #${q.number}`} onClick={() => void decide(q.id, "accept", q.number)}>
+                        Accept &amp; invoice
+                      </Button>
+                    </div>
+                  )}
+                </Card>
+              </div>
             ))
           )}
         </>

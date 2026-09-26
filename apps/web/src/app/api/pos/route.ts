@@ -28,11 +28,9 @@ export async function GET() {
       createdAt: invoices.createdAt,
       customerId: invoices.customerId,
       customerName: customers.name,
-      paymentMethod: payments.method,
     })
     .from(invoices)
     .leftJoin(customers, eq(invoices.customerId, customers.id))
-    .leftJoin(payments, eq(payments.invoiceId, invoices.id))
     .where(and(eq(invoices.orgId, resolved.orgId), isNotNull(invoices.posSessionId)))
     .orderBy(desc(invoices.number))
     .limit(20);
@@ -48,6 +46,15 @@ export async function GET() {
         .from(invoiceLines)
         .where(inArray(invoiceLines.invoiceId, saleRows.map((sale) => sale.id)))
     : [];
+  const paymentRows = saleRows.length
+    ? await getDb().db.select({ invoiceId: payments.invoiceId, method: payments.method }).from(payments).where(inArray(payments.invoiceId, saleRows.map((sale) => sale.id)))
+    : [];
+  const methodsByInvoice = new Map<string, string[]>();
+  for (const payment of paymentRows) {
+    const methods = methodsByInvoice.get(payment.invoiceId) ?? [];
+    if (!methods.includes(payment.method)) methods.push(payment.method);
+    methodsByInvoice.set(payment.invoiceId, methods);
+  }
   const linesByInvoice = new Map<string, typeof saleLines>();
   for (const line of saleLines) {
     const current = linesByInvoice.get(line.invoiceId) ?? [];
@@ -69,7 +76,7 @@ export async function GET() {
       memo: s.memo,
       customerId: s.customerId,
       customerName: s.customerName,
-      method: s.paymentMethod ?? (s.memo?.match(/POS \((cash|card)\)/)?.[1] ?? "cash"),
+      method: methodsByInvoice.get(s.id)?.join(" + ") ?? (s.memo?.match(/POS \((cash|card|mobile_money)\)/)?.[1] ?? "cash"),
       lines: linesByInvoice.get(s.id) ?? [],
       createdAt: s.createdAt.toISOString(),
     })),
@@ -87,6 +94,10 @@ const actionSchema = z.discriminatedUnion("action", [
     method: z.enum(["cash", "card"]).default("cash"),
     customerId: z.string().uuid().optional(),
     cashReceivedMinor: z.number().int().nonnegative().optional(),
+    tenders: z.array(z.object({
+      method: z.enum(["cash", "card", "mobile_money"]),
+      amountMinor: z.number().int().positive(),
+    })).min(1).max(3).optional(),
     lines: z
       .array(
         z.object({
@@ -102,11 +113,13 @@ const actionSchema = z.discriminatedUnion("action", [
     action: z.literal("close"),
     sessionId: z.string(),
     countedCashMinor: z.number().int().nonnegative(),
+    varianceReason: z.string().trim().min(3).max(500).optional(),
   }),
   z.object({
     action: z.literal("returnSale"),
     invoiceId: z.string().uuid(),
     reason: z.string().min(3).max(500),
+    refundMethod: z.enum(["cash", "card", "mobile_money"]),
   }),
   z.object({
     action: z.literal("shiftSummary"),
@@ -147,6 +160,7 @@ export async function POST(req: Request) {
       method: body.data.method,
       ...(body.data.customerId ? { customerId: body.data.customerId } : {}),
       ...(body.data.cashReceivedMinor !== undefined ? { cashReceivedMinor: body.data.cashReceivedMinor } : {}),
+      ...(body.data.tenders ? { tenders: body.data.tenders } : {}),
       lines: body.data.lines,
     });
   } else if (body.data.action === "returnSale") {
@@ -155,6 +169,7 @@ export async function POST(req: Request) {
     result = await executor.execute("pos.returnSale", humanCtx, {
       invoiceId: body.data.invoiceId,
       reason: body.data.reason,
+      refundMethod: body.data.refundMethod,
     });
   } else if (body.data.action === "shiftSummary") {
     result = await executor.execute("pos.shiftSummary", humanCtx, {
@@ -164,6 +179,7 @@ export async function POST(req: Request) {
     result = await executor.execute("pos.closeSession", humanCtx, {
       sessionId: body.data.sessionId,
       countedCashMinor: body.data.countedCashMinor,
+      ...(body.data.varianceReason ? { varianceReason: body.data.varianceReason } : {}),
     });
   }
 

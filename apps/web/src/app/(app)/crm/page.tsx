@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { findDuplicate, normalizeCustomerName, normalizeEmail, normalizePhone, type DuplicateVerdict } from "@chaste/erp-core";
 import {
   ActionNotice,
   type ActionNoticeState,
@@ -29,10 +31,12 @@ import { QuickCreateButton } from "../quick-create";
 import { callApi, postApi } from "@/lib/api";
 import { ModuleDisabled, useModuleEnabled } from "../_shell/module-context";
 import { AppFrame } from "../_shell/app-frame";
-import { TasksTab } from "./tasks-tab";
+import { FollowUpQueue } from "./follow-up-queue";
+import { CustomerImportDialog } from "./customer-import-dialog";
 
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"] as const;
 type Stage = (typeof STAGES)[number];
+type DealFilter = "all" | "open" | "won" | "lost";
 
 interface Deal {
   id: string;
@@ -49,12 +53,45 @@ interface Customer {
   id: string;
   name: string;
   email: string | null;
+  phone: string | null;
+  preferredContactMethod: "email" | "phone" | "whatsapp" | "other";
+  doNotContact: boolean;
   ownerUserId: string | null;
   ownerName: string | null;
+  updatedByUserId: string | null;
+  updatedByName: string | null;
+  updatedByEmail: string | null;
+  updatedAt: string;
   tags: string[];
   notes: string | null;
+  nextStep: { kind: "invoice" | "quote" | "task"; summary: string; refId: string; amountMinor?: number } | null;
   lastActivityAt: string;
   deactivatedAt: string | null;
+  mergedRecords?: { id: string; name: string; mergedAt: string | null }[];
+}
+
+interface CustomerMergeSnapshot {
+  customerId: string;
+  email: string | null;
+  phone: string | null;
+  preferredContactMethod: Customer["preferredContactMethod"];
+  doNotContact: boolean;
+  reminderOptOut: boolean;
+  marketingOptOut: boolean;
+  ownerUserId: string | null;
+  tags: string[];
+  notes: string | null;
+  creditLimitMinor: number | null;
+  paymentTermDays: number | null;
+  deactivatedAt: string | null;
+  mergedIntoCustomerId: string | null;
+  mergedAt: string | null;
+}
+
+interface CustomerMergeOutput {
+  survivorCustomerId: string;
+  duplicateCustomerId: string;
+  previous: CustomerMergeSnapshot[];
 }
 
 interface TeamMember {
@@ -91,7 +128,15 @@ interface TimelineState {
 export default function CrmPage() {
   useMoneySync();
   const __enabled = useModuleEnabled("crm");
+  const router = useRouter();
   const [tab, setTab] = useState("overview");
+  const [dealFilter, setDealFilter] = useState<DealFilter>("all");
+  useEffect(() => {
+    const requestedFilter = new URLSearchParams(window.location.search).get("dealFilter");
+    if (requestedFilter === "all" || requestedFilter === "open" || requestedFilter === "won" || requestedFilter === "lost") {
+      setDealFilter(requestedFilter);
+    }
+  }, []);
   const [deals, setDeals] = useState<Deal[] | null>(null);
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [newTitle, setNewTitle] = useState("");
@@ -99,6 +144,9 @@ export default function CrmPage() {
   const [newCustomerId, setNewCustomerId] = useState("");
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerEmail, setNewCustomerEmail] = useState("");
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const [newCustomerContactMethod, setNewCustomerContactMethod] = useState<Customer["preferredContactMethod"]>("email");
+  const [newCustomerDoNotContact, setNewCustomerDoNotContact] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<ActionNoticeState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -106,6 +154,7 @@ export default function CrmPage() {
   const [timeline, setTimeline] = useState<TimelineState | null>(null);
   const [profileCustomerId, setProfileCustomerId] = useState<string | null>(null);
   const [profileTab, setProfileTab] = useState<"overview" | "activity" | "invoices" | "documents">("overview");
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMember[] | null>(null);
   const [teamError, setTeamError] = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<Customer | null>(null);
@@ -184,27 +233,36 @@ export default function CrmPage() {
     }
   }
 
-  async function createCustomer(e: React.FormEvent) {
+  async function createCustomer(e: React.FormEvent): Promise<boolean> {
     e.preventDefault();
-    if (!newCustomerName.trim()) return;
+    if (!newCustomerName.trim()) return false;
     setBusy(true);
     try {
       const res = await postApi<{ data?: { duplicateWarning?: string | null } }>("/api/customers", {
         action: "create",
         name: newCustomerName.trim(),
         ...(newCustomerEmail.trim() ? { email: newCustomerEmail.trim() } : {}),
+        ...(newCustomerPhone.trim() ? { phone: newCustomerPhone.trim() } : {}),
+        preferredContactMethod: newCustomerContactMethod,
+        doNotContact: newCustomerDoNotContact,
       });
       if (res.status === 202) {
         setNotice({ tone: "pending", text: "Creating this customer is waiting for approval." });
+        return false;
       } else if (!res.ok && res.error) {
         setNotice({ tone: "error", error: res.error });
+        return false;
       } else {
         setNewCustomerName("");
         setNewCustomerEmail("");
+        setNewCustomerPhone("");
+        setNewCustomerContactMethod("email");
+        setNewCustomerDoNotContact(false);
         setNotice(res.data?.data?.duplicateWarning
           ? { tone: "pending", text: `Customer added. ${res.data.data.duplicateWarning}` }
           : { tone: "success", text: "Customer added." });
         await load();
+        return true;
       }
     } finally {
       setBusy(false);
@@ -212,7 +270,7 @@ export default function CrmPage() {
   }
 
   /** Optimistic stage move: the board responds instantly; failure rolls back. */
-  async function move(dealId: string, stage: Stage) {
+  async function move(dealId: string, stage: Stage, lostReason?: string) {
     const prev = deals;
     const deal = deals?.find((d) => d.id === dealId);
     if (!deal || deal.stage === stage) return;
@@ -220,7 +278,7 @@ export default function CrmPage() {
     setLiveStatus(`Moved “${deal.title}” to ${stageMeta[stage].label}`);
     setBusy(true);
     try {
-      const res = await postApi("/api/deals", { action: "move", dealId, stage });
+      const res = await postApi("/api/deals", { action: "move", dealId, stage, ...(lostReason ? { lostReason } : {}) });
       if (res.status === 202) {
         setDeals(prev ?? null);
         setNotice({ tone: "pending", text: "That stage change is waiting for approval." });
@@ -255,10 +313,14 @@ export default function CrmPage() {
 
   async function updateCustomerProfiles(input: {
     customerIds: string[];
+    name?: string;
     ownerUserId?: string | null;
     addTags?: string[];
     removeTags?: string[];
     notes?: string | null;
+    phone?: string | null;
+    preferredContactMethod?: Customer["preferredContactMethod"];
+    doNotContact?: boolean;
   }): Promise<boolean> {
     setBusy(true);
     try {
@@ -275,7 +337,7 @@ export default function CrmPage() {
       await load();
       if (profileCustomerId) {
         const customer = customers?.find((entry) => entry.id === profileCustomerId);
-        if (customer) await openTimeline(customer.id, customer.name);
+        if (customer) await openTimeline(customer.id, input.name?.trim() || customer.name);
       }
       return true;
     } finally {
@@ -318,6 +380,20 @@ export default function CrmPage() {
     void openTimeline(customerId, name);
   }
 
+  const openNextStep = useCallback((customer: Customer) => {
+    const step = customer.nextStep;
+    if (!step) return;
+    const refId = encodeURIComponent(step.refId);
+    if (step.kind === "task") {
+      setFocusedTaskId(step.refId);
+      setTab("tasks");
+    } else if (step.kind === "invoice") {
+      router.push(`/accounting?recordPayment=${refId}#receivables`);
+    } else {
+      router.push(`/sales?tab=quotes&focusQuote=${refId}`);
+    }
+  }, [router]);
+
   if (loadError) {
     return (
       <EmptyState
@@ -336,6 +412,11 @@ export default function CrmPage() {
   if (!__enabled) return <ModuleDisabled label="CRM" />;
 
   const activeCustomers = customers.filter((c) => !c.deactivatedAt);
+
+  function openPipeline(filter: DealFilter = "all") {
+    setDealFilter(filter);
+    setTab("pipeline");
+  }
 
   const openDeals = deals.filter((d) => d.stage !== "won" && d.stage !== "lost");
   const forecast = openDeals.reduce((s, d) => s + Math.round(d.valueMinor * weights[d.stage]), 0);
@@ -365,7 +446,7 @@ export default function CrmPage() {
           <OverviewTab
             deals={deals}
             customers={customers}
-            onOpenPipeline={() => setTab("pipeline")}
+            onOpenPipeline={openPipeline}
             onOpenCustomers={() => setTab("customers")}
           />
         )}
@@ -373,6 +454,8 @@ export default function CrmPage() {
           <DealsTab
             deals={deals}
             customers={activeCustomers}
+            dealFilter={dealFilter}
+            onDealFilterChange={setDealFilter}
             busy={busy}
             newTitle={newTitle}
             newValue={newValue}
@@ -381,7 +464,7 @@ export default function CrmPage() {
             onValueChange={setNewValue}
             onCustomerChange={setNewCustomerId}
             onCreate={(e) => void createDeal(e)}
-            onMove={(id, stage) => void move(id, stage)}
+            onMove={(id, stage, lostReason) => void move(id, stage, lostReason)}
             onNotice={setNotice}
             onReload={load}
             onDataChanged={load}
@@ -396,17 +479,26 @@ export default function CrmPage() {
             busy={busy}
             newName={newCustomerName}
             newEmail={newCustomerEmail}
+            newPhone={newCustomerPhone}
+            newContactMethod={newCustomerContactMethod}
+            newDoNotContact={newCustomerDoNotContact}
             onNameChange={setNewCustomerName}
             onEmailChange={setNewCustomerEmail}
-            onCreate={(e) => void createCustomer(e)}
+            onPhoneChange={setNewCustomerPhone}
+            onContactMethodChange={setNewCustomerContactMethod}
+            onDoNotContactChange={setNewCustomerDoNotContact}
+            onCreate={(e) => createCustomer(e)}
             onDeactivate={(customer) => setDeactivateTarget(customer)}
             onRetryTeam={() => { setTeamMembers(null); setTeamError(null); }}
             onOpenProfile={(customerId, name) => openCustomerProfile(customerId, name)}
+            onOpenNextStep={openNextStep}
             onUpdateProfile={updateCustomerProfiles}
             onCreateTask={createCustomerTask}
+            onNotice={setNotice}
+            onRefresh={() => void load()}
           />
         )}
-        {tab === "tasks" && <TasksTab notice={setNotice} />}
+        {tab === "tasks" && <FollowUpQueue notice={setNotice} customers={activeCustomers} focusedTaskId={focusedTaskId} />}
       </AppFrame>
 
       <Customer360Dialog
@@ -461,7 +553,7 @@ function OverviewTab({
 }: {
   deals: Deal[];
   customers: Customer[];
-  onOpenPipeline: () => void;
+  onOpenPipeline: (filter?: DealFilter) => void;
   onOpenCustomers: () => void;
 }) {
   const open = deals.filter((d) => d.stage !== "won" && d.stage !== "lost");
@@ -490,17 +582,17 @@ function OverviewTab({
           </div>
           <div className="mt-4 flex shrink-0 gap-2 sm:mt-0">
             <Button onClick={onOpenCustomers}>Add a customer</Button>
-            <Button tone="secondary" onClick={onOpenPipeline}>Add a deal</Button>
+            <Button tone="secondary" onClick={() => onOpenPipeline()}>Add a deal</Button>
           </div>
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <StatCard label="Open deals" value={open.length} />
-        <StatCard label="Open pipeline" value={formatMoneyWhole(openValue)} />
-        <StatCard label="Weighted forecast" value={formatMoneyWhole(forecast)} tone="accent" />
-        <StatCard label="Won total" value={formatMoneyWhole(wonValue)} tone="success" />
-        <StatCard label="Active customers" value={active.length} />
+        <StatCard label="Open deals" value={open.length} onClick={() => onOpenPipeline("open")} actionLabel="Open the active deal pipeline" />
+        <StatCard label="Open pipeline" value={formatMoneyWhole(openValue)} onClick={() => onOpenPipeline("open")} actionLabel="Review open deal values" />
+        <StatCard label="Weighted forecast" value={formatMoneyWhole(forecast)} tone="accent" onClick={() => onOpenPipeline("open")} actionLabel="Review the weighted forecast deals" />
+        <StatCard label="Won total" value={formatMoneyWhole(wonValue)} tone="success" onClick={() => onOpenPipeline("won")} actionLabel="Review won deals" />
+        <StatCard label="Active customers" value={active.length} onClick={onOpenCustomers} actionLabel="Open active customers" />
       </div>
       <p className="mt-2 text-xs text-stone-400">
         Forecast uses stage estimates: Lead 10%, Qualified 30%, Proposal 50%, Negotiation 70%, Won 100%, Lost 0%.
@@ -586,6 +678,8 @@ function OverviewTab({
 function DealsTab(props: {
   deals: Deal[];
   customers: Customer[];
+  dealFilter: DealFilter;
+  onDealFilterChange: (filter: DealFilter) => void;
   busy: boolean;
   newTitle: string;
   newValue: string;
@@ -594,7 +688,7 @@ function DealsTab(props: {
   onValueChange: (v: string) => void;
   onCustomerChange: (v: string) => void;
   onCreate: (e: React.FormEvent) => void;
-  onMove: (dealId: string, stage: Stage) => void;
+  onMove: (dealId: string, stage: Stage, lostReason?: string) => void;
   onNotice: (n: ActionNoticeState) => void;
   onReload: () => Promise<void> | void;
   onDataChanged?: () => void;
@@ -606,13 +700,19 @@ function DealsTab(props: {
   const wonValue = deals.filter((d) => d.stage === "won").reduce((s, d) => s + d.valueMinor, 0);
   const [search, setSearch] = useState("");
   const query = search.trim().toLowerCase();
-  const visibleDeals = query
-    ? deals.filter((d) => `${d.title} ${d.customerName ?? ""} ${d.note ?? ""}`.toLowerCase().includes(query))
-    : deals;
+  const visibleDeals = deals.filter((deal) => {
+    const matchesStage = props.dealFilter === "all"
+      || (props.dealFilter === "open" && deal.stage !== "won" && deal.stage !== "lost")
+      || deal.stage === props.dealFilter;
+    const matchesSearch = !query || `${deal.title} ${deal.customerName ?? ""} ${deal.note ?? ""}`.toLowerCase().includes(query);
+    return matchesStage && matchesSearch;
+  });
 
   // Drag state lives at board level: one dragged card, one hovered column.
   const [dragging, setDragging] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<Stage | null>(null);
+  const [viewMode, setViewMode] = useState<"board" | "table">("board");
+  const [moveIntent, setMoveIntent] = useState<{ deal: Deal; stage: Stage; reason: string } | null>(null);
 
   // Convert lead
   const [convertTarget, setConvertTarget] = useState<Deal | null>(null);
@@ -620,6 +720,24 @@ function DealsTab(props: {
   const [convertCustomerId, setConvertCustomerId] = useState("");
   const [convertCustomerName, setConvertCustomerName] = useState("");
   const [converting, setConverting] = useState(false);
+
+  function requestMove(dealId: string, stage: Stage): void {
+    const deal = deals.find((candidate) => candidate.id === dealId);
+    if (!deal || deal.stage === stage) return;
+    const scoreFor = (value: number, dealStage: Stage) => dealStage === "won" || dealStage === "lost" ? 0 : Math.round(value * weights[dealStage]);
+    const nextForecast = forecast - scoreFor(deal.valueMinor, deal.stage) + scoreFor(deal.valueMinor, stage);
+    if (stage === "lost" || nextForecast !== forecast) {
+      setMoveIntent({ deal, stage, reason: "" });
+      return;
+    }
+    props.onMove(deal.id, stage);
+  }
+
+  function confirmMove(): void {
+    if (!moveIntent || (moveIntent.stage === "lost" && moveIntent.reason.trim().length < 3)) return;
+    props.onMove(moveIntent.deal.id, moveIntent.stage, moveIntent.reason.trim() || undefined);
+    setMoveIntent(null);
+  }
 
   async function convert(): Promise<void> {
     if (!convertTarget) return;
@@ -649,7 +767,7 @@ function DealsTab(props: {
   }
 
   function onDrop(stage: Stage) {
-    if (dragging) props.onMove(dragging, stage);
+    if (dragging) requestMove(dragging, stage);
     setDragging(null);
     setOverStage(null);
   }
@@ -702,22 +820,54 @@ function DealsTab(props: {
       </label>
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Open deals" value={openDeals.length} />
-        <StatCard label="Open pipeline" value={formatMoneyWhole(openValue)} />
-        <StatCard label="Weighted forecast" value={formatMoneyWhole(forecast)} tone="accent" />
-        <StatCard label="Won total" value={formatMoneyWhole(wonValue)} tone="success" />
+        <StatCard label="Open deals" value={openDeals.length} onClick={() => props.onDealFilterChange("open")} selected={props.dealFilter === "open"} actionLabel="Filter the pipeline to open deals" />
+        <StatCard label="Open pipeline" value={formatMoneyWhole(openValue)} onClick={() => props.onDealFilterChange("open")} selected={props.dealFilter === "open"} actionLabel="Filter the pipeline to open deals" />
+        <StatCard label="Weighted forecast" value={formatMoneyWhole(forecast)} tone="accent" onClick={() => props.onDealFilterChange("open")} selected={props.dealFilter === "open"} actionLabel="Filter the pipeline to forecast deals" />
+        <StatCard label="Won total" value={formatMoneyWhole(wonValue)} tone="success" onClick={() => props.onDealFilterChange("won")} selected={props.dealFilter === "won"} actionLabel="Filter the pipeline to won deals" />
       </div>
       <p className="-mt-4 mb-5 text-xs text-stone-400">
         Forecast uses stage estimates: Lead 10%, Qualified 30%, Proposal 50%, Negotiation 70%, Won 100%, Lost 0%.
       </p>
 
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-xs text-stone-500">{visibleDeals.length} deal{visibleDeals.length === 1 ? "" : "s"}{props.dealFilter !== "all" ? ` · ${props.dealFilter === "open" ? "Open" : props.dealFilter}` : ""}</p>
+        <div className="flex items-center gap-2">
+          <label className="sr-only" htmlFor="crm-deal-stage-filter">Filter deals by stage</label>
+          <select id="crm-deal-stage-filter" className="select h-9 max-w-32 text-xs" value={props.dealFilter} onChange={(event) => props.onDealFilterChange(event.target.value as DealFilter)}>
+            <option value="all">All stages</option><option value="open">Open deals</option><option value="won">Won</option><option value="lost">Lost</option>
+          </select>
+          <div className="inline-flex shrink-0 rounded-lg border border-stone-200 bg-white p-1" role="group" aria-label="Pipeline display">
+            <Button tone={viewMode === "board" ? "primary" : "ghost"} size="sm" aria-pressed={viewMode === "board"} onClick={() => setViewMode("board")}>Board</Button>
+            <Button tone={viewMode === "table" ? "primary" : "ghost"} size="sm" aria-pressed={viewMode === "table"} onClick={() => setViewMode("table")}>Table</Button>
+          </div>
+        </div>
+      </div>
+
       {visibleDeals.length === 0 ? (
         <EmptyState
           icon={<IconTrendingUp />}
           title={deals.length === 0 ? "No deals yet" : "No deals match that search"}
-          hint={deals.length === 0 ? "Add your first deal above, or ask your workmate to create one from a conversation." : "Try a different deal, customer, or note."}
-          action={deals.length > 0 ? <Button tone="secondary" size="sm" onClick={() => setSearch("")}>Clear search</Button> : undefined}
+          hint={deals.length === 0 ? "Add your first deal above, or ask your workmate to create one from a conversation." : "Try another search or stage filter."}
+          action={deals.length > 0 ? <Button tone="secondary" size="sm" onClick={() => { setSearch(""); props.onDealFilterChange("all"); }}>Show all deals</Button> : undefined}
         />
+      ) : viewMode === "table" ? (
+        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead><tr className="border-b border-stone-200 bg-stone-50 text-left text-xs text-stone-500"><th className="px-3 py-2.5 font-medium">Deal</th><th className="px-3 py-2.5 font-medium">Customer</th><th className="px-3 py-2.5 font-medium">Stage</th><th className="px-3 py-2.5 text-right font-medium">Value</th><th className="px-3 py-2.5 text-right font-medium">Time in stage</th><th className="px-3 py-2.5 text-right font-medium">Forecast</th></tr></thead>
+            <tbody>{visibleDeals.map((deal) => {
+              const stageDays = Math.max(0, Math.floor((Date.now() - new Date(deal.updatedAt).getTime()) / 86400000));
+              const contribution = deal.stage === "won" || deal.stage === "lost" ? 0 : Math.round(deal.valueMinor * weights[deal.stage]);
+              return <tr key={deal.id} className="border-b border-stone-100 last:border-0 hover:bg-stone-50/60">
+                <td className="px-3 py-3"><p className="font-medium text-stone-900">{deal.title}</p>{deal.note && <p className="mt-0.5 max-w-sm truncate text-xs text-stone-500">{deal.note}</p>}</td>
+                <td className="px-3 py-3 text-stone-600">{deal.customerName ?? <span className="text-stone-400">No customer</span>}</td>
+                <td className="px-3 py-3"><select className="select h-9 min-w-36" aria-label={`Move ${deal.title} to stage`} value={deal.stage} onChange={(event) => requestMove(deal.id, event.target.value as Stage)}>{STAGES.map((stage) => <option key={stage} value={stage}>{stageMeta[stage].label}</option>)}</select></td>
+                <td className="px-3 py-3 text-right tnum">{formatMoneyWhole(deal.valueMinor)}</td>
+                <td className="px-3 py-3 text-right text-xs text-stone-500">{stageDays === 0 ? "Today" : `${stageDays} day${stageDays === 1 ? "" : "s"}`}</td>
+                <td className="px-3 py-3 text-right tnum font-medium">{formatMoneyWhole(contribution)}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
       ) : (
         <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-3 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
           {STAGES.map((stage) => {
@@ -758,10 +908,18 @@ function DealsTab(props: {
                     <article
                       key={deal.id}
                       draggable
+                      tabIndex={0}
+                      aria-label={`${deal.title}, ${stageMeta[stage].label}, ${formatMoneyWhole(deal.valueMinor)}. Use left or right arrow to move stage.`}
                       onDragStart={() => setDragging(deal.id)}
                       onDragEnd={() => {
                         setDragging(null);
                         setOverStage(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        const index = STAGES.indexOf(stage);
+                        if (event.key === "ArrowRight" && index < STAGES.length - 1) { event.preventDefault(); requestMove(deal.id, STAGES[index + 1]!); }
+                        if (event.key === "ArrowLeft" && index > 0) { event.preventDefault(); requestMove(deal.id, STAGES[index - 1]!); }
                       }}
                       className={cn(
                         "cursor-grab rounded-lg border border-stone-200 bg-white p-3 shadow-xs transition-shadow duration-150 hover:shadow-sm active:cursor-grabbing",
@@ -775,13 +933,14 @@ function DealsTab(props: {
                       {deal.valueMinor > 0 && (
                         <p className="tnum mt-1 text-xs font-medium text-stone-500">{formatMoneyWhole(deal.valueMinor)}</p>
                       )}
+                      <p className="mt-1 text-[11px] text-stone-500">In stage {Math.max(0, Math.floor((Date.now() - new Date(deal.updatedAt).getTime()) / 86400000))} days</p>
                       {deal.note && <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-stone-500">{deal.note}</p>}
                       <p className="mt-1.5 text-[11px] text-stone-400">Updated {timeAgo(deal.updatedAt)}</p>
                       {stage !== "won" && stage !== "lost" && (
                         <div className="mt-2.5 flex items-center justify-between gap-1 border-t border-stone-100 pt-2">
                           <button
                             type="button"
-                            onClick={() => props.onMove(deal.id, STAGES[Math.min(STAGES.indexOf(stage) + 1, STAGES.length - 2)]!)}
+                            onClick={() => requestMove(deal.id, STAGES[Math.min(STAGES.indexOf(stage) + 1, STAGES.length - 2)]!)}
                             disabled={busy}
                             aria-label={`Move “${deal.title}” forward`}
                             title="Advance stage"
@@ -791,7 +950,7 @@ function DealsTab(props: {
                           </button>
                           <button
                             type="button"
-                            onClick={() => props.onMove(deal.id, "lost")}
+                            onClick={() => requestMove(deal.id, "lost")}
                             disabled={busy}
                             aria-label={`Mark “${deal.title}” as lost`}
                             title="Mark lost"
@@ -822,7 +981,7 @@ function DealsTab(props: {
                         <div className="mt-2.5 border-t border-stone-100 pt-2">
                           <button
                             type="button"
-                            onClick={() => props.onMove(deal.id, "lead")}
+                            onClick={() => requestMove(deal.id, "lead")}
                             disabled={busy}
                             className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-stone-400 transition-colors duration-150 hover:bg-stone-100 hover:text-stone-700 disabled:pointer-events-none disabled:opacity-40"
                           >
@@ -855,9 +1014,28 @@ function DealsTab(props: {
       )}
 
       <p className="mt-2 text-xs text-stone-400">
-        Drag a card to any stage - every move is recorded in the ledger and reversible. Keyboard: use Advance, Mark
-        lost, or Reopen on each card.
+        Drag a card to move it, use the stage selector in Table view, or focus a card and press ←/→. Forecast changes and lost reasons are reviewed before they are saved.
       </p>
+
+      <Dialog
+        open={moveIntent !== null}
+        onClose={() => setMoveIntent(null)}
+        title="Review stage change"
+        description="This move changes the forecast. Check the deal and totals before saving it."
+        footer={<><Button tone="secondary" onClick={() => setMoveIntent(null)} disabled={busy}>Cancel</Button><Button tone={moveIntent?.stage === "lost" ? "dangerSecondary" : "primary"} onClick={confirmMove} disabled={busy || (moveIntent?.stage === "lost" && moveIntent.reason.trim().length < 3)}>{moveIntent?.stage === "lost" ? "Mark lost" : "Save stage"}</Button></>}
+      >
+        {moveIntent && (() => {
+          const contribution = (stage: Stage) => stage === "won" || stage === "lost" ? 0 : Math.round(moveIntent.deal.valueMinor * weights[stage]);
+          const afterForecast = forecast - contribution(moveIntent.deal.stage) + contribution(moveIntent.stage);
+          const wonBefore = deals.filter((deal) => deal.stage === "won").reduce((sum, deal) => sum + deal.valueMinor, 0);
+          const wonAfter = wonBefore + (moveIntent.stage === "won" ? moveIntent.deal.valueMinor : 0) - (moveIntent.deal.stage === "won" ? moveIntent.deal.valueMinor : 0);
+          return <div className="space-y-4">
+            <div className="rounded-lg border border-stone-200 bg-stone-50 p-3"><p className="font-semibold text-stone-900">{moveIntent.deal.title}</p><p className="mt-0.5 text-xs text-stone-500">{moveIntent.deal.customerName ?? "No linked customer"}</p><p className="mt-2 text-sm">{stageMeta[moveIntent.deal.stage].label} <IconArrowRight className="inline size-3.5" /> {stageMeta[moveIntent.stage].label} <span className="ml-2 tnum font-semibold">{formatMoneyWhole(moveIntent.deal.valueMinor)}</span></p></div>
+            <dl className="grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg bg-stone-50 p-3"><dt className="text-xs text-stone-500">Weighted forecast</dt><dd className="mt-1 tnum font-semibold">{formatMoneyWhole(forecast)} <span className="text-xs font-normal text-stone-500">→ {formatMoneyWhole(afterForecast)}</span></dd></div><div className="rounded-lg bg-stone-50 p-3"><dt className="text-xs text-stone-500">Won total</dt><dd className="mt-1 tnum font-semibold">{formatMoneyWhole(wonBefore)} <span className="text-xs font-normal text-stone-500">→ {formatMoneyWhole(wonAfter)}</span></dd></div></dl>
+            {moveIntent.stage === "lost" && <label className="label" htmlFor="crm-lost-reason">Why was this deal lost?<textarea id="crm-lost-reason" className="textarea mt-1 min-h-24 resize-y" maxLength={500} value={moveIntent.reason} onChange={(event) => setMoveIntent({ ...moveIntent, reason: event.target.value })} placeholder="Price, timing, selected another provider…" required /></label>}
+          </div>;
+        })()}
+      </Dialog>
 
       <Dialog
         open={convertTarget !== null}
@@ -933,8 +1111,13 @@ interface CustomerFilter {
 }
 
 interface SavedCustomerView {
+  id: string;
   name: string;
-  filter: CustomerFilter;
+  filters: CustomerFilter;
+  isShared: boolean;
+  isPinned: boolean;
+  createdByUserId: string;
+  updatedAt: string;
 }
 
 function CustomersTab(props: {
@@ -945,47 +1128,120 @@ function CustomersTab(props: {
   busy: boolean;
   newName: string;
   newEmail: string;
+  newPhone: string;
+  newContactMethod: Customer["preferredContactMethod"];
+  newDoNotContact: boolean;
   onNameChange: (v: string) => void;
   onEmailChange: (v: string) => void;
-  onCreate: (e: React.FormEvent) => void;
+  onPhoneChange: (v: string) => void;
+  onContactMethodChange: (v: Customer["preferredContactMethod"]) => void;
+  onDoNotContactChange: (v: boolean) => void;
+  onCreate: (e: React.FormEvent) => Promise<boolean>;
   onDeactivate: (customer: Customer) => void;
   onRetryTeam: () => void;
-  onOpenProfile: (customerId: string, name: string) => void;
-  onUpdateProfile: (input: { customerIds: string[]; ownerUserId?: string | null; addTags?: string[] }) => Promise<boolean>;
+  onOpenProfile: (customerId: string, name: string, initialTab?: "overview" | "activity" | "invoices" | "documents") => void;
+  onOpenNextStep: (customer: Customer) => void;
+  onUpdateProfile: (input: { customerIds: string[]; name?: string; ownerUserId?: string | null; addTags?: string[]; removeTags?: string[]; notes?: string | null; phone?: string | null; preferredContactMethod?: Customer["preferredContactMethod"]; doNotContact?: boolean }) => Promise<boolean>;
   onCreateTask: (input: { customerId: string; title: string; dueAt?: string; note?: string }) => Promise<boolean>;
+  onNotice: (notice: ActionNoticeState | null) => void;
+  onRefresh: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<CustomerFilter>({ status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" });
   const [savedViews, setSavedViews] = useState<SavedCustomerView[]>([]);
   const [saveName, setSaveName] = useState("");
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkOwner, setBulkOwner] = useState("unchanged");
   const [bulkTag, setBulkTag] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [viewsBusy, setViewsBusy] = useState(false);
+  const [viewsError, setViewsError] = useState<string | null>(null);
+  const [shareOnSave, setShareOnSave] = useState(true);
+  const [pinOnSave, setPinOnSave] = useState(false);
+  const [reviewTarget, setReviewTarget] = useState<{ first: Customer; second: Customer; reason: NonNullable<DuplicateVerdict["reason"]> } | null>(null);
+  const [reviewSurvivorId, setReviewSurvivorId] = useState("");
+  const [reviewEntries, setReviewEntries] = useState<Record<string, TimelineEntry[] | null>>({});
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeUndo, setMergeUndo] = useState<CustomerMergeOutput | null>(null);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("chaste.crm.customer-views.v1");
-      if (stored) {
-        const parsed: unknown = JSON.parse(stored);
-        if (Array.isArray(parsed)) setSavedViews(parsed as SavedCustomerView[]);
-      }
-    } catch {
-      setSavedViews([]);
-    }
+    let active = true;
+    void callApi<{ views?: SavedCustomerView[] }>("/api/crm/views").then((response) => {
+      if (!active) return;
+      if (response.ok) {
+        setSavedViews(response.data?.views ?? []);
+        setViewsError(null);
+      } else setViewsError(response.error?.title ?? "Saved views are unavailable.");
+    });
+    return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!reviewTarget) return;
+    let current = true;
+    setReviewEntries({});
+    setReviewLoading(true);
+    const timeout = window.setTimeout(() => {
+      if (!current) return;
+      setReviewEntries({ [reviewTarget.first.id]: null, [reviewTarget.second.id]: null });
+      setReviewLoading(false);
+    }, 5000);
+    void Promise.all([reviewTarget.first.id, reviewTarget.second.id].map(async (customerId) => {
+      const response = await callApi<{ entries?: TimelineEntry[] }>(`/api/crm?timeline=${encodeURIComponent(customerId)}`);
+      return [customerId, response.ok ? response.data?.entries ?? [] : null] as const;
+    })).then((entries) => {
+      if (current) setReviewEntries(Object.fromEntries(entries));
+    }).finally(() => {
+      window.clearTimeout(timeout);
+      if (current) setReviewLoading(false);
+    });
+    return () => { current = false; window.clearTimeout(timeout); };
+  }, [reviewTarget]);
 
   const active = props.customers.filter((customer) => !customer.deactivatedAt);
   const inactive = props.customers.filter((customer) => customer.deactivatedAt);
-  const emailGroups = new Map<string, string[]>();
-  const nameGroups = new Map<string, string[]>();
-  for (const customer of active) {
-    const email = customer.email?.trim().toLowerCase();
-    const name = customer.name.trim().toLowerCase();
-    if (email) emailGroups.set(email, [...(emailGroups.get(email) ?? []), customer.id]);
-    if (name && name !== "walk-in customer") nameGroups.set(name, [...(nameGroups.get(name) ?? []), customer.id]);
-  }
-  const duplicateIds = new Set([...emailGroups.values(), ...nameGroups.values()].filter((group) => group.length > 1).flat());
+  const duplicatePartners = useMemo(() => {
+    const byKey = new Map<string, number[]>();
+    const matches = new Map<string, { customerId: string; reason: NonNullable<DuplicateVerdict["reason"]> }>();
+    const candidates = props.customers.filter((customer) => !customer.deactivatedAt);
+    const rememberKeys = (customer: Customer, index: number, candidate: boolean) => {
+      const email = normalizeEmail(customer.email);
+      const phone = normalizePhone(customer.phone);
+      const name = normalizeCustomerName(customer.name);
+      const keys = [
+        ...(email ? [`email:${email}`] : []),
+        ...(phone ? [`phone:${phone}`] : []),
+        ...(name ? [`name:${name}`] : []),
+      ];
+      if (name.length >= 8) {
+        keys.push(`name:${name.slice(0, 2)}`, `name:${name.slice(1, 3)}`, `name:${name[0]}${name[2] ?? ""}`);
+      }
+      if (candidate) {
+        const prior = new Set(keys.flatMap((key) => byKey.get(key) ?? []));
+        for (const priorIndex of prior) {
+          const other = candidates[priorIndex];
+          if (!other) continue;
+          const verdict = findDuplicate([{ name: other.name, email: other.email, phone: other.phone }], {
+            name: customer.name,
+            email: customer.email,
+            phone: customer.phone,
+          });
+          if (!verdict.duplicate || !verdict.reason) continue;
+          if (!matches.has(customer.id)) matches.set(customer.id, { customerId: other.id, reason: verdict.reason });
+          if (!matches.has(other.id)) matches.set(other.id, { customerId: customer.id, reason: verdict.reason });
+        }
+      }
+      for (const key of new Set(keys)) byKey.set(key, [...(byKey.get(key) ?? []), index]);
+    };
+    candidates.forEach((customer, index) => rememberKeys(customer, index, true));
+    return matches;
+  }, [props.customers]);
+  const duplicateIds = new Set(duplicatePartners.keys());
   const query = search.trim().toLowerCase();
   const visible = props.customers.filter((customer) => {
     const matchesStatus = filter.status === "all" || (filter.status === "active" ? !customer.deactivatedAt : Boolean(customer.deactivatedAt));
@@ -997,14 +1253,105 @@ function CustomersTab(props: {
     return matchesStatus && matchesSearch && matchesOwner && (!filter.staleOnly || stale) && (!filter.duplicateOnly || duplicateIds.has(customer.id)) && matchesTag;
   });
   const staleCount = active.filter((customer) => Date.now() - new Date(customer.lastActivityAt).getTime() >= 30 * 86400000).length;
+  const activeFilterCount = Number(filter.status !== "active") + Number(filter.owner !== "all") + Number(filter.staleOnly) + Number(filter.duplicateOnly) + Number(Boolean(filter.tag));
+
+  function reviewDuplicate(customer: Customer): void {
+    const match = duplicatePartners.get(customer.id);
+    const other = match && props.customers.find((candidate) => candidate.id === match.customerId);
+    if (!match || !other) return;
+    setReviewSurvivorId(customer.id);
+    setReviewTarget({ first: customer, second: other, reason: match.reason });
+  }
+
+  async function mergeReviewedCustomers(): Promise<void> {
+    if (!reviewTarget || !reviewSurvivorId) return;
+    const duplicateCustomerId = reviewTarget.first.id === reviewSurvivorId ? reviewTarget.second.id : reviewTarget.first.id;
+    setMergeBusy(true);
+    try {
+      const response = await postApi<{ data?: CustomerMergeOutput }>("/api/customers", {
+        action: "merge",
+        survivorCustomerId: reviewSurvivorId,
+        duplicateCustomerId,
+      });
+      if (response.status === 202) {
+        props.onNotice({ tone: "pending", text: "This customer merge is waiting for approval." });
+        return;
+      }
+      if (!response.ok || !response.data?.data) {
+        props.onNotice({ tone: "error", error: response.error ?? { title: "Customers could not be merged", hint: "Refresh the list and review the records again." } });
+        return;
+      }
+      setMergeUndo(response.data.data);
+      setReviewTarget(null);
+      props.onNotice({ tone: "success", text: "Customers merged. Their original invoices and activity remain in history." });
+      props.onRefresh();
+    } finally {
+      setMergeBusy(false);
+    }
+  }
+
+  async function undoCustomerMerge(): Promise<void> {
+    if (!mergeUndo) return;
+    setMergeBusy(true);
+    try {
+      const response = await postApi("/api/customers", { action: "undoMerge", ...mergeUndo });
+      if (!response.ok) {
+        props.onNotice({ tone: "error", error: response.error ?? { title: "Merge could not be undone", hint: "Refresh the customer list and try again." } });
+        return;
+      }
+      setMergeUndo(null);
+      props.onNotice({ tone: "success", text: "Customer records restored to their previous state." });
+      props.onRefresh();
+    } finally {
+      setMergeBusy(false);
+    }
+  }
+
+  function countForView(target: CustomerFilter): number {
+    return props.customers.filter((customer) => {
+      const matchesStatus = target.status === "all" || (target.status === "active" ? !customer.deactivatedAt : Boolean(customer.deactivatedAt));
+      const stale = !customer.deactivatedAt && Date.now() - new Date(customer.lastActivityAt).getTime() >= 30 * 86400000;
+      const matchesOwner = target.owner === "all" || (target.owner === "unassigned" ? !customer.ownerUserId : customer.ownerUserId === target.owner);
+      const matchesTag = !target.tag || customer.tags.some((tag) => tag.toLowerCase() === target.tag.toLowerCase());
+      return matchesStatus && matchesOwner && (!target.staleOnly || stale) && (!target.duplicateOnly || duplicateIds.has(customer.id)) && matchesTag;
+    }).length;
+  }
+
+  function describeView(target: CustomerFilter): string {
+    const parts = [target.status === "active" ? "Active" : target.status === "inactive" ? "Inactive" : "All statuses"];
+    if (target.owner !== "all") parts.push(target.owner === "unassigned" ? "Unassigned" : props.teamMembers?.find((member) => member.userId === target.owner)?.name ?? "Selected owner");
+    if (target.staleOnly) parts.push("No activity 30d");
+    if (target.duplicateOnly) parts.push("Possible duplicates");
+    if (target.tag) parts.push(`Tag: ${target.tag}`);
+    return parts.join(" · ");
+  }
+
+  function toggleSavedView(view: SavedCustomerView, key: "isShared" | "isPinned"): void {
+    void persistView({ id: view.id, name: view.name, filters: view.filters, isShared: key === "isShared" ? !view.isShared : view.isShared, isPinned: key === "isPinned" ? !view.isPinned : view.isPinned });
+  }
+
+  async function persistView(input: { id?: string; name: string; filters: CustomerFilter; isShared: boolean; isPinned: boolean }): Promise<void> {
+    setViewsBusy(true);
+    try {
+      const response = await postApi<{ data?: { viewId: string } }>("/api/crm/views", input);
+      if (response.status === 202) props.onNotice({ tone: "pending", text: "Saving this customer view needs approval." });
+      else if (!response.ok) props.onNotice({ tone: "error", error: response.error ?? { title: "Could not save view", hint: "Try again." } });
+      else {
+        props.onNotice({ tone: "success", text: `Saved “${input.name}” to this workspace.` });
+        const refreshed = await callApi<{ views?: SavedCustomerView[] }>("/api/crm/views");
+        if (refreshed.ok) setSavedViews(refreshed.data?.views ?? []);
+        setSaveName("");
+      }
+    } finally {
+      setViewsBusy(false);
+    }
+  }
 
   function saveView() {
     const name = saveName.trim();
     if (!name) return;
-    const next = [...savedViews.filter((view) => view.name.toLowerCase() !== name.toLowerCase()), { name, filter: { ...filter } }];
-    setSavedViews(next);
-    localStorage.setItem("chaste.crm.customer-views.v1", JSON.stringify(next));
-    setSaveName("");
+    const existing = savedViews.find((view) => view.name.toLowerCase() === name.toLowerCase());
+    void persistView({ ...(existing ? { id: existing.id } : {}), name, filters: { ...filter }, isShared: shareOnSave, isPinned: pinOnSave });
   }
 
   function exportSelected() {
@@ -1045,18 +1392,23 @@ function CustomersTab(props: {
 
   return (
     <div>
-      <form onSubmit={props.onCreate} className="mb-6 flex flex-wrap items-center gap-2">
-        <input value={props.newName} onChange={(event) => props.onNameChange(event.target.value)} placeholder="Customer name" aria-label="New customer name" className="input h-9 w-full sm:w-56" />
-        <input value={props.newEmail} onChange={(event) => props.onEmailChange(event.target.value)} placeholder="Email (optional)" aria-label="New customer email" type="email" className="input h-9 w-full sm:w-52" />
-        <Button type="submit" className="w-full sm:w-auto" loading={props.busy} disabled={!props.newName.trim()}>Add customer</Button>
-      </form>
-
-      <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <label className="relative block w-full lg:max-w-md">
+      <div className="mb-3 grid gap-2 sm:flex sm:items-center sm:justify-between">
+        <div className="flex min-w-0 gap-2 sm:flex-1">
+        <label className="relative block min-w-0 flex-1 lg:max-w-md">
           <IconSearch aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-stone-400" />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, email, or tag" aria-label="Search customers by name, email, or tag" className="input pl-9" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search customers" aria-label="Search customers by name, email, or tag" className="input h-11 pl-9 sm:h-10" />
         </label>
-        <div className="flex flex-wrap items-center gap-2">
+        <Button tone="secondary" className="min-h-11 shrink-0 sm:hidden" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen((open) => !open)}>
+            Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
+        </Button>
+        </div>
+        <div className="flex items-center gap-2 sm:flex-none">
+          <Button tone="secondary" className="min-h-11 flex-1 sm:min-h-9 sm:flex-none" onClick={() => setImportOpen(true)}>Import CSV</Button>
+          <Button className="min-h-11 flex-1 sm:min-h-9 sm:flex-none" onClick={() => setCreateOpen(true)}>Add customer</Button>
+        </div>
+      </div>
+
+      <div className={cn("mb-3 flex flex-wrap items-center gap-2", mobileFiltersOpen ? "" : "hidden sm:flex")}>
           <select className={filterButtonClass} aria-label="Customer status" value={filter.status} onChange={(event) => setFilter((current) => ({ ...current, status: event.target.value as CustomerFilter["status"] }))}>
             <option value="active">Active ({active.length})</option><option value="inactive">Inactive ({inactive.length})</option><option value="all">All ({props.customers.length})</option>
           </select>
@@ -1066,20 +1418,49 @@ function CustomersTab(props: {
           <button type="button" className={cn(filterButtonClass, filter.staleOnly && "border-amber-300 bg-amber-50 text-amber-900")} aria-pressed={filter.staleOnly} onClick={() => setFilter((current) => ({ ...current, staleOnly: !current.staleOnly }))}>No activity 30d · {staleCount}</button>
           <button type="button" className={cn(filterButtonClass, filter.duplicateOnly && "border-amber-300 bg-amber-50 text-amber-900")} aria-pressed={filter.duplicateOnly} onClick={() => setFilter((current) => ({ ...current, duplicateOnly: !current.duplicateOnly }))}>Possible duplicates · {duplicateIds.size}</button>
           <input className="input h-9 w-32" value={filter.tag} onChange={(event) => setFilter((current) => ({ ...current, tag: event.target.value }))} placeholder="Filter by tag" aria-label="Filter by exact tag" />
-        </div>
       </div>
 
-      <div className="mb-4 flex flex-col gap-2 rounded-lg border border-stone-200 bg-stone-50/70 p-3 sm:flex-row sm:items-center">
-        <div className="flex flex-wrap items-center gap-2">
-          <select className="select h-9 min-w-40" aria-label="Saved customer view" value="" onChange={(event) => { const found = savedViews.find((view) => view.name === event.target.value); if (found) setFilter(found.filter); }}>
-            <option value="">Saved views on this device</option>{savedViews.map((view) => <option key={view.name} value={view.name}>{view.name}</option>)}
-          </select>
-          <input className="input h-9 w-40" value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="Name this view" aria-label="Saved view name" />
-          <Button tone="secondary" size="sm" disabled={!saveName.trim()} onClick={saveView}>Save view</Button>
-          {props.teamError && <button type="button" className="text-xs text-amber-800 underline" onClick={props.onRetryTeam}>Owner list unavailable. Retry</button>}
+      {activeFilterCount > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5" aria-label="Active customer filters">
+          <span className="mr-1 text-xs text-stone-500">Filtered by</span>
+          {filter.status !== "active" && <button type="button" className="rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs text-stone-700" onClick={() => setFilter((current) => ({ ...current, status: "active" }))}>{filter.status === "all" ? "All statuses" : "Inactive"} <span aria-hidden="true">×</span></button>}
+          {filter.owner !== "all" && <button type="button" className="rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs text-stone-700" onClick={() => setFilter((current) => ({ ...current, owner: "all" }))}>{filter.owner === "unassigned" ? "Unassigned" : props.teamMembers?.find((member) => member.userId === filter.owner)?.name ?? "Owner"} <span aria-hidden="true">×</span></button>}
+          {filter.staleOnly && <button type="button" className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-900" onClick={() => setFilter((current) => ({ ...current, staleOnly: false }))}>No activity 30d <span aria-hidden="true">×</span></button>}
+          {filter.duplicateOnly && <button type="button" className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-900" onClick={() => setFilter((current) => ({ ...current, duplicateOnly: false }))}>Possible duplicates <span aria-hidden="true">×</span></button>}
+          {filter.tag && <button type="button" className="rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs text-stone-700" onClick={() => setFilter((current) => ({ ...current, tag: "" }))}>Tag: {filter.tag} <span aria-hidden="true">×</span></button>}
+          <button type="button" className="px-2 py-1 text-xs font-medium text-stone-500 underline" onClick={() => setFilter({ status: "active", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" })}>Clear all</button>
         </div>
-        <span className="text-xs text-stone-500 sm:ml-auto">Views are saved in this browser. {visible.length} shown.</span>
+      )}
+
+      <div className="mb-4 rounded-lg border border-stone-200 bg-stone-50/70 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <details className="group relative">
+            <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-md border border-stone-200 bg-white px-3 text-sm font-medium text-stone-700 sm:min-w-48"><span>Views ({savedViews.length})</span><span aria-hidden="true" className="text-stone-400">⌄</span></summary>
+            <div className="absolute top-full left-0 z-20 mt-1 max-h-80 w-[min(22rem,calc(100vw-3rem))] overflow-auto rounded-xl border border-stone-200 bg-white p-2 shadow-lg">
+              {viewsError ? <p className="p-2 text-xs text-amber-800">{viewsError}</p> : savedViews.length === 0 ? <p className="p-2 text-xs text-stone-500">No shared workspace views yet. Save this filter set to make it available on your other devices and to teammates.</p> : [...savedViews].sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name)).map((view) => (
+                <div key={view.id} className="rounded-lg px-2 py-2 hover:bg-stone-50">
+                  <button type="button" onClick={() => setFilter(view.filters)} className="block w-full text-left"><span className="flex items-center gap-1.5 text-sm font-medium text-stone-800">{view.isPinned && <span aria-label="Pinned">★</span>}{view.name}<span className="ml-auto text-xs font-normal text-stone-500">{countForView(view.filters)}</span></span><span className="mt-0.5 block text-[11px] text-stone-500">{describeView(view.filters)} · {view.isShared ? "Team" : "Private"}</span></button>
+                  <div className="mt-1 flex gap-3 text-[11px]"><button type="button" className="text-stone-500 underline" onClick={() => toggleSavedView(view, "isPinned")}>{view.isPinned ? "Unpin" : "Pin"}</button><button type="button" className="text-stone-500 underline" onClick={() => toggleSavedView(view, "isShared")}>{view.isShared ? "Make private" : "Share with team"}</button></div>
+                </div>
+              ))}
+            </div>
+          </details>
+          <Button tone="secondary" className="min-h-10" aria-expanded={saveViewOpen} onClick={() => setSaveViewOpen((open) => !open)}>
+            {saveViewOpen ? "Close" : "Save view"}
+          </Button>
+        </div>
+        {saveViewOpen && (
+          <div className="mt-3 grid gap-2 border-t border-stone-200 pt-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center">
+            <input className="input h-10 min-w-0" value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="Name this customer view" aria-label="Saved view name" maxLength={60} />
+            <label className="flex min-h-10 items-center gap-2 rounded-md border border-stone-200 bg-white px-3 text-xs text-stone-600"><input type="checkbox" checked={shareOnSave} onChange={(event) => setShareOnSave(event.target.checked)} className="accent-gold-700" />Share with team</label>
+            <label className="flex min-h-10 items-center gap-2 rounded-md border border-stone-200 bg-white px-3 text-xs text-stone-600"><input type="checkbox" checked={pinOnSave} onChange={(event) => setPinOnSave(event.target.checked)} className="accent-gold-700" />Pin</label>
+            <Button tone="secondary" className="min-h-10" loading={viewsBusy} disabled={!saveName.trim()} onClick={saveView}>Save view</Button>
+          </div>
+        )}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500"><span>{visible.length} customer{visible.length === 1 ? "" : "s"} shown · {savedViews.filter((view) => view.isShared).length} team view{savedViews.filter((view) => view.isShared).length === 1 ? "" : "s"}</span>{props.teamError && <button type="button" className="text-amber-800 underline" onClick={props.onRetryTeam}>Owner list unavailable. Retry</button>}</div>
       </div>
+
+      {mergeUndo && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2" role="status"><span className="text-sm text-emerald-950">Merge complete. Customer history is preserved.</span><div className="flex gap-2"><Button tone="secondary" size="sm" loading={mergeBusy} onClick={() => void undoCustomerMerge()}><IconUndo className="size-3.5" /> Undo merge</Button><button type="button" className="px-2 text-xs text-emerald-900 underline" onClick={() => setMergeUndo(null)}>Dismiss</button></div></div>}
 
       {selected.length > 0 && (
         <div className="mb-3 flex flex-col gap-2 rounded-lg border border-gold-200 bg-gold-50/70 p-3 sm:flex-row sm:items-center" aria-live="polite">
@@ -1102,19 +1483,23 @@ function CustomersTab(props: {
         <>
           <ul className="space-y-2 sm:hidden" aria-label="Customers">
             {visible.map((customer) => (
-              <li key={customer.id} className="rounded-xl border border-stone-200 bg-white p-3 shadow-xs">
-                <div className="flex items-start gap-3">
-                  <input type="checkbox" aria-label={`Select ${customer.name}`} checked={selected.includes(customer.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, customer.id] : current.filter((id) => id !== customer.id))} className="mt-1 size-4 accent-gold-700" />
+              <li key={customer.id} className="group relative cursor-pointer rounded-xl border border-stone-200 bg-white p-3 shadow-xs transition hover:border-gold-300 hover:shadow-sm">
+                <button type="button" className="absolute inset-0 z-0 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-600" aria-label={`Open customer profile for ${customer.name}`} aria-haspopup="dialog" onClick={() => props.onOpenProfile(customer.id, customer.name)} />
+                <span aria-hidden="true" className="pointer-events-none absolute top-3 right-3 z-10 text-sm font-semibold text-stone-400 transition group-hover:translate-x-0.5 group-hover:text-gold-800">→</span>
+                <div className="relative z-10 flex pointer-events-none items-start gap-3">
+                  <input type="checkbox" aria-label={`Select ${customer.name}`} checked={selected.includes(customer.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, customer.id] : current.filter((id) => id !== customer.id))} className="pointer-events-auto mt-1 size-4 accent-gold-700" />
                   <div className="min-w-0 flex-1">
-                    <button type="button" className="block max-w-full truncate text-left text-sm font-semibold text-stone-900 hover:underline" onClick={() => props.onOpenProfile(customer.id, customer.name)}>{customer.name}</button>
-                    {customer.email ? <a className="mt-0.5 block truncate text-xs text-stone-500 hover:text-gold-800 hover:underline" href={`mailto:${customer.email}`}>{customer.email}</a> : <p className="mt-0.5 text-xs text-stone-400">No email</p>}
+                    <span className="block max-w-full truncate pr-5 text-left text-sm font-semibold text-stone-900">{customer.name}</span>
+                    {customer.email ? <a className="pointer-events-auto mt-0.5 block truncate text-xs text-stone-500 hover:text-gold-800 hover:underline" href={`mailto:${customer.email}`}>{customer.email}</a> : <p className="mt-0.5 text-xs text-stone-400">No email</p>}
                     <div className="mt-2 flex flex-wrap gap-1">{customer.deactivatedAt ? <Badge tone="neutral">Inactive</Badge> : <Badge tone="green">Active</Badge>}{duplicateIds.has(customer.id) && <Badge tone="amber">Possible duplicate</Badge>}{customer.ownerName && <Badge tone="blue">{customer.ownerName}</Badge>}{customer.tags.map((tag) => <Badge key={tag} tone="neutral">{tag}</Badge>)}</div>
+                    {customer.nextStep && <div className="pointer-events-auto mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2.5"><p className="text-xs font-medium text-amber-950">Next step: {customer.nextStep.summary}{customer.nextStep.amountMinor !== undefined ? ` · ${formatMoney(customer.nextStep.amountMinor)} outstanding` : ""}</p><button type="button" className="mt-1 text-xs font-semibold text-amber-900 underline" aria-label={`Open ${customer.nextStep.kind} next step for ${customer.name}`} onClick={() => props.onOpenNextStep(customer)}>{customer.nextStep.kind === "task" ? "Open follow-up" : customer.nextStep.kind === "invoice" ? "Open invoice" : "Open quote"}</button></div>}
                     <p className="mt-2 text-[11px] text-stone-400">Last activity {timeAgo(customer.lastActivityAt)}</p>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2 border-t border-stone-100 pt-2">
-                  <Button tone="secondary" size="sm" disabled={props.busy} onClick={() => props.onOpenProfile(customer.id, customer.name)}><IconHistory className="size-3.5" /> Open profile</Button>
-                  {!customer.deactivatedAt && <Button tone="ghost" size="sm" disabled={props.busy} onClick={() => props.onDeactivate(customer)}><IconX className="size-3.5" /> Deactivate</Button>}
+                <div className="relative z-10 mt-3 flex pointer-events-none flex-wrap gap-2 border-t border-stone-100 pt-2">
+                  <Button tone="secondary" size="sm" className="pointer-events-auto" disabled={props.busy} onClick={() => props.onOpenProfile(customer.id, customer.name)}><IconHistory className="size-3.5" /> Open profile</Button>
+                  {duplicatePartners.has(customer.id) && <Button tone="ghost" size="sm" className="pointer-events-auto" onClick={() => reviewDuplicate(customer)}>Review match</Button>}
+                  {!customer.deactivatedAt && <Button tone="ghost" size="sm" className="pointer-events-auto" disabled={props.busy} onClick={() => props.onDeactivate(customer)}><IconX className="size-3.5" /> Deactivate</Button>}
                 </div>
               </li>
             ))}
@@ -1127,13 +1512,20 @@ function CustomersTab(props: {
                 <th className="px-3 py-2.5 font-medium">Customer</th><th className="px-3 py-2.5 font-medium">Owner &amp; tags</th><th className="px-3 py-2.5 font-medium">Last activity</th><th className="px-3 py-2.5 font-medium">Status</th><th className="px-3 py-2.5" />
               </tr></thead>
               <tbody>{visible.map((customer) => (
-                <tr key={customer.id} className="border-b border-stone-100 last:border-0 hover:bg-stone-50/60">
+                <tr
+                  key={customer.id}
+                  className="cursor-pointer border-b border-stone-100 last:border-0 hover:bg-stone-50/60"
+                  onClick={(event) => {
+                    if (event.target instanceof Element && event.target.closest("button,a,input,select,textarea")) return;
+                    props.onOpenProfile(customer.id, customer.name);
+                  }}
+                >
                   <td className="px-3 py-3"><input type="checkbox" aria-label={`Select ${customer.name}`} checked={selected.includes(customer.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, customer.id] : current.filter((id) => id !== customer.id))} className="size-4 accent-gold-700" /></td>
-                  <td className="px-3 py-3"><button type="button" className="text-left font-medium text-stone-800 hover:text-gold-800 hover:underline" onClick={() => props.onOpenProfile(customer.id, customer.name)}>{customer.name}</button><p className="mt-0.5 text-xs text-stone-500">{customer.email ?? "No email"}{duplicateIds.has(customer.id) && <span className="ml-2 text-amber-700">Possible duplicate</span>}</p></td>
+                  <td className="px-3 py-3"><button type="button" className="text-left font-medium text-stone-800 hover:text-gold-800 hover:underline" onClick={() => props.onOpenProfile(customer.id, customer.name)}>{customer.name}</button><p className="mt-0.5 text-xs text-stone-500">{customer.email ?? customer.phone ?? "No contact details"}{duplicateIds.has(customer.id) && <span className="ml-2 text-amber-700">Possible duplicate</span>}</p>{customer.nextStep && <button type="button" className="mt-1 block max-w-80 truncate text-left text-xs font-medium text-amber-800 hover:underline" aria-label={`Open ${customer.nextStep.kind} next step for ${customer.name}`} onClick={() => props.onOpenNextStep(customer)}>Next: {customer.nextStep.summary}{customer.nextStep.amountMinor !== undefined ? ` · ${formatMoney(customer.nextStep.amountMinor)}` : ""}</button>}</td>
                   <td className="px-3 py-3"><div className="flex max-w-64 flex-wrap gap-1">{customer.ownerName ? <Badge tone="blue">{customer.ownerName}</Badge> : <span className="text-xs text-stone-400">Unassigned</span>}{customer.tags.slice(0, 3).map((tag) => <Badge key={tag} tone="neutral">{tag}</Badge>)}{customer.tags.length > 3 && <Badge tone="neutral">+{customer.tags.length - 3}</Badge>}</div></td>
                   <td className="px-3 py-3 text-xs text-stone-500">{timeAgo(customer.lastActivityAt)}</td>
                   <td className="px-3 py-3">{customer.deactivatedAt ? <Badge tone="neutral">Inactive</Badge> : <Badge tone="green">Active</Badge>}</td>
-                  <td className="px-3 py-3 text-right whitespace-nowrap"><button type="button" onClick={() => props.onOpenProfile(customer.id, customer.name)} className="rounded-md px-2 py-1 text-xs font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800">Open profile</button>{!customer.deactivatedAt && <button type="button" onClick={() => props.onDeactivate(customer)} disabled={props.busy} className="rounded-md px-2 py-1 text-xs text-stone-400 hover:bg-red-50 hover:text-red-700 disabled:opacity-40">Deactivate</button>}</td>
+                  <td className="px-3 py-3 text-right whitespace-nowrap"><button type="button" onClick={() => props.onOpenProfile(customer.id, customer.name)} className="rounded-md px-2 py-1 text-xs font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800">Open profile</button>{duplicatePartners.has(customer.id) && <button type="button" onClick={() => reviewDuplicate(customer)} className="rounded-md px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-50">Review match</button>}{!customer.deactivatedAt && <button type="button" onClick={() => props.onDeactivate(customer)} disabled={props.busy} className="rounded-md px-2 py-1 text-xs text-stone-400 hover:bg-red-50 hover:text-red-700 disabled:opacity-40">Deactivate</button>}</td>
                 </tr>
               ))}</tbody>
             </table>
@@ -1141,6 +1533,64 @@ function CustomersTab(props: {
         </>
       )}
       <p className="mt-3 text-xs text-stone-400">Deactivation keeps invoices and history available. Duplicate matches are suggestions only, review records before merging.</p>
+
+      <Dialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Add a customer"
+        description="Create a record your team can use on deals, invoices, and follow-ups."
+        footer={<Button tone="secondary" onClick={() => setCreateOpen(false)} disabled={props.busy}>Cancel</Button>}
+      >
+        <form id="crm-create-customer-form" onSubmit={(event) => { void props.onCreate(event).then((created) => created && setCreateOpen(false)); }} className="space-y-3">
+          <label className="label" htmlFor="crm-new-customer-name">Customer name<input id="crm-new-customer-name" autoFocus value={props.newName} onChange={(event) => props.onNameChange(event.target.value)} placeholder="e.g. Acme Supplies" className="input mt-1" maxLength={120} required /></label>
+          <label className="label" htmlFor="crm-new-customer-email">Email <span className="font-normal text-stone-400">(optional)</span><input id="crm-new-customer-email" value={props.newEmail} onChange={(event) => props.onEmailChange(event.target.value)} placeholder="name@company.com" type="email" className="input mt-1" /></label>
+          <label className="label" htmlFor="crm-new-customer-phone">Phone <span className="font-normal text-stone-400">(optional)</span><input id="crm-new-customer-phone" value={props.newPhone} onChange={(event) => props.onPhoneChange(event.target.value)} placeholder="+256 700 000 000" type="tel" className="input mt-1" /></label>
+          <label className="label" htmlFor="crm-new-customer-contact">Preferred contact
+            <select id="crm-new-customer-contact" className="select mt-1" value={props.newContactMethod} onChange={(event) => props.onContactMethodChange(event.target.value as Customer["preferredContactMethod"])}><option value="email">Email</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option></select>
+          </label>
+          <label className="flex items-start gap-2 rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm"><input type="checkbox" className="mt-0.5 accent-red-700" checked={props.newDoNotContact} onChange={(event) => props.onDoNotContactChange(event.target.checked)} /><span><span className="font-medium text-stone-800">Do not contact</span><span className="block text-xs text-stone-500">Prevent staff from starting outreach from this profile.</span></span></label>
+          <Button type="submit" className="w-full" loading={props.busy} disabled={!props.newName.trim()}>Add customer</Button>
+        </form>
+      </Dialog>
+      <CustomerImportDialog
+        open={importOpen}
+        customers={props.customers}
+        onClose={() => setImportOpen(false)}
+        onImported={props.onRefresh}
+        onNotice={(message, isError) => props.onNotice(isError
+          ? { tone: "error", error: { title: message, hint: "Review the import details and retry." } }
+          : { tone: "success", text: message })}
+      />
+      <Dialog
+        open={reviewTarget !== null}
+        onClose={() => { if (!mergeBusy) setReviewTarget(null); }}
+        title="Review possible duplicate"
+        description={reviewTarget ? `Matched by ${reviewTarget.reason}. Choose which customer record should remain.` : undefined}
+        width="max-w-3xl"
+        footer={<>
+          <Button tone="secondary" disabled={mergeBusy} onClick={() => setReviewTarget(null)}>Cancel</Button>
+          <Button loading={mergeBusy} disabled={!reviewSurvivorId} onClick={() => void mergeReviewedCustomers()}>Merge customers</Button>
+        </>}
+      >
+        {reviewTarget && <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[reviewTarget.first, reviewTarget.second].map((customer) => {
+              const entries = reviewEntries[customer.id] ?? [];
+              const counts = entries.reduce<Record<string, number>>((result, entry) => {
+                result[entry.kind] = (result[entry.kind] ?? 0) + 1;
+                return result;
+              }, {});
+              return <label key={customer.id} className={cn("cursor-pointer rounded-xl border p-3 transition-colors", reviewSurvivorId === customer.id ? "border-gold-500 bg-gold-50/60 ring-1 ring-gold-300" : "border-stone-200 hover:bg-stone-50")}>
+                <span className="flex items-start gap-2"><input type="radio" name="merge-survivor" className="mt-1 accent-gold-700" checked={reviewSurvivorId === customer.id} onChange={() => setReviewSurvivorId(customer.id)} /><span className="min-w-0"><span className="block truncate text-sm font-semibold text-stone-900">{customer.name}</span><span className="mt-0.5 block break-all text-xs text-stone-500">{customer.email ?? "No email"}</span></span></span>
+                <span className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-stone-600"><span>Phone</span><span className="text-right">{customer.phone ?? "None"}</span><span>Owner</span><span className="text-right">{customer.ownerName ?? "Unassigned"}</span><span>Contact preference</span><span className="text-right capitalize">{customer.preferredContactMethod}</span><span>Do not contact</span><span className="text-right">{customer.doNotContact ? "Yes" : "No"}</span><span>Tags</span><span className="text-right">{customer.tags.length ? customer.tags.join(", ") : "None"}</span></span>
+                <span className="mt-3 block border-t border-stone-200 pt-2 text-xs text-stone-600">{reviewLoading ? "Checking linked records…" : reviewEntries[customer.id] === null ? "History preview unavailable. Existing record links will be preserved." : `${entries.length} linked history records`}{!reviewLoading && reviewEntries[customer.id] !== null && Object.entries(counts).length > 0 && <span className="mt-1 block text-[11px] text-stone-500">{Object.entries(counts).map(([kind, count]) => `${count} ${kind}${count === 1 ? "" : "s"}`).join(" · ")}</span>}</span>
+                <span className="mt-2 block text-[11px] font-medium text-gold-900">{reviewSurvivorId === customer.id ? "Keep this customer" : "Select to keep this customer"}</span>
+              </label>;
+            })}
+          </div>
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-xs leading-relaxed text-amber-950"><strong>History stays intact.</strong> Existing invoices, quotes, deals, tasks, and documents keep their original record links. The surviving profile will include activity from both records, and you can undo this merge from the customer list.</div>
+        </>}
+      </Dialog>
     </div>
   );
 }
@@ -1155,17 +1605,22 @@ function Customer360Dialog(props: {
   onTabChange: (tab: "overview" | "activity" | "invoices" | "documents") => void;
   onClose: () => void;
   onRetryActivity: () => void;
-  onUpdateProfile: (input: { customerIds: string[]; ownerUserId?: string | null; addTags?: string[]; removeTags?: string[]; notes?: string | null }) => Promise<boolean>;
+  onUpdateProfile: (input: { customerIds: string[]; name?: string; ownerUserId?: string | null; addTags?: string[]; removeTags?: string[]; notes?: string | null; phone?: string | null; preferredContactMethod?: Customer["preferredContactMethod"]; doNotContact?: boolean }) => Promise<boolean>;
   onCreateTask: (input: { customerId: string; title: string; dueAt?: string; note?: string }) => Promise<boolean>;
 }) {
+  const [name, setName] = useState(props.customer?.name ?? "");
   const [notes, setNotes] = useState(props.customer?.notes ?? "");
   const [owner, setOwner] = useState(props.customer?.ownerUserId ?? "");
   const [tagsText, setTagsText] = useState((props.customer?.tags ?? []).join(", "));
+  const [phone, setPhone] = useState(props.customer?.phone ?? "");
+  const [contactMethod, setContactMethod] = useState<Customer["preferredContactMethod"]>(props.customer?.preferredContactMethod ?? "email");
+  const [doNotContact, setDoNotContact] = useState(props.customer?.doNotContact ?? false);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDate, setTaskDate] = useState("");
   if (!props.customer) return null;
   const customer = props.customer;
-  const customerDeals = props.deals.filter((deal) => deal.customerId === customer.id);
+  const linkedCustomerIds = new Set([customer.id, ...(customer.mergedRecords ?? []).map((record) => record.id)]);
+  const customerDeals = props.deals.filter((deal) => deal.customerId && linkedCustomerIds.has(deal.customerId));
   const entries = props.timeline?.entries ?? [];
   const invoiceEntries = entries.filter((entry) => ["invoice", "payment", "quote"].includes(entry.kind));
   const documentEntries = entries.filter((entry) => entry.kind === "document");
@@ -1179,9 +1634,19 @@ function Customer360Dialog(props: {
       customerIds: [customer.id],
       ownerUserId: owner || null,
       notes: notes.trim() || null,
+      phone: phone.trim() || null,
+      preferredContactMethod: contactMethod,
+      doNotContact,
       addTags: afterTags.filter((tag) => !before.has(tag.toLowerCase())),
       removeTags: customer.tags.filter((tag) => !after.has(tag.toLowerCase())),
     });
+  }
+
+  async function saveCustomerName() {
+    const nextName = name.trim();
+    if (!nextName || nextName === customer.name) return;
+    const saved = await props.onUpdateProfile({ customerIds: [customer.id], name: nextName });
+    if (saved) setName(nextName);
   }
 
   async function addTask(event: React.FormEvent) {
@@ -1192,9 +1657,12 @@ function Customer360Dialog(props: {
 
   const tabs = [["overview", "Overview"], ["activity", "Activity"], ["invoices", `Invoices & quotes (${invoiceEntries.length})`], ["documents", `Documents (${documentEntries.length})`]] as const;
   return (
-    <Dialog open onClose={props.onClose} title={customer.name} description={customer.email ?? "No email address on file"} width="max-w-3xl">
+    <Dialog open onClose={props.onClose} title={customer.name} description={customer.email ?? customer.phone ?? "No contact details on file"} width="max-w-3xl">
       <div className="mb-4 flex flex-wrap gap-2">
-        {customer.email && <a className="inline-flex min-h-9 items-center rounded-md bg-gold-700 px-3 text-xs font-semibold text-white hover:bg-gold-800" href={`mailto:${customer.email}`}>Email customer</a>}
+        {customer.doNotContact ? <Badge tone="amber">Do not contact</Badge> : <>
+          {customer.email && <a className="inline-flex min-h-9 items-center rounded-md bg-gold-700 px-3 text-xs font-semibold text-white hover:bg-gold-800" href={`mailto:${customer.email}`}>Email customer</a>}
+          {customer.phone && <a className="inline-flex min-h-9 items-center rounded-md border border-stone-200 px-3 text-xs font-semibold text-stone-700 hover:bg-stone-50" href={customer.preferredContactMethod === "whatsapp" ? `https://wa.me/${customer.phone.replace(/\D/g, "")}` : `tel:${customer.phone}`}>{customer.preferredContactMethod === "whatsapp" ? "Message on WhatsApp" : "Call customer"}</a>}
+        </>}
         <Button tone="secondary" size="sm" onClick={() => props.onTabChange("activity")}>View history</Button>
         {!customer.deactivatedAt && <Badge tone="green">Active</Badge>}
         {customer.deactivatedAt && <Badge tone="neutral">Inactive</Badge>}
@@ -1204,25 +1672,41 @@ function Customer360Dialog(props: {
       </div>
 
       {props.activeTab === "overview" ? (
+        <>
+        <section className="mb-4 rounded-lg border border-stone-200 p-3">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <label className="label" htmlFor="customer-profile-name">Customer name<input id="customer-profile-name" className="input mt-1" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></label>
+            <Button size="sm" className="min-h-10 w-full sm:w-auto" loading={props.busy} disabled={!name.trim() || name.trim() === customer.name} onClick={() => void saveCustomerName()}>Save name</Button>
+          </div>
+          <p className="mt-1 text-[11px] text-stone-500">This name appears on customer records and new sales documents.</p>
+        </section>
         <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-4">
             <section className="rounded-lg border border-stone-200 p-3">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">Related deals</h3>
               {customerDeals.length ? <ul className="mt-2 divide-y divide-stone-100">{customerDeals.map((deal) => <li key={deal.id} className="flex items-center justify-between gap-3 py-2 text-sm"><span className="min-w-0 truncate font-medium">{deal.title}</span><span className="shrink-0 text-xs text-stone-500">{stageMeta[deal.stage].label} · {formatMoney(deal.valueMinor)}</span></li>)}</ul> : <p className="mt-2 text-sm text-stone-500">No deals linked yet.</p>}
             </section>
+            {customer.mergedRecords?.length ? <section className="rounded-lg border border-stone-200 p-3"><h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">Merged records</h3><p className="mt-1 text-xs text-stone-500">These records were combined here. Their original documents and activity remain linked in history.</p><ul className="mt-2 divide-y divide-stone-100">{customer.mergedRecords.map((record) => <li key={record.id} className="py-2 text-sm"><span className="font-medium text-stone-800">{record.name}</span>{record.mergedAt && <span className="ml-2 text-xs text-stone-500">Merged {timeAgo(record.mergedAt)}</span>}</li>)}</ul></section> : null}
             <section className="rounded-lg border border-stone-200 p-3">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">Notes</h3>
               <textarea className="input mt-2 min-h-24 resize-y" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={4000} placeholder="Keep useful context for the next conversation" aria-label="Customer notes" />
-              <div className="mt-2 flex items-center justify-between gap-3"><span className="text-[11px] text-stone-400">{notes.length}/4000 · changes are recorded</span><Button size="sm" loading={props.busy} onClick={() => void saveDetails()}>Save profile</Button></div>
+              <p className="mt-2 text-[11px] text-stone-400">{notes.length}/4000 · saved with the rest of this profile</p>
             </section>
           </div>
           <div className="space-y-4">
             <section className="rounded-lg border border-stone-200 p-3">
               <label className="label" htmlFor="customer-owner">Owner</label>
               <select id="customer-owner" className="select mt-1" value={owner} onChange={(event) => setOwner(event.target.value)}><option value="">Unassigned</option>{props.members.map((member) => <option key={member.userId} value={member.userId}>{member.name || member.email}</option>)}</select>
+              <p className="mt-1 text-[11px] text-stone-500">Owned by {customer.ownerName ?? "No one"} · Last edited by {customer.updatedByName ?? customer.updatedByEmail ?? "Not recorded"} {customer.updatedAt ? `· ${timeAgo(customer.updatedAt)}` : ""}</p>
               <label className="label mt-3 block" htmlFor="customer-tags">Tags</label>
               <input id="customer-tags" className="input mt-1" value={tagsText} onChange={(event) => setTagsText(event.target.value)} placeholder="Retail, priority" />
               <p className="mt-1 text-[11px] text-stone-400">Separate tags with commas.</p>
+              <label className="label mt-3 block" htmlFor="customer-profile-phone">Phone</label>
+              <input id="customer-profile-phone" className="input mt-1" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+256 700 000 000" />
+              <label className="label mt-3 block" htmlFor="customer-profile-contact-method">Preferred contact method</label>
+              <select id="customer-profile-contact-method" className="select mt-1" value={contactMethod} onChange={(event) => setContactMethod(event.target.value as Customer["preferredContactMethod"])}><option value="email">Email</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option></select>
+              <label className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2.5 text-xs"><input type="checkbox" className="mt-0.5 accent-red-700" checked={doNotContact} onChange={(event) => setDoNotContact(event.target.checked)} /><span><span className="font-medium text-amber-950">Do not contact</span><span className="block text-amber-800">Hides outreach shortcuts for this customer.</span></span></label>
+              <Button size="sm" className="mt-3 w-full" loading={props.busy} onClick={() => void saveDetails()}>Save profile</Button>
             </section>
             <form className="rounded-lg border border-stone-200 p-3" onSubmit={(event) => void addTask(event)}>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">Next follow-up</h3>
@@ -1234,6 +1718,7 @@ function Customer360Dialog(props: {
             <p className="text-xs text-stone-500">Last activity {timeAgo(customer.lastActivityAt)}</p>
           </div>
         </div>
+        </>
       ) : (
         <div className="max-h-[55vh] overflow-y-auto">
           {props.timeline?.error ? <EmptyState icon={<IconAlertTriangle />} title="History could not load" hint={props.timeline.error} action={<Button tone="secondary" size="sm" onClick={props.onRetryActivity}>Retry</Button>} /> : !props.timeline?.entries ? <p className="py-8 text-center text-sm text-stone-500" role="status">Loading customer history…</p> : visibleEntries.length === 0 ? <EmptyState icon={props.activeTab === "documents" ? <IconFileText /> : <IconHistory />} title={props.activeTab === "documents" ? "No documents linked" : props.activeTab === "invoices" ? "No invoices or quotes yet" : "No activity yet"} hint="Linked records will appear here as work is recorded." /> : <ol className="divide-y divide-stone-100">{visibleEntries.map((entry) => <li key={`${entry.kind}-${entry.refId}`} className="flex gap-3 py-3"><span className="mt-1 size-2 shrink-0 rounded-full bg-gold-500" aria-hidden="true" /><div className="min-w-0 flex-1"><p className="text-sm font-medium text-stone-800">{entry.summary}</p><p className="mt-0.5 text-xs text-stone-500">{entry.kind} · {timeAgo(entry.date)}</p></div></li>)}</ol>}

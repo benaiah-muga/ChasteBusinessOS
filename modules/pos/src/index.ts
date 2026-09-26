@@ -126,14 +126,32 @@ const completeSale = (deps: ModuleDeps) =>
         method: z.enum(["cash", "card"]).default("cash"),
         customerId: z.string().uuid().optional(),
         cashReceivedMinor: z.number().int().nonnegative().optional(),
+        tenders: z.array(z.object({
+          method: z.enum(["cash", "card", "mobile_money"]),
+          amountMinor: z.number().int().positive(),
+        })).min(1).max(3).optional(),
       })
-      .refine((input) => input.method === "cash" || input.cashReceivedMinor === undefined, "cash received only applies to cash sales"),
+      .superRefine((input, issue) => {
+        const total = input.lines.reduce((sum, line) => sum + Math.round((line.quantity * line.unitPriceMinor) / 1000) + line.taxMinor, 0);
+        if (input.tenders) {
+          const allocated = input.tenders.reduce((sum, tender) => sum + tender.amountMinor, 0);
+          const cashAllocated = input.tenders.filter((tender) => tender.method === "cash").reduce((sum, tender) => sum + tender.amountMinor, 0);
+          if (allocated !== total) issue.addIssue({ code: "custom", message: "tender allocations must exactly cover the sale total", path: ["tenders"] });
+          if (cashAllocated === 0 && input.cashReceivedMinor !== undefined) issue.addIssue({ code: "custom", message: "cash received only applies when cash is one of the tenders", path: ["cashReceivedMinor"] });
+          if (cashAllocated > 0 && (input.cashReceivedMinor ?? cashAllocated) < cashAllocated) issue.addIssue({ code: "custom", message: "cash received cannot be less than its allocated amount", path: ["cashReceivedMinor"] });
+        } else if (input.method !== "cash" && input.cashReceivedMinor !== undefined) {
+          issue.addIssue({ code: "custom", message: "cash received only applies to cash sales", path: ["cashReceivedMinor"] });
+        } else if (input.method === "cash" && (input.cashReceivedMinor ?? total) < total) {
+          issue.addIssue({ code: "custom", message: "cash received must cover the sale total", path: ["cashReceivedMinor"] });
+        }
+      }),
     output: z.object({
       invoiceId: z.string(),
       invoiceNumber: z.number(),
       totalMinor: z.number(),
       tenderedMinor: z.number(),
       changeGivenMinor: z.number(),
+      tenders: z.array(z.object({ method: z.string(), amountMinor: z.number() })),
     }),
     execute: async (ctx, input) => {
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
@@ -226,9 +244,21 @@ const completeSale = (deps: ModuleDeps) =>
         const total = subtotal + tax;
         if (total <= 0) throw new Error("sale must have a non-zero total");
 
-        const tender = input.method === "cash"
-          ? calculateCashTender(total, input.cashReceivedMinor)
-          : { tenderedMinor: total, changeGivenMinor: 0 };
+        const appliedTenders = input.tenders ?? [{ method: input.method, amountMinor: total }];
+        if (appliedTenders.some((payment) => !Number.isSafeInteger(payment.amountMinor) || payment.amountMinor <= 0)
+          || appliedTenders.reduce((sum, payment) => sum + payment.amountMinor, 0) !== total) {
+          throw new Error("tender allocations must exactly cover the sale total");
+        }
+        const paymentSummary = [...new Set(appliedTenders.map((payment) => payment.method))].join(" + ");
+        const cashAllocatedMinor = appliedTenders.filter((tender) => tender.method === "cash").reduce((sum, tender) => sum + tender.amountMinor, 0);
+        const cashReceivedMinor = cashAllocatedMinor > 0 ? (input.cashReceivedMinor ?? cashAllocatedMinor) : 0;
+        if (cashAllocatedMinor > 0 && cashReceivedMinor < cashAllocatedMinor) throw new Error("cash received cannot be less than its allocated amount");
+        const tender = {
+          tenderedMinor: cashAllocatedMinor > 0 && appliedTenders.length === 1
+            ? calculateCashTender(total, cashReceivedMinor).tenderedMinor
+            : total,
+          changeGivenMinor: Math.max(0, cashReceivedMinor - cashAllocatedMinor),
+        };
         let customerId = input.customerId;
         if (customerId) {
           const [customer] = await tx
@@ -264,7 +294,7 @@ const completeSale = (deps: ModuleDeps) =>
             paidMinor: total,
             posSessionId: session.id,
             issuedAt: ctx.now,
-            memo: `POS (${input.method})`,
+            memo: `POS (${paymentSummary})`,
           })
           .returning({ id: invoices.id });
 
@@ -277,20 +307,20 @@ const completeSale = (deps: ModuleDeps) =>
         })));
 
         const entryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
-          memo: `POS sale #${invoiceNumber} (${input.method})`,
+          memo: `POS sale #${invoiceNumber} (${paymentSummary})`,
           sourceType: "pos_sale",
           sourceId: inv!.id,
           postedAt: ctx.now,
           lines: glLines,
         });
 
-        await tx.insert(payments).values({
+        await tx.insert(payments).values(appliedTenders.map((payment) => ({
           orgId: ctx.actor.orgId,
           invoiceId: inv!.id,
-          amountMinor: total,
-          method: input.method === "card" ? "card" : "cash",
+          amountMinor: payment.amountMinor,
+          method: payment.method,
           entryId,
-        });
+        })));
 
         // Stock leaves the ledger in the same transaction as the money -
         // only when the inventory module is enabled (ADR 0035). N22: through
@@ -309,12 +339,13 @@ const completeSale = (deps: ModuleDeps) =>
           });
         }
 
-        // Card sales never touch the drawer; cash sales do.
-        if (input.method === "cash") {
+        // Only the cash allocation enters the physical drawer. Card and mobile money
+        // remain visible as separate payment rows for reconciliation.
+        if (cashAllocatedMinor > 0) {
           await tx
             .update(posSessions)
             .set({
-              expectedCashMinor: sql`${posSessions.expectedCashMinor} + ${total}`,
+              expectedCashMinor: sql`${posSessions.expectedCashMinor} + ${cashAllocatedMinor}`,
             })
             .where(eq(posSessions.id, session.id));
         }
@@ -325,6 +356,7 @@ const completeSale = (deps: ModuleDeps) =>
           totalMinor: total,
           tenderedMinor: tender.tenderedMinor,
           changeGivenMinor: tender.changeGivenMinor,
+          tenders: appliedTenders,
         };
       });
     },
@@ -343,7 +375,11 @@ const closeSession = (deps: ModuleDeps) =>
     module: "pos",
     risk: "write",
     permission: "pos.write",
-    input: z.object({ sessionId: z.string(), countedCashMinor: z.number().int().nonnegative() }),
+    input: z.object({
+      sessionId: z.string(),
+      countedCashMinor: z.number().int().nonnegative(),
+      varianceReason: z.string().trim().min(3).max(500).optional(),
+    }),
     output: z.object({
       expectedCashMinor: z.number(),
       varianceMinor: z.number(),
@@ -361,6 +397,7 @@ const closeSession = (deps: ModuleDeps) =>
 
         const expected = session.openingFloatMinor + (session.expectedCashMinor ?? 0);
         const variance = input.countedCashMinor - expected;
+        if (variance !== 0 && !input.varianceReason) throw new Error("a reason is required to record a drawer variance");
 
         await tx
           .update(posSessions)
@@ -369,6 +406,7 @@ const closeSession = (deps: ModuleDeps) =>
             countedCashMinor: input.countedCashMinor,
             expectedCashMinor: expected,
             varianceMinor: variance,
+            varianceReason: variance === 0 ? null : input.varianceReason,
             closedByUserId: ctx.actor.type === "human" ? ctx.actor.id : null,
             closedAt: ctx.now,
           })
@@ -396,9 +434,11 @@ const returnSale = (deps: ModuleDeps) =>
     input: z.object({
       invoiceId: z.string().uuid(),
       reason: z.string().min(3).max(500),
+      refundMethod: z.enum(["cash", "card", "mobile_money"]).default("cash"),
     }),
-    output: z.object({ refundEntryId: z.string(), creditedMinor: z.number(), restockedLines: z.number() }),
+    output: z.object({ refundEntryId: z.string(), creditedMinor: z.number(), restockedLines: z.number(), refundMethod: z.string() }),
     execute: async (ctx, input) => {
+      const refundMethod = input.refundMethod ?? "cash";
       return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
         const [inv] = await tx
           .select()
@@ -431,7 +471,7 @@ const returnSale = (deps: ModuleDeps) =>
           creditMinor: l.debitMinor,
         }));
         const refundEntryId = await postEntry(tx, ctx.actor.orgId, ctx.actor, {
-          memo: `POS return on sale ${inv.number}: ${input.reason}`,
+          memo: `POS return on sale ${inv.number} to ${refundMethod}: ${input.reason}`,
           sourceType: "pos_return",
           sourceId: inv.id,
           reversalOfId: origEntry?.id ?? null,
@@ -445,13 +485,7 @@ const returnSale = (deps: ModuleDeps) =>
         // would flag an "overage" that is really money already handed back.
         // A closed session's count is frozen history; its variance was
         // recorded when it closed and is not rewritten by later returns.
-        const [salePayment] = await tx
-          .select({ method: payments.method })
-          .from(payments)
-          .innerJoin(journalEntries, eq(journalEntries.id, payments.entryId))
-          .where(and(eq(payments.orgId, ctx.actor.orgId), eq(payments.invoiceId, inv.id)))
-          .limit(1);
-        if (salePayment?.method === "cash" && inv.posSessionId) {
+        if (refundMethod === "cash" && inv.posSessionId) {
           const [session] = await tx
             .select({ id: posSessions.id, status: posSessions.status })
             .from(posSessions)
@@ -492,7 +526,7 @@ const returnSale = (deps: ModuleDeps) =>
           });
           restockedLines += 1;
         }
-        return { refundEntryId, creditedMinor: inv.creditedMinor + refund, restockedLines };
+        return { refundEntryId, creditedMinor: inv.creditedMinor + refund, restockedLines, refundMethod };
       });
     },
   });

@@ -1,8 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { items } from "@chaste/db";
 import { defineCapability, type CapabilityRegistry } from "@chaste/kernel";
-import type { ModuleDeps } from "./shared";
+import { withOrgContext, type ModuleDeps } from "./shared";
 
 /**
  * Product-surface capabilities (M7.3): identity beyond the SKU - image,
@@ -94,6 +94,101 @@ const restoreItem = (deps: ModuleDeps) =>
     execute: async (ctx, input) => applyItemPatch(deps)(ctx, input),
   });
 
+const importedItemRow = z.object({
+  rowNumber: z.number().int().positive(),
+  sku: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(120),
+  kind: z.enum(["goods", "service"]).default("goods"),
+  unitLabel: z.string().trim().min(1).max(20).default("unit"),
+  salePriceMinor: z.number().int().nonnegative(),
+  reorderPointThousandths: z.number().int().nonnegative().default(0),
+  barcode: z.string().trim().min(3).max(64).nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(30)).max(20).default([]),
+});
+
+const importItems = (deps: ModuleDeps) => defineCapability({
+  id: "inventory.importItems",
+  title: "Import reviewed catalog items",
+  intent: "Add reviewed products and services from a mapped spreadsheet, skip duplicate codes or barcodes, and retain an undo path for the imported batch",
+  module: "inventory",
+  risk: "write",
+  permission: "inventory.write",
+  inverse: { capabilityId: "inventory.undoItemImport", buildInput: (_input, output) => ({ itemIds: output.createdIds }) },
+  input: z.object({ rows: z.array(importedItemRow).min(1).max(5000) }),
+  output: z.object({ createdIds: z.array(z.string().uuid()), imported: z.number().int(), skippedDuplicateRows: z.array(z.number().int()) }),
+  execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+    const existing = await tx.select({ sku: items.sku, barcode: items.barcode }).from(items)
+      .where(eq(items.orgId, ctx.actor.orgId));
+    const seenSku = new Set(existing.map((row) => row.sku.trim().toLowerCase()));
+    const seenBarcode = new Set(existing.map((row) => row.barcode?.trim().toLowerCase()).filter((value): value is string => Boolean(value)));
+    const skippedDuplicateRows: number[] = [];
+    const fresh: Array<z.infer<typeof importedItemRow>> = [];
+    for (const row of input.rows) {
+      const sku = row.sku.toLowerCase();
+      const barcode = row.barcode?.trim().toLowerCase();
+      if (seenSku.has(sku) || (barcode && seenBarcode.has(barcode))) {
+        skippedDuplicateRows.push(row.rowNumber);
+        continue;
+      }
+      seenSku.add(sku);
+      if (barcode) seenBarcode.add(barcode);
+      fresh.push(row);
+    }
+    const createdIds: string[] = [];
+    for (let offset = 0; offset < fresh.length; offset += 500) {
+      const inserted = await tx.insert(items).values(fresh.slice(offset, offset + 500).map((row) => ({
+        orgId: ctx.actor.orgId,
+        sku: row.sku,
+        name: row.name,
+        kind: row.kind,
+        unitLabel: row.unitLabel,
+        salePriceMinor: row.salePriceMinor,
+        reorderPointThousandths: row.kind === "service" ? 0 : row.reorderPointThousandths,
+        barcode: row.kind === "service" ? null : row.barcode ?? null,
+        tags: row.tags,
+      }))).returning({ id: items.id });
+      createdIds.push(...inserted.map((row) => row.id));
+    }
+    return { createdIds, imported: createdIds.length, skippedDuplicateRows };
+  }),
+});
+
+const undoItemImport = (deps: ModuleDeps) => defineCapability({
+  id: "inventory.undoItemImport",
+  title: "Undo catalog import",
+  intent: "Archive only the items created by a recent spreadsheet import, preserving their references and any stock history",
+  module: "inventory",
+  risk: "write",
+  permission: "inventory.write",
+  inverse: { capabilityId: "inventory.restoreItemImport", buildInput: (_input, output) => ({ itemIds: output.itemIds }) },
+  input: z.object({ itemIds: z.array(z.string().uuid()).min(1).max(5000) }),
+  output: z.object({ itemIds: z.array(z.string().uuid()), archived: z.number().int() }),
+  execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+    const changed = await tx.update(items).set({ archivedAt: ctx.now })
+      .where(and(eq(items.orgId, ctx.actor.orgId), inArray(items.id, [...new Set(input.itemIds)]), isNull(items.archivedAt)))
+      .returning({ id: items.id });
+    return { itemIds: changed.map((row) => row.id), archived: changed.length };
+  }),
+});
+
+const restoreItemImport = (deps: ModuleDeps) => defineCapability({
+  id: "inventory.restoreItemImport",
+  title: "Restore imported catalog items",
+  intent: "Restore catalog items after reversing an import undo while keeping item identity and stock history intact",
+  module: "inventory",
+  risk: "write",
+  permission: "inventory.write",
+  inverse: { capabilityId: "inventory.undoItemImport", buildInput: (_input, output) => ({ itemIds: output.itemIds }) },
+  input: z.object({ itemIds: z.array(z.string().uuid()).min(1).max(5000) }),
+  output: z.object({ itemIds: z.array(z.string().uuid()), restored: z.number().int() }),
+  execute: async (ctx, input) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+    const changed = await tx.update(items).set({ archivedAt: null })
+      .where(and(eq(items.orgId, ctx.actor.orgId), inArray(items.id, [...new Set(input.itemIds)]), isNotNull(items.archivedAt)))
+      .returning({ id: items.id });
+    return { itemIds: changed.map((row) => row.id), restored: changed.length };
+  }),
+});
+
 const lookupByBarcode = (deps: ModuleDeps) =>
   defineCapability({
     id: "inventory.lookupByBarcode",
@@ -136,6 +231,8 @@ const lookupByBarcode = (deps: ModuleDeps) =>
 export function registerItemCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
   registry.register(updateItem(deps));
   registry.register(restoreItem(deps));
+  registry.register(importItems(deps));
+  registry.register(undoItemImport(deps));
+  registry.register(restoreItemImport(deps));
   registry.register(lookupByBarcode(deps));
 }
-

@@ -22,6 +22,12 @@ const actionSchema = z.discriminatedUnion("action", [
     note: z.string().max(2000).optional(),
   }),
   z.object({ action: z.literal("completeTask"), taskId: z.string().uuid() }),
+  z.object({
+    action: z.literal("updateTaskDetails"),
+    taskId: z.string().uuid(),
+    dueAt: z.string().datetime().nullable().optional(),
+    assigneeUserId: z.string().uuid().nullable().optional(),
+  }),
 ]);
 
 export async function GET(req: Request) {
@@ -60,8 +66,9 @@ export async function POST(req: Request) {
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   const d = parsed.data;
-  const capId =
-    d.action === "convertLead" ? "crm.convertLead" : d.action === "createTask" ? "crm.createTask" : "crm.completeTask";
+  const capId = d.action === "convertLead" ? "crm.convertLead"
+    : d.action === "createTask" ? "crm.createTask"
+      : d.action === "completeTask" ? "crm.completeTask" : "crm.updateTaskDetails";
   const input =
     d.action === "convertLead"
       ? {
@@ -79,7 +86,8 @@ export async function POST(req: Request) {
             refId: d.refId,
             note: d.note,
           }
-        : { taskId: d.taskId };
+        : d.action === "completeTask" ? { taskId: d.taskId }
+          : { taskId: d.taskId, ...(d.dueAt !== undefined ? { dueAt: d.dueAt } : {}), ...(d.assigneeUserId !== undefined ? { assigneeUserId: d.assigneeUserId } : {}) };
 
   const result = await buildExecutor(db, buildRegistry(db)).execute(capId, ctx, input);
   if (!result.ok) {

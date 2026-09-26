@@ -787,10 +787,10 @@ function ManufacturingOverview({
   return (
     <div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Open work orders" value={drafts.length + released.length} sub={`${released.length} released`} />
-        <StatCard label="Assemblies with BOMs" value={(data.boms ? new Set(data.boms.map((b) => b.assemblySku)).size : 0)} />
-        <StatCard label="Produced this month" value={qty(producedThisMonth)} sub={`${runsThisMonth.length} run${runsThisMonth.length === 1 ? "" : "s"}`} />
-        <StatCard label="Production cost · month" value={formatMoney(costThisMonth)} />
+        <StatCard label="Open work orders" value={drafts.length + released.length} sub={`${released.length} released`} onClick={() => goTo("orders")} actionLabel="Review open work orders" />
+        <StatCard label="Assemblies with BOMs" value={(data.boms ? new Set(data.boms.map((b) => b.assemblySku)).size : 0)} onClick={() => goTo("boms")} actionLabel="Open bills of materials" />
+        <StatCard label="Produced this month" value={qty(producedThisMonth)} sub={`${runsThisMonth.length} run${runsThisMonth.length === 1 ? "" : "s"}`} onClick={() => goTo("runs")} actionLabel="Review this month's production runs" />
+        <StatCard label="Production cost · month" value={formatMoney(costThisMonth)} onClick={() => goTo("runs")} actionLabel="Review costs by production run" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">

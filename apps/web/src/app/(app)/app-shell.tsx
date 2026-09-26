@@ -324,7 +324,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
             <span className="min-w-0 flex-1 truncate px-1 text-sm font-semibold tracking-tight text-stone-900">
               {currentApp?.name || orgName || "Chaste"}
             </span>
-            <DigitalClock className="tnum mr-1 shrink-0 text-[11px] font-medium text-stone-500" />
+            <DigitalClock className="tnum mr-1 hidden shrink-0 text-[11px] font-medium text-stone-500 min-[360px]:block" />
             <button type="button" onClick={() => setPaletteOpen(true)} aria-label="Search" className="icon-btn">
               <IconSearch className="size-5" />
             </button>
@@ -387,7 +387,7 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "relative flex flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors duration-100",
-                    active ? "text-gold-800" : "text-stone-400 hover:text-stone-600",
+                    active ? "text-gold-800" : "text-stone-700 hover:text-stone-900",
                   )}
                 >
                   <NavIcon className="size-5" />
@@ -403,7 +403,9 @@ export function AppShell({ children, user, orgName, orgCurrency, pendingApproval
 
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} enabledModules={enabled} />
         <AppsLauncher open={launcherOpen} onClose={() => setLauncherOpen(false)} enabledModules={enabled} />
-        <ChatWidget />
+        <aside aria-label="Workmate">
+          <ChatWidget />
+        </aside>
       </div>
       </QuickCreateProvider>
     </EnabledModulesProvider>

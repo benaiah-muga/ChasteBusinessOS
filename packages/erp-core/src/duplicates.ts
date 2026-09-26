@@ -3,8 +3,7 @@
  *
  * Pure string logic - the CRM surfaces a warning when a new customer looks
  * like an existing one; it never silently merges. Two customers are
- * duplicates when their normalized names match (suffix-insensitive so
- * "Acme LLC" == "Acme") or their emails match case-insensitively.
+ * duplicates when email, normalized phone, or a close normalized name match.
  *
  * Deterministic and byte-order stable by construction: no locale-aware
  * comparisons (M8 lesson - localeCompare is environment-dependent).
@@ -12,6 +11,7 @@
 export interface CustomerFingerprint {
   name: string;
   email?: string | null;
+  phone?: string | null;
 }
 
 /** Legal-suffix noise stripped before comparing names. */
@@ -47,11 +47,39 @@ export function normalizeEmail(email: string | null | undefined): string | null 
   return trimmed.length > 0 ? trimmed : null;
 }
 
+export function normalizePhone(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 7) return null;
+  return digits.length > 9 ? digits.slice(-9) : digits;
+}
+
+function editDistance(a: string, b: string): number {
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = previous[0]!;
+    previous[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const above = previous[j]!;
+      previous[j] = Math.min(previous[j]! + 1, previous[j - 1]! + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return previous[b.length]!;
+}
+
+function similarName(a: string, b: string): boolean {
+  if (Math.min(a.length, b.length) < 8) return false;
+  const longest = Math.max(a.length, b.length);
+  if (Math.abs(a.length - b.length) > Math.floor(longest * 0.12)) return false;
+  return 1 - editDistance(a, b) / longest >= 0.92;
+}
+
 export interface DuplicateVerdict {
   /** true when the candidate matches an existing customer closely enough to warn. */
   duplicate: boolean;
-  /** "name" or "email" - which fingerprint matched. */
-  reason: "name" | "email" | null;
+  /** Which fingerprint matched. */
+  reason: "name" | "email" | "phone" | "similar name" | null;
   /** The existing customer's name as stored (for the warning message). */
   existingName: string | null;
 }
@@ -66,14 +94,21 @@ export function findDuplicate(
   candidate: CustomerFingerprint,
 ): DuplicateVerdict {
   const candidateEmail = normalizeEmail(candidate.email);
+  const candidatePhone = normalizePhone(candidate.phone);
   const candidateName = normalizeCustomerName(candidate.name);
   for (const row of existing) {
     if (candidateEmail && normalizeEmail(row.email) === candidateEmail) {
       return { duplicate: true, reason: "email", existingName: row.name };
     }
+    if (candidatePhone && normalizePhone(row.phone) === candidatePhone) {
+      return { duplicate: true, reason: "phone", existingName: row.name };
+    }
     const rowName = normalizeCustomerName(row.name);
     if (candidateName.length > 0 && rowName === candidateName) {
       return { duplicate: true, reason: "name", existingName: row.name };
+    }
+    if (candidateName && rowName && similarName(candidateName, rowName)) {
+      return { duplicate: true, reason: "similar name", existingName: row.name };
     }
   }
   return { duplicate: false, reason: null, existingName: null };
