@@ -31,6 +31,8 @@ export async function beginLedgerMaintenance<T>(
  */
 export async function purgeTenantFinancials(db: Database["db"], orgId: string): Promise<void> {
   await beginLedgerMaintenance(db, async (tx) => {
+    await tx.execute(sql`DELETE FROM pos_return_lines WHERE org_id = ${orgId}`);
+    await tx.execute(sql`DELETE FROM pos_returns WHERE org_id = ${orgId}`);
     await tx.execute(
       sql`DELETE FROM journal_lines WHERE entry_id IN (SELECT id FROM journal_entries WHERE org_id = ${orgId})`,
     );

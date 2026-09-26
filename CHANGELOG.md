@@ -13,20 +13,28 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Added
 - Personal Codex and OpenCode plan connections. Users can sign into Codex with its device flow or connect an authenticated OpenCode server, choose a personal default, and see request and provider-reported token usage.
+- Personal coding-plan controls now appear before shared model settings, so people can find their own inference connection quickly and manage it even when workspace provider settings are unavailable.
 - Coding-plan inference for Buzz, internal chat assistance, support drafting, document writing assist, and My Work summaries. User-started runs use the selected personal plan; scheduled runs continue to use the workspace provider.
 - Coding-agent business tools connect through a short-lived, signed MCP grant scoped to the user's permissions, enabled modules, session, and tools already exposed to that agent. Tool calls still pass through the kernel executor and audit ledger.
 - CRM customer search and active, inactive, and all views, with mobile customer cards that keep timeline and deactivation actions visible.
 - CRM customer profiles combine related deals, tasks, invoices, quotes, payments, linked documents, notes, ownership, tags, and quick email or follow-up actions.
 - CRM customer profiles include an editable customer name saved with an audited undo path.
+- CRM follow-up drafts use recent invoices, quotes, and tasks as source context, show links to those records, stay editable, and only open an email composer after a deliberate user action.
 - CRM customer cards and wide-table rows now open the profile across their main surface, with selection, email, next-step, and record actions kept independent.
+- Accounting receivables aging cards filter the underlying invoice list by age range, keep the active range visible, and offer a one-tap reset.
+- CRM customer import uses editable row cards on phones, keeping validation, duplicate choices, and import selection visible without horizontal table scrolling.
 - Summary cards across CRM, Sales, POS, Products, Inventory, Documents, Support, Purchasing, Manufacturing, and HR now show a clear action affordance and open the relevant list, status filter, or workflow. Sales pipeline metrics deep-link into the filtered CRM pipeline.
 - Document summary cards open the library with matching parsed, awaiting-parse, or recent-document filters. Support summary cards open the inbox with the matching conversation status selected.
 - CRM saved filters, stale follow-up and owner views, duplicate suggestions, bulk owner and tag updates, and selected-customer CSV export.
-- CRM saved views now sync with the workspace, can be shared or pinned, and show live result counts. Customer records show their next action, preferred contact method, do-not-contact status, owner, and last editor. A guided customer CSV preview supports column mapping, duplicate review, inline fixes, and reversible import.
-- CRM duplicate review compares contact and name details side by side, previews linked activity, preserves existing record links, and offers an immediate audited undo.
+- CRM saved views now sync with the workspace, can be shared or pinned, and show live result counts. Customer cards and profiles show their next action; profiles also include preferred contact method, do-not-contact status, owner, and last editor. A guided customer CSV preview supports column mapping, duplicate review, inline fixes, and reversible import.
+- CRM duplicate review compares contact and name details, previews linked activity, preserves existing record links, and offers an immediate audited undo. On phones, comparison cards fit the dialog width and wrap full customer names so similar records stay distinguishable.
 - POS product search by name, SKU, or barcode; stock-aware cart quantities; custom line items; and a structured return request dialog.
+- POS empty-register quick add captures price, barcode, and optional opening stock, and explains when zero stock or an approval means the item cannot be sold yet. Less-used unit and SKU fields stay behind More details.
+- Inventory stock value now leads with a plain-language estimate and keeps moving-average and ledger details in an expandable explanation.
+- Inventory stock levels keep Add item beside the heading on phones, then focus the item name field in the creation flow.
 - POS customer lookup with purchase history, cash tender and change calculation, split cash/card/mobile-money tenders, shareable printable receipts, a selected refund destination, and register-scoped offline carts that can be parked and resumed from the same device.
-- POS shift closeout supports denomination counting and requires a note for drawer variances. Inventory empty states point to setup actions, and the overview surfaces draft transfers alongside counts, reservations, and reorder work.
+- POS sale history opens a receipt preview with print, download, email-draft, and messaging-share actions. Return review selects item quantities, previews the refund, traces prior returned quantities, and restores only stock tied to the original sale lines. Older sales without line-to-stock links keep a full-return path, and unlinked prior credits require accounting review.
+- POS shift closeout shows captured sales by tender alongside the separate drawer expectation, counts cash by denomination, requires a note for variances, and repeats the figures in a final review. Inventory empty states point to setup actions, and the overview surfaces draft transfers alongside counts, reservations, and reorder work.
 - Products & Services can import a mapped catalog CSV from the catalog screen, preview likely SKU or barcode duplicates, import services without a supplied SKU, and undo a recent batch while preserving item history.
 - Approval cards with plain-language summaries, affected-field previews, linked document shortcuts, and recent decision history with audit-ledger links.
 - Document library search and status filters, mobile document cards, explicit loading and error states, and file type and size validation.
@@ -37,6 +45,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Mobile app headers now include a shared Ask workmate action. Sales summary cards fill the phone width cleanly, and the Workmate composer grows to fit prompts instead of showing a clipped one-line field.
 - Inventory cycle counts can start from a location, barcode scan, or selected products; the count sheet tracks progress and requires a review of every variance before posting.
 - Inventory transfer and reservation forms now search location names, item names, SKUs, and barcodes, with available quantity shown before selection.
+- Inventory Locations groups transfers and reservations into collapsible work areas with clear pending and active counts, keeping setup and movement workflows easy to scan on phones.
 - **Documents you write, not just ingest.** New Write tab: rich text
   documents with a full formatting toolbar (headings, lists, tables,
   images), debounced autosave with a Saved indicator, live presence of
@@ -79,9 +88,12 @@ The full v1 changelog is preserved at the bottom of this file.
 - Switching app sections no longer scrolls page content behind the sticky app header; the tab rail now reveals the selected section horizontally.
 - The floating mobile Workmate bubble no longer covers app cards when the app header already offers Ask workmate.
 - Hidden mobile Workmate controls no longer intercept taps on app cards and actions.
+- POS sell content now gives barcode search the first position, collapses optional customer lookup, prevents phone-width overflow, and keeps the focused next-scan field above the sticky checkout. The cart bar shows the full total, separates Review cart from Complete sale, and opens the line list on demand.
+- POS split-payment rows now give each tender a readable full-width method selector on small screens, with the amount and remove action kept together. The sticky checkout explains whether payment allocation or cash received is short.
 - The Products & Services catalog stacks its heading, import action, and search field on narrow screens instead of overflowing horizontally.
-- Dialog rerenders no longer steal focus from text fields. Dialogs focus their first usable input when they open and restore the prior focus only when they close.
+- Dialog rerenders no longer steal focus from text fields. Dialogs focus their first usable input without scrolling content under the sticky title, and descriptions now begin below the title without overlap.
 - Dialog overlays now cover floating chat controls, keeping modal fields and actions clear on phones.
+- Saving a CRM view now uses a focused review dialog with the active filter summary and matching customer count; on phones the filter panel collapses while saved filters remain applied.
 - Customer name changes now update the CRM record through the governed profile capability and remain reversible with the original customer name in the audit snapshot.
 - Coding-plan connection and MCP routes now use the Next.js 16.3 default Node runtime, which is compatible with this project's Cache Components configuration.
 - Messages now loads the conversation list on entry and shows a recoverable error state if that request fails, instead of staying on the loading skeleton.

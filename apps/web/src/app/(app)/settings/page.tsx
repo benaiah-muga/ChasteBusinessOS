@@ -644,6 +644,8 @@ function AiTab() {
         change goes through the governed capability pipeline.
       </p>
 
+      <CodingPlansCard />
+
       {!config ? (
         <p className="text-sm text-stone-400">{error ?? "Checking configuration…"}</p>
       ) : (
@@ -725,12 +727,6 @@ function AiTab() {
             <ModelRow label="Reasoning" model={config.models.reasoning} hint="Deep multi-step analysis" />
             <ModelRow label="Embeddings" model={config.models.embeddings} hint="Document search and memory" />
           </div>
-
-          <p className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-            Workspace model credentials are shared by workspace runs. Coding-plan connections are personal and only used for runs that you start.
-          </p>
-
-          <CodingPlansCard />
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <Link

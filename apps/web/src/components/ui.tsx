@@ -388,7 +388,7 @@ export function Dialog({
     const autoFocusTarget = panelRef.current?.querySelector<HTMLElement>(
       "[data-dialog-autofocus], input:not([type='hidden']):not([disabled]), textarea:not([disabled]), select:not([disabled])",
     );
-    (autoFocusTarget ?? panelRef.current)?.focus();
+    (autoFocusTarget ?? panelRef.current)?.focus({ preventScroll: true });
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCloseRef.current();
@@ -416,7 +416,7 @@ export function Dialog({
           width,
         )}
       >
-        <div className="sticky top-0 z-10 -mx-5 -mt-5 mb-1 flex items-start justify-between gap-4 border-b border-stone-200 bg-white px-5 pt-5 pb-3">
+        <div className="sticky top-0 z-10 -mx-5 -mt-5 mb-5 flex items-start justify-between gap-4 border-b border-stone-200 bg-white px-5 pt-5 pb-3">
           <h2 className="text-[15px] font-semibold text-stone-900">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close dialog" className="icon-btn -mt-1 -mr-1">
             <IconX className="size-4" />

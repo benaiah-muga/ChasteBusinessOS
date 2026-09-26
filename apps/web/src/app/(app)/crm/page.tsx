@@ -394,6 +394,18 @@ export default function CrmPage() {
     }
   }, [router]);
 
+  const openDraftSource = useCallback((source: Pick<TimelineEntry, "kind" | "refId">) => {
+    setProfileCustomerId(null);
+    if (source.kind === "task") {
+      setFocusedTaskId(source.refId);
+      setTab("tasks");
+    } else if (source.kind === "invoice") {
+      router.push(`/accounting?recordPayment=${encodeURIComponent(source.refId)}#receivables`);
+    } else if (source.kind === "quote") {
+      router.push(`/sales?tab=quotes&focusQuote=${encodeURIComponent(source.refId)}`);
+    }
+  }, [router]);
+
   if (loadError) {
     return (
       <EmptyState
@@ -510,6 +522,8 @@ export default function CrmPage() {
         timeline={timeline}
         activeTab={profileTab}
         onTabChange={setProfileTab}
+        onOpenNextStep={(customer) => { setProfileCustomerId(null); openNextStep(customer); }}
+        onOpenSource={openDraftSource}
         onClose={() => { setProfileCustomerId(null); setTimeline(null); }}
         onRetryActivity={() => {
           if (profileCustomerId) {
@@ -1341,6 +1355,7 @@ function CustomersTab(props: {
         const refreshed = await callApi<{ views?: SavedCustomerView[] }>("/api/crm/views");
         if (refreshed.ok) setSavedViews(refreshed.data?.views ?? []);
         setSaveName("");
+        setSaveViewOpen(false);
       }
     } finally {
       setViewsBusy(false);
@@ -1398,7 +1413,11 @@ function CustomersTab(props: {
           <IconSearch aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-stone-400" />
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search customers" aria-label="Search customers by name, email, or tag" className="input h-11 pl-9 sm:h-10" />
         </label>
-        <Button tone="secondary" className="min-h-11 shrink-0 sm:hidden" aria-expanded={mobileFiltersOpen} onClick={() => setMobileFiltersOpen((open) => !open)}>
+        <Button tone="secondary" className="min-h-11 shrink-0 sm:hidden" aria-expanded={mobileFiltersOpen} onClick={() => {
+          const nextOpen = !mobileFiltersOpen;
+          setMobileFiltersOpen(nextOpen);
+          if (nextOpen) setSaveViewOpen(false);
+        }}>
             Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
         </Button>
         </div>
@@ -1445,20 +1464,35 @@ function CustomersTab(props: {
               ))}
             </div>
           </details>
-          <Button tone="secondary" className="min-h-10" aria-expanded={saveViewOpen} onClick={() => setSaveViewOpen((open) => !open)}>
+          <Button tone="secondary" className="min-h-10" aria-expanded={saveViewOpen} onClick={() => {
+            const nextOpen = !saveViewOpen;
+            setSaveViewOpen(nextOpen);
+            if (nextOpen) setMobileFiltersOpen(false);
+          }}>
             {saveViewOpen ? "Close" : "Save view"}
           </Button>
         </div>
-        {saveViewOpen && (
-          <div className="mt-3 grid gap-2 border-t border-stone-200 pt-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center">
-            <input className="input h-10 min-w-0" value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="Name this customer view" aria-label="Saved view name" maxLength={60} />
-            <label className="flex min-h-10 items-center gap-2 rounded-md border border-stone-200 bg-white px-3 text-xs text-stone-600"><input type="checkbox" checked={shareOnSave} onChange={(event) => setShareOnSave(event.target.checked)} className="accent-gold-700" />Share with team</label>
-            <label className="flex min-h-10 items-center gap-2 rounded-md border border-stone-200 bg-white px-3 text-xs text-stone-600"><input type="checkbox" checked={pinOnSave} onChange={(event) => setPinOnSave(event.target.checked)} className="accent-gold-700" />Pin</label>
-            <Button tone="secondary" className="min-h-10" loading={viewsBusy} disabled={!saveName.trim()} onClick={saveView}>Save view</Button>
-          </div>
-        )}
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500"><span>{visible.length} customer{visible.length === 1 ? "" : "s"} shown · {savedViews.filter((view) => view.isShared).length} team view{savedViews.filter((view) => view.isShared).length === 1 ? "" : "s"}</span>{props.teamError && <button type="button" className="text-amber-800 underline" onClick={props.onRetryTeam}>Owner list unavailable. Retry</button>}</div>
       </div>
+
+      <Dialog
+        open={saveViewOpen}
+        onClose={() => setSaveViewOpen(false)}
+        title="Save customer view"
+        description="Save this filter set to your workspace so you or your team can open it again."
+        width="max-w-md"
+        footer={<><Button tone="secondary" onClick={() => setSaveViewOpen(false)} disabled={viewsBusy}>Cancel</Button><Button type="submit" form="crm-save-customer-view" loading={viewsBusy} disabled={!saveName.trim()}>Save view</Button></>}
+      >
+        <form id="crm-save-customer-view" onSubmit={(event) => { event.preventDefault(); saveView(); }} className="space-y-3">
+          <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+            <p className="text-xs font-medium text-stone-800">{describeView(filter)}</p>
+            <p className="mt-1 text-xs text-stone-500">{countForView(filter)} matching customer{countForView(filter) === 1 ? "" : "s"}</p>
+          </div>
+          <label className="label" htmlFor="crm-save-customer-view-name">View name<input id="crm-save-customer-view-name" className="input mt-1" value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder="e.g. Follow up this week" maxLength={60} required /></label>
+          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700"><input type="checkbox" checked={shareOnSave} onChange={(event) => setShareOnSave(event.target.checked)} className="accent-gold-700" />Share with my team</label>
+          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700"><input type="checkbox" checked={pinOnSave} onChange={(event) => setPinOnSave(event.target.checked)} className="accent-gold-700" />Pin this view for quick access</label>
+        </form>
+      </Dialog>
 
       {mergeUndo && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2" role="status"><span className="text-sm text-emerald-950">Merge complete. Customer history is preserved.</span><div className="flex gap-2"><Button tone="secondary" size="sm" loading={mergeBusy} onClick={() => void undoCustomerMerge()}><IconUndo className="size-3.5" /> Undo merge</Button><button type="button" className="px-2 text-xs text-emerald-900 underline" onClick={() => setMergeUndo(null)}>Dismiss</button></div></div>}
 
@@ -1573,16 +1607,16 @@ function CustomersTab(props: {
         </>}
       >
         {reviewTarget && <>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
             {[reviewTarget.first, reviewTarget.second].map((customer) => {
               const entries = reviewEntries[customer.id] ?? [];
               const counts = entries.reduce<Record<string, number>>((result, entry) => {
                 result[entry.kind] = (result[entry.kind] ?? 0) + 1;
                 return result;
               }, {});
-              return <label key={customer.id} className={cn("cursor-pointer rounded-xl border p-3 transition-colors", reviewSurvivorId === customer.id ? "border-gold-500 bg-gold-50/60 ring-1 ring-gold-300" : "border-stone-200 hover:bg-stone-50")}>
-                <span className="flex items-start gap-2"><input type="radio" name="merge-survivor" className="mt-1 accent-gold-700" checked={reviewSurvivorId === customer.id} onChange={() => setReviewSurvivorId(customer.id)} /><span className="min-w-0"><span className="block truncate text-sm font-semibold text-stone-900">{customer.name}</span><span className="mt-0.5 block break-all text-xs text-stone-500">{customer.email ?? "No email"}</span></span></span>
-                <span className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-stone-600"><span>Phone</span><span className="text-right">{customer.phone ?? "None"}</span><span>Owner</span><span className="text-right">{customer.ownerName ?? "Unassigned"}</span><span>Contact preference</span><span className="text-right capitalize">{customer.preferredContactMethod}</span><span>Do not contact</span><span className="text-right">{customer.doNotContact ? "Yes" : "No"}</span><span>Tags</span><span className="text-right">{customer.tags.length ? customer.tags.join(", ") : "None"}</span></span>
+              return <label key={customer.id} className={cn("w-full min-w-0 cursor-pointer rounded-xl border p-3 transition-colors", reviewSurvivorId === customer.id ? "border-gold-500 bg-gold-50/60 ring-1 ring-gold-300" : "border-stone-200 hover:bg-stone-50")}>
+                <span className="flex items-start gap-2"><input type="radio" name="merge-survivor" className="mt-1 accent-gold-700" checked={reviewSurvivorId === customer.id} onChange={() => setReviewSurvivorId(customer.id)} /><span className="min-w-0"><span className="block break-words text-sm font-semibold text-stone-900">{customer.name}</span><span className="mt-0.5 block break-all text-xs text-stone-500">{customer.email ?? "No email"}</span></span></span>
+                <span className="mt-3 grid min-w-0 grid-cols-2 gap-x-3 gap-y-1 text-xs text-stone-600"><span>Phone</span><span className="min-w-0 break-words text-right">{customer.phone ?? "None"}</span><span>Owner</span><span className="min-w-0 break-words text-right">{customer.ownerName ?? "Unassigned"}</span><span>Contact preference</span><span className="min-w-0 break-words text-right capitalize">{customer.preferredContactMethod}</span><span>Do not contact</span><span className="min-w-0 break-words text-right">{customer.doNotContact ? "Yes" : "No"}</span><span>Tags</span><span className="min-w-0 break-words text-right">{customer.tags.length ? customer.tags.join(", ") : "None"}</span></span>
                 <span className="mt-3 block border-t border-stone-200 pt-2 text-xs text-stone-600">{reviewLoading ? "Checking linked records…" : reviewEntries[customer.id] === null ? "History preview unavailable. Existing record links will be preserved." : `${entries.length} linked history records`}{!reviewLoading && reviewEntries[customer.id] !== null && Object.entries(counts).length > 0 && <span className="mt-1 block text-[11px] text-stone-500">{Object.entries(counts).map(([kind, count]) => `${count} ${kind}${count === 1 ? "" : "s"}`).join(" · ")}</span>}</span>
                 <span className="mt-2 block text-[11px] font-medium text-gold-900">{reviewSurvivorId === customer.id ? "Keep this customer" : "Select to keep this customer"}</span>
               </label>;
@@ -1603,6 +1637,8 @@ function Customer360Dialog(props: {
   timeline: TimelineState | null;
   activeTab: "overview" | "activity" | "invoices" | "documents";
   onTabChange: (tab: "overview" | "activity" | "invoices" | "documents") => void;
+  onOpenNextStep: (customer: Customer) => void;
+  onOpenSource: (source: Pick<TimelineEntry, "kind" | "refId">) => void;
   onClose: () => void;
   onRetryActivity: () => void;
   onUpdateProfile: (input: { customerIds: string[]; name?: string; ownerUserId?: string | null; addTags?: string[]; removeTags?: string[]; notes?: string | null; phone?: string | null; preferredContactMethod?: Customer["preferredContactMethod"]; doNotContact?: boolean }) => Promise<boolean>;
@@ -1617,8 +1653,15 @@ function Customer360Dialog(props: {
   const [doNotContact, setDoNotContact] = useState(props.customer?.doNotContact ?? false);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDate, setTaskDate] = useState("");
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftBody, setDraftBody] = useState("");
+  const [draftSubject, setDraftSubject] = useState(`Following up with ${props.customer?.name ?? "your customer"}`);
+  const [draftSources, setDraftSources] = useState<TimelineEntry[]>([]);
+  const [draftCopied, setDraftCopied] = useState(false);
   if (!props.customer) return null;
   const customer = props.customer;
+  const contactBlocked = customer.doNotContact || doNotContact;
   const linkedCustomerIds = new Set([customer.id, ...(customer.mergedRecords ?? []).map((record) => record.id)]);
   const customerDeals = props.deals.filter((deal) => deal.customerId && linkedCustomerIds.has(deal.customerId));
   const entries = props.timeline?.entries ?? [];
@@ -1655,11 +1698,40 @@ function Customer360Dialog(props: {
     if (ok) { setTaskTitle(""); setTaskDate(""); }
   }
 
+  async function generateFollowUpDraft() {
+    setDraftLoading(true);
+    setDraftError(null);
+    setDraftCopied(false);
+    const result = await postApi<{ draft?: string; sources?: TimelineEntry[]; error?: string }>("/api/crm", { action: "draftFollowUp", customerId: customer.id });
+    setDraftLoading(false);
+    if (!result.ok || !result.data?.draft) {
+      setDraftError(result.error?.hint ?? result.data?.error ?? "The draft could not be generated. Try again.");
+      return;
+    }
+    setDraftBody(result.data.draft);
+    setDraftSources(result.data.sources ?? []);
+    setDraftSubject(`Following up with ${customer.name}`);
+  }
+
+  async function copyDraft() {
+    const content = `Subject: ${draftSubject.trim()}\n\n${draftBody.trim()}`;
+    try {
+      await navigator.clipboard.writeText(content);
+      setDraftCopied(true);
+    } catch {
+      setDraftError("Clipboard access was blocked. Select and copy the subject and message manually.");
+    }
+  }
+
+  const emailDraftHref = customer.email
+    ? `mailto:${customer.email}?subject=${encodeURIComponent(draftSubject)}&body=${encodeURIComponent(draftBody)}`
+    : undefined;
+
   const tabs = [["overview", "Overview"], ["activity", "Activity"], ["invoices", `Invoices & quotes (${invoiceEntries.length})`], ["documents", `Documents (${documentEntries.length})`]] as const;
   return (
     <Dialog open onClose={props.onClose} title={customer.name} description={customer.email ?? customer.phone ?? "No contact details on file"} width="max-w-3xl">
       <div className="mb-4 flex flex-wrap gap-2">
-        {customer.doNotContact ? <Badge tone="amber">Do not contact</Badge> : <>
+        {contactBlocked ? <Badge tone="amber">Do not contact</Badge> : <>
           {customer.email && <a className="inline-flex min-h-9 items-center rounded-md bg-gold-700 px-3 text-xs font-semibold text-white hover:bg-gold-800" href={`mailto:${customer.email}`}>Email customer</a>}
           {customer.phone && <a className="inline-flex min-h-9 items-center rounded-md border border-stone-200 px-3 text-xs font-semibold text-stone-700 hover:bg-stone-50" href={customer.preferredContactMethod === "whatsapp" ? `https://wa.me/${customer.phone.replace(/\D/g, "")}` : `tel:${customer.phone}`}>{customer.preferredContactMethod === "whatsapp" ? "Message on WhatsApp" : "Call customer"}</a>}
         </>}
@@ -1667,6 +1739,34 @@ function Customer360Dialog(props: {
         {!customer.deactivatedAt && <Badge tone="green">Active</Badge>}
         {customer.deactivatedAt && <Badge tone="neutral">Inactive</Badge>}
       </div>
+      {customer.nextStep && <section className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50/70 p-3 sm:flex-row sm:items-center sm:justify-between" aria-label="Customer next step">
+        <div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wide text-amber-900">Next step</p><p className="mt-1 text-sm font-medium text-amber-950">{customer.nextStep.summary}{customer.nextStep.amountMinor !== undefined ? ` · ${formatMoney(customer.nextStep.amountMinor)} outstanding` : ""}</p></div>
+        <Button tone="secondary" size="sm" className="w-full shrink-0 sm:w-auto" onClick={() => props.onOpenNextStep(customer)}>{customer.nextStep.kind === "task" ? "Open follow-up" : customer.nextStep.kind === "invoice" ? "Open invoice" : "Open quote"}<IconArrowRight className="size-3.5" /></Button>
+      </section>}
+      <section className="mb-4 rounded-lg border border-stone-200 p-3" aria-label="AI follow-up draft">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><h3 className="text-sm font-semibold text-stone-900">Follow-up draft</h3><p className="mt-0.5 text-xs text-stone-500">Use recent CRM records as context, then review and edit before outreach.</p></div>
+          {!contactBlocked && <Button tone="secondary" size="sm" loading={draftLoading} onClick={() => void generateFollowUpDraft()}>{draftBody ? "Regenerate draft" : "Draft with AI"}</Button>}
+        </div>
+        {contactBlocked ? <p className="mt-3 rounded-md bg-amber-50 p-2.5 text-xs text-amber-900">This customer is marked do not contact. Drafting and outreach shortcuts are disabled.</p> : <>
+          {draftLoading && <p className="mt-3 text-xs text-stone-500" role="status">Reviewing recent invoices, quotes, and follow-ups…</p>}
+          {draftError && <p className="mt-3 rounded-md bg-red-50 p-2.5 text-xs text-red-800" role="alert">{draftError}</p>}
+          {draftBody && <div className="mt-3 space-y-3">
+            <label className="label block">Subject<input className="input mt-1" value={draftSubject} onChange={(event) => setDraftSubject(event.target.value)} maxLength={180} /></label>
+            <label className="label block">Message<textarea className="input mt-1 min-h-32 resize-y" value={draftBody} onChange={(event) => setDraftBody(event.target.value)} maxLength={4000} /></label>
+            <div>
+              <p className="text-xs font-semibold text-stone-700">Records used</p>
+              <ul className="mt-1 space-y-1.5">{draftSources.map((source) => <li key={`${source.kind}-${source.refId}`}><button type="button" className="w-full rounded-md border border-stone-200 px-2.5 py-2 text-left text-xs hover:border-gold-400 hover:bg-gold-50/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-600" onClick={() => props.onOpenSource(source)}><span className="font-semibold capitalize text-stone-700">{source.kind}</span><span className="ml-2 text-stone-600">{source.summary}</span><span className="mt-0.5 block text-[11px] text-stone-400">Open related record · {timeAgo(source.date)}</span></button></li>)}</ul>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button tone="secondary" size="sm" onClick={() => void copyDraft()}>{draftCopied ? "Copied" : "Copy draft"}</Button>
+              {emailDraftHref && <a className="inline-flex min-h-9 items-center rounded-md bg-gold-700 px-3 text-xs font-semibold text-white hover:bg-gold-800" href={emailDraftHref}>Open in email app</a>}
+              {!customer.email && <span className="text-xs text-stone-500">Add an email address to open this draft in your email app.</span>}
+            </div>
+            <p className="text-[11px] text-stone-500" role="status">{draftCopied ? "Draft copied. Nothing has been sent." : "Review and edit this draft. Opening your email app will not send it."}</p>
+          </div>}
+        </>}
+      </section>
       <div className="scrollbar-hidden mb-4 flex gap-1 overflow-x-auto border-b border-stone-200" role="tablist" aria-label="Customer profile sections">
         {tabs.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={props.activeTab === id} onClick={() => props.onTabChange(id)} className={cn("min-h-10 shrink-0 border-b-2 px-3 text-xs font-medium", props.activeTab === id ? "border-gold-700 text-stone-900" : "border-transparent text-stone-500 hover:text-stone-800")}>{label}</button>)}
       </div>

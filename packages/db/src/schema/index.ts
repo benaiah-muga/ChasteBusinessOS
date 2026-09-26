@@ -2,6 +2,7 @@ import { type AnyPgColumn,
   bigint,
   bigserial,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -13,6 +14,7 @@ import { type AnyPgColumn,
   uuid,
   vector,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const EMBEDDING_DIM = Number(process.env.EMBEDDING_DIMENSIONS ?? 1024);
 
@@ -492,6 +494,7 @@ export const invoiceLines = pgTable(
     invoiceId: uuid("invoice_id")
       .notNull()
       .references(() => invoices.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
     description: text("description").notNull(),
     quantity: integer("quantity").notNull(), // thousandths of a unit
     unitPriceMinor: integer("unit_price_minor").notNull(),
@@ -567,6 +570,58 @@ export const journalLines = pgTable(
     creditMinor: integer("credit_minor").notNull().default(0),
   },
   (t) => [index("journal_line_entry_idx").on(t.entryId), index("journal_line_account_idx").on(t.accountId)],
+);
+
+export const posReturns = pgTable(
+  "pos_returns",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "restrict" }),
+    entryId: uuid("entry_id")
+      .notNull()
+      .references(() => journalEntries.id, { onDelete: "restrict" }),
+    refundMethod: text("refund_method").notNull(),
+    refundMinor: integer("refund_minor").notNull(),
+    reason: text("reason").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("pos_return_entry_idx").on(t.orgId, t.entryId),
+    index("pos_return_org_invoice_idx").on(t.orgId, t.invoiceId),
+    check("pos_returns_refund_positive", sql`${t.refundMinor} > 0`),
+    check("pos_returns_method_valid", sql`${t.refundMethod} in ('cash', 'card', 'mobile_money', 'unknown')`),
+  ],
+);
+
+export const posReturnLines = pgTable(
+  "pos_return_lines",
+  {
+    id: id(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    returnId: uuid("return_id")
+      .notNull()
+      .references(() => posReturns.id, { onDelete: "cascade" }),
+    invoiceLineId: uuid("invoice_line_id")
+      .notNull()
+      .references(() => invoiceLines.id, { onDelete: "restrict" }),
+    quantity: integer("quantity").notNull(),
+    subtotalMinor: integer("subtotal_minor").notNull(),
+    taxMinor: integer("tax_minor").notNull(),
+  },
+  (t) => [
+    uniqueIndex("pos_return_line_unique_idx").on(t.returnId, t.invoiceLineId),
+    index("pos_return_line_org_idx").on(t.orgId, t.invoiceLineId),
+    check("pos_return_lines_quantity_positive", sql`${t.quantity} > 0`),
+    check("pos_return_lines_subtotal_nonnegative", sql`${t.subtotalMinor} >= 0`),
+    check("pos_return_lines_tax_nonnegative", sql`${t.taxMinor} >= 0`),
+  ],
 );
 
 // ── Purchasing (AP subledger) ───────────────────────────────────────────

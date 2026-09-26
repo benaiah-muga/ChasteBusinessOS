@@ -520,6 +520,20 @@
       "when": 1790408193555,
       "tag": "0073_late_mindworm",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790452033241,
+      "tag": "0074_swift_ricochet",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790453308881,
+      "tag": "0075_sturdy_the_spike",
+      "breakpoints": true
     }
   ]
 }

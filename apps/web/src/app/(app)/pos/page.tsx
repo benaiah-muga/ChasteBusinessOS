@@ -64,7 +64,9 @@ interface PosSale {
   customerId: string | null;
   customerName: string | null;
   method: string;
-  lines: Array<{ description: string; quantity: number; unitPriceMinor: number }>;
+  returnMode: "itemized" | "legacy-full" | "credit-review";
+  unallocatedCreditMinor: number;
+  lines: Array<{ id: string; itemId: string | null; description: string; quantity: number; unitPriceMinor: number; taxMinor: number; returnedQuantity: number; stockTracked: boolean }>;
   createdAt: string;
 }
 interface PosCustomer {
@@ -116,6 +118,8 @@ interface ShiftSummary {
   status: string;
   salesCount: number;
   takingsMinor: number;
+  tenderTotals: Array<{ method: string; amountMinor: number }>;
+  refundTotals: Array<{ method: string; amountMinor: number }>;
   expectedCashMinor: number;
   countedCashMinor: number | null;
   varianceMinor: number | null;
@@ -130,6 +134,7 @@ interface PosActionData {
   expectedCashMinor?: number;
   varianceMinor?: number;
   creditedMinor?: number;
+  refundMinor?: number;
   restockedLines?: number;
 }
 
@@ -151,7 +156,8 @@ export default function PosPage() {
   const [line, setLine] = useState({ description: "", price: "" });
   const [customLineOpen, setCustomLineOpen] = useState(false);
   const [quickProductOpen, setQuickProductOpen] = useState(false);
-  const [quickProduct, setQuickProduct] = useState({ name: "", sku: "", barcode: "", price: "", unitLabel: "unit" });
+  const [quickProduct, setQuickProduct] = useState({ name: "", sku: "", barcode: "", price: "", openingStock: "", unitLabel: "unit" });
+  const [quickProductAdvancedOpen, setQuickProductAdvancedOpen] = useState(false);
   const [activeLineIndex, setActiveLineIndex] = useState<number | null>(null);
   const [lines, setLines] = useState<SaleLine[]>([]);
   const [salePendingApproval, setSalePendingApproval] = useState(false);
@@ -173,6 +179,7 @@ export default function PosPage() {
   const [summary, setSummary] = useState<ShiftSummary | null>(null);
   const [returnTarget, setReturnTarget] = useState<PosSale | null>(null);
   const [returnReason, setReturnReason] = useState("");
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, string>>({});
   const [refundMethod, setRefundMethod] = useState<"cash" | "card" | "mobile_money">("cash");
   const [customers, setCustomers] = useState<PosCustomer[]>([]);
   const [customerError, setCustomerError] = useState<string | null>(null);
@@ -181,6 +188,9 @@ export default function PosPage() {
   const [cashReceived, setCashReceived] = useState("");
   const [online, setOnline] = useState(true);
   const [receiptText, setReceiptText] = useState<string | null>(null);
+  const [receiptCustomer, setReceiptCustomer] = useState<{ name: string; email: string | null }>({ name: "Walk-in customer", email: null });
+  const [receiptPreview, setReceiptPreview] = useState<{ text: string; customerName: string; customerEmail: string | null } | null>(null);
+  const [receiptShareFeedback, setReceiptShareFeedback] = useState<string | null>(null);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
   const [draftToRestore, setDraftToRestore] = useState<PosDraft | null>(null);
@@ -378,6 +388,16 @@ export default function PosPage() {
     wasOnline.current = online;
   }, [online, loadCatalog]);
 
+  const focusCatalogField = useCallback(() => {
+    const input = catalogInputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({
+      block: "center",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
+  }, []);
+
   useEffect(() => {
     if (tab !== "sell" || !openSessionId) return;
     const focusCatalog = (event: KeyboardEvent) => {
@@ -385,16 +405,16 @@ export default function PosPage() {
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
       if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
       event.preventDefault();
-      catalogInputRef.current?.focus();
+      focusCatalogField();
     };
     window.addEventListener("keydown", focusCatalog);
     return () => window.removeEventListener("keydown", focusCatalog);
-  }, [tab, openSessionId]);
+  }, [tab, openSessionId, focusCatalogField]);
 
   useEffect(() => {
     if (tab !== "sell" || !openSessionId || catalog.length === 0 || lines.length > 0) return;
-    requestAnimationFrame(() => catalogInputRef.current?.focus());
-  }, [tab, openSessionId, catalog.length, lines.length]);
+    requestAnimationFrame(focusCatalogField);
+  }, [tab, openSessionId, catalog.length, lines.length, focusCatalogField]);
 
   const loadSummary = useCallback(async (sessionId: string) => {
     const res = await postApi<{ data?: ShiftSummary }>("/api/pos", { action: "shiftSummary", sessionId });
@@ -468,10 +488,12 @@ export default function PosPage() {
         const d = res.data.data;
         setSalePendingApproval(false);
         const paymentSummary = d.tenders?.map((tender) => `${tender.method.replace("_", " ")} ${formatMoney(tender.amountMinor)}`).join(" + ") ?? String(payload.method);
+        const receiptName = selectedCustomer?.name ?? "Walk-in customer";
+        setReceiptCustomer({ name: receiptName, email: selectedCustomer?.email ?? null });
         setReceiptText([
           `Chaste BusinessOS · Sale #${d.invoiceNumber ?? ""}`,
           `Date: ${new Date().toLocaleString()}`,
-          `Customer: ${selectedCustomer?.name ?? "Walk-in customer"}`,
+          `Customer: ${receiptName}`,
           ...lines.map((saleLine) => `${saleLine.quantity / 1000} × ${saleLine.description} · ${formatMoney(Math.round(saleLine.quantity * saleLine.unitPriceMinor / 1000))}`),
           `Total: ${formatMoney(d.totalMinor ?? 0)}`,
           `Payment: ${paymentSummary}`,
@@ -497,15 +519,39 @@ export default function PosPage() {
     try {
       if (navigator.share) {
         await navigator.share({ title: "Purchase receipt", text });
+        setReceiptShareFeedback("Receipt shared.");
         setNotice({ tone: "success", text: "Receipt shared." });
       } else {
         await navigator.clipboard.writeText(text);
+        setReceiptShareFeedback("Receipt copied. Paste it into a message to share.");
         setNotice({ tone: "success", text: "Receipt copied. Paste it into a message to share." });
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
+      setReceiptShareFeedback("Could not share the receipt. Try downloading it instead.");
       setNotice({ tone: "error", error: { title: "Could not share receipt", hint: "Check the browser share permissions, or try again from a secure connection." } });
     }
+  }
+
+  function openReceiptPreview(text: string, customerName: string, customerEmail: string | null) {
+    setReceiptShareFeedback(null);
+    setReceiptPreview({ text, customerName, customerEmail });
+  }
+
+  function emailReceiptDraft() {
+    if (!receiptPreview) return;
+    const saleNumber = /Sale #?(\d+)/.exec(receiptPreview.text.split("\n")[0] ?? "")?.[1];
+    const recipient = receiptPreview.customerEmail ? encodeURIComponent(receiptPreview.customerEmail) : "";
+    const query = new URLSearchParams({
+      subject: `Receipt${saleNumber ? ` for sale #${saleNumber}` : ""}`,
+      body: receiptPreview.text,
+    });
+    window.location.href = `mailto:${recipient}?${query.toString()}`;
+    const feedback = receiptPreview.customerEmail
+      ? `Email draft opened for ${receiptPreview.customerEmail}. Review it before sending.`
+      : "Email draft opened. Add a recipient and review it before sending.";
+    setReceiptShareFeedback(feedback);
+    setNotice({ tone: "success", text: feedback });
   }
 
   function downloadReceipt(text: string) {
@@ -516,6 +562,7 @@ export default function PosPage() {
     anchor.download = `receipt-${saleNumber}.txt`;
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(href), 1_000);
+    setReceiptShareFeedback("Receipt downloaded.");
     setNotice({ tone: "success", text: "Receipt downloaded." });
   }
 
@@ -531,6 +578,7 @@ export default function PosPage() {
     printWindow.document.close();
     printWindow.focus();
     window.setTimeout(() => printWindow.print(), 200);
+    setReceiptShareFeedback("Print dialog opened.");
   }
 
   async function returnSale(): Promise<void> {
@@ -543,14 +591,34 @@ export default function PosPage() {
       });
       return;
     }
+    const hasInvalidQuantity = returnTarget.returnMode === "itemized" && returnTarget.lines.some((line) => {
+      const value = returnQuantities[line.id];
+      if (!value?.trim()) return false;
+      const quantity = Number(value);
+      return !Number.isFinite(quantity) || quantity < 0 || quantity > (line.quantity - line.returnedQuantity) / 1000;
+    });
+    if (hasInvalidQuantity) {
+      setNotice({ tone: "error", error: { title: "Check return quantities", hint: "Each quantity must be within the unreturned amount shown for that item." } });
+      return;
+    }
     const saleNumber = returnTarget.number;
+    const selectedLines = returnTarget.returnMode === "itemized"
+      ? returnTarget.lines
+          .map((line) => ({ invoiceLineId: line.id, quantity: Math.round(Number(returnQuantities[line.id] ?? "0") * 1000) }))
+          .filter((line) => Number.isSafeInteger(line.quantity) && line.quantity > 0)
+      : undefined;
+    if (returnTarget.returnMode === "itemized" && !selectedLines?.length) {
+      setNotice({ tone: "error", error: { title: "Choose items to return", hint: "Enter a quantity for at least one sale item." } });
+      return;
+    }
     setBusy(true);
     try {
-      const res = await postApi<{ data?: { creditedMinor: number; restockedLines: number } }>("/api/pos", {
+      const res = await postApi<{ data?: { refundMinor: number; creditedMinor: number; restockedLines: number } }>("/api/pos", {
         action: "returnSale",
         invoiceId: returnTarget.id,
         reason: trimmed,
         refundMethod,
+        ...(selectedLines ? { lines: selectedLines } : {}),
       });
       if (res.status === 202) {
         setNotice({
@@ -559,6 +627,7 @@ export default function PosPage() {
         });
         setReturnTarget(null);
         setReturnReason("");
+        setReturnQuantities({});
       } else if (!res.ok || !res.data?.data) {
         setNotice({ tone: "error", error: res.error ?? { title: "That didn't work", hint: "Try again in a moment." } });
         return;
@@ -566,16 +635,25 @@ export default function PosPage() {
         const d = res.data.data;
         setNotice({
           tone: "success",
-          text: `Return posted - ${formatMoney(d.creditedMinor)} credited to ${refundMethod.replaceAll("_", " ")}, ${d.restockedLines} line${d.restockedLines === 1 ? "" : "s"} restocked.`,
+          text: `Return posted - ${formatMoney(d.refundMinor)} refunded to ${refundMethod.replaceAll("_", " ")}, ${d.restockedLines} line${d.restockedLines === 1 ? "" : "s"} restocked.`,
         });
         setReturnTarget(null);
         setReturnReason("");
+        setReturnQuantities({});
       }
       await load();
     } finally {
       setBusy(false);
       router.refresh();
     }
+  }
+
+  function startReturn(sale: PosSale) {
+    setReturnTarget(sale);
+    setReturnReason("");
+    setReturnQuantities({});
+    const firstMethod = sale.method.split(" + ")[0];
+    setRefundMethod(firstMethod === "card" ? "card" : firstMethod === "mobile_money" ? "mobile_money" : "cash");
   }
 
   function addLine(e: React.FormEvent) {
@@ -605,12 +683,22 @@ export default function PosPage() {
   const splitAllocatedMinor = splitAmounts.reduce((sum, amount) => sum + (Number.isSafeInteger(amount) && amount > 0 ? amount : 0), 0);
   const splitCashAllocatedMinor = splitTenders.reduce((sum, tender, index) => sum + (tender.method === "cash" ? splitAmounts[index] ?? 0 : 0), 0);
   const splitCashReceivedMinor = cashReceived.trim() ? toMinor(cashReceived) : splitCashAllocatedMinor;
+  const splitTenderRowsComplete = splitTenders.length > 1 && splitTenders.every((tender, index) => tender.amount.trim() !== "" && Number.isSafeInteger(splitAmounts[index]) && (splitAmounts[index] ?? 0) > 0);
   const checkoutReady = splitMode
-    ? splitTenders.length > 1 && splitTenders.every((tender, index) => tender.amount.trim() !== "" && (splitAmounts[index] ?? 0) > 0) && splitAllocatedMinor === total && (splitCashAllocatedMinor === 0 || splitCashReceivedMinor >= splitCashAllocatedMinor)
+    ? splitTenderRowsComplete && splitAllocatedMinor === total && (splitCashAllocatedMinor === 0 || splitCashReceivedMinor >= splitCashAllocatedMinor)
     : method !== "cash" || tenderedMinor >= total;
   const changeDueMinor = splitMode
     ? Math.max(0, splitCashReceivedMinor - splitCashAllocatedMinor)
     : Math.max(0, tenderedMinor - total);
+  const splitCheckoutStatus = splitAllocatedMinor < total
+    ? `Remaining ${formatMoney(total - splitAllocatedMinor)}`
+    : splitAllocatedMinor > total
+      ? `Over by ${formatMoney(splitAllocatedMinor - total)}`
+      : !splitTenderRowsComplete
+        ? "Enter amounts"
+        : splitCashReceivedMinor < splitCashAllocatedMinor
+        ? `Cash short ${formatMoney(splitCashAllocatedMinor - splitCashReceivedMinor)}`
+        : "Complete sale";
   const currencyDigits = activeCurrencyMinorUnits();
   const currencyScale = 10 ** currencyDigits;
   const denominationMinorValues = (currencyDigits === 0
@@ -635,17 +723,46 @@ export default function PosPage() {
   const customerResults = customerQuery.trim()
     ? customers.filter((customer) => `${customer.name} ${customer.email ?? ""}`.toLowerCase().includes(customerQuery.trim().toLowerCase())).slice(0, 6)
     : [];
+  const selectedReturnLines = returnTarget?.returnMode === "itemized"
+    ? returnTarget.lines.flatMap((line) => {
+        const quantity = Math.round(Number(returnQuantities[line.id] ?? "0") * 1000);
+        const remaining = line.quantity - line.returnedQuantity;
+        if (!Number.isSafeInteger(quantity) || quantity <= 0 || quantity > remaining) return [];
+        const nextQuantity = line.returnedQuantity + quantity;
+        const subtotalMinor = Math.round((nextQuantity * line.unitPriceMinor) / 1000) - Math.round((line.returnedQuantity * line.unitPriceMinor) / 1000);
+        const taxMinor = Math.round((line.taxMinor * nextQuantity) / line.quantity) - Math.round((line.taxMinor * line.returnedQuantity) / line.quantity);
+        return [{ invoiceLineId: line.id, quantity, refundMinor: subtotalMinor + taxMinor, stockTracked: line.stockTracked }];
+      })
+    : [];
+  const selectedReturnTotalMinor = selectedReturnLines.reduce((sum, line) => sum + line.refundMinor, 0);
+  const invalidReturnQuantity = returnTarget?.returnMode === "itemized" && returnTarget.lines.some((line) => {
+    const value = returnQuantities[line.id];
+    if (!value?.trim()) return false;
+    const quantity = Number(value);
+    return !Number.isFinite(quantity) || quantity < 0 || quantity > (line.quantity - line.returnedQuantity) / 1000;
+  });
+
+  function setAllRemainingReturnQuantities(sale: PosSale) {
+    setReturnQuantities(Object.fromEntries(sale.lines
+      .filter((line) => line.quantity > line.returnedQuantity)
+      .map((line) => [line.id, String((line.quantity - line.returnedQuantity) / 1000)])));
+  }
 
   function receiptForSale(sale: PosSale): string {
     return [
       `Chaste BusinessOS · Sale #${sale.number}`,
       `Date: ${new Date(sale.createdAt).toLocaleString()}`,
       `Customer: ${sale.customerName ?? "Walk-in customer"}`,
-      ...sale.lines.map((saleLine) => `${saleLine.quantity / 1000} × ${saleLine.description} · ${formatMoney(Math.round(saleLine.quantity * saleLine.unitPriceMinor / 1000))}`),
+      ...sale.lines.map((saleLine) => `${saleLine.quantity / 1000} × ${saleLine.description} · ${formatMoney(Math.round(saleLine.quantity * saleLine.unitPriceMinor / 1000) + (saleLine.taxMinor ?? 0))}`),
       `Total: ${formatMoney(sale.totalMinor)}`,
       `Payment: ${sale.method}`,
       "Thank you for your purchase.",
     ].join("\n");
+  }
+
+  function previewSaleReceipt(sale: PosSale) {
+    const customerEmail = customers.find((customer) => customer.id === sale.customerId)?.email ?? null;
+    openReceiptPreview(receiptForSale(sale), sale.customerName ?? "Walk-in customer", customerEmail);
   }
 
   function clearCart() {
@@ -692,13 +809,21 @@ export default function PosPage() {
     setSalePendingApproval(false);
     setParkedCarts((current) => current.filter((cart) => cart.id !== parked.id));
     setNotice({ tone: "success", text: `Cart for ${parked.customerName} resumed. Review stock and total before checkout.` });
-    requestAnimationFrame(() => catalogInputRef.current?.focus());
+    requestAnimationFrame(focusCatalogField);
   }
 
   async function createQuickProduct(): Promise<void> {
     const name = quickProduct.name.trim();
     const sku = quickProduct.sku.trim() || `POS-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const openingStockInput = quickProduct.openingStock.trim();
+    const openingStockPrecisionIsValid = openingStockInput === "" || /^(?:\d+(?:\.\d{0,3})?|\.\d{1,3})$/.test(openingStockInput);
+    const openingStockUnits = openingStockInput ? Number(openingStockInput) : 0;
+    const openingStockThousandths = Math.round(openingStockUnits * 1000);
     if (!name) return;
+    if (!openingStockPrecisionIsValid || !Number.isFinite(openingStockUnits) || openingStockUnits < 0 || !Number.isSafeInteger(openingStockThousandths)) {
+      setNotice({ tone: "error", error: { title: "Check the opening stock quantity", hint: "Enter a non-negative quantity with up to three decimal places." } });
+      return;
+    }
     setBusy(true);
     try {
       const response = await postApi("/api/inventory", {
@@ -711,17 +836,35 @@ export default function PosPage() {
       });
       if (response.status === 202) {
         setNotice({ tone: "pending", text: `Adding ${name} is waiting for approval.` });
+        setQuickProduct({ name: "", sku: "", barcode: "", price: "", openingStock: "", unitLabel: "unit" });
+        setQuickProductOpen(false);
         return;
       }
       if (!response.ok) {
         setNotice({ tone: "error", error: response.error ?? { title: "Could not add product", hint: "Review the item details and try again." } });
         return;
       }
-      setQuickProduct({ name: "", sku: "", barcode: "", price: "", unitLabel: "unit" });
+      setQuickProduct({ name: "", sku: "", barcode: "", price: "", openingStock: "", unitLabel: "unit" });
       setQuickProductOpen(false);
-      setNotice({ tone: "success", text: `${name} is in the catalog. Scan its barcode or search to add it to this sale.` });
+      if (openingStockThousandths > 0) {
+        const stockResponse = await postApi("/api/inventory", {
+          action: "adjustStock",
+          sku,
+          quantityDelta: openingStockThousandths,
+          note: "Opening stock from POS quick add",
+        });
+        if (stockResponse.status === 202) {
+          setNotice({ tone: "pending", text: `${name} was added. Its opening stock is waiting for approval before the item can be sold.` });
+        } else if (!stockResponse.ok) {
+          setNotice({ tone: "error", error: { title: `${name} was added, but opening stock was not recorded`, hint: "Open Inventory and record the opening quantity before selling this item." } });
+        } else {
+          setNotice({ tone: "success", text: `${name} is in the catalog with ${openingStockUnits} ${quickProduct.unitLabel || "unit"} in opening stock. Scan its barcode or search to add it to this sale.` });
+        }
+      } else {
+        setNotice({ tone: "success", text: `${name} is in the catalog with zero stock. Add an opening balance in Inventory before selling it.` });
+      }
       await loadCatalog();
-      requestAnimationFrame(() => catalogInputRef.current?.focus());
+      requestAnimationFrame(focusCatalogField);
     } finally {
       setBusy(false);
     }
@@ -745,7 +888,7 @@ export default function PosPage() {
         : lineItem);
     });
     setCatalogQuery("");
-    requestAnimationFrame(() => catalogInputRef.current?.focus());
+    requestAnimationFrame(focusCatalogField);
   }
 
   function updateQuantity(index: number, value: string) {
@@ -855,7 +998,9 @@ export default function PosPage() {
         return;
       }
       const result = response.data.data;
-      const customerName = customers.find((customer) => customer.id === queued.customerId)?.name ?? "Walk-in customer";
+      const receiptCustomerRecord = customers.find((customer) => customer.id === queued.customerId);
+      const customerName = receiptCustomerRecord?.name ?? "Walk-in customer";
+      setReceiptCustomer({ name: customerName, email: receiptCustomerRecord?.email ?? null });
       const paymentSummary = result.tenders?.map((tender) => `${tender.method.replace("_", " ")} ${formatMoney(tender.amountMinor)}`).join(" + ") ?? queued.method;
       setReceiptText([
         `Chaste BusinessOS · Sale #${result.invoiceNumber ?? ""}`,
@@ -930,11 +1075,9 @@ export default function PosPage() {
       )}
       {receiptText && (
         <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-950">
-          <span>Receipt ready{selectedCustomer ? ` for ${selectedCustomer.name}` : " to share"}.</span>
+          <span>Receipt ready for {receiptCustomer.name}.</span>
           <div className="flex flex-wrap gap-1">
-            <Button tone="ghost" size="sm" onClick={() => printReceipt(receiptText)}>Print</Button>
-            <Button tone="ghost" size="sm" onClick={() => downloadReceipt(receiptText)}>Download</Button>
-            <Button tone="secondary" size="sm" onClick={() => void shareReceipt(receiptText)}>Share</Button>
+            <Button tone="secondary" size="sm" onClick={() => openReceiptPreview(receiptText, receiptCustomer.name, receiptCustomer.email)}>Preview and share</Button>
             <Button tone="ghost" size="sm" onClick={() => setReceiptText(null)}>Dismiss</Button>
           </div>
         </div>
@@ -1053,41 +1196,14 @@ export default function PosPage() {
       )}
 
       {tab === "sell" && openSession && (
-        <div className="grid items-start gap-4 lg:grid-cols-[1fr_380px]">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
           {/* Sale builder */}
-          <Card>
+          <Card className="min-w-0">
             <CardTitle right={<Badge tone="green">register open</Badge>}>Ring a sale</CardTitle>
             {draftReady && lines.length > 0 && !salePendingApproval && (
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900">
                 <span>Cart saved on this device. You can leave and come back without losing it.</span>
                 <button type="button" className="font-medium underline" onClick={clearCart} disabled={busy}>Clear cart</button>
-              </div>
-            )}
-            {selectedCustomer ? (
-              <div className="mb-4 rounded-lg border border-gold-200 bg-gold-50/50 p-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-stone-900">{selectedCustomer.name}</p>
-                    {selectedCustomer.email && <p className="mt-0.5 truncate text-xs text-stone-500">{selectedCustomer.email}</p>}
-                  </div>
-                  <button type="button" className="text-xs font-medium text-stone-500 underline" onClick={() => { setCustomerId(""); setCustomerQuery(""); }} disabled={busy || salePendingApproval}>Change customer</button>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t border-gold-200/70 pt-2 text-xs text-stone-600">
-                  <span><strong className="tnum text-stone-900">{selectedCustomer.purchaseCount}</strong> past purchase{selectedCustomer.purchaseCount === 1 ? "" : "s"}</span>
-                  <span><strong className="tnum text-stone-900">{formatMoney(selectedCustomer.lifetimeSpendMinor)}</strong> lifetime net spend</span>
-                </div>
-                <p className="mt-2 text-[11px] text-stone-500">Rewards points are unavailable because no loyalty program is configured for this workspace.</p>
-              </div>
-            ) : (
-              <div className="mb-4">
-                <label htmlFor="pos-customer-search" className="label">Customer lookup <span className="font-normal text-stone-400">(optional)</span></label>
-                <input id="pos-customer-search" className="input" value={customerQuery} onChange={(event) => setCustomerQuery(event.target.value)} placeholder="Search name or email, or leave as walk-in" autoComplete="off" disabled={busy || salePendingApproval} />
-                {customerError ? <p className="mt-1 text-xs text-amber-800">{customerError}</p> : customerQuery.trim() ? (
-                  <ul className="mt-1 max-h-56 overflow-auto rounded-lg border border-stone-200 bg-white shadow-sm" aria-label="Matching customers">
-                    {customerResults.map((customer) => <li key={customer.id}><button type="button" className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-stone-50" onClick={() => { setCustomerId(customer.id); setCustomerQuery(""); }}><span className="min-w-0"><span className="block truncate text-sm font-medium">{customer.name}</span><span className="block truncate text-xs text-stone-500">{customer.email ?? "No email"}</span></span><span className="shrink-0 text-right text-[11px] text-stone-500">{customer.purchaseCount} visits</span></button></li>)}
-                    {customerResults.length === 0 && <li className="px-3 py-3 text-xs text-stone-500">No match. Continue as walk-in, or add the customer in CRM.</li>}
-                  </ul>
-                ) : <p className="mt-1 text-[11px] text-stone-400">Find a customer to attach this sale to their purchase history.</p>}
               </div>
             )}
             {!online && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Products already in the cart stay available. Register lookups need a connection.</p>}
@@ -1118,7 +1234,7 @@ export default function PosPage() {
                       type="button"
                       onClick={() => {
                         setCatalogQuery("");
-                        catalogInputRef.current?.focus();
+                        focusCatalogField();
                       }}
                       disabled={busy || salePendingApproval}
                       className="absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium text-stone-500 hover:text-stone-900"
@@ -1184,7 +1300,7 @@ export default function PosPage() {
                     <div className="rounded-xl border border-dashed border-stone-300 bg-stone-50/70 p-4">
                       <p className="text-sm font-semibold text-stone-900">Set up this register</p>
                       <p className="mt-1 text-xs leading-relaxed text-stone-600">Add a first item with its selling price and barcode, or bring in your existing spreadsheet.</p>
-                      <div className="mt-3 flex flex-col gap-2 sm:flex-row"><Button size="sm" onClick={() => setQuickProductOpen(true)}>Add a product</Button><Button size="sm" tone="secondary" onClick={() => router.push("/products")}>Import spreadsheet</Button><Button size="sm" tone="ghost" onClick={() => router.push("/inventory")}>Open Inventory</Button></div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row"><Button size="sm" onClick={() => { setQuickProductAdvancedOpen(false); setQuickProductOpen(true); }}>Add a product</Button><Button size="sm" tone="secondary" onClick={() => router.push("/products")}>Import spreadsheet</Button><Button size="sm" tone="ghost" onClick={() => router.push("/inventory")}>Open Inventory</Button></div>
                     </div>
                   ) : (
                     <p className="px-1 text-xs text-stone-500">Scan a barcode or type a few characters. Press Enter to add the first match, or / to focus search.</p>
@@ -1195,6 +1311,39 @@ export default function PosPage() {
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 Product lookup is unavailable in this workspace. You can still add an untracked item or service below.
               </p>
+            )}
+
+            {selectedCustomer ? (
+              <div className="mt-4 rounded-lg border border-gold-200 bg-gold-50/50 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-stone-900">{selectedCustomer.name}</p>
+                    {selectedCustomer.email && <p className="mt-0.5 truncate text-xs text-stone-500">{selectedCustomer.email}</p>}
+                  </div>
+                  <button type="button" className="text-xs font-medium text-stone-500 underline" onClick={() => { setCustomerId(""); setCustomerQuery(""); }} disabled={busy || salePendingApproval}>Change customer</button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t border-gold-200/70 pt-2 text-xs text-stone-600">
+                  <span><strong className="tnum text-stone-900">{selectedCustomer.purchaseCount}</strong> past purchase{selectedCustomer.purchaseCount === 1 ? "" : "s"}</span>
+                  <span><strong className="tnum text-stone-900">{formatMoney(selectedCustomer.lifetimeSpendMinor)}</strong> lifetime net spend</span>
+                </div>
+                <p className="mt-2 text-[11px] text-stone-500">Rewards points are unavailable because no loyalty program is configured for this workspace.</p>
+              </div>
+            ) : (
+              <details className="mt-4 rounded-lg border border-stone-200 bg-stone-50/60">
+                <summary className="min-h-11 cursor-pointer px-3 py-3 text-sm font-medium text-stone-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-600">
+                  Attach customer <span className="font-normal text-stone-400">· optional</span>
+                </summary>
+                <div className="border-t border-stone-200 p-3">
+                  <label htmlFor="pos-customer-search" className="label">Customer lookup</label>
+                  <input id="pos-customer-search" className="input" value={customerQuery} onChange={(event) => setCustomerQuery(event.target.value)} placeholder="Search name or email" autoComplete="off" disabled={busy || salePendingApproval} />
+                  {customerError ? <p className="mt-1 text-xs text-amber-800">{customerError}</p> : customerQuery.trim() ? (
+                    <ul className="mt-1 max-h-56 overflow-auto rounded-lg border border-stone-200 bg-white shadow-sm" aria-label="Matching customers">
+                      {customerResults.map((customer) => <li key={customer.id}><button type="button" className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-stone-50" onClick={() => { setCustomerId(customer.id); setCustomerQuery(""); }}><span className="min-w-0"><span className="block truncate text-sm font-medium">{customer.name}</span><span className="block truncate text-xs text-stone-500">{customer.email ?? "No email"}</span></span><span className="shrink-0 text-right text-[11px] text-stone-500">{customer.purchaseCount} visits</span></button></li>)}
+                      {customerResults.length === 0 && <li className="px-3 py-3 text-xs text-stone-500">No match. Continue as walk-in, or add the customer in CRM.</li>}
+                    </ul>
+                  ) : <p className="mt-1 text-[11px] text-stone-400">Search to attach this sale to a customer&apos;s purchase history.</p>}
+                </div>
+              </details>
             )}
 
             {inventoryEnabled && (
@@ -1256,7 +1405,7 @@ export default function PosPage() {
                   onClick={() => {
                     clearCart();
                     setCatalogQuery("");
-                    requestAnimationFrame(() => catalogInputRef.current?.focus());
+                    requestAnimationFrame(focusCatalogField);
                   }}
                 >
                   Start another sale
@@ -1265,7 +1414,7 @@ export default function PosPage() {
             )}
 
             {lines.length > 0 && (
-              <ul className="mt-4 divide-y divide-stone-100 border-y border-stone-100">
+              <ul id="pos-cart-lines" className="mt-4 divide-y divide-stone-100 border-y border-stone-100">
               {lines.map((l, i) => {
                 const catalogItem = l.sku ? catalog.find((item) => item.sku === l.sku) : undefined;
                 return (
@@ -1349,14 +1498,14 @@ export default function PosPage() {
               <div className="mt-4 space-y-3 rounded-lg border border-stone-200 bg-stone-50/70 p-3">
                 <div className="flex items-center justify-between text-sm"><span className="font-medium text-stone-800">Payment allocation</span><span className="tnum text-stone-600">{formatMoney(splitAllocatedMinor)} of {formatMoney(total)}</span></div>
                 {splitTenders.map((tender, index) => (
-                  <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(7rem,0.8fr)_auto] items-end gap-2">
-                    <label className="label">Type
-                      <select className="select mt-1" value={tender.method} disabled={busy || salePendingApproval} onChange={(event) => setSplitTenders((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, method: event.target.value as typeof entry.method } : entry))}>
+                  <div key={index} className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(7rem,0.8fr)_auto]">
+                    <label className="label col-span-2 sm:col-span-1">Payment method
+                      <select className="select mt-1 w-full min-w-0" value={tender.method} disabled={busy || salePendingApproval} onChange={(event) => setSplitTenders((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, method: event.target.value as typeof entry.method } : entry))}>
                         <option value="cash">Cash</option><option value="card">Card</option><option value="mobile_money">Mobile money</option>
                       </select>
                     </label>
-                    <label className="label">Amount
-                      <input className="input mt-1 text-right tnum" type="number" min="0" step={currencyDigits === 0 ? "1" : "0.01"} inputMode="decimal" value={tender.amount} placeholder="0" disabled={busy || salePendingApproval} onChange={(event) => setSplitTenders((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, amount: event.target.value } : entry))} />
+                    <label className="label min-w-0">Amount
+                      <input className="input mt-1 w-full min-w-0 text-right tnum" type="number" min="0" step={currencyDigits === 0 ? "1" : "0.01"} inputMode="decimal" value={tender.amount} placeholder="0" disabled={busy || salePendingApproval} onChange={(event) => setSplitTenders((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, amount: event.target.value } : entry))} />
                     </label>
                     <button type="button" className="icon-btn size-10 text-stone-500 hover:text-red-600" aria-label={`Remove ${tender.method.replace("_", " ")} payment`} disabled={splitTenders.length <= 2 || busy || salePendingApproval} onClick={() => setSplitTenders((current) => current.filter((_, entryIndex) => entryIndex !== index))}><IconTrash className="size-3.5" /></button>
                   </div>
@@ -1406,7 +1555,7 @@ export default function PosPage() {
           </Card>
 
           {/* Drawer */}
-          <Card>
+          <Card className="min-w-0">
             <CardTitle>Close &amp; count drawer</CardTitle>
             <dl className="mb-4 space-y-2 rounded-lg bg-stone-50 p-3.5 text-sm">
               <div className="flex justify-between">
@@ -1414,7 +1563,7 @@ export default function PosPage() {
                 <dd className="tnum">{formatMoney(openSession.openingFloatMinor)}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-stone-500">Cash sales</dt>
+                <dt className="text-stone-500">Net cash movement</dt>
                 <dd className="tnum">{formatMoney(openSession.expectedCashMinor ?? 0)}</dd>
               </div>
               <div className="flex justify-between border-t border-stone-200 pt-2 font-semibold">
@@ -1422,6 +1571,25 @@ export default function PosPage() {
                 <dd className="tnum">{formatMoney(expectedCash)}</dd>
               </div>
             </dl>
+            {summary?.tenderTotals.length ? <section className="mb-4 rounded-lg border border-stone-200 p-3" aria-labelledby="pos-tender-summary-title">
+              <h3 id="pos-tender-summary-title" className="text-sm font-semibold">Gross sales by tender</h3>
+              <dl className="mt-2 space-y-1.5 text-sm">
+                {summary.tenderTotals.map((tender) => <div key={tender.method} className="flex justify-between gap-3">
+                  <dt className="capitalize text-stone-600">{tender.method.replaceAll("_", " ")}</dt>
+                  <dd className="tnum font-medium">{formatMoney(tender.amountMinor)}</dd>
+                </div>)}
+              </dl>
+              <p className="mt-2 text-xs leading-5 text-stone-500">Captured sales by payment type. Net cash movement and expected drawer cash are shown separately.</p>
+              {summary.refundTotals.length > 0 && <div className="mt-3 border-t border-stone-100 pt-2">
+                <h4 className="text-xs font-semibold text-stone-600">Refunds by destination</h4>
+                <dl className="mt-1.5 space-y-1.5 text-sm">
+                  {summary.refundTotals.map((refund) => <div key={refund.method} className="flex justify-between gap-3">
+                    <dt className="capitalize text-stone-600">{refund.method.replaceAll("_", " ")}</dt>
+                    <dd className="tnum font-medium">{formatMoney(refund.amountMinor)}</dd>
+                  </div>)}
+                </dl>
+              </div>}
+            </section> : null}
             <label htmlFor="counted" className="label">
               Counted cash
             </label>
@@ -1520,8 +1688,8 @@ export default function PosPage() {
                     <div className="mt-3 flex items-center justify-between gap-3 border-t border-stone-100 pt-2">
                       <span className="text-xs text-stone-500" title={new Date(sale.createdAt).toLocaleString()}>{timeAgo(sale.createdAt)}</span>
                       <div className="flex gap-2">
-                        <Button tone="ghost" size="sm" onClick={() => void shareReceipt(receiptForSale(sale))}>Share receipt</Button>
-                        {returnable ? <Button tone="secondary" size="sm" disabled={busy || !online} onClick={() => { setReturnTarget(sale); setReturnReason(""); setRefundMethod(sale.method.split(" + ")[0] === "card" ? "card" : sale.method.split(" + ")[0] === "mobile_money" ? "mobile_money" : "cash"); }}><IconUndo className="size-3.5" /> Return</Button> : <span className="self-center text-xs text-stone-400">No return balance</span>}
+                        <Button tone="ghost" size="sm" onClick={() => previewSaleReceipt(sale)}>Receipt</Button>
+                        {returnable ? <Button tone="secondary" size="sm" disabled={busy || !online} onClick={() => startReturn(sale)}><IconUndo className="size-3.5" /> Return</Button> : <span className="self-center text-xs text-stone-400">No return balance</span>}
                       </div>
                     </div>
                   </li>
@@ -1559,8 +1727,8 @@ export default function PosPage() {
                         <td className="num">{sale.creditedMinor > 0 ? formatMoney(sale.creditedMinor) : "-"}</td>
                         <td className="text-right">
                           <div className="inline-flex gap-1">
-                            <Button tone="ghost" size="sm" onClick={() => void shareReceipt(receiptForSale(sale))}>Share</Button>
-                            <Button tone="secondary" size="sm" disabled={!returnable || busy || !online} onClick={() => { setReturnTarget(sale); setReturnReason(""); setRefundMethod(sale.method.split(" + ")[0] === "card" ? "card" : sale.method.split(" + ")[0] === "mobile_money" ? "mobile_money" : "cash"); }}><IconUndo className="size-3.5" />Return</Button>
+                            <Button tone="ghost" size="sm" onClick={() => previewSaleReceipt(sale)}>Receipt</Button>
+                            <Button tone="secondary" size="sm" disabled={!returnable || busy || !online} onClick={() => startReturn(sale)}><IconUndo className="size-3.5" />Return</Button>
                           </div>
                         </td>
                       </tr>
@@ -1638,7 +1806,39 @@ export default function PosPage() {
 
       {tab === "sell" && openSession && lines.length > 0 && (
         <div className="fixed inset-x-3 bottom-20 z-30 rounded-xl border border-stone-200 bg-white/95 p-2 shadow-lg backdrop-blur sm:hidden">
-          <div className="flex items-center gap-2"><div className="min-w-0 flex-1 pl-2"><p className="text-[10px] uppercase tracking-wide text-stone-500">{lines.length} line{lines.length === 1 ? "" : "s"}</p><p className="tnum truncate text-lg font-semibold text-stone-900">{formatMoney(total)}</p></div><Button className="min-h-11 flex-1" loading={busy} disabled={salePendingApproval || !checkoutReady || total <= 0 || (!online && queuedSales.length >= 20)} onClick={() => online ? void completeCurrentSale() : queueCurrentSaleOffline()}>{!checkoutReady && splitMode ? `Remaining ${formatMoney(Math.max(0, total - splitAllocatedMinor))}` : !checkoutReady && method === "cash" ? `Due ${formatMoney(total - tenderedMinor)}` : online ? `Checkout · ${formatMoney(total)}` : `Queue · ${formatMoney(total)}`}</Button></div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="min-w-0 flex-1 rounded-md pl-2 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-600"
+              aria-label={`Review cart with ${lines.length} line${lines.length === 1 ? "" : "s"}, total ${formatMoney(total)}`}
+              onClick={() => document.getElementById("pos-cart-lines")?.scrollIntoView({
+                block: "center",
+                behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+              })}
+            >
+              <p className="truncate text-[10px] uppercase tracking-wide text-stone-500">Review cart · {lines.length} line{lines.length === 1 ? "" : "s"}</p>
+              <p className="tnum whitespace-nowrap text-sm font-semibold text-stone-900">{formatMoney(total)}</p>
+            </button>
+            <Button
+              className="min-h-11 min-w-0 flex-1"
+              loading={busy}
+              disabled={salePendingApproval || !checkoutReady || total <= 0 || (!online && queuedSales.length >= 20)}
+              aria-label={!checkoutReady && splitMode
+                ? splitCheckoutStatus
+                : !checkoutReady && method === "cash"
+                  ? `Cash due ${formatMoney(Math.max(0, total - tenderedMinor))}`
+                  : online
+                    ? `Complete sale for ${formatMoney(total)}`
+                    : `Queue sale for ${formatMoney(total)} without charging`}
+              onClick={() => online ? void completeCurrentSale() : queueCurrentSaleOffline()}
+            >
+              {!checkoutReady && splitMode
+                ? splitCheckoutStatus
+                : !checkoutReady && method === "cash"
+                  ? `Due ${formatMoney(Math.max(0, total - tenderedMinor))}`
+                  : online ? "Complete sale" : "Queue sale"}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -1661,11 +1861,31 @@ export default function PosPage() {
         title="Close this register session?"
         body={
           <>
-            Expected cash is <strong className="text-stone-900">{formatMoney(expectedCash)}</strong>; you counted{" "}
-            <strong className="text-stone-900">{formatMoney(countedCashMinor)}</strong>.{" "}
+            <p>Expected cash is <strong className="text-stone-900">{formatMoney(expectedCash)}</strong>; you counted{" "}
+              <strong className="text-stone-900">{formatMoney(countedCashMinor)}</strong>.</p>
+            {summary?.tenderTotals.length ? <div className="mt-3 rounded-lg bg-stone-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Gross sales by tender</p>
+              <dl className="mt-2 space-y-1 text-sm">
+                {summary.tenderTotals.map((tender) => <div key={tender.method} className="flex justify-between gap-3">
+                  <dt className="capitalize">{tender.method.replaceAll("_", " ")}</dt>
+                  <dd className="tnum font-medium">{formatMoney(tender.amountMinor)}</dd>
+                </div>)}
+              </dl>
+              {summary.refundTotals.length > 0 && <div className="mt-2 border-t border-stone-200 pt-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Refunds by destination</p>
+                <dl className="mt-1 space-y-1 text-sm">
+                  {summary.refundTotals.map((refund) => <div key={refund.method} className="flex justify-between gap-3">
+                    <dt className="capitalize">{refund.method.replaceAll("_", " ")}</dt>
+                    <dd className="tnum font-medium">{formatMoney(refund.amountMinor)}</dd>
+                  </div>)}
+                </dl>
+              </div>}
+            </div> : null}
+            <p className="mt-3">
             {liveVariance !== null && liveVariance !== 0
               ? `The ${formatMoney(liveVariance)} variance and your note, “${varianceReason.trim()}”, will be recorded for review.`
               : "The drawer balances; closing posts the reconciliation."}
+            </p>
           </>
         }
         confirmLabel="Close & reconcile"
@@ -1681,40 +1901,78 @@ export default function PosPage() {
         busy={queuedSaleBusyId !== null}
       />
       <Dialog
+        open={receiptPreview !== null}
+        onClose={() => {
+          setReceiptPreview(null);
+          setReceiptShareFeedback(null);
+        }}
+        title="Receipt preview"
+        description="Review the sale before printing, saving, emailing, or sharing it to a messaging app. This screen does not send a message."
+        width="max-w-lg"
+        footer={
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex">
+            <Button tone="secondary" onClick={() => { if (receiptPreview) printReceipt(receiptPreview.text); }}>Print</Button>
+            <Button tone="secondary" onClick={() => { if (receiptPreview) downloadReceipt(receiptPreview.text); }}>Download</Button>
+            <Button tone="secondary" onClick={emailReceiptDraft}>Email draft</Button>
+            <Button onClick={() => { if (receiptPreview) void shareReceipt(receiptPreview.text); }}>Share</Button>
+          </div>
+        }
+      >
+        {receiptPreview && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+              <p className="mb-2 text-xs font-semibold text-stone-600">For {receiptPreview.customerName}</p>
+              <pre className="max-h-[38dvh] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-stone-800">{receiptPreview.text}</pre>
+            </div>
+            {receiptShareFeedback && <p role="status" aria-live="polite" className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{receiptShareFeedback}</p>}
+          </div>
+        )}
+      </Dialog>
+      <Dialog
         open={Boolean(returnTarget)}
         onClose={() => {
           if (busy) return;
           setReturnTarget(null);
           setReturnReason("");
+          setReturnQuantities({});
         }}
         title={`Return sale${returnTarget ? ` #${returnTarget.number}` : ""}`}
-        description="A return request is recorded in the audit trail. Credit is applied after approval."
+        description="Every POS return needs approval before the refund posts or stock is restored. Review the original sale and refund destination before requesting it."
         footer={
-          <>
-            <Button
-              tone="secondary"
-              disabled={busy}
-              onClick={() => {
-                setReturnTarget(null);
-                setReturnReason("");
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              tone="dangerSecondary"
-              loading={busy}
-              disabled={returnReason.trim().length < 3 || returnReason.trim().length > 500}
-              onClick={() => void returnSale()}
-            >
-              <IconUndo className="size-3.5" /> Request return
-            </Button>
-          </>
+          <div className="sticky bottom-0 -mx-5 -mb-5 mt-1 flex w-full flex-col gap-3 border-t border-stone-200 bg-white px-5 pt-3 pb-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-stone-600">Refund amount</span>
+              <strong className="tnum text-base text-stone-900">{formatMoney(returnTarget?.returnMode === "itemized" ? selectedReturnTotalMinor : Math.max(0, (returnTarget?.totalMinor ?? 0) - (returnTarget?.creditedMinor ?? 0)))}</strong>
+            </div>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <Button
+                tone="secondary"
+                className="w-full sm:w-auto"
+                disabled={busy}
+                onClick={() => {
+                  setReturnTarget(null);
+                  setReturnReason("");
+                  setReturnQuantities({});
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                tone="dangerSecondary"
+                className="w-full sm:w-auto"
+                loading={busy}
+                disabled={returnReason.trim().length < 3 || returnReason.trim().length > 500 || returnTarget?.returnMode === "credit-review" || (returnTarget?.returnMode === "itemized" && (selectedReturnTotalMinor <= 0 || invalidReturnQuantity))}
+                onClick={() => void returnSale()}
+              >
+                <IconUndo className="size-3.5" /> {returnTarget?.returnMode === "itemized" ? "Request selected return" : "Request full return"}
+              </Button>
+            </div>
+          </div>
         }
       >
         {returnTarget && (
           <div>
-            <div className="mb-4 rounded-lg bg-stone-50 p-3 text-sm">
+            <div role="group" aria-label="Return amount summary" data-dialog-autofocus tabIndex={-1} className="mb-4 rounded-lg bg-stone-50 p-3 text-sm outline-none">
               <div className="flex justify-between gap-3">
                 <span className="text-stone-500">Sale total</span>
                 <strong className="tnum">{formatMoney(returnTarget.totalMinor)}</strong>
@@ -1723,12 +1981,39 @@ export default function PosPage() {
                 <span className="text-stone-500">Already credited</span>
                 <strong className="tnum">{formatMoney(returnTarget.creditedMinor)}</strong>
               </div>
-              <div className="mt-2 flex justify-between gap-3 border-t border-stone-200 pt-2 font-semibold">
-                <span>Remaining return balance</span>
+              {returnTarget.returnMode === "itemized" ? <>
+                <div className="mt-2 flex justify-between gap-3 border-t border-stone-200 pt-2 text-sm font-semibold">
+                  <span>Selected refund</span>
+                  <span className="tnum">{formatMoney(selectedReturnTotalMinor)}</span>
+                </div>
+                <button type="button" onClick={() => setAllRemainingReturnQuantities(returnTarget)} className="mt-2 min-h-9 text-left text-xs font-semibold text-gold-800 hover:text-gold-900">Return all remaining items</button>
+              </> : <div className="mt-2 flex justify-between gap-3 border-t border-stone-200 pt-2 font-semibold">
+                <span>Refund amount</span>
                 <span className="tnum">{formatMoney(Math.max(0, returnTarget.totalMinor - returnTarget.creditedMinor))}</span>
-              </div>
+              </div>}
               <p className="mt-2 text-xs text-stone-500">Original tender: {returnTarget.method}</p>
             </div>
+            <section className="mb-4 rounded-lg border border-stone-200 p-3" aria-label="Items in original sale">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-stone-800">{returnTarget.returnMode === "itemized" ? "Choose return quantities" : "Items in original sale"}</h3>
+                {returnTarget.returnMode === "itemized" && <span className="text-[11px] text-stone-500">Qty available</span>}
+              </div>
+              <ul className="mt-2 divide-y divide-stone-100">
+                {returnTarget.lines.map((saleLine) => {
+                  const itemTotalMinor = Math.round(saleLine.quantity * saleLine.unitPriceMinor / 1000) + saleLine.taxMinor;
+                  const remainingQuantity = saleLine.quantity - saleLine.returnedQuantity;
+                  const selected = selectedReturnLines.find((line) => line.invoiceLineId === saleLine.id);
+                  return <li key={saleLine.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-2 first:pt-0 last:pb-0">
+                    <div className="min-w-0"><p className="break-words text-sm font-medium text-stone-800">{saleLine.description}</p><p className="mt-0.5 text-xs text-stone-500">{saleLine.quantity / 1000} × {formatMoney(saleLine.unitPriceMinor)} each · {formatMoney(itemTotalMinor)}</p><p className="mt-0.5 text-[11px] text-stone-500">{saleLine.returnedQuantity > 0 ? `${saleLine.returnedQuantity / 1000} returned · ` : ""}{saleLine.stockTracked ? "Stock will be restored" : "No stock adjustment"}</p></div>
+                    {returnTarget.returnMode === "itemized" ? <input className="input tnum h-10 w-[5.5rem] px-2 text-right" type="number" min="0" max={remainingQuantity / 1000} step="0.001" inputMode="decimal" disabled={remainingQuantity <= 0} value={returnQuantities[saleLine.id] ?? ""} onChange={(event) => setReturnQuantities((current) => ({ ...current, [saleLine.id]: event.target.value }))} aria-label={`Quantity to return for ${saleLine.description}, ${remainingQuantity / 1000} available`} /> : <strong className="tnum shrink-0 text-sm text-stone-800">{formatMoney(itemTotalMinor)}</strong>}
+                    {returnTarget.returnMode === "itemized" && selected && <p className="col-span-2 -mt-1 text-right text-xs font-medium text-stone-600">Selected refund: {formatMoney(selected.refundMinor)}</p>}
+                  </li>;
+                })}
+              </ul>
+              {returnTarget.returnMode === "legacy-full" && <p className="mt-2 border-t border-stone-100 pt-2 text-xs leading-relaxed text-amber-800">This older sale does not link stock to individual items. A full remaining return will restore its original stock movements together.</p>}
+              {returnTarget.returnMode === "credit-review" && <p role="alert" className="mt-2 border-t border-stone-100 pt-2 text-xs leading-relaxed text-amber-800">An earlier credit is not linked to returned item quantities. Ask accounting to review the sale before returning more items.</p>}
+              {returnTarget.returnMode === "itemized" && <p className="mt-2 border-t border-stone-100 pt-2 text-xs leading-relaxed text-stone-600">Only the selected quantities will be refunded. Inventory is restored for tracked items, and fractional tax is allocated across returns so totals match the original sale.</p>}
+            </section>
             <label className="label mb-4">Refund destination<select className="select mt-1" value={refundMethod} onChange={(event) => setRefundMethod(event.target.value as typeof refundMethod)}><option value="cash">Cash</option><option value="card">Card reversal</option><option value="mobile_money">Mobile money</option></select><span className="mt-1 block text-xs font-normal text-stone-500">Cash refunds reduce this open drawer. Non-cash refunds leave drawer cash unchanged.</span></label>
             <label htmlFor="return-reason" className="label">Reason for return</label>
             <textarea
@@ -1747,17 +2032,22 @@ export default function PosPage() {
       </Dialog>
       <Dialog
         open={quickProductOpen}
-        onClose={() => { if (!busy) setQuickProductOpen(false); }}
-        title="Add a product to the register"
-        description="Set a price and barcode now. You can complete stock details in Products & Services later."
-        footer={<Button tone="secondary" disabled={busy} onClick={() => setQuickProductOpen(false)}>Cancel</Button>}
+        onClose={() => { if (!busy) { setQuickProductOpen(false); setQuickProductAdvancedOpen(false); } }}
+        title="Quick add product"
+        description="Add a price and barcode. Enter on-hand stock to sell this item right away."
+        footer={<Button tone="secondary" disabled={busy} onClick={() => { setQuickProductOpen(false); setQuickProductAdvancedOpen(false); }}>Cancel</Button>}
       >
         <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void createQuickProduct(); }}>
           <label className="label">Product name<input autoFocus className="input mt-1" value={quickProduct.name} onChange={(event) => setQuickProduct({ ...quickProduct, name: event.target.value })} required maxLength={120} /></label>
-          <div className="grid grid-cols-2 gap-3"><label className="label">Price<input className="input mt-1 tnum" type="number" min="0" step="0.01" inputMode="decimal" value={quickProduct.price} onChange={(event) => setQuickProduct({ ...quickProduct, price: event.target.value })} required /></label><label className="label">Unit<input className="input mt-1" value={quickProduct.unitLabel} onChange={(event) => setQuickProduct({ ...quickProduct, unitLabel: event.target.value })} /></label></div>
-          <label className="label">Barcode <span className="font-normal text-stone-400">(optional)</span><input className="input mt-1 font-mono" value={quickProduct.barcode} onChange={(event) => setQuickProduct({ ...quickProduct, barcode: event.target.value })} /></label>
-          <label className="label">SKU <span className="font-normal text-stone-400">(optional)</span><input className="input mt-1 font-mono" placeholder="Generated automatically if blank" value={quickProduct.sku} onChange={(event) => setQuickProduct({ ...quickProduct, sku: event.target.value })} /></label>
+          <label className="label">Price<input className="input mt-1 tnum" type="number" min="0" step="0.01" inputMode="decimal" value={quickProduct.price} onChange={(event) => setQuickProduct({ ...quickProduct, price: event.target.value })} required /></label>
+          <label className="label">Opening stock <span className="font-normal text-stone-400">(optional)</span><input className="input mt-1 tnum" type="number" min="0" step="0.001" inputMode="decimal" placeholder="0" value={quickProduct.openingStock} onChange={(event) => setQuickProduct({ ...quickProduct, openingStock: event.target.value })} /><span className="mt-1 block text-[11px] font-normal leading-relaxed text-stone-500">Zero stock cannot be sold from this register.</span></label>
+          <label className="label">Barcode <span className="font-normal text-stone-400">(optional)</span><input className="input mt-1 font-mono" value={quickProduct.barcode} onChange={(event) => setQuickProduct({ ...quickProduct, barcode: event.target.value })} minLength={3} maxLength={64} /></label>
           <Button type="submit" className="w-full" loading={busy} disabled={!quickProduct.name.trim() || !quickProduct.price.trim()}>Save product</Button>
+          <button type="button" aria-expanded={quickProductAdvancedOpen} aria-controls="pos-quick-product-advanced" onClick={() => setQuickProductAdvancedOpen((open) => !open)} className="min-h-10 text-xs font-medium text-gold-800 hover:text-gold-900">{quickProductAdvancedOpen ? "Hide details" : "More details"}</button>
+          {quickProductAdvancedOpen && <div id="pos-quick-product-advanced" className="grid gap-3 rounded-lg border border-stone-200 bg-stone-50/60 p-3 sm:grid-cols-2">
+            <label className="label">Unit<input className="input mt-1" value={quickProduct.unitLabel} onChange={(event) => setQuickProduct({ ...quickProduct, unitLabel: event.target.value })} maxLength={20} /></label>
+            <label className="label">SKU <span className="font-normal text-stone-400">(optional)</span><input className="input mt-1 font-mono" placeholder="Generated automatically if blank" value={quickProduct.sku} onChange={(event) => setQuickProduct({ ...quickProduct, sku: event.target.value })} maxLength={40} /></label>
+          </div>}
         </form>
       </Dialog>
     </AppFrame>

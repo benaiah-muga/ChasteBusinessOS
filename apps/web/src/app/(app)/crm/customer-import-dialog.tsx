@@ -231,7 +231,25 @@ export function CustomerImportDialog(props: {
         </section>
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500"><span>{sourceRows.length} rows · {validCount} valid · {duplicateCount} possible duplicates</span><span>{selectedCount} selected to import</span></div>
         <div className="flex items-center justify-between text-xs text-stone-500"><span>Rows {page * pageSize + 1}-{Math.min((page + 1) * pageSize, preview.length)} of {preview.length}</span><div className="flex gap-2"><button type="button" className="rounded border border-stone-200 px-2 py-1 disabled:opacity-40" disabled={page === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>Previous</button><button type="button" className="rounded border border-stone-200 px-2 py-1 disabled:opacity-40" disabled={(page + 1) * pageSize >= preview.length} onClick={() => setPage((current) => current + 1)}>Next</button></div></div>
-        <div className="max-h-[48vh] overflow-auto rounded-xl border border-stone-200">
+        <div className="space-y-2 md:hidden">
+          {visibleRows.map(({ row, index }) => <article key={`mobile-${row.rowNumber}`} className="rounded-xl border border-stone-200 bg-white p-3">
+            <div className="flex items-start justify-between gap-3">
+              <label className="flex min-h-8 items-center gap-2 text-xs font-semibold text-stone-600">
+                <input type="checkbox" aria-label={`Import row ${row.rowNumber}`} checked={row.include} disabled={Boolean(row.error)} onChange={(event) => setIncludedRows((current) => ({ ...current, [index]: event.target.checked }))} />
+                CSV row {row.rowNumber}
+              </label>
+              <span className={cn("rounded-full px-2 py-1 text-[11px] font-medium", row.error ? "bg-red-50 text-red-700" : row.duplicate ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-700")}>{row.error ? "Needs a fix" : row.duplicate ? "Possible duplicate" : "Ready"}</span>
+            </div>
+            <div className="mt-3 grid gap-2.5">
+              {(["name", "email", "phone"] as const).map((field) => <label key={field} className="text-xs font-medium capitalize text-stone-600">{field}{field === "name" && <span className="text-red-600"> *</span>}
+                <input className={cn("input mt-1 h-10 w-full", field === "name" && !row.name && "border-red-300")} aria-label={`Row ${row.rowNumber} ${field}`} value={row[field]} onChange={(event) => setEdits((current) => ({ ...current, [index]: { ...current[index], [field]: event.target.value } }))} />
+              </label>)}
+            </div>
+            {row.error && <p className="mt-2 text-xs text-red-700" role="alert">{row.error}</p>}
+            {row.duplicate && <label className="mt-3 flex min-h-10 items-start gap-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900"><input type="checkbox" checked={row.allowDuplicate} onChange={(event) => setDuplicateRows((current) => ({ ...current, [index]: event.target.checked }))} /><span>{row.duplicate}. Import anyway</span></label>}
+          </article>)}
+        </div>
+        <div className="hidden max-h-[48vh] overflow-auto rounded-xl border border-stone-200 md:block">
           <table className="w-full min-w-[760px] text-sm">
             <thead className="sticky top-0 bg-stone-50 text-left text-xs text-stone-500"><tr><th className="p-2">Import</th><th className="p-2">Row</th><th className="p-2">Customer name</th><th className="p-2">Email</th><th className="p-2">Phone</th><th className="p-2">Review</th></tr></thead>
             <tbody>{visibleRows.map(({ row, index }) => <tr key={row.rowNumber} className="border-t border-stone-100 align-top">

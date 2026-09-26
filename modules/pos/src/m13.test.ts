@@ -90,6 +90,7 @@ describe("pos returns (M13.1)", () => {
     const [inv] = await db.db.select({ id: invoices.id }).from(invoices).where(eq(invoices.posSessionId, sessionId));
     const returned = await run("pos.returnSale", { invoiceId: inv!.id, reason: "customer changed mind" });
     expect(returned.creditedMinor).toBe(400_00);
+    expect(returned.refundMinor).toBe(400_00);
     expect(returned.restockedLines).toBe(1);
 
     const [stock] = await db.db
@@ -104,6 +105,8 @@ describe("pos returns (M13.1)", () => {
       .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
       .where(eq(journalEntries.orgId, orgId));
     expect(Number(drift!.d)).toBe(0);
+    const summary = await run("pos.shiftSummary", { sessionId });
+    expect(summary.refundTotals).toEqual([{ method: "cash", amountMinor: 400_00 }]);
 
     await expect(run("pos.returnSale", { invoiceId: inv!.id, reason: "try to return twice" })).rejects.toThrow(/nothing left to return/);
   });
@@ -137,6 +140,11 @@ describe("pos returns (M13.1)", () => {
     ]));
     const [session] = await db.db.select({ expectedCashMinor: posSessions.expectedCashMinor }).from(posSessions).where(eq(posSessions.id, splitSession!.id));
     expect(session?.expectedCashMinor).toBe(75_00);
+    const summary = await run("pos.shiftSummary", { sessionId: splitSession!.id });
+    expect(summary.tenderTotals).toEqual(expect.arrayContaining([
+      { method: "cash", amountMinor: 75_00 },
+      { method: "card", amountMinor: 125_00 },
+    ]));
   });
 
   it("leaves the cash drawer unchanged when a split sale is refunded to mobile money", async () => {

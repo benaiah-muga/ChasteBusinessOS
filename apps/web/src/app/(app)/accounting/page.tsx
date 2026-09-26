@@ -831,6 +831,7 @@ function ReceivablesSection({
   const [emailTo, setEmailTo] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailNote, setEmailNote] = useState<string | null>(null);
+  const [agingFilter, setAgingFilter] = useState<"all" | "current" | "d30" | "d60" | "d90plus" | "outstanding">("all");
 
   // New invoice
   const [invoiceOpen, setInvoiceOpen] = useState(false);
@@ -908,15 +909,45 @@ function ReceivablesSection({
   }
 
   const outstanding = invoices.filter((i) => i.outstandingMinor > 0 && i.status !== "void");
+  const matchesAgingFilter = (ageDays: number) => {
+    if (agingFilter === "current") return ageDays <= 30;
+    if (agingFilter === "d30") return ageDays > 30 && ageDays <= 60;
+    if (agingFilter === "d60") return ageDays > 60 && ageDays <= 90;
+    if (agingFilter === "d90plus") return ageDays > 90;
+    return agingFilter === "outstanding";
+  };
+  const visibleAgingInvoices = agingFilter === "all"
+    ? agingInvoices
+    : agingInvoices.filter((invoice) => matchesAgingFilter(invoice.ageDays));
+  const visibleInvoiceNumbers = new Set(visibleAgingInvoices.map((invoice) => invoice.number));
+  const visibleInvoices = agingFilter === "all"
+    ? invoices
+    : invoices.filter((invoice) => visibleInvoiceNumbers.has(invoice.number));
+  const agingFilterLabel: Record<Exclude<typeof agingFilter, "all">, string> = {
+    current: "Current",
+    d30: "31–60 days",
+    d60: "61–90 days",
+    d90plus: "90+ days",
+    outstanding: "Outstanding",
+  };
+
+  function showAgingRange(filter: Exclude<typeof agingFilter, "all">) {
+    setAgingFilter(filter);
+    window.requestAnimationFrame(() => {
+      const list = document.getElementById("accounting-receivables-list");
+      list?.scrollIntoView({ behavior: "smooth", block: "start" });
+      list?.focus({ preventScroll: true });
+    });
+  }
 
   return (
     <section>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-        <StatCard label="Current" value={formatMoney(a.current)} />
-        <StatCard label="31–60 days" value={formatMoney(a.d30)} tone={a.d30 > 0 ? "warn" : "default"} />
-        <StatCard label="61–90 days" value={formatMoney(a.d60)} tone={a.d60 > 0 ? "warn" : "default"} />
-        <StatCard label="90+ days" value={formatMoney(a.d90plus)} tone={a.d90plus > 0 ? "danger" : "default"} />
-        <StatCard label="Total outstanding" value={formatMoney(a.totalOutstanding)} tone="accent" className="col-span-2 sm:col-span-1" />
+        <StatCard label="Current" value={formatMoney(a.current)} onClick={() => showAgingRange("current")} selected={agingFilter === "current"} actionLabel="Show current receivables" />
+        <StatCard label="31–60 days" value={formatMoney(a.d30)} tone={a.d30 > 0 ? "warn" : "default"} onClick={() => showAgingRange("d30")} selected={agingFilter === "d30"} actionLabel="Show receivables 31 to 60 days overdue" />
+        <StatCard label="61–90 days" value={formatMoney(a.d60)} tone={a.d60 > 0 ? "warn" : "default"} onClick={() => showAgingRange("d60")} selected={agingFilter === "d60"} actionLabel="Show receivables 61 to 90 days overdue" />
+        <StatCard label="90+ days" value={formatMoney(a.d90plus)} tone={a.d90plus > 0 ? "danger" : "default"} onClick={() => showAgingRange("d90plus")} selected={agingFilter === "d90plus"} actionLabel="Show receivables more than 90 days overdue" />
+        <StatCard label="Total outstanding" value={formatMoney(a.totalOutstanding)} tone="accent" className="col-span-2 sm:col-span-1" onClick={() => showAgingRange("outstanding")} selected={agingFilter === "outstanding"} actionLabel="Show all unpaid invoices" />
       </div>
 
       <div className="mt-4 flex justify-end">
@@ -924,10 +955,17 @@ function ReceivablesSection({
       </div>
 
       {/* Full invoice ledger */}
-      {invoices.length === 0 ? (
-        <QuietLine>No invoices yet - issue your first one above, or accept a quote in Sales.</QuietLine>
-      ) : (
-        <div className="table-shell mt-4">
+      <div id="accounting-receivables-list" role="region" aria-label="Filtered receivables" tabIndex={-1} className="mt-4 scroll-mt-72 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold-600 focus-visible:outline-offset-2 sm:scroll-mt-32">
+        {agingFilter !== "all" && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-200 bg-gold-50/50 px-3 py-2" role="status">
+          <p className="text-xs text-stone-700">Showing {agingFilterLabel[agingFilter].toLowerCase()} invoices</p>
+          <Button tone="ghost" size="sm" className="min-h-8" onClick={() => setAgingFilter("all")}>Show all invoices</Button>
+        </div>}
+        {visibleInvoices.length === 0 ? (
+          agingFilter === "all"
+            ? <QuietLine>No invoices yet - issue your first one above, or accept a quote in Sales.</QuietLine>
+            : <QuietLine>No invoices match this aging range.</QuietLine>
+        ) : (
+          <div className="table-shell">
           <table className="data-table">
             <thead>
               <tr>
@@ -940,7 +978,7 @@ function ReceivablesSection({
               </tr>
             </thead>
             <tbody>
-              {invoices.slice(0, 30).map((inv) => {
+              {visibleInvoices.slice(0, 30).map((inv) => {
                 const age = agingInvoices.find((x) => x.number === inv.number);
                 return (
                   <tr key={inv.id}>
@@ -987,13 +1025,14 @@ function ReceivablesSection({
               })}
             </tbody>
           </table>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
-      {/* Overdue aging list */}
-      {agingInvoices.length > 0 && (
+      {/* Open receivables by age */}
+      {visibleAgingInvoices.length > 0 && (
         <ul className="mt-4 divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white px-4 shadow-xs">
-          {agingInvoices.map((inv) => (
+          {visibleAgingInvoices.map((inv) => (
             <li key={inv.number} className="py-2.5 text-sm">
               <div className="flex items-center gap-3">
                 <span className="font-medium text-stone-800">Invoice #{inv.number}</span>

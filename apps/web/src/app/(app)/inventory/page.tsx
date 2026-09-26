@@ -269,6 +269,9 @@ export default function InventoryPage() {
 
   const items = useMemo(() => data?.items ?? [], [data]);
   const countableItems = useMemo(() => items.filter((item) => item.kind !== "service"), [items]);
+  const transferRows = data?.transfers ?? [];
+  const transferNeedsReview = transferRows.filter((transfer) => transfer.status === "draft" || transfer.status === "pending" || transfer.status === "partial").length;
+  const activeReservationCount = (data?.reservations ?? []).filter((reservation) => reservation.status === "active").length;
   const matchingCountItems = useMemo(() => {
     const query = countSearch.trim().toLowerCase();
     return countableItems.filter((item) => !query || `${item.name} ${item.sku}`.toLowerCase().includes(query)).slice(0, 12);
@@ -300,24 +303,22 @@ export default function InventoryPage() {
       {tab === "levels" && (
         <>
           <Card>
-            <CardTitle
-              right={
-                <div className="flex items-center gap-2">
-                  <Badge tone="blue">total value {formatMoney(totalValue)}</Badge>
-                  <Button
-                    tone="secondary"
-                    size="sm"
-                    disabled={busy || totalValue === 0}
-                    onClick={() => void post({ action: "postValuationSummary", memo: `Valuation summary ${new Date().toISOString().slice(0, 10)}` }, "Post valuation summary")}
-                    title="Posts the inventory value to the ledger as a summary entry - approval-gated"
-                  >
-                    Post valuation summary
-                  </Button>
-                </div>
-              }
-            >
+            <CardTitle right={<Button tone="secondary" size="sm" onClick={() => document.getElementById("inventory-create-item-name")?.focus()}>Add item</Button>}>
               Stock on hand
             </CardTitle>
+            <div className="mb-3 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <Badge tone="blue" className="self-start">total value {formatMoney(totalValue)}</Badge>
+              <Button
+                tone="secondary"
+                size="sm"
+                className="w-full sm:w-auto"
+                disabled={busy || totalValue === 0}
+                onClick={() => void post({ action: "postValuationSummary", memo: `Valuation summary ${new Date().toISOString().slice(0, 10)}` }, "Post valuation summary")}
+                title="Posts the inventory value to the ledger as a summary entry - approval-gated"
+              >
+                Post valuation summary
+              </Button>
+            </div>
             <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
               <input
                 className="w-56 rounded border bg-transparent px-2 py-1.5"
@@ -446,9 +447,17 @@ export default function InventoryPage() {
               </div>
               </>
             )}
-            <p className="mt-2 text-xs opacity-50">
-              Available = on hand − open reservations. Value uses moving-average cost replayed from the append-only ledger.
-            </p>
+            <div className="mt-2 space-y-1.5">
+              <p className="text-xs text-stone-600">
+                Stock value estimates what the units on hand cost. Available quantity removes stock already reserved for other work.
+              </p>
+              <details className="rounded-md border border-stone-200 bg-stone-50/60 px-2.5 py-2 text-xs text-stone-600">
+                <summary className="cursor-pointer font-medium text-stone-700">How stock value is calculated</summary>
+                <p className="mt-1.5 leading-relaxed">
+                  Value is on-hand quantity multiplied by the moving-average unit cost. That average changes when stock comes in. The inventory ledger keeps the recorded stock movements behind the total.
+                </p>
+              </details>
+            </div>
           </Card>
 
           <Card>
@@ -718,7 +727,13 @@ export default function InventoryPage() {
               </ul>
             )}
           </Card>
-          <Card>
+          <details className="group">
+            <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 shadow-sm [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0"><span className="block text-sm font-semibold text-stone-900">Transfers</span><span className="mt-0.5 block text-xs text-stone-500">Draft or review stock moves between locations</span></span>
+              <span className="flex shrink-0 items-center gap-2">{transferNeedsReview > 0 ? <Badge tone="amber">{transferNeedsReview} to review</Badge> : <span className="text-xs text-stone-500">{transferRows.length} total</span>}<IconChevronDown className="size-4 text-stone-500 transition-transform group-open:rotate-180" /></span>
+            </summary>
+            <div className="mt-2 space-y-4">
+            <Card>
             <CardTitle>Transfer stock</CardTitle>
             <p
               className="text-xs opacity-50"
@@ -778,12 +793,12 @@ export default function InventoryPage() {
             </p>
           </Card>
           <Card>
-            <CardTitle>Transfers</CardTitle>
-            {(data.transfers ?? []).length === 0 ? (
+            <CardTitle>Transfer history</CardTitle>
+            {transferRows.length === 0 ? (
               <EmptyState icon={<IconListTree />} title="No transfers yet" hint="Draft a transfer above to relocate stock between locations." />
             ) : (
               <ul className="divide-y text-sm">
-                {(data.transfers ?? []).map((t) => (
+                {transferRows.map((t) => (
                   <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
                     <span>
                       <span className="font-mono text-xs opacity-60">#{t.number}</span> {t.from} → {t.to}{" "}
@@ -830,6 +845,14 @@ export default function InventoryPage() {
               </ul>
             )}
           </Card>
+            </div>
+          </details>
+          <details className="group">
+            <summary className="flex min-h-16 cursor-pointer list-none items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 shadow-sm [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0"><span className="block text-sm font-semibold text-stone-900">Reservations</span><span className="mt-0.5 block text-xs text-stone-500">Set aside stock for a customer or job</span></span>
+              <span className="flex shrink-0 items-center gap-2"><span className="text-xs text-stone-500">{activeReservationCount} active</span><IconChevronDown className="size-4 text-stone-500 transition-transform group-open:rotate-180" /></span>
+            </summary>
+            <div className="mt-2">
           <Card>
             <CardTitle>Reserve stock</CardTitle>
             <div className="grid gap-2 text-sm sm:grid-cols-3">
@@ -861,6 +884,8 @@ export default function InventoryPage() {
               </Button>
             </div>
           </Card>
+            </div>
+          </details>
         </>
       )}
 
@@ -983,7 +1008,7 @@ function InventoryOverview({
   const counts = data.cycleCounts ?? [];
   const openCounts = counts.filter((c) => c.status !== "posted");
   const reservations = (data.reservations ?? []).filter((r) => r.status === "active");
-  const draftTransfers = (data.transfers ?? []).filter((transfer) => transfer.status === "draft");
+  const draftTransfers = (data.transfers ?? []).filter((transfer) => transfer.status === "draft" || transfer.status === "pending" || transfer.status === "partial");
   const reservedValue = items.reduce((s, i) => s + Math.round((i.avgUnitCostMinor * i.reservedThousandths) / 1000), 0);
 
   return (
