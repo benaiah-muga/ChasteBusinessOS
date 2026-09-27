@@ -597,6 +597,13 @@
       "when": 1790499823106,
       "tag": "0084_go_capability_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1790523261046,
+      "tag": "0085_go_crm_deal_jobs",
+      "breakpoints": true
     }
   ]
 }

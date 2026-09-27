@@ -297,6 +297,132 @@ func TestGoCapabilityJobWorkerMatchesLegacy(t *testing.T) {
 
 }
 
+func TestCRMDealJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the CRM deal jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := os.Getenv("CHASTE_APP_DB_PASSWORD")
+	if appPassword == "" {
+		appPassword = "chaste_app_dev_only"
+	}
+	workerPassword := os.Getenv("CHASTE_JOBS_WORKER_DB_PASSWORD")
+	if workerPassword == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("CHASTE_JOBS_WORKER_DB_PASSWORD is required for the CRM deal jobs database proof")
+		}
+		workerPassword = "chaste_jobs_worker_dev_only"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect database owner: %v", err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatalf("connect app runtime: %v", err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatalf("connect jobs worker: %v", err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("crm-deal-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:      "crm-deal-jobs-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for capabilityID, permission := range map[string]string{
+		"crm.createDeal":    "crm.write",
+		"crm.moveDealStage": "crm.write",
+		"crm.convertLead":   "crm.write",
+	} {
+		if GoCapabilityPermissions[capabilityID] != permission {
+			t.Fatalf("Go job permission for %s = %q, want %q", capabilityID, GoCapabilityPermissions[capabilityID], permission)
+		}
+	}
+
+	availableAt := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+	createID := insertJobsTestJob(t, ctx, owner, orgID, "crm.createDeal", json.RawMessage(`{"title":"Worker-created prospect","valueMinor":7300,"source":"worker"}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("createDeal job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, createID, "done", 1)
+	var dealID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM deals WHERE org_id=$1::uuid AND title='Worker-created prospect'`, orgID).Scan(&dealID); err != nil {
+		t.Fatal(err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+createID); got != 1 {
+		t.Fatalf("createDeal system receipts=%d, want one", got)
+	}
+
+	moveToProposalID := insertJobsTestJob(t, ctx, owner, orgID, "crm.moveDealStage", json.RawMessage(fmt.Sprintf(`{"dealId":%q,"stage":"proposal"}`, dealID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("moveDealStage proposal job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, moveToProposalID, "done", 1)
+	assertCRMDealJobStage(t, ctx, owner, orgID, dealID, "proposal")
+
+	moveToLeadID := insertJobsTestJob(t, ctx, owner, orgID, "crm.moveDealStage", json.RawMessage(fmt.Sprintf(`{"dealId":%q,"stage":"lead"}`, dealID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("moveDealStage lead job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, moveToLeadID, "done", 1)
+	assertCRMDealJobStage(t, ctx, owner, orgID, dealID, "lead")
+
+	convertID := insertJobsTestJob(t, ctx, owner, orgID, "crm.convertLead", json.RawMessage(fmt.Sprintf(`{"dealId":%q,"createCustomer":true}`, dealID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("convertLead job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, convertID, "done", 1)
+	var stage, customerName string
+	if err := owner.QueryRow(ctx, `
+		SELECT d.stage,c.name FROM deals d JOIN customers c ON c.id=d.customer_id
+		WHERE d.id=$1::uuid AND d.org_id=$2::uuid`, dealID, orgID).Scan(&stage, &customerName); err != nil {
+		t.Fatal(err)
+	}
+	if stage != "qualified" || customerName != "Worker-created prospect" {
+		t.Fatalf("system conversion stage/customer=%q/%q, want qualified/title-derived customer", stage, customerName)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events
+		WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND actor_id IS NULL AND session_id IS NULL
+		AND capability_id IN ('crm.createDeal','crm.moveDealStage','crm.convertLead')`, orgID); got != 4 {
+		t.Fatalf("system CRM deal audit events=%d, want four executions", got)
+	}
+}
+
+func assertCRMDealJobStage(t *testing.T, ctx context.Context, owner *pgxpool.Pool, orgID, dealID, wantStage string) {
+	t.Helper()
+	var got string
+	if err := owner.QueryRow(ctx, `SELECT stage FROM deals WHERE id=$1::uuid AND org_id=$2::uuid`, dealID, orgID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != wantStage {
+		t.Fatalf("CRM deal stage=%q, want %q", got, wantStage)
+	}
+}
+
 func workerRoleURL(t *testing.T, baseURL, role, password string) string {
 	t.Helper()
 	parsed, err := url.Parse(baseURL)

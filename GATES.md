@@ -344,3 +344,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /ALL MET \(3 met\)/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Scoped gates G1-G3 passed. Ten focused route tests cover default-off TypeScript behavior, exact signed Go capability input/session, success and approval normalization, permission mapping, unrelated actions, and no fallback after uncertain writes. The DB-backed Go invoice proof passes balanced posting and audit rollback. Repository typecheck, lint, all workspace tests, route inventory, and whitespace checks passed. `/api/accounting` GET and POST remain `legacy/pending`; no route ownership override was added.
+
+- [x] G74: Go CRM deal lifecycle writes preserve approval, audit, replay, tenant, and worker behavior behind the signed opt-in routes while route ownership stays legacy.
+  CHECK: /home/benaiah/.nvm/versions/node/v24.18.0/bin/node /home/benaiah/.agents/skills/unlazy/scripts/gate-check.mjs --root . --cwd . --reverify --jobs 1 .unlazy/migration-crm-deals/gates/leaf-6.1.md .unlazy/migration-crm-deals/gates/leaf-6.2.md && PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:/home/benaiah/.local/share/pnpm/.tools/pnpm/11.9.0/bin:$PATH pnpm migration:routes:check
+  EXPECT: /ALL MET[\s\S]*Routes:/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=f67208a7a5a6/21 entries; EXPECT=matched; output-sha256=b0748b1eb9a3b1532f45e6c50a770a2e308a108ac223e78f2ecfab9917558764; output-bytes=2813

@@ -72,6 +72,9 @@ var capabilitySpecs = map[string]capabilitySpec{
 	pipelineReportCapabilityID:           {module: "crm", permission: "crm.read", risk: "read"},
 	listTasksCapabilityID:                {module: "crm", permission: "crm.read", risk: "read"},
 	customerTimelineCapabilityID:         {module: "crm", permission: "crm.read", risk: "read"},
+	createDealCapabilityID:               {module: "crm", permission: "crm.write", risk: "write"},
+	moveDealStageCapabilityID:            {module: "crm", permission: "crm.write", risk: "write"},
+	convertLeadCapabilityID:              {module: "crm", permission: "crm.write", risk: "write"},
 	createInvoiceCapabilityID:            {module: "accounting", permission: "accounting.write", risk: "write"},
 	recordFxRateCapabilityID:             {module: "accounting", permission: "accounting.post", risk: "write"},
 	recordPaymentCapabilityID:            {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
@@ -92,6 +95,7 @@ func supportedCapability(capabilityID string) bool {
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
 		listCustomersCapabilityID, pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
+		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID,
 		createInvoiceCapabilityID, recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID, trialBalanceCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID:
 		return true
@@ -260,6 +264,12 @@ func (e *Executor) execute(
 			input = parsed
 		case customerTimelineCapabilityID:
 			parsed, err := ParseCustomerTimelineInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID:
+			parsed, err := parseCRMDealInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -479,6 +489,24 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case CreateDealInput:
+			output, err := createDeal(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MoveDealStageInput:
+			output, err := moveDealStage(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ConvertLeadInput:
+			output, err := convertLead(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case DeactivateCustomerInput:
 			output, err := deactivateCustomer(ctx, tx, claims.OrganizationID, parsed, now)
 			if err != nil {
@@ -628,6 +656,7 @@ func canonicalInputHash(input any) (string, error) {
 	case CustomerProfileSnapshotsInput:
 		return parsed.CanonicalHash()
 	case ListCustomersInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
+		CreateDealInput, MoveDealStageInput, ConvertLeadInput,
 		CreateInvoiceInput, RecordFxRateInput, RecordPaymentInput, ReversePaymentInput, TrialBalanceInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput:
 		return canonicalHash(parsed)

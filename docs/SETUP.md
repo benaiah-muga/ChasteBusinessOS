@@ -293,6 +293,7 @@ NVIDIA_API_KEY=""      # default; free tier at build.nvidia.com
 | Approval decision shows an upstream error | `GO_APPROVAL_DECISION=1` but Go is unavailable or its outcome could not be confirmed | Start `pnpm dev:api`; refresh the approval queue before deciding again |
 | Projects shows an upstream error | `GO_PROJECTS_READ=1` but the Go API or signed bridge config is unavailable | Start `pnpm dev:api`, set `GO_INTERNAL_AUTH_SECRET`, or set `GO_PROJECTS_READ=0` |
 | Invoice creation shows an upstream error | `GO_ACCOUNTING_CREATE_INVOICE=1` but Go is unavailable or the write outcome could not be confirmed | Check invoice status before retrying; start `pnpm dev:api` or set `GO_ACCOUNTING_CREATE_INVOICE=0` |
+| CRM deal write shows an upstream error | `GO_CRM_DEAL_WRITES=1` but Go is unavailable or the write outcome could not be confirmed | Check the deal before retrying; start `pnpm dev:api` or set `GO_CRM_DEAL_WRITES=0` |
 | `NVIDIA_API_KEY is not set` at runtime | No provider key | Expected without one - see [§5](#5-optional-the-ai-provider-key) |
 
 **Still stuck?** The `packages/db` package has `db:studio` (Drizzle Studio) for

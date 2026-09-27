@@ -434,3 +434,7 @@ new owners and the manifest shows zero legacy runtime paths.
    capability executor behind `GO_ACCOUNTING_CREATE_INVOICE=1`. Preserve the
    legacy owner by default, the approval response contract, and fail-closed
    behavior for unknown write outcomes.
+7. (In progress) Add Go parity for CRM deal creation, stage changes, and lead
+   conversion, including the capability jobs worker path. Bridge only those
+   public POST actions behind `GO_CRM_DEAL_WRITES=1`; keep reads, unrelated CRM
+   actions, and route ownership on the existing defaults until parity passes.

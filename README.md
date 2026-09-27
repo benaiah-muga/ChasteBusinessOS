@@ -112,6 +112,10 @@ history reads remain on the legacy handler.
 `pnpm dev:api`, keeps the legacy approval response shape, and fails closed when
 the invoice outcome cannot be confirmed. Every other accounting action and
 the GET route remain on the legacy handler. The flag defaults to `0`.
+`GO_CRM_DEAL_WRITES=1` opts deal creation, stage changes, and lead conversion
+into the signed Go capability bridge. It requires `pnpm dev:api`; reads and
+other CRM actions remain on the legacy handler, and uncertain writes fail
+closed without a TypeScript retry. The flag defaults to `0`.
 
 For a production-shaped local Docker run, use the full Compose stack instead:
 

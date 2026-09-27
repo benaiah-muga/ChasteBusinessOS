@@ -265,6 +265,12 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID:
+			parsed, parseErr := parseCRMDealInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		default:
 			verifiedPayload = false
 		}
@@ -347,7 +353,8 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case createCustomerCapabilityID, deactivateCustomerCapabilityID,
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
-		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID:
+		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
+		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID:
 		return "crm.write", true
 	case createInvoiceCapabilityID:
 		return "accounting.write", true
