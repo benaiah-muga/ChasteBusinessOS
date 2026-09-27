@@ -17,7 +17,7 @@ pnpm install
 cp .env.example .env        # fill NVIDIA_API_KEY + BETTER_AUTH_SECRET; generate GO_INTERNAL_AUTH_SECRET
 docker start chaste-pgvector
 pnpm --filter @chaste/db db:migrate
-pnpm dev                    # legacy app on :3000 and Vite React shell on :5173
+pnpm dev                    # Vite React app on :3000 and legacy compatibility app on :3001
 # In another terminal, run the Go API on :8080: pnpm dev:api
 ```
 
