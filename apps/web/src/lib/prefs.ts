@@ -79,6 +79,15 @@ function readPrefs(): Prefs {
   }
 }
 
+function mirrorDisplayCurrency(currency: DisplayCurrency): void {
+  if (typeof document === "undefined") return;
+  try {
+    document.cookie = `chaste_display_currency=${currency}; Path=/; Max-Age=31536000; SameSite=Lax`;
+  } catch {
+    // Keep a blocked preference cookie from breaking local preferences.
+  }
+}
+
 const listeners = new Set<(p: Prefs) => void>();
 
 /** Current preferences; safe on the server (returns defaults). */
@@ -101,6 +110,7 @@ export function setPrefs(next: Partial<Prefs>) {
   } catch {
     // Session-only memory when storage is unavailable.
   }
+  mirrorDisplayCurrency(merged.currency);
   for (const fn of listeners) fn(merged);
 }
 
@@ -110,7 +120,9 @@ export function usePrefs(initial?: Partial<Prefs>): [Prefs, (next: Partial<Prefs
   useEffect(() => {
     const sync = (p: Prefs) => update(p);
     listeners.add(sync);
-    update(readPrefs());
+    const current = readPrefs();
+    update(current);
+    mirrorDisplayCurrency(current.currency);
     return () => {
       listeners.delete(sync);
     };

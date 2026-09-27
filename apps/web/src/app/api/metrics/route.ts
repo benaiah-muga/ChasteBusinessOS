@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { agentSessions, getDb } from "@chaste/db";
+import { readGoMetrics } from "@/server/metrics-bridge";
 import { getResolvedUser } from "@/server/session";
 
 /**
@@ -11,6 +12,17 @@ import { getResolvedUser } from "@/server/session";
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  if (process.env.GO_METRICS_READ === "1") {
+    const payload = await readGoMetrics({ userId: resolved.userId, orgId: resolved.orgId });
+    if (!payload) {
+      return NextResponse.json(
+        { error: "metrics service unavailable" },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
+  }
 
   const rows = await getDb()
     .db.select({ tokenUsage: agentSessions.tokenUsage, updatedAt: agentSessions.updatedAt })

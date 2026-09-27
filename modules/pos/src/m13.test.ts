@@ -11,7 +11,6 @@ import {
   organizations,
   payments,
   posSessions,
-  payments,
   stockMovements,
   type Database,
   purgeTenantFinancials,

@@ -74,6 +74,13 @@ the next number; superseded ones get a Status update, never deletion.
 | 0067 | Business paper design system | accepted |
 | 0068 | Messaging conversation UX and capabilities | accepted |
 | 0069 | Accounting workbenches separate planning, review, submission, and settlement | accepted |
+| 0070 | React Vite and Go runtime migration | accepted direction, implementation underway and gated by parity |
+| 0071 | Temporary signed session assertions for Go reads | accepted for migration reads |
+| 0072 | Dedicated least-privilege Go database runtime role | accepted for migration runtime |
+| 0073 | Preserve the governed capability path in Go | accepted for implementation; public ownership gated by parity |
+| 0074 | Preserve the CRM merge restore contract during runtime migration | accepted for migration parity |
+| 0075 | Go webhook outbox worker privilege boundary | accepted |
+| 0076 | Go capability jobs worker | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

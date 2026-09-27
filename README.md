@@ -56,7 +56,10 @@ It cannot spend above your approval threshold without sign-off. It cannot assign
 
 ## Quick start
 
-Requirements: Node 24+ (matches CI), pnpm 11+, Postgres 16 **with pgvector**, and - optionally - one model provider key (NVIDIA NIM ([build.nvidia.com](https://build.nvidia.com)) by default, or OpenRouter, Groq, Mistral, or Z.ai (GLM) via `MODEL_PROVIDER`).
+Requirements: Node 24+ (matches CI), pnpm 11+, Go 1.27.1 (pinned in
+`.go-version`), Postgres 16 **with pgvector**, and - optionally - one model
+provider key (NVIDIA NIM ([build.nvidia.com](https://build.nvidia.com)) by
+default, or OpenRouter, Groq, Mistral, or Z.ai (GLM) via `MODEL_PROVIDER`).
 
 **Docker is not required.** The commands below use it for the database because
 it is the shortest path, but [docs/SETUP.md](docs/SETUP.md) covers three
@@ -75,9 +78,40 @@ docker run -d --name chaste-pgvector \
   -e POSTGRES_DB=chaste_os_v2 -p 5433:5432 pgvector/pgvector:pg16
 
 pnpm --filter @chaste/db db:migrate
-pnpm dev                    # local dev defaults to AUTO_MIGRATE_ON_BOOT=0
-# To opt into boot migration locally: AUTO_MIGRATE_ON_BOOT=1 pnpm dev
+pnpm db:provision-runtime
+pnpm dev                    # Vite app on :3000, legacy compatibility server on :3001
+# To opt into legacy boot migration locally: AUTO_MIGRATE_ON_BOOT=1 pnpm dev
+# In another terminal, run the Go API on :8080:
+pnpm dev:api
 ```
+
+Generate a random `GO_INTERNAL_AUTH_SECRET` in `.env` (for example,
+`openssl rand -hex 32`). Set `GO_POLICY_SHADOW=1` to compare the Go policy read
+with the existing database read during development; shadow comparison runs
+only in development and only over loopback HTTP or HTTPS. `/api/policy` keeps
+the existing response as its default. `GO_POLICY_READ=1` opts the GET into the
+Go result after the signed session and permission checks, and requires the Go
+API to be running. The POST remains on the existing governed capability path.
+`GO_LEDGER_SHADOW=1` compares the ledger response during development while
+still returning legacy data. `GO_LEDGER_READ=1` opts `GET /api/ledger` into Go
+after the signed session and `accounting.read` checks; its route owner stays
+legacy until the Go parity gates pass.
+`GO_PROJECTS_WRITE=1` opts `POST /api/projects` into the signed Go capability
+bridge; it requires `pnpm dev:api` and fails closed if Go is unavailable.
+`GO_PROJECTS_READ=1` opts project list and board reads into the signed Go
+reader; it also requires `pnpm dev:api` and fails closed on errors. The
+development-only `GO_PROJECTS_SHADOW=1` compares the unaudited collection list
+while returning legacy data. Board reads are not shadowed because their
+capability audit entry must stay single.
+`GO_APPROVAL_DECISION=1` opts approval POST decisions into the signed Go
+service. It uses the exact payload stored with the pending approval and fails
+closed if Go is unavailable or the outcome is unknown; approval queue and
+history reads remain on the legacy handler.
+`GO_ACCOUNTING_CREATE_INVOICE=1` opts only `action: "createInvoice"` on
+`POST /api/accounting` into the signed Go capability bridge. It requires
+`pnpm dev:api`, keeps the legacy approval response shape, and fails closed when
+the invoice outcome cannot be confirmed. Every other accounting action and
+the GET route remain on the legacy handler. The flag defaults to `0`.
 
 For a production-shaped local Docker run, use the full Compose stack instead:
 
@@ -125,9 +159,17 @@ pnpm demo:m13     # POS returns, shift summaries, marketing-lite
 ```
 
 Most take a subcommand to run one proof, e.g. `pnpm demo:m9 fulfillment`.
-Every demo needs a migrated database, and several also drive the real agent
-and so need a model provider key - CI skips the whole set when no key is
-configured, so a missing key looks like a skipped job rather than a failure.
+Every demo needs a migrated database. Some also drive the real agent and need a
+model provider key - CI skips the keyed demo set when no key is configured, so
+a missing key looks like a skipped job rather than a failure. The G52
+`demo:slice` proof does not call a model.
+
+For the G52 Go-backed `demo:slice` proof, set `GO_DATABASE_URL` to the
+provisioned `chaste_app` connection and set `GO_INTERNAL_AUTH_SECRET` to at
+least 32 bytes (`openssl rand -hex 32` generates 32 random bytes as hex). Start
+the Go API in another terminal with `pnpm dev:api`, then run `pnpm demo:slice`.
+The proof exercises Go capability, approval, and trial-balance APIs; public
+business routes remain legacy-owned during the migration.
 
 ## Upgrading
 

@@ -163,25 +163,28 @@ Model routing (all via NVIDIA NIM unless overridden):
 | Layer | Choice | Why |
 |---|---|---|
 | Repo | Turborepo + pnpm workspaces | parallel builds, shared versioning, clean package boundaries |
-| Language | TypeScript (strict) end-to-end | one type system from DB to UI; agents generate typed code |
-| Web | Next.js 16 (App Router, RSC, Cache Components) | server components for dense ERP grids; streaming agent UIs (ADR 0027, 0028) |
-| API | Next.js route handlers + Zod boundaries | thin adapters over the capability kernel; tRPC considered, not needed yet |
+| Language | TypeScript strict in the browser; Go for the business runtime | generated API types keep the boundary checked; no TypeScript server remains after cutover (ADR 0070) |
+| Web | React 19 + Vite static client | faster client iteration and a separately compiled browser app; legacy server pages remain until each page passes parity |
+| API | Go HTTP service with validated, versioned contracts | one governed capability executor owns business writes; legacy handlers remain temporary route owners until parity passes |
 | DB | PostgreSQL 16 + Drizzle ORM | relational integrity is non-negotiable for accounting; SQL-native migrations |
 | Vectors | pgvector | no extra infra; joins with transactional data; HNSW indexes |
-| Auth | better-auth (multi-org) | TS-first, org/team plugins, passkeys ready |
-| UI | Tailwind v4 + in-repo primitives (`apps/web/src/components/ui.tsx`) | token-driven theme and brand shell (ADR 0015, 0030); no component-library dependency; a shared `ui/` package is a future extraction |
-| Validation | Zod 4 | shared schemas across kernel/UI/LLM function-calling |
-| Jobs | Postgres-backed durable queue (`jobs`, claimed `FOR UPDATE SKIP LOCKED`) | no extra infra; schedules advanced at claim time for at-most-once execution. Drives routines and ingestion |
+| Auth | Existing Better Auth sessions with a temporary bridge | preserve passwords, sessions, verified identity binding, and active-org behavior while the Go auth port is proven |
+| UI | Existing token-driven theme and in-repo components, ported into Vite in slices | preserve the current brand and accessible controls; keep the component system in-repo |
+| Validation | Versioned API schemas with Go runtime validation and generated TypeScript types | reject contract drift at the HTTP boundary while retaining strict browser types |
+| Jobs | Go worker over the existing PostgreSQL durable queue | preserve `FOR UPDATE SKIP LOCKED` claims, leases, retries, occurrence receipts, and existing rows during the worker port |
 | Observability | console logging + event ledger in DB | structured pino logs and OpenTelemetry traces are planned, not wired |
-| Testing | Vitest (unit + DB integration); property-based tests for ledger invariants | double-entry balance is a property, not a test case; Playwright e2e planned |
+| Testing | Vitest, Go tests and vet, database integration proofs, and browser checks | retain the existing demo proofs and drive them through the migrated API; property-test ledger invariants |
 
-Monorepo layout (as actually built):
+Monorepo migration layout (current owner is recorded in
+`docs/migration/route-ownership.json`; see ADR 0070):
 
 ```
 apps/
-  web/            Next.js app (ERP console + agent chat + approvals inbox)
+  web-vite/       React + Vite browser client (target UI)
+  api/            Go HTTP API and worker (target business runtime)
+  web/            legacy application and auth bridge during parity-gated port
 packages/
-  kernel/         capability registry, governance pipeline, event ledger, agent loop
+  kernel/         legacy TypeScript reference until each Go path is verified
   db/             drizzle schema + migrations (all modules)
   ai/             provider adapters (NIM, openai-compat), embeddings
   erp-core/       pure domain logic: posting rules, tax, inventory math (no IO)

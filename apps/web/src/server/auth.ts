@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getDb, authAccount, authSession, authUser, authVerification } from "@chaste/db";
+import { authTrustedOrigins } from "./auth-origins";
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -44,5 +45,5 @@ export const auth = betterAuth({
       "/sign-up/email": { max: 10, window: 60 },
     },
   },
-  trustedOrigins: [appUrl],
+  trustedOrigins: authTrustedOrigins({ appUrl, isDevelopment: process.env.NODE_ENV === "development" }),
 });

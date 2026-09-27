@@ -15,7 +15,12 @@ import { createDb, memberships, organizations, purgeTenantFinancials, users, typ
 const url = process.env.DATABASE_URL ?? "postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2";
 
 const state = vi.hoisted(() => ({
-  session: null as { user: { email: string; name: string | null; emailVerified: boolean } } | null,
+  session: null as
+    | {
+        session?: { id?: string };
+        user?: { email: string; name: string | null; emailVerified: boolean };
+      }
+    | null,
 }));
 
 vi.mock("@/server/auth", () => ({
@@ -67,36 +72,56 @@ afterAll(async () => {
 
 describe("N03 verified identity binding", () => {
   it("an unverified sign-up for a pre-provisioned email inherits nothing", async () => {
-    state.session = { user: { email: provisionedEmail, name: "Attacker or Owner", emailVerified: false } };
+    state.session = {
+      session: { id: "better-auth-session-unverified" },
+      user: { email: provisionedEmail, name: "Attacker or Owner", emailVerified: false },
+    };
     const resolved = await getResolvedUser();
     expect(resolved).not.toBeNull();
     expect(resolved!.userId).toBe(provisionedUserId);
+    expect(resolved!.authSessionId).toBe("better-auth-session-unverified");
     expect(resolved!.allOrgIds).toEqual([]);
     expect(resolved!.orgId).toBeNull();
     expect(resolved!.permissions.size).toBe(0);
 
     // Case variations of the same claim reach the same wall.
-    state.session = { user: { email: provisionedEmail.toUpperCase(), name: "Attacker or Owner", emailVerified: false } };
+    state.session = {
+      session: { id: "better-auth-session-cased" },
+      user: { email: provisionedEmail.toUpperCase(), name: "Attacker or Owner", emailVerified: false },
+    };
     const cased = await getResolvedUser();
     expect(cased!.allOrgIds).toEqual([]);
     expect(cased!.permissions.size).toBe(0);
   });
 
   it("verification - or a trusted IdP assertion - unlocks the pre-provisioned access", async () => {
-    state.session = { user: { email: provisionedEmail, name: "Provisioned Person", emailVerified: true } };
+    state.session = {
+      session: { id: "better-auth-session-verified" },
+      user: { email: provisionedEmail, name: "Provisioned Person", emailVerified: true },
+    };
     const resolved = await getResolvedUser();
     expect(resolved!.userId).toBe(provisionedUserId);
+    expect(resolved!.authSessionId).toBe("better-auth-session-verified");
     expect(resolved!.allOrgIds).toContain(orgId);
     expect(resolved!.orgId).toBe(orgId);
   });
 
   it("a verified session with no memberships still resolves to a bare identity", async () => {
-    state.session = { user: { email: freshEmail, name: "Newcomer", emailVerified: true } };
+    state.session = {
+      session: { id: "better-auth-session-no-org" },
+      user: { email: freshEmail, name: "Newcomer", emailVerified: true },
+    };
     const resolved = await getResolvedUser();
+    expect(resolved!.authSessionId).toBe("better-auth-session-no-org");
     expect(resolved!.allOrgIds).toEqual([]);
     expect(resolved!.orgId).toBeNull();
     const [row] = await db.db.select({ id: users.id }).from(users).where(eq(users.email, freshEmail));
     expect(row).toBeTruthy();
+  });
+
+  it("does not resolve a session without a Better Auth session row id", async () => {
+    state.session = { user: { email: provisionedEmail, name: "No Session Id", emailVerified: true } };
+    expect(await getResolvedUser()).toBeNull();
   });
 
   it("concurrent first sign-ins resolve to exactly one domain user", async () => {

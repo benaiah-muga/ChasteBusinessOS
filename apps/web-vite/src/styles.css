@@ -1,0 +1,249 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #24241f;
+  background: #f4f3ef;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(ellipse at 77% 18%, rgb(219 203 165 / 20%), transparent 30rem),
+    #f4f3ef;
+}
+
+button, a { font: inherit; }
+
+.page-shell { min-height: 100vh; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 76px;
+  padding: 0 clamp(24px, 5vw, 76px);
+  border-bottom: 1px solid #e5e3dc;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: inherit;
+  font-size: 14px;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.brand strong { font-weight: 700; }
+
+.brand-mark {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border-radius: 9px;
+  background: #26372e;
+  color: #fff;
+  font-family: inherit;
+  font-weight: 800;
+}
+
+.environment-tag {
+  border: 1px solid #dedbd2;
+  border-radius: 99px;
+  padding: 7px 11px;
+  color: #68675f;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.content {
+  width: min(100% - 48px, 880px);
+  margin: 0 auto;
+  padding: clamp(76px, 12vh, 132px) 0 72px;
+}
+
+.eyebrow {
+  margin-bottom: 21px;
+  color: #84744e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+h1, h2, p { margin-top: 0; }
+
+h1 {
+  max-width: 750px;
+  margin-bottom: 20px;
+  font-family: inherit;
+  font-size: clamp(40px, 7vw, 72px);
+  font-weight: 600;
+  letter-spacing: -0.075em;
+  line-height: 1.04;
+}
+
+.lede {
+  max-width: 570px;
+  margin-bottom: 48px;
+  color: #6e6d65;
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.status-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 24px;
+  padding: 26px 28px;
+  border: 1px solid #e2dfd6;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 76%);
+  box-shadow: 0 14px 44px rgb(46 43 34 / 5%);
+}
+
+.status-copy { display: flex; align-items: flex-start; gap: 14px; }
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: #c7a650;
+  box-shadow: 0 0 0 5px rgb(199 166 80 / 13%);
+}
+
+.status-ready { background: #43805b; box-shadow: 0 0 0 5px rgb(67 128 91 / 12%); }
+.status-failed { background: #b94e3b; box-shadow: 0 0 0 5px rgb(185 78 59 / 12%); }
+
+.status-card h2 {
+  margin-bottom: 4px;
+  font-family: inherit;
+  font-size: 16px;
+  letter-spacing: -0.03em;
+}
+
+.status-card p { margin-bottom: 0; color: #77766e; font-size: 13px; }
+
+.refresh-button {
+  min-height: 39px;
+  border: 1px solid #d9d6cc;
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #fff;
+  color: #343830;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.refresh-button:hover { border-color: #a99a74; background: #faf9f5; }
+.refresh-button:focus-visible { outline: 2px solid #84744e; outline-offset: 3px; }
+
+.health-details {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 48px;
+  margin: 0;
+  padding: 19px 0 0 23px;
+  border-top: 1px solid #eceae4;
+}
+
+.health-details div { display: grid; gap: 5px; }
+.health-details dt { color: #8a8980; font-size: 11px; }
+.health-details dd { margin: 0; color: #40443d; font-size: 12px; font-weight: 600; }
+.error-message { grid-column: 1 / -1; color: #a5382e !important; }
+
+.organization-card {
+  display: grid;
+  gap: 16px;
+  margin-top: 14px;
+  padding: 22px 28px;
+  border: 1px solid #e2dfd6;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 76%);
+}
+
+.organization-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.organization-heading .eyebrow { margin-bottom: 8px; font-size: 10px; }
+.organization-heading h2 { margin-bottom: 0; font-size: 16px; letter-spacing: -0.03em; }
+.organization-card p { margin: 0; color: #77766e; font-size: 13px; line-height: 1.6; }
+
+.organization-select-label { position: relative; display: block; }
+
+.organization-select-label select {
+  width: 100%;
+  min-height: 42px;
+  appearance: none;
+  border: 1px solid #d9d6cc;
+  border-radius: 8px;
+  padding: 0 38px 0 12px;
+  background: #fff;
+  color: #343830;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.organization-select-label select:focus-visible { outline: 2px solid #84744e; outline-offset: 3px; }
+.organization-select-label select:disabled { cursor: wait; opacity: 0.6; }
+.organization-chevron { position: absolute; top: 8px; right: 13px; color: #77766e; font-size: 19px; pointer-events: none; }
+.organization-pending { color: #84744e; font-size: 12px; font-weight: 600; }
+.organization-footnote { font-size: 11px !important; }
+.organization-error, .organization-error-state [role="alert"] { color: #a5382e !important; }
+.organization-error-state { display: grid; justify-items: start; gap: 12px; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.proof-note {
+  display: flex;
+  gap: 16px;
+  margin-top: 52px;
+  color: #85847c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.proof-note span { color: #9b895c; font-size: 11px; font-weight: 700; }
+.proof-note p { max-width: 530px; margin: -3px 0 0; }
+
+@media (max-width: 560px) {
+  .topbar { height: 66px; padding-inline: 20px; }
+  .environment-tag { padding: 6px 8px; font-size: 9px; }
+  .content { width: min(100% - 40px, 880px); padding-top: 68px; }
+  .lede { margin-bottom: 34px; font-size: 15px; }
+  .status-card { grid-template-columns: 1fr; gap: 18px; padding: 21px; }
+  .refresh-button { justify-self: start; }
+  .health-details { gap: 28px; padding-left: 0; }
+  .proof-note { margin-top: 38px; }
+}

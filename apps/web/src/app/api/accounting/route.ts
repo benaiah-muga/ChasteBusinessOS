@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import {
   customers,
   getDb,
@@ -19,6 +20,7 @@ import { documentOutstanding } from "@/server/balances";
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
 import { executeAtomically } from "@/server/unit-of-work";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
 
 export async function GET() {
   const resolved = await getResolvedUser();
@@ -211,11 +213,47 @@ export async function POST(req: Request) {
     effectiveAt?: string;
     budgetScenarioId?: string;
   };
-  const db = getDb().db;
-  const executor = buildExecutor(db, buildRegistry(db));
 
   const humanCtx = actorFromResolved(resolved, { intentId: body.intentId });
   if (!humanCtx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+
+  if (body.action === "createInvoice" && body.customerId) {
+    const lines = body.lines;
+    if (!lines?.length) return NextResponse.json({ error: "lines are required" }, { status: 400 });
+    const input = {
+      customerId: body.customerId,
+      memo: body.memo || undefined,
+      lines,
+      currency: body.currency || undefined,
+      fxRate: body.fxRate || undefined,
+      dueAt: body.dueAt || undefined,
+    };
+
+    if (process.env.GO_ACCOUNTING_CREATE_INVOICE === "1") {
+      try {
+        const result = await executeGoCapability({
+          actionContext: humanCtx,
+          session: {
+            userId: resolved.userId,
+            orgId: resolved.orgId,
+            authSessionId: resolved.authSessionId,
+          },
+          capabilityId: "accounting.createInvoice",
+          input,
+        });
+        return createInvoiceGoResponse(result);
+      } catch {
+        return accountingUnavailable();
+      }
+    }
+
+    const db = getDb().db;
+    const executor = buildExecutor(db, buildRegistry(db));
+    return respond(await executor.execute("accounting.createInvoice", humanCtx, input));
+  }
+
+  const db = getDb().db;
+  const executor = buildExecutor(db, buildRegistry(db));
 
   if (body.action === "reverse" && body.entryId) {
     const result = await executor.execute("accounting.reverseEntry", humanCtx, { entryId: body.entryId });
@@ -270,20 +308,6 @@ export async function POST(req: Request) {
     const result = await executor.execute("accounting.cashForecast", humanCtx, { budgetScenarioId: body.budgetScenarioId });
     return respond(result);
   }
-  if (body.action === "createInvoice" && body.customerId) {
-    const lines = body.lines;
-    if (!lines?.length) return NextResponse.json({ error: "lines are required" }, { status: 400 });
-    return respond(
-      await executor.execute("accounting.createInvoice", humanCtx, {
-        customerId: body.customerId,
-        memo: body.memo || undefined,
-        lines,
-        currency: body.currency || undefined,
-        fxRate: body.fxRate || undefined,
-        dueAt: body.dueAt || undefined,
-      }),
-    );
-  }
   if (body.action === "recordPayment" && body.invoiceNumber && body.amountMinor) {
     return respond(
       await executor.execute("accounting.recordPayment", humanCtx, {
@@ -321,6 +345,67 @@ export async function POST(req: Request) {
     );
   }
   return NextResponse.json({ error: "invalid action" }, { status: 400 });
+}
+
+const invoiceOutputSchema = z.object({
+  invoiceId: z.string(),
+  invoiceNumber: z.number().int(),
+  totalMinor: z.number().int(),
+  entryId: z.string(),
+  currency: z.string().optional(),
+});
+
+function accountingUnavailable() {
+  return NextResponse.json(
+    { error: "accounting service unavailable; check invoice status before retrying" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+async function createInvoiceGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return accountingUnavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    const headers = { "Cache-Control": "no-store" };
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: invoiceOutputSchema }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json({ ok: true, data: parsed.data.data }, { status: 200, headers });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({
+        ok: z.literal(false),
+        pendingApproval: z.literal(true),
+        reason: z.string(),
+        approvalId: z.string().optional(),
+      }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json(
+        { ok: false, pendingApproval: true, reason: parsed.data.reason },
+        { status: 202, headers },
+      );
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers });
+    }
+    if (result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers });
+    }
+  } catch {
+    return accountingUnavailable();
+  }
+
+  return accountingUnavailable();
 }
 
 function respond(result: { ok: boolean; data?: unknown; error?: string; pendingApproval?: unknown }) {

@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { approvals, documents, getDb, users } from "@chaste/db";
-import { buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
+import { actorFromResolved, buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
 import { decideApproval } from "@/server/approvals";
+import { decideGoApproval } from "@/server/go-bridge";
 import { getResolvedUser } from "@/server/session";
 
 export async function GET() {
@@ -100,6 +101,44 @@ export async function POST(req: Request) {
   if (!body.success || !approvalId) return NextResponse.json({ error: "invalid request" }, { status: 400 });
 
   const db = getDb().db;
+  if (process.env.GO_APPROVAL_DECISION === "1") {
+    const [approval] = await db
+      .select({ capabilityId: approvals.capabilityId, payload: approvals.payload })
+      .from(approvals)
+      .where(and(eq(approvals.id, approvalId), eq(approvals.orgId, resolved.orgId)))
+      .limit(1);
+    if (!approval) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
+
+    const actionContext = actorFromResolved(resolved, {});
+    if (!actionContext) return NextResponse.json({ ok: false, error: "onboarding required" }, { status: 428 });
+
+    const outcome = await decideGoApproval(
+      {
+        actionContext,
+        session: {
+          userId: resolved.userId,
+          orgId: resolved.orgId,
+          authSessionId: resolved.authSessionId,
+        },
+        approvalId,
+        capabilityId: approval.capabilityId,
+        input: approval.payload,
+        decision: body.data.decision,
+        comment: body.data.comment,
+      },
+    );
+    if (outcome.kind === "not-dispatched") {
+      return NextResponse.json({ ok: false, error: "approval decision service unavailable" }, { status: 503 });
+    }
+    if (outcome.kind === "outcome-unknown") {
+      return NextResponse.json(
+        { ok: false, error: "approval decision outcome unknown; refresh before retrying" },
+        { status: 503 },
+      );
+    }
+    return outcome.response;
+  }
+
   const registry = buildRegistry(db);
   const executor = buildExecutor(db, registry);
 

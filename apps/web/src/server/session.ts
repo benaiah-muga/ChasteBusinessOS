@@ -9,6 +9,8 @@ export const ACTIVE_ORG_COOKIE = "chaste_active_org";
 
 export interface SessionUser extends ResolvedUser {
   allOrgIds: string[];
+  /** Better Auth session row id, distinct from the kernel's agent session id. */
+  authSessionId: string;
   /**
    * Whether the auth account's mailbox is verified (N03): invitation claims
    * are pre-provisioned identity bindings, so an unverified account must
@@ -25,11 +27,12 @@ export interface SessionUser extends ResolvedUser {
  */
 export async function getResolvedUser(): Promise<SessionUser | null> {
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user?.email) return null;
+  if (!session?.session?.id || !session.user?.email) return null;
   const db = getDb().db;
 
   const base = await resolveActorFromAuth(session.user.email, session.user.name ?? null, db);
   const emailVerified = session.user.emailVerified === true;
+  const authSessionId = session.session.id;
 
   // N03 verified binding: a password account proves nothing about mailbox
   // ownership. Domain identities are pre-provisioned by SCIM and
@@ -47,6 +50,7 @@ export async function getResolvedUser(): Promise<SessionUser | null> {
       permissions: new Set<string>(),
       allOrgIds: [],
       emailVerified,
+      authSessionId,
     };
   }
 
@@ -55,7 +59,7 @@ export async function getResolvedUser(): Promise<SessionUser | null> {
     .from(memberships)
     .where(eq(memberships.userId, base.userId));
   const allOrgIds = rows.map((r) => r.orgId);
-  if (allOrgIds.length === 0) return { ...base, allOrgIds, emailVerified };
+  if (allOrgIds.length === 0) return { ...base, allOrgIds, emailVerified, authSessionId };
 
   const cookieStore = await cookies();
   const requested = cookieStore.get(ACTIVE_ORG_COOKIE)?.value;
@@ -65,5 +69,5 @@ export async function getResolvedUser(): Promise<SessionUser | null> {
   const resolved: ResolvedUser =
     activeOrgId === base.orgId ? base : await resolveForOrg(base.userId, activeOrgId, db);
 
-  return { ...resolved, allOrgIds, emailVerified };
+  return { ...resolved, allOrgIds, emailVerified, authSessionId };
 }

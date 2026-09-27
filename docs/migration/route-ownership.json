@@ -1,0 +1,1463 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "kind": "api",
+      "path": "/api/accounting",
+      "method": "GET",
+      "source": "apps/web/src/app/api/accounting/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting",
+      "method": "POST",
+      "source": "apps/web/src/app/api/accounting/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/budgets",
+      "method": "GET",
+      "source": "apps/web/src/app/api/accounting/budgets/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/budgets",
+      "method": "POST",
+      "source": "apps/web/src/app/api/accounting/budgets/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/close",
+      "method": "GET",
+      "source": "apps/web/src/app/api/accounting/close/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/close",
+      "method": "POST",
+      "source": "apps/web/src/app/api/accounting/close/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/tax",
+      "method": "GET",
+      "source": "apps/web/src/app/api/accounting/tax/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/accounting/tax",
+      "method": "POST",
+      "source": "apps/web/src/app/api/accounting/tax/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-config",
+      "method": "GET",
+      "source": "apps/web/src/app/api/ai-config/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-config",
+      "method": "POST",
+      "source": "apps/web/src/app/api/ai-config/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-connections",
+      "method": "GET",
+      "source": "apps/web/src/app/api/ai-connections/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-connections",
+      "method": "POST",
+      "source": "apps/web/src/app/api/ai-connections/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ai-tools/mcp",
+      "method": "POST",
+      "source": "apps/web/src/app/api/ai-tools/mcp/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/analytics",
+      "method": "GET",
+      "source": "apps/web/src/app/api/analytics/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/analytics",
+      "method": "POST",
+      "source": "apps/web/src/app/api/analytics/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/approvals",
+      "method": "GET",
+      "source": "apps/web/src/app/api/approvals/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/approvals",
+      "method": "POST",
+      "source": "apps/web/src/app/api/approvals/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/banking",
+      "method": "GET",
+      "source": "apps/web/src/app/api/banking/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/banking",
+      "method": "POST",
+      "source": "apps/web/src/app/api/banking/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/branding",
+      "method": "GET",
+      "source": "apps/web/src/app/api/branding/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/branding",
+      "method": "POST",
+      "source": "apps/web/src/app/api/branding/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/capability-gaps",
+      "method": "GET",
+      "source": "apps/web/src/app/api/capability-gaps/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/chat",
+      "method": "POST",
+      "source": "apps/web/src/app/api/chat/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/chat/steer",
+      "method": "POST",
+      "source": "apps/web/src/app/api/chat/steer/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations",
+      "method": "GET",
+      "source": "apps/web/src/app/api/conversations/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations",
+      "method": "POST",
+      "source": "apps/web/src/app/api/conversations/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]",
+      "method": "PATCH",
+      "source": "apps/web/src/app/api/conversations/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/attachments",
+      "method": "POST",
+      "source": "apps/web/src/app/api/conversations/[id]/attachments/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/attachments",
+      "method": "DELETE",
+      "source": "apps/web/src/app/api/conversations/[id]/attachments/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/messages",
+      "method": "GET",
+      "source": "apps/web/src/app/api/conversations/[id]/messages/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/messages",
+      "method": "POST",
+      "source": "apps/web/src/app/api/conversations/[id]/messages/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/presence",
+      "method": "GET",
+      "source": "apps/web/src/app/api/conversations/[id]/presence/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/presence",
+      "method": "POST",
+      "source": "apps/web/src/app/api/conversations/[id]/presence/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/[id]/read",
+      "method": "POST",
+      "source": "apps/web/src/app/api/conversations/[id]/read/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/conversations/people",
+      "method": "GET",
+      "source": "apps/web/src/app/api/conversations/people/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/creator/agent",
+      "method": "GET",
+      "source": "apps/web/src/app/api/creator/agent/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/creator/evolution",
+      "method": "POST",
+      "source": "apps/web/src/app/api/creator/evolution/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm",
+      "method": "GET",
+      "source": "apps/web/src/app/api/crm/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm",
+      "method": "POST",
+      "source": "apps/web/src/app/api/crm/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm/views",
+      "method": "GET",
+      "source": "apps/web/src/app/api/crm/views/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/crm/views",
+      "method": "POST",
+      "source": "apps/web/src/app/api/crm/views/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/customers",
+      "method": "GET",
+      "source": "apps/web/src/app/api/customers/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/customers",
+      "method": "POST",
+      "source": "apps/web/src/app/api/customers/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/dashboard",
+      "method": "GET",
+      "source": "apps/web/src/app/api/dashboard/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/deals",
+      "method": "GET",
+      "source": "apps/web/src/app/api/deals/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/deals",
+      "method": "POST",
+      "source": "apps/web/src/app/api/deals/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs",
+      "method": "GET",
+      "source": "apps/web/src/app/api/docs/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs",
+      "method": "POST",
+      "source": "apps/web/src/app/api/docs/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/docs/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]",
+      "method": "POST",
+      "source": "apps/web/src/app/api/docs/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]/workspace",
+      "method": "POST",
+      "source": "apps/web/src/app/api/docs/[id]/workspace/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/[id]/workspace",
+      "method": "DELETE",
+      "source": "apps/web/src/app/api/docs/[id]/workspace/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/assist",
+      "method": "POST",
+      "source": "apps/web/src/app/api/docs/assist/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/folders",
+      "method": "GET",
+      "source": "apps/web/src/app/api/docs/folders/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/folders",
+      "method": "POST",
+      "source": "apps/web/src/app/api/docs/folders/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/next-number",
+      "method": "GET",
+      "source": "apps/web/src/app/api/docs/next-number/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/docs/records",
+      "method": "GET",
+      "source": "apps/web/src/app/api/docs/records/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/documents",
+      "method": "GET",
+      "source": "apps/web/src/app/api/documents/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/documents",
+      "method": "POST",
+      "source": "apps/web/src/app/api/documents/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/documents/[id]/content",
+      "method": "GET",
+      "source": "apps/web/src/app/api/documents/[id]/content/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs",
+      "method": "GET",
+      "source": "apps/web/src/app/api/durable-runs/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs/[id]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/durable-runs/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/email",
+      "method": "GET",
+      "source": "apps/web/src/app/api/email/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/email",
+      "method": "POST",
+      "source": "apps/web/src/app/api/email/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/expenses",
+      "method": "GET",
+      "source": "apps/web/src/app/api/expenses/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/expenses",
+      "method": "POST",
+      "source": "apps/web/src/app/api/expenses/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/harness/compositions",
+      "method": "GET",
+      "source": "apps/web/src/app/api/harness/compositions/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/health",
+      "method": "GET",
+      "source": "apps/web/src/app/api/health/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/hr",
+      "method": "GET",
+      "source": "apps/web/src/app/api/hr/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/hr",
+      "method": "POST",
+      "source": "apps/web/src/app/api/hr/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/import",
+      "method": "POST",
+      "source": "apps/web/src/app/api/import/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/inventory",
+      "method": "GET",
+      "source": "apps/web/src/app/api/inventory/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/inventory",
+      "method": "POST",
+      "source": "apps/web/src/app/api/inventory/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/invite/[token]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/invite/[token]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/invite/[token]",
+      "method": "POST",
+      "source": "apps/web/src/app/api/invite/[token]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/ledger",
+      "method": "GET",
+      "source": "apps/web/src/app/api/ledger/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/manufacturing",
+      "method": "GET",
+      "source": "apps/web/src/app/api/manufacturing/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/manufacturing",
+      "method": "POST",
+      "source": "apps/web/src/app/api/manufacturing/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketing",
+      "method": "GET",
+      "source": "apps/web/src/app/api/marketing/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketing",
+      "method": "POST",
+      "source": "apps/web/src/app/api/marketing/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketplace",
+      "method": "GET",
+      "source": "apps/web/src/app/api/marketplace/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/marketplace",
+      "method": "POST",
+      "source": "apps/web/src/app/api/marketplace/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/memory",
+      "method": "GET",
+      "source": "apps/web/src/app/api/memory/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/memory",
+      "method": "POST",
+      "source": "apps/web/src/app/api/memory/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/message-attachments/[id]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/message-attachments/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]",
+      "method": "PATCH",
+      "source": "apps/web/src/app/api/messages/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]",
+      "method": "DELETE",
+      "source": "apps/web/src/app/api/messages/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]/pin",
+      "method": "PATCH",
+      "source": "apps/web/src/app/api/messages/[id]/pin/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/[id]/reactions",
+      "method": "POST",
+      "source": "apps/web/src/app/api/messages/[id]/reactions/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/messages/search",
+      "method": "GET",
+      "source": "apps/web/src/app/api/messages/search/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/metrics",
+      "method": "GET",
+      "source": "apps/web/src/app/api/metrics/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/module-settings",
+      "method": "GET",
+      "source": "apps/web/src/app/api/module-settings/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/module-settings",
+      "method": "POST",
+      "source": "apps/web/src/app/api/module-settings/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/modules",
+      "method": "GET",
+      "source": "apps/web/src/app/api/modules/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/modules",
+      "method": "POST",
+      "source": "apps/web/src/app/api/modules/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/my-work",
+      "method": "GET",
+      "source": "apps/web/src/app/api/my-work/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/my-work/summarize",
+      "method": "POST",
+      "source": "apps/web/src/app/api/my-work/summarize/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/notifications",
+      "method": "GET",
+      "source": "apps/web/src/app/api/notifications/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/notifications",
+      "method": "POST",
+      "source": "apps/web/src/app/api/notifications/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/onboarding",
+      "method": "GET",
+      "source": "apps/web/src/app/api/onboarding/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/onboarding",
+      "method": "POST",
+      "source": "apps/web/src/app/api/onboarding/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/onboarding",
+      "method": "PATCH",
+      "source": "apps/web/src/app/api/onboarding/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
+      "method": "GET",
+      "source": "apps/web/src/app/api/org/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
+      "method": "POST",
+      "source": "apps/web/src/app/api/org/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
+      "method": "PUT",
+      "source": "apps/web/src/app/api/org/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/org",
+      "method": "PATCH",
+      "source": "apps/web/src/app/api/org/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/policy",
+      "method": "GET",
+      "source": "apps/web/src/app/api/policy/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/policy",
+      "method": "POST",
+      "source": "apps/web/src/app/api/policy/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/portal/invoice/[token]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/portal/invoice/[token]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/pos",
+      "method": "GET",
+      "source": "apps/web/src/app/api/pos/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/pos",
+      "method": "POST",
+      "source": "apps/web/src/app/api/pos/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/projects",
+      "method": "GET",
+      "source": "apps/web/src/app/api/projects/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/projects",
+      "method": "POST",
+      "source": "apps/web/src/app/api/projects/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/proposals",
+      "method": "GET",
+      "source": "apps/web/src/app/api/proposals/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/proposals",
+      "method": "POST",
+      "source": "apps/web/src/app/api/proposals/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing",
+      "method": "GET",
+      "source": "apps/web/src/app/api/purchasing/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing",
+      "method": "POST",
+      "source": "apps/web/src/app/api/purchasing/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing/payment-runs",
+      "method": "GET",
+      "source": "apps/web/src/app/api/purchasing/payment-runs/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/purchasing/payment-runs",
+      "method": "POST",
+      "source": "apps/web/src/app/api/purchasing/payment-runs/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/quotes",
+      "method": "GET",
+      "source": "apps/web/src/app/api/quotes/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/quotes",
+      "method": "POST",
+      "source": "apps/web/src/app/api/quotes/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/recurring",
+      "method": "GET",
+      "source": "apps/web/src/app/api/recurring/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/recurring",
+      "method": "POST",
+      "source": "apps/web/src/app/api/recurring/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/reports",
+      "method": "GET",
+      "source": "apps/web/src/app/api/reports/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines",
+      "method": "GET",
+      "source": "apps/web/src/app/api/routines/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines",
+      "method": "POST",
+      "source": "apps/web/src/app/api/routines/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines/webhook/[token]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/routines/webhook/[token]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/routines/webhook/[token]",
+      "method": "POST",
+      "source": "apps/web/src/app/api/routines/webhook/[token]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sales",
+      "method": "GET",
+      "source": "apps/web/src/app/api/sales/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sales",
+      "method": "POST",
+      "source": "apps/web/src/app/api/sales/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/tokens",
+      "method": "GET",
+      "source": "apps/web/src/app/api/scim/tokens/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/tokens",
+      "method": "POST",
+      "source": "apps/web/src/app/api/scim/tokens/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/tokens",
+      "method": "DELETE",
+      "source": "apps/web/src/app/api/scim/tokens/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users",
+      "method": "GET",
+      "source": "apps/web/src/app/api/scim/v2/Users/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users",
+      "method": "POST",
+      "source": "apps/web/src/app/api/scim/v2/Users/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users",
+      "method": "DELETE",
+      "source": "apps/web/src/app/api/scim/v2/Users/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users/[id]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/scim/v2/Users/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users/[id]",
+      "method": "DELETE",
+      "source": "apps/web/src/app/api/scim/v2/Users/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sessions",
+      "method": "GET",
+      "source": "apps/web/src/app/api/sessions/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sessions/[id]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/sessions/[id]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sessions/[id]/replay",
+      "method": "GET",
+      "source": "apps/web/src/app/api/sessions/[id]/replay/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/setup",
+      "method": "GET",
+      "source": "apps/web/src/app/api/setup/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/signals",
+      "method": "GET",
+      "source": "apps/web/src/app/api/signals/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support",
+      "method": "GET",
+      "source": "apps/web/src/app/api/support/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support",
+      "method": "POST",
+      "source": "apps/web/src/app/api/support/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/channels",
+      "method": "GET",
+      "source": "apps/web/src/app/api/support/channels/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/channels",
+      "method": "POST",
+      "source": "apps/web/src/app/api/support/channels/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/public",
+      "method": "GET",
+      "source": "apps/web/src/app/api/support/public/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/public",
+      "method": "POST",
+      "source": "apps/web/src/app/api/support/public/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team",
+      "method": "GET",
+      "source": "apps/web/src/app/api/team/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team",
+      "method": "POST",
+      "source": "apps/web/src/app/api/team/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team/sso",
+      "method": "GET",
+      "source": "apps/web/src/app/api/team/sso/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team/sso",
+      "method": "POST",
+      "source": "apps/web/src/app/api/team/sso/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/team/sso",
+      "method": "DELETE",
+      "source": "apps/web/src/app/api/team/sso/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/time",
+      "method": "GET",
+      "source": "apps/web/src/app/api/time/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/time",
+      "method": "POST",
+      "source": "apps/web/src/app/api/time/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/",
+      "source": "apps/web/src/app/(app)/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/accounting",
+      "source": "apps/web/src/app/(app)/accounting/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/analytics",
+      "source": "apps/web/src/app/(app)/analytics/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/approvals",
+      "source": "apps/web/src/app/(app)/approvals/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/crm",
+      "source": "apps/web/src/app/(app)/crm/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/documents",
+      "source": "apps/web/src/app/(app)/documents/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/documents/editor/[id]",
+      "source": "apps/web/src/app/(app)/documents/editor/[id]/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/hr",
+      "source": "apps/web/src/app/(app)/hr/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/inventory",
+      "source": "apps/web/src/app/(app)/inventory/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/ledger",
+      "source": "apps/web/src/app/(app)/ledger/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/login",
+      "source": "apps/web/src/app/login/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/manufacturing",
+      "source": "apps/web/src/app/(app)/manufacturing/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/marketing",
+      "source": "apps/web/src/app/(app)/marketing/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/marketplace",
+      "source": "apps/web/src/app/(app)/marketplace/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/messages",
+      "source": "apps/web/src/app/(app)/messages/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/onboarding",
+      "source": "apps/web/src/app/onboarding/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/portal/[token]",
+      "source": "apps/web/src/app/portal/[token]/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/pos",
+      "source": "apps/web/src/app/(app)/pos/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/print/invoice/[orderId]",
+      "source": "apps/web/src/app/print/invoice/[orderId]/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/products",
+      "source": "apps/web/src/app/(app)/products/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/projects",
+      "source": "apps/web/src/app/(app)/projects/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/proposals",
+      "source": "apps/web/src/app/(app)/proposals/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/purchasing",
+      "source": "apps/web/src/app/(app)/purchasing/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/purchasing/receiving",
+      "source": "apps/web/src/app/(app)/purchasing/receiving/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/sales",
+      "source": "apps/web/src/app/(app)/sales/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/sessions",
+      "source": "apps/web/src/app/(app)/sessions/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/settings",
+      "source": "apps/web/src/app/(app)/settings/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/support",
+      "source": "apps/web/src/app/(app)/support/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/team",
+      "source": "apps/web/src/app/(app)/team/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "page",
+      "path": "/widget/[token]",
+      "source": "apps/web/src/app/widget/[token]/page.tsx",
+      "owner": "legacy",
+      "parity": "pending"
+    }
+  ]
+}

@@ -90,6 +90,7 @@ describe("integrated operational UI surfaces", () => {
     expect(page).toContain("visibleInvoices.slice(0, 30)");
     expect(page).toContain("Show all invoices");
     expect(page).toContain("list?.focus({ preventScroll: true })");
+    console.info("RECEIVABLE-AGING-FILTERS-OK");
   });
 
   it("POS quick add makes stock availability explicit", () => {

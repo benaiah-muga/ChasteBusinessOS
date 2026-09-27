@@ -7,6 +7,7 @@ import { cn, formatMoney, formatMoneyWhole, timeAgo } from "@/lib/format";
 import { useMoneySync } from "@/lib/money";
 import { IconArrowRight, IconSparkle } from "@/components/icons";
 import { pilotBegin, record } from "@/lib/pilot-metrics";
+import { consumeWorkmatePrompt } from "./dashboard-prompt";
 
 /**
  * The home dashboard reads like the cover page of the accounts book:
@@ -102,6 +103,14 @@ export function HomeDashboard({ orgName }: { orgName: string }) {
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
+    const promptLink = consumeWorkmatePrompt(
+      new URL(window.location.href),
+      ASK_ACTIONS.map((action) => action.prompt),
+    );
+    if (promptLink) {
+      window.history.replaceState(null, "", promptLink.href);
+      openChatWith(promptLink.prompt);
+    }
     void (async () => {
       const res = await callApi<DashboardPayload>("/api/dashboard");
       if (!res.data) setError(res.error?.title ?? "Could not load your dashboard");

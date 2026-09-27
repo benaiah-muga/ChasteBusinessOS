@@ -1,9 +1,130 @@
 import { NextResponse } from "next/server";
+import { createHmac } from "node:crypto";
 import { z } from "zod";
+import { canonicalInputHash, logger } from "@chaste/kernel";
 import { getDb } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
-import { getResolvedUser } from "@/server/session";
+import { getResolvedUser, type SessionUser } from "@/server/session";
 import { draftCrmFollowUp } from "@/server/crm-assist";
+
+const crmTimelineResponseSchema = z.object({
+  entries: z.array(z.object({
+    kind: z.string(),
+    date: z.string(),
+    refId: z.string(),
+    summary: z.string(),
+  })),
+});
+
+const crmTasksResponseSchema = z.object({
+  tasks: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    dueAt: z.string().nullable(),
+    doneAt: z.string().nullable(),
+    refType: z.string().nullable(),
+    refId: z.string().nullable(),
+    assigneeUserId: z.string().nullable(),
+    assigneeName: z.string().nullable(),
+    customerName: z.string().nullable(),
+  })),
+});
+
+type CRMReadMode = "timeline" | "tasks";
+type CRMReadResult = z.infer<typeof crmTimelineResponseSchema> | z.infer<typeof crmTasksResponseSchema>;
+type GoCRMReadOutcome =
+  | { kind: "success"; data: CRMReadResult }
+  | { kind: "error"; status: 422; error: string };
+
+async function readGoCRM(input: {
+  resolved: SessionUser;
+  actor: NonNullable<ReturnType<typeof actorFromResolved>>["actor"];
+  mode: CRMReadMode;
+  capabilityId: "crm.customerTimeline" | "crm.listTasks";
+  capabilityInput: { customerId: string } | { openOnly: boolean | undefined };
+  timelineId?: string;
+  openOnly?: boolean;
+}): Promise<GoCRMReadOutcome | null> {
+  const secret = process.env.GO_INTERNAL_AUTH_SECRET;
+  if (!secret) {
+    logger.warn("Go CRM read unavailable: bridge secret is not configured");
+    return null;
+  }
+  const resolved = input.resolved;
+  if (!resolved || !resolved.orgId || input.actor.type !== "human" || input.actor.id !== resolved.userId || input.actor.orgId !== resolved.orgId) {
+    return null;
+  }
+
+  try {
+    if (Buffer.byteLength(secret, "utf8") < 32) return null;
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const claims = {
+      aud: "go.crm.read",
+      sub: resolved.userId,
+      org_id: resolved.orgId,
+      capability_id: input.capabilityId,
+      input_sha256: await canonicalInputHash(input.capabilityInput),
+      actor_id: input.actor.id,
+      actor_type: input.actor.type,
+      permissions: [...input.actor.permissions].sort(),
+      auth_session_id: resolved.authSessionId,
+      iat: issuedAt,
+      exp: issuedAt + 30,
+    };
+    const encoded = Buffer.from(JSON.stringify(claims)).toString("base64url");
+    const assertion = `${encoded}.${createHmac("sha256", secret).update(encoded).digest("base64url")}`;
+    const baseUrl = new URL(process.env.GO_API_INTERNAL_URL ?? "http://127.0.0.1:8080");
+    const bridgeHost = baseUrl.hostname.replace(/^\[|\]$/g, "");
+    const loopbackHttp = baseUrl.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(bridgeHost);
+    if (
+      baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash || baseUrl.pathname !== "/" ||
+      (baseUrl.protocol !== "https:" && !loopbackHttp)
+    ) {
+      logger.warn("Go CRM read unavailable: bridge URL must use loopback HTTP or HTTPS");
+      return null;
+    }
+    const query = new URLSearchParams();
+    if (input.mode === "timeline") query.set("timeline", input.timelineId ?? "");
+    else {
+      query.set("tasks", "1");
+      if (input.openOnly) query.set("open", "1");
+    }
+    const response = await fetch(new URL(`/__go/crm?${query.toString()}`, baseUrl), {
+      method: "GET",
+      headers: { "X-Chaste-Session-Assertion": assertion },
+      cache: "no-store",
+      credentials: "omit",
+      redirect: "error",
+      signal: AbortSignal.timeout(3000),
+    });
+    if (response.status === 422) {
+      const errorBody = z.object({ error: z.string() }).safeParse(await response.json().catch(() => null));
+      if (errorBody.success) return { kind: "error", status: 422, error: errorBody.data.error };
+      logger.warn("Go CRM read returned an invalid error response");
+      return null;
+    }
+    if (!response.ok) {
+      logger.warn("Go CRM read failed", { status: response.status });
+      return null;
+    }
+    const raw: unknown = await response.json().catch(() => null);
+    const parsed = input.mode === "timeline"
+      ? crmTimelineResponseSchema.safeParse(raw)
+      : crmTasksResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      logger.warn("Go CRM read returned an invalid response", { mode: input.mode });
+      return null;
+    }
+    return { kind: "success", data: parsed.data };
+  } catch {
+    logger.warn("Go CRM read failed");
+    return null;
+  }
+}
+
+function crmReadMatches(left: CRMReadResult, right: CRMReadResult): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -38,22 +159,53 @@ export async function GET(req: Request) {
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
   const url = new URL(req.url);
-  const executor = buildExecutor(getDb().db, buildRegistry(getDb().db));
-
   const timelineId = url.searchParams.get("timeline");
+  let mode: CRMReadMode | null = null;
+  let capabilityId: "crm.customerTimeline" | "crm.listTasks" | null = null;
+  let capabilityInput: { customerId: string } | { openOnly: boolean | undefined } | null = null;
   if (timelineId) {
-    const result = await executor.execute("crm.customerTimeline", ctx, { customerId: timelineId });
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 });
-    return NextResponse.json(result.data);
+    mode = "timeline";
+    capabilityId = "crm.customerTimeline";
+    capabilityInput = { customerId: timelineId };
+  } else if (url.searchParams.get("tasks")) {
+    mode = "tasks";
+    capabilityId = "crm.listTasks";
+    capabilityInput = { openOnly: url.searchParams.get("open") === "1" ? true : undefined };
   }
 
-  if (url.searchParams.get("tasks")) {
-    const result = await executor.execute("crm.listTasks", ctx, { openOnly: url.searchParams.get("open") === "1" ? true : undefined });
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 });
-    return NextResponse.json(result.data);
+  if (!mode || !capabilityId || !capabilityInput) return NextResponse.json({ error: "nothing requested" }, { status: 400 });
+
+  const goReadEnabled = process.env.GO_CRM_READ === "1";
+  const shadowEnabled = !goReadEnabled && process.env.NODE_ENV === "development" && process.env.GO_CRM_SHADOW === "1";
+  const legacyPayload = !goReadEnabled || shadowEnabled
+    ? await buildExecutor(getDb().db, buildRegistry(getDb().db)).execute(capabilityId, ctx, capabilityInput)
+    : null;
+  if (legacyPayload && !legacyPayload.ok) return NextResponse.json({ error: legacyPayload.error }, { status: 422 });
+
+  if (goReadEnabled || shadowEnabled) {
+    const goPayload = await readGoCRM({
+      resolved,
+      actor: ctx.actor,
+      mode,
+      capabilityId,
+      capabilityInput,
+      ...(timelineId ? { timelineId } : {}),
+      ...(url.searchParams.get("open") === "1" ? { openOnly: true } : {}),
+    });
+    if (goReadEnabled && !goPayload) {
+      return NextResponse.json({ error: "CRM service unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
+    if (goReadEnabled && goPayload?.kind === "error") {
+      return NextResponse.json({ error: goPayload.error }, { status: goPayload.status, headers: { "Cache-Control": "no-store" } });
+    }
+    if (goPayload?.kind === "error") logger.warn("Go CRM read differs from legacy data", { mode });
+    if (goPayload?.kind === "success" && legacyPayload?.ok && !crmReadMatches(goPayload.data, legacyPayload.data as CRMReadResult)) {
+      logger.warn("Go CRM read differs from legacy data", { mode });
+    }
+    if (goReadEnabled && goPayload?.kind === "success") return NextResponse.json(goPayload.data, { headers: { "Cache-Control": "no-store" } });
   }
 
-  return NextResponse.json({ error: "nothing requested" }, { status: 400 });
+  return NextResponse.json(legacyPayload?.ok ? legacyPayload.data : null);
 }
 
 export async function POST(req: Request) {

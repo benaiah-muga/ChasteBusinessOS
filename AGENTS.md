@@ -3,44 +3,45 @@
 Agentic ERP. Every human action is also an AI-agent action through the same
 capability pipeline, governed, auditable, reversible.
 
+The target runtime is a React app built with Vite and Go business APIs and
+workers. During the migration, use the active commands documented in
+[README.md](README.md) and the [migration plan](docs/REACT_GO_MIGRATION_PLAN.md).
+
 Read `ARCHITECTURE.md` first, then `ROADMAP.md`. Design decisions live in
 `docs/adr/`; user-facing changes are recorded in `CHANGELOG.md`.
-
-<!-- BEGIN:nextjs-agent-rules -->
-
-# This is NOT the Next.js you know
-
-This version has breaking changes - APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` - verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
-
-In this monorepo the bundled docs resolve to **`apps/web/node_modules/next/dist/docs/`** (Next.js lives in `apps/web`).
 
 ## Quick start
 
 ```sh
 pnpm install
-cp .env.example .env        # fill NVIDIA_API_KEY + BETTER_AUTH_SECRET
+cp .env.example .env        # fill NVIDIA_API_KEY + BETTER_AUTH_SECRET; generate GO_INTERNAL_AUTH_SECRET
 docker start chaste-pgvector
 pnpm --filter @chaste/db db:migrate
-pnpm dev                    # apps/web on :3000
+pnpm dev                    # legacy app on :3000 and Vite React shell on :5173
+# In another terminal, run the Go API on :8080: pnpm dev:api
 ```
 
 ## Conventions
 
-- TypeScript strict everywhere; Zod for all boundaries.
-- All state changes go through kernel capabilities (`packages/kernel`).
+- TypeScript strict in the React app; Go for business APIs and workers.
+- Define API contracts once and generate TypeScript and Go types from them.
+- Validate untrusted input at runtime at every API, database, and agent-tool boundary.
+- All state changes go through the governed capability kernel. Human, agent,
+  and worker actions use the same execution path.
 - Money = integer minor units; posted financial documents are immutable.
 - Append-only event ledger; hash-chained audit entries.
+- Keep domain math pure and add property tests for financial invariants.
 - Never commit secrets. `.env` is gitignored.
 
 ## Verification gate, run before declaring any work done
 
 ```sh
 pnpm typecheck && pnpm lint && pnpm test
+pnpm go:verify
 ```
+
+During the migration, run checks for each language and app that exists in the
+change. Keep the full gate above once the Go workspace is present.
 
 Live behavior proofs - one per milestone, each an executable specification:
 `demo:slice`, `demo:m2`, `demo:m3`, `demo:m4`, `demo:m4b`, `demo:m5`,
@@ -61,10 +62,13 @@ locally before claiming a milestone works.
   valid `module.action` id, intent ≥ 20 chars (it gets embedded), and an
   inverse declared for state changes unless you can justify the warning.
   The registry self-validates at boot, broken inverses refuse to boot.
-- Domain math lives in `packages/erp-core` as pure functions, keep IO out,
-  and add property tests for financial invariants.
-- No `any` without an adjacent eslint-disable comment explaining *why* the
-  hole is unavoidable. `pnpm lint` fails on unexplained ones.
+- Keep domain math in pure domain packages, keep IO out, and add property
+  tests for financial invariants.
+- Go org-scoped queries must run through `internal/dbx.WithOrgTx`, which sets
+  `app.org_id` transaction-locally for PostgreSQL RLS.
+- In TypeScript, do not use `any` without an adjacent eslint-disable comment
+  explaining *why* the hole is unavoidable. `pnpm lint` fails on unexplained
+  uses.
 - Significant design decisions get an ADR (`docs/adr/`, next number, never
   delete old ones). If you argued for a choice that others will live with,
   write it down.
@@ -76,71 +80,21 @@ locally before claiming a milestone works.
   means it also hides real errors until it is fixed. Never hand-edit it.
 - Do not add comments explaining obvious code; explain *why*, not *what*.
 
-## Next.js 16.3 agent tooling (`apps/web`)
+## Frontend runtime checks
 
-The web app runs Next.js **16.3** with version-matched docs bundled inside
-the package. Never trust training-data Next.js knowledge for this app;
-consult these first:
+After a UI change, start the active app using the command in `README.md` and
+open the affected route in the in-app browser. Confirm the route loads, the
+changed interaction works, and there are no new browser console or request
+errors. If the in-app browser is unavailable, leave the runtime gate open and
+report that limitation. Run a focused browser check for the changed flow, then
+run the verification gate above.
 
-### Bundled docs (version-accurate, offline)
+## Performance work
 
-```
-apps/web/node_modules/next/dist/docs/
-├── 01-app/01-getting-started/
-├── 01-app/02-guides/          # ai-agents.md, mcp.md, caching, instant-navigation, …
-├── 01-app/03-api-reference/
-└── index.md
-```
-
-Start with `01-app/02-guides/upgrading/version-16.md` before touching code
-written against older Next.js. The same docs are online as Markdown: append
-`.md` to any nextjs.org/docs URL; `/docs/messages/*` error pages are written
-for agents and are not bundled.
-
-### Runtime visibility (MCP)
-
-`.mcp.json` at the repo root configures `next-devtools-mcp`, which connects
-to the dev server's built-in MCP endpoint at `/_next/mcp`. Start the dev
-server (`pnpm --filter web dev`) and use its tools instead of guessing:
-`get_errors`, `get_logs`, `get_page_metadata`, `get_project_metadata`,
-`get_routes`, `get_server_action_by_id`, `get_compilation_issues`,
-`compile_route` - e.g. check compilation via MCP before running a full
-`next build`.
-
-`next dev` also forwards browser console errors/warnings to the terminal,
-and writes PID/port to `apps/web/.next/dev/lock`; connect to the running
-server instead of starting a duplicate.
-
-For the browser's view use [`agent-browser`](https://github.com/vercel-labs/agent-browser)
-(`agent-browser open --enable react-devtools`), which exposes DOM, console,
-network, Web Vitals, component tree, and pending Suspense boundaries as
-structured text.
-
-### Skills
-
-Already installed at `.agents/skills/` (committed): `next-dev-loop`,
-`next-cache-components-adoption`, `next-cache-components-optimizer`,
-`next-partial-prefetching-adoption`. Re-install only to update:
-
-```sh
-npx skills add vercel/next.js --skill next-dev-loop                    # edit → verify loop vs running dev server
-npx skills add vercel/next.js --skill next-cache-components-adoption   # adopt Cache Components route-by-route
-npx skills add vercel/next.js --skill next-cache-components-optimizer  # make a navigation instant, guarded by instant() test
-npx skills add vercel/next.js --skill next-partial-prefetching-adoption # shared App Shell prefetching
-```
-
-Default working agreement for this repo: after every UI edit, verify the page
-at runtime using the `next-dev-loop` Skill (or MCP + agent-browser when the
-skill is not installed), then run the verification gate below.
-
-### Performance work
-
-When asked to make pages fast: prefer Cache Components (`"use cache"`,
-`<Suspense>` streaming) and instant navigation patterns from
-`01-app/02-guides/caching-without-cache-components.md` → `migrating-to-cache-components.md`
-and `instant-navigation.md` in the bundled docs, drive the work through the
-matching Skill, and guard outcomes with `instant()` tests rather than
-one-off measurements.
+Measure startup, edit-to-ready, production build, and representative browser
+navigation before optimizing. Report frontend and Go build times separately.
+Use repeatable runs on the same machine and data, and guard improvements with
+the existing behavior proofs and browser checks.
 
 <!-- graft:start -->
 ## Graft - repo context graph

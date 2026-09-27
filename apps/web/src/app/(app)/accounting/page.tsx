@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -529,13 +529,12 @@ export default function AccountingPage() {
       appId="accounting"
       description="Entries are immutable - corrections are mirror reversals. Sealed periods refuse new postings."
       tabs={[
-        { id: "overview", label: "Overview", mobileQuick: true },
+        { id: "overview", label: "Overview" },
         { id: "journal", label: "Journal" },
         {
           id: "receivables",
           label: "Receivables",
           count: data?.agingInvoices.length || undefined,
-          mobileQuick: true,
         },
         { id: "cash", label: "Cash & collections" },
         { id: "budgets", label: "Budgets" },
@@ -545,7 +544,6 @@ export default function AccountingPage() {
           count:
             data?.bills.filter((b) => b.outstandingMinor > 0).length ||
             undefined,
-          mobileQuick: true,
         },
         {
           id: "bank",
@@ -1286,10 +1284,23 @@ function ReceivablesSection({
     label: string,
   ) => Promise<boolean>;
 }) {
+  type AgingRange = "all" | "current" | "d30" | "d60" | "d90plus" | "outstanding";
   const [emailFor, setEmailFor] = useState<number | null>(null);
   const [emailTo, setEmailTo] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailNote, setEmailNote] = useState<string | null>(null);
+  const [agingRange, setAgingRange] = useState<AgingRange>("all");
+  const [showAllInvoices, setShowAllInvoices] = useState(false);
+  const invoiceListRef = useRef<HTMLDivElement>(null);
+
+  const showAgingRange = (range: AgingRange) => {
+    setAgingRange(range);
+    setShowAllInvoices(false);
+    requestAnimationFrame(() => {
+      const list = invoiceListRef.current;
+      list?.focus({ preventScroll: true });
+    });
+  };
 
   // New invoice
   const [invoiceOpen, setInvoiceOpen] = useState(false);
@@ -1437,35 +1448,86 @@ function ReceivablesSection({
   const outstanding = invoices.filter(
     (i) => i.outstandingMinor > 0 && i.status !== "void",
   );
+  const ageDaysByInvoice = new Map(
+    agingInvoices.map((invoice) => [invoice.number, invoice.ageDays]),
+  );
+  const visibleInvoices = invoices.filter((invoice) => {
+    if (agingRange === "all") return true;
+    if (invoice.outstandingMinor <= 0 || invoice.status === "void") return false;
+    if (agingRange === "outstanding") return true;
+
+    const ageDays = ageDaysByInvoice.get(invoice.number) ?? 0;
+    if (agingRange === "current") return ageDays <= 30;
+    if (agingRange === "d30") return ageDays > 30 && ageDays <= 60;
+    if (agingRange === "d60") return ageDays > 60 && ageDays <= 90;
+    return ageDays > 90;
+  });
+  const invoicesToShow = showAllInvoices
+    ? visibleInvoices
+    : visibleInvoices.slice(0, 30);
 
   return (
     <section>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-        <StatCard
-          label="Current"
-          value={formatMoneyIn(baseCurrency, a.current)}
-        />
-        <StatCard
-          label="31–60 days"
-          value={formatMoneyIn(baseCurrency, a.d30)}
-          tone={a.d30 > 0 ? "warn" : "default"}
-        />
-        <StatCard
-          label="61–90 days"
-          value={formatMoneyIn(baseCurrency, a.d60)}
-          tone={a.d60 > 0 ? "warn" : "default"}
-        />
-        <StatCard
-          label="90+ days"
-          value={formatMoneyIn(baseCurrency, a.d90plus)}
-          tone={a.d90plus > 0 ? "danger" : "default"}
-        />
-        <StatCard
-          label={`Total outstanding · ${baseCurrency}`}
-          value={formatMoneyIn(baseCurrency, a.totalOutstanding)}
-          tone="accent"
-          className="col-span-2 sm:col-span-1"
-        />
+        <button
+          type="button"
+          aria-pressed={agingRange === "current"}
+          className="min-w-0 cursor-pointer rounded-xl text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-500"
+          onClick={() => showAgingRange("current")}
+        >
+          <StatCard
+            label="Current"
+            value={formatMoneyIn(baseCurrency, a.current)}
+          />
+        </button>
+        <button
+          type="button"
+          aria-pressed={agingRange === "d30"}
+          className="min-w-0 cursor-pointer rounded-xl text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-500"
+          onClick={() => showAgingRange("d30")}
+        >
+          <StatCard
+            label="31–60 days"
+            value={formatMoneyIn(baseCurrency, a.d30)}
+            tone={a.d30 > 0 ? "warn" : "default"}
+          />
+        </button>
+        <button
+          type="button"
+          aria-pressed={agingRange === "d60"}
+          className="min-w-0 cursor-pointer rounded-xl text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-500"
+          onClick={() => showAgingRange("d60")}
+        >
+          <StatCard
+            label="61–90 days"
+            value={formatMoneyIn(baseCurrency, a.d60)}
+            tone={a.d60 > 0 ? "warn" : "default"}
+          />
+        </button>
+        <button
+          type="button"
+          aria-pressed={agingRange === "d90plus"}
+          className="min-w-0 cursor-pointer rounded-xl text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-500"
+          onClick={() => showAgingRange("d90plus")}
+        >
+          <StatCard
+            label="90+ days"
+            value={formatMoneyIn(baseCurrency, a.d90plus)}
+            tone={a.d90plus > 0 ? "danger" : "default"}
+          />
+        </button>
+        <button
+          type="button"
+          aria-pressed={agingRange === "outstanding"}
+          className="col-span-2 min-w-0 cursor-pointer rounded-xl text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-500 sm:col-span-1"
+          onClick={() => showAgingRange("outstanding")}
+        >
+          <StatCard
+            label={`Total outstanding · ${baseCurrency}`}
+            value={formatMoneyIn(baseCurrency, a.totalOutstanding)}
+            tone="accent"
+          />
+        </button>
       </div>
       {agingInvoices.some((invoice) => invoice.currency !== baseCurrency) && (
         <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
@@ -1486,8 +1548,30 @@ function ReceivablesSection({
           Sales.
         </QuietLine>
       ) : (
-        <div className="table-shell mt-4">
-          <table className="data-table">
+        <>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-stone-500" aria-live="polite">
+              {agingRange === "all"
+                ? "All invoices"
+                : agingRange === "outstanding"
+                  ? "Outstanding invoices"
+                  : `${visibleInvoices.length} invoices in this aging range`}
+            </p>
+            {agingRange !== "all" && (
+              <Button tone="ghost" size="sm" onClick={() => showAgingRange("all")}>
+                Reset filter
+              </Button>
+            )}
+          </div>
+          {visibleInvoices.length === 0 ? (
+            <QuietLine>No invoices match this aging range.</QuietLine>
+          ) : (
+            <div
+              ref={invoiceListRef}
+              tabIndex={-1}
+              className="table-shell mt-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-500"
+            >
+              <table className="data-table">
             <thead>
               <tr>
                 <th>#</th>
@@ -1499,7 +1583,7 @@ function ReceivablesSection({
               </tr>
             </thead>
             <tbody>
-              {invoices.map((inv) => {
+              {invoicesToShow.map((inv) => {
                 const age = agingInvoices.find((x) => x.number === inv.number);
                 const invoiceCurrency = hasCurrencyCode(inv.currency)
                   ? inv.currency
@@ -1589,8 +1673,20 @@ function ReceivablesSection({
                 );
               })}
             </tbody>
-          </table>
-        </div>
+              </table>
+            </div>
+          )}
+          {visibleInvoices.length > 30 && (
+            <div className="mt-3 flex justify-center">
+              <Button
+                tone="secondary"
+                onClick={() => setShowAllInvoices((showingAll) => !showingAll)}
+              >
+                {showAllInvoices ? "Show fewer invoices" : "Show all invoices"}
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Overdue aging list */}

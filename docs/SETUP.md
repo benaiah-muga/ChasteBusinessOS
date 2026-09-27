@@ -180,7 +180,20 @@ BETTER_AUTH_SECRET=""
 
 ```sh
 pnpm --filter @chaste/db db:migrate
+pnpm db:provision-runtime
 ```
+
+The provisioning command creates or repairs the dedicated `chaste_app`
+database role used by Go. Keep `DATABASE_URL` for migrations and the existing
+application runtime. Set `GO_DATABASE_URL` to the matching `chaste_app` URL.
+Production also needs a strong `CHASTE_APP_DB_PASSWORD`; provisioning fails
+closed when it is missing. The Go API refuses to start with a superuser,
+`BYPASSRLS` role, or a role with additional memberships.
+
+For local G52 `demo:slice` verification, set `GO_DATABASE_URL` to the
+provisioned `chaste_app` connection and set `GO_INTERNAL_AUTH_SECRET` to at
+least 32 bytes. Generate a value with `openssl rand -hex 32` and place it in
+`.env`.
 
 You can skip this: the web server applies pending migrations once at boot
 before serving requests, serialized across instances by a Postgres advisory
@@ -200,8 +213,13 @@ controls.
 pnpm dev
 ```
 
-Open <http://localhost:3000>. If port 3000 is taken, Next picks the next free
-port and prints it - check the terminal.
+Open <http://localhost:3000>. This is the React/Vite app. The legacy
+compatibility server runs on <http://localhost:3001> and serves API routes and
+pages that have not moved yet. Vite proxies those requests to port 3001.
+Better Auth remains the session owner during migration. Use `localhost` for
+both URLs so the browser sends the existing host-scoped session cookie. Set
+`CHASTE_LEGACY_WEB_ORIGIN` if the compatibility server uses a different port.
+The Go API runs separately on port 8080 when Go-backed routes are enabled.
 
 Then:
 
@@ -222,8 +240,12 @@ pnpm demo:slice                            # invoice → gated payment → appro
 pnpm demo:m5                               # POS session → sale → drawer variance
 ```
 
-`demo:m5` needs no model key. `demo:slice` drives the real agent, so it needs
-one. Full list in [README.md](../README.md#demo-proofs).
+`demo:m5` and the G52 `demo:slice` proof need no model key. `demo:slice` runs
+agent-context actions through the capability pipeline without calling a model.
+Start the Go API in another terminal with `pnpm dev:api` before running
+`pnpm demo:slice`. The proof exercises Go capability, approval, and
+trial-balance APIs while public business routes remain legacy-owned. Full list
+in [README.md](../README.md#demo-proofs).
 
 ---
 
@@ -237,7 +259,7 @@ you lose without one:
 |---|---|
 | Sign-up, onboarding, all business modules | Agent chat and tool calls |
 | Ledger postings, approvals, reports | `askYourBusiness`, `explainChange` narration |
-| `demo:m5`, `demo:m9`, and other deterministic proofs | `demo:slice`, `demo:m7`, embedding-based memory search |
+| `demo:slice`, `demo:m5`, `demo:m9`, and other deterministic proofs | `demo:m7`, embedding-based memory search |
 
 Onboarding degrades gracefully: if embedding fails, a zero vector is stored and
 retrieval falls back to keyword search rather than erroring.
@@ -262,8 +284,15 @@ NVIDIA_API_KEY=""      # default; free tier at build.nvidia.com
 | `password authentication failed for user "chaste"` | Role doesn't exist or password mismatch | Recreate the role; a stale volume from an earlier run keeps old credentials - `docker compose down -v` |
 | `Tenant or user not found` (Neon/Supabase) | Wrong host or branch string | Re-copy the connection string from the dashboard |
 | Migrations hang | Another instance holds the advisory lock | Stop other dev servers; check `pg_stat_activity` |
-| Port 3000 in use | | Next auto-selects the next free port - read the terminal output |
+| Port 3000 in use | Vite uses a strict local port | Stop the conflicting service before running `pnpm dev` |
+| Port 3001 in use | The legacy compatibility server uses this port | Stop the conflicting service or update its port and `CHASTE_LEGACY_WEB_ORIGIN` together |
 | Sign-up succeeds, then loops back to login | `BETTER_AUTH_SECRET` empty or changed | Set a stable secret, restart |
+| Policy screen shows an upstream error | `GO_POLICY_READ=1` but the Go API is stopped or unreachable | Start `pnpm dev:api` or set `GO_POLICY_READ=0` |
+| Ledger screen shows an upstream error | `GO_LEDGER_READ=1` but the Go API is stopped or unreachable | Start `pnpm dev:api` or set `GO_LEDGER_READ=0` |
+| Organization switching shows an upstream error | `GO_ORG_SWITCH=1` but the Go API or signed bridge config is unavailable | Start `pnpm dev:api`, set a 32-byte `GO_INTERNAL_AUTH_SECRET`, or set `GO_ORG_SWITCH=0` |
+| Approval decision shows an upstream error | `GO_APPROVAL_DECISION=1` but Go is unavailable or its outcome could not be confirmed | Start `pnpm dev:api`; refresh the approval queue before deciding again |
+| Projects shows an upstream error | `GO_PROJECTS_READ=1` but the Go API or signed bridge config is unavailable | Start `pnpm dev:api`, set `GO_INTERNAL_AUTH_SECRET`, or set `GO_PROJECTS_READ=0` |
+| Invoice creation shows an upstream error | `GO_ACCOUNTING_CREATE_INVOICE=1` but Go is unavailable or the write outcome could not be confirmed | Check invoice status before retrying; start `pnpm dev:api` or set `GO_ACCOUNTING_CREATE_INVOICE=0` |
 | `NVIDIA_API_KEY is not set` at runtime | No provider key | Expected without one - see [§5](#5-optional-the-ai-provider-key) |
 
 **Still stuck?** The `packages/db` package has `db:studio` (Drizzle Studio) for

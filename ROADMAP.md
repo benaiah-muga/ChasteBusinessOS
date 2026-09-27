@@ -224,3 +224,12 @@ Plan: `docs/BUSINESS_OS_PLAN.md` (eleven external module audits, triaged)
 ## Proposed enterprise evolution programme
 
 The [Enterprise Evolution Plan](docs/ENTERPRISE_EVOLUTION_PLAN.md) extends the [Cordis-like engine proposal](docs/CORDIS_LIKE_ENGINE_PLAN.md) with an evidence register, integrity-first delivery order, bounded autonomy levels, enterprise operations, onboarding/UX/UI, developer setup and independently verified self-development. This programme is proposed and its implementation gates remain open; historical milestone checkmarks above are not enterprise readiness certification. See the [planning review](docs/ENTERPRISE_PLAN_REVIEW.md) for this documentation task’s verification limits.
+
+## React and Go migration programme
+
+The approved target is a Vite-built React app with Go business APIs, agent
+runtime, and workers. Preserve the current database and behavior through
+single-writer, parity-gated cutovers. See the
+[migration plan](docs/REACT_GO_MIGRATION_PLAN.md) and [ADR 0070](docs/adr/0070-react-vite-and-go-migration.md).
+Implementation gates are open; this planning decision is not a completed
+runtime migration.

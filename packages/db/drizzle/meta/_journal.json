@@ -576,6 +576,27 @@
       "when": 1790453308881,
       "tag": "0081_sturdy_the_spike",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790476571253,
+      "tag": "0082_global_ledger_head_reader",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1790495028595,
+      "tag": "0083_go_webhook_outbox_worker",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1790499823106,
+      "tag": "0084_go_capability_jobs",
+      "breakpoints": true
     }
   ]
 }

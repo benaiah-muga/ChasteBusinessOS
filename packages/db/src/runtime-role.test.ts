@@ -33,6 +33,27 @@ beforeAll(async () => {
   ]);
   const { runtimeUrl } = await ensureAppRole({ databaseUrl: url });
   app = createDb(runtimeUrl);
+  const roleState = await admin.db.execute<{
+    superuser: boolean;
+    bypassesRls: boolean;
+    memberships: number;
+  }>(`
+    SELECT r.rolsuper AS superuser,
+           r.rolbypassrls AS "bypassesRls",
+           (SELECT count(*)::int FROM pg_auth_members membership
+             WHERE membership.member = r.oid) AS memberships
+    FROM pg_roles r
+    WHERE r.rolname = 'chaste_app'
+  `);
+  expect(roleState).toHaveLength(1);
+  const appRole = roleState[0] as unknown as {
+    superuser: boolean;
+    bypassesRls: boolean;
+    memberships: number;
+  };
+  expect(appRole.superuser).toBe(false);
+  expect(appRole.bypassesRls).toBe(false);
+  expect(Number(appRole.memberships)).toBe(0);
 });
 
 afterAll(async () => {

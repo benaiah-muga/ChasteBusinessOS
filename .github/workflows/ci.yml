@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, architectural-pivot2]
+    branches: [main, architectural-pivot2, react-go-migration]
   pull_request:
 
 concurrency:
@@ -54,6 +54,8 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://chaste:chaste_dev@localhost:5433/chaste_os_v2
+      CHASTE_APP_DB_PASSWORD: chaste_app_dev_only
+      GO_DATABASE_URL: postgresql://chaste_app:chaste_app_dev_only@localhost:5433/chaste_os_v2
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       BETTER_AUTH_SECRET: ci-only-not-a-real-secret
     steps:
@@ -69,8 +71,35 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check migration route ownership manifest
+        run: pnpm migration:routes:check
+
+      - name: Check server action migration manifest
+        run: pnpm migration:actions:check
+
+      - name: Check database table migration manifest
+        run: pnpm migration:data:check
+
+      - name: Check runtime capability migration manifest
+        run: pnpm migration:capabilities:check
+
+      - name: Check migration inventory source references
+        run: pnpm migration:inventory:check
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: .go-version
+          cache-dependency-path: apps/api/go.sum
+
       - name: Migrate database
         run: pnpm --filter @chaste/db db:migrate
+
+      - name: Provision least-privilege Go runtime role
+        run: pnpm db:provision-runtime
+
+      - name: Verify Go API
+        run: pnpm go:verify
 
       - name: Typecheck
         run: pnpm typecheck
@@ -83,6 +112,9 @@ jobs:
 
       - name: Build web app
         run: pnpm --filter web build
+
+      - name: Build Vite React app
+        run: pnpm --filter @chaste/web-vite build
 
       # Live proofs need the NVIDIA key; run when present so PRs from forks
       # still pass without it.
