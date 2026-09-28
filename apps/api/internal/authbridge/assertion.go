@@ -15,6 +15,7 @@ const LedgerReadAudience = "go.ledger.read"
 const OrgSwitchAudience = "go.org.switch"
 const CapabilityExecuteAudience = "go.capability.execute"
 const ApprovalDecisionAudience = "go.approval.decide"
+const ApprovalInboxReadAudience = "go.approvals.inbox.read"
 
 var ErrInvalidAssertion = errors.New("invalid session assertion")
 
@@ -65,6 +66,75 @@ type ApprovalDecisionClaims struct {
 	Comment        *string  `json:"comment"`
 	IssuedAt       int64    `json:"iat"`
 	ExpiresAt      int64    `json:"exp"`
+}
+
+type ApprovalInboxClaims struct {
+	Audience       string   `json:"aud"`
+	Subject        string   `json:"sub"`
+	OrganizationID string   `json:"org_id"`
+	InputSHA256    string   `json:"input_sha256"`
+	ActorID        *string  `json:"actor_id"`
+	ActorType      string   `json:"actor_type"`
+	Permissions    []string `json:"permissions"`
+	AuthSessionID  string   `json:"auth_session_id"`
+	IssuedAt       int64    `json:"iat"`
+	ExpiresAt      int64    `json:"exp"`
+}
+
+func VerifyApprovalInbox(secret, token string, now time.Time) (ApprovalInboxClaims, error) {
+	var claims ApprovalInboxClaims
+	if len([]byte(secret)) < 32 || len(token) == 0 || len(token) > 4096 {
+		return claims, ErrInvalidAssertion
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return claims, ErrInvalidAssertion
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return claims, ErrInvalidAssertion
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(parts[0]))
+	if !hmac.Equal(signature, mac.Sum(nil)) {
+		return claims, ErrInvalidAssertion
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil || json.Unmarshal(payload, &claims) != nil {
+		return ApprovalInboxClaims{}, ErrInvalidAssertion
+	}
+	nowUnix := now.Unix()
+	if claims.Audience != ApprovalInboxReadAudience || !isUUID(claims.Subject) || !isUUID(claims.OrganizationID) ||
+		claims.ActorID == nil || *claims.ActorID != claims.Subject || claims.ActorType != "human" ||
+		strings.TrimSpace(claims.AuthSessionID) == "" || !isSHA256Hex(claims.InputSHA256) ||
+		claims.IssuedAt > nowUnix+5 || claims.IssuedAt < nowUnix-60 || claims.ExpiresAt <= nowUnix ||
+		claims.ExpiresAt <= claims.IssuedAt || claims.ExpiresAt-claims.IssuedAt > 30 || claims.ExpiresAt > nowUnix+30 {
+		return ApprovalInboxClaims{}, ErrInvalidAssertion
+	}
+	for index, permission := range claims.Permissions {
+		if strings.TrimSpace(permission) == "" || (index > 0 && claims.Permissions[index-1] >= permission) {
+			return ApprovalInboxClaims{}, ErrInvalidAssertion
+		}
+	}
+	return claims, nil
+}
+
+func isUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for index, char := range value {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if char != '-' {
+				return false
+			}
+			continue
+		}
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // CapabilityClaims returns the signed authority subset consumed by the

@@ -14,10 +14,12 @@ import (
 )
 
 const (
-	submitExpenseClaimCapabilityID = "accounting.submitExpenseClaim"
-	decideExpenseClaimCapabilityID = "accounting.decideExpenseClaim"
-	payExpenseClaimCapabilityID    = "accounting.payExpenseClaim"
-	listExpenseClaimsCapabilityID  = "accounting.listExpenseClaims"
+	submitExpenseClaimCapabilityID  = "accounting.submitExpenseClaim"
+	decideExpenseClaimCapabilityID  = "accounting.decideExpenseClaim"
+	payExpenseClaimCapabilityID     = "accounting.payExpenseClaim"
+	listExpenseClaimsCapabilityID   = "accounting.listExpenseClaims"
+	listExpensePoliciesCapabilityID = "accounting.listExpensePolicies"
+	setExpensePolicyCapabilityID    = "accounting.setExpensePolicy"
 )
 
 var expenseClaimStatusValues = []string{"submitted", "approved", "rejected", "paid"}
@@ -76,6 +78,28 @@ type ListExpenseClaimsOutput struct {
 	Claims []ListExpenseClaimSummary `json:"claims"`
 }
 
+type ListExpensePoliciesInput struct{}
+
+type ExpensePolicySummary struct {
+	Category   string `json:"category"`
+	LimitMinor int64  `json:"limitMinor"`
+}
+
+type ListExpensePoliciesOutput struct {
+	Policies []ExpensePolicySummary `json:"policies"`
+}
+
+type SetExpensePolicyInput struct {
+	Category   string `json:"category"`
+	LimitMinor int64  `json:"limitMinor"`
+}
+
+type SetExpensePolicyOutput struct {
+	Set        bool   `json:"set"`
+	Category   string `json:"category"`
+	LimitMinor int64  `json:"limitMinor"`
+}
+
 func parseAccountingExpenseInput(capabilityID string, raw json.RawMessage) (any, error) {
 	switch capabilityID {
 	case submitExpenseClaimCapabilityID:
@@ -86,9 +110,39 @@ func parseAccountingExpenseInput(capabilityID string, raw json.RawMessage) (any,
 		return ParsePayExpenseClaimInput(raw)
 	case listExpenseClaimsCapabilityID:
 		return ParseListExpenseClaimsInput(raw)
+	case listExpensePoliciesCapabilityID:
+		return ParseListExpensePoliciesInput(raw)
+	case setExpensePolicyCapabilityID:
+		return ParseSetExpensePolicyInput(raw)
 	default:
 		return nil, errors.New("unsupported accounting expense capability")
 	}
+}
+
+func ParseListExpensePoliciesInput(raw json.RawMessage) (ListExpensePoliciesInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return ListExpensePoliciesInput{}, err
+	}
+	return ListExpensePoliciesInput{}, nil
+}
+
+func ParseSetExpensePolicyInput(raw json.RawMessage) (SetExpensePolicyInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return SetExpensePolicyInput{}, err
+	}
+	var input SetExpensePolicyInput
+	if input.Category, err = requiredString(fields, "category"); err != nil {
+		return SetExpensePolicyInput{}, err
+	}
+	if utf16Length(input.Category) < 2 || utf16Length(input.Category) > 40 {
+		return SetExpensePolicyInput{}, errors.New("category must contain between 2 and 40 characters")
+	}
+	input.LimitMinor, err = requiredSafeInteger(fields, "limitMinor")
+	if err != nil || input.LimitMinor < 0 {
+		return SetExpensePolicyInput{}, errors.New("limitMinor must be a nonnegative integer")
+	}
+	return input, nil
 }
 
 func ParseSubmitExpenseClaimInput(raw json.RawMessage) (SubmitExpenseClaimInput, error) {
@@ -373,4 +427,40 @@ func listExpenseClaims(ctx context.Context, tx pgx.Tx, orgID string, input ListE
 		return ListExpenseClaimsOutput{}, err
 	}
 	return ListExpenseClaimsOutput{Claims: claims}, nil
+}
+
+func listExpensePolicies(ctx context.Context, tx pgx.Tx, orgID string) (ListExpensePoliciesOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT category, limit_minor
+		FROM expense_policies
+		WHERE org_id = $1::uuid
+		ORDER BY limit_minor DESC`, orgID)
+	if err != nil {
+		return ListExpensePoliciesOutput{}, err
+	}
+	defer rows.Close()
+	policies := make([]ExpensePolicySummary, 0)
+	for rows.Next() {
+		var policy ExpensePolicySummary
+		if err := rows.Scan(&policy.Category, &policy.LimitMinor); err != nil {
+			return ListExpensePoliciesOutput{}, err
+		}
+		policies = append(policies, policy)
+	}
+	if err := rows.Err(); err != nil {
+		return ListExpensePoliciesOutput{}, err
+	}
+	return ListExpensePoliciesOutput{Policies: policies}, nil
+}
+
+func setExpensePolicy(ctx context.Context, tx pgx.Tx, orgID string, input SetExpensePolicyInput) (SetExpensePolicyOutput, error) {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO expense_policies (org_id, category, limit_minor)
+		VALUES ($1::uuid, $2, $3)
+		ON CONFLICT (org_id, category) DO UPDATE SET limit_minor = EXCLUDED.limit_minor`,
+		orgID, input.Category, input.LimitMinor)
+	if err != nil {
+		return SetExpensePolicyOutput{}, err
+	}
+	return SetExpensePolicyOutput{Set: true, Category: input.Category, LimitMinor: input.LimitMinor}, nil
 }

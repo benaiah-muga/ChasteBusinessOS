@@ -19,6 +19,58 @@ const (
 	convertLeadCapabilityID   = "crm.convertLead"
 )
 
+type ListDealsInput struct{}
+
+type CRMDealRow struct {
+	ID           string  `json:"id"`
+	Title        string  `json:"title"`
+	Stage        string  `json:"stage"`
+	ValueMinor   int64   `json:"valueMinor"`
+	Note         *string `json:"note"`
+	CustomerID   *string `json:"customerId"`
+	CustomerName *string `json:"customerName"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
+}
+
+type ListDealsOutput struct {
+	Deals []CRMDealRow `json:"deals"`
+}
+
+func ParseListDealsInput(raw json.RawMessage) (ListDealsInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return ListDealsInput{}, err
+	}
+	return ListDealsInput{}, nil
+}
+
+func listDeals(ctx context.Context, tx pgx.Tx, orgID string) (ListDealsOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT d.id::text, d.title, d.stage, d.value_minor, d.note,
+		       d.customer_id::text, c.name, d.created_at, d.updated_at
+		FROM deals d
+		LEFT JOIN customers c ON c.id = d.customer_id AND c.org_id = d.org_id
+		WHERE d.org_id = $1::uuid
+		LIMIT 200`, orgID)
+	if err != nil {
+		return ListDealsOutput{}, err
+	}
+	defer rows.Close()
+	deals := make([]CRMDealRow, 0)
+	for rows.Next() {
+		var deal CRMDealRow
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&deal.ID, &deal.Title, &deal.Stage, &deal.ValueMinor, &deal.Note,
+			&deal.CustomerID, &deal.CustomerName, &createdAt, &updatedAt); err != nil {
+			return ListDealsOutput{}, err
+		}
+		deal.CreatedAt = createdAt.UTC().Format("2006-01-02T15:04:05.000Z")
+		deal.UpdatedAt = updatedAt.UTC().Format("2006-01-02T15:04:05.000Z")
+		deals = append(deals, deal)
+	}
+	return ListDealsOutput{Deals: deals}, rows.Err()
+}
+
 var crmDealStages = map[string]struct{}{
 	"lead": {}, "qualified": {}, "proposal": {}, "negotiation": {}, "won": {}, "lost": {},
 }

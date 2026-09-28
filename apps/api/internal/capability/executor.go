@@ -34,6 +34,7 @@ const (
 	restoreCustomerProfilesCapabilityID  = "crm.restoreCustomerProfiles"
 	reapplyCustomerProfilesCapabilityID  = "crm.reapplyCustomerProfiles"
 	listCustomersCapabilityID            = "crm.listCustomers"
+	listDealsCapabilityID                = "crm.listDeals"
 	pipelineReportCapabilityID           = "crm.pipelineReport"
 	listTasksCapabilityID                = "crm.listTasks"
 	customerTimelineCapabilityID         = "crm.customerTimeline"
@@ -47,6 +48,11 @@ const (
 	createProjectTaskCapabilityID        = "projects.createTask"
 	moveProjectTaskCapabilityID          = "projects.moveTask"
 	assignProjectTaskCapabilityID        = "projects.assignTask"
+	iamListMembersCapabilityID           = "iam.listMembers"
+	iamCreateRoleCapabilityID            = "iam.createRole"
+	iamUpdateRolePermissionsCapabilityID = "iam.updateRolePermissions"
+	iamAssignRoleCapabilityID            = "iam.assignRole"
+	iamInviteMemberCapabilityID          = "iam.inviteMember"
 )
 const approvalTTL = 7 * 24 * time.Hour
 
@@ -69,6 +75,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	restoreCustomerProfilesCapabilityID:      {module: "crm", permission: "crm.write", risk: "write"},
 	reapplyCustomerProfilesCapabilityID:      {module: "crm", permission: "crm.write", risk: "write"},
 	listCustomersCapabilityID:                {module: "crm", permission: "crm.read", risk: "read"},
+	listDealsCapabilityID:                    {module: "crm", permission: "crm.read", risk: "read"},
 	pipelineReportCapabilityID:               {module: "crm", permission: "crm.read", risk: "read"},
 	listTasksCapabilityID:                    {module: "crm", permission: "crm.read", risk: "read"},
 	customerTimelineCapabilityID:             {module: "crm", permission: "crm.read", risk: "read"},
@@ -106,6 +113,8 @@ var capabilitySpecs = map[string]capabilitySpec{
 	decideExpenseClaimCapabilityID:           {module: "accounting", permission: "expenses.decide", risk: "write"},
 	payExpenseClaimCapabilityID:              {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
 	listExpenseClaimsCapabilityID:            {module: "accounting", permission: "expenses.decide", risk: "read"},
+	listExpensePoliciesCapabilityID:          {module: "accounting", permission: "expenses.decide", risk: "read"},
+	setExpensePolicyCapabilityID:             {module: "accounting", permission: "expenses.decide", risk: "write"},
 	createVendorCapabilityID:                 {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	createPurchaseOrderCapabilityID:          {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	receiveGoodsCapabilityID:                 {module: "purchasing", permission: "purchasing.write", risk: "write"},
@@ -183,6 +192,11 @@ var capabilitySpecs = map[string]capabilitySpec{
 	createProjectTaskCapabilityID:            {module: "projects", permission: "projects.write", risk: "write"},
 	moveProjectTaskCapabilityID:              {module: "projects", permission: "projects.write", risk: "write"},
 	assignProjectTaskCapabilityID:            {module: "projects", permission: "projects.write", risk: "write"},
+	iamListMembersCapabilityID:               {module: "iam", permission: "iam.read", risk: "read"},
+	iamCreateRoleCapabilityID:                {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamUpdateRolePermissionsCapabilityID:     {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamAssignRoleCapabilityID:                {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamInviteMemberCapabilityID:              {module: "iam", permission: "iam.admin", risk: "write"},
 }
 
 func supportedCapability(capabilityID string) bool {
@@ -191,7 +205,7 @@ func supportedCapability(capabilityID string) bool {
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
-		listCustomersCapabilityID, pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
+		listCustomersCapabilityID, listDealsCapabilityID, pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
 		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID,
 		createTaskCapabilityID, completeTaskCapabilityID, updateTaskDetailsCapabilityID, restoreTaskDetailsCapabilityID,
 		createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID,
@@ -199,7 +213,7 @@ func supportedCapability(capabilityID string) bool {
 		hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrUpdateEmployeeStructureCapabilityID,
 		salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
 		createInvoiceCapabilityID, recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID, trialBalanceCapabilityID,
-		submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID,
+		submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID, listExpensePoliciesCapabilityID, setExpensePolicyCapabilityID,
 		createVendorCapabilityID, createPurchaseOrderCapabilityID, receiveGoodsCapabilityID, returnGoodsCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID,
 		inventoryAdjustStockCapabilityID, inventoryCreateTransferCapabilityID, inventoryConfirmTransferCapabilityID,
 		inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID, inventoryListTransfersCapabilityID,
@@ -223,7 +237,8 @@ func supportedCapability(capabilityID string) bool {
 		closePeriodCapabilityID, reopenPeriodCapabilityID, closeYearCapabilityID,
 		saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID,
 		listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID,
-		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID:
+		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID,
+		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 		return true
 	default:
 		return false
@@ -372,6 +387,12 @@ func (e *Executor) execute(
 			input = parsed
 		case listCustomersCapabilityID:
 			parsed, err := ParseListCustomersInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case listDealsCapabilityID:
+			parsed, err := ParseListDealsInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -538,7 +559,7 @@ func (e *Executor) execute(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID:
+		case submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID, listExpensePoliciesCapabilityID, setExpensePolicyCapabilityID:
 			parsed, err := parseAccountingExpenseInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -645,6 +666,13 @@ func (e *Executor) execute(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
+			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
+			parsed, err := parseIAMInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
 		}
 		inputHash, err := canonicalInputHash(input)
 		if err != nil {
@@ -722,6 +750,36 @@ func (e *Executor) execute(
 
 		var data json.RawMessage
 		switch parsed := input.(type) {
+		case IAMListMembersInput:
+			output, err := iamListMembers(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case IAMCreateRoleInput:
+			output, err := iamCreateRole(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case IAMUpdateRolePermissionsInput:
+			output, err := iamUpdateRolePermissions(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case IAMAssignRoleInput:
+			output, err := iamAssignRole(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case IAMInviteMemberInput:
+			output, err := iamInviteMember(ctx, tx, claims, now, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case CreateCustomerInput:
 			output, err := createCustomer(ctx, tx, claims, parsed)
 			if err != nil {
@@ -730,6 +788,12 @@ func (e *Executor) execute(
 			data, err = marshalJS(output)
 		case ListCustomersInput:
 			output, err := listCustomers(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListDealsInput:
+			output, err := listDeals(ctx, tx, claims.OrganizationID)
 			if err != nil {
 				return Result{}, err
 			}
@@ -970,6 +1034,18 @@ func (e *Executor) execute(
 			data, err = marshalJS(output)
 		case ListExpenseClaimsInput:
 			output, err := listExpenseClaims(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListExpensePoliciesInput:
+			output, err := listExpensePolicies(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SetExpensePolicyInput:
+			output, err := setExpensePolicy(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -1476,7 +1552,7 @@ func canonicalInputHash(input any) (string, error) {
 		return parsed.CanonicalHash()
 	case CustomerProfileSnapshotsInput:
 		return parsed.CanonicalHash()
-	case ListCustomersInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
+	case ListCustomersInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
 		CreateDealInput, MoveDealStageInput, ConvertLeadInput,
 		CreateTaskInput, CompleteTaskInput, UpdateTaskDetailsInput,
 		CreateQuoteInput, AcceptQuoteInput, DeclineQuoteInput, ExpireQuoteInput, ListQuotesInput,
@@ -1484,7 +1560,7 @@ func canonicalInputHash(input any) (string, error) {
 		HRHireEmployeeInput, HRDeactivateEmployeeInput, HRListEmployeesInput, HRUpdateEmployeeStructureInput,
 		SalesCreateOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
 		CreateInvoiceInput, RecordFxRateInput, RecordPaymentInput, ReversePaymentInput, TrialBalanceInput,
-		SubmitExpenseClaimInput, DecideExpenseClaimInput, PayExpenseClaimInput, ListExpenseClaimsInput,
+		SubmitExpenseClaimInput, DecideExpenseClaimInput, PayExpenseClaimInput, ListExpenseClaimsInput, ListExpensePoliciesInput, SetExpensePolicyInput,
 		CreateVendorInput, CreatePurchaseOrderInput, ReceiveGoodsInput, ReturnGoodsInput, CreateBillInput, PayBillInput, ReverseVendorPaymentInput,
 		InventoryAdjustStockInput, InventoryCreateTransferInput, InventoryConfirmTransferInput, InventoryCancelTransferInput,
 		InventoryReverseTransferInput, InventoryListTransfersInput,
@@ -1503,7 +1579,8 @@ func canonicalInputHash(input any) (string, error) {
 		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput,
 		ClosePeriodInput, PeriodCloseCheckInput, CloseYearInput,
 		SaveBudgetScenarioInput, BudgetScenarioVersionInput, ListBudgetScenariosInput, BudgetActualVsPlanInput,
-		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput:
+		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput,
+		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput:
 		return canonicalHash(parsed)
 	default:
 		return "", errors.New("unsupported capability input")

@@ -6,7 +6,7 @@
     "dev": "AUTO_MIGRATE_ON_BOOT=${AUTO_MIGRATE_ON_BOOT:-0} next dev --port 3001",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit && tsc --noEmit -p ../../scripts/migration/tsconfig.json",
     "test": "vitest run --maxWorkers=1"
   },

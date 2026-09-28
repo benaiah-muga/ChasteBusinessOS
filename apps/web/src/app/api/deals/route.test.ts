@@ -67,6 +67,7 @@ describe("Deals route migration adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.GO_CRM_DEAL_WRITES;
+    delete process.env.GO_CRM_DEAL_READS;
     mocks.getResolvedUser.mockResolvedValue(resolved);
     mocks.actorFromResolved.mockReturnValue(actionContext);
     mocks.dealRows = [{ id: dealId }];
@@ -91,6 +92,7 @@ describe("Deals route migration adapter", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("keeps create and move on the legacy executor when the Go flag is unset", async () => {
@@ -244,6 +246,56 @@ describe("Deals route migration adapter", () => {
       createdAt: "2026-09-27T10:00:00.000Z",
       updatedAt: "2026-09-27T10:00:00.000Z",
     }] });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches deal reads through the signed Go bridge only when enabled", async () => {
+    vi.stubEnv("GO_CRM_DEAL_READS", "1");
+    vi.stubEnv("GO_INTERNAL_AUTH_SECRET", "0123456789abcdef0123456789abcdef");
+    const payload = {
+      deals: [{
+        id: dealId,
+        title: "New lead",
+        stage: "lead",
+        valueMinor: 12500,
+        note: null,
+        customerId,
+        customerName: "Acme",
+        createdAt: "2026-09-28T10:00:00.000Z",
+        updatedAt: "2026-09-28T10:00:00.000Z",
+      }],
+    };
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      expect(url.pathname).toBe("/__go/crm");
+      expect(url.search).toBe("?deals=1");
+      return Response.json(payload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mocks.dealSelect).not.toHaveBeenCalled();
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "Go unavailable", response: new Response("", { status: 503 }) },
+    { name: "malformed Go data", response: Response.json({ deals: [{ id: dealId }] }) },
+  ])("fails closed on $name without reading through TypeScript", async ({ response: goResponse }) => {
+    vi.stubEnv("GO_CRM_DEAL_READS", "1");
+    vi.stubEnv("GO_INTERNAL_AUTH_SECRET", "0123456789abcdef0123456789abcdef");
+    vi.stubGlobal("fetch", vi.fn(async () => goResponse));
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.dealSelect).not.toHaveBeenCalled();
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
   });
 });

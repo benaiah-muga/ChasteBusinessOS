@@ -8,16 +8,64 @@ import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-
 
 const noStore = { "Cache-Control": "no-store" };
 
+const expenseOutputSchemas = {
+  submit: z.object({
+    claimId: z.string(),
+    status: z.literal("submitted"),
+    category: z.string(),
+    overPolicyLimit: z.boolean(),
+    policyLimitMinor: z.number().nullable(),
+  }),
+  decide: z.object({ claimId: z.string(), status: z.enum(["approved", "rejected"]) }),
+  pay: z.object({ claimId: z.string(), entryId: z.string(), paidMinor: z.number() }),
+  setPolicy: z.object({ set: z.literal(true), category: z.string(), limitMinor: z.number() }),
+} as const;
+
+type ExpenseAction = keyof typeof expenseOutputSchemas;
+
 function goUnavailable() {
   return NextResponse.json({ error: "expenses service unavailable; check claim status before retrying" }, { status: 503, headers: noStore });
 }
 
-async function expenseGoResponse(result: GoCapabilityBridgeResult) {
-  if (result.kind !== "response") return goUnavailable();
+function goReadUnavailable() {
+  return NextResponse.json({ error: "expenses service unavailable" }, { status: 503, headers: noStore });
+}
+
+async function expenseGoReadData(result: GoCapabilityBridgeResult): Promise<
+  | { data: Record<string, unknown> }
+  | { response: Response }
+> {
+  if (result.kind !== "response") return { response: goReadUnavailable() };
   try {
     const body: unknown = await result.response.json();
     if (result.response.status === 200) {
       const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(body);
+      return parsed.success ? { data: parsed.data.data } : { response: goReadUnavailable() };
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      return parsed.success
+        ? { response: NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore }) }
+        : { response: goReadUnavailable() };
+    }
+    if (result.response.status === 401 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      return parsed.success
+        ? { response: NextResponse.json(parsed.data, { status: result.response.status, headers: noStore }) }
+        : { response: goReadUnavailable() };
+    }
+  } catch {
+    return { response: goReadUnavailable() };
+  }
+  return { response: goReadUnavailable() };
+}
+
+async function expenseGoResponse(action: ExpenseAction, result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return goUnavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: expenseOutputSchemas[action] }).safeParse(body);
       if (!parsed.success) return goUnavailable();
       return NextResponse.json(parsed.data, { headers: noStore });
     }
@@ -79,6 +127,27 @@ export async function GET(req: Request) {
   const db = getDb().db;
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  if (process.env.GO_ACCOUNTING_EXPENSE_READS === "1") {
+    const input = status && ["submitted", "approved", "rejected", "paid"].includes(status) ? { status } : {};
+    try {
+      const [claimsResult, policiesResult] = await Promise.all([
+        executeGoCapability({ actionContext: ctx, session: resolved, capabilityId: "accounting.listExpenseClaims", input }),
+        executeGoCapability({ actionContext: ctx, session: resolved, capabilityId: "accounting.listExpensePolicies", input: {} }),
+      ]);
+      const [claims, policies] = await Promise.all([
+        expenseGoReadData(claimsResult),
+        expenseGoReadData(policiesResult),
+      ]);
+      if ("response" in claims) return claims.response;
+      if ("response" in policies) return policies.response;
+      const payload = z.object({ claims: z.array(z.unknown()) }).safeParse(claims.data);
+      const policyRows = z.object({ policies: z.array(z.object({ category: z.string(), limitMinor: z.number() })) }).safeParse(policies.data);
+      if (!payload.success || !policyRows.success) return goReadUnavailable();
+      return NextResponse.json({ claims: payload.data.claims, policies: policyRows.data.policies }, { headers: noStore });
+    } catch {
+      return goReadUnavailable();
+    }
+  }
   const result = await buildExecutor(db, buildRegistry(db)).execute("accounting.listExpenseClaims", ctx, {
     status:
       status && ["submitted", "approved", "rejected", "paid"].includes(status) ? status : undefined,
@@ -125,12 +194,9 @@ export async function POST(req: Request) {
           ? { claimId: parsed.data.claimId, amountMinor: parsed.data.amountMinor }
           : { category: parsed.data.category, limitMinor: parsed.data.limitMinor };
 
-  if (
-    process.env.GO_ACCOUNTING_EXPENSE_WRITES === "1" &&
-    capId !== "accounting.setExpensePolicy"
-  ) {
+  if (process.env.GO_ACCOUNTING_EXPENSE_WRITES === "1") {
     try {
-      return await expenseGoResponse(await executeGoCapability({
+      return await expenseGoResponse(parsed.data.action, await executeGoCapability({
         actionContext: ctx,
         session: resolved,
         capabilityId: capId,

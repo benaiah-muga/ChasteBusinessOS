@@ -32,7 +32,7 @@ targets, not measured results.
 | UI | 30 `page.tsx` files under `apps/web/src/app`; React 19 on Next.js 16.3 | Port routing, layouts, server-rendered data, redirects, print and public views to Vite React. |
 | HTTP | 93 `apps/web/src/app/api/**/route.ts` files; 156 explicitly exported GET/POST/PUT/PATCH/DELETE functions, plus the Better Auth catch-all | Inventory each path, method, status, body, stream, cookie, and permission before switching traffic. |
 | Framework actions | One exported server action, `switchOrgAction`, recorded in [`docs/migration/server-actions.json`](migration/server-actions.json) | Replace it with a typed `POST /api/org` call in Vite while preserving membership validation, the active-org cookie, and return-to-home behavior. |
-| Governance | 311 live registrations across 21 modules, recorded in [`docs/migration/capabilities.json`](migration/capabilities.json); about 307 source `defineCapability(` occurrences in `modules/` | The live registry manifest is authoritative for ids, schemas, risk, permissions, and inverses. Port every registered id and conformance rule; the source occurrence count is only a size signal. |
+| Governance | 312 live registrations across 21 modules, recorded in [`docs/migration/capabilities.json`](migration/capabilities.json); about 307 source `defineCapability(` occurrences in `modules/` | The live registry manifest is authoritative for ids, schemas, risk, permissions, and inverses. Port every registered id and conformance rule; the source occurrence count is only a size signal. |
 | Backend assembly | 72 files in `apps/web/src/server/`; `packages/kernel`, `packages/ai`, `packages/db`, `packages/erp-core`, and `modules/*` | Port the domain and orchestration logic, not just route handlers. |
 | Worker | `scripts/worker.ts` calls jobs, outbox, and routines | Preserve claims, leases, fencing, retries, and occurrence receipts. |
 | Platform integrations | `packages/plugin-kit`, marketplace install, coding-agent discovery/dispatch, and managed AI connections | Preserve signed manifest verification, install state, agent routing, least-privilege dispatch, and secret references. |
@@ -472,7 +472,7 @@ new owners and the manifest shows zero legacy runtime paths.
     verification, and narrow worker permissions. Bridge covered public actions
     behind the independent default-off flags `GO_ACCOUNTING_EXPENSE_WRITES`,
     `GO_PURCHASING_BILL_WRITES`, `GO_INVENTORY_STOCK_WRITES`, and `GO_POS_WRITES`.
-    Keep policy configuration and other actions on their existing handlers.
+    Other actions remain on their existing handlers.
 14. (Done) Add Go parity for purchase order creation, including line defaults, SKU links,
     tenant scoping, approval verification, receipt replay, and the capability jobs
     worker path. Bridge only `createPurchaseOrder` behind the independent,
@@ -502,3 +502,48 @@ new owners and the manifest shows zero legacy runtime paths.
     imports and reservations, supplier payment runs, and purchase returns.
     Preserve tenant isolation, approvals, audit/replay receipts, worker
     permissions, legacy HTTP responses, and fail-closed default-off bridges.
+19. (Done) Add Go parity for expense policy updates through the governed
+    executor and jobs worker. Preserve organization-scoped upserts, approvals,
+    audit, receipt replay, and response shapes. Bridge `setPolicy` behind the
+    existing default-off `GO_ACCOUNTING_EXPENSE_WRITES` flag.
+20. (Done) Add the separately governed Go expense policy read and bridge the combined
+    claims and policy response behind default-off `GO_ACCOUNTING_EXPENSE_READS`.
+    Keep `accounting.listExpenseClaims` output and agent behavior unchanged.
+21. (Done) Port the team and role management screen into the Vite React app with
+    validated API contracts and the existing `/api/team` behavior, including
+    approval-pending notices, invitations, role assignment, and permission
+    editing. Its opt-in Go IAM API bridge is recorded in item 24; the production
+    page and API owners remain legacy until staged routing is verified.
+22. (Done) Bridge customer import and undo through the existing governed Go CRM
+    capabilities behind default-off `GO_CRM_IMPORT_WRITES`. Preserve row
+    normalization, duplicate decisions, partial-row errors, approval responses,
+    and uncertain-outcome handling. The route owner remains legacy.
+23. (Done) Bridge customer creation, deactivation, merge, merge undo, and
+    profile updates through existing governed Go CRM capabilities behind
+    default-off `GO_CRM_CUSTOMER_WRITES`. Preserve response and approval
+    behavior, with fail-closed handling for uncertain outcomes.
+24. (Done) Add Go parity for the Team & Roles API capabilities and bridge
+    `GET|POST /api/team` behind default-off `GO_IAM_TEAM`. Preserve the full
+    registry-derived permission catalog, identity approval behavior, owner
+    protections, and invitation acceptance compatibility. Focused parser,
+    executor, bridge, and route tests pass, including database-backed RLS and
+    concurrent last-owner proofs. The route remains legacy-owned by default.
+25. (In progress) Port the CRM workspace to Vite using the same-origin CRM,
+    customer, deal, task, team, and import APIs. Preserve pipeline actions,
+    lead conversion, AI follow-up drafting, customer profiles and merges, saved
+    views, imports and undo, tasks, approvals, deal board/table/search, and
+    customer timelines. Focused API and component tests pass. Keep API and page
+    ownership on the existing defaults until runtime and parity proofs pass;
+    browser proof remains deferred by user direction.
+26. (Done) Add an opt-in Go read for the approvals inbox and recent history
+    behind `GO_APPROVALS_READ`. Bind the complete TypeScript capability
+    permission map to the signed request, and recheck the verified session,
+    organization membership, and live grants in Go. Preserve status filters,
+    ordering, limits, attribution, ISO timestamps, and org-scoped document
+    titles. The legacy GET remains the default and decision writes are
+    unchanged. Focused route and database parity tests pass.
+27. (Done) Add the governed `crm.listDeals` capability and an opt-in signed Go
+    read for `GET /api/deals` behind `GO_CRM_DEAL_READS=1`. Preserve the
+    org-scoped left join, 200-row limit, response fields, and ISO timestamps.
+    Keep the legacy route owner and default behavior; fail closed after Go
+    dispatch if the service or response is invalid.

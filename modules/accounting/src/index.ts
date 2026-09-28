@@ -2283,6 +2283,26 @@ const expenseList = (deps: ModuleDeps) =>
     },
   });
 
+const expensePolicyList = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.listExpensePolicies",
+    title: "List expense policy limits",
+    intent: "Review the configured per-category expense limits alongside claims before making reimbursement decisions",
+    module: "accounting",
+    risk: "read",
+    permission: "expenses.decide",
+    input: z.object({}),
+    output: z.object({ policies: z.array(z.object({ category: z.string(), limitMinor: z.number() })) }),
+    execute: async (ctx) => {
+      const rows = await deps.db
+        .select({ category: expensePolicies.category, limitMinor: expensePolicies.limitMinor })
+        .from(expensePolicies)
+        .where(eq(expensePolicies.orgId, ctx.actor.orgId))
+        .orderBy(desc(expensePolicies.limitMinor));
+      return { policies: rows };
+    },
+  });
+
 // ── Customer portal share links ─────────────────────────────────────────
 
 const shareInvoice = (deps: ModuleDeps) =>
@@ -4256,6 +4276,7 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(expenseDecide(deps));
   registry.register(expensePay(deps));
   registry.register(expenseList(deps));
+  registry.register(expensePolicyList(deps));
   registry.register(shareInvoice(deps));
   registry.register(createInvoice(deps));
   registry.register(listInvoices(deps));

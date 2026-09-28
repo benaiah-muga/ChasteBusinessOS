@@ -14,6 +14,14 @@ func NewRouterWithMetrics(pinger Pinger, logger *slog.Logger, bridgeSecret strin
 }
 
 func newRouter(pinger Pinger, logger *slog.Logger, bridgeSecret string, policyReader PolicyReader, ledgerReader LedgerReader, orgMembershipChecker OrgMembershipChecker, capabilityExecutor CapabilityExecutor, metricsReader MetricsReader, approvalDeciders ...ApprovalDecisionDecider) http.Handler {
+	return newRouterWithApprovalInbox(pinger, logger, bridgeSecret, policyReader, ledgerReader, orgMembershipChecker, capabilityExecutor, metricsReader, nil, approvalDeciders...)
+}
+
+func NewRouterWithApprovalInbox(pinger Pinger, logger *slog.Logger, bridgeSecret string, policyReader PolicyReader, ledgerReader LedgerReader, orgMembershipChecker OrgMembershipChecker, capabilityExecutor CapabilityExecutor, metricsReader MetricsReader, approvalInboxReader ApprovalInboxReader, approvalDeciders ...ApprovalDecisionDecider) http.Handler {
+	return newRouterWithApprovalInbox(pinger, logger, bridgeSecret, policyReader, ledgerReader, orgMembershipChecker, capabilityExecutor, metricsReader, approvalInboxReader, approvalDeciders...)
+}
+
+func newRouterWithApprovalInbox(pinger Pinger, logger *slog.Logger, bridgeSecret string, policyReader PolicyReader, ledgerReader LedgerReader, orgMembershipChecker OrgMembershipChecker, capabilityExecutor CapabilityExecutor, metricsReader MetricsReader, approvalInboxReader ApprovalInboxReader, approvalDeciders ...ApprovalDecisionDecider) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/health", NewHealthHandler(pinger, logger))
 	mux.Handle("GET /__go/metrics", NewGoMetricsHandler(bridgeSecret, metricsReader, logger))
@@ -28,5 +36,6 @@ func newRouter(pinger Pinger, logger *slog.Logger, bridgeSecret string, policyRe
 		approvalDecider = approvalDeciders[0]
 	}
 	mux.Handle("POST /__go/approval/decide", NewGoApprovalDecisionHandler(bridgeSecret, approvalDecider, logger))
+	mux.Handle("POST /__go/approvals/inbox", NewGoApprovalInboxHandler(bridgeSecret, approvalInboxReader, logger))
 	return mux
 }

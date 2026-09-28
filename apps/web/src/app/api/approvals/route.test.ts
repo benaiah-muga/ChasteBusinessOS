@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   actorFromResolved: vi.fn(),
   decideApproval: vi.fn(),
   decideGoApproval: vi.fn(),
+  executeGoApprovalInbox: vi.fn(),
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -33,10 +34,11 @@ vi.mock("@/server/kernel", () => ({
 }));
 
 vi.mock("@/server/approvals", () => ({ decideApproval: mocks.decideApproval }));
+vi.mock("@/server/approval-inbox-bridge", () => ({ executeGoApprovalInbox: mocks.executeGoApprovalInbox }));
 vi.mock("@/server/go-bridge", () => ({ decideGoApproval: mocks.decideGoApproval }));
 vi.mock("@/server/session", () => ({ getResolvedUser: mocks.getResolvedUser }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const approvalId = "8201e7d5-0a84-4f53-8a7c-470b0aaf47c8";
 const actor = {
@@ -83,6 +85,7 @@ function decisionRequest(decision: "approve" | "reject" = "approve", comment?: s
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("GO_APPROVAL_DECISION", "0");
+  vi.stubEnv("GO_APPROVALS_READ", "0");
   mocks.getResolvedUser.mockResolvedValue(resolved);
   mocks.actorFromResolved.mockReturnValue(actor);
   mocks.buildRegistry.mockReturnValue({});
@@ -165,5 +168,50 @@ describe("POST /api/approvals", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ ok: false, error: "approval decision service unavailable" });
     expect(mocks.decideApproval).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/approvals", () => {
+  it("keeps the TypeScript inbox as the default", async () => {
+    mocks.getResolvedUser.mockResolvedValue({ ...resolved, orgId: null });
+    const response = await GET();
+    expect(response.status).toBe(401);
+    expect(mocks.executeGoApprovalInbox).not.toHaveBeenCalled();
+  });
+
+  it("signs the complete registry permission map and returns Go inbox data", async () => {
+    vi.stubEnv("GO_APPROVALS_READ", "1");
+    const inbox = { approvals: [], history: [] };
+    mocks.buildRegistry.mockReturnValue({ all: () => [
+      { id: "accounting.recordPayment", permission: "accounting.post" },
+      { id: "iam.createRole", permission: "iam.admin" },
+    ] });
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.executeGoApprovalInbox.mockResolvedValue({ kind: "response", response: Response.json(inbox) });
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(inbox);
+    expect(mocks.executeGoApprovalInbox).toHaveBeenCalledWith({
+      userId: resolved.userId,
+      orgId: resolved.orgId,
+      authSessionId: resolved.authSessionId,
+      permissions: resolved.permissions,
+      capabilityPermissions: {
+        "accounting.recordPayment": "accounting.post",
+        "iam.createRole": "iam.admin",
+      },
+    });
+  });
+
+  it("fails closed when Go cannot serve the inbox", async () => {
+    vi.stubEnv("GO_APPROVALS_READ", "1");
+    mocks.buildRegistry.mockReturnValue({ all: () => [] });
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.executeGoApprovalInbox.mockResolvedValue({ kind: "unavailable" });
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "approvals service unavailable" });
   });
 });

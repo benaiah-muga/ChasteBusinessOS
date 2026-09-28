@@ -100,6 +100,13 @@ func TestGoCRMReadHandlerForwardsLegacyTimelineAndTaskQueryModes(t *testing.T) {
 			input:      `{}`,
 			response:   `{"tasks":[]}`,
 		},
+		{
+			name:       "deal listing",
+			query:      "deals=1",
+			capability: "crm.listDeals",
+			input:      `{}`,
+			response:   `{"deals":[{"id":"deal-1","title":"Deal","stage":"lead","valueMinor":12500,"note":null,"customerId":null,"customerName":null,"createdAt":"2026-09-28T10:00:00.000Z","updatedAt":"2026-09-28T10:00:00.000Z"}]}`,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -188,6 +195,7 @@ func TestGoCRMReadHandlerRejectsTamperedInputAndWrongAudienceBeforeExecution(t *
 		wantCalls int
 	}{
 		{name: "tampered customer", query: "timeline=" + crmReadTestOtherCustomerID, audience: CRMReadAudience},
+		{name: "deals query capability mismatch", query: "deals=1", audience: CRMReadAudience},
 		{name: "wrong audience", query: "timeline=" + crmReadTestCustomerID, audience: authbridge.LedgerReadAudience},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -224,6 +232,7 @@ func TestCRMReadRequestMatchesLegacyModePrecedence(t *testing.T) {
 		{query: url.Values{"timeline": {crmReadTestCustomerID}, "tasks": {"1"}}, capID: "crm.customerTimeline", input: `{"customerId":"` + crmReadTestCustomerID + `"}`},
 		{query: url.Values{"tasks": {"1"}, "open": {"1"}}, capID: "crm.listTasks", input: `{"openOnly":true}`},
 		{query: url.Values{"tasks": {"1"}}, capID: "crm.listTasks", input: `{}`},
+		{query: url.Values{"deals": {"1"}}, capID: "crm.listDeals", input: `{}`},
 	} {
 		capID, input, err := crmReadRequest(test.query)
 		if err != nil || capID != test.capID || !reflect.DeepEqual(json.RawMessage(input), json.RawMessage(test.input)) {

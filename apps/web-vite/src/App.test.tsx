@@ -115,7 +115,15 @@ beforeEach(() => {
       { status: "doing", tasks: [] },
       { status: "done", tasks: [] },
     ] });
-    if (path === "/api/team") return Response.json({ members: [], roles: [], catalog: [] });
+    if (path === "/api/team") return Response.json({
+      members: [{ userId: "user-1", name: "Ada Lovelace", email: "ada@example.test", roleKeys: ["owner"] }],
+      roles: [{ id: "role-bookkeeper", key: "bookkeeper", name: "Bookkeeper", isSystem: false, permissions: ["accounting.read"] }],
+      catalog: ["accounting.read", "accounting.write"],
+    });
+    if (path === "/api/deals") return Response.json({ deals: [] });
+    if (path === "/api/customers") return Response.json({ customers: [] });
+    if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+    if (path === "/api/crm/views") return Response.json({ views: [] });
     return new Response(null, { status: 404 });
   }));
 });
@@ -191,6 +199,36 @@ describe("Vite app frame", () => {
     expect(await screen.findByText("payment.recorded")).not.toBeNull();
     expect(screen.queryByText("invoice.created")).toBeNull();
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/ledger?limit=100")).toHaveLength(2);
+  });
+
+  it("keeps the team and roles page in Vite and reloads its data after an organization switch", async () => {
+    window.history.replaceState(null, "", "/team");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Team & roles" })).not.toBeNull();
+    expect(screen.getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: "Team" }).getAttribute("href")).toBe("/team");
+    expect(screen.getByRole("link", { name: "Team" }).getAttribute("aria-current")).toBe("page");
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Active organization" }), { target: { value: secondOrgId } });
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/team")).toHaveLength(2));
+  });
+
+  it("renders the CRM preview in Vite and keeps its APIs same-origin", async () => {
+    window.history.replaceState(null, "", "/crm");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "CRM" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "CRM" }).getAttribute("href")).toBe("/crm");
+    expect(screen.getByRole("link", { name: "CRM" }).getAttribute("aria-current")).toBe("page");
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/deals", expect.objectContaining({ credentials: "same-origin" }));
+      expect(fetchMock).toHaveBeenCalledWith("/api/customers", expect.objectContaining({ credentials: "same-origin" }));
+    });
   });
 
   it("loads the projects board in the authenticated shell and resets it after an organization switch", async () => {

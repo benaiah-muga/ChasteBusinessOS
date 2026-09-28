@@ -79,6 +79,16 @@ func TestAccountingExpensesParsersMirrorZodContracts(t *testing.T) {
 	if listed, err = ParseListExpenseClaimsInput(json.RawMessage(`{}`)); err != nil || listed.Status != nil {
 		t.Fatalf("ParseListExpenseClaimsInput({}) = %+v, %v, want absent status", listed, err)
 	}
+	if _, err := ParseListExpensePoliciesInput(json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("ParseListExpensePoliciesInput({}) = %v", err)
+	}
+	policy, err := ParseSetExpensePolicyInput(json.RawMessage(`{"category":"Travel","limitMinor":50000,"unknown":true}`))
+	if err != nil || policy != (SetExpensePolicyInput{Category: "Travel", LimitMinor: 50_000}) {
+		t.Fatalf("ParseSetExpensePolicyInput() = %+v, %v", policy, err)
+	}
+	if encoded, err = marshalJS(policy); err != nil || string(encoded) != `{"category":"Travel","limitMinor":50000}` {
+		t.Fatalf("ParseSetExpensePolicyInput() JSON = %s, %v", encoded, err)
+	}
 
 	longMemo := strings.Repeat("m", 501)
 	longCategory := strings.Repeat("c", 41)
@@ -151,6 +161,7 @@ func TestAccountingExpensesParsersMirrorZodContracts(t *testing.T) {
 		decideExpenseClaimCapabilityID: `{"claimId":"` + claimID + `","decision":"approved"}`,
 		payExpenseClaimCapabilityID:    `{"claimId":"` + claimID + `","amountMinor":1}`,
 		listExpenseClaimsCapabilityID:  `{}`,
+		setExpensePolicyCapabilityID:   `{"category":"Travel","limitMinor":0}`,
 	}
 	for capabilityID, raw := range validByCapability {
 		if _, err := parseAccountingExpenseInput(capabilityID, json.RawMessage(raw)); err != nil {
@@ -159,6 +170,19 @@ func TestAccountingExpensesParsersMirrorZodContracts(t *testing.T) {
 	}
 	if _, err := parseAccountingExpenseInput("accounting.unknown", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("parseAccountingExpenseInput accepted an unsupported capability")
+	}
+	for _, raw := range []string{
+		`{}`,
+		`{"category":"A","limitMinor":1}`,
+		`{"category":"","limitMinor":1}`,
+		`{"category":"` + strings.Repeat("c", 41) + `","limitMinor":1}`,
+		`{"category":"Travel","limitMinor":-1}`,
+		`{"category":"Travel","limitMinor":1.5}`,
+		`{"category":"Travel","limitMinor":9007199254740992}`,
+	} {
+		if _, err := ParseSetExpensePolicyInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("ParseSetExpensePolicyInput accepted %s", raw)
+		}
 	}
 }
 
@@ -407,6 +431,51 @@ func TestAccountingExpensesSubmitPersistsCategoryPolicyAndDefaults(t *testing.T)
 	}
 	if fallbackCategory != "other" || fallbackAccountCode != nil {
 		t.Fatalf("fallback claim category=%q account_code=%v, want other with null account", fallbackCategory, fallbackAccountCode)
+	}
+}
+
+func TestGoAccountingExpensePolicyUpsertsAndUsesGovernedApproval(t *testing.T) {
+	fx := newExecutorFixture(t)
+	fx.addAgentSession()
+	grantWavePermission(t, fx, "expenses.decide")
+	fx.addPolicy(setExpensePolicyCapabilityID, "read", nil)
+
+	input := json.RawMessage(`{"category":"Travel","limitMinor":50000}`)
+	result := approveModuleWrite(t, fx, setExpensePolicyCapabilityID, "expenses.decide", input)
+	if !result.OK || string(result.Data) != `{"set":true,"category":"Travel","limitMinor":50000}` {
+		t.Fatalf("approved expense policy result=%+v, want set confirmation", result)
+	}
+	if got := fx.count(`SELECT count(*) FROM expense_policies WHERE org_id=$1::uuid AND category='Travel' AND limit_minor=50000`, fx.orgID); got != 1 {
+		t.Fatalf("expense policies=%d, want the approved limit", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='approval.requested' AND capability_id=$2`, fx.orgID, setExpensePolicyCapabilityID); got != 1 {
+		t.Fatalf("approval request audit events=%d, want one", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2 AND actor_type='human'`, fx.orgID, setExpensePolicyCapabilityID); got != 1 {
+		t.Fatalf("execution audit events=%d, want one human-attributed event", got)
+	}
+	updateInput := json.RawMessage(`{"category":"Travel","limitMinor":60000}`)
+	claims := waveModuleClaims(fx, setExpensePolicyCapabilityID, "expenses.decide", updateInput, "human", "", "expense-policy-update")
+	updated, err := fx.executor.Execute(fx.ctx, claims, setExpensePolicyCapabilityID, updateInput)
+	if err != nil || !updated.OK || string(updated.Data) != `{"set":true,"category":"Travel","limitMinor":60000}` {
+		t.Fatalf("updated expense policy result=%+v err=%v", updated, err)
+	}
+	replay, err := fx.executor.Execute(fx.ctx, claims, setExpensePolicyCapabilityID, updateInput)
+	var replayed SetExpensePolicyOutput
+	if decodeErr := json.Unmarshal(replay.Data, &replayed); err == nil {
+		err = decodeErr
+	}
+	if err != nil || !replay.OK || !replay.Replayed || replayed != (SetExpensePolicyOutput{Set: true, Category: "Travel", LimitMinor: 60_000}) {
+		t.Fatalf("expense policy replay=%+v err=%v, want the stored result", replay, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, fx.orgID, fx.orgID+":expense-policy-update"); got != 1 {
+		t.Fatalf("action receipts=%d, want one idempotency receipt", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM expense_policies WHERE org_id=$1::uuid AND category='Travel'`, fx.orgID); got != 1 {
+		t.Fatalf("expense policy upsert stored %d rows, want one", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2 AND actor_type='human'`, fx.orgID, setExpensePolicyCapabilityID); got != 2 {
+		t.Fatalf("execution audit events after receipt replay=%d, want two", got)
 	}
 }
 
@@ -732,5 +801,27 @@ func TestAccountingExpensesListFiltersOrdersAndScopesTenants(t *testing.T) {
 	emptyEncoded, err := marshalJS(empty)
 	if err != nil || string(emptyEncoded) != `{"claims":[]}` {
 		t.Fatalf("empty listExpenseClaims JSON = %s, %v", emptyEncoded, err)
+	}
+}
+
+func TestAccountingExpensesListPoliciesOrdersAndScopesTenants(t *testing.T) {
+	fx := newExecutorFixture(t)
+	seedExpensePolicy(t, fx, fx.orgID, "travel", 50_000)
+	seedExpensePolicy(t, fx, fx.orgID, "meals", 5_000)
+	seedExpensePolicy(t, fx, fx.otherOrgID, "foreign", 90_000)
+
+	policies, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (ListExpensePoliciesOutput, error) {
+		return listExpensePolicies(fx.ctx, tx, fx.orgID)
+	})
+	if err != nil {
+		t.Fatalf("listExpensePolicies: %v", err)
+	}
+	if len(policies.Policies) != 2 || policies.Policies[0] != (ExpensePolicySummary{Category: "travel", LimitMinor: 50_000}) ||
+		policies.Policies[1] != (ExpensePolicySummary{Category: "meals", LimitMinor: 5_000}) {
+		t.Fatalf("listExpensePolicies = %+v, want ordered tenant-scoped policy rows", policies.Policies)
+	}
+	encoded, err := marshalJS(policies)
+	if err != nil || string(encoded) != `{"policies":[{"category":"travel","limitMinor":50000},{"category":"meals","limitMinor":5000}]}` {
+		t.Fatalf("listExpensePolicies JSON = %s, %v", encoded, err)
 	}
 }

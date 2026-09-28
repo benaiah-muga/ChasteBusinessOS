@@ -52,7 +52,7 @@ func run(logger *slog.Logger) error {
 	approvalDecider := capability.NewApprovalDecider(pool, capabilityExecutor)
 	server := &http.Server{
 		Addr: addr,
-		Handler: httpapi.NewRouterWithMetrics(
+		Handler: httpapi.NewRouterWithApprovalInbox(
 			pool,
 			logger,
 			os.Getenv("GO_INTERNAL_AUTH_SECRET"),
@@ -61,6 +61,7 @@ func run(logger *slog.Logger) error {
 			orgswitch.NewPostgresMembershipChecker(pool),
 			capabilityExecutor,
 			metrics.NewPostgresReader(pool),
+			httpapi.NewPostgresApprovalInboxReader(pool),
 			approvalDecider,
 		),
 		ReadHeaderTimeout: 5 * time.Second,

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHmac } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { deals, customers, getDb } from "@chaste/db";
@@ -6,14 +7,88 @@ import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
 import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+import { canonicalInputHash, logger } from "@chaste/kernel";
 
 const noStore = { "Cache-Control": "no-store" };
+const dealReadResponseSchema = z.object({
+  deals: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    stage: z.string(),
+    valueMinor: z.number().int(),
+    note: z.string().nullable(),
+    customerId: z.string().nullable(),
+    customerName: z.string().nullable(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  }).strict()),
+}).strict();
 
 function dealsGoUnavailable() {
   return NextResponse.json(
     { ok: false, error: "deals service unavailable; check deal status before retrying" },
     { status: 503, headers: noStore },
   );
+}
+
+async function readDealsFromGo(resolved: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>, actor: NonNullable<ReturnType<typeof actorFromResolved>>["actor"]) {
+  const secret = process.env.GO_INTERNAL_AUTH_SECRET;
+  if (!secret || Buffer.byteLength(secret, "utf8") < 32 || !resolved.orgId || !resolved.authSessionId ||
+    actor.type !== "human" || actor.id !== resolved.userId || actor.orgId !== resolved.orgId) {
+    return dealsGoUnavailable();
+  }
+
+  try {
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const claims = {
+      aud: "go.crm.read",
+      sub: resolved.userId,
+      org_id: resolved.orgId,
+      capability_id: "crm.listDeals",
+      input_sha256: await canonicalInputHash({}),
+      actor_id: actor.id,
+      actor_type: actor.type,
+      permissions: [...actor.permissions].sort(),
+      auth_session_id: resolved.authSessionId,
+      iat: issuedAt,
+      exp: issuedAt + 30,
+    };
+    const encoded = Buffer.from(JSON.stringify(claims)).toString("base64url");
+    const assertion = `${encoded}.${createHmac("sha256", secret).update(encoded).digest("base64url")}`;
+    const baseUrl = new URL(process.env.GO_API_INTERNAL_URL ?? "http://127.0.0.1:8080");
+    const host = baseUrl.hostname.replace(/^\[|\]$/g, "");
+    const loopbackHttp = baseUrl.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(host);
+    if (baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash || baseUrl.pathname !== "/" ||
+      (baseUrl.protocol !== "https:" && !loopbackHttp)) {
+      return dealsGoUnavailable();
+    }
+    const response = await fetch(new URL("/__go/crm?deals=1", baseUrl), {
+      method: "GET",
+      headers: { "X-Chaste-Session-Assertion": assertion },
+      cache: "no-store",
+      credentials: "omit",
+      redirect: "error",
+      signal: AbortSignal.timeout(3000),
+    });
+    if (response.status === 401) {
+      const body = z.object({ error: z.string() }).safeParse(await response.json().catch(() => null));
+      return body.success ? NextResponse.json({ error: body.data.error }, { status: 401, headers: noStore }) : dealsGoUnavailable();
+    }
+    if (!response.ok) {
+      logger.warn("Go CRM deals read failed", { status: response.status });
+      return dealsGoUnavailable();
+    }
+    const body: unknown = await response.json().catch(() => null);
+    const parsed = dealReadResponseSchema.safeParse(body);
+    if (!parsed.success) {
+      logger.warn("Go CRM deals read returned an invalid response");
+      return dealsGoUnavailable();
+    }
+    return NextResponse.json(parsed.data, { headers: noStore });
+  } catch {
+    logger.warn("Go CRM deals read failed");
+    return dealsGoUnavailable();
+  }
 }
 
 async function dealsGoResponse(
@@ -61,6 +136,11 @@ export async function GET() {
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const denied = missingPermission(resolved, "crm.read");
   if (denied) return denied;
+  if (process.env.GO_CRM_DEAL_READS === "1") {
+    const actor = actorFromResolved(resolved);
+    if (!actor) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return readDealsFromGo(resolved, actor.actor);
+  }
   const rows = await getDb()
     .db.select({
       id: deals.id,

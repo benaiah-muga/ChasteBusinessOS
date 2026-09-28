@@ -4,6 +4,7 @@ import { z } from "zod";
 import { approvals, documents, getDb, users } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
 import { decideApproval } from "@/server/approvals";
+import { executeGoApprovalInbox } from "@/server/approval-inbox-bridge";
 import { decideGoApproval } from "@/server/go-bridge";
 import { getResolvedUser } from "@/server/session";
 
@@ -12,6 +13,25 @@ export async function GET() {
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const db = getDb().db;
   const registry = buildRegistry(db);
+
+  if (process.env.GO_APPROVALS_READ === "1") {
+    const actionContext = actorFromResolved(resolved, {});
+    if (!actionContext || actionContext.actor.type !== "human" || actionContext.actor.id !== resolved.userId) {
+      return NextResponse.json({ error: "approvals service unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
+    const capabilityPermissions = Object.fromEntries(registry.all().map((capability) => [capability.id, capability.permission]));
+    const result = await executeGoApprovalInbox({
+      userId: resolved.userId,
+      orgId: resolved.orgId,
+      authSessionId: resolved.authSessionId,
+      permissions: actionContext.actor.permissions,
+      capabilityPermissions,
+    });
+    if (result.kind !== "response") {
+      return NextResponse.json({ error: "approvals service unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
+    return result.response;
+  }
 
   const [rows, historyRows] = await Promise.all([
     db

@@ -138,6 +138,86 @@ func TestGoCRMDealsParsersMatchCRMContracts(t *testing.T) {
 	}
 }
 
+func TestGoCRMListDealsCapabilityIsReadScopedTenantSafeAndLimited(t *testing.T) {
+	if err := capabilitySpecForCRMListDeals(t); err != nil {
+		t.Fatal(err)
+	}
+	fx := newExecutorFixture(t)
+	input := json.RawMessage(`{}`)
+	claims := fx.claims(input, "human", "", "")
+	claims.CapabilityID = listDealsCapabilityID
+	claims.Permissions = []string{"crm.read"}
+	denied, err := fx.executor.Execute(fx.ctx, claims, listDealsCapabilityID, input)
+	if err != nil || denied.OK || !strings.Contains(denied.Error, "forbidden: missing permission: crm.read") {
+		t.Fatalf("listDeals without crm.read result=%+v err=%v", denied, err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'crm.read', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	customerID := seedCRMDealCustomer(t, fx, fx.orgID, "Deal list customer")
+	localDealID := seedCRMDeal(t, fx, fx.orgID, "Deal list with customer", "qualified", &customerID)
+	nullCustomerDealID := seedCRMDeal(t, fx, fx.orgID, "Deal list without customer", "lead", nil)
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE deals SET note='follow-up', value_minor=12345 WHERE id=$1::uuid`, localDealID); err != nil {
+		t.Fatal(err)
+	}
+	seedCRMDeal(t, fx, fx.otherOrgID, "Other organization deal", "won", nil)
+	result, err := fx.executor.Execute(fx.ctx, claims, listDealsCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("listDeals result=%+v err=%v", result, err)
+	}
+	var output ListDealsOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatal(err)
+	}
+	var localWithCustomer, localWithoutCustomer bool
+	for _, deal := range output.Deals {
+		if deal.ID == localDealID {
+			localWithCustomer = deal.Title == "Deal list with customer" && deal.Stage == "qualified" && deal.ValueMinor == 12345 &&
+				deal.Note != nil && *deal.Note == "follow-up" && deal.CustomerID != nil && *deal.CustomerID == customerID &&
+				deal.CustomerName != nil && *deal.CustomerName == "Deal list customer" && deal.CreatedAt != "" && deal.UpdatedAt != ""
+		}
+		if deal.ID == nullCustomerDealID {
+			localWithoutCustomer = deal.CustomerID == nil && deal.CustomerName == nil && deal.Note == nil
+		}
+	}
+	if !localWithCustomer || !localWithoutCustomer {
+		t.Fatalf("listDeals did not preserve joined and nullable fields: withCustomer=%t withoutCustomer=%t", localWithCustomer, localWithoutCustomer)
+	}
+	for i := 0; i < 205; i++ {
+		seedCRMDeal(t, fx, fx.orgID, fmt.Sprintf("Limited deal %03d", i), "lead", nil)
+	}
+	limited, err := fx.executor.Execute(fx.ctx, claims, listDealsCapabilityID, input)
+	if err != nil || !limited.OK {
+		t.Fatalf("listDeals limit result=%+v err=%v", limited, err)
+	}
+	if err := json.Unmarshal(limited.Data, &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Deals) != 200 {
+		t.Fatalf("listDeals returned %d rows, want the legacy maximum of 200", len(output.Deals))
+	}
+	for _, deal := range output.Deals {
+		if deal.Title == "Other organization deal" {
+			t.Fatal("listDeals leaked a deal from another organization")
+		}
+	}
+}
+
+func capabilitySpecForCRMListDeals(t *testing.T) error {
+	t.Helper()
+	spec, exists := capabilitySpecs[listDealsCapabilityID]
+	if !supportedCapability(listDealsCapabilityID) || !exists || spec.module != "crm" || spec.permission != "crm.read" || spec.risk != "read" {
+		return fmt.Errorf("crm.listDeals spec=%+v supported=%t, want crm.read read capability", spec, supportedCapability(listDealsCapabilityID))
+	}
+	if _, err := ParseListDealsInput(json.RawMessage(`{}`)); err != nil {
+		return fmt.Errorf("parse crm.listDeals input: %w", err)
+	}
+	if _, err := ParseListDealsInput(json.RawMessage(`[]`)); err == nil {
+		return fmt.Errorf("crm.listDeals accepted a non-object input")
+	}
+	return nil
+}
+
 func TestGoCRMDealsEnforceTenancyConversionAuditsAndReceiptReplay(t *testing.T) {
 	fx := newExecutorFixture(t)
 	localCustomerID := seedCRMDealCustomer(t, fx, fx.orgID, "Local buyer")

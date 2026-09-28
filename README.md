@@ -116,11 +116,34 @@ the GET route remain on the legacy handler. The flag defaults to `0`.
 into the signed Go capability bridge. It requires `pnpm dev:api`; reads and
 other CRM actions remain on the legacy handler, and uncertain writes fail
 closed without a TypeScript retry. The flag defaults to `0`.
+`GO_CRM_DEAL_READS=1` opts `GET /api/deals` into a short-lived signed Go CRM
+read. It requires `pnpm dev:api`, preserves the org-scoped 200-row response,
+and fails closed if Go is unavailable or returns invalid data. The legacy route
+remains the default; the flag defaults to `0`.
 `GO_CRM_TASK_WRITES=1` opts CRM task creation, completion, and detail updates
 into the signed Go capability bridge. It requires `pnpm dev:api`; reads,
 follow-up drafting, and other CRM actions remain on their existing handlers.
 The flag defaults to `0`, and uncertain task writes fail closed without a
 TypeScript retry.
+`GO_CRM_IMPORT_WRITES=1` opts customer imports and customer import undo into
+the signed Go capability bridge. It requires `pnpm dev:api`; product imports
+remain on `GO_INVENTORY_IMPORT_WRITES`. The flag defaults to `0`, and uncertain
+customer import outcomes fail closed without a TypeScript retry.
+`GO_CRM_CUSTOMER_WRITES=1` opts customer creation, deactivation, merge, merge
+undo, and profile updates into the signed Go capability bridge. It requires
+`pnpm dev:api`; customer reads remain on the existing handler. The flag defaults
+to `0`, and uncertain customer write outcomes fail closed without a TypeScript
+retry.
+`GO_IAM_TEAM=1` opts Team & Roles member and role reads and writes into the
+signed Go capability bridge. It requires `pnpm dev:api`; the complete
+registry-derived permission catalog stays available, identity actions retain
+their approval rules, and uncertain writes fail closed without a TypeScript
+retry. The flag defaults to `0`.
+`GO_APPROVALS_READ=1` opts the approvals inbox and decision history GET into
+the signed Go read bridge. It requires `pnpm dev:api`; the full TypeScript
+capability registry still controls row visibility, and Go rechecks the active
+session, organization membership, and live permissions. The flag defaults to
+`0`. Approval decisions remain on their existing route path.
 `GO_SALES_WRITE=1` opts sales order creation, confirmation, delivery, and
 cancellation into the signed Go capability bridge. It requires `pnpm dev:api`;
 order listing and other sales actions remain on the legacy handler, and
@@ -141,11 +164,13 @@ updates into the signed Go capability bridge. It requires `pnpm dev:api`;
 leave, payroll, and other HR actions remain on the legacy handler, and
 uncertain writes fail closed without a TypeScript retry. The flag defaults to
 `0`.
-`GO_ACCOUNTING_EXPENSE_WRITES=1` opts expense claim submission, decisions, and
-payments into the signed Go capability bridge. Expense policy configuration
-and other accounting actions remain on their existing handlers. It requires
-`pnpm dev:api`; uncertain writes fail closed without a TypeScript retry. The
-flag defaults to `0`.
+`GO_ACCOUNTING_EXPENSE_WRITES=1` opts expense claim submission, decisions,
+payments, and policy changes into the signed Go capability bridge.
+`GO_ACCOUNTING_EXPENSE_READS=1` opts expense claim and policy reads into Go.
+Both flags require `pnpm dev:api` and default to `0`; other accounting actions
+remain on their existing handlers. Uncertain writes fail closed without a
+TypeScript retry, while unavailable reads fail closed without querying the
+legacy database.
 `GO_PURCHASING_BILL_WRITES=1` opts vendor and bill creation and bill payments
 into the signed Go capability bridge. Other purchasing actions remain on their
 existing handlers. It requires `pnpm dev:api`; uncertain writes fail closed

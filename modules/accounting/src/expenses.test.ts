@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import {
   createDb,
   expenseClaims,
+  expensePolicies,
   organizations,
   users,
   type Database,
@@ -98,6 +99,19 @@ describe("expenses depth (M11.6)", () => {
     const hit = signals.find((s) => s.id === `accounting.policyOverrun:${over.claimId}`);
     expect(hit).toBeDefined();
     expect(hit!.severity).toBe("orange");
+  });
+
+  it("lists expense policies under the current organization", async () => {
+    await db.db.delete(expensePolicies).where(eq(expensePolicies.orgId, orgId));
+    await db.db.insert(expensePolicies).values([
+      { orgId, category: "policy-read-travel", limitMinor: 50_000 },
+      { orgId, category: "policy-read-meals", limitMinor: 5_000 },
+    ]);
+    const result = await run("accounting.listExpensePolicies", {});
+    expect(result.policies).toEqual([
+      { category: "policy-read-travel", limitMinor: 50_000 },
+      { category: "policy-read-meals", limitMinor: 5_000 },
+    ]);
   });
 
   it("duplicate claims raise a signal", async () => {

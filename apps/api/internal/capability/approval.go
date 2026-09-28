@@ -301,7 +301,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
-		case submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID:
+		case submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID, setExpensePolicyCapabilityID:
 			parsed, parseErr := parseAccountingExpenseInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
@@ -404,6 +404,13 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 		case saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID,
 			listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID:
 			parsed, parseErr := parseAccountingBudgetInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
+			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
+			parsed, parseErr := parseIAMInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
@@ -513,7 +520,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "accounting.read", true
 	case submitExpenseClaimCapabilityID:
 		return "expenses.submit", true
-	case decideExpenseClaimCapabilityID, listExpenseClaimsCapabilityID:
+	case decideExpenseClaimCapabilityID, listExpenseClaimsCapabilityID, listExpensePoliciesCapabilityID, setExpensePolicyCapabilityID:
 		return "expenses.decide", true
 	case payExpenseClaimCapabilityID:
 		return "accounting.post", true
@@ -574,6 +581,10 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "accounting.write", true
 	case listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID:
 		return "accounting.read", true
+	case iamListMembersCapabilityID:
+		return "iam.read", true
+	case iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
+		return "iam.admin", true
 	default:
 		return "", false
 	}

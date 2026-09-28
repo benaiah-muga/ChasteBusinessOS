@@ -6,6 +6,95 @@ import { customers, deals, documents, getDb, invoices, quotes, tasks, users } fr
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
+import { executeGoCapability } from "@/server/go-bridge";
+
+const goUnavailableMessage = "CRM service unavailable; check the customer status before retrying.";
+const noStore = { "Cache-Control": "no-store" };
+const customerMergeSnapshotSchema = z.object({
+  customerId: z.string().uuid(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  preferredContactMethod: z.enum(["email", "phone", "whatsapp", "other"]),
+  doNotContact: z.boolean(),
+  reminderOptOut: z.boolean(),
+  marketingOptOut: z.boolean(),
+  ownerUserId: z.string().uuid().nullable(),
+  tags: z.array(z.string()),
+  notes: z.string().nullable(),
+  creditLimitMinor: z.number().int().nullable(),
+  paymentTermDays: z.number().int().nullable(),
+  deactivatedAt: z.string().nullable(),
+  mergedIntoCustomerId: z.string().uuid().nullable(),
+  mergedAt: z.string().nullable(),
+});
+const customerProfileSnapshotSchema = z.object({
+  customerId: z.string().uuid(),
+  name: z.string().optional(),
+  ownerUserId: z.string().uuid().nullable(),
+  tags: z.array(z.string()),
+  notes: z.string().nullable(),
+  phone: z.string().nullable(),
+  preferredContactMethod: z.enum(["email", "phone", "whatsapp", "other"]),
+  doNotContact: z.boolean(),
+});
+
+function customerWriteOutputSchema(action: z.infer<typeof actionSchema>) {
+  if (action.action === "create") {
+    return z.object({ customerId: z.string().uuid(), duplicateWarning: z.string().nullable() });
+  }
+  if (action.action === "deactivate") return z.object({ deactivated: z.boolean() });
+  if (action.action === "merge" || action.action === "undoMerge") {
+    return z.object({
+      survivorCustomerId: z.string().uuid(),
+      duplicateCustomerId: z.string().uuid(),
+      previous: z.array(customerMergeSnapshotSchema).min(2).max(502),
+    });
+  }
+  return z.object({
+    updatedCount: z.number().int().nonnegative(),
+    previous: z.array(customerProfileSnapshotSchema),
+  });
+}
+
+async function customerGoResponse(
+  result: Awaited<ReturnType<typeof executeGoCapability>>,
+  action: z.infer<typeof actionSchema>,
+) {
+  const unavailable = () => NextResponse.json({ error: goUnavailableMessage, code: "unavailable" }, { status: 503, headers: noStore });
+  if (result.kind !== "response") return unavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: customerWriteOutputSchema(action) }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json({ ok: true, data: parsed.data.data }, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json({ ok: false, pendingApproval: true, reason: parsed.data.reason }, { status: 202, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 400 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+  } catch {
+    return unavailable();
+  }
+  return unavailable();
+}
 
 /**
  * Customer directory. Reads power pickers across the app; writes go through
@@ -269,6 +358,48 @@ export async function POST(req: Request) {
 
   const body = actionSchema.safeParse(raw);
   if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+
+  if (process.env.GO_CRM_CUSTOMER_WRITES === "1") {
+    const { data: action } = body;
+    const input = action.action === "create"
+      ? {
+          name: action.name,
+          email: action.email,
+          phone: action.phone,
+          preferredContactMethod: action.preferredContactMethod,
+          doNotContact: action.doNotContact,
+        }
+      : action.action === "deactivate"
+        ? { customerId: action.customerId }
+        : action.action === "merge"
+          ? { survivorCustomerId: action.survivorCustomerId, duplicateCustomerId: action.duplicateCustomerId }
+          : action.action === "undoMerge"
+            ? { survivorCustomerId: action.survivorCustomerId, duplicateCustomerId: action.duplicateCustomerId, previous: action.previous }
+            : {
+                customerIds: action.customerIds,
+                ...(action.name !== undefined ? { name: action.name } : {}),
+                ...(action.ownerUserId !== undefined ? { ownerUserId: action.ownerUserId } : {}),
+                ...(action.addTags ? { addTags: action.addTags } : {}),
+                ...(action.removeTags ? { removeTags: action.removeTags } : {}),
+                ...(action.notes !== undefined ? { notes: action.notes } : {}),
+                ...(action.phone !== undefined ? { phone: action.phone } : {}),
+                ...(action.preferredContactMethod !== undefined ? { preferredContactMethod: action.preferredContactMethod } : {}),
+                ...(action.doNotContact !== undefined ? { doNotContact: action.doNotContact } : {}),
+              };
+    const capabilityId = action.action === "create" ? "crm.createCustomer"
+      : action.action === "deactivate" ? "crm.deactivateCustomer"
+        : action.action === "merge" ? "crm.mergeCustomers"
+          : action.action === "undoMerge" ? "crm.restoreCustomerMerge"
+            : "crm.updateCustomerProfiles";
+    try {
+      return await customerGoResponse(
+        await executeGoCapability({ actionContext: humanCtx, session: resolved, capabilityId, input }),
+        action,
+      );
+    } catch {
+      return NextResponse.json({ error: goUnavailableMessage, code: "unavailable" }, { status: 503, headers: noStore });
+    }
+  }
 
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));

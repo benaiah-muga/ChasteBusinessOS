@@ -48,6 +48,7 @@
     "demo:m9": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m9.ts",
     "demo:m10": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m10.ts",
     "demo:m11": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m11.ts",
+    "demo:m11:isolated": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m11-isolated.ts",
     "demo:m12": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m12.ts",
     "demo:m13": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m13.ts"
   },

@@ -82,6 +82,33 @@ export async function POST(req: Request) {
     if (!ids.success) return NextResponse.json({ error: "Select a valid recent import to undo.", code: "invalid" }, { status: 400 });
     const ctx = actorFromResolved(resolved, {});
     if (!ctx) return NextResponse.json({ error: "Set up your workspace before undoing this import.", code: "not_found" }, { status: 409 });
+    if (process.env.GO_CRM_IMPORT_WRITES === "1") {
+      try {
+        const result = await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId: "crm.undoCustomerImport", input: { customerIds: ids.data } });
+        if (result.kind !== "response") return NextResponse.json({ error: "CRM service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+        const body: unknown = await result.response.json().catch(() => null);
+        if (result.response.status === 200) {
+          const parsed = z.object({ ok: z.literal(true), data: z.object({ deactivated: z.number().int().nonnegative() }) }).safeParse(body);
+          if (!parsed.success) return NextResponse.json({ error: "CRM service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+          const undone = parsed.data.data.deactivated;
+          return NextResponse.json({ undone, remaining: Math.max(0, ids.data.length - undone) }, { headers: { "Cache-Control": "no-store" } });
+        }
+        if (result.response.status === 202) {
+          const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+          if (!parsed.success) return NextResponse.json({ error: "CRM service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+          return NextResponse.json({ error: parsed.data.reason, pendingApproval: true }, { status: 202, headers: { "Cache-Control": "no-store" } });
+        }
+        if ([403, 422].includes(result.response.status)) {
+          const parsed = result.response.status === 422
+            ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+            : z.object({ error: z.string() }).safeParse(body);
+          if (parsed.success) return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: { "Cache-Control": "no-store" } });
+        }
+        return NextResponse.json({ error: "CRM service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      } catch {
+        return NextResponse.json({ error: "CRM service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      }
+    }
     const db = getDb().db;
     const result = await buildExecutor(db, buildRegistry(db)).execute("crm.undoCustomerImport", ctx, { customerIds: ids.data });
     if (result.pendingApproval) return NextResponse.json({ error: result.error ?? "Undo is awaiting approval.", pendingApproval: true }, { status: 202 });
@@ -178,6 +205,32 @@ export async function POST(req: Request) {
       }];
     });
     if (prepared.length === 0) return NextResponse.json({ inserted: 0, skippedDuplicates: 0, errors, createdIds: [] });
+    if (process.env.GO_CRM_IMPORT_WRITES === "1") {
+      try {
+        const result = await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId: "crm.importCustomers", input: { rows: prepared } });
+        if (result.kind !== "response") return NextResponse.json({ error: "CRM service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+        const body: unknown = await result.response.json().catch(() => null);
+        if (result.response.status === 200) {
+          const parsed = z.object({ ok: z.literal(true), data: z.object({ createdIds: z.array(z.string().uuid()), imported: z.number().int().nonnegative(), skippedDuplicateRows: z.array(z.number().int()) }) }).safeParse(body);
+          if (!parsed.success) return NextResponse.json({ error: "CRM service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+          const data = parsed.data.data;
+          return NextResponse.json({ inserted: data.imported, skippedDuplicates: data.skippedDuplicateRows.length, skippedDuplicateRows: data.skippedDuplicateRows, errors, createdIds: data.createdIds }, { headers: { "Cache-Control": "no-store" } });
+        }
+        if (result.response.status === 202) {
+          const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+          if (parsed.success) return NextResponse.json({ error: parsed.data.reason, pendingApproval: true }, { status: 202, headers: { "Cache-Control": "no-store" } });
+        }
+        if ([403, 422].includes(result.response.status)) {
+          const parsed = result.response.status === 422
+            ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+            : z.object({ error: z.string() }).safeParse(body);
+          if (parsed.success) return NextResponse.json({ error: parsed.data.error, code: "invalid" }, { status: 422, headers: { "Cache-Control": "no-store" } });
+        }
+        return NextResponse.json({ error: "CRM service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      } catch {
+        return NextResponse.json({ error: "CRM service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      }
+    }
     const db = getDb().db;
     const result = await buildExecutor(db, buildRegistry(db)).execute("crm.importCustomers", ctx, { rows: prepared });
     if (result.pendingApproval) return NextResponse.json({ error: result.error ?? "Import is awaiting approval.", pendingApproval: true }, { status: 202 });

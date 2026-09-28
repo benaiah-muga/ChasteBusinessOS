@@ -5,6 +5,8 @@ import { LedgerPage } from "./components/LedgerPage";
 import { SessionsPage } from "./components/SessionsPage";
 import { ProjectsPage } from "./components/ProjectsPage";
 import { AnalyticsPage } from "./components/AnalyticsPage";
+import { TeamPage } from "./components/TeamPage";
+import { CRMPage } from "./components/CRMPage";
 import { DashboardPage } from "./components/DashboardPage";
 import { ActiveOrganization } from "./components/ActiveOrganization";
 import { LoginPage } from "./components/LoginPage";
@@ -37,6 +39,8 @@ const navigationItems = [
   { label: "Sessions", href: "/sessions", icon: "⌁" },
   { label: "Projects", href: "/projects", icon: "▣" },
   { label: "Analytics", href: "/analytics", icon: "◷" },
+  { label: "Team", href: "/team", icon: "♙" },
+  { label: "CRM", href: "/crm", icon: "◎" },
 ];
 
 function AuthenticatedApp({ pathname }: { pathname: string }) {
@@ -45,6 +49,8 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   const sessionsPage = pathname === "/sessions";
   const projectsPage = pathname === "/projects";
   const analyticsPage = pathname === "/analytics";
+  const teamPage = pathname === "/team";
+  const crmPage = pathname === "/crm";
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const [organizationRevision, setOrganizationRevision] = useState(0);
   const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
@@ -112,21 +118,21 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
           <span className="rail-brand-copy">Chaste <strong>BusinessOS</strong></span>
         </a>
         <nav className="rail-nav">
-          <a className={`rail-link${!approvalsPage && !ledgerPage && !sessionsPage && !projectsPage && !analyticsPage ? " rail-link-current" : ""}`} href="/" {...(!approvalsPage && !ledgerPage && !sessionsPage && !projectsPage && !analyticsPage ? { "aria-current": "page" as const } : {})}>
+          <a className={`rail-link${!approvalsPage && !ledgerPage && !sessionsPage && !projectsPage && !analyticsPage && !teamPage && !crmPage ? " rail-link-current" : ""}`} href="/" {...(!approvalsPage && !ledgerPage && !sessionsPage && !projectsPage && !analyticsPage && !teamPage && !crmPage ? { "aria-current": "page" as const } : {})}>
             <span aria-hidden="true">⌂</span><span>Home</span>
           </a>
           <p className="rail-caption">Workspace</p>
           {navigationItems.map((item) => (
             <a
-              className={`rail-link${(approvalsPage && item.href === "/approvals") || (ledgerPage && item.href === "/ledger") || (sessionsPage && item.href === "/sessions") || (projectsPage && item.href === "/projects") || (analyticsPage && item.href === "/analytics") ? " rail-link-current" : ""}`}
+              className={`rail-link${(approvalsPage && item.href === "/approvals") || (ledgerPage && item.href === "/ledger") || (sessionsPage && item.href === "/sessions") || (projectsPage && item.href === "/projects") || (analyticsPage && item.href === "/analytics") || (teamPage && item.href === "/team") || (crmPage && item.href === "/crm") ? " rail-link-current" : ""}`}
               key={item.href}
-              href={item.href === "/approvals" || item.href === "/ledger" || item.href === "/sessions" || item.href === "/projects" || item.href === "/analytics" ? item.href : legacyUrl(item.href)}
-              {...((approvalsPage && item.href === "/approvals") || (ledgerPage && item.href === "/ledger") || (sessionsPage && item.href === "/sessions") || (projectsPage && item.href === "/projects") || (analyticsPage && item.href === "/analytics") ? { "aria-current": "page" as const } : {})}
+              href={item.href === "/approvals" || item.href === "/ledger" || item.href === "/sessions" || item.href === "/projects" || item.href === "/analytics" || item.href === "/team" || item.href === "/crm" ? item.href : legacyUrl(item.href)}
+              {...((approvalsPage && item.href === "/approvals") || (ledgerPage && item.href === "/ledger") || (sessionsPage && item.href === "/sessions") || (projectsPage && item.href === "/projects") || (analyticsPage && item.href === "/analytics") || (teamPage && item.href === "/team") || (crmPage && item.href === "/crm") ? { "aria-current": "page" as const } : {})}
             >
               <span aria-hidden="true">{item.icon}</span><span>{item.label}</span>
             </a>
           ))}
-          <p className="rail-note">{approvalsPage || ledgerPage || sessionsPage || projectsPage || analyticsPage ? "This Vite preview uses the existing workspace APIs. Other pages still open in the current app." : "Approvals, the event ledger, agent sessions, projects, and analytics are available in this Vite preview. Other pages still open in the current app."}</p>
+          <p className="rail-note">{approvalsPage || ledgerPage || sessionsPage || projectsPage || analyticsPage || teamPage || crmPage ? "This Vite preview uses the existing workspace APIs. Other pages still open in the current app." : "Approvals, the event ledger, agent sessions, projects, analytics, team roles, and CRM are available in this Vite preview. Other pages still open in the current app."}</p>
         </nav>
         <div className="rail-account">
           <div className="account-initial" aria-hidden="true">{(auth.user.name || auth.user.email).slice(0, 1).toUpperCase()}</div>
@@ -161,9 +167,13 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
           : sessionsPage
               ? <SessionsPage key={organizationRevision} />
               : projectsPage
-                ? <ProjectsPage key={organizationRevision} />
-                : analyticsPage
-                  ? <AnalyticsPage key={organizationRevision} />
+                  ? <ProjectsPage key={organizationRevision} />
+                  : analyticsPage
+                    ? <AnalyticsPage key={organizationRevision} />
+                    : teamPage
+                      ? <TeamPage key={organizationRevision} />
+                      : crmPage
+                        ? <CRMPage key={organizationRevision} />
                   : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
       </div>
     </div>
@@ -197,6 +207,6 @@ export function App() {
   }, []);
 
   if (pathname === "/login") return <LoginPage />;
-  if (pathname !== "/" && pathname !== "/approvals" && pathname !== "/ledger" && pathname !== "/sessions" && pathname !== "/projects" && pathname !== "/analytics") return <LegacyRoute pathname={pathname} />;
+  if (pathname !== "/" && pathname !== "/approvals" && pathname !== "/ledger" && pathname !== "/sessions" && pathname !== "/projects" && pathname !== "/analytics" && pathname !== "/team" && pathname !== "/crm") return <LegacyRoute pathname={pathname} />;
   return <AuthenticatedApp pathname={pathname} />;
 }

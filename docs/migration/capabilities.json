@@ -2535,6 +2535,51 @@
       }
     },
     {
+      "id": "accounting.listExpensePolicies",
+      "title": "List expense policy limits",
+      "intent": "Review the configured per-category expense limits alongside claims before making reimbursement decisions",
+      "module": "accounting",
+      "risk": "read",
+      "permission": "expenses.decide",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "policies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "limitMinor": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "category",
+                "limitMinor"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "policies"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "accounting.listInvoices",
       "title": "List invoices",
       "intent": "Find invoices by customer name or status so the agent can look up the invoice number needed to record a payment against it",
