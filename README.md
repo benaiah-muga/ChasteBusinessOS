@@ -116,6 +116,31 @@ the GET route remain on the legacy handler. The flag defaults to `0`.
 into the signed Go capability bridge. It requires `pnpm dev:api`; reads and
 other CRM actions remain on the legacy handler, and uncertain writes fail
 closed without a TypeScript retry. The flag defaults to `0`.
+`GO_CRM_TASK_WRITES=1` opts CRM task creation, completion, and detail updates
+into the signed Go capability bridge. It requires `pnpm dev:api`; reads,
+follow-up drafting, and other CRM actions remain on their existing handlers.
+The flag defaults to `0`, and uncertain task writes fail closed without a
+TypeScript retry.
+`GO_SALES_WRITE=1` opts sales order creation, confirmation, delivery, and
+cancellation into the signed Go capability bridge. It requires `pnpm dev:api`;
+order listing and other sales actions remain on the legacy handler, and
+uncertain writes fail closed without a TypeScript retry. The flag defaults to
+`0`.
+`GO_ACCOUNTING_QUOTES_WRITE=1` opts quote creation, acceptance, decline, and
+expiry sweeps into the signed Go capability bridge. It requires `pnpm
+dev:api`; the dedicated quotes route and other accounting actions remain on
+their existing handlers, and uncertain writes fail closed without a
+TypeScript retry. The flag defaults to `0`.
+`GO_ACCOUNTING_RECURRING_WRITE=1` opts recurring invoice template creation,
+pausing, and resumption into the signed Go capability bridge. It requires
+`pnpm dev:api`; the dedicated recurring route and other accounting actions
+remain on their existing handlers, and uncertain writes fail closed without a
+TypeScript retry. The flag defaults to `0`.
+`GO_HR_EMPLOYEE_WRITES=1` opts employee hiring, deactivation, and structure
+updates into the signed Go capability bridge. It requires `pnpm dev:api`;
+leave, payroll, and other HR actions remain on the legacy handler, and
+uncertain writes fail closed without a TypeScript retry. The flag defaults to
+`0`.
 
 For a production-shaped local Docker run, use the full Compose stack instead:
 

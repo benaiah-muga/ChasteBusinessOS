@@ -434,7 +434,26 @@ new owners and the manifest shows zero legacy runtime paths.
    capability executor behind `GO_ACCOUNTING_CREATE_INVOICE=1`. Preserve the
    legacy owner by default, the approval response contract, and fail-closed
    behavior for unknown write outcomes.
-7. (In progress) Add Go parity for CRM deal creation, stage changes, and lead
+7. (Done) Add Go parity for CRM deal creation, stage changes, and lead
    conversion, including the capability jobs worker path. Bridge only those
    public POST actions behind `GO_CRM_DEAL_WRITES=1`; keep reads, unrelated CRM
    actions, and route ownership on the existing defaults until parity passes.
+8. (Done) Add Go parity for CRM task creation, completion, and detail
+   updates, including the capability jobs worker path and inverse restore. Bridge
+   only those POST actions behind `GO_CRM_TASK_WRITES=1`; keep reads, follow-up
+   drafting, and route ownership on their existing defaults until parity passes.
+9. (Done) Add Go parity for sales order creation, confirmation, delivery, and
+   cancellation, including stock reservations, credit guards, invoice posting,
+   and the capability jobs worker path. Bridge those POST actions behind
+   `GO_SALES_WRITE=1`; order listing and unrelated sales actions stay legacy.
+10. (Done) Add Go parity for accounting quote creation, acceptance, decline,
+    and expiry sweeps, reusing the shared invoice posting path, plus the
+    capability jobs worker path. Bridge the dedicated quotes route actions
+    behind `GO_ACCOUNTING_QUOTES_WRITE=1`.
+11. (Done) Add Go parity for recurring invoice template creation, pausing, and
+    resumption, plus the capability jobs worker path. Bridge the dedicated
+    recurring route actions behind `GO_ACCOUNTING_RECURRING_WRITE=1`.
+12. (Done) Add Go parity for HR employee hiring, deactivation, listing, and
+    structure updates, plus the capability jobs worker path. Bridge those POST
+    actions behind `GO_HR_EMPLOYEE_WRITES=1`; leave, payroll, and time tracking
+    keep their existing handlers.

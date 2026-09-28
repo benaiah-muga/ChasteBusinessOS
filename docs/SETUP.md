@@ -294,6 +294,11 @@ NVIDIA_API_KEY=""      # default; free tier at build.nvidia.com
 | Projects shows an upstream error | `GO_PROJECTS_READ=1` but the Go API or signed bridge config is unavailable | Start `pnpm dev:api`, set `GO_INTERNAL_AUTH_SECRET`, or set `GO_PROJECTS_READ=0` |
 | Invoice creation shows an upstream error | `GO_ACCOUNTING_CREATE_INVOICE=1` but Go is unavailable or the write outcome could not be confirmed | Check invoice status before retrying; start `pnpm dev:api` or set `GO_ACCOUNTING_CREATE_INVOICE=0` |
 | CRM deal write shows an upstream error | `GO_CRM_DEAL_WRITES=1` but Go is unavailable or the write outcome could not be confirmed | Check the deal before retrying; start `pnpm dev:api` or set `GO_CRM_DEAL_WRITES=0` |
+| CRM task write shows an upstream error | `GO_CRM_TASK_WRITES=1` but Go is unavailable or the write outcome could not be confirmed | Check the task before retrying; start `pnpm dev:api` or set `GO_CRM_TASK_WRITES=0` |
+| Sales order write shows an upstream error | `GO_SALES_WRITE=1` but Go is unavailable or the write outcome could not be confirmed | Check the order before retrying; start `pnpm dev:api` or set `GO_SALES_WRITE=0` |
+| Accounting quote write shows an upstream error | `GO_ACCOUNTING_QUOTES_WRITE=1` but Go is unavailable or the write outcome could not be confirmed | Check the quote before retrying; start `pnpm dev:api` or set `GO_ACCOUNTING_QUOTES_WRITE=0` |
+| Recurring invoice write shows an upstream error | `GO_ACCOUNTING_RECURRING_WRITE=1` but Go is unavailable or the write outcome could not be confirmed | Check the recurring template before retrying; start `pnpm dev:api` or set `GO_ACCOUNTING_RECURRING_WRITE=0` |
+| HR employee write shows an upstream error | `GO_HR_EMPLOYEE_WRITES=1` but Go is unavailable or the write outcome could not be confirmed | Check the employee before retrying; start `pnpm dev:api` or set `GO_HR_EMPLOYEE_WRITES=0` |
 | `NVIDIA_API_KEY is not set` at runtime | No provider key | Expected without one - see [§5](#5-optional-the-ai-provider-key) |
 
 **Still stuck?** The `packages/db` package has `db:studio` (Drizzle Studio) for
