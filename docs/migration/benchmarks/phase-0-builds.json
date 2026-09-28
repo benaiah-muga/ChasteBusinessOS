@@ -1,0 +1,255 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-09-28T10:22:33.663Z",
+  "gitRevision": "8262d5082def982cdf6a77a649efb3b04a130c5f",
+  "machine": {
+    "platform": "linux 6.8.0-138-generic",
+    "architecture": "x64",
+    "cpuModel": "Intel(R) Core(TM) i7-4600U CPU @ 2.10GHz",
+    "logicalCpuCount": 4,
+    "totalMemoryBytes": 16663068672
+  },
+  "toolchain": {
+    "node": "v24.18.0",
+    "pnpm": "11.9.0",
+    "go": "go version go1.27.1 linux/amd64"
+  },
+  "protocol": {
+    "runsPerBuild": 10,
+    "order": "Next, Vite, then Go, sequentially per run",
+    "cachePolicy": "shared working-tree dependency and compiler caches, left warm between samples",
+    "metrics": "GNU time wall clock and maximum resident set size for each full command",
+    "commands": {
+      "next": [
+        "pnpm",
+        "--filter",
+        "web",
+        "build"
+      ],
+      "vite": [
+        "pnpm",
+        "--filter",
+        "@chaste/web-vite",
+        "build"
+      ],
+      "go": [
+        "go",
+        "-C",
+        "apps/api",
+        "build",
+        "./cmd/api",
+        "./cmd/jobs-worker",
+        "./cmd/outbox-worker"
+      ]
+    }
+  },
+  "summaries": {
+    "next": {
+      "successfulRuns": 10,
+      "failedRuns": 0,
+      "medianWallSeconds": 25.225,
+      "p95WallSeconds": 28.85,
+      "medianPeakRSSKilobytes": 816230,
+      "samples": [
+        {
+          "run": 1,
+          "exitCode": 0,
+          "wallSeconds": 21.43,
+          "maxRSSKilobytes": 1024096
+        },
+        {
+          "run": 2,
+          "exitCode": 0,
+          "wallSeconds": 20.89,
+          "maxRSSKilobytes": 814692
+        },
+        {
+          "run": 3,
+          "exitCode": 0,
+          "wallSeconds": 24.06,
+          "maxRSSKilobytes": 822912
+        },
+        {
+          "run": 4,
+          "exitCode": 0,
+          "wallSeconds": 27.91,
+          "maxRSSKilobytes": 806868
+        },
+        {
+          "run": 5,
+          "exitCode": 0,
+          "wallSeconds": 26.5,
+          "maxRSSKilobytes": 819220
+        },
+        {
+          "run": 6,
+          "exitCode": 0,
+          "wallSeconds": 25.3,
+          "maxRSSKilobytes": 813516
+        },
+        {
+          "run": 7,
+          "exitCode": 0,
+          "wallSeconds": 25.15,
+          "maxRSSKilobytes": 810196
+        },
+        {
+          "run": 8,
+          "exitCode": 0,
+          "wallSeconds": 25.41,
+          "maxRSSKilobytes": 814236
+        },
+        {
+          "run": 9,
+          "exitCode": 0,
+          "wallSeconds": 25.02,
+          "maxRSSKilobytes": 823768
+        },
+        {
+          "run": 10,
+          "exitCode": 0,
+          "wallSeconds": 28.85,
+          "maxRSSKilobytes": 817768
+        }
+      ]
+    },
+    "vite": {
+      "successfulRuns": 10,
+      "failedRuns": 0,
+      "medianWallSeconds": 11.035,
+      "p95WallSeconds": 12.9,
+      "medianPeakRSSKilobytes": 626158,
+      "samples": [
+        {
+          "run": 1,
+          "exitCode": 0,
+          "wallSeconds": 9.62,
+          "maxRSSKilobytes": 619720
+        },
+        {
+          "run": 2,
+          "exitCode": 0,
+          "wallSeconds": 11.07,
+          "maxRSSKilobytes": 616232
+        },
+        {
+          "run": 3,
+          "exitCode": 0,
+          "wallSeconds": 10.06,
+          "maxRSSKilobytes": 625320
+        },
+        {
+          "run": 4,
+          "exitCode": 0,
+          "wallSeconds": 11,
+          "maxRSSKilobytes": 629120
+        },
+        {
+          "run": 5,
+          "exitCode": 0,
+          "wallSeconds": 12.9,
+          "maxRSSKilobytes": 631028
+        },
+        {
+          "run": 6,
+          "exitCode": 0,
+          "wallSeconds": 10.41,
+          "maxRSSKilobytes": 618480
+        },
+        {
+          "run": 7,
+          "exitCode": 0,
+          "wallSeconds": 10.98,
+          "maxRSSKilobytes": 621436
+        },
+        {
+          "run": 8,
+          "exitCode": 0,
+          "wallSeconds": 11.41,
+          "maxRSSKilobytes": 626996
+        },
+        {
+          "run": 9,
+          "exitCode": 0,
+          "wallSeconds": 11.64,
+          "maxRSSKilobytes": 627656
+        },
+        {
+          "run": 10,
+          "exitCode": 0,
+          "wallSeconds": 11.12,
+          "maxRSSKilobytes": 628012
+        }
+      ]
+    },
+    "go": {
+      "successfulRuns": 10,
+      "failedRuns": 0,
+      "medianWallSeconds": 2.205,
+      "p95WallSeconds": 2.55,
+      "medianPeakRSSKilobytes": 234496,
+      "samples": [
+        {
+          "run": 1,
+          "exitCode": 0,
+          "wallSeconds": 1.86,
+          "maxRSSKilobytes": 236544
+        },
+        {
+          "run": 2,
+          "exitCode": 0,
+          "wallSeconds": 1.99,
+          "maxRSSKilobytes": 234624
+        },
+        {
+          "run": 3,
+          "exitCode": 0,
+          "wallSeconds": 2.55,
+          "maxRSSKilobytes": 234368
+        },
+        {
+          "run": 4,
+          "exitCode": 0,
+          "wallSeconds": 2.33,
+          "maxRSSKilobytes": 229504
+        },
+        {
+          "run": 5,
+          "exitCode": 0,
+          "wallSeconds": 2.19,
+          "maxRSSKilobytes": 235520
+        },
+        {
+          "run": 6,
+          "exitCode": 0,
+          "wallSeconds": 2.2,
+          "maxRSSKilobytes": 236800
+        },
+        {
+          "run": 7,
+          "exitCode": 0,
+          "wallSeconds": 2.21,
+          "maxRSSKilobytes": 234240
+        },
+        {
+          "run": 8,
+          "exitCode": 0,
+          "wallSeconds": 2.31,
+          "maxRSSKilobytes": 230400
+        },
+        {
+          "run": 9,
+          "exitCode": 0,
+          "wallSeconds": 2.3,
+          "maxRSSKilobytes": 240640
+        },
+        {
+          "run": 10,
+          "exitCode": 0,
+          "wallSeconds": 2.06,
+          "maxRSSKilobytes": 232960
+        }
+      ]
+    }
+  }
+}

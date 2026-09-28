@@ -338,6 +338,12 @@ capability and parity tests are green.
 Use the same machine, dataset, DB state, dependency cache, and process limits
 for old and new runtimes. Record ten runs each and publish median and p95 for:
 
+`pnpm benchmark:migration:builds` records ten sequential production builds for
+the current Next app, Vite app, and Go services, including wall time and peak
+resident memory. Its raw samples and toolchain metadata are written to
+`docs/migration/benchmarks/phase-0-builds.json`. This is a build baseline only;
+it does not establish UI, request, or end-to-end parity.
+
 - cold dev startup until the login and dashboard are usable;
 - warm edit-to-ready for one UI component, one business API, and one pure
   domain function, including browser refresh where relevant;
@@ -424,7 +430,7 @@ new owners and the manifest shows zero legacy runtime paths.
    capability, and database table manifests with CI drift detection; source-cite
    the worker, event, integration, auth/session, data, demo, and action
    continuity inventories.
-3. Capture old-runtime fixtures and benchmark scripts on a migrated database.
+3. (In progress) Capture old-runtime fixtures and benchmark scripts on a migrated database. Repeatable frontend and Go build timings are recorded by `pnpm benchmark:migration:builds`; request, startup, edit-to-ready, browser, and demo fixtures remain to be measured.
 4. (In progress) Define the versioned HTTP contract and auth bridge contract;
    prove Go read-only policy and ledger endpoints under the existing session,
    permission, and RLS policies.
