@@ -12,6 +12,7 @@ The full v1 changelog is preserved at the bottom of this file.
 ## [Unreleased]
 
 ### Added
+- **Opt-in Go inventory cycle counts.** Starting, recording, posting, and cancelling cycle counts can use the signed Go capability executor and jobs worker behind `GO_INVENTORY_CYCLE_COUNTS=1`. The flag defaults off; the existing `startCycleCount` alias and unrelated inventory actions keep their current handlers. Movement drift checks, location snapshots, audit and approval behavior, and fail-closed uncertain writes are preserved.
 - **Generated Go policy API contract.** Added a versioned OpenAPI contract for the signed Go policy read, with generated Go and TypeScript models and a drift check. Existing paths, runtime validation, and response behavior remain in place.
 - **Opt-in Go purchase order creation.** The purchasing route can create purchase orders through the signed Go capability executor and worker behind `GO_PURCHASING_PO_WRITES=1`. The flag defaults off, other purchasing actions keep their existing handlers, and uncertain writes fail closed without TypeScript retry.
 - **Opt-in Go expense, purchasing, inventory, and POS capabilities.** Expense claim submission, decisions, and payments; vendor and bill creation and bill payments; stock adjustments and transfer lifecycle actions; and POS session, sale, return, and summary actions now have Go capability and worker paths. Four independent flags default off, public route ownership and existing data remain intact, and uncertain writes fail closed without TypeScript retry.

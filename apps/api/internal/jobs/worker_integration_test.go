@@ -555,6 +555,82 @@ func TestCRMTaskJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
 	}
 }
 
+func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the cycle-count jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := os.Getenv("CHASTE_APP_DB_PASSWORD")
+	if appPassword == "" {
+		appPassword = "chaste_app_dev_only"
+	}
+	workerPassword := os.Getenv("CHASTE_JOBS_WORKER_DB_PASSWORD")
+	if workerPassword == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("CHASTE_JOBS_WORKER_DB_PASSWORD is required for the cycle-count jobs database proof")
+		}
+		workerPassword = "chaste_jobs_worker_dev_only"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect database owner: %v", err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatalf("connect app runtime: %v", err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatalf("connect jobs worker: %v", err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+	if GoCapabilityPermissions["inventory.createCycleCount"] != "inventory.write" ||
+		GoCapabilityPermissions["inventory.recordCycleCounts"] != "inventory.write" ||
+		GoCapabilityPermissions["inventory.postCycleCount"] != "inventory.write" ||
+		GoCapabilityPermissions["inventory.cancelCycleCount"] != "inventory.write" {
+		t.Fatal("cycle-count worker permissions are incomplete")
+	}
+	tag := fmt.Sprintf("inventory-cycle-count-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	if _, err := owner.Exec(ctx, `INSERT INTO items (org_id, sku, name, kind) VALUES ($1::uuid, 'CYCLE-WORKER', 'Cycle count worker item', 'goods')`, orgID); err != nil {
+		t.Fatalf("insert cycle-count item: %v", err)
+	}
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID: "inventory-cycle-count-integration-worker", LeaseDuration: time.Second,
+		PollInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	availableAt := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+	jobID := insertJobsTestJob(t, ctx, owner, orgID, "inventory.createCycleCount", json.RawMessage(`{"skus":["CYCLE-WORKER"]}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("cycle-count job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, jobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM cycle_counts cc JOIN cycle_count_lines ccl ON ccl.count_id=cc.id WHERE cc.org_id=$1::uuid AND cc.status='open' AND ccl.item_id=(SELECT id FROM items WHERE org_id=$1::uuid AND sku='CYCLE-WORKER')`, orgID); got != 1 {
+		t.Fatalf("worker created %d open cycle-count snapshots, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2 AND capability_id='inventory.createCycleCount'`, orgID, orgID+":"+jobID); got != 1 {
+		t.Fatalf("worker cycle-count action receipts=%d, want one", got)
+	}
+}
+
 func TestPurchasingCommerceJobsClaimThroughSystemPath(t *testing.T) {
 	ownerURL := os.Getenv("DATABASE_URL")
 	if ownerURL == "" {

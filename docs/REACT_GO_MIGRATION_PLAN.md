@@ -477,3 +477,9 @@ new owners and the manifest shows zero legacy runtime paths.
     tenant scoping, approval verification, receipt replay, and the capability jobs
     worker path. Bridge only `createPurchaseOrder` behind the independent,
     default-off `GO_PURCHASING_PO_WRITES` flag.
+15. (Done) Add Go parity for inventory cycle-count creation, count recording,
+    posting, and cancellation through the governed executor and jobs worker.
+    Preserve item-wide movement watermarks, location-scoped snapshots and
+    adjustments, tenant isolation, approvals, audit, replay, and response shapes.
+    Bridge only those four actions behind default-off
+    `GO_INVENTORY_CYCLE_COUNTS`.

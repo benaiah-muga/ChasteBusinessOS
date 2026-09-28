@@ -356,3 +356,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: Contract outputs current
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: The contract drift check passed; all 6 policy route tests passed; the Go policy handler exact response and mixed-value tests passed; policy package tests passed; web TypeScript typecheck passed.
+
+- [x] G76: Go inventory cycle-count creation, recording, posting, and cancellation preserve the existing governed behavior through the signed opt-in route and worker paths.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:$PATH node /home/benaiah/.agents/skills/unlazy/scripts/gate-check.mjs --scope migration-inventory-cycle-count --status
+  EXPECT: /ALL MET/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Parent re-verification passed the Go lifecycle and worker claim tests, route bridge tests, TypeScript checks, full workspace tests, Go verification, migration inventories, and whitespace checks. Cycle counts preserve item-wide movement watermarks, location-scoped snapshot and adjustment behavior, tenant isolation, approvals, audit, replay, and the original public response shape. The Go route flag remains off by default. Browser checks remain deferred by request.

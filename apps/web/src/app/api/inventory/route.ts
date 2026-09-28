@@ -277,25 +277,40 @@ export async function POST(req: Request) {
       if (!str("reservationId")) return NextResponse.json({ error: "reservationId required" }, { status: 400 });
       return respond(await executor.execute("inventory.releaseReservation", ctx, { reservationId: str("reservationId")! }));
     case "startCycleCount":
-    case "createCycleCount":
+    case "createCycleCount": {
+      const input = {
+        note: str("note"),
+        skus: Array.isArray(body.skus) ? (body.skus as string[]) : undefined,
+        locationId: str("locationId"),
+      };
+      if (body.action === "createCycleCount" && process.env.GO_INVENTORY_CYCLE_COUNTS === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.createCycleCount", input);
+      }
       return respond(
-        await executor.execute("inventory.createCycleCount", ctx, {
-          note: str("note"),
-          skus: Array.isArray(body.skus) ? (body.skus as string[]) : undefined,
-          locationId: str("locationId"),
-        }),
+        await executor.execute("inventory.createCycleCount", ctx, input),
       );
+    }
     case "recordCycleCounts": {
       const entries = (body.entries ?? body.counts) as { sku: string; countedThousandths: number }[] | undefined;
       if (!str("countId") || !entries?.length)
         return NextResponse.json({ error: "countId and entries required" }, { status: 400 });
-      return respond(await executor.execute("inventory.recordCycleCounts", ctx, { countId: str("countId")!, counts: entries }));
+      const input = { countId: str("countId")!, counts: entries };
+      if (process.env.GO_INVENTORY_CYCLE_COUNTS === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.recordCycleCounts", input);
+      }
+      return respond(await executor.execute("inventory.recordCycleCounts", ctx, input));
     }
     case "postCycleCount":
       if (!str("countId")) return NextResponse.json({ error: "countId required" }, { status: 400 });
+      if (process.env.GO_INVENTORY_CYCLE_COUNTS === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.postCycleCount", { countId: str("countId")! });
+      }
       return respond(await executor.execute("inventory.postCycleCount", ctx, { countId: str("countId")! }));
     case "cancelCycleCount":
       if (!str("countId")) return NextResponse.json({ error: "countId required" }, { status: 400 });
+      if (process.env.GO_INVENTORY_CYCLE_COUNTS === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.cancelCycleCount", { countId: str("countId")! });
+      }
       return respond(await executor.execute("inventory.cancelCycleCount", ctx, { countId: str("countId")! }));
     case "createLocation":
       if (!str("code") || !str("name")) return NextResponse.json({ error: "code and name required" }, { status: 400 });

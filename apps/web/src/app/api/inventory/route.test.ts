@@ -22,6 +22,7 @@ describe("inventory Go route adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GO_INVENTORY_STOCK_WRITES", "0");
+    vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -54,6 +55,63 @@ describe("inventory Go route adapter", () => {
     expect(mocks.execute).toHaveBeenCalledWith("inventory.adjustStock", ctx, {
       sku: "MUG-1", quantityDelta: 3000, note: "Opening stock", lotCode: undefined,
     });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { body: { action: "createCycleCount", note: "Quarterly count", skus: ["MUG-1"], locationId: "33333333-3333-4333-8333-333333333333" }, capabilityId: "inventory.createCycleCount", input: { note: "Quarterly count", skus: ["MUG-1"], locationId: "33333333-3333-4333-8333-333333333333" } },
+    { body: { action: "recordCycleCounts", countId: "44444444-4444-4444-8444-444444444444", counts: [{ sku: "MUG-1", countedThousandths: 1500 }] }, capabilityId: "inventory.recordCycleCounts", input: { countId: "44444444-4444-4444-8444-444444444444", counts: [{ sku: "MUG-1", countedThousandths: 1500 }] } },
+    { body: { action: "postCycleCount", countId: "44444444-4444-4444-8444-444444444444" }, capabilityId: "inventory.postCycleCount", input: { countId: "44444444-4444-4444-8444-444444444444" } },
+    { body: { action: "cancelCycleCount", countId: "44444444-4444-4444-8444-444444444444" }, capabilityId: "inventory.cancelCycleCount", input: { countId: "44444444-4444-4444-8444-444444444444" } },
+  ])("keeps $body.action on TypeScript with cycle-count flag off", async ({ body, capabilityId, input }) => {
+    await POST(request(body));
+    expect(mocks.execute).toHaveBeenCalledWith(capabilityId, ctx, input);
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { body: { action: "createCycleCount", note: "Quarterly count", skus: ["MUG-1"], locationId: "33333333-3333-4333-8333-333333333333" }, capabilityId: "inventory.createCycleCount", input: { note: "Quarterly count", skus: ["MUG-1"], locationId: "33333333-3333-4333-8333-333333333333" } },
+    { body: { action: "recordCycleCounts", countId: "44444444-4444-4444-8444-444444444444", entries: [{ sku: "MUG-1", countedThousandths: 1500 }] }, capabilityId: "inventory.recordCycleCounts", input: { countId: "44444444-4444-4444-8444-444444444444", counts: [{ sku: "MUG-1", countedThousandths: 1500 }] } },
+    { body: { action: "postCycleCount", countId: "44444444-4444-4444-8444-444444444444" }, capabilityId: "inventory.postCycleCount", input: { countId: "44444444-4444-4444-8444-444444444444" } },
+    { body: { action: "cancelCycleCount", countId: "44444444-4444-4444-8444-444444444444" }, capabilityId: "inventory.cancelCycleCount", input: { countId: "44444444-4444-4444-8444-444444444444" } },
+  ])("dispatches $body.action to Go with the existing public input", async ({ body, capabilityId, input }) => {
+    vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { saved: true }, replayed: true }) });
+    const response = await POST(request({ ...body, intentId: "inventory-intent" }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: { saved: true } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({ actionContext: ctx, session: user, capabilityId, input });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves approval response mapping and removes private approval metadata", async () => {
+    vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: false, pendingApproval: true, reason: "Review required", approvalId: "private-approval-id" }, { status: 202 }) });
+    const response = await POST(request({ action: "postCycleCount", countId: "44444444-4444-4444-8444-444444444444" }));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ ok: false, pendingApproval: true, reason: "Review required" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { kind: "not-dispatched" },
+    { kind: "outcome-unknown" },
+  ])("fails closed on $kind without retrying a cycle-count write", async (result) => {
+    vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+    const response = await POST(request({ action: "recordCycleCounts", countId: "44444444-4444-4444-8444-444444444444", counts: [{ sku: "MUG-1", countedThousandths: 1500 }] }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps the startCycleCount alias and unrelated actions on TypeScript", async () => {
+    vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS", "1");
+    await POST(request({ action: "startCycleCount", note: "Legacy alias" }));
+    await POST(request({ action: "createLocation", code: "A", name: "Aisle A" }));
+    expect(mocks.execute).toHaveBeenNthCalledWith(1, "inventory.createCycleCount", ctx, { note: "Legacy alias", skus: undefined, locationId: undefined });
+    expect(mocks.execute).toHaveBeenNthCalledWith(2, "inventory.createLocation", ctx, { code: "A", name: "Aisle A" });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
   });
 
