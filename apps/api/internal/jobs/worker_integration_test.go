@@ -619,6 +619,25 @@ func TestPurchasingCommerceJobsClaimThroughSystemPath(t *testing.T) {
 		AND actor_type='system' AND actor_id IS NULL AND capability_id='accounting.listExpenseClaims'`, orgID); got != 1 {
 		t.Fatalf("system commerce audit events=%d, want one", got)
 	}
+	var vendorID string
+	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Commerce jobs vendor') RETURNING id::text`, orgID).Scan(&vendorID); err != nil {
+		t.Fatal(err)
+	}
+	poPayload := json.RawMessage(fmt.Sprintf(`{"vendorId":%q,"lines":[{"description":"Stock item","quantity":2000,"unitPriceMinor":1500}]}`, vendorID))
+	poJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.createPurchaseOrder", poPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("createPurchaseOrder job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, poJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM purchase_orders WHERE org_id=$1::uuid AND vendor_id=$2::uuid AND status='ordered'`, orgID, vendorID); got != 1 {
+		t.Fatalf("system purchase orders=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
+		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.createPurchaseOrder'`, orgID); got != 1 {
+		t.Fatalf("system purchase order audit events=%d, want one", got)
+	}
 }
 
 func workerRoleURL(t *testing.T, baseURL, role, password string) string {

@@ -235,6 +235,30 @@ export async function POST(req: Request) {
     }
   }
 
+  if (process.env.GO_PURCHASING_PO_WRITES === "1" && body.action === "createPurchaseOrder") {
+    const lines = body.lines as
+      | { description: string; quantity: number; unitPriceMinor: number; expenseAccountCode?: string; sku?: string }[]
+      | undefined;
+    if (!body.vendorId || !lines?.length)
+      return NextResponse.json({ error: "vendorId and lines are required" }, { status: 400 });
+    const input: Record<string, unknown> = {
+      vendorId: body.vendorId as string,
+      memo: (body.memo as string) || undefined,
+      promisedAt: (body.promisedAt as string) || undefined,
+      lines,
+    };
+    try {
+      return await purchasingGoResponse(await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "purchasing.createPurchaseOrder",
+        input,
+      }));
+    } catch {
+      return goUnavailable();
+    }
+  }
+
   switch (body.action) {
     case "createVendor":
       return respond(

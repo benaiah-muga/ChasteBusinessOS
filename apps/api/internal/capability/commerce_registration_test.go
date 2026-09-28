@@ -15,6 +15,7 @@ func TestCommerceCapabilitiesHaveConsistentGovernance(t *testing.T) {
 		{payExpenseClaimCapabilityID, "accounting.post", "accounting", "money", 50_000},
 		{listExpenseClaimsCapabilityID, "expenses.decide", "accounting", "read", 0},
 		{createVendorCapabilityID, "purchasing.write", "purchasing", "write", 0},
+		{createPurchaseOrderCapabilityID, "purchasing.write", "purchasing", "write", 0},
 		{createBillCapabilityID, "purchasing.write", "purchasing", "write", 0},
 		{payBillCapabilityID, "purchasing.post", "purchasing", "money", 50_000},
 		{reverseVendorPaymentCapabilityID, "purchasing.post", "purchasing", "money", 0},

@@ -464,3 +464,7 @@ new owners and the manifest shows zero legacy runtime paths.
     behind the independent default-off flags `GO_ACCOUNTING_EXPENSE_WRITES`,
     `GO_PURCHASING_BILL_WRITES`, `GO_INVENTORY_STOCK_WRITES`, and `GO_POS_WRITES`.
     Keep policy configuration and other actions on their existing handlers.
+14. Add Go parity for purchase order creation, including line defaults, SKU links,
+    tenant scoping, approval verification, receipt replay, and the capability jobs
+    worker path. Bridge only `createPurchaseOrder` behind the independent,
+    default-off `GO_PURCHASING_PO_WRITES` flag.

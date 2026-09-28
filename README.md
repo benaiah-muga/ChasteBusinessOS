@@ -150,6 +150,10 @@ flag defaults to `0`.
 into the signed Go capability bridge. Other purchasing actions remain on their
 existing handlers. It requires `pnpm dev:api`; uncertain writes fail closed
 without a TypeScript retry. The flag defaults to `0`.
+`GO_PURCHASING_PO_WRITES=1` opts purchase order creation into the signed Go
+capability bridge. Other purchasing actions remain on their existing
+handlers. It requires `pnpm dev:api`; uncertain writes fail closed without a
+TypeScript retry. The flag defaults to `0`.
 `GO_INVENTORY_STOCK_WRITES=1` opts stock adjustments and stock transfer
 creation, confirmation, cancellation, and reversal into the signed Go
 capability bridge. Other inventory actions remain on their existing handlers.

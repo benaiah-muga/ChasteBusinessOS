@@ -23,6 +23,7 @@ describe("purchasing Go route adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GO_PURCHASING_BILL_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_PO_WRITES", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -60,6 +61,47 @@ describe("purchasing Go route adapter", () => {
     vi.stubEnv("GO_PURCHASING_BILL_WRITES", "1");
     await POST(request({ action: "createPurchaseRequest", title: "Laptops", justification: "Hiring" }));
     expect(mocks.execute).toHaveBeenCalledWith("purchasing.createPurchaseRequest", ctx, { title: "Laptops", justification: "Hiring", estimatedAmountMinor: undefined });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("bridges only purchase order creation when its independent flag is on", async () => {
+    vi.stubEnv("GO_PURCHASING_PO_WRITES", "1");
+    const input = {
+      vendorId: "vendor-1",
+      memo: "Quarterly stock",
+      promisedAt: "2030-02-03T04:05:06.123Z",
+      lines: [{ description: "Chair frame", quantity: 2500, unitPriceMinor: 4500, sku: "CHAIR" }],
+    };
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { poNumber: 7 } }),
+    });
+
+    const response = await POST(request({ action: "createPurchaseOrder", ...input, intentId: "buy-intent" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: { poNumber: 7 } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.createPurchaseOrder",
+      input,
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps purchase order creation on TypeScript while its flag is off", async () => {
+    await POST(request({
+      action: "createPurchaseOrder",
+      vendorId: "vendor-1",
+      lines: [{ description: "Chair frame", quantity: 2500, unitPriceMinor: 4500 }],
+    }));
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.createPurchaseOrder", ctx, {
+      vendorId: "vendor-1",
+      lines: [{ description: "Chair frame", quantity: 2500, unitPriceMinor: 4500 }],
+      memo: undefined,
+    });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
   });
 

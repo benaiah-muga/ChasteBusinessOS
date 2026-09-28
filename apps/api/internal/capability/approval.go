@@ -307,6 +307,12 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case createPurchaseOrderCapabilityID:
+			parsed, parseErr := ParseCreatePurchaseOrderInput(transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case createVendorCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID:
 			parsed, parseErr := parsePurchasingBillInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
@@ -435,7 +441,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "expenses.decide", true
 	case payExpenseClaimCapabilityID:
 		return "accounting.post", true
-	case createVendorCapabilityID, createBillCapabilityID:
+	case createVendorCapabilityID, createPurchaseOrderCapabilityID, createBillCapabilityID:
 		return "purchasing.write", true
 	case payBillCapabilityID, reverseVendorPaymentCapabilityID:
 		return "purchasing.post", true
