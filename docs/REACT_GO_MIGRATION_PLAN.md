@@ -483,3 +483,9 @@ new owners and the manifest shows zero legacy runtime paths.
     adjustments, tenant isolation, approvals, audit, replay, and response shapes.
     Bridge only those four actions behind default-off
     `GO_INVENTORY_CYCLE_COUNTS`.
+16. (Done) Add Go parity for purchase order receiving through the governed
+    executor and jobs worker. Preserve duplicate-line aggregation, accepted and
+    rejected quantities, authority-gated over-receipt, stock and service-line
+    behavior, three-way matching, tenant isolation, approvals, audit, replay,
+    and response shapes. Bridge only `receiveGoods` behind default-off
+    `GO_PURCHASING_RECEIPT_WRITES`.

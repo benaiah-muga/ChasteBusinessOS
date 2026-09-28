@@ -24,6 +24,7 @@ describe("purchasing Go route adapter", () => {
     vi.clearAllMocks();
     vi.stubEnv("GO_PURCHASING_BILL_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_PO_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_RECEIPT_WRITES", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -104,6 +105,100 @@ describe("purchasing Go route adapter", () => {
     });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
   });
+
+  it("keeps receiving on TypeScript while its flag is off", async () => {
+    const body = {
+      action: "receiveGoods",
+      poNumber: 14,
+      lines: [{ lineNumber: 2, quantity: 1750, rejected: 250, rejectionNote: "Damaged" }],
+      overreceiptTolerancePct: 5,
+      authorityReason: "Supplier replacement",
+      note: "Partial delivery",
+    };
+
+    await POST(request(body));
+
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.receiveGoods", ctx, {
+      poNumber: 14,
+      lines: body.lines,
+      overreceiptTolerancePct: 5,
+      authorityReason: "Supplier replacement",
+      note: "Partial delivery",
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches receiving to Go and preserves the success response", async () => {
+    vi.stubEnv("GO_PURCHASING_RECEIPT_WRITES", "1");
+    const lines = [{ lineNumber: 2, quantity: 1750, rejected: 250, rejectionNote: "Damaged" }];
+    const input = {
+      poNumber: 14,
+      lines,
+      overreceiptTolerancePct: 5,
+      authorityReason: "Supplier replacement",
+      note: "Partial delivery",
+    };
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { receiptNumber: 19, fullyReceived: false } }),
+    });
+
+    const response = await POST(request({ action: "receiveGoods", ...input, intentId: "buy-intent" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: { receiptNumber: 19, fullyReceived: false } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.receiveGoods",
+      input,
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves pending approval responses for Go receiving", async () => {
+    vi.stubEnv("GO_PURCHASING_RECEIPT_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json(
+        { ok: false, pendingApproval: true, reason: "Overreceipt requires approval" },
+        { status: 202 },
+      ),
+    });
+
+    const response = await POST(request({
+      action: "receiveGoods",
+      poNumber: 14,
+      lines: [{ lineNumber: 2, quantity: 2200 }],
+    }));
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      ok: false,
+      pendingApproval: true,
+      reason: "Overreceipt requires approval",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([{ kind: "not-dispatched" }, { kind: "outcome-unknown" }])(
+    "does not retry a receiving write on $kind",
+    async (result) => {
+      vi.stubEnv("GO_PURCHASING_RECEIPT_WRITES", "1");
+      mocks.executeGoCapability.mockResolvedValue(result);
+
+      const response = await POST(request({
+        action: "receiveGoods",
+        poNumber: 14,
+        lines: [{ lineNumber: 2, quantity: 1750 }],
+      }));
+
+      expect(response.status).toBe(503);
+      expect(mocks.execute).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([{ kind: "not-dispatched" }, { kind: "outcome-unknown" }])("does not retry a bill write on $kind", async (result) => {
     vi.stubEnv("GO_PURCHASING_BILL_WRITES", "1");

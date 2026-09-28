@@ -660,6 +660,13 @@
       "when": 1790596386905,
       "tag": "0093_go_inventory_cycle_count_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1790596387905,
+      "tag": "0094_go_purchasing_receipt_jobs",
+      "breakpoints": true
     }
   ]
 }

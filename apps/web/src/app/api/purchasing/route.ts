@@ -259,6 +259,31 @@ export async function POST(req: Request) {
     }
   }
 
+  if (process.env.GO_PURCHASING_RECEIPT_WRITES === "1" && body.action === "receiveGoods") {
+    const lines = body.lines as
+      | { lineNumber: number; quantity: number; rejected?: number; rejectionNote?: string }[]
+      | undefined;
+    if (!body.poNumber || !lines?.length)
+      return NextResponse.json({ error: "poNumber and lines are required" }, { status: 400 });
+    const input: Record<string, unknown> = {
+      poNumber: body.poNumber as number,
+      lines,
+      overreceiptTolerancePct: (body.overreceiptTolerancePct as number) || undefined,
+      authorityReason: (body.authorityReason as string) || undefined,
+      note: (body.note as string) || undefined,
+    };
+    try {
+      return await purchasingGoResponse(await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "purchasing.receiveGoods",
+        input,
+      }));
+    } catch {
+      return goUnavailable();
+    }
+  }
+
   switch (body.action) {
     case "createVendor":
       return respond(

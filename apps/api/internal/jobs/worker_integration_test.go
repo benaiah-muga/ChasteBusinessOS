@@ -631,7 +631,7 @@ func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
 	}
 }
 
-func TestPurchasingCommerceJobsClaimThroughSystemPath(t *testing.T) {
+func TestPurchasingReceiveGoodsWorkerClaimAndExecution(t *testing.T) {
 	ownerURL := os.Getenv("DATABASE_URL")
 	if ownerURL == "" {
 		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
@@ -713,6 +713,25 @@ func TestPurchasingCommerceJobsClaimThroughSystemPath(t *testing.T) {
 		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
 		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.createPurchaseOrder'`, orgID); got != 1 {
 		t.Fatalf("system purchase order audit events=%d, want one", got)
+	}
+	receiptPayload := json.RawMessage(`{"poNumber":1,"lines":[{"lineNumber":1,"quantity":2000}]}`)
+	receiptJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.receiveGoods", receiptPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("receiveGoods job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, receiptJobID, "done", 1)
+	if worked, err := worker.ProcessOne(ctx); err != nil || worked {
+		t.Fatalf("completed receiveGoods job was claimed again: worked=%v err=%v", worked, err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM goods_receipts r JOIN purchase_orders p ON p.id=r.po_id
+		WHERE r.org_id=$1::uuid AND p.number=1 AND r.number=1`, orgID); got != 1 {
+		t.Fatalf("system goods receipts=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
+		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.receiveGoods'`, orgID); got != 1 {
+		t.Fatalf("system receipt audit events=%d, want one", got)
 	}
 }
 

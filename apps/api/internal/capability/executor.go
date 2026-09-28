@@ -108,6 +108,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	listExpenseClaimsCapabilityID:          {module: "accounting", permission: "expenses.decide", risk: "read"},
 	createVendorCapabilityID:               {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	createPurchaseOrderCapabilityID:        {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	receiveGoodsCapabilityID:               {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	createBillCapabilityID:                 {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	payBillCapabilityID:                    {module: "purchasing", permission: "purchasing.post", risk: "money", moneyThresholdMinor: 50_000},
 	reverseVendorPaymentCapabilityID:       {module: "purchasing", permission: "purchasing.post", risk: "money"},
@@ -149,7 +150,7 @@ func supportedCapability(capabilityID string) bool {
 		salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
 		createInvoiceCapabilityID, recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID, trialBalanceCapabilityID,
 		submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID,
-		createVendorCapabilityID, createPurchaseOrderCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID,
+		createVendorCapabilityID, createPurchaseOrderCapabilityID, receiveGoodsCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID,
 		inventoryAdjustStockCapabilityID, inventoryCreateTransferCapabilityID, inventoryConfirmTransferCapabilityID,
 		inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID, inventoryListTransfersCapabilityID,
 		inventoryCreateCycleCountCapabilityID, inventoryRecordCycleCountsCapabilityID,
@@ -478,6 +479,12 @@ func (e *Executor) execute(
 			input = parsed
 		case createPurchaseOrderCapabilityID:
 			parsed, err := ParseCreatePurchaseOrderInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case receiveGoodsCapabilityID:
+			parsed, err := ParseReceiveGoodsInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -849,6 +856,12 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case ReceiveGoodsInput:
+			output, err := receiveGoods(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case CreateBillInput:
 			output, err := createBill(ctx, tx, claims, parsed, now)
 			if err != nil {
@@ -1060,7 +1073,7 @@ func canonicalInputHash(input any) (string, error) {
 		SalesCreateOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
 		CreateInvoiceInput, RecordFxRateInput, RecordPaymentInput, ReversePaymentInput, TrialBalanceInput,
 		SubmitExpenseClaimInput, DecideExpenseClaimInput, PayExpenseClaimInput, ListExpenseClaimsInput,
-		CreateVendorInput, CreatePurchaseOrderInput, CreateBillInput, PayBillInput, ReverseVendorPaymentInput,
+		CreateVendorInput, CreatePurchaseOrderInput, ReceiveGoodsInput, CreateBillInput, PayBillInput, ReverseVendorPaymentInput,
 		InventoryAdjustStockInput, InventoryCreateTransferInput, InventoryConfirmTransferInput, InventoryCancelTransferInput,
 		InventoryReverseTransferInput, InventoryListTransfersInput,
 		InventoryCreateCycleCountInput, InventoryRecordCycleCountsInput, InventoryPostCycleCountInput, InventoryCancelCycleCountInput,

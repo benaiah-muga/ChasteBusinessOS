@@ -44,7 +44,7 @@ async function main() {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName: "M6 Everything Co",
+    orgName: `M6 Everything Co ${Date.now()}`,
     businessDescription: "Retail and wholesale hardware store testing teams, inventory, matching, and creator mode.",
   });
   const ownerCtx = {
@@ -57,12 +57,12 @@ async function main() {
   // ── 1. TEAMS & RBAC ────────────────────────────────────────────────
   console.log("\n── teams & rbac ──");
 
-  const clerk = await executor.execute("iam.createRole", ownerCtx, { key: "clerk", name: "Clerk" });
-  ok("role creation is identity-class and was gated for approval");
-  void clerk;
-  // createRole is identity → forced approval even for the owner. Approve it.
+  await executor.execute("iam.createRole", agentCtx, { key: "clerk", name: "Clerk" });
+  // Agent identity changes need human approval; a human acting for the
+  // organization executes directly under their own authority.
   const pending = (await db.select().from(approvals).where(and(eq(approvals.orgId, orgId), eq(approvals.status, "pending")))).at(-1);
-  if (!pending) throw new Error("createRole did not gate");
+  if (!pending) throw new Error("agent createRole did not gate");
+  ok("agent role creation is identity-class and gated for approval");
   const approvedRole = await executor.execute("iam.createRole", ownerCtx, pending.payload, {
     approvedApprovalId: pending.id,
   });
@@ -74,7 +74,6 @@ async function main() {
     "iam.updateRolePermissions",
     ownerCtx,
     { roleId, permissions: ["inventory.read", "pos.sell"] },
-    { approvedApprovalId: (await db.select().from(approvals).where(and(eq(approvals.orgId, orgId), eq(approvals.status, "pending")))).at(-1)!.id },
   );
   ok(`permissions set on clerk role (${setPerms.data?.permissionCount})`);
 

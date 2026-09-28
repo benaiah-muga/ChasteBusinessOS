@@ -362,3 +362,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /ALL MET/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Parent re-verification passed the Go lifecycle and worker claim tests, route bridge tests, TypeScript checks, full workspace tests, Go verification, migration inventories, and whitespace checks. Cycle counts preserve item-wide movement watermarks, location-scoped snapshot and adjustment behavior, tenant isolation, approvals, audit, replay, and the original public response shape. The Go route flag remains off by default. Browser checks remain deferred by request.
+
+- [x] G77: Go purchase order receiving preserves the existing stock, rejection, over-receipt, approval, audit, replay, and worker behavior behind a default-off route bridge.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:$PATH node /home/benaiah/.agents/skills/unlazy/scripts/gate-check.mjs --scope migration-purchasing-receipts --status
+  EXPECT: /ALL MET/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Parent re-verification passed the receipt and jobs worker DB gates, route tests, TypeScript typecheck and lint, all 25 workspace test tasks, Go test and vet, and route/capability/data inventories. The M6 proof passed all 21 guarantees after making its organization fixture repeatable and aligning its approval proof with human-versus-agent identity policy. Migration 0094 adds the receipt capability to the restrictive jobs policy and claim query. `GO_PURCHASING_RECEIPT_WRITES` remains off by default. Browser checks remain deferred by request.

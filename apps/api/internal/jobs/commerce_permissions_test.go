@@ -10,6 +10,7 @@ func TestCommerceWorkerPermissionsAreLeastPrivilege(t *testing.T) {
 		"accounting.listExpenseClaims":    "expenses.decide",
 		"purchasing.createVendor":         "purchasing.write",
 		"purchasing.createPurchaseOrder":  "purchasing.write",
+		"purchasing.receiveGoods":         "purchasing.write",
 		"purchasing.createBill":           "purchasing.write",
 		"purchasing.payBill":              "purchasing.post",
 		"purchasing.reverseVendorPayment": "purchasing.post",
