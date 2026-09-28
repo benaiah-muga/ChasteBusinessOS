@@ -498,3 +498,7 @@ new owners and the manifest shows zero legacy runtime paths.
     `GO_BANKING_WRITES`, the request workflow behind
     `GO_PURCHASING_REQUEST_WRITES`, and the item master behind
     `GO_INVENTORY_ITEM_WRITES`.
+18. (Done) Add Go parity for budget scenarios, period-close workflows, inventory
+    imports and reservations, supplier payment runs, and purchase returns.
+    Preserve tenant isolation, approvals, audit/replay receipts, worker
+    permissions, legacy HTTP responses, and fail-closed default-off bridges.

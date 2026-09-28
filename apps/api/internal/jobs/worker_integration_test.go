@@ -631,7 +631,7 @@ func TestInventoryCycleCountWorkerClaimAndExecute(t *testing.T) {
 	}
 }
 
-func TestPurchasingReceiveGoodsWorkerClaimAndExecution(t *testing.T) {
+func TestPurchasingReturnGoodsWorkerClaimAndExecution(t *testing.T) {
 	ownerURL := os.Getenv("DATABASE_URL")
 	if ownerURL == "" {
 		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
@@ -699,7 +699,10 @@ func TestPurchasingReceiveGoodsWorkerClaimAndExecution(t *testing.T) {
 	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Commerce jobs vendor') RETURNING id::text`, orgID).Scan(&vendorID); err != nil {
 		t.Fatal(err)
 	}
-	poPayload := json.RawMessage(fmt.Sprintf(`{"vendorId":%q,"lines":[{"description":"Stock item","quantity":2000,"unitPriceMinor":1500}]}`, vendorID))
+	if _, err := owner.Exec(ctx, `INSERT INTO items (org_id,sku,name,sale_price_minor) VALUES ($1::uuid,'PILOT-CEM','Pilot cement',1500)`, orgID); err != nil {
+		t.Fatal(err)
+	}
+	poPayload := json.RawMessage(fmt.Sprintf(`{"vendorId":%q,"lines":[{"description":"Stock item","quantity":2000,"unitPriceMinor":1500,"sku":"PILOT-CEM"}]}`, vendorID))
 	poJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.createPurchaseOrder", poPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
 	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
 		t.Fatalf("createPurchaseOrder job worked=%v err=%v", worked, err)
@@ -732,6 +735,26 @@ func TestPurchasingReceiveGoodsWorkerClaimAndExecution(t *testing.T) {
 		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
 		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.receiveGoods'`, orgID); got != 1 {
 		t.Fatalf("system receipt audit events=%d, want one", got)
+	}
+	returnPayload := json.RawMessage(`{"poNumber":1,"lines":[{"lineNumber":1,"quantity":500,"reason":"worker return"}]}`)
+	returnJobID := insertJobsTestJob(t, ctx, owner, orgID, "purchasing.returnGoods", returnPayload, 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("returnGoods job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, returnJobID, "done", 1)
+	if worked, err := worker.ProcessOne(ctx); err != nil || worked {
+		t.Fatalf("completed returnGoods job was claimed again: worked=%v err=%v", worked, err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM stock_movements sm JOIN items i ON i.id=sm.item_id
+		WHERE sm.org_id=$1::uuid AND sm.quantity_delta=-500 AND sm.ref_type='goods_receipt_line' AND sm.reason='purchase'
+		AND i.sku='PILOT-CEM'`, orgID); got != 1 {
+		t.Fatalf("system return stock movements=%d, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
+		AND actor_type='system' AND actor_id IS NULL AND capability_id='purchasing.returnGoods'`, orgID); got != 1 {
+		t.Fatalf("system return audit events=%d, want one", got)
 	}
 }
 

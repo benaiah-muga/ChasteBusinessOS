@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   getDb: vi.fn(),
   executeGoCapability: vi.fn(),
+  dispatchGoCapabilityRoute: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({ NextResponse: { json: (body: unknown, init?: ResponseInit) => Response.json(body, init) } }));
@@ -36,6 +37,7 @@ vi.mock("@/server/session", () => ({ getResolvedUser: mocks.getResolvedUser }));
 vi.mock("@/server/route-guards", () => ({ missingPermission: vi.fn(() => null) }));
 vi.mock("@/server/unit-of-work", () => ({ executeAtomically: vi.fn() }));
 vi.mock("@/server/go-bridge", () => ({ executeGoCapability: mocks.executeGoCapability }));
+vi.mock("@/server/go-route-response", () => ({ dispatchGoCapabilityRoute: mocks.dispatchGoCapabilityRoute }));
 
 import { POST } from "./route";
 
@@ -99,6 +101,7 @@ describe("POST /api/accounting Go invoice bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GO_ACCOUNTING_CREATE_INVOICE", "0");
+    vi.stubEnv("GO_ACCOUNTING_PERIOD_CLOSE_WRITES", "0");
     mocks.getResolvedUser.mockResolvedValue(resolved);
     mocks.actorFromResolved.mockReturnValue(actionContext);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -106,6 +109,7 @@ describe("POST /api/accounting Go invoice bridge", () => {
     mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
     mocks.execute.mockResolvedValue({ ok: true, data: invoiceOutput });
     mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+    mocks.dispatchGoCapabilityRoute.mockResolvedValue(Response.json({ ok: true, data: { closed: true } }));
   });
 
   afterEach(() => {
@@ -542,6 +546,34 @@ describe("POST /api/accounting Go invoice ops bridge", () => {
     mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
     const response = await POST(request({ action: "creditNote", invoiceId: "inv-1", amountMinor: 25000, reason: "Damaged goods" }));
     expect(response.status).toBe(503);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/accounting Go year close bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_PERIOD_CLOSE_WRITES", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { closed: true } });
+    mocks.dispatchGoCapabilityRoute.mockResolvedValue(Response.json({ ok: true, data: { closed: true } }));
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("bridges only closeYear when the shared period-close flag is enabled", async () => {
+    vi.stubEnv("GO_ACCOUNTING_PERIOD_CLOSE_WRITES", "1");
+    const response = await POST(request({ action: "closeYear", year: 2025 }));
+    expect(response.status).toBe(200);
+    expect(mocks.dispatchGoCapabilityRoute).toHaveBeenCalledWith({
+      actionContext,
+      session: resolved,
+      capabilityId: "accounting.closeYear",
+      input: { year: 2025 },
+    }, expect.stringContaining("year close status"));
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });

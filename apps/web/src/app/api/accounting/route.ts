@@ -21,6 +21,7 @@ import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
 import { executeAtomically } from "@/server/unit-of-work";
 import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+import { dispatchGoCapabilityRoute } from "@/server/go-route-response";
 
 export async function GET() {
   const resolved = await getResolvedUser();
@@ -412,6 +413,9 @@ export async function POST(req: Request) {
     return respond(result);
   }
   if (body.action === "closeYear" && body.year) {
+    if (process.env.GO_ACCOUNTING_PERIOD_CLOSE_WRITES === "1") {
+      return dispatchGoCapabilityRoute({ actionContext: humanCtx, session: resolved, capabilityId: "accounting.closeYear", input: { year: body.year } }, "accounting service unavailable; check year close status before retrying");
+    }
     const result = await executor.execute("accounting.closeYear", humanCtx, { year: body.year });
     return respond(result);
   }

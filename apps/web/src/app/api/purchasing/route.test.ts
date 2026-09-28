@@ -25,6 +25,7 @@ describe("purchasing Go route adapter", () => {
     vi.stubEnv("GO_PURCHASING_BILL_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_PO_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_RECEIPT_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_RETURN_WRITES", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -182,6 +183,37 @@ describe("purchasing Go route adapter", () => {
     });
     expect(mocks.execute).not.toHaveBeenCalled();
   });
+
+  it("dispatches vendor returns to Go without changing the public response", async () => {
+    vi.stubEnv("GO_PURCHASING_RETURN_WRITES", "1");
+    const input = { poNumber: 14, receiptNumber: 3, lines: [{ lineNumber: 1, quantity: 500, reason: "damaged goods" }] };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { returned: true, lines: 1 } }) });
+    const response = await POST(request({ action: "returnGoods", ...input, intentId: "return-intent" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: { returned: true, lines: 1 } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.returnGoods",
+      input,
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([{ kind: "not-dispatched" }, { kind: "outcome-unknown" }])(
+    "does not retry a vendor return on $kind",
+    async (result) => {
+      vi.stubEnv("GO_PURCHASING_RETURN_WRITES", "1");
+      mocks.executeGoCapability.mockResolvedValue(result);
+      const response = await POST(request({
+        action: "returnGoods",
+        poNumber: 14,
+        lines: [{ lineNumber: 1, quantity: 500, reason: "damaged goods" }],
+      }));
+      expect(response.status).toBe(503);
+      expect(mocks.execute).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([{ kind: "not-dispatched" }, { kind: "outcome-unknown" }])(
     "does not retry a receiving write on $kind",

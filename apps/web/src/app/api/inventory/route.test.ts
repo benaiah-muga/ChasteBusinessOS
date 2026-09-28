@@ -23,6 +23,7 @@ describe("inventory Go route adapter", () => {
     vi.clearAllMocks();
     vi.stubEnv("GO_INVENTORY_STOCK_WRITES", "0");
     vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS", "0");
+    vi.stubEnv("GO_INVENTORY_RESERVATION_WRITES", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -56,6 +57,21 @@ describe("inventory Go route adapter", () => {
       sku: "MUG-1", quantityDelta: 3000, note: "Opening stock", lotCode: undefined,
     });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches reservations through Go only when the reservation flag is enabled", async () => {
+    vi.stubEnv("GO_INVENTORY_RESERVATION_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { reservationId: "reservation-1" } }) });
+    const response = await POST(request({ action: "reserveStock", sku: "MUG-1", quantityThousandths: 1000, reason: "sales order" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: { reservationId: "reservation-1" } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.reserveStock",
+      input: { sku: "MUG-1", quantityThousandths: 1000, reason: "sales order" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 
   it.each([

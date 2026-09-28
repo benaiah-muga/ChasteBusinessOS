@@ -307,6 +307,13 @@ export async function POST(req: Request) {
     case "reserveStock": {
       if (!str("sku") || !num("quantityThousandths") || !str("reason"))
         return NextResponse.json({ error: "sku, quantityThousandths and reason required" }, { status: 400 });
+      if (process.env.GO_INVENTORY_RESERVATION_WRITES === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.reserveStock", {
+          sku: str("sku")!,
+          quantityThousandths: num("quantityThousandths")!,
+          reason: str("reason")!,
+        });
+      }
       return respond(
         await executor.execute("inventory.reserveStock", ctx, {
           sku: str("sku")!,
@@ -317,6 +324,9 @@ export async function POST(req: Request) {
     }
     case "releaseReservation":
       if (!str("reservationId")) return NextResponse.json({ error: "reservationId required" }, { status: 400 });
+      if (process.env.GO_INVENTORY_RESERVATION_WRITES === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.releaseReservation", { reservationId: str("reservationId")! });
+      }
       return respond(await executor.execute("inventory.releaseReservation", ctx, { reservationId: str("reservationId")! }));
     case "startCycleCount":
     case "createCycleCount": {

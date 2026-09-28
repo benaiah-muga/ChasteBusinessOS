@@ -58,107 +58,131 @@ type capabilitySpec struct {
 }
 
 var capabilitySpecs = map[string]capabilitySpec{
-	createCustomerCapabilityID:             {module: "crm", permission: "crm.write", risk: "write"},
-	deactivateCustomerCapabilityID:         {module: "crm", permission: "crm.write", risk: "write"},
-	mergeCustomersCapabilityID:             {module: "crm", permission: "crm.write", risk: "write"},
-	restoreCustomerMergeCapabilityID:       {module: "crm", permission: "crm.write", risk: "write"},
-	importCustomersCapabilityID:            {module: "crm", permission: "crm.write", risk: "write"},
-	undoCustomerImportCapabilityID:         {module: "crm", permission: "crm.write", risk: "write"},
-	restoreImportedCustomersCapabilityID:   {module: "crm", permission: "crm.write", risk: "write"},
-	updateCustomerProfilesCapabilityID:     {module: "crm", permission: "crm.write", risk: "write"},
-	restoreCustomerProfilesCapabilityID:    {module: "crm", permission: "crm.write", risk: "write"},
-	reapplyCustomerProfilesCapabilityID:    {module: "crm", permission: "crm.write", risk: "write"},
-	listCustomersCapabilityID:              {module: "crm", permission: "crm.read", risk: "read"},
-	pipelineReportCapabilityID:             {module: "crm", permission: "crm.read", risk: "read"},
-	listTasksCapabilityID:                  {module: "crm", permission: "crm.read", risk: "read"},
-	customerTimelineCapabilityID:           {module: "crm", permission: "crm.read", risk: "read"},
-	createDealCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write"},
-	moveDealStageCapabilityID:              {module: "crm", permission: "crm.write", risk: "write"},
-	convertLeadCapabilityID:                {module: "crm", permission: "crm.write", risk: "write"},
-	createTaskCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write"},
-	completeTaskCapabilityID:               {module: "crm", permission: "crm.write", risk: "write"},
-	updateTaskDetailsCapabilityID:          {module: "crm", permission: "crm.write", risk: "write"},
-	restoreTaskDetailsCapabilityID:         {module: "crm", permission: "crm.write", risk: "write"},
-	createQuoteCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
-	acceptQuoteCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
-	declineQuoteCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
-	expireQuoteCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
-	listQuotesCapabilityID:                 {module: "accounting", permission: "accounting.read", risk: "read"},
-	createRecurringTemplateCapabilityID:    {module: "accounting", permission: "accounting.write", risk: "write"},
-	pauseRecurringTemplateCapabilityID:     {module: "accounting", permission: "accounting.write", risk: "write"},
-	resumeRecurringTemplateCapabilityID:    {module: "accounting", permission: "accounting.write", risk: "write"},
-	listRecurringTemplatesCapabilityID:     {module: "accounting", permission: "accounting.read", risk: "read"},
-	hrHireEmployeeCapabilityID:             {module: "hr", permission: "hr.write", risk: "write"},
-	hrDeactivateEmployeeCapabilityID:       {module: "hr", permission: "hr.write", risk: "write"},
-	hrListEmployeesCapabilityID:            {module: "hr", permission: "hr.read", risk: "read"},
-	hrUpdateEmployeeStructureCapabilityID:  {module: "hr", permission: "hr.write", risk: "write"},
-	salesCreateOrderCapabilityID:           {module: "sales", permission: "sales.write", risk: "write"},
-	salesConfirmOrderCapabilityID:          {module: "sales", permission: "sales.write", risk: "write"},
-	salesDeliverOrderCapabilityID:          {module: "sales", permission: "sales.write", risk: "write"},
-	salesCancelOrderCapabilityID:           {module: "sales", permission: "sales.write", risk: "write"},
-	salesListOrdersCapabilityID:            {module: "sales", permission: "sales.read", risk: "read"},
-	createInvoiceCapabilityID:              {module: "accounting", permission: "accounting.write", risk: "write"},
-	recordFxRateCapabilityID:               {module: "accounting", permission: "accounting.post", risk: "write"},
-	recordPaymentCapabilityID:              {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
-	reversePaymentCapabilityID:             {module: "accounting", permission: "accounting.post", risk: "money"},
-	trialBalanceCapabilityID:               {module: "accounting", permission: "accounting.read", risk: "read"},
-	submitExpenseClaimCapabilityID:         {module: "accounting", permission: "expenses.submit", risk: "write"},
-	decideExpenseClaimCapabilityID:         {module: "accounting", permission: "expenses.decide", risk: "write"},
-	payExpenseClaimCapabilityID:            {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
-	listExpenseClaimsCapabilityID:          {module: "accounting", permission: "expenses.decide", risk: "read"},
-	createVendorCapabilityID:               {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	createPurchaseOrderCapabilityID:        {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	receiveGoodsCapabilityID:               {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	createBillCapabilityID:                 {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	payBillCapabilityID:                    {module: "purchasing", permission: "purchasing.post", risk: "money", moneyThresholdMinor: 50_000},
-	reverseVendorPaymentCapabilityID:       {module: "purchasing", permission: "purchasing.post", risk: "money"},
-	inventoryAdjustStockCapabilityID:       {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryCreateCycleCountCapabilityID:  {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryRecordCycleCountsCapabilityID: {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryPostCycleCountCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryCancelCycleCountCapabilityID:  {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryCreateTransferCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryConfirmTransferCapabilityID:   {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryCancelTransferCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryReverseTransferCapabilityID:   {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryListTransfersCapabilityID:     {module: "inventory", permission: "inventory.read", risk: "read"},
-	posOpenSessionCapabilityID:             {module: "pos", permission: "pos.write", risk: "write"},
-	posCompleteSaleCapabilityID:            {module: "pos", permission: "pos.sell", risk: "money", moneyThresholdMinor: 100_000},
-	posCloseSessionCapabilityID:            {module: "pos", permission: "pos.write", risk: "write"},
-	posReturnSaleCapabilityID:              {module: "pos", permission: "pos.sell", risk: "money"},
-	posShiftSummaryCapabilityID:            {module: "pos", permission: "pos.read", risk: "read"},
-	creditNoteCapabilityID:                 {module: "accounting", permission: "accounting.post", risk: "money"},
-	shareInvoiceCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
-	generateDueInvoicesCapabilityID:        {module: "accounting", permission: "accounting.write", risk: "write"},
-	reverseEntryCapabilityID:               {module: "accounting", permission: "accounting.post", risk: "money"},
-	addBankAccountCapabilityID:             {module: "accounting", permission: "accounting.write", risk: "write"},
-	importBankFeedCapabilityID:             {module: "accounting", permission: "accounting.write", risk: "write"},
-	deleteBankTransactionCapabilityID:      {module: "accounting", permission: "accounting.write", risk: "write"},
-	matchBankTransactionCapabilityID:       {module: "accounting", permission: "accounting.write", risk: "write"},
-	unmatchBankTransactionCapabilityID:     {module: "accounting", permission: "accounting.write", risk: "write"},
-	bankReconciliationCapabilityID:         {module: "accounting", permission: "accounting.read", risk: "read"},
-	excludeBankTransactionCapabilityID:     {module: "accounting", permission: "accounting.write", risk: "write"},
-	unexcludeBankTransactionCapabilityID:   {module: "accounting", permission: "accounting.write", risk: "write"},
-	bankSummaryCapabilityID:                {module: "accounting", permission: "accounting.read", risk: "read"},
-	createPurchaseRequestCapabilityID:      {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	decidePurchaseRequestCapabilityID:      {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	createRfqCapabilityID:                  {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	recordQuoteCapabilityID:                {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	selectWinningQuoteCapabilityID:         {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	listPurchaseWorkflowCapabilityID:       {module: "purchasing", permission: "purchasing.read", risk: "read"},
-	inventoryCreateItemCapabilityID:        {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryUpdateItemCapabilityID:        {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryRestoreItemCapabilityID:       {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryArchiveItemCapabilityID:       {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryCreateLocationCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryListLocationsCapabilityID:     {module: "inventory", permission: "inventory.read", risk: "read"},
-	inventoryLookupByBarcodeCapabilityID:   {module: "inventory", permission: "inventory.read", risk: "read"},
-	createProjectCapabilityID:              {module: "projects", permission: "projects.write", risk: "write"},
-	ProjectBoardReadCapabilityID:           {module: "projects", permission: "projects.read", risk: "read"},
-	archiveProjectCapabilityID:             {module: "projects", permission: "projects.write", risk: "write"},
-	createProjectTaskCapabilityID:          {module: "projects", permission: "projects.write", risk: "write"},
-	moveProjectTaskCapabilityID:            {module: "projects", permission: "projects.write", risk: "write"},
-	assignProjectTaskCapabilityID:          {module: "projects", permission: "projects.write", risk: "write"},
+	createCustomerCapabilityID:               {module: "crm", permission: "crm.write", risk: "write"},
+	deactivateCustomerCapabilityID:           {module: "crm", permission: "crm.write", risk: "write"},
+	mergeCustomersCapabilityID:               {module: "crm", permission: "crm.write", risk: "write"},
+	restoreCustomerMergeCapabilityID:         {module: "crm", permission: "crm.write", risk: "write"},
+	importCustomersCapabilityID:              {module: "crm", permission: "crm.write", risk: "write"},
+	undoCustomerImportCapabilityID:           {module: "crm", permission: "crm.write", risk: "write"},
+	restoreImportedCustomersCapabilityID:     {module: "crm", permission: "crm.write", risk: "write"},
+	updateCustomerProfilesCapabilityID:       {module: "crm", permission: "crm.write", risk: "write"},
+	restoreCustomerProfilesCapabilityID:      {module: "crm", permission: "crm.write", risk: "write"},
+	reapplyCustomerProfilesCapabilityID:      {module: "crm", permission: "crm.write", risk: "write"},
+	listCustomersCapabilityID:                {module: "crm", permission: "crm.read", risk: "read"},
+	pipelineReportCapabilityID:               {module: "crm", permission: "crm.read", risk: "read"},
+	listTasksCapabilityID:                    {module: "crm", permission: "crm.read", risk: "read"},
+	customerTimelineCapabilityID:             {module: "crm", permission: "crm.read", risk: "read"},
+	createDealCapabilityID:                   {module: "crm", permission: "crm.write", risk: "write"},
+	moveDealStageCapabilityID:                {module: "crm", permission: "crm.write", risk: "write"},
+	convertLeadCapabilityID:                  {module: "crm", permission: "crm.write", risk: "write"},
+	createTaskCapabilityID:                   {module: "crm", permission: "crm.write", risk: "write"},
+	completeTaskCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write"},
+	updateTaskDetailsCapabilityID:            {module: "crm", permission: "crm.write", risk: "write"},
+	restoreTaskDetailsCapabilityID:           {module: "crm", permission: "crm.write", risk: "write"},
+	createQuoteCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write"},
+	acceptQuoteCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write"},
+	declineQuoteCapabilityID:                 {module: "accounting", permission: "accounting.write", risk: "write"},
+	expireQuoteCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write"},
+	listQuotesCapabilityID:                   {module: "accounting", permission: "accounting.read", risk: "read"},
+	createRecurringTemplateCapabilityID:      {module: "accounting", permission: "accounting.write", risk: "write"},
+	pauseRecurringTemplateCapabilityID:       {module: "accounting", permission: "accounting.write", risk: "write"},
+	resumeRecurringTemplateCapabilityID:      {module: "accounting", permission: "accounting.write", risk: "write"},
+	listRecurringTemplatesCapabilityID:       {module: "accounting", permission: "accounting.read", risk: "read"},
+	hrHireEmployeeCapabilityID:               {module: "hr", permission: "hr.write", risk: "write"},
+	hrDeactivateEmployeeCapabilityID:         {module: "hr", permission: "hr.write", risk: "write"},
+	hrListEmployeesCapabilityID:              {module: "hr", permission: "hr.read", risk: "read"},
+	hrUpdateEmployeeStructureCapabilityID:    {module: "hr", permission: "hr.write", risk: "write"},
+	salesCreateOrderCapabilityID:             {module: "sales", permission: "sales.write", risk: "write"},
+	salesConfirmOrderCapabilityID:            {module: "sales", permission: "sales.write", risk: "write"},
+	salesDeliverOrderCapabilityID:            {module: "sales", permission: "sales.write", risk: "write"},
+	salesCancelOrderCapabilityID:             {module: "sales", permission: "sales.write", risk: "write"},
+	salesListOrdersCapabilityID:              {module: "sales", permission: "sales.read", risk: "read"},
+	createInvoiceCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
+	recordFxRateCapabilityID:                 {module: "accounting", permission: "accounting.post", risk: "write"},
+	recordPaymentCapabilityID:                {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
+	reversePaymentCapabilityID:               {module: "accounting", permission: "accounting.post", risk: "money"},
+	trialBalanceCapabilityID:                 {module: "accounting", permission: "accounting.read", risk: "read"},
+	submitExpenseClaimCapabilityID:           {module: "accounting", permission: "expenses.submit", risk: "write"},
+	decideExpenseClaimCapabilityID:           {module: "accounting", permission: "expenses.decide", risk: "write"},
+	payExpenseClaimCapabilityID:              {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
+	listExpenseClaimsCapabilityID:            {module: "accounting", permission: "expenses.decide", risk: "read"},
+	createVendorCapabilityID:                 {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	createPurchaseOrderCapabilityID:          {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	receiveGoodsCapabilityID:                 {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	returnGoodsCapabilityID:                  {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	createBillCapabilityID:                   {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	payBillCapabilityID:                      {module: "purchasing", permission: "purchasing.post", risk: "money", moneyThresholdMinor: 50_000},
+	reverseVendorPaymentCapabilityID:         {module: "purchasing", permission: "purchasing.post", risk: "money"},
+	inventoryAdjustStockCapabilityID:         {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCreateCycleCountCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryRecordCycleCountsCapabilityID:   {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryPostCycleCountCapabilityID:      {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCancelCycleCountCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCreateTransferCapabilityID:      {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryConfirmTransferCapabilityID:     {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCancelTransferCapabilityID:      {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryReverseTransferCapabilityID:     {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryListTransfersCapabilityID:       {module: "inventory", permission: "inventory.read", risk: "read"},
+	posOpenSessionCapabilityID:               {module: "pos", permission: "pos.write", risk: "write"},
+	posCompleteSaleCapabilityID:              {module: "pos", permission: "pos.sell", risk: "money", moneyThresholdMinor: 100_000},
+	posCloseSessionCapabilityID:              {module: "pos", permission: "pos.write", risk: "write"},
+	posReturnSaleCapabilityID:                {module: "pos", permission: "pos.sell", risk: "money"},
+	posShiftSummaryCapabilityID:              {module: "pos", permission: "pos.read", risk: "read"},
+	creditNoteCapabilityID:                   {module: "accounting", permission: "accounting.post", risk: "money"},
+	shareInvoiceCapabilityID:                 {module: "accounting", permission: "accounting.write", risk: "write"},
+	generateDueInvoicesCapabilityID:          {module: "accounting", permission: "accounting.write", risk: "write"},
+	reverseEntryCapabilityID:                 {module: "accounting", permission: "accounting.post", risk: "money"},
+	addBankAccountCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
+	importBankFeedCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
+	deleteBankTransactionCapabilityID:        {module: "accounting", permission: "accounting.write", risk: "write"},
+	matchBankTransactionCapabilityID:         {module: "accounting", permission: "accounting.write", risk: "write"},
+	unmatchBankTransactionCapabilityID:       {module: "accounting", permission: "accounting.write", risk: "write"},
+	bankReconciliationCapabilityID:           {module: "accounting", permission: "accounting.read", risk: "read"},
+	excludeBankTransactionCapabilityID:       {module: "accounting", permission: "accounting.write", risk: "write"},
+	unexcludeBankTransactionCapabilityID:     {module: "accounting", permission: "accounting.write", risk: "write"},
+	bankSummaryCapabilityID:                  {module: "accounting", permission: "accounting.read", risk: "read"},
+	createPurchaseRequestCapabilityID:        {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	decidePurchaseRequestCapabilityID:        {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	createRfqCapabilityID:                    {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	recordQuoteCapabilityID:                  {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	selectWinningQuoteCapabilityID:           {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	listPurchaseWorkflowCapabilityID:         {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	inventoryCreateItemCapabilityID:          {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryUpdateItemCapabilityID:          {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryRestoreItemCapabilityID:         {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryArchiveItemCapabilityID:         {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCreateLocationCapabilityID:      {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryListLocationsCapabilityID:       {module: "inventory", permission: "inventory.read", risk: "read"},
+	inventoryLookupByBarcodeCapabilityID:     {module: "inventory", permission: "inventory.read", risk: "read"},
+	inventoryImportItemsCapabilityID:         {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryUndoItemImportCapabilityID:      {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryRestoreItemImportCapabilityID:   {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryReserveStockCapabilityID:        {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryReleaseReservationCapabilityID:  {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryListReservationsCapabilityID:    {module: "inventory", permission: "inventory.read", risk: "read"},
+	createPaymentRunCapabilityID:             {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	cancelPaymentRunDraftCapabilityID:        {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	restorePaymentRunDraftCapabilityID:       {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	instructPaymentRunCapabilityID:           {module: "purchasing", permission: "purchasing.post", risk: "money"},
+	reversePaymentRunCapabilityID:            {module: "purchasing", permission: "purchasing.post", risk: "money"},
+	listPaymentRunsCapabilityID:              {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	periodCloseWorkbenchCapabilityID:         {module: "accounting", permission: "accounting.read", risk: "read"},
+	updatePeriodCloseCheckCapabilityID:       {module: "accounting", permission: "accounting.write", risk: "write"},
+	restorePeriodCloseCheckCapabilityID:      {module: "accounting", permission: "accounting.write", risk: "write"},
+	closePeriodCapabilityID:                  {module: "accounting", permission: "accounting.admin", risk: "destructive"},
+	reopenPeriodCapabilityID:                 {module: "accounting", permission: "accounting.admin", risk: "destructive"},
+	closeYearCapabilityID:                    {module: "accounting", permission: "accounting.admin", risk: "destructive"},
+	saveBudgetScenarioCapabilityID:           {module: "accounting", permission: "accounting.write", risk: "write"},
+	undoBudgetScenarioVersionCapabilityID:    {module: "accounting", permission: "accounting.write", risk: "write"},
+	restoreBudgetScenarioVersionCapabilityID: {module: "accounting", permission: "accounting.write", risk: "write"},
+	listBudgetScenariosCapabilityID:          {module: "accounting", permission: "accounting.read", risk: "read"},
+	budgetActualVsPlanCapabilityID:           {module: "accounting", permission: "accounting.read", risk: "read"},
+	createProjectCapabilityID:                {module: "projects", permission: "projects.write", risk: "write"},
+	ProjectBoardReadCapabilityID:             {module: "projects", permission: "projects.read", risk: "read"},
+	archiveProjectCapabilityID:               {module: "projects", permission: "projects.write", risk: "write"},
+	createProjectTaskCapabilityID:            {module: "projects", permission: "projects.write", risk: "write"},
+	moveProjectTaskCapabilityID:              {module: "projects", permission: "projects.write", risk: "write"},
+	assignProjectTaskCapabilityID:            {module: "projects", permission: "projects.write", risk: "write"},
 }
 
 func supportedCapability(capabilityID string) bool {
@@ -176,7 +200,7 @@ func supportedCapability(capabilityID string) bool {
 		salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
 		createInvoiceCapabilityID, recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID, trialBalanceCapabilityID,
 		submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID,
-		createVendorCapabilityID, createPurchaseOrderCapabilityID, receiveGoodsCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID,
+		createVendorCapabilityID, createPurchaseOrderCapabilityID, receiveGoodsCapabilityID, returnGoodsCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID,
 		inventoryAdjustStockCapabilityID, inventoryCreateTransferCapabilityID, inventoryConfirmTransferCapabilityID,
 		inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID, inventoryListTransfersCapabilityID,
 		inventoryCreateCycleCountCapabilityID, inventoryRecordCycleCountsCapabilityID,
@@ -191,6 +215,14 @@ func supportedCapability(capabilityID string) bool {
 		inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
 		inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
 		inventoryLookupByBarcodeCapabilityID,
+		inventoryImportItemsCapabilityID, inventoryUndoItemImportCapabilityID, inventoryRestoreItemImportCapabilityID,
+		inventoryReserveStockCapabilityID, inventoryReleaseReservationCapabilityID, inventoryListReservationsCapabilityID,
+		createPaymentRunCapabilityID, cancelPaymentRunDraftCapabilityID, restorePaymentRunDraftCapabilityID,
+		instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID,
+		periodCloseWorkbenchCapabilityID, updatePeriodCloseCheckCapabilityID, restorePeriodCloseCheckCapabilityID,
+		closePeriodCapabilityID, reopenPeriodCapabilityID, closeYearCapabilityID,
+		saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID,
+		listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID:
 		return true
 	default:
@@ -524,6 +556,12 @@ func (e *Executor) execute(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case returnGoodsCapabilityID:
+			parsed, err := ParseReturnGoodsInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
 		case createVendorCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID:
 			parsed, err := parsePurchasingBillInput(capabilityID, rawInput)
 			if err != nil {
@@ -575,6 +613,34 @@ func (e *Executor) execute(
 			inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
 			inventoryLookupByBarcodeCapabilityID:
 			parsed, err := parseInventoryItemInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case inventoryImportItemsCapabilityID, inventoryUndoItemImportCapabilityID, inventoryRestoreItemImportCapabilityID,
+			inventoryReserveStockCapabilityID, inventoryReleaseReservationCapabilityID, inventoryListReservationsCapabilityID:
+			parsed, err := parseInventoryImportInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case createPaymentRunCapabilityID, cancelPaymentRunDraftCapabilityID, restorePaymentRunDraftCapabilityID,
+			instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID:
+			parsed, err := parsePurchasingPaymentRunInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case periodCloseWorkbenchCapabilityID, updatePeriodCloseCheckCapabilityID, restorePeriodCloseCheckCapabilityID,
+			closePeriodCapabilityID, reopenPeriodCapabilityID, closeYearCapabilityID:
+			parsed, err := parseAccountingPeriodCloseInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID,
+			listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID:
+			parsed, err := parseAccountingBudgetInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -926,6 +992,12 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case ReturnGoodsInput:
+			output, err := returnGoods(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case CreateBillInput:
 			output, err := createBill(ctx, tx, claims, parsed, now)
 			if err != nil {
@@ -1220,6 +1292,132 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case InventoryImportItemsInput:
+			output, err := inventoryImportItems(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryUndoItemImportInput:
+			output, err := inventoryUndoItemImport(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryRestoreItemImportInput:
+			output, err := inventoryRestoreItemImport(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryReserveStockInput:
+			output, err := inventoryReserveStock(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryReleaseReservationInput:
+			output, err := inventoryReleaseReservation(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryListReservationsInput:
+			output, err := inventoryListReservations(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatePaymentRunInput:
+			output, err := createPaymentRun(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PaymentRunIDInput:
+			var output any
+			var execErr error
+			switch capabilityID {
+			case restorePaymentRunDraftCapabilityID:
+				output, execErr = restorePaymentRunDraft(ctx, tx, claims.OrganizationID, parsed)
+			case instructPaymentRunCapabilityID:
+				output, execErr = instructPaymentRun(ctx, tx, claims, parsed, now)
+			default:
+				output, execErr = cancelPaymentRunDraft(ctx, tx, claims.OrganizationID, parsed)
+			}
+			if execErr != nil {
+				return Result{}, execErr
+			}
+			data, err = marshalJS(output)
+		case ReversePaymentRunInput:
+			output, err := reversePaymentRun(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListPaymentRunsInput:
+			output, err := listPaymentRuns(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ClosePeriodInput:
+			var output any
+			var execErr error
+			switch capabilityID {
+			case periodCloseWorkbenchCapabilityID:
+				output, execErr = periodCloseWorkbench(ctx, tx, claims.OrganizationID, parsed)
+			case reopenPeriodCapabilityID:
+				output, execErr = reopenPeriod(ctx, tx, claims.OrganizationID, parsed)
+			default:
+				output, execErr = closePeriod(ctx, tx, claims, parsed)
+			}
+			if execErr != nil {
+				return Result{}, execErr
+			}
+			data, err = marshalJS(output)
+		case PeriodCloseCheckInput:
+			output, err := persistPeriodCloseCheck(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CloseYearInput:
+			output, err := closeYear(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SaveBudgetScenarioInput:
+			output, err := saveBudgetScenario(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case BudgetScenarioVersionInput:
+			var output any
+			var execErr error
+			if capabilityID == restoreBudgetScenarioVersionCapabilityID {
+				output, execErr = restoreBudgetScenarioVersion(ctx, tx, claims.OrganizationID, parsed)
+			} else {
+				output, execErr = undoBudgetScenarioVersion(ctx, tx, claims.OrganizationID, parsed)
+			}
+			if execErr != nil {
+				return Result{}, execErr
+			}
+			data, err = marshalJS(output)
+		case ListBudgetScenariosInput:
+			output, err := listBudgetScenarios(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case BudgetActualVsPlanInput:
+			output, err := budgetActualVsPlan(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		default:
 			return Result{}, errors.New("unsupported capability input")
 		}
@@ -1287,7 +1485,7 @@ func canonicalInputHash(input any) (string, error) {
 		SalesCreateOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
 		CreateInvoiceInput, RecordFxRateInput, RecordPaymentInput, ReversePaymentInput, TrialBalanceInput,
 		SubmitExpenseClaimInput, DecideExpenseClaimInput, PayExpenseClaimInput, ListExpenseClaimsInput,
-		CreateVendorInput, CreatePurchaseOrderInput, ReceiveGoodsInput, CreateBillInput, PayBillInput, ReverseVendorPaymentInput,
+		CreateVendorInput, CreatePurchaseOrderInput, ReceiveGoodsInput, ReturnGoodsInput, CreateBillInput, PayBillInput, ReverseVendorPaymentInput,
 		InventoryAdjustStockInput, InventoryCreateTransferInput, InventoryConfirmTransferInput, InventoryCancelTransferInput,
 		InventoryReverseTransferInput, InventoryListTransfersInput,
 		InventoryCreateCycleCountInput, InventoryRecordCycleCountsInput, InventoryPostCycleCountInput, InventoryCancelCycleCountInput,
@@ -1300,6 +1498,11 @@ func canonicalInputHash(input any) (string, error) {
 		SelectWinningQuoteInput, ListPurchaseWorkflowInput,
 		InventoryCreateItemInput, InventoryItemPatchInput, InventoryArchiveItemInput, InventoryCreateLocationInput,
 		InventoryListLocationsInput, InventoryLookupByBarcodeInput,
+		InventoryImportItemsInput, InventoryUndoItemImportInput, InventoryRestoreItemImportInput,
+		InventoryReserveStockInput, InventoryReleaseReservationInput, InventoryListReservationsInput,
+		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput,
+		ClosePeriodInput, PeriodCloseCheckInput, CloseYearInput,
+		SaveBudgetScenarioInput, BudgetScenarioVersionInput, ListBudgetScenariosInput, BudgetActualVsPlanInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput:
 		return canonicalHash(parsed)
 	default:

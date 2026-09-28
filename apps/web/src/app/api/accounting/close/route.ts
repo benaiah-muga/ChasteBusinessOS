@@ -4,6 +4,7 @@ import { buildExecutor, buildRegistry, actorFromResolved } from "@/server/kernel
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
 import { getDb } from "@chaste/db";
+import { dispatchGoCapabilityRoute } from "@/server/go-route-response";
 
 const closeWindow = z.object({ year: z.coerce.number().int().min(2000).max(2100), month: z.coerce.number().int().min(1).max(12) });
 
@@ -28,6 +29,9 @@ export async function GET(req: Request) {
   const period = query.success ? query.data : { year: prior.getUTCFullYear(), month: prior.getUTCMonth() + 1 };
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  if (process.env.GO_ACCOUNTING_PERIOD_CLOSE_WRITES === "1") {
+    return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "accounting.periodCloseWorkbench", input: period }, "accounting service unavailable; check period close status before retrying");
+  }
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
   return respond(await executor.execute("accounting.periodCloseWorkbench", ctx, period));
@@ -55,6 +59,17 @@ export async function POST(req: Request) {
   if (denied) return denied;
   const ctx = actorFromResolved(resolved, { intentId: body.intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  if (process.env.GO_ACCOUNTING_PERIOD_CLOSE_WRITES === "1") {
+    if (body.action === "checklist" && body.taskKey !== undefined && body.completed !== undefined) {
+      return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "accounting.updatePeriodCloseCheck", input: { year: body.year, month: body.month, taskKey: body.taskKey, completed: body.completed, note: body.note } }, "accounting service unavailable; check period close status before retrying");
+    }
+    if (body.action === "close") {
+      return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "accounting.closePeriod", input: { year: body.year, month: body.month } }, "accounting service unavailable; check period close status before retrying");
+    }
+    if (body.action === "reopen") {
+      return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "accounting.reopenPeriod", input: { year: body.year, month: body.month } }, "accounting service unavailable; check period close status before retrying");
+    }
+  }
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
   if (body.action === "checklist" && body.taskKey !== undefined && body.completed !== undefined) {

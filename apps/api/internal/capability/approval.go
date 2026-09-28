@@ -325,6 +325,12 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case returnGoodsCapabilityID:
+			parsed, parseErr := ParseReturnGoodsInput(transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case inventoryAdjustStockCapabilityID, inventoryCreateTransferCapabilityID, inventoryConfirmTransferCapabilityID,
 			inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID, inventoryListTransfersCapabilityID:
 			parsed, parseErr := parseInventoryStockInput(transition.row.CapabilityID, transition.row.Payload)
@@ -370,6 +376,34 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 			inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
 			inventoryLookupByBarcodeCapabilityID:
 			parsed, parseErr := parseInventoryItemInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case inventoryImportItemsCapabilityID, inventoryUndoItemImportCapabilityID, inventoryRestoreItemImportCapabilityID,
+			inventoryReserveStockCapabilityID, inventoryReleaseReservationCapabilityID, inventoryListReservationsCapabilityID:
+			parsed, parseErr := parseInventoryImportInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case createPaymentRunCapabilityID, cancelPaymentRunDraftCapabilityID, restorePaymentRunDraftCapabilityID,
+			instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID:
+			parsed, parseErr := parsePurchasingPaymentRunInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case periodCloseWorkbenchCapabilityID, updatePeriodCloseCheckCapabilityID, restorePeriodCloseCheckCapabilityID,
+			closePeriodCapabilityID, reopenPeriodCapabilityID, closeYearCapabilityID:
+			parsed, parseErr := parseAccountingPeriodCloseInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID,
+			listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID:
+			parsed, parseErr := parseAccountingBudgetInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
@@ -483,7 +517,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "expenses.decide", true
 	case payExpenseClaimCapabilityID:
 		return "accounting.post", true
-	case createVendorCapabilityID, createPurchaseOrderCapabilityID, receiveGoodsCapabilityID, createBillCapabilityID:
+	case createVendorCapabilityID, createPurchaseOrderCapabilityID, receiveGoodsCapabilityID, returnGoodsCapabilityID, createBillCapabilityID:
 		return "purchasing.write", true
 	case payBillCapabilityID, reverseVendorPaymentCapabilityID:
 		return "purchasing.post", true
@@ -519,6 +553,27 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "inventory.write", true
 	case inventoryListLocationsCapabilityID, inventoryLookupByBarcodeCapabilityID:
 		return "inventory.read", true
+	case inventoryImportItemsCapabilityID, inventoryUndoItemImportCapabilityID, inventoryRestoreItemImportCapabilityID,
+		inventoryReserveStockCapabilityID, inventoryReleaseReservationCapabilityID:
+		return "inventory.write", true
+	case inventoryListReservationsCapabilityID:
+		return "inventory.read", true
+	case createPaymentRunCapabilityID, cancelPaymentRunDraftCapabilityID, restorePaymentRunDraftCapabilityID:
+		return "purchasing.write", true
+	case instructPaymentRunCapabilityID, reversePaymentRunCapabilityID:
+		return "purchasing.post", true
+	case listPaymentRunsCapabilityID:
+		return "purchasing.read", true
+	case periodCloseWorkbenchCapabilityID:
+		return "accounting.read", true
+	case updatePeriodCloseCheckCapabilityID, restorePeriodCloseCheckCapabilityID:
+		return "accounting.write", true
+	case closePeriodCapabilityID, reopenPeriodCapabilityID, closeYearCapabilityID:
+		return "accounting.admin", true
+	case saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID:
+		return "accounting.write", true
+	case listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID:
+		return "accounting.read", true
 	default:
 		return "", false
 	}

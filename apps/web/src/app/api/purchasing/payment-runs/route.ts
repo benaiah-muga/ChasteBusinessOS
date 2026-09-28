@@ -4,6 +4,7 @@ import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
 import { getDb } from "@chaste/db";
+import { dispatchGoCapabilityRoute } from "@/server/go-route-response";
 
 function respond(result: { ok: boolean; data?: unknown; error?: string; pendingApproval?: unknown }) {
   if (result.pendingApproval) return NextResponse.json({ ok: false, pendingApproval: true, reason: result.error }, { status: 202 });
@@ -18,6 +19,9 @@ export async function GET() {
   if (denied) return denied;
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  if (process.env.GO_PURCHASING_PAYMENT_RUN_WRITES === "1") {
+    return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "purchasing.listPaymentRuns", input: {} }, "purchasing service unavailable; check payment run status before retrying");
+  }
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
   return respond(await executor.execute("purchasing.listPaymentRuns", ctx, {}));
@@ -42,6 +46,20 @@ export async function POST(req: Request) {
   if (denied) return denied;
   const ctx = actorFromResolved(resolved, { intentId: body.intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  if (process.env.GO_PURCHASING_PAYMENT_RUN_WRITES === "1") {
+    if (body.action === "create") {
+      return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "purchasing.createPaymentRun", input: { memo: body.memo, lines: body.lines } }, "purchasing service unavailable; check payment run status before retrying");
+    }
+    if (body.action === "instruct") {
+      return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "purchasing.instructPaymentRun", input: { paymentRunId: body.paymentRunId } }, "purchasing service unavailable; check payment run status before retrying");
+    }
+    if (body.action === "cancel") {
+      return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "purchasing.cancelPaymentRunDraft", input: { paymentRunId: body.paymentRunId } }, "purchasing service unavailable; check payment run status before retrying");
+    }
+    if (body.action === "reverse") {
+      return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "purchasing.reversePaymentRun", input: { paymentRunId: body.paymentRunId, reason: body.reason } }, "purchasing service unavailable; check payment run status before retrying");
+    }
+  }
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
   if (body.action === "create") {

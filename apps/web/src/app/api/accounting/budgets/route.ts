@@ -5,6 +5,7 @@ import { buildExecutor, buildRegistry, actorFromResolved } from "@/server/kernel
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
 import { accounts, getDb } from "@chaste/db";
+import { dispatchGoCapabilityRoute } from "@/server/go-route-response";
 
 const querySchema = z.object({ fiscalYear: z.coerce.number().int().min(2000).max(2100).optional(), scenarioId: z.string().uuid().optional() });
 
@@ -47,6 +48,21 @@ export async function POST(req: Request) {
   if (denied) return denied;
   const ctx = actorFromResolved(resolved, { intentId: body.intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  if (process.env.GO_ACCOUNTING_BUDGET_WRITES === "1") {
+    if (body.action === "undo" && body.scenarioId) {
+      return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "accounting.undoBudgetScenarioVersion", input: { scenarioId: body.scenarioId, previousScenarioId: body.previousScenarioId ?? null } }, "accounting service unavailable; check budget status before retrying");
+    }
+    if (body.action === "save") {
+      return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "accounting.saveBudgetScenario", input: {
+        scenarioKey: body.scenarioKey,
+        name: body.name,
+        fiscalYear: body.fiscalYear,
+        currency: body.currency,
+        assumptions: body.assumptions,
+        lines: body.lines,
+      } }, "accounting service unavailable; check budget status before retrying");
+    }
+  }
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
   if (body.action === "undo" && body.scenarioId) return respond(await executor.execute("accounting.undoBudgetScenarioVersion", ctx, { scenarioId: body.scenarioId, previousScenarioId: body.previousScenarioId ?? null }));

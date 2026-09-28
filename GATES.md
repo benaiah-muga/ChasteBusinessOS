@@ -368,3 +368,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /ALL MET/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: Parent re-verification passed the receipt and jobs worker DB gates, route tests, TypeScript typecheck and lint, all 25 workspace test tasks, Go test and vet, and route/capability/data inventories. The M6 proof passed all 21 guarantees after making its organization fixture repeatable and aligning its approval proof with human-versus-agent identity policy. Migration 0094 adds the receipt capability to the restrictive jobs policy and claim query. `GO_PURCHASING_RECEIPT_WRITES` remains off by default. Browser checks remain deferred by request.
+
+- [x] G78: Wave 4 budget, period-close, inventory import/reservation, and supplier payment-run capabilities plus Go vendor returns preserve route contracts, approval, audit, replay, tenant isolation, and worker execution.
+  CHECK: PATH=/home/benaiah/.nvm/versions/node/v24.18.0/bin:$PATH node /home/benaiah/.agents/skills/unlazy/scripts/gate-check.mjs --scope migration-wave4-returns --status
+  EXPECT: /ALL MET/
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: Wave 4 scope ledger reports ALL MET (7 gates). Database-backed Go capability, worker, and returns tests pass; the focused payment-run persistence test passes. Route bridges pass 94 tests with web typecheck, route/capability/data/continuity inventories pass, full workspace typecheck/lint/test and Go test/vet pass, and the M10 proof passes all 20 guarantees. Browser checks remain deferred by user request.

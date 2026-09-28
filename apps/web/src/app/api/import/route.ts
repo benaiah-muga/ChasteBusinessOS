@@ -6,6 +6,7 @@ import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel
 import { getResolvedUser } from "@/server/session";
 import { checkRateLimit } from "@/server/rate-limit";
 import { setOnboardingStep } from "@/server/onboarding";
+import { executeGoCapability } from "@/server/go-bridge";
 
 /**
  * CSV import for the two entities a migrating business almost always has a
@@ -93,6 +94,31 @@ export async function POST(req: Request) {
     if (!ids.success) return NextResponse.json({ error: "Select a valid recent import to undo.", code: "invalid" }, { status: 400 });
     const ctx = actorFromResolved(resolved, {});
     if (!ctx) return NextResponse.json({ error: "Set up your workspace before undoing this import.", code: "not_found" }, { status: 409 });
+    if (process.env.GO_INVENTORY_IMPORT_WRITES === "1") {
+      try {
+        const result = await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId: "inventory.undoItemImport", input: { itemIds: ids.data } });
+        if (result.kind !== "response") return NextResponse.json({ error: "Inventory service unavailable; check the import status before retrying." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+        const body: unknown = await result.response.json().catch(() => null);
+        if (result.response.status === 200) {
+          const parsed = z.object({ ok: z.literal(true), data: z.object({ archived: z.number().int().nonnegative() }) }).safeParse(body);
+          if (!parsed.success) return NextResponse.json({ error: "Inventory service unavailable; check the import status before retrying." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+          const undone = parsed.data.data.archived;
+          return NextResponse.json({ undone, remaining: Math.max(0, ids.data.length - undone) });
+        }
+        if (result.response.status === 202) {
+          const parsed = z.object({ pendingApproval: z.literal(true), error: z.string().optional(), reason: z.string().optional() }).safeParse(body);
+          if (!parsed.success) return NextResponse.json({ error: "Inventory service unavailable; check the import status before retrying." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+          return NextResponse.json({ error: parsed.data.error ?? parsed.data.reason ?? "Undo is awaiting approval.", pendingApproval: true }, { status: 202 });
+        }
+        if (result.response.status === 422) {
+          const parsed = z.object({ error: z.string() }).safeParse(body);
+          if (parsed.success) return NextResponse.json({ error: parsed.data.error }, { status: 422 });
+        }
+        return NextResponse.json({ error: "Inventory service unavailable; check the import status before retrying." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      } catch {
+        return NextResponse.json({ error: "Inventory service unavailable; check the import status before retrying." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      }
+    }
     const db = getDb().db;
     const result = await buildExecutor(db, buildRegistry(db)).execute("inventory.undoItemImport", ctx, { itemIds: ids.data });
     if (result.pendingApproval) return NextResponse.json({ error: result.error ?? "Undo is awaiting approval.", pendingApproval: true }, { status: 202 });
@@ -214,6 +240,31 @@ export async function POST(req: Request) {
     }];
   });
   if (prepared.length === 0) return NextResponse.json({ inserted: 0, skippedDuplicates: 0, errors, createdIds: [] });
+  if (process.env.GO_INVENTORY_IMPORT_WRITES === "1") {
+    try {
+      const result = await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId: "inventory.importItems", input: { rows: prepared } });
+      if (result.kind !== "response") return NextResponse.json({ error: "Inventory service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      const body: unknown = await result.response.json().catch(() => null);
+      if (result.response.status === 200) {
+        const parsed = z.object({ ok: z.literal(true), data: z.object({ createdIds: z.array(z.string().uuid()), imported: z.number().int().nonnegative(), skippedDuplicateRows: z.array(z.number().int()) }) }).safeParse(body);
+        if (!parsed.success) return NextResponse.json({ error: "Inventory service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+        const data = parsed.data.data;
+        if (data.imported) await setOnboardingStep(getDb().db, resolved.orgId, "import_products", "done");
+        return NextResponse.json({ inserted: data.imported, skippedDuplicates: data.skippedDuplicateRows.length, skippedDuplicateRows: data.skippedDuplicateRows, errors, createdIds: data.createdIds });
+      }
+      if (result.response.status === 202) {
+        const parsed = z.object({ pendingApproval: z.literal(true), error: z.string().optional(), reason: z.string().optional() }).safeParse(body);
+        if (parsed.success) return NextResponse.json({ error: parsed.data.error ?? parsed.data.reason ?? "Import is awaiting approval.", pendingApproval: true }, { status: 202 });
+      }
+      if (result.response.status === 422) {
+        const parsed = z.object({ error: z.string() }).safeParse(body);
+        if (parsed.success) return NextResponse.json({ error: parsed.data.error, code: "invalid" }, { status: 422 });
+      }
+      return NextResponse.json({ error: "Inventory service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    } catch {
+      return NextResponse.json({ error: "Inventory service unavailable; check the import status before retrying.", code: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
+  }
   const db = getDb().db;
   const result = await buildExecutor(db, buildRegistry(db)).execute("inventory.importItems", ctx, { rows: prepared });
   if (result.pendingApproval) return NextResponse.json({ error: result.error ?? "Import is awaiting approval.", pendingApproval: true }, { status: 202 });

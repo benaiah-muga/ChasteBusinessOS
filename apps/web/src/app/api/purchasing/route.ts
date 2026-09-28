@@ -333,6 +333,19 @@ export async function POST(req: Request) {
     }
   }
 
+  if (process.env.GO_PURCHASING_RETURN_WRITES === "1" && body.action === "returnGoods") {
+    try {
+      return await purchasingGoResponse(await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "purchasing.returnGoods",
+        input: { poNumber: body.poNumber, receiptNumber: body.receiptNumber, lines: body.lines },
+      }));
+    } catch {
+      return goUnavailable();
+    }
+  }
+
   switch (body.action) {
     case "createVendor":
       return respond(
@@ -351,8 +364,8 @@ export async function POST(req: Request) {
           lines,
           memo: (body.memo as string) || undefined,
         }),
-      );
-    }
+    );
+  }
     case "receiveGoods": {
       // N16 pilot (P05): the receiving desk sends accepted quantity plus an
       // optional rejected quantity with its reason, and overreceipt only
