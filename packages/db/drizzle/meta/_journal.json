@@ -604,6 +604,13 @@
       "when": 1790523261046,
       "tag": "0085_go_crm_deal_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1790526400000,
+      "tag": "0086_go_crm_task_jobs",
+      "breakpoints": true
     }
   ]
 }

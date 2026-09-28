@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   canonicalInputHash: vi.fn(),
   executeGoCapability: vi.fn(),
+  draftCrmFollowUp: vi.fn(),
   logger: { warn: vi.fn() },
 }));
 
@@ -17,7 +18,7 @@ vi.mock("@chaste/kernel", () => ({ canonicalInputHash: mocks.canonicalInputHash,
 vi.mock("@chaste/db", () => ({ getDb: mocks.getDb }));
 vi.mock("@/server/kernel", () => ({ actorFromResolved: mocks.actorFromResolved, buildExecutor: mocks.buildExecutor, buildRegistry: mocks.buildRegistry }));
 vi.mock("@/server/session", () => ({ getResolvedUser: mocks.getResolvedUser }));
-vi.mock("@/server/crm-assist", () => ({ draftCrmFollowUp: vi.fn() }));
+vi.mock("@/server/crm-assist", () => ({ draftCrmFollowUp: mocks.draftCrmFollowUp }));
 vi.mock("@/server/go-bridge", () => ({ executeGoCapability: mocks.executeGoCapability }));
 
 import { GET, POST } from "./route";
@@ -30,6 +31,7 @@ const resolved = {
 };
 const dealId = "f3c65071-356d-48e4-b5cb-cccd4fc06f6d";
 const customerId = "7a7b152e-7e80-496b-952c-275067fef54f";
+const taskId = "229cda1d-0ad9-4198-bec0-58858b11610e";
 const actor = {
   type: "human",
   id: resolved.userId,
@@ -47,6 +49,7 @@ describe("CRM route migration adapter", () => {
     vi.stubEnv("GO_CRM_READ", "0");
     vi.stubEnv("GO_CRM_SHADOW", "0");
     vi.stubEnv("GO_CRM_DEAL_WRITES", "0");
+    vi.stubEnv("GO_CRM_TASK_WRITES", "0");
     vi.stubEnv("NODE_ENV", "test");
     mocks.getResolvedUser.mockResolvedValue(resolved);
     mocks.actorFromResolved.mockReturnValue({ actor });
@@ -184,6 +187,177 @@ describe("CRM route migration adapter", () => {
     expect(mocks.execute).toHaveBeenCalledWith("crm.createTask", { actor }, expect.objectContaining({ title: "Call Acme" }));
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "createTask",
+      body: { action: "createTask", title: "Call Acme", dueAt: "2026-09-28T10:00:00.000Z", assigneeUserId: resolved.userId, refType: "customer", refId: customerId, note: "Follow up" },
+      capabilityId: "crm.createTask",
+      input: { title: "Call Acme", dueAt: "2026-09-28T10:00:00.000Z", assigneeUserId: resolved.userId, refType: "customer", refId: customerId, note: "Follow up" },
+      data: { taskId },
+    },
+    {
+      name: "completeTask",
+      body: { action: "completeTask", taskId },
+      capabilityId: "crm.completeTask",
+      input: { taskId },
+      data: { completed: true },
+    },
+    {
+      name: "updateTaskDetails",
+      body: { action: "updateTaskDetails", taskId, dueAt: null, assigneeUserId: null },
+      capabilityId: "crm.updateTaskDetails",
+      input: { taskId, dueAt: null, assigneeUserId: null },
+      data: { taskId, previous: { dueAt: "2026-09-27T10:00:00.000Z", assigneeUserId: resolved.userId } },
+    },
+  ])("dispatches $name to Go when task writes are enabled", async ({ body, capabilityId, input, data }) => {
+    vi.stubEnv("GO_CRM_TASK_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data }),
+    });
+
+    const response = await POST(new Request("http://localhost/api/crm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: { actor },
+      session: resolved,
+      capabilityId,
+      input,
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps all three task writes on their current TypeScript capabilities when the task flag is off", async () => {
+    vi.stubEnv("GO_CRM_TASK_WRITES", "0");
+    mocks.execute.mockResolvedValue({ ok: true, data: { taskId, completed: true } });
+    const requests = [
+      { body: { action: "createTask", title: "Call Acme" }, capId: "crm.createTask", input: { title: "Call Acme", dueAt: undefined, assigneeUserId: undefined, refType: undefined, refId: undefined, note: undefined } },
+      { body: { action: "completeTask", taskId }, capId: "crm.completeTask", input: { taskId } },
+      { body: { action: "updateTaskDetails", taskId, dueAt: null }, capId: "crm.updateTaskDetails", input: { taskId, dueAt: null } },
+    ];
+
+    for (const { body, capId, input } of requests) {
+      const response = await POST(new Request("http://localhost/api/crm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }));
+      expect(response.status).toBe(200);
+      expect(mocks.execute).toHaveBeenLastCalledWith(capId, { actor }, input);
+    }
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("normalizes task approval and capability errors without retrying through TypeScript", async () => {
+    vi.stubEnv("GO_CRM_TASK_WRITES", "1");
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, pendingApproval: true, reason: "Approval required", approvalId: "private-approval-id" }, { status: 202 }),
+      })
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, error: "forbidden: missing permission: crm.write" }, { status: 422 }),
+      });
+    const request = () => new Request("http://localhost/api/crm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "completeTask", taskId }),
+    });
+
+    const pending = await POST(request());
+    const denied = await POST(request());
+
+    expect(pending.status).toBe(202);
+    expect(pending.headers.get("cache-control")).toBe("no-store");
+    expect(await pending.json()).toEqual({ error: "Approval required", pendingApproval: true });
+    expect(denied.status).toBe(422);
+    expect(denied.headers.get("cache-control")).toBe("no-store");
+    expect(await denied.json()).toEqual({ error: "forbidden: missing permission: crm.write" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "not dispatched", result: { kind: "not-dispatched" } },
+    { name: "unknown outcome", result: { kind: "outcome-unknown" } },
+    { name: "malformed success", result: { kind: "response", response: Response.json({ ok: true, data: { completed: true } }) } },
+  ])("fails closed on task Go $name without TypeScript retry", async ({ result }) => {
+    vi.stubEnv("GO_CRM_TASK_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(new Request("http://localhost/api/crm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "createTask", title: "Call Acme" }),
+    }));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "CRM service unavailable; check task status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed if Go task dispatch throws and keeps non-task actions on their current paths", async () => {
+    vi.stubEnv("GO_CRM_TASK_WRITES", "1");
+    mocks.executeGoCapability.mockRejectedValueOnce(new Error("bridge timeout"));
+    const taskResponse = await POST(new Request("http://localhost/api/crm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "createTask", title: "Call Acme" }),
+    }));
+    expect(taskResponse.status).toBe(503);
+    expect(taskResponse.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+
+    mocks.draftCrmFollowUp.mockResolvedValue({ body: { ok: true, data: { text: "Call tomorrow" } }, status: 200 });
+    const followUpResponse = await POST(new Request("http://localhost/api/crm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "draftFollowUp", customerId }),
+    }));
+    expect(await followUpResponse.json()).toEqual({ ok: true, data: { text: "Call tomorrow" } });
+    expect(mocks.draftCrmFollowUp).toHaveBeenCalledWith({ db: { handle: "legacy-db" }, resolved, customerId });
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps task writes behind authentication, onboarding, and body validation", async () => {
+    vi.stubEnv("GO_CRM_TASK_WRITES", "1");
+    mocks.getResolvedUser.mockResolvedValue(null);
+    const anonymous = await POST(new Request("http://localhost/api/crm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "completeTask", taskId }),
+    }));
+    expect(anonymous.status).toBe(401);
+
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(null);
+    const onboarding = await POST(new Request("http://localhost/api/crm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "completeTask", taskId }),
+    }));
+    expect(onboarding.status).toBe(428);
+
+    mocks.actorFromResolved.mockReturnValue({ actor });
+    const invalid = await POST(new Request("http://localhost/api/crm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "completeTask", taskId: "not-a-uuid" }),
+    }));
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toEqual({ error: "invalid body" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 
   it("keeps convertLead on the legacy executor when the Go flag is unset", async () => {

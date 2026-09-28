@@ -61,6 +61,64 @@ async function crmGoResponse(result: GoCapabilityBridgeResult) {
   return crmGoUnavailable();
 }
 
+function crmTaskGoUnavailable() {
+  return NextResponse.json(
+    { error: "CRM service unavailable; check task status before retrying" },
+    { status: 503, headers: noStore },
+  );
+}
+
+async function crmTaskGoResponse(
+  result: GoCapabilityBridgeResult,
+  action: "createTask" | "completeTask" | "updateTaskDetails",
+) {
+  if (result.kind !== "response") return crmTaskGoUnavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const taskDataSchema = action === "createTask"
+        ? z.object({ taskId: z.string().uuid() })
+        : action === "completeTask"
+          ? z.object({ completed: z.literal(true) })
+          : z.object({
+              taskId: z.string().uuid(),
+              previous: z.object({
+                dueAt: z.string().datetime().nullable(),
+                assigneeUserId: z.string().uuid().nullable(),
+              }),
+            });
+      const parsed = z.object({ ok: z.literal(true), data: taskDataSchema }).safeParse(body);
+      if (!parsed.success) return crmTaskGoUnavailable();
+      return NextResponse.json({ ok: true, data: parsed.data.data }, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return crmTaskGoUnavailable();
+      return NextResponse.json(
+        { error: parsed.data.reason, pendingApproval: true },
+        { status: 202, headers: noStore },
+      );
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return crmTaskGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 401, headers: noStore });
+    }
+    if ([400, 403, 422].includes(result.response.status)) {
+      const parsed = result.response.status === 422
+        ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+        : z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return crmTaskGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+  } catch {
+    return crmTaskGoUnavailable();
+  }
+
+  return crmTaskGoUnavailable();
+}
+
 const crmTimelineResponseSchema = z.object({
   entries: z.array(z.object({
     kind: z.string(),
@@ -300,6 +358,41 @@ export async function POST(req: Request) {
       return crmGoResponse(result);
     } catch {
       return crmGoUnavailable();
+    }
+  }
+
+  if (
+    process.env.GO_CRM_TASK_WRITES === "1" &&
+    (d.action === "createTask" || d.action === "completeTask" || d.action === "updateTaskDetails")
+  ) {
+    const capabilityId = d.action === "createTask" ? "crm.createTask"
+      : d.action === "completeTask" ? "crm.completeTask" : "crm.updateTaskDetails";
+    const input = d.action === "createTask"
+      ? {
+          title: d.title,
+          dueAt: d.dueAt,
+          assigneeUserId: d.assigneeUserId,
+          refType: d.refType,
+          refId: d.refId,
+          note: d.note,
+        }
+      : d.action === "completeTask"
+        ? { taskId: d.taskId }
+        : {
+            taskId: d.taskId,
+            ...(d.dueAt !== undefined ? { dueAt: d.dueAt } : {}),
+            ...(d.assigneeUserId !== undefined ? { assigneeUserId: d.assigneeUserId } : {}),
+          };
+    try {
+      const result = await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId,
+        input,
+      });
+      return crmTaskGoResponse(result, d.action);
+    } catch {
+      return crmTaskGoUnavailable();
     }
   }
 
