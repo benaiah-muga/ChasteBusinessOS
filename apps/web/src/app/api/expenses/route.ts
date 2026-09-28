@@ -4,6 +4,48 @@ import { z } from "zod";
 import { expensePolicies, getDb } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+function goUnavailable() {
+  return NextResponse.json({ error: "expenses service unavailable; check claim status before retrying" }, { status: 503, headers: noStore });
+}
+
+async function expenseGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return goUnavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ error: parsed.data.reason, pendingApproval: true }, { status: 202, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 400 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+  } catch {
+    return goUnavailable();
+  }
+  return goUnavailable();
+}
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -82,6 +124,22 @@ export async function POST(req: Request) {
         : parsed.data.action === "pay"
           ? { claimId: parsed.data.claimId, amountMinor: parsed.data.amountMinor }
           : { category: parsed.data.category, limitMinor: parsed.data.limitMinor };
+
+  if (
+    process.env.GO_ACCOUNTING_EXPENSE_WRITES === "1" &&
+    capId !== "accounting.setExpensePolicy"
+  ) {
+    try {
+      return await expenseGoResponse(await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: capId,
+        input,
+      }));
+    } catch {
+      return goUnavailable();
+    }
+  }
 
   const result = await buildExecutor(db, buildRegistry(db)).execute(capId, ctx, input);
   if (!result.ok) {

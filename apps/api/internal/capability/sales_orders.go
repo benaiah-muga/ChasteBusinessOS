@@ -309,7 +309,8 @@ func salesLoadOrder(ctx context.Context, tx pgx.Tx, orgID, orderID string) (*sal
 		SELECT id::text, number, customer_id::text, status, backordered
 		FROM sales_orders
 		WHERE id = $1::uuid AND org_id = $2::uuid
-		LIMIT 1`, orderID, orgID).Scan(&order.id, &order.number, &order.customerID, &order.status, &order.backordered)
+		LIMIT 1
+		FOR UPDATE`, orderID, orgID).Scan(&order.id, &order.number, &order.customerID, &order.status, &order.backordered)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -556,7 +557,10 @@ func salesConfirmOrder(ctx context.Context, tx pgx.Tx, claims authbridge.Capabil
 	}
 	var creditLimit *int64
 	if err := tx.QueryRow(ctx, `
-		SELECT credit_limit_minor FROM customers WHERE id = $1::uuid LIMIT 1`, order.customerID).Scan(&creditLimit); err != nil {
+		SELECT credit_limit_minor FROM customers
+		WHERE id = $1::uuid AND org_id = $2::uuid
+		LIMIT 1
+		FOR UPDATE`, order.customerID, orgID).Scan(&creditLimit); err != nil {
 		return SalesConfirmOrderOutput{}, err
 	}
 	ar, err := salesOpenARMinor(ctx, tx, orgID, order.customerID)

@@ -555,6 +555,72 @@ func TestCRMTaskJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
 	}
 }
 
+func TestPurchasingCommerceJobsClaimThroughSystemPath(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the commerce jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := os.Getenv("CHASTE_APP_DB_PASSWORD")
+	if appPassword == "" {
+		appPassword = "chaste_app_dev_only"
+	}
+	workerPassword := os.Getenv("CHASTE_JOBS_WORKER_DB_PASSWORD")
+	if workerPassword == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("CHASTE_JOBS_WORKER_DB_PASSWORD is required for the commerce jobs database proof")
+		}
+		workerPassword = "chaste_jobs_worker_dev_only"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("commerce-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	worker, err := NewWorker(workerPool, workerPool, appPool, capability.NewExecutor(appPool, "", "", ""), Options{
+		WorkerID:      "commerce-jobs-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID := insertJobsTestJob(t, ctx, owner, orgID, "accounting.listExpenseClaims", json.RawMessage(`{}`), 3, time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC))
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("listExpenseClaims job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, jobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed'
+		AND actor_type='system' AND actor_id IS NULL AND capability_id='accounting.listExpenseClaims'`, orgID); got != 1 {
+		t.Fatalf("system commerce audit events=%d, want one", got)
+	}
+}
+
 func workerRoleURL(t *testing.T, baseURL, role, password string) string {
 	t.Helper()
 	parsed, err := url.Parse(baseURL)

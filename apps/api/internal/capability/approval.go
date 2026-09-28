@@ -301,6 +301,31 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID:
+			parsed, parseErr := parseAccountingExpenseInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case createVendorCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID:
+			parsed, parseErr := parsePurchasingBillInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case inventoryAdjustStockCapabilityID, inventoryCreateTransferCapabilityID, inventoryConfirmTransferCapabilityID,
+			inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID, inventoryListTransfersCapabilityID:
+			parsed, parseErr := parseInventoryStockInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID:
+			parsed, parseErr := parsePosSaleInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		default:
 			verifiedPayload = false
 		}
@@ -404,6 +429,27 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "accounting.post", true
 	case trialBalanceCapabilityID:
 		return "accounting.read", true
+	case submitExpenseClaimCapabilityID:
+		return "expenses.submit", true
+	case decideExpenseClaimCapabilityID, listExpenseClaimsCapabilityID:
+		return "expenses.decide", true
+	case payExpenseClaimCapabilityID:
+		return "accounting.post", true
+	case createVendorCapabilityID, createBillCapabilityID:
+		return "purchasing.write", true
+	case payBillCapabilityID, reverseVendorPaymentCapabilityID:
+		return "purchasing.post", true
+	case inventoryAdjustStockCapabilityID, inventoryCreateTransferCapabilityID, inventoryConfirmTransferCapabilityID,
+		inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID:
+		return "inventory.write", true
+	case inventoryListTransfersCapabilityID:
+		return "inventory.read", true
+	case posOpenSessionCapabilityID, posCloseSessionCapabilityID:
+		return "pos.write", true
+	case posCompleteSaleCapabilityID, posReturnSaleCapabilityID:
+		return "pos.sell", true
+	case posShiftSummaryCapabilityID:
+		return "pos.read", true
 	default:
 		return "", false
 	}

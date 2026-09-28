@@ -102,6 +102,25 @@ var capabilitySpecs = map[string]capabilitySpec{
 	recordPaymentCapabilityID:             {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
 	reversePaymentCapabilityID:            {module: "accounting", permission: "accounting.post", risk: "money"},
 	trialBalanceCapabilityID:              {module: "accounting", permission: "accounting.read", risk: "read"},
+	submitExpenseClaimCapabilityID:        {module: "accounting", permission: "expenses.submit", risk: "write"},
+	decideExpenseClaimCapabilityID:        {module: "accounting", permission: "expenses.decide", risk: "write"},
+	payExpenseClaimCapabilityID:           {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
+	listExpenseClaimsCapabilityID:         {module: "accounting", permission: "expenses.decide", risk: "read"},
+	createVendorCapabilityID:              {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	createBillCapabilityID:                {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	payBillCapabilityID:                   {module: "purchasing", permission: "purchasing.post", risk: "money", moneyThresholdMinor: 50_000},
+	reverseVendorPaymentCapabilityID:      {module: "purchasing", permission: "purchasing.post", risk: "money"},
+	inventoryAdjustStockCapabilityID:      {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCreateTransferCapabilityID:   {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryConfirmTransferCapabilityID:  {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCancelTransferCapabilityID:   {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryReverseTransferCapabilityID:  {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryListTransfersCapabilityID:    {module: "inventory", permission: "inventory.read", risk: "read"},
+	posOpenSessionCapabilityID:            {module: "pos", permission: "pos.write", risk: "write"},
+	posCompleteSaleCapabilityID:           {module: "pos", permission: "pos.sell", risk: "money", moneyThresholdMinor: 100_000},
+	posCloseSessionCapabilityID:           {module: "pos", permission: "pos.write", risk: "write"},
+	posReturnSaleCapabilityID:             {module: "pos", permission: "pos.sell", risk: "money"},
+	posShiftSummaryCapabilityID:           {module: "pos", permission: "pos.read", risk: "read"},
 	createProjectCapabilityID:             {module: "projects", permission: "projects.write", risk: "write"},
 	ProjectBoardReadCapabilityID:          {module: "projects", permission: "projects.read", risk: "read"},
 	archiveProjectCapabilityID:            {module: "projects", permission: "projects.write", risk: "write"},
@@ -124,6 +143,11 @@ func supportedCapability(capabilityID string) bool {
 		hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrUpdateEmployeeStructureCapabilityID,
 		salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
 		createInvoiceCapabilityID, recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID, trialBalanceCapabilityID,
+		submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID,
+		createVendorCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID,
+		inventoryAdjustStockCapabilityID, inventoryCreateTransferCapabilityID, inventoryConfirmTransferCapabilityID,
+		inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID, inventoryListTransfersCapabilityID,
+		posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID:
 		return true
 	default:
@@ -439,6 +463,31 @@ func (e *Executor) execute(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID:
+			parsed, err := parseAccountingExpenseInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case createVendorCapabilityID, createBillCapabilityID, payBillCapabilityID, reverseVendorPaymentCapabilityID:
+			parsed, err := parsePurchasingBillInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case inventoryAdjustStockCapabilityID, inventoryCreateTransferCapabilityID, inventoryConfirmTransferCapabilityID,
+			inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID, inventoryListTransfersCapabilityID:
+			parsed, err := parseInventoryStockInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID:
+			parsed, err := parsePosSaleInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
 		}
 		inputHash, err := canonicalInputHash(input)
 		if err != nil {
@@ -744,6 +793,120 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case SubmitExpenseClaimInput:
+			output, err := submitExpenseClaim(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case DecideExpenseClaimInput:
+			output, err := decideExpenseClaim(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PayExpenseClaimInput:
+			output, err := payExpenseClaim(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListExpenseClaimsInput:
+			output, err := listExpenseClaims(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreateVendorInput:
+			output, err := createVendor(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreateBillInput:
+			output, err := createBill(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PayBillInput:
+			output, err := payBill(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ReverseVendorPaymentInput:
+			output, err := reverseVendorPayment(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryAdjustStockInput:
+			output, err := inventoryAdjustStock(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryCreateTransferInput:
+			output, err := inventoryCreateTransfer(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryConfirmTransferInput:
+			output, err := inventoryConfirmTransfer(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryCancelTransferInput:
+			output, err := inventoryCancelTransfer(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryReverseTransferInput:
+			output, err := inventoryReverseTransfer(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryListTransfersInput:
+			output, err := inventoryListTransfers(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PosOpenSessionInput:
+			output, err := posOpenSession(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PosCompleteSaleInput:
+			output, err := posCompleteSale(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PosCloseSessionInput:
+			output, err := posCloseSession(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PosReturnSaleInput:
+			output, err := posReturnSale(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PosShiftSummaryInput:
+			output, err := posShiftSummary(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case CreateProjectInput:
 			output, err := createProject(ctx, tx, claims, parsed)
 			if err != nil {
@@ -846,6 +1009,11 @@ func canonicalInputHash(input any) (string, error) {
 		HRHireEmployeeInput, HRDeactivateEmployeeInput, HRListEmployeesInput, HRUpdateEmployeeStructureInput,
 		SalesCreateOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
 		CreateInvoiceInput, RecordFxRateInput, RecordPaymentInput, ReversePaymentInput, TrialBalanceInput,
+		SubmitExpenseClaimInput, DecideExpenseClaimInput, PayExpenseClaimInput, ListExpenseClaimsInput,
+		CreateVendorInput, CreateBillInput, PayBillInput, ReverseVendorPaymentInput,
+		InventoryAdjustStockInput, InventoryCreateTransferInput, InventoryConfirmTransferInput, InventoryCancelTransferInput,
+		InventoryReverseTransferInput, InventoryListTransfersInput,
+		PosOpenSessionInput, PosCompleteSaleInput, PosCloseSessionInput, PosReturnSaleInput, PosShiftSummaryInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput:
 		return canonicalHash(parsed)
 	default:
@@ -1107,6 +1275,18 @@ func moneyAmount(input any) (*int64, bool) {
 		return &parsed.AmountMinor, true
 	case ReversePaymentInput:
 		return nil, true
+	case PayExpenseClaimInput:
+		return &parsed.AmountMinor, true
+	case PayBillInput:
+		return &parsed.AmountMinor, true
+	case ReverseVendorPaymentInput, PosReturnSaleInput:
+		return nil, true
+	case PosCompleteSaleInput:
+		totals, err := posComputeSaleTotals(parsed.Lines)
+		if err != nil {
+			return nil, false
+		}
+		return &totals.totalMinor, true
 	default:
 		return nil, false
 	}

@@ -3,6 +3,7 @@ package capability
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -943,5 +944,198 @@ func TestSalesOrdersListScopeStatusAndTenantIsolation(t *testing.T) {
 	}
 	if got := fx.count(`SELECT count(*) FROM stock_reservations WHERE org_id=$1::uuid AND ref_id=$2::uuid`, fx.otherOrgID, foreignOrderID); got != 0 {
 		t.Fatalf("foreign order reservations = %d, want none", got)
+	}
+}
+
+func assertSalesOperationBlocked(t *testing.T, done <-chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		t.Fatalf("competing operation finished before the locked transaction committed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func salesOperationGate() (<-chan struct{}, func()) {
+	gate := make(chan struct{})
+	var once sync.Once
+	return gate, func() { once.Do(func() { close(gate) }) }
+}
+
+func TestSalesOrdersConcurrentConfirmAndCancelSerializePerOrder(t *testing.T) {
+	fx := newExecutorFixture(t)
+	claims := salesTestClaims(fx)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	customerID := seedCRMDealCustomer(t, fx, fx.orgID, "Concurrent order buyer")
+	itemID := seedSalesItem(t, fx, fx.orgID, "SO-CONCURRENT-CONFIRM", "goods")
+	seedSalesStock(t, fx, fx.orgID, itemID, 5000)
+	order := salesCreateDraft(t, fx, claims, customerID, []SalesOrderLineInput{{
+		Description: "Concurrent chair", Quantity: 1000, UnitPriceMinor: 100, SKU: crmStringPointer("SO-CONCURRENT-CONFIRM"),
+	}})
+
+	firstReady := make(chan struct{})
+	continueFirst, releaseFirst := salesOperationGate()
+	defer releaseFirst()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
+			_, err := salesConfirmOrder(fx.ctx, tx, claims, SalesConfirmOrderInput{OrderID: order.OrderID}, now)
+			if err != nil {
+				return struct{}{}, err
+			}
+			close(firstReady)
+			<-continueFirst
+			return struct{}{}, nil
+		})
+		firstDone <- err
+	}()
+	<-firstReady
+
+	competingStarted := make(chan struct{})
+	competingDone := make(chan error, 1)
+	go func() {
+		close(competingStarted)
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
+			_, err := salesCancelOrder(fx.ctx, tx, fx.orgID, SalesCancelOrderInput{OrderID: order.OrderID}, now)
+			return struct{}{}, err
+		})
+		competingDone <- err
+	}()
+	<-competingStarted
+	assertSalesOperationBlocked(t, competingDone)
+	releaseFirst()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("confirm transaction failed: %v", err)
+	}
+	if err := <-competingDone; err != nil {
+		t.Fatalf("cancel after confirm failed: %v", err)
+	}
+
+	var status string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT status FROM sales_orders WHERE id=$1::uuid`, order.OrderID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("order status = %q, want cancelled after serialized confirm and cancel", status)
+	}
+	if got := fx.count(`SELECT count(*) FROM stock_reservations WHERE org_id=$1::uuid AND ref_id=$2::uuid AND status='open'`, fx.orgID, order.OrderID); got != 0 {
+		t.Fatalf("serialized cancel left %d open reservations", got)
+	}
+	if got := fx.count(`SELECT COALESCE(SUM(quantity_thousandths), 0) FROM stock_reservations WHERE org_id=$1::uuid AND ref_id=$2::uuid AND status='released'`, fx.orgID, order.OrderID); got != 1000 {
+		t.Fatalf("released reservation quantity = %d, want 1000", got)
+	}
+}
+
+func TestSalesOrdersConcurrentDeliverAndCancelSerializePerOrder(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupAccountingFixtureLedger(t, fx)
+	claims := salesTestClaims(fx)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	seedSalesAccounts(t, fx, fx.orgID)
+	customerID := seedCRMDealCustomer(t, fx, fx.orgID, "Concurrent delivery buyer")
+	itemID := seedSalesItem(t, fx, fx.orgID, "SO-CONCURRENT-DELIVER", "goods")
+	seedSalesStock(t, fx, fx.orgID, itemID, 5000)
+	order := salesCreateDraft(t, fx, claims, customerID, []SalesOrderLineInput{{
+		Description: "Concurrent delivery chair", Quantity: 1000, UnitPriceMinor: 100, SKU: crmStringPointer("SO-CONCURRENT-DELIVER"),
+	}})
+	salesConfirmDraft(t, fx, claims, order.OrderID, nil, now)
+
+	firstReady := make(chan struct{})
+	continueFirst, releaseFirst := salesOperationGate()
+	defer releaseFirst()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
+			_, err := salesDeliverOrder(fx.ctx, tx, claims, SalesDeliverOrderInput{OrderID: order.OrderID}, now)
+			if err != nil {
+				return struct{}{}, err
+			}
+			close(firstReady)
+			<-continueFirst
+			return struct{}{}, nil
+		})
+		firstDone <- err
+	}()
+	<-firstReady
+
+	competingStarted := make(chan struct{})
+	competingDone := make(chan error, 1)
+	go func() {
+		close(competingStarted)
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
+			_, err := salesCancelOrder(fx.ctx, tx, fx.orgID, SalesCancelOrderInput{OrderID: order.OrderID}, now)
+			return struct{}{}, err
+		})
+		competingDone <- err
+	}()
+	<-competingStarted
+	assertSalesOperationBlocked(t, competingDone)
+	releaseFirst()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("deliver transaction failed: %v", err)
+	}
+	if err := <-competingDone; err == nil || err.Error() != "order is fully delivered; unwind through invoice reversal instead" {
+		t.Fatalf("cancel after delivery error = %v, want fully delivered guard", err)
+	}
+
+	if got := fx.count(`SELECT count(*) FROM invoices WHERE org_id=$1::uuid AND memo='Sales order #1'`, fx.orgID); got != 1 {
+		t.Fatalf("sales-order invoice count = %d, want exactly one", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM sales_orders WHERE id=$1::uuid AND status='delivered'`, order.OrderID); got != 1 {
+		t.Fatal("order was not left delivered after the competing cancel was rejected")
+	}
+}
+
+func TestSalesOrdersConcurrentCreditConfirmationsSerializeOnCustomer(t *testing.T) {
+	fx := newExecutorFixture(t)
+	claims := salesTestClaims(fx)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	customerID := seedCRMDealCustomer(t, fx, fx.orgID, "Concurrent credit buyer")
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE customers SET credit_limit_minor=500000 WHERE id=$1::uuid`, customerID); err != nil {
+		t.Fatal(err)
+	}
+	lines := []SalesOrderLineInput{{Description: "Consulting", Quantity: 1000, UnitPriceMinor: 100000}}
+	firstOrder := salesCreateDraft(t, fx, claims, customerID, lines)
+	secondOrder := salesCreateDraft(t, fx, claims, customerID, lines)
+
+	firstReady := make(chan struct{})
+	continueFirst, releaseFirst := salesOperationGate()
+	defer releaseFirst()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
+			_, err := salesConfirmOrder(fx.ctx, tx, claims, SalesConfirmOrderInput{OrderID: firstOrder.OrderID}, now)
+			if err != nil {
+				return struct{}{}, err
+			}
+			close(firstReady)
+			<-continueFirst
+			return struct{}{}, nil
+		})
+		firstDone <- err
+	}()
+	<-firstReady
+
+	competingStarted := make(chan struct{})
+	competingDone := make(chan error, 1)
+	go func() {
+		close(competingStarted)
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
+			_, err := salesConfirmOrder(fx.ctx, tx, claims, SalesConfirmOrderInput{OrderID: secondOrder.OrderID}, now)
+			return struct{}{}, err
+		})
+		competingDone <- err
+	}()
+	<-competingStarted
+	assertSalesOperationBlocked(t, competingDone)
+	releaseFirst()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first credit confirmation failed: %v", err)
+	}
+	if err := <-competingDone; err != nil {
+		t.Fatalf("second credit confirmation failed after serialized check: %v", err)
+	}
+	if got := fx.count(`SELECT count(*) FROM sales_orders WHERE id = ANY($1::uuid[]) AND status='confirmed'`, []string{firstOrder.OrderID, secondOrder.OrderID}); got != 2 {
+		t.Fatalf("confirmed orders = %d, want both permitted orders", got)
 	}
 }

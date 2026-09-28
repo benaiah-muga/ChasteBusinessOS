@@ -4,6 +4,49 @@ import { getDb, organizations, poLines, purchaseOrders, purchaseRequests, rfqs, 
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 import { documentOutstanding } from "@/server/balances";
+import { z } from "zod";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+function goUnavailable() {
+  return NextResponse.json({ ok: false, error: "purchasing service unavailable; check bill status before retrying" }, { status: 503, headers: noStore });
+}
+
+async function purchasingGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return goUnavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ ok: false, pendingApproval: true, reason: parsed.data.reason }, { status: 202, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 400 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+  } catch {
+    return goUnavailable();
+  }
+  return goUnavailable();
+}
 
 /**
  * Full human surface for the purchasing module: vendors, orders, receipts,
@@ -156,6 +199,41 @@ export async function POST(req: Request) {
 
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
+
+  if (process.env.GO_PURCHASING_BILL_WRITES === "1" && ["createVendor", "createBill", "payBill"].includes(body.action ?? "")) {
+    let capabilityId: string;
+    let input: Record<string, unknown>;
+    if (body.action === "createVendor") {
+      capabilityId = "purchasing.createVendor";
+      input = { name: body.name as string, email: (body.email as string) || undefined };
+    } else if (body.action === "createBill") {
+      const lines = body.lines as { description: string; quantity: number; unitPriceMinor: number; taxCodeId?: string; poLineNumber?: number }[] | undefined;
+      if (!body.vendorId || !lines?.length)
+        return NextResponse.json({ error: "vendorId and lines are required" }, { status: 400 });
+      capabilityId = "purchasing.createBill";
+      input = {
+        vendorId: body.vendorId as string,
+        vendorRef: (body.vendorRef as string) || undefined,
+        memo: (body.memo as string) || undefined,
+        poNumber: (body.poNumber as number) || undefined,
+        lines,
+      };
+    } else {
+      if (!body.billNumber || !body.amountMinor)
+        return NextResponse.json({ error: "billNumber and amountMinor are required" }, { status: 400 });
+      capabilityId = "purchasing.payBill";
+      input = {
+        billNumber: body.billNumber as number,
+        amountMinor: body.amountMinor as number,
+        method: (body.method as "cash" | "bank_transfer" | "card") ?? "bank_transfer",
+      };
+    }
+    try {
+      return await purchasingGoResponse(await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId, input }));
+    } catch {
+      return goUnavailable();
+    }
+  }
 
   switch (body.action) {
     case "createVendor":

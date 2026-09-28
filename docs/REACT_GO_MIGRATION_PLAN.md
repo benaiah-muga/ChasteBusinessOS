@@ -457,3 +457,10 @@ new owners and the manifest shows zero legacy runtime paths.
     structure updates, plus the capability jobs worker path. Bridge those POST
     actions behind `GO_HR_EMPLOYEE_WRITES=1`; leave, payroll, and time tracking
     keep their existing handlers.
+13. (Done) Add Go parity for expense claims, vendor bills, inventory stock and
+    transfers, and POS sessions, sales, returns, and summaries. Register their
+    capability schemas, parsers, governed executor paths, approval payload
+    verification, and narrow worker permissions. Bridge covered public actions
+    behind the independent default-off flags `GO_ACCOUNTING_EXPENSE_WRITES`,
+    `GO_PURCHASING_BILL_WRITES`, `GO_INVENTORY_STOCK_WRITES`, and `GO_POS_WRITES`.
+    Keep policy configuration and other actions on their existing handlers.

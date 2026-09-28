@@ -37,16 +37,17 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string) {
     .values({ email: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`, name: "Owner" })
     .returning();
   if (!owner) throw new Error("owner insert failed");
+  const runName = `${orgName} ${Date.now()} ${Math.random().toString(36).slice(2, 6)}`;
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
-    userEmail: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`,
-    orgName,
+    userEmail: owner.email,
+    orgName: runName,
     businessDescription: "Trading company turning quotes into shipped, invoiced, paid orders.",
   });
   return {
     orgId,
     ownerCtx: {
-      actor: { type: "human" as const, id: null, orgId, permissions: new Set(["*"]) },
+      actor: { type: "human" as const, id: owner.id, orgId, permissions: new Set(["*"]) },
       now: new Date(),
       services: {},
     },

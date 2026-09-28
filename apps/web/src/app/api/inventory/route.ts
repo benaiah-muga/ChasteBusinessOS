@@ -13,6 +13,57 @@ import {
 } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { z } from "zod";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+function goUnavailable() {
+  return NextResponse.json({ ok: false, error: "inventory service unavailable; check stock status before retrying" }, { status: 503, headers: noStore });
+}
+
+async function inventoryGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return goUnavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 202, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 400 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+  } catch {
+    return goUnavailable();
+  }
+  return goUnavailable();
+}
+
+async function dispatchInventoryGo(ctx: ReturnType<typeof actorFromResolved> & {}, session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>, capabilityId: string, input: Record<string, unknown>) {
+  try {
+    return await inventoryGoResponse(await executeGoCapability({ actionContext: ctx, session, capabilityId, input }));
+  } catch {
+    return goUnavailable();
+  }
+}
 
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
@@ -193,6 +244,11 @@ export async function POST(req: Request) {
     case "adjustStock": {
       if (!str("sku") || !num("quantityDelta") || !str("note"))
         return NextResponse.json({ error: "sku, quantityDelta and note required" }, { status: 400 });
+      if (process.env.GO_INVENTORY_STOCK_WRITES === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.adjustStock", {
+          sku: str("sku")!, quantityDelta: num("quantityDelta")!, note: str("note")!, lotCode: str("lotCode"),
+        });
+      }
       return respond(
         await executor.execute("inventory.adjustStock", ctx, {
           sku: str("sku")!,
@@ -262,6 +318,11 @@ export async function POST(req: Request) {
       const lines = (body.lines ?? []) as { sku: string; quantityThousandths: number; lotCode?: string }[];
       if (!str("fromLocationCode") || !str("toLocationCode") || lines.length === 0)
         return NextResponse.json({ error: "fromLocationCode, toLocationCode and lines required" }, { status: 400 });
+      if (process.env.GO_INVENTORY_STOCK_WRITES === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.createTransfer", {
+          fromLocationCode: str("fromLocationCode")!, toLocationCode: str("toLocationCode")!, lines, note: str("note"),
+        });
+      }
       return respond(
         await executor.execute("inventory.createTransfer", ctx, {
           fromLocationCode: str("fromLocationCode")!,
@@ -274,13 +335,22 @@ export async function POST(req: Request) {
     case "confirmTransfer": {
       if (!str("transferId")) return NextResponse.json({ error: "transferId required" }, { status: 400 });
       const lines = (body.lines ?? undefined) as { lineId: string; quantityThousandths: number }[] | undefined;
+      if (process.env.GO_INVENTORY_STOCK_WRITES === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.confirmTransfer", { transferId: str("transferId")!, lines });
+      }
       return respond(await executor.execute("inventory.confirmTransfer", ctx, { transferId: str("transferId")!, lines }));
     }
     case "cancelTransfer":
       if (!str("transferId")) return NextResponse.json({ error: "transferId required" }, { status: 400 });
+      if (process.env.GO_INVENTORY_STOCK_WRITES === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.cancelTransfer", { transferId: str("transferId")! });
+      }
       return respond(await executor.execute("inventory.cancelTransfer", ctx, { transferId: str("transferId")! }));
     case "reverseTransfer":
       if (!str("transferId")) return NextResponse.json({ error: "transferId required" }, { status: 400 });
+      if (process.env.GO_INVENTORY_STOCK_WRITES === "1") {
+        return dispatchInventoryGo(ctx, resolved, "inventory.reverseTransfer", { transferId: str("transferId")! });
+      }
       return respond(await executor.execute("inventory.reverseTransfer", ctx, { transferId: str("transferId")! }));
     case "postValuationSummary":
       return respond(await executor.execute("inventory.postValuationSummary", ctx, { memo: str("memo") }));

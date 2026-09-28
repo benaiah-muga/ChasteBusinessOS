@@ -141,6 +141,24 @@ updates into the signed Go capability bridge. It requires `pnpm dev:api`;
 leave, payroll, and other HR actions remain on the legacy handler, and
 uncertain writes fail closed without a TypeScript retry. The flag defaults to
 `0`.
+`GO_ACCOUNTING_EXPENSE_WRITES=1` opts expense claim submission, decisions, and
+payments into the signed Go capability bridge. Expense policy configuration
+and other accounting actions remain on their existing handlers. It requires
+`pnpm dev:api`; uncertain writes fail closed without a TypeScript retry. The
+flag defaults to `0`.
+`GO_PURCHASING_BILL_WRITES=1` opts vendor and bill creation and bill payments
+into the signed Go capability bridge. Other purchasing actions remain on their
+existing handlers. It requires `pnpm dev:api`; uncertain writes fail closed
+without a TypeScript retry. The flag defaults to `0`.
+`GO_INVENTORY_STOCK_WRITES=1` opts stock adjustments and stock transfer
+creation, confirmation, cancellation, and reversal into the signed Go
+capability bridge. Other inventory actions remain on their existing handlers.
+It requires `pnpm dev:api`; uncertain writes fail closed without a TypeScript
+retry. The flag defaults to `0`.
+`GO_POS_WRITES=1` opts register opening, sales, closing, returns, and shift
+summaries into the signed Go capability bridge. It requires `pnpm dev:api`;
+uncertain writes fail closed without a TypeScript retry. The flag defaults to
+`0`.
 
 For a production-shaped local Docker run, use the full Compose stack instead:
 

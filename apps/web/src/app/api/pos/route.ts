@@ -5,6 +5,61 @@ import { customers, getDb, invoiceLines, invoices, payments, posReturnLines, pos
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+function goUnavailable() {
+  return NextResponse.json({ error: "POS service unavailable; check register status before retrying" }, { status: 503, headers: noStore });
+}
+
+async function posGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return goUnavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ ok: false, pendingApproval: true, reason: parsed.data.reason }, { status: 202, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 400 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+  } catch {
+    return goUnavailable();
+  }
+  return goUnavailable();
+}
+
+async function dispatchPosGo(
+  actionContext: NonNullable<ReturnType<typeof actorFromResolved>>,
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+  capabilityId: string,
+  input: Record<string, unknown>,
+) {
+  try {
+    return await posGoResponse(await executeGoCapability({ actionContext, session, capabilityId, input }));
+  } catch {
+    return goUnavailable();
+  }
+}
 
 export async function GET() {
   const resolved = await getResolvedUser();
@@ -176,9 +231,16 @@ export async function POST(req: Request) {
 
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
+  const goWrites = process.env.GO_POS_WRITES === "1";
 
   let result;
   if (body.data.action === "open") {
+    if (goWrites) {
+      return dispatchPosGo(humanCtx, resolved, "pos.openSession", {
+        register: "main",
+        openingFloatMinor: body.data.openingFloatMinor,
+      });
+    }
     result = await executor.execute("pos.openSession", humanCtx, {
       openingFloatMinor: body.data.openingFloatMinor,
     });
@@ -192,6 +254,16 @@ export async function POST(req: Request) {
     if (session?.status !== "open") {
       return NextResponse.json({ ok: false, error: "no open register session" }, { status: 422 });
     }
+    if (goWrites) {
+      return dispatchPosGo(humanCtx, resolved, "pos.completeSale", {
+        sessionId: body.data.sessionId,
+        method: body.data.method,
+        ...(body.data.customerId ? { customerId: body.data.customerId } : {}),
+        ...(body.data.cashReceivedMinor !== undefined ? { cashReceivedMinor: body.data.cashReceivedMinor } : {}),
+        ...(body.data.tenders ? { tenders: body.data.tenders } : {}),
+        lines: body.data.lines.map((line) => ({ ...line, taxMinor: 0 })),
+      });
+    }
     result = await executor.execute("pos.completeSale", humanCtx, {
       sessionId: body.data.sessionId,
       method: body.data.method,
@@ -203,22 +275,27 @@ export async function POST(req: Request) {
   } else if (body.data.action === "returnSale") {
     // money-risk with no declared amount: the gate always holds, a 202 with
     // pendingApproval is the normal outcome until someone approves it.
-    result = await executor.execute("pos.returnSale", humanCtx, {
+    const input = {
       invoiceId: body.data.invoiceId,
       reason: body.data.reason,
       refundMethod: body.data.refundMethod,
       ...(body.data.lines ? { lines: body.data.lines } : {}),
-    });
+    };
+    if (goWrites) return dispatchPosGo(humanCtx, resolved, "pos.returnSale", input);
+    result = await executor.execute("pos.returnSale", humanCtx, input);
   } else if (body.data.action === "shiftSummary") {
+    if (goWrites) return dispatchPosGo(humanCtx, resolved, "pos.shiftSummary", { sessionId: body.data.sessionId });
     result = await executor.execute("pos.shiftSummary", humanCtx, {
       sessionId: body.data.sessionId,
     });
   } else {
-    result = await executor.execute("pos.closeSession", humanCtx, {
+    const input = {
       sessionId: body.data.sessionId,
       countedCashMinor: body.data.countedCashMinor,
       ...(body.data.varianceReason ? { varianceReason: body.data.varianceReason } : {}),
-    });
+    };
+    if (goWrites) return dispatchPosGo(humanCtx, resolved, "pos.closeSession", input);
+    result = await executor.execute("pos.closeSession", humanCtx, input);
   }
 
   if (result.pendingApproval) {
