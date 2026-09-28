@@ -366,6 +366,40 @@ export async function POST(req: Request) {
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
 
+  if (
+    (body.action === "creditNote" || body.action === "reverse") &&
+    process.env.GO_ACCOUNTING_INVOICE_OPS_WRITE === "1"
+  ) {
+    let capabilityId: string;
+    let input: Record<string, unknown>;
+    let outputSchema: z.ZodTypeAny;
+    if (body.action === "creditNote") {
+      if (!body.invoiceId || !body.amountMinor || !body.reason || body.reason.length < 3)
+        return NextResponse.json({ error: "invoiceId, amountMinor and a reason of at least 3 characters are required" }, { status: 400 });
+      capabilityId = "accounting.creditNote";
+      input = { invoiceId: body.invoiceId as string, amountMinor: body.amountMinor as number, reason: body.reason as string };
+      outputSchema = creditNoteOutputSchema;
+    } else {
+      if (!body.entryId) return NextResponse.json({ error: "entryId is required" }, { status: 400 });
+      capabilityId = "accounting.reverseEntry";
+      input = { entryId: body.entryId as string };
+      outputSchema = reverseEntryOutputSchema;
+    }
+    try {
+      return await invoiceOpsGoResponse(
+        await executeGoCapability({
+          actionContext: humanCtx,
+          session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+          capabilityId,
+          input,
+        }),
+        outputSchema,
+      );
+    } catch {
+      return accountingUnavailable();
+    }
+  }
+
   if (body.action === "reverse" && body.entryId) {
     const result = await executor.execute("accounting.reverseEntry", humanCtx, { entryId: body.entryId });
     return respond(result);
@@ -519,6 +553,43 @@ async function createInvoiceGoResponse(result: GoCapabilityBridgeResult) {
   return accountingUnavailable();
 }
 
+async function invoiceOpsGoResponse(result: GoCapabilityBridgeResult, outputSchema: z.ZodTypeAny) {
+  if (result.kind !== "response") return accountingUnavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    const headers = { "Cache-Control": "no-store" };
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: outputSchema }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json({ ok: true, data: parsed.data.data }, { status: 200, headers });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json({ ok: false, pendingApproval: true, reason: parsed.data.reason }, { status: 202, headers });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers });
+    }
+    if (result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return accountingUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers });
+    }
+  } catch {
+    return accountingUnavailable();
+  }
+  return accountingUnavailable();
+}
+
 function respond(result: { ok: boolean; data?: unknown; error?: string; pendingApproval?: unknown }) {
   if (result.pendingApproval) {
     return NextResponse.json({ ok: false, pendingApproval: true, reason: result.error }, { status: 202 });
@@ -527,6 +598,12 @@ function respond(result: { ok: boolean; data?: unknown; error?: string; pendingA
   return NextResponse.json({ ok: true, data: result.data });
 }
 
+const creditNoteOutputSchema = z.object({
+  entryId: z.string(),
+  creditedMinor: z.number(),
+  invoiceBalanceMinor: z.number(),
+});
+const reverseEntryOutputSchema = z.object({ reversalEntryId: z.string() });
 const quoteCreateOutputSchema = z.object({
   quoteId: z.string(),
   quoteNumber: z.number(),

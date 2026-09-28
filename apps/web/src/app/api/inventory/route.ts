@@ -217,6 +217,48 @@ export async function POST(req: Request) {
   const str = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : undefined);
   const num = (k: string) => (typeof body[k] === "number" ? (body[k] as number) : undefined);
 
+  if (process.env.GO_INVENTORY_ITEM_WRITES === "1" && ["createItem", "updateItem", "archiveItem", "createLocation"].includes((body.action as string | undefined) ?? "")) {
+    let capabilityId: string;
+    let input: Record<string, unknown>;
+    if (body.action === "createItem") {
+      if (!str("sku") || !str("name")) return NextResponse.json({ error: "sku and name required" }, { status: 400 });
+      capabilityId = "inventory.createItem";
+      input = {
+        sku: str("sku")!,
+        name: str("name")!,
+        kind: body.kind === "service" ? "service" : "goods",
+        unitLabel: str("unitLabel") ?? "unit",
+        salePriceMinor: num("salePriceMinor") ?? 0,
+        reorderPointThousandths: num("reorderPointThousandths") ?? 0,
+        imageUrl: str("imageUrl"),
+        tags: Array.isArray(body.tags) ? (body.tags as string[]) : [],
+        barcode: str("barcode"),
+      };
+    } else if (body.action === "updateItem") {
+      if (!str("sku")) return NextResponse.json({ error: "sku required" }, { status: 400 });
+      capabilityId = "inventory.updateItem";
+      input = { sku: str("sku")! };
+      for (const key of ["name", "unitLabel", "imageUrl", "barcode"] as const) {
+        if (body[key] !== undefined) input[key] = body[key];
+      }
+      if (body.salePriceMinor !== undefined) input.salePriceMinor = num("salePriceMinor");
+      if (Array.isArray(body.tags)) input.tags = body.tags;
+    } else if (body.action === "archiveItem") {
+      if (!str("sku")) return NextResponse.json({ error: "sku required" }, { status: 400 });
+      capabilityId = "inventory.archiveItem";
+      input = { sku: str("sku")!, archive: body.archive !== false };
+    } else {
+      if (!str("code") || !str("name")) return NextResponse.json({ error: "code and name required" }, { status: 400 });
+      capabilityId = "inventory.createLocation";
+      input = { code: str("code")!, name: str("name")! };
+    }
+    try {
+      return await inventoryGoResponse(await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId, input }));
+    } catch {
+      return goUnavailable();
+    }
+  }
+
   switch (body.action) {
     case "createItem":
       if (!str("sku") || !str("name")) return NextResponse.json({ error: "sku and name required" }, { status: 400 });

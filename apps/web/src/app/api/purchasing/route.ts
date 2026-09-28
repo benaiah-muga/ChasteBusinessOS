@@ -235,6 +235,55 @@ export async function POST(req: Request) {
     }
   }
 
+  if (process.env.GO_PURCHASING_REQUEST_WRITES === "1" && ["createPurchaseRequest", "decidePurchaseRequest", "createRfq", "recordQuote", "selectWinningQuote"].includes(body.action ?? "")) {
+    let capabilityId: string;
+    let input: Record<string, unknown>;
+    if (body.action === "createPurchaseRequest") {
+      if (!body.title || !body.justification)
+        return NextResponse.json({ error: "title and justification are required" }, { status: 400 });
+      capabilityId = "purchasing.createPurchaseRequest";
+      input = {
+        title: body.title as string,
+        justification: body.justification as string,
+        estimatedAmountMinor: (body.estimatedAmountMinor as number) || undefined,
+      };
+    } else if (body.action === "decidePurchaseRequest") {
+      if (!body.requestId || (body.decision !== "approve" && body.decision !== "reject"))
+        return NextResponse.json({ error: "requestId and a decision of approve or reject are required" }, { status: 400 });
+      capabilityId = "purchasing.decidePurchaseRequest";
+      input = {
+        requestId: body.requestId as string,
+        decision: body.decision as string,
+        reason: (body.reason as string) || undefined,
+      };
+    } else if (body.action === "createRfq") {
+      const vendorIds = body.vendorIds as string[] | undefined;
+      if (!body.requestId || !vendorIds?.length)
+        return NextResponse.json({ error: "requestId and vendorIds are required" }, { status: 400 });
+      capabilityId = "purchasing.createRfq";
+      input = { requestId: body.requestId as string, vendorIds };
+    } else if (body.action === "recordQuote") {
+      if (!body.rfqId || !body.amountMinor)
+        return NextResponse.json({ error: "rfqId and amountMinor are required" }, { status: 400 });
+      capabilityId = "purchasing.recordQuote";
+      input = {
+        rfqId: body.rfqId as string,
+        amountMinor: body.amountMinor as number,
+        leadTimeDays: (body.leadTimeDays as number) || undefined,
+        notes: (body.notes as string) || undefined,
+      };
+    } else {
+      if (!body.rfqId) return NextResponse.json({ error: "rfqId is required" }, { status: 400 });
+      capabilityId = "purchasing.selectWinningQuote";
+      input = { rfqId: body.rfqId as string };
+    }
+    try {
+      return await purchasingGoResponse(await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId, input }));
+    } catch {
+      return goUnavailable();
+    }
+  }
+
   if (process.env.GO_PURCHASING_PO_WRITES === "1" && body.action === "createPurchaseOrder") {
     const lines = body.lines as
       | { description: string; quantity: number; unitPriceMinor: number; expenseAccountCode?: string; sku?: string }[]

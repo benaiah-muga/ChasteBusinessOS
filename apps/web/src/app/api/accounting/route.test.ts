@@ -471,3 +471,77 @@ describe("POST /api/accounting Go quote and recurring template bridges", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/accounting Go invoice ops bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_CREATE_INVOICE", "0");
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_OPS_WRITE", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { done: true } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("dispatches credit notes and entry reversals through the signed Go bridge when enabled", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_OPS_WRITE", "1");
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: true, data: { entryId: "entry-1", creditedMinor: 25000, invoiceBalanceMinor: 125000 }, replayed: true }) })
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: true, data: { reversalEntryId: "entry-2" } }) });
+
+    const credit = await POST(request({ action: "creditNote", invoiceId: "inv-1", amountMinor: 25000, reason: "Damaged goods" }));
+    expect(credit.status).toBe(200);
+    expect(await credit.json()).toEqual({ ok: true, data: { entryId: "entry-1", creditedMinor: 25000, invoiceBalanceMinor: 125000 } });
+    expect(mocks.executeGoCapability).toHaveBeenNthCalledWith(1, {
+      actionContext,
+      session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+      capabilityId: "accounting.creditNote",
+      input: { invoiceId: "inv-1", amountMinor: 25000, reason: "Damaged goods" },
+    });
+
+    const reversal = await POST(request({ action: "reverse", entryId: "entry-1" }));
+    expect(reversal.status).toBe(200);
+    expect(await reversal.json()).toEqual({ ok: true, data: { reversalEntryId: "entry-2" } });
+    expect(mocks.executeGoCapability).toHaveBeenNthCalledWith(2, {
+      actionContext,
+      session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+      capabilityId: "accounting.reverseEntry",
+      input: { entryId: "entry-1" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps invoice ops on TypeScript while the flag is off", async () => {
+    await POST(request({ action: "creditNote", invoiceId: "inv-1", amountMinor: 25000, reason: "Damaged goods" }));
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.creditNote", actionContext, {
+      invoiceId: "inv-1", amountMinor: 25000, reason: "Damaged goods",
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("normalizes Go approval requests without retrying through TypeScript", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_OPS_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, pendingApproval: true, reason: "Approval required", approvalId: "private-id" }, { status: 202 }),
+    });
+    const response = await POST(request({ action: "reverse", entryId: "entry-1" }));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ ok: false, pendingApproval: true, reason: "Approval required" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the Go outcome cannot be confirmed", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_OPS_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+    const response = await POST(request({ action: "creditNote", invoiceId: "inv-1", amountMinor: 25000, reason: "Damaged goods" }));
+    expect(response.status).toBe(503);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

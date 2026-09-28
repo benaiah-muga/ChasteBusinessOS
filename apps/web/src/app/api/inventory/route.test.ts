@@ -133,3 +133,51 @@ describe("inventory Go route adapter", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("inventory Go item master bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_INVENTORY_STOCK_WRITES", "0");
+    vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS", "0");
+    vi.stubEnv("GO_INVENTORY_ITEM_WRITES", "0");
+    mocks.getResolvedUser.mockResolvedValue(user);
+    mocks.actorFromResolved.mockReturnValue(ctx);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { done: true } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    { body: { action: "createItem", sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "pc", salePriceMinor: 5000, reorderPointThousandths: 1000, tags: ["core"], barcode: "BC-1", imageUrl: "https://example.test/mug.png" }, capabilityId: "inventory.createItem", input: { sku: "MUG-1", name: "Mug", kind: "goods", unitLabel: "pc", salePriceMinor: 5000, reorderPointThousandths: 1000, tags: ["core"], barcode: "BC-1", imageUrl: "https://example.test/mug.png" } },
+    { body: { action: "updateItem", sku: "MUG-1", name: "Mug Pro", salePriceMinor: 6000, tags: ["core", "new"] }, capabilityId: "inventory.updateItem", input: { sku: "MUG-1", name: "Mug Pro", salePriceMinor: 6000, tags: ["core", "new"] } },
+    { body: { action: "archiveItem", sku: "MUG-1" }, capabilityId: "inventory.archiveItem", input: { sku: "MUG-1", archive: true } },
+    { body: { action: "createLocation", code: "SHOP", name: "Shop Floor" }, capabilityId: "inventory.createLocation", input: { code: "SHOP", name: "Shop Floor" } },
+  ])("dispatches $body.action to Go behind GO_INVENTORY_ITEM_WRITES", async ({ body, capabilityId, input }) => {
+    vi.stubEnv("GO_INVENTORY_ITEM_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { done: true }, replayed: true }) });
+    const response = await POST(request({ ...body, intentId: "inventory-intent" }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: { done: true } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({ actionContext: ctx, session: user, capabilityId, input });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps item master writes on TypeScript while the flag is off", async () => {
+    await POST(request({ action: "createLocation", code: "SHOP", name: "Shop Floor" }));
+    expect(mocks.execute).toHaveBeenCalledWith("inventory.createLocation", ctx, { code: "SHOP", name: "Shop Floor" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without retrying through TypeScript when the Go outcome is unknown", async () => {
+    vi.stubEnv("GO_INVENTORY_ITEM_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "outcome-unknown" });
+    const response = await POST(request({ action: "archiveItem", sku: "MUG-1" }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

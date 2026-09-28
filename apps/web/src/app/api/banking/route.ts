@@ -3,6 +3,52 @@ import { and, desc, eq } from "drizzle-orm";
 import { bankAccounts, bankTransactions, customers, getDb, invoices, payments } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { z } from "zod";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+function bankingUnavailable() {
+  return NextResponse.json(
+    { ok: false, error: "banking service unavailable; check transaction status before retrying" },
+    { status: 503, headers: noStore },
+  );
+}
+
+async function bankingGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return bankingUnavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(body);
+      if (!parsed.success) return bankingUnavailable();
+      return NextResponse.json(parsed.data, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return bankingUnavailable();
+      return NextResponse.json({ ok: false, pendingApproval: true, reason: parsed.data.reason }, { status: 202, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return bankingUnavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 400 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return bankingUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return bankingUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+  } catch {
+    return bankingUnavailable();
+  }
+  return bankingUnavailable();
+}
 
 /**
  * Full human surface for bank feeds & reconciliation: accounts, statement
@@ -143,6 +189,49 @@ export async function POST(req: Request) {
 
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
+
+  if (
+    process.env.GO_BANKING_WRITES === "1" &&
+    ["addBankAccount", "importBankFeed", "matchBankTransaction", "unmatchBankTransaction", "excludeBankTransaction", "unexcludeBankTransaction", "deleteBankTransaction"].includes(body.action ?? "")
+  ) {
+    let capabilityId: string;
+    let input: Record<string, unknown>;
+    if (body.action === "addBankAccount") {
+      if (!body.name) return NextResponse.json({ error: "name is required" }, { status: 400 });
+      capabilityId = "accounting.addBankAccount";
+      input = {
+        name: body.name as string,
+        currencyCode: typeof body.currencyCode === "string" ? body.currencyCode : undefined,
+        last4: (body.last4 as string) || undefined,
+        balanceMinor: typeof body.balanceMinor === "number" ? body.balanceMinor : 0,
+      };
+    } else if (body.action === "importBankFeed") {
+      const rows = body.rows as { postedAt: string; amountMinor: number; description: string }[] | undefined;
+      if (!rows?.length) return NextResponse.json({ error: "rows are required" }, { status: 400 });
+      if (rows.length > 500) return NextResponse.json({ error: "at most 500 rows per import" }, { status: 400 });
+      capabilityId = "accounting.importBankFeed";
+      input = { bankAccountId: (body.bankAccountId as string) || undefined, rows };
+    } else if (body.action === "matchBankTransaction") {
+      if (!body.transactionId) return NextResponse.json({ error: "transactionId is required" }, { status: 400 });
+      if (!body.paymentId && !body.entryId)
+        return NextResponse.json({ error: "paymentId or entryId is required" }, { status: 400 });
+      capabilityId = "accounting.matchBankTransaction";
+      input = {
+        transactionId: body.transactionId as string,
+        ...(body.paymentId ? { paymentId: body.paymentId as string } : {}),
+        ...(body.entryId ? { entryId: body.entryId as string } : {}),
+      };
+    } else {
+      if (!body.transactionId) return NextResponse.json({ error: "transactionId is required" }, { status: 400 });
+      capabilityId = `accounting.${body.action}`;
+      input = { transactionId: body.transactionId as string };
+    }
+    try {
+      return await bankingGoResponse(await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId, input }));
+    } catch {
+      return bankingUnavailable();
+    }
+  }
 
   switch (body.action) {
     case "addBankAccount":

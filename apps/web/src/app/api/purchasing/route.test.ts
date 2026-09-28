@@ -208,3 +208,55 @@ describe("purchasing Go route adapter", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("purchasing Go request workflow bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_PURCHASING_BILL_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_PO_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_RECEIPT_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_REQUEST_WRITES", "0");
+    mocks.getResolvedUser.mockResolvedValue(user);
+    mocks.actorFromResolved.mockReturnValue(ctx);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { done: true } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    { body: { action: "createPurchaseRequest", title: "Forklift battery", justification: "Failed load test", estimatedAmountMinor: 800000 }, capabilityId: "purchasing.createPurchaseRequest", input: { title: "Forklift battery", justification: "Failed load test", estimatedAmountMinor: 800000 } },
+    { body: { action: "decidePurchaseRequest", requestId: "pr-1", decision: "approve", reason: "Budget open" }, capabilityId: "purchasing.decidePurchaseRequest", input: { requestId: "pr-1", decision: "approve", reason: "Budget open" } },
+    { body: { action: "createRfq", requestId: "pr-1", vendorIds: ["vendor-1", "vendor-2"] }, capabilityId: "purchasing.createRfq", input: { requestId: "pr-1", vendorIds: ["vendor-1", "vendor-2"] } },
+    { body: { action: "recordQuote", rfqId: "rfq-1", amountMinor: 750000, leadTimeDays: 14, notes: "Includes delivery" }, capabilityId: "purchasing.recordQuote", input: { rfqId: "rfq-1", amountMinor: 750000, leadTimeDays: 14, notes: "Includes delivery" } },
+    { body: { action: "selectWinningQuote", rfqId: "rfq-1" }, capabilityId: "purchasing.selectWinningQuote", input: { rfqId: "rfq-1" } },
+  ])("dispatches $body.action to Go behind GO_PURCHASING_REQUEST_WRITES", async ({ body, capabilityId, input }) => {
+    vi.stubEnv("GO_PURCHASING_REQUEST_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { done: true }, replayed: true }) });
+    const response = await POST(request({ ...body, intentId: "buy-intent" }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: { done: true } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({ actionContext: ctx, session: user, capabilityId, input });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps request workflow writes on TypeScript while the flag is off", async () => {
+    await POST(request({ action: "createPurchaseRequest", title: "Forklift battery", justification: "Failed load test" }));
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.createPurchaseRequest", ctx, {
+      title: "Forklift battery", justification: "Failed load test", estimatedAmountMinor: undefined,
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without retrying through TypeScript when Go is unavailable", async () => {
+    vi.stubEnv("GO_PURCHASING_REQUEST_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "outcome-unknown" });
+    const response = await POST(request({ action: "selectWinningQuote", rfqId: "rfq-1" }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
