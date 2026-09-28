@@ -350,3 +350,9 @@ Scope: Preserve the migration plan and verify the Go foundation, policy and ledg
   EXPECT: /ALL MET[\s\S]*Routes:/
   CWD: /home/benaiah/projects/Chaste BusinessOS
   EVIDENCE: exit=0; shell=/bin/sh; cwd=/home/benaiah/projects/Chaste BusinessOS; path=f67208a7a5a6/21 entries; EXPECT=matched; output-sha256=b0748b1eb9a3b1532f45e6c50a770a2e308a108ac223e78f2ecfab9917558764; output-bytes=2813
+
+- [x] G75: The versioned Go policy HTTP contract generates matching TypeScript and Go models used by the signed Go handler and React bridge, with runtime validation and the existing response behavior preserved.
+  CHECK: pnpm migration:contracts:check && pnpm --filter web exec vitest run src/server/policy-route.test.ts && go -C apps/api test -run '^TestGoPolicyHandler' ./internal/httpapi && go -C apps/api test ./internal/policy
+  EXPECT: Contract outputs current
+  CWD: /home/benaiah/projects/Chaste BusinessOS
+  EVIDENCE: The contract drift check passed; all 6 policy route tests passed; the Go policy handler exact response and mixed-value tests passed; policy package tests passed; web TypeScript typecheck passed.

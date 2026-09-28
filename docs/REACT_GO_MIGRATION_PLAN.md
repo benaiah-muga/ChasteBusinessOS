@@ -433,7 +433,10 @@ new owners and the manifest shows zero legacy runtime paths.
 3. (In progress) Capture old-runtime fixtures and benchmark scripts on a migrated database. Repeatable frontend and Go build timings are recorded by `pnpm benchmark:migration:builds`; request, startup, edit-to-ready, browser, and demo fixtures remain to be measured.
 4. (In progress) Define the versioned HTTP contract and auth bridge contract;
    prove Go read-only policy and ledger endpoints under the existing session,
-   permission, and RLS policies.
+   permission, and RLS policies. The first OpenAPI 3.1 contract now covers
+   `GET /__go/policy`; `pnpm migration:contracts:check` verifies generated Go
+   and TypeScript models. The assertion-claims contract and remaining endpoints
+   are still open.
 5. Port the kernel trust spine and the customer-to-payment slice; do not
    switch any write before its parity and rollback gates pass.
 6. (Done) Bridge only `POST /api/accounting` invoice creation to the existing Go

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/policy"
 )
@@ -46,8 +47,12 @@ func (h *GoPolicyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
-		Policy  policy.Value `json:"policy"`
-		CanEdit bool         `json:"canEdit"`
-	}{Policy: value, CanEdit: claims.CanEdit})
+	writeJSON(w, http.StatusOK, apicontract.GoPolicyResponse{
+		Policy: apicontract.Policy{
+			MaxRiskAutonomous:   value.MaxRiskAutonomous,
+			MoneyThresholdMinor: value.MoneyThresholdMinor,
+			RequiresApprovalFor: value.RequiresApprovalFor,
+		},
+		CanEdit: claims.CanEdit,
+	})
 }

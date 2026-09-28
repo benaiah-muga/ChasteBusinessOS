@@ -1,0 +1,76 @@
+openapi: 3.1.0
+info:
+  title: Chaste Go Internal API
+  version: 1.0.0
+  description: Version 1 contract for the private Go API consumed by the web application.
+paths:
+  /__go/policy:
+    get:
+      operationId: readGoPolicy
+      summary: Read the organization policy
+      description: Reads policy for the organization named by the signed session assertion.
+      security:
+        - chasteSessionAssertion: []
+      responses:
+        "200":
+          description: Current policy and whether the actor can edit it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoPolicyResponse"
+        "401":
+          description: The signed assertion is missing, invalid, or expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The policy could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The private bridge is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  securitySchemes:
+    chasteSessionAssertion:
+      type: apiKey
+      in: header
+      name: X-Chaste-Session-Assertion
+      description: Short-lived signed assertion created by the authenticated web server.
+  schemas:
+    GoPolicyResponse:
+      type: object
+      additionalProperties: false
+      required: [policy, canEdit]
+      properties:
+        policy:
+          $ref: "#/components/schemas/Policy"
+        canEdit:
+          type: boolean
+    Policy:
+      type: object
+      additionalProperties: false
+      required: [maxRiskAutonomous, moneyThresholdMinor, requiresApprovalFor]
+      properties:
+        maxRiskAutonomous:
+          type: string
+        moneyThresholdMinor:
+          type: integer
+          format: int64
+        requiresApprovalFor:
+          type: array
+          items: {}
+          x-go-type: RawJSON
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string

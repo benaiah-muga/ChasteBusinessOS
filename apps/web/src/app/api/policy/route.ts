@@ -3,11 +3,14 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { getDb, policies } from "@chaste/db";
 import { logger } from "@chaste/kernel";
+import type { components } from "@/generated/go-internal-v1";
 import { createGoPolicyAssertion } from "@/server/go-bridge";
 import { actorFromResolved, buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
 
-const goPolicyResponseSchema = z.object({
+type GoPolicyResponse = components["schemas"]["GoPolicyResponse"];
+
+const goPolicyResponseSchema: z.ZodType<GoPolicyResponse> = z.object({
   policy: z.object({
     maxRiskAutonomous: z.string(),
     moneyThresholdMinor: z.number().int(),
@@ -15,8 +18,6 @@ const goPolicyResponseSchema = z.object({
   }),
   canEdit: z.boolean(),
 });
-
-type GoPolicyResponse = z.infer<typeof goPolicyResponseSchema>;
 
 async function readGoPolicy(input: {
   userId: string;

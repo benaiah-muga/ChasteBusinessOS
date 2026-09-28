@@ -83,6 +83,9 @@ jobs:
       - name: Check runtime capability migration manifest
         run: pnpm migration:capabilities:check
 
+      - name: Check generated API contract bindings
+        run: pnpm migration:contracts:check
+
       - name: Check migration inventory source references
         run: pnpm migration:inventory:check
 
