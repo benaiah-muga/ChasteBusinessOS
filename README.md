@@ -163,6 +163,25 @@ retry. The flag defaults to `0`.
 summaries into the signed Go capability bridge. It requires `pnpm dev:api`;
 uncertain writes fail closed without a TypeScript retry. The flag defaults to
 `0`.
+`GO_ACCOUNTING_INVOICE_OPS_WRITE=1` opts credit notes and journal entry
+reversals into the signed Go capability bridge. It requires `pnpm dev:api`;
+other accounting actions remain on their existing handlers, and uncertain
+writes fail closed without a TypeScript retry. The flag defaults to `0`.
+`GO_BANKING_WRITES=1` opts bank account creation, feed imports, transaction
+matching, unmatching, exclusions, and deletion into the signed Go capability
+bridge. It requires `pnpm dev:api`; the reconciliation view and other
+accounting actions remain on their existing handlers, and uncertain writes
+fail closed without a TypeScript retry. The flag defaults to `0`.
+`GO_PURCHASING_REQUEST_WRITES=1` opts purchase requests, request decisions,
+RFQs, quote recording, and winning-quote selection into the signed Go
+capability bridge. It requires `pnpm dev:api`; other purchasing actions remain
+on their existing handlers, and uncertain writes fail closed without a
+TypeScript retry. The flag defaults to `0`.
+`GO_INVENTORY_ITEM_WRITES=1` opts item creation, updates, archiving, and
+location creation into the signed Go capability bridge. It requires `pnpm
+dev:api`; barcode lookup, listing, and other inventory actions remain on their
+existing handlers, and uncertain writes fail closed without a TypeScript
+retry. The flag defaults to `0`.
 
 For a production-shaped local Docker run, use the full Compose stack instead:
 

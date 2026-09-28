@@ -299,6 +299,10 @@ NVIDIA_API_KEY=""      # default; free tier at build.nvidia.com
 | Accounting quote write shows an upstream error | `GO_ACCOUNTING_QUOTES_WRITE=1` but Go is unavailable or the write outcome could not be confirmed | Check the quote before retrying; start `pnpm dev:api` or set `GO_ACCOUNTING_QUOTES_WRITE=0` |
 | Recurring invoice write shows an upstream error | `GO_ACCOUNTING_RECURRING_WRITE=1` but Go is unavailable or the write outcome could not be confirmed | Check the recurring template before retrying; start `pnpm dev:api` or set `GO_ACCOUNTING_RECURRING_WRITE=0` |
 | HR employee write shows an upstream error | `GO_HR_EMPLOYEE_WRITES=1` but Go is unavailable or the write outcome could not be confirmed | Check the employee before retrying; start `pnpm dev:api` or set `GO_HR_EMPLOYEE_WRITES=0` |
+| Accounting invoice op shows an upstream error | `GO_ACCOUNTING_INVOICE_OPS_WRITE=1` but Go is unavailable or the write outcome could not be confirmed | Check the invoice or entry before retrying; start `pnpm dev:api` or set `GO_ACCOUNTING_INVOICE_OPS_WRITE=0` |
+| Banking write shows an upstream error | `GO_BANKING_WRITES=1` but Go is unavailable or the write outcome could not be confirmed | Check the transaction before retrying; start `pnpm dev:api` or set `GO_BANKING_WRITES=0` |
+| Purchase request write shows an upstream error | `GO_PURCHASING_REQUEST_WRITES=1` but Go is unavailable or the write outcome could not be confirmed | Check the request or RFQ before retrying; start `pnpm dev:api` or set `GO_PURCHASING_REQUEST_WRITES=0` |
+| Inventory item write shows an upstream error | `GO_INVENTORY_ITEM_WRITES=1` but Go is unavailable or the write outcome could not be confirmed | Check the item or location before retrying; start `pnpm dev:api` or set `GO_INVENTORY_ITEM_WRITES=0` |
 | `NVIDIA_API_KEY is not set` at runtime | No provider key | Expected without one - see [§5](#5-optional-the-ai-provider-key) |
 
 **Still stuck?** The `packages/db` package has `db:studio` (Drizzle Studio) for

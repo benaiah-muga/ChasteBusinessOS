@@ -489,3 +489,12 @@ new owners and the manifest shows zero legacy runtime paths.
     behavior, three-way matching, tenant isolation, approvals, audit, replay,
     and response shapes. Bridge only `receiveGoods` behind default-off
     `GO_PURCHASING_RECEIPT_WRITES`.
+17. (Done) Add Go parity for credit notes and journal entry reversals, bank
+    reconciliation writes, the purchase request and RFQ workflow, and the
+    inventory item and location master through the governed executor and jobs
+    worker. Preserve posting, approval gating, audit, replay, and response
+    shapes. Bridge `creditNote` and `reverseEntry` behind default-off
+    `GO_ACCOUNTING_INVOICE_OPS_WRITE`, the banking writes behind
+    `GO_BANKING_WRITES`, the request workflow behind
+    `GO_PURCHASING_REQUEST_WRITES`, and the item master behind
+    `GO_INVENTORY_ITEM_WRITES`.
