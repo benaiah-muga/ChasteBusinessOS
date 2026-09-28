@@ -127,6 +127,32 @@ var capabilitySpecs = map[string]capabilitySpec{
 	posCloseSessionCapabilityID:            {module: "pos", permission: "pos.write", risk: "write"},
 	posReturnSaleCapabilityID:              {module: "pos", permission: "pos.sell", risk: "money"},
 	posShiftSummaryCapabilityID:            {module: "pos", permission: "pos.read", risk: "read"},
+	creditNoteCapabilityID:                 {module: "accounting", permission: "accounting.post", risk: "money"},
+	shareInvoiceCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
+	generateDueInvoicesCapabilityID:        {module: "accounting", permission: "accounting.write", risk: "write"},
+	reverseEntryCapabilityID:               {module: "accounting", permission: "accounting.post", risk: "money"},
+	addBankAccountCapabilityID:             {module: "accounting", permission: "accounting.write", risk: "write"},
+	importBankFeedCapabilityID:             {module: "accounting", permission: "accounting.write", risk: "write"},
+	deleteBankTransactionCapabilityID:      {module: "accounting", permission: "accounting.write", risk: "write"},
+	matchBankTransactionCapabilityID:       {module: "accounting", permission: "accounting.write", risk: "write"},
+	unmatchBankTransactionCapabilityID:     {module: "accounting", permission: "accounting.write", risk: "write"},
+	bankReconciliationCapabilityID:         {module: "accounting", permission: "accounting.read", risk: "read"},
+	excludeBankTransactionCapabilityID:     {module: "accounting", permission: "accounting.write", risk: "write"},
+	unexcludeBankTransactionCapabilityID:   {module: "accounting", permission: "accounting.write", risk: "write"},
+	bankSummaryCapabilityID:                {module: "accounting", permission: "accounting.read", risk: "read"},
+	createPurchaseRequestCapabilityID:      {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	decidePurchaseRequestCapabilityID:      {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	createRfqCapabilityID:                  {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	recordQuoteCapabilityID:                {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	selectWinningQuoteCapabilityID:         {module: "purchasing", permission: "purchasing.write", risk: "write"},
+	listPurchaseWorkflowCapabilityID:       {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	inventoryCreateItemCapabilityID:        {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryUpdateItemCapabilityID:        {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryRestoreItemCapabilityID:       {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryArchiveItemCapabilityID:       {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCreateLocationCapabilityID:    {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryListLocationsCapabilityID:     {module: "inventory", permission: "inventory.read", risk: "read"},
+	inventoryLookupByBarcodeCapabilityID:   {module: "inventory", permission: "inventory.read", risk: "read"},
 	createProjectCapabilityID:              {module: "projects", permission: "projects.write", risk: "write"},
 	ProjectBoardReadCapabilityID:           {module: "projects", permission: "projects.read", risk: "read"},
 	archiveProjectCapabilityID:             {module: "projects", permission: "projects.write", risk: "write"},
@@ -156,6 +182,15 @@ func supportedCapability(capabilityID string) bool {
 		inventoryCreateCycleCountCapabilityID, inventoryRecordCycleCountsCapabilityID,
 		inventoryPostCycleCountCapabilityID, inventoryCancelCycleCountCapabilityID,
 		posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID,
+		creditNoteCapabilityID, shareInvoiceCapabilityID, generateDueInvoicesCapabilityID, reverseEntryCapabilityID,
+		addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
+		unmatchBankTransactionCapabilityID, bankReconciliationCapabilityID, excludeBankTransactionCapabilityID,
+		unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID,
+		createPurchaseRequestCapabilityID, decidePurchaseRequestCapabilityID, createRfqCapabilityID, recordQuoteCapabilityID,
+		selectWinningQuoteCapabilityID, listPurchaseWorkflowCapabilityID,
+		inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
+		inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
+		inventoryLookupByBarcodeCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID:
 		return true
 	default:
@@ -511,6 +546,35 @@ func (e *Executor) execute(
 			input = parsed
 		case posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID:
 			parsed, err := parsePosSaleInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case creditNoteCapabilityID, shareInvoiceCapabilityID, generateDueInvoicesCapabilityID, reverseEntryCapabilityID:
+			parsed, err := parseAccountingInvoiceOpsInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
+			unmatchBankTransactionCapabilityID, bankReconciliationCapabilityID, excludeBankTransactionCapabilityID,
+			unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID:
+			parsed, err := parseBankingInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case createPurchaseRequestCapabilityID, decidePurchaseRequestCapabilityID, createRfqCapabilityID, recordQuoteCapabilityID,
+			selectWinningQuoteCapabilityID, listPurchaseWorkflowCapabilityID:
+			parsed, err := parsePurchasingRequestInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
+			inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
+			inventoryLookupByBarcodeCapabilityID:
+			parsed, err := parseInventoryItemInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -1006,6 +1070,156 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case CreditNoteInput:
+			output, err := executeCreditNote(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ShareInvoiceInput:
+			output, err := executeShareInvoice(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case GenerateDueInvoicesInput:
+			output, err := executeGenerateDueInvoices(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ReverseEntryInput:
+			output, err := executeReverseEntry(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AddBankAccountInput:
+			output, err := addBankAccount(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ImportBankFeedInput:
+			output, err := importBankFeed(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case DeleteBankTransactionInput:
+			output, err := deleteBankTransaction(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MatchBankTransactionInput:
+			output, err := matchBankTransaction(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case UnmatchBankTransactionInput:
+			output, err := unmatchBankTransaction(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case BankReconciliationInput:
+			output, err := bankReconciliation(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ExcludeBankTransactionInput:
+			output, err := excludeBankTransaction(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case UnexcludeBankTransactionInput:
+			output, err := unexcludeBankTransaction(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case BankSummaryInput:
+			output, err := bankSummary(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatePurchaseRequestInput:
+			output, err := createPurchaseRequest(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case DecidePurchaseRequestInput:
+			output, err := decidePurchaseRequest(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreateRfqInput:
+			output, err := createRfq(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case RecordQuoteInput:
+			output, err := recordQuote(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SelectWinningQuoteInput:
+			output, err := selectWinningQuote(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListPurchaseWorkflowInput:
+			output, err := listPurchaseWorkflow(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryCreateItemInput:
+			output, err := inventoryCreateItem(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryItemPatchInput:
+			output, err := inventoryUpdateItem(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryArchiveItemInput:
+			output, err := inventoryArchiveItem(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryCreateLocationInput:
+			output, err := inventoryCreateLocation(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryListLocationsInput:
+			output, err := inventoryListLocations(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryLookupByBarcodeInput:
+			output, err := inventoryLookupByBarcode(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		default:
 			return Result{}, errors.New("unsupported capability input")
 		}
@@ -1078,6 +1292,14 @@ func canonicalInputHash(input any) (string, error) {
 		InventoryReverseTransferInput, InventoryListTransfersInput,
 		InventoryCreateCycleCountInput, InventoryRecordCycleCountsInput, InventoryPostCycleCountInput, InventoryCancelCycleCountInput,
 		PosOpenSessionInput, PosCompleteSaleInput, PosCloseSessionInput, PosReturnSaleInput, PosShiftSummaryInput,
+		CreditNoteInput, ShareInvoiceInput, GenerateDueInvoicesInput, ReverseEntryInput,
+		AddBankAccountInput, ImportBankFeedInput, DeleteBankTransactionInput, MatchBankTransactionInput,
+		UnmatchBankTransactionInput, BankReconciliationInput, ExcludeBankTransactionInput,
+		UnexcludeBankTransactionInput, BankSummaryInput,
+		CreatePurchaseRequestInput, DecidePurchaseRequestInput, CreateRfqInput, RecordQuoteInput,
+		SelectWinningQuoteInput, ListPurchaseWorkflowInput,
+		InventoryCreateItemInput, InventoryItemPatchInput, InventoryArchiveItemInput, InventoryCreateLocationInput,
+		InventoryListLocationsInput, InventoryLookupByBarcodeInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput:
 		return canonicalHash(parsed)
 	default:

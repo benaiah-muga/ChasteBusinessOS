@@ -667,6 +667,13 @@
       "when": 1790596387905,
       "tag": "0094_go_purchasing_receipt_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1790605452525,
+      "tag": "0095_go_wave3_capability_jobs",
+      "breakpoints": true
     }
   ]
 }

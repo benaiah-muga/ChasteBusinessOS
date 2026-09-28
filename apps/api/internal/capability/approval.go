@@ -345,6 +345,35 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case creditNoteCapabilityID, shareInvoiceCapabilityID, generateDueInvoicesCapabilityID, reverseEntryCapabilityID:
+			parsed, parseErr := parseAccountingInvoiceOpsInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
+			unmatchBankTransactionCapabilityID, bankReconciliationCapabilityID, excludeBankTransactionCapabilityID,
+			unexcludeBankTransactionCapabilityID, bankSummaryCapabilityID:
+			parsed, parseErr := parseBankingInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case createPurchaseRequestCapabilityID, decidePurchaseRequestCapabilityID, createRfqCapabilityID, recordQuoteCapabilityID,
+			selectWinningQuoteCapabilityID, listPurchaseWorkflowCapabilityID:
+			parsed, parseErr := parsePurchasingRequestInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
+			inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
+			inventoryLookupByBarcodeCapabilityID:
+			parsed, parseErr := parseInventoryItemInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		default:
 			verifiedPayload = false
 		}
@@ -471,6 +500,25 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "pos.sell", true
 	case posShiftSummaryCapabilityID:
 		return "pos.read", true
+	case creditNoteCapabilityID, reverseEntryCapabilityID:
+		return "accounting.post", true
+	case shareInvoiceCapabilityID, generateDueInvoicesCapabilityID:
+		return "accounting.write", true
+	case addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
+		unmatchBankTransactionCapabilityID, excludeBankTransactionCapabilityID, unexcludeBankTransactionCapabilityID:
+		return "accounting.write", true
+	case bankReconciliationCapabilityID, bankSummaryCapabilityID:
+		return "accounting.read", true
+	case createPurchaseRequestCapabilityID, decidePurchaseRequestCapabilityID, createRfqCapabilityID, recordQuoteCapabilityID,
+		selectWinningQuoteCapabilityID:
+		return "purchasing.write", true
+	case listPurchaseWorkflowCapabilityID:
+		return "purchasing.read", true
+	case inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
+		inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID:
+		return "inventory.write", true
+	case inventoryListLocationsCapabilityID, inventoryLookupByBarcodeCapabilityID:
+		return "inventory.read", true
 	default:
 		return "", false
 	}
