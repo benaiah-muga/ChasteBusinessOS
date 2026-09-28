@@ -423,6 +423,138 @@ func assertCRMDealJobStage(t *testing.T, ctx context.Context, owner *pgxpool.Poo
 	}
 }
 
+func TestCRMTaskJobsClaimAndExecuteThroughSystemPath(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the CRM task jobs database proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := os.Getenv("CHASTE_APP_DB_PASSWORD")
+	if appPassword == "" {
+		appPassword = "chaste_app_dev_only"
+	}
+	workerPassword := os.Getenv("CHASTE_JOBS_WORKER_DB_PASSWORD")
+	if workerPassword == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("CHASTE_JOBS_WORKER_DB_PASSWORD is required for the CRM task jobs database proof")
+		}
+		workerPassword = "chaste_jobs_worker_dev_only"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatalf("connect database owner: %v", err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatalf("connect app runtime: %v", err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatalf("connect jobs worker: %v", err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("crm-task-jobs-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{
+		WorkerID:      "crm-task-jobs-integration-worker",
+		LeaseDuration: time.Second,
+		PollInterval:  10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for capabilityID, permission := range map[string]string{
+		"crm.createTask":         "crm.write",
+		"crm.completeTask":       "crm.write",
+		"crm.updateTaskDetails":  "crm.write",
+		"crm.restoreTaskDetails": "crm.write",
+	} {
+		if GoCapabilityPermissions[capabilityID] != permission {
+			t.Fatalf("Go job permission for %s = %q, want %q", capabilityID, GoCapabilityPermissions[capabilityID], permission)
+		}
+	}
+
+	availableAt := time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)
+	createID := insertJobsTestJob(t, ctx, owner, orgID, "crm.createTask", json.RawMessage(`{"title":"Worker follow-up","dueAt":"2026-10-01T09:30:00.123Z","refType":"customer"}`), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("createTask job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, createID, "done", 1)
+	var taskID string
+	if err := owner.QueryRow(ctx, `SELECT id::text FROM tasks WHERE org_id=$1::uuid AND title='Worker follow-up'`, orgID).Scan(&taskID); err != nil {
+		t.Fatal(err)
+	}
+	var refType *string
+	if err := owner.QueryRow(ctx, `SELECT ref_type FROM tasks WHERE id=$1::uuid`, taskID).Scan(&refType); err != nil {
+		t.Fatal(err)
+	}
+	if refType != nil {
+		t.Fatalf("system createTask ref_type=%q, want null without refId", *refType)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+createID); got != 1 {
+		t.Fatalf("createTask system receipts=%d, want one", got)
+	}
+
+	dueUpdateID := insertJobsTestJob(t, ctx, owner, orgID, "crm.updateTaskDetails", json.RawMessage(fmt.Sprintf(`{"taskId":%q,"dueAt":"2026-11-15T08:00:00.000Z"}`, taskID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("updateTaskDetails job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, dueUpdateID, "done", 1)
+	var updatedDueAt *string
+	if err := owner.QueryRow(ctx, `SELECT to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM tasks WHERE id=$1::uuid`, taskID).Scan(&updatedDueAt); err != nil {
+		t.Fatal(err)
+	}
+	if updatedDueAt == nil || *updatedDueAt != "2026-11-15T08:00:00.000Z" {
+		t.Fatalf("system updateTaskDetails due_at=%v, want 2026-11-15T08:00:00.000Z", updatedDueAt)
+	}
+
+	restoreID := insertJobsTestJob(t, ctx, owner, orgID, "crm.restoreTaskDetails", json.RawMessage(fmt.Sprintf(`{"taskId":%q,"dueAt":"2026-10-01T09:30:00.123Z"}`, taskID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("restoreTaskDetails job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, restoreID, "done", 1)
+	if err := owner.QueryRow(ctx, `SELECT to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM tasks WHERE id=$1::uuid`, taskID).Scan(&updatedDueAt); err != nil {
+		t.Fatal(err)
+	}
+	if updatedDueAt == nil || *updatedDueAt != "2026-10-01T09:30:00.123Z" {
+		t.Fatalf("system restoreTaskDetails due_at=%v, want 2026-10-01T09:30:00.123Z", updatedDueAt)
+	}
+
+	completeID := insertJobsTestJob(t, ctx, owner, orgID, "crm.completeTask", json.RawMessage(fmt.Sprintf(`{"taskId":%q}`, taskID)), 3, availableAt)
+	if worked, err := worker.ProcessOne(ctx); err != nil || !worked {
+		t.Fatalf("completeTask job worked=%v err=%v", worked, err)
+	}
+	assertJobsTestState(t, ctx, owner, completeID, "done", 1)
+	var doneAt *time.Time
+	if err := owner.QueryRow(ctx, `SELECT done_at FROM tasks WHERE id=$1::uuid`, taskID).Scan(&doneAt); err != nil {
+		t.Fatal(err)
+	}
+	if doneAt == nil {
+		t.Fatal("system completeTask left done_at null")
+	}
+	if got := countJobsTestRows(t, ctx, owner, `
+		SELECT count(*) FROM ledger_events
+		WHERE org_id=$1::uuid AND kind='capability.executed' AND actor_type='system' AND actor_id IS NULL AND session_id IS NULL
+		AND capability_id IN ('crm.createTask','crm.updateTaskDetails','crm.restoreTaskDetails','crm.completeTask')`, orgID); got != 4 {
+		t.Fatalf("system CRM task audit events=%d, want four executions", got)
+	}
+}
+
 func workerRoleURL(t *testing.T, baseURL, role, password string) string {
 	t.Helper()
 	parsed, err := url.Parse(baseURL)

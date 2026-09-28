@@ -611,6 +611,34 @@
       "when": 1790526400000,
       "tag": "0086_go_crm_task_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1790563139262,
+      "tag": "0087_go_hr_employee_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1790563140262,
+      "tag": "0088_go_accounting_quote_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1790563141262,
+      "tag": "0089_go_accounting_recurring_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1790563308279,
+      "tag": "0090_go_sales_order_jobs",
+      "breakpoints": true
     }
   ]
 }

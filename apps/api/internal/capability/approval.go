@@ -271,6 +271,36 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case createTaskCapabilityID, completeTaskCapabilityID, updateTaskDetailsCapabilityID, restoreTaskDetailsCapabilityID:
+			parsed, parseErr := parseCRMTaskInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID:
+			parsed, parseErr := parseAccountingQuoteInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case createRecurringTemplateCapabilityID, pauseRecurringTemplateCapabilityID, resumeRecurringTemplateCapabilityID, listRecurringTemplatesCapabilityID:
+			parsed, parseErr := parseAccountingRecurringInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrUpdateEmployeeStructureCapabilityID:
+			parsed, parseErr := parseHREmployeeInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID:
+			parsed, parseErr := parseSalesInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		default:
 			verifiedPayload = false
 		}
@@ -354,10 +384,22 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
-		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID:
+		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID,
+		createTaskCapabilityID, completeTaskCapabilityID, updateTaskDetailsCapabilityID, restoreTaskDetailsCapabilityID:
 		return "crm.write", true
-	case createInvoiceCapabilityID:
+	case createInvoiceCapabilityID, createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID,
+		expireQuoteCapabilityID, createRecurringTemplateCapabilityID, pauseRecurringTemplateCapabilityID, resumeRecurringTemplateCapabilityID:
 		return "accounting.write", true
+	case listQuotesCapabilityID, listRecurringTemplatesCapabilityID:
+		return "accounting.read", true
+	case hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrUpdateEmployeeStructureCapabilityID:
+		return "hr.write", true
+	case hrListEmployeesCapabilityID:
+		return "hr.read", true
+	case salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID:
+		return "sales.write", true
+	case salesListOrdersCapabilityID:
+		return "sales.read", true
 	case recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID:
 		return "accounting.post", true
 	case trialBalanceCapabilityID:

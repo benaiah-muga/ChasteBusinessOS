@@ -58,34 +58,56 @@ type capabilitySpec struct {
 }
 
 var capabilitySpecs = map[string]capabilitySpec{
-	createCustomerCapabilityID:           {module: "crm", permission: "crm.write", risk: "write"},
-	deactivateCustomerCapabilityID:       {module: "crm", permission: "crm.write", risk: "write"},
-	mergeCustomersCapabilityID:           {module: "crm", permission: "crm.write", risk: "write"},
-	restoreCustomerMergeCapabilityID:     {module: "crm", permission: "crm.write", risk: "write"},
-	importCustomersCapabilityID:          {module: "crm", permission: "crm.write", risk: "write"},
-	undoCustomerImportCapabilityID:       {module: "crm", permission: "crm.write", risk: "write"},
-	restoreImportedCustomersCapabilityID: {module: "crm", permission: "crm.write", risk: "write"},
-	updateCustomerProfilesCapabilityID:   {module: "crm", permission: "crm.write", risk: "write"},
-	restoreCustomerProfilesCapabilityID:  {module: "crm", permission: "crm.write", risk: "write"},
-	reapplyCustomerProfilesCapabilityID:  {module: "crm", permission: "crm.write", risk: "write"},
-	listCustomersCapabilityID:            {module: "crm", permission: "crm.read", risk: "read"},
-	pipelineReportCapabilityID:           {module: "crm", permission: "crm.read", risk: "read"},
-	listTasksCapabilityID:                {module: "crm", permission: "crm.read", risk: "read"},
-	customerTimelineCapabilityID:         {module: "crm", permission: "crm.read", risk: "read"},
-	createDealCapabilityID:               {module: "crm", permission: "crm.write", risk: "write"},
-	moveDealStageCapabilityID:            {module: "crm", permission: "crm.write", risk: "write"},
-	convertLeadCapabilityID:              {module: "crm", permission: "crm.write", risk: "write"},
-	createInvoiceCapabilityID:            {module: "accounting", permission: "accounting.write", risk: "write"},
-	recordFxRateCapabilityID:             {module: "accounting", permission: "accounting.post", risk: "write"},
-	recordPaymentCapabilityID:            {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
-	reversePaymentCapabilityID:           {module: "accounting", permission: "accounting.post", risk: "money"},
-	trialBalanceCapabilityID:             {module: "accounting", permission: "accounting.read", risk: "read"},
-	createProjectCapabilityID:            {module: "projects", permission: "projects.write", risk: "write"},
-	ProjectBoardReadCapabilityID:         {module: "projects", permission: "projects.read", risk: "read"},
-	archiveProjectCapabilityID:           {module: "projects", permission: "projects.write", risk: "write"},
-	createProjectTaskCapabilityID:        {module: "projects", permission: "projects.write", risk: "write"},
-	moveProjectTaskCapabilityID:          {module: "projects", permission: "projects.write", risk: "write"},
-	assignProjectTaskCapabilityID:        {module: "projects", permission: "projects.write", risk: "write"},
+	createCustomerCapabilityID:            {module: "crm", permission: "crm.write", risk: "write"},
+	deactivateCustomerCapabilityID:        {module: "crm", permission: "crm.write", risk: "write"},
+	mergeCustomersCapabilityID:            {module: "crm", permission: "crm.write", risk: "write"},
+	restoreCustomerMergeCapabilityID:      {module: "crm", permission: "crm.write", risk: "write"},
+	importCustomersCapabilityID:           {module: "crm", permission: "crm.write", risk: "write"},
+	undoCustomerImportCapabilityID:        {module: "crm", permission: "crm.write", risk: "write"},
+	restoreImportedCustomersCapabilityID:  {module: "crm", permission: "crm.write", risk: "write"},
+	updateCustomerProfilesCapabilityID:    {module: "crm", permission: "crm.write", risk: "write"},
+	restoreCustomerProfilesCapabilityID:   {module: "crm", permission: "crm.write", risk: "write"},
+	reapplyCustomerProfilesCapabilityID:   {module: "crm", permission: "crm.write", risk: "write"},
+	listCustomersCapabilityID:             {module: "crm", permission: "crm.read", risk: "read"},
+	pipelineReportCapabilityID:            {module: "crm", permission: "crm.read", risk: "read"},
+	listTasksCapabilityID:                 {module: "crm", permission: "crm.read", risk: "read"},
+	customerTimelineCapabilityID:          {module: "crm", permission: "crm.read", risk: "read"},
+	createDealCapabilityID:                {module: "crm", permission: "crm.write", risk: "write"},
+	moveDealStageCapabilityID:             {module: "crm", permission: "crm.write", risk: "write"},
+	convertLeadCapabilityID:               {module: "crm", permission: "crm.write", risk: "write"},
+	createTaskCapabilityID:                {module: "crm", permission: "crm.write", risk: "write"},
+	completeTaskCapabilityID:              {module: "crm", permission: "crm.write", risk: "write"},
+	updateTaskDetailsCapabilityID:         {module: "crm", permission: "crm.write", risk: "write"},
+	restoreTaskDetailsCapabilityID:        {module: "crm", permission: "crm.write", risk: "write"},
+	createQuoteCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
+	acceptQuoteCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
+	declineQuoteCapabilityID:              {module: "accounting", permission: "accounting.write", risk: "write"},
+	expireQuoteCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
+	listQuotesCapabilityID:                {module: "accounting", permission: "accounting.read", risk: "read"},
+	createRecurringTemplateCapabilityID:   {module: "accounting", permission: "accounting.write", risk: "write"},
+	pauseRecurringTemplateCapabilityID:    {module: "accounting", permission: "accounting.write", risk: "write"},
+	resumeRecurringTemplateCapabilityID:   {module: "accounting", permission: "accounting.write", risk: "write"},
+	listRecurringTemplatesCapabilityID:    {module: "accounting", permission: "accounting.read", risk: "read"},
+	hrHireEmployeeCapabilityID:            {module: "hr", permission: "hr.write", risk: "write"},
+	hrDeactivateEmployeeCapabilityID:      {module: "hr", permission: "hr.write", risk: "write"},
+	hrListEmployeesCapabilityID:           {module: "hr", permission: "hr.read", risk: "read"},
+	hrUpdateEmployeeStructureCapabilityID: {module: "hr", permission: "hr.write", risk: "write"},
+	salesCreateOrderCapabilityID:          {module: "sales", permission: "sales.write", risk: "write"},
+	salesConfirmOrderCapabilityID:         {module: "sales", permission: "sales.write", risk: "write"},
+	salesDeliverOrderCapabilityID:         {module: "sales", permission: "sales.write", risk: "write"},
+	salesCancelOrderCapabilityID:          {module: "sales", permission: "sales.write", risk: "write"},
+	salesListOrdersCapabilityID:           {module: "sales", permission: "sales.read", risk: "read"},
+	createInvoiceCapabilityID:             {module: "accounting", permission: "accounting.write", risk: "write"},
+	recordFxRateCapabilityID:              {module: "accounting", permission: "accounting.post", risk: "write"},
+	recordPaymentCapabilityID:             {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
+	reversePaymentCapabilityID:            {module: "accounting", permission: "accounting.post", risk: "money"},
+	trialBalanceCapabilityID:              {module: "accounting", permission: "accounting.read", risk: "read"},
+	createProjectCapabilityID:             {module: "projects", permission: "projects.write", risk: "write"},
+	ProjectBoardReadCapabilityID:          {module: "projects", permission: "projects.read", risk: "read"},
+	archiveProjectCapabilityID:            {module: "projects", permission: "projects.write", risk: "write"},
+	createProjectTaskCapabilityID:         {module: "projects", permission: "projects.write", risk: "write"},
+	moveProjectTaskCapabilityID:           {module: "projects", permission: "projects.write", risk: "write"},
+	assignProjectTaskCapabilityID:         {module: "projects", permission: "projects.write", risk: "write"},
 }
 
 func supportedCapability(capabilityID string) bool {
@@ -96,6 +118,11 @@ func supportedCapability(capabilityID string) bool {
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
 		listCustomersCapabilityID, pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
 		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID,
+		createTaskCapabilityID, completeTaskCapabilityID, updateTaskDetailsCapabilityID, restoreTaskDetailsCapabilityID,
+		createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID,
+		createRecurringTemplateCapabilityID, pauseRecurringTemplateCapabilityID, resumeRecurringTemplateCapabilityID, listRecurringTemplatesCapabilityID,
+		hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrUpdateEmployeeStructureCapabilityID,
+		salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
 		createInvoiceCapabilityID, recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID, trialBalanceCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID:
 		return true
@@ -270,6 +297,36 @@ func (e *Executor) execute(
 			input = parsed
 		case createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID:
 			parsed, err := parseCRMDealInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case createTaskCapabilityID, completeTaskCapabilityID, updateTaskDetailsCapabilityID, restoreTaskDetailsCapabilityID:
+			parsed, err := parseCRMTaskInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID:
+			parsed, err := parseAccountingQuoteInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case createRecurringTemplateCapabilityID, pauseRecurringTemplateCapabilityID, resumeRecurringTemplateCapabilityID, listRecurringTemplatesCapabilityID:
+			parsed, err := parseAccountingRecurringInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrUpdateEmployeeStructureCapabilityID:
+			parsed, err := parseHREmployeeInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID:
+			parsed, err := parseSalesInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -507,6 +564,132 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case CreateTaskInput:
+			output, err := createTask(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CompleteTaskInput:
+			output, err := completeTask(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case UpdateTaskDetailsInput:
+			output, err := updateTaskDetails(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreateQuoteInput:
+			output, err := createQuote(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AcceptQuoteInput:
+			output, err := acceptQuote(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case DeclineQuoteInput:
+			output, err := declineQuote(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ExpireQuoteInput:
+			output, err := expireQuote(ctx, tx, claims.OrganizationID, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListQuotesInput:
+			output, err := listQuotes(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreateRecurringTemplateInput:
+			output, err := createRecurringTemplate(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PauseRecurringTemplateInput:
+			output, err := pauseRecurringTemplate(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ResumeRecurringTemplateInput:
+			output, err := resumeRecurringTemplate(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListRecurringTemplatesInput:
+			output, err := listRecurringTemplates(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case HRHireEmployeeInput:
+			output, err := hrHireEmployee(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case HRDeactivateEmployeeInput:
+			output, err := hrDeactivateEmployee(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case HRListEmployeesInput:
+			output, err := hrListEmployees(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case HRUpdateEmployeeStructureInput:
+			output, err := hrUpdateEmployeeStructure(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SalesCreateOrderInput:
+			output, err := salesCreateOrder(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SalesConfirmOrderInput:
+			output, err := salesConfirmOrder(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SalesDeliverOrderInput:
+			output, err := salesDeliverOrder(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SalesCancelOrderInput:
+			output, err := salesCancelOrder(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SalesListOrdersInput:
+			output, err := salesListOrders(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case DeactivateCustomerInput:
 			output, err := deactivateCustomer(ctx, tx, claims.OrganizationID, parsed, now)
 			if err != nil {
@@ -657,6 +840,11 @@ func canonicalInputHash(input any) (string, error) {
 		return parsed.CanonicalHash()
 	case ListCustomersInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
 		CreateDealInput, MoveDealStageInput, ConvertLeadInput,
+		CreateTaskInput, CompleteTaskInput, UpdateTaskDetailsInput,
+		CreateQuoteInput, AcceptQuoteInput, DeclineQuoteInput, ExpireQuoteInput, ListQuotesInput,
+		CreateRecurringTemplateInput, PauseRecurringTemplateInput, ResumeRecurringTemplateInput, ListRecurringTemplatesInput,
+		HRHireEmployeeInput, HRDeactivateEmployeeInput, HRListEmployeesInput, HRUpdateEmployeeStructureInput,
+		SalesCreateOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
 		CreateInvoiceInput, RecordFxRateInput, RecordPaymentInput, ReversePaymentInput, TrialBalanceInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput:
 		return canonicalHash(parsed)
