@@ -232,3 +232,242 @@ describe("POST /api/accounting Go invoice bridge", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/accounting Go quote and recurring template bridges", () => {
+  const quoteId = "8c1e6f4a-2b3d-4e5f-8a9b-0c1d2e3f4a5b";
+  const templateId = "9d2f7a5b-3c4e-4f6a-9b0c-1d2e3f4a5b6c";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_CREATE_INVOICE", "0");
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_WRITE", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("keeps quote and recurring template actions on their existing legacy behavior when the flags are off", async () => {
+    const response = await POST(request({ action: "createQuote", customerId: invoiceBody.customerId, lines: invoiceBody.lines }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid action" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "createQuote",
+      body: { action: "createQuote", intentId: "quote-intent-1", customerId: invoiceBody.customerId, memo: "Q4 pricing", expiresAt: "2026-10-31T23:59:59.999Z", lines: invoiceBody.lines },
+      capabilityId: "accounting.createQuote",
+      input: { customerId: invoiceBody.customerId, memo: "Q4 pricing", expiresAt: "2026-10-31T23:59:59.999Z", lines: invoiceBody.lines },
+      data: { quoteId, quoteNumber: 12, totalMinor: 125000 },
+    },
+    {
+      name: "acceptQuote",
+      body: { action: "acceptQuote", quoteId },
+      capabilityId: "accounting.acceptQuote",
+      input: { quoteId },
+      data: { invoiceId, invoiceNumber: 105, totalMinor: 125000 },
+    },
+    {
+      name: "declineQuote",
+      body: { action: "declineQuote", quoteId },
+      capabilityId: "accounting.declineQuote",
+      input: { quoteId },
+      data: { status: "declined" },
+    },
+    {
+      name: "expireQuote",
+      body: { action: "expireQuote" },
+      capabilityId: "accounting.expireQuote",
+      input: {},
+      data: { expiredCount: 3 },
+    },
+  ])("dispatches $name to Go when quote writes are enabled", async ({ body, capabilityId, input, data }) => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data, replayed: true }),
+    });
+
+    const response = await POST(request(body));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: resolved,
+      capabilityId,
+      input,
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("normalizes quote approvals and capability errors to the legacy accounting shapes", async () => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "1");
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, pendingApproval: true, reason: "Approval required", approvalId: "private-approval-id" }, { status: 202 }),
+      })
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ error: "unauthorized" }, { status: 401 }) })
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ error: "forbidden: missing permission: accounting.write" }, { status: 403 }) })
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, error: "quote not found" }, { status: 422 }) });
+    const declineRequest = () => request({ action: "declineQuote", quoteId });
+
+    const pending = await POST(declineRequest());
+    const unauthorized = await POST(declineRequest());
+    const denied = await POST(declineRequest());
+    const invalid = await POST(declineRequest());
+
+    expect(pending.status).toBe(202);
+    expect(await pending.json()).toEqual({ ok: false, pendingApproval: true, reason: "Approval required" });
+    expect(unauthorized.status).toBe(401);
+    expect(await unauthorized.json()).toEqual({ error: "unauthorized" });
+    expect(denied.status).toBe(422);
+    expect(await denied.json()).toEqual({ ok: false, error: "forbidden: missing permission: accounting.write" });
+    expect(invalid.status).toBe(422);
+    expect(await invalid.json()).toEqual({ ok: false, error: "quote not found" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "missing dispatch", result: { kind: "not-dispatched" } },
+    { name: "unknown outcome", result: { kind: "outcome-unknown" } },
+    { name: "malformed success", result: { kind: "response", response: Response.json({ ok: true, data: { quoteId: 5 } }) } },
+    { name: "backend failure", result: { kind: "response", response: Response.json({ error: "internal error" }, { status: 500 }) } },
+  ])("fails closed on quote $name without retrying through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(request({ action: "createQuote", customerId: invoiceBody.customerId, lines: invoiceBody.lines }));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "accounting service unavailable; check quote status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed if a quote dispatch throws", async () => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "1");
+    mocks.executeGoCapability.mockRejectedValue(new Error("bridge timeout"));
+
+    const response = await POST(request({ action: "expireQuote" }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "accounting service unavailable; check quote status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "createRecurringTemplate",
+      body: { action: "createRecurringTemplate", intentId: "template-intent-1", customerId: invoiceBody.customerId, frequency: "monthly", memo: "Hosting", lines: invoiceBody.lines, firstRunAt: "2026-10-01T00:00:00.000Z" },
+      capabilityId: "accounting.createRecurringTemplate",
+      input: { customerId: invoiceBody.customerId, frequency: "monthly", memo: "Hosting", lines: invoiceBody.lines, firstRunAt: "2026-10-01T00:00:00.000Z" },
+      data: { templateId, nextRunAt: "2026-10-01T00:00:00.000Z" },
+    },
+    {
+      name: "pauseRecurringTemplate",
+      body: { action: "pauseRecurringTemplate", templateId },
+      capabilityId: "accounting.pauseRecurringTemplate",
+      input: { templateId },
+      data: { active: false },
+    },
+    {
+      name: "resumeRecurringTemplate",
+      body: { action: "resumeRecurringTemplate", templateId },
+      capabilityId: "accounting.resumeRecurringTemplate",
+      input: { templateId },
+      data: { active: true },
+    },
+  ])("dispatches $name to Go when recurring writes are enabled", async ({ body, capabilityId, input, data }) => {
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data }),
+    });
+
+    const response = await POST(request(body));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: resolved,
+      capabilityId,
+      input,
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("normalizes recurring approvals and fails closed on unknown outcomes", async () => {
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_WRITE", "1");
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, pendingApproval: true, reason: "Approval required" }, { status: 202 }),
+      })
+      .mockResolvedValueOnce({ kind: "outcome-unknown" });
+    const pauseRequest = () => request({ action: "pauseRecurringTemplate", templateId });
+
+    const pending = await POST(pauseRequest());
+    const unknown = await POST(pauseRequest());
+
+    expect(pending.status).toBe(202);
+    expect(pending.headers.get("cache-control")).toBe("no-store");
+    expect(await pending.json()).toEqual({ ok: false, pendingApproval: true, reason: "Approval required" });
+    expect(unknown.status).toBe(503);
+    expect(await unknown.json()).toEqual({ error: "accounting service unavailable; check recurring template status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps the two accounting write flags independent of each other", async () => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "1");
+    const recurringWhileQuotesOnly = await POST(request({ action: "pauseRecurringTemplate", templateId }));
+    expect(recurringWhileQuotesOnly.status).toBe(400);
+    expect(await recurringWhileQuotesOnly.json()).toEqual({ error: "invalid action" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_WRITE", "1");
+    const quoteWhileRecurringOnly = await POST(request({ action: "acceptQuote", quoteId }));
+    expect(quoteWhileRecurringOnly.status).toBe(400);
+    expect(await quoteWhileRecurringOnly.json()).toEqual({ error: "invalid action" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps quote writes behind authentication, onboarding, and body validation", async () => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "1");
+    mocks.getResolvedUser.mockResolvedValueOnce(null);
+    const anonymous = await POST(request({ action: "createQuote", customerId: invoiceBody.customerId, lines: invoiceBody.lines }));
+    expect(anonymous.status).toBe(401);
+    expect(await anonymous.json()).toEqual({ error: "unauthorized" });
+
+    mocks.actorFromResolved.mockReturnValueOnce(null);
+    const onboarding = await POST(request({ action: "createQuote", customerId: invoiceBody.customerId, lines: invoiceBody.lines }));
+    expect(onboarding.status).toBe(428);
+
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    const missingLines = await POST(request({ action: "createQuote", customerId: invoiceBody.customerId }));
+    expect(missingLines.status).toBe(400);
+    expect(await missingLines.json()).toEqual({ error: "invalid action" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

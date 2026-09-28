@@ -1,9 +1,65 @@
 import { NextResponse } from "next/server";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { z } from "zod";
 import { getDb, employees, leaveRequests, payrollRuns, jobOpenings, timeEntries } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { missingPermission } from "@/server/route-guards";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+function hrEmployeeGoUnavailable() {
+  return NextResponse.json(
+    { error: "HR service unavailable; check employee status before retrying" },
+    { status: 503, headers: noStore },
+  );
+}
+
+async function hrEmployeeGoResponse(
+  result: GoCapabilityBridgeResult,
+  action: "hireEmployee" | "deactivateEmployee" | "updateStructure",
+) {
+  if (result.kind !== "response") return hrEmployeeGoUnavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const employeeDataSchema = action === "hireEmployee"
+        ? z.object({ employeeId: z.string() })
+        : action === "deactivateEmployee"
+          ? z.object({ deactivated: z.boolean() })
+          : z.object({ updated: z.literal(true) });
+      const parsed = z.object({ ok: z.literal(true), data: employeeDataSchema }).safeParse(body);
+      if (!parsed.success) return hrEmployeeGoUnavailable();
+      return NextResponse.json({ ok: true, data: parsed.data.data }, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return hrEmployeeGoUnavailable();
+      return NextResponse.json(
+        { ok: false, pendingApproval: true, reason: parsed.data.reason },
+        { status: 202, headers: noStore },
+      );
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return hrEmployeeGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 401, headers: noStore });
+    }
+    if ([400, 403, 422].includes(result.response.status)) {
+      const parsed = result.response.status === 422
+        ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+        : z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return hrEmployeeGoUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+  } catch {
+    return hrEmployeeGoUnavailable();
+  }
+
+  return hrEmployeeGoUnavailable();
+}
 
 export async function GET() {
   const resolved = await getResolvedUser();
@@ -153,6 +209,49 @@ export async function POST(req: Request) {
   const intentId = typeof body.intentId === "string" ? body.intentId : undefined;
   const ctx = actorFromResolved(resolved, { intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+
+  // Missing required fields keep the legacy switch's parameter checks below.
+  if (
+    process.env.GO_HR_EMPLOYEE_WRITES === "1" &&
+    (body.action === "hireEmployee" ||
+      ((body.action === "deactivateEmployee" || body.action === "updateStructure") && body.employeeId))
+  ) {
+    const capabilityId = body.action === "hireEmployee"
+      ? "hr.hireEmployee"
+      : body.action === "deactivateEmployee"
+        ? "hr.deactivateEmployee"
+        : "hr.updateEmployeeStructure";
+    const input = body.action === "hireEmployee"
+      ? {
+          name: body.name ?? "",
+          email: body.email || undefined,
+          title: body.title || undefined,
+          monthlySalaryMinor: body.monthlySalaryMinor ?? 0,
+          taxRateBps: body.taxRateBps,
+          annualLeaveDays: body.annualLeaveDays,
+        }
+      : body.action === "deactivateEmployee"
+        ? { employeeId: body.employeeId }
+        : {
+            employeeId: body.employeeId,
+            department: body.department,
+            position: body.position,
+            managerEmployeeId: body.managerEmployeeId,
+            emergencyContactName: body.emergencyContactName,
+            emergencyContactPhone: body.emergencyContactPhone,
+          };
+    try {
+      const result = await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId,
+        input,
+      });
+      return hrEmployeeGoResponse(result, body.action);
+    } catch {
+      return hrEmployeeGoUnavailable();
+    }
+  }
 
   // Dispatch explicitly so each capability gets exactly the input its schema declares.
   switch (body.action) {

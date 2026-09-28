@@ -212,6 +212,11 @@ export async function POST(req: Request) {
     rate?: string;
     effectiveAt?: string;
     budgetScenarioId?: string;
+    quoteId?: string;
+    templateId?: string;
+    frequency?: "weekly" | "monthly" | "quarterly";
+    expiresAt?: string;
+    firstRunAt?: string;
   };
 
   const humanCtx = actorFromResolved(resolved, { intentId: body.intentId });
@@ -250,6 +255,112 @@ export async function POST(req: Request) {
     const db = getDb().db;
     const executor = buildExecutor(db, buildRegistry(db));
     return respond(await executor.execute("accounting.createInvoice", humanCtx, input));
+  }
+
+  if (body.action === "createQuote" && body.customerId && body.lines?.length && process.env.GO_ACCOUNTING_QUOTES_WRITE === "1") {
+    try {
+      const result = await executeGoCapability({
+        actionContext: humanCtx,
+        session: resolved,
+        capabilityId: "accounting.createQuote",
+        input: {
+          customerId: body.customerId,
+          memo: body.memo || undefined,
+          expiresAt: body.expiresAt || undefined,
+          lines: body.lines,
+        },
+      });
+      return goBridgeResponse(result, quoteUnavailable, quoteCreateOutputSchema);
+    } catch {
+      return quoteUnavailable();
+    }
+  }
+
+  if (
+    (body.action === "acceptQuote" || body.action === "declineQuote") &&
+    body.quoteId &&
+    process.env.GO_ACCOUNTING_QUOTES_WRITE === "1"
+  ) {
+    try {
+      const result = await executeGoCapability({
+        actionContext: humanCtx,
+        session: resolved,
+        capabilityId: body.action === "acceptQuote" ? "accounting.acceptQuote" : "accounting.declineQuote",
+        input: { quoteId: body.quoteId },
+      });
+      return goBridgeResponse(
+        result,
+        quoteUnavailable,
+        body.action === "acceptQuote" ? quoteAcceptOutputSchema : quoteDeclineOutputSchema,
+      );
+    } catch {
+      return quoteUnavailable();
+    }
+  }
+
+  if (body.action === "expireQuote" && process.env.GO_ACCOUNTING_QUOTES_WRITE === "1") {
+    try {
+      const result = await executeGoCapability({
+        actionContext: humanCtx,
+        session: resolved,
+        capabilityId: "accounting.expireQuote",
+        input: {},
+      });
+      return goBridgeResponse(result, quoteUnavailable, quoteExpireOutputSchema);
+    } catch {
+      return quoteUnavailable();
+    }
+  }
+
+  if (
+    body.action === "createRecurringTemplate" &&
+    body.customerId &&
+    body.lines?.length &&
+    body.frequency &&
+    process.env.GO_ACCOUNTING_RECURRING_WRITE === "1"
+  ) {
+    try {
+      const result = await executeGoCapability({
+        actionContext: humanCtx,
+        session: resolved,
+        capabilityId: "accounting.createRecurringTemplate",
+        input: {
+          customerId: body.customerId,
+          frequency: body.frequency,
+          memo: body.memo || undefined,
+          lines: body.lines,
+          firstRunAt: body.firstRunAt || undefined,
+        },
+      });
+      return goBridgeResponse(result, recurringUnavailable, recurringCreateOutputSchema);
+    } catch {
+      return recurringUnavailable();
+    }
+  }
+
+  if (
+    (body.action === "pauseRecurringTemplate" || body.action === "resumeRecurringTemplate") &&
+    body.templateId &&
+    process.env.GO_ACCOUNTING_RECURRING_WRITE === "1"
+  ) {
+    try {
+      const result = await executeGoCapability({
+        actionContext: humanCtx,
+        session: resolved,
+        capabilityId:
+          body.action === "pauseRecurringTemplate"
+            ? "accounting.pauseRecurringTemplate"
+            : "accounting.resumeRecurringTemplate",
+        input: { templateId: body.templateId },
+      });
+      return goBridgeResponse(
+        result,
+        recurringUnavailable,
+        body.action === "pauseRecurringTemplate" ? recurringPauseOutputSchema : recurringResumeOutputSchema,
+      );
+    } catch {
+      return recurringUnavailable();
+    }
   }
 
   const db = getDb().db;
@@ -414,4 +525,80 @@ function respond(result: { ok: boolean; data?: unknown; error?: string; pendingA
   }
   if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 422 });
   return NextResponse.json({ ok: true, data: result.data });
+}
+
+const quoteCreateOutputSchema = z.object({
+  quoteId: z.string(),
+  quoteNumber: z.number(),
+  totalMinor: z.number(),
+});
+const quoteAcceptOutputSchema = z.object({
+  invoiceId: z.string(),
+  invoiceNumber: z.number(),
+  totalMinor: z.number(),
+});
+const quoteDeclineOutputSchema = z.object({ status: z.literal("declined") });
+const quoteExpireOutputSchema = z.object({ expiredCount: z.number().int() });
+const recurringCreateOutputSchema = z.object({ templateId: z.string(), nextRunAt: z.string().datetime() });
+const recurringPauseOutputSchema = z.object({ active: z.literal(false) });
+const recurringResumeOutputSchema = z.object({ active: z.literal(true) });
+
+function quoteUnavailable() {
+  return NextResponse.json(
+    { error: "accounting service unavailable; check quote status before retrying" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+function recurringUnavailable() {
+  return NextResponse.json(
+    { error: "accounting service unavailable; check recurring template status before retrying" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+async function goBridgeResponse(result: GoCapabilityBridgeResult, unavailable: () => NextResponse, dataSchema: z.ZodType) {
+  if (result.kind !== "response") return unavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    const headers = { "Cache-Control": "no-store" };
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: dataSchema }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json({ ok: true, data: parsed.data.data }, { status: 200, headers });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({
+        ok: z.literal(false),
+        pendingApproval: z.literal(true),
+        reason: z.string(),
+        approvalId: z.string().optional(),
+      }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json(
+        { ok: false, pendingApproval: true, reason: parsed.data.reason },
+        { status: 202, headers },
+      );
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers });
+    }
+    if (result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers });
+    }
+  } catch {
+    return unavailable();
+  }
+
+  return unavailable();
 }

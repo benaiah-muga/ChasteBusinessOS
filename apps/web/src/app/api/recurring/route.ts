@@ -3,6 +3,56 @@ import { z } from "zod";
 import { getDb } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+function recurringGoUnavailable() {
+  return NextResponse.json(
+    { error: "recurring template service unavailable; check template status before retrying" },
+    { status: 503, headers: noStore },
+  );
+}
+
+async function recurringGoResponse(result: GoCapabilityBridgeResult, action: "create" | "pause" | "resume") {
+  if (result.kind !== "response") return recurringGoUnavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const recurringDataSchema = action === "create"
+        ? z.object({ templateId: z.string(), nextRunAt: z.string() })
+        : z.object({ active: z.boolean() });
+      const parsed = z.object({ ok: z.literal(true), data: recurringDataSchema }).safeParse(body);
+      if (!parsed.success) return recurringGoUnavailable();
+      return NextResponse.json({ ok: true, data: parsed.data.data }, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return recurringGoUnavailable();
+      return NextResponse.json(
+        { error: parsed.data.reason, pendingApproval: true },
+        { status: 202, headers: noStore },
+      );
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return recurringGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 401, headers: noStore });
+    }
+    if ([400, 403, 422].includes(result.response.status)) {
+      const parsed = result.response.status === 422
+        ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+        : z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return recurringGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+  } catch {
+    return recurringGoUnavailable();
+  }
+
+  return recurringGoUnavailable();
+}
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -66,6 +116,20 @@ export async function POST(req: Request) {
           lines: parsed.data.lines,
         }
       : { templateId: parsed.data.templateId };
+
+  if (process.env.GO_ACCOUNTING_RECURRING_WRITE === "1") {
+    try {
+      const goResult = await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: capId,
+        input,
+      });
+      return recurringGoResponse(goResult, parsed.data.action);
+    } catch {
+      return recurringGoUnavailable();
+    }
+  }
 
   const result = await buildExecutor(db, buildRegistry(db)).execute(capId, ctx, input);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 });

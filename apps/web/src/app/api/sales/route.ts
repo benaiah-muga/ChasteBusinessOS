@@ -3,6 +3,69 @@ import { z } from "zod";
 import { getDb } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+function salesGoUnavailable() {
+  return NextResponse.json(
+    { error: "sales service unavailable; check order status before retrying" },
+    { status: 503, headers: noStore },
+  );
+}
+
+async function salesGoResponse(result: GoCapabilityBridgeResult, action: "create" | "confirm" | "deliver" | "cancel") {
+  if (result.kind !== "response") return salesGoUnavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const orderDataSchema = action === "create"
+        ? z.object({ orderId: z.string(), orderNumber: z.number() })
+        : action === "confirm"
+          ? z.object({
+              confirmed: z.literal(true),
+              backordered: z.boolean(),
+              reservedThousandths: z.number().int(),
+            })
+          : action === "deliver"
+            ? z.object({
+                invoiceId: z.string(),
+                invoiceNumber: z.number(),
+                invoiceTotalMinor: z.number(),
+                orderStatus: z.string(),
+              })
+            : z.object({ status: z.literal("cancelled"), releasedThousandths: z.number().int() });
+      const parsed = z.object({ ok: z.literal(true), data: orderDataSchema }).safeParse(body);
+      if (!parsed.success) return salesGoUnavailable();
+      return NextResponse.json({ ok: true, data: parsed.data.data }, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return salesGoUnavailable();
+      return NextResponse.json(
+        { error: parsed.data.reason, pendingApproval: true },
+        { status: 202, headers: noStore },
+      );
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return salesGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 401, headers: noStore });
+    }
+    if ([400, 403, 422].includes(result.response.status)) {
+      const parsed = result.response.status === 422
+        ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+        : z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return salesGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+  } catch {
+    return salesGoUnavailable();
+  }
+
+  return salesGoUnavailable();
+}
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -75,6 +138,20 @@ export async function POST(req: Request) {
         : d.action === "deliver"
           ? { orderId: d.orderId, lines: d.lines }
           : { orderId: d.orderId };
+
+  if (process.env.GO_SALES_WRITE === "1") {
+    try {
+      const goResult = await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: capId,
+        input,
+      });
+      return salesGoResponse(goResult, d.action);
+    } catch {
+      return salesGoUnavailable();
+    }
+  }
 
   const result = await buildExecutor(db, buildRegistry(db)).execute(capId, ctx, input);
   if (!result.ok) {
