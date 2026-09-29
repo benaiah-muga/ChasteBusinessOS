@@ -789,3 +789,18 @@ new owners and the manifest shows zero legacy runtime paths.
     output in parity. Unavailable or malformed Go output fails closed without
     retrying the TypeScript lot query. Focused route and Go database parity
     tests pass, as does capability manifest validation.
+
+60. (Done) Extend the read-only Vite Inventory preview with stock location
+    codes and names from the existing same-origin API. Validate the consumed
+    location fields and provide an accessible empty state. Keep location
+    changes in the full workspace. Focused component/API tests, typecheck,
+    lint, and production build pass.
+
+61. (Done) Add a default-off signed Go bridge for inventory reservations on
+    `GET /api/inventory` using `GO_INVENTORY_RESERVATIONS_READS=1`. Preserve all
+    statuses, the 100-row newest-first order, and the full legacy response
+    projection while keeping inventory authorization and module checks. Extend
+    the registered `inventory.listReservations` TypeScript and Go contracts in
+    parity. Unavailable or malformed Go output fails closed without retrying
+    the TypeScript reservation query. Focused route and Go organization-scope
+    parity tests pass, as does capability manifest validation.

@@ -67,6 +67,7 @@ describe("inventory Go route adapter", () => {
     vi.stubEnv("GO_INVENTORY_STOCK_REPORT_READS", "0");
     vi.stubEnv("GO_INVENTORY_TRANSFER_READS", "0");
     vi.stubEnv("GO_INVENTORY_LOTS_READS", "0");
+    vi.stubEnv("GO_INVENTORY_RESERVATIONS_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -126,6 +127,103 @@ describe("inventory Go route adapter", () => {
     expect(response.status).toBe(200);
     expect((await response.json()).lots).toEqual([{ id: "lot-1", lotCode: "BATCH-1", sku: "", expiresAt: "2026-10-01T00:00:00.000Z" }]);
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps reservation rows on TypeScript by default", async () => {
+    const reservation = {
+      id: "reservation-ts",
+      orgId: user.orgId,
+      itemId: "item-1",
+      quantityThousandths: 1250,
+      reason: "SO-1042",
+      refType: null,
+      refId: null,
+      status: "open",
+      createdByActorType: "human",
+      createdByActorId: user.userId,
+      releasedAt: null,
+      createdAt: new Date("2026-09-29T10:00:00.000Z"),
+    };
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb([[], [], [reservation], [], [], []]) });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [stockReportItem], totalValueMinor: 2000 } });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(200);
+    expect((await response.json()).reservations).toEqual([{
+      ...reservation,
+      sku: "",
+      createdAt: "2026-09-29T10:00:00.000Z",
+    }]);
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("bridges reservations through Go with the full legacy projection and all statuses", async () => {
+    vi.stubEnv("GO_INVENTORY_RESERVATIONS_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.execute.mockImplementation(async (_id: string, _ctx: unknown, _input: { belowReorderOnly: boolean }) => ({
+      ok: true,
+      data: { items: [stockReportItem], totalValueMinor: 2000 },
+    }));
+    const reservation = {
+      id: "reservation-1",
+      orgId: user.orgId,
+      itemId: "item-1",
+      sku: "MUG-1",
+      quantityThousandths: 1250,
+      reason: "SO-1042",
+      refType: null,
+      refId: null,
+      status: "released",
+      createdByActorType: "human",
+      createdByActorId: user.userId,
+      releasedAt: "2026-09-29T10:15:00.000Z",
+      createdAt: "2026-09-29T10:00:00.000Z",
+    };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { reservations: [reservation] } }) });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(200);
+    expect((await response.json()).reservations).toEqual([reservation]);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.listReservations",
+      input: { openOnly: false },
+    });
+  });
+
+  it("preserves Go reservation permission denials", async () => {
+    vi.stubEnv("GO_INVENTORY_RESERVATIONS_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [stockReportItem], totalValueMinor: 2000 } });
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "missing permission: inventory.read" }, { status: 403 }),
+    });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "missing permission: inventory.read" });
+  });
+
+  it("fails closed for malformed or unavailable Go reservation reads", async () => {
+    vi.stubEnv("GO_INVENTORY_RESERVATIONS_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [stockReportItem], totalValueMinor: 2000 } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({
+      ok: true,
+      data: { reservations: [{ id: "reservation-1", createdAt: "not-a-date" }] },
+    }) });
+
+    const malformed = await GET(readRequest());
+    expect(malformed.status).toBe(503);
+    expect(malformed.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+    const unavailable = await GET(readRequest());
+    expect(unavailable.status).toBe(503);
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(2);
   });
 
   it("bridges the existing lot list through Go and returns only legacy lot fields", async () => {

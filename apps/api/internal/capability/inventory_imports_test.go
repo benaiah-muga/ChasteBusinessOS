@@ -91,10 +91,11 @@ func TestInventoryImportsParsersMirrorZodContracts(t *testing.T) {
 			raw:      `{"openOnly":false}`,
 			wantJSON: `{"openOnly":false}`,
 			output: InventoryListReservationsOutput{Reservations: []InventoryListReservationRow{{
-				ID: uuid, SKU: "RES-ITEM", QuantityThousandths: 15000, Reason: "SO-1042", Status: "open",
+				ID: uuid, OrgID: uuid, ItemID: uuid, SKU: "RES-ITEM", QuantityThousandths: 15000, Reason: "SO-1042", Status: "open",
+				RefType: nil, RefID: nil, CreatedByActorType: nil, CreatedByActorID: nil, ReleasedAt: nil,
 				CreatedAt: "2026-09-28T10:00:00.000Z",
 			}}},
-			outputJS: `{"reservations":[{"id":"` + uuid + `","sku":"RES-ITEM","quantityThousandths":15000,"reason":"SO-1042","status":"open","createdAt":"2026-09-28T10:00:00.000Z"}]}`,
+			outputJS: `{"reservations":[{"id":"` + uuid + `","orgId":"` + uuid + `","itemId":"` + uuid + `","sku":"RES-ITEM","quantityThousandths":15000,"reason":"SO-1042","refType":null,"refId":null,"status":"open","createdByActorType":null,"createdByActorId":null,"releasedAt":null,"createdAt":"2026-09-28T10:00:00.000Z"}]}`,
 		},
 	}
 	for _, test := range cases {
@@ -623,8 +624,9 @@ func TestInventoryImportsReservations(t *testing.T) {
 		t.Fatalf("all list = %+v, want newest first across statuses", allList.Reservations)
 	}
 	encoded, err = marshalJS(allList)
-	wantAll := fmt.Sprintf(`{"reservations":[{"id":%q,"sku":"RES-ITEM","quantityThousandths":15000,"reason":"WO-9","status":"open","createdAt":%q},{"id":%q,"sku":"RES-ITEM","quantityThousandths":10000,"reason":"SO-1042","status":"released","createdAt":%q}]}`,
-		second.ReservationID, allList.Reservations[0].CreatedAt, first.ReservationID, allList.Reservations[1].CreatedAt)
+	wantAll := fmt.Sprintf(`{"reservations":[{"id":%q,"orgId":%q,"itemId":%q,"sku":"RES-ITEM","quantityThousandths":15000,"reason":"WO-9","refType":null,"refId":null,"status":"open","createdByActorType":"human","createdByActorId":%q,"releasedAt":null,"createdAt":%q},{"id":%q,"orgId":%q,"itemId":%q,"sku":"RES-ITEM","quantityThousandths":10000,"reason":"SO-1042","refType":null,"refId":null,"status":"released","createdByActorType":"human","createdByActorId":%q,"releasedAt":%q,"createdAt":%q}]}`,
+		second.ReservationID, fx.orgID, item.ItemID, fx.userID, allList.Reservations[0].CreatedAt,
+		first.ReservationID, fx.orgID, item.ItemID, fx.userID, releaseNow.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z"), allList.Reservations[1].CreatedAt)
 	if err != nil || string(encoded) != wantAll {
 		t.Fatalf("all list JSON = %s, %v", encoded, err)
 	}

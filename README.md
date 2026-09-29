@@ -336,6 +336,11 @@ signed Go `inventory.listLots` read. It requires `pnpm dev:api`, preserves the
 200-row newest-first order, SKU, lot code, expiration timestamp, and response
 fields, and fails closed if Go is unavailable or returns invalid data. The
 flag defaults to `0`.
+`GO_INVENTORY_RESERVATIONS_READS=1` opts the reservation list on
+`GET /api/inventory` into the signed Go `inventory.listReservations` read. It
+preserves all statuses, the 100-row newest-first order, the full route fields,
+and fails closed if Go is unavailable or returns invalid data. The flag
+defaults to `0`.
 `GO_INVENTORY_VALUATION_SUMMARY_WRITE=1` opts the existing
 `postValuationSummary` action on `POST /api/inventory` into the signed Go
 `inventory.postValuationSummary` capability. It requires `pnpm dev:api`,

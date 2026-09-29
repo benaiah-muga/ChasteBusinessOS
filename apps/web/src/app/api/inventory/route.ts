@@ -337,6 +337,60 @@ async function dispatchInventoryLotsGo(
   }
 }
 
+const inventoryReservationSchema = z.object({
+  id: z.string(),
+  orgId: z.string(),
+  itemId: z.string(),
+  sku: z.string(),
+  quantityThousandths: z.number().int().refine(Number.isSafeInteger),
+  reason: z.string(),
+  refType: z.string().nullable(),
+  refId: z.string().nullable(),
+  status: z.string(),
+  createdByActorType: z.string().nullable(),
+  createdByActorId: z.string().nullable(),
+  releasedAt: z.string().datetime({ offset: true }).nullable(),
+  createdAt: z.string().datetime({ offset: true }),
+});
+
+async function dispatchInventoryReservationsGo(
+  ctx: ReturnType<typeof actorFromResolved> & {},
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+) {
+  try {
+    const result = await executeGoCapability({
+      actionContext: ctx,
+      session,
+      capabilityId: "inventory.listReservations",
+      input: { openOnly: false },
+    });
+    if (result.kind !== "response") return goUnavailable();
+
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({
+        ok: z.literal(true),
+        data: z.object({ reservations: z.array(inventoryReservationSchema) }),
+      }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return parsed.data.data.reservations.slice(0, 100);
+    }
+    if (result.response.status === 401 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: result.response.status, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    return goUnavailable();
+  } catch {
+    return goUnavailable();
+  }
+}
+
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -424,12 +478,20 @@ export async function GET(req: Request) {
     .where(eq(stockLocations.orgId, orgId))
     .orderBy(stockLocations.code);
 
-  const reservations = await db
-    .select()
-    .from(stockReservations)
-    .where(eq(stockReservations.orgId, orgId))
-    .orderBy(desc(stockReservations.createdAt))
-    .limit(100);
+  let reservations: unknown[];
+  if (process.env.GO_INVENTORY_RESERVATIONS_READS === "1") {
+    const bridgedReservations = await dispatchInventoryReservationsGo(ctx, resolved);
+    if (bridgedReservations instanceof Response) return bridgedReservations;
+    reservations = bridgedReservations;
+  } else {
+    const reservationRows = await db
+      .select()
+      .from(stockReservations)
+      .where(eq(stockReservations.orgId, orgId))
+      .orderBy(desc(stockReservations.createdAt))
+      .limit(100);
+    reservations = reservationRows.map((r) => ({ ...r, sku: skuOf.get(r.itemId) ?? "" }));
+  }
 
   const counts = await db
     .select()
@@ -491,7 +553,7 @@ export async function GET(req: Request) {
     totalValueMinor,
     reorderAlerts,
     locations,
-    reservations: reservations.map((r) => ({ ...r, sku: skuOf.get(r.itemId) ?? "" })),
+    reservations,
     cycleCounts: counts.map((c) => ({
       id: c.id,
       status: c.status,

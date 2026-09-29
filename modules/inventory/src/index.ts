@@ -721,10 +721,17 @@ const listReservations = (deps: ModuleDeps) =>
       reservations: z.array(
         z.object({
           id: z.string(),
+          orgId: z.string(),
+          itemId: z.string(),
           sku: z.string(),
           quantityThousandths: z.number(),
           reason: z.string(),
+          refType: z.string().nullable(),
+          refId: z.string().nullable(),
           status: z.string(),
+          createdByActorType: z.string().nullable(),
+          createdByActorId: z.string().nullable(),
+          releasedAt: z.date().nullable(),
           createdAt: z.date(),
         }),
       ),

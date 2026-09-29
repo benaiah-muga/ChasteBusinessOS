@@ -131,6 +131,7 @@ beforeEach(() => {
       items: [{ sku: "MUG-1", name: "Ceramic mug", kind: "product", unitLabel: "unit", onHandThousandths: 4000, reservedThousandths: 1000, availableThousandths: 3000, totalValueMinor: 2000, reorderPointThousandths: 5000, reorderNeeded: true }],
       totalValueMinor: 2000,
       lots: [],
+      locations: [],
     });
     if (path === "/api/accounting") return Response.json({ invoices: [{
       id: "f9184ddd-a042-4e24-9fe1-553cadc44df1",

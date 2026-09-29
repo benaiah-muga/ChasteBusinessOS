@@ -29,7 +29,7 @@ const items = [
   },
 ];
 const switchboard = { catalog: [{ id: "inventory" }], enabledModules: ["inventory"] };
-const report = { items, totalValueMinor: 12_000, lots: [] };
+const report = { items, totalValueMinor: 12_000, lots: [], locations: [] };
 
 function inventoryFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
@@ -92,6 +92,27 @@ describe("Vite inventory page", () => {
     expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
   });
 
+  it("shows read-only stock locations with their codes and names", async () => {
+    const locations = [
+      { id: "location-1", code: "MAIN", name: "Main warehouse" },
+      { id: "location-2", code: "SHOP", name: "Retail shop" },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      return Response.json({ ...report, locations });
+    }));
+    render(<InventoryPage />);
+
+    expect(await screen.findByRole("heading", { name: "Stock locations" })).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Location code" })).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Location name" })).not.toBeNull();
+    expect(screen.getByRole("rowheader", { name: "MAIN" })).not.toBeNull();
+    expect(screen.getByText("Main warehouse")).not.toBeNull();
+    expect(screen.getByRole("rowheader", { name: "SHOP" })).not.toBeNull();
+    expect(screen.getByText("Retail shop")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
+  });
+
   it("announces an empty lot list and keeps loading and failures accessible", async () => {
     let resolveReport: ((response: Response) => void) | undefined;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -104,6 +125,7 @@ describe("Vite inventory page", () => {
     await waitFor(() => expect(resolveReport).toBeDefined());
     await act(async () => { resolveReport?.(Response.json(report)); });
     expect(await screen.findByText("No inventory lots recorded yet.")).not.toBeNull();
+    expect(screen.getByText("No stock locations recorded yet.")).not.toBeNull();
   });
 
   it("does not request stock data when Inventory is disabled", async () => {
@@ -134,7 +156,7 @@ describe("Vite inventory page", () => {
   it("formats value using the active currency's minor-unit scale", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      return Response.json({ items, totalValueMinor: 1_234_560, lots: [] });
+      return Response.json({ items, totalValueMinor: 1_234_560, lots: [], locations: [] });
     }));
     render(<InventoryPage baseCurrency="BHD" />);
 

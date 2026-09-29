@@ -86,12 +86,19 @@ type InventoryListReservationsInput struct {
 }
 
 type InventoryListReservationRow struct {
-	ID                  string `json:"id"`
-	SKU                 string `json:"sku"`
-	QuantityThousandths int64  `json:"quantityThousandths"`
-	Reason              string `json:"reason"`
-	Status              string `json:"status"`
-	CreatedAt           string `json:"createdAt"`
+	ID                  string  `json:"id"`
+	OrgID               string  `json:"orgId"`
+	ItemID              string  `json:"itemId"`
+	SKU                 string  `json:"sku"`
+	QuantityThousandths int64   `json:"quantityThousandths"`
+	Reason              string  `json:"reason"`
+	RefType             *string `json:"refType"`
+	RefID               *string `json:"refId"`
+	Status              string  `json:"status"`
+	CreatedByActorType  *string `json:"createdByActorType"`
+	CreatedByActorID    *string `json:"createdByActorId"`
+	ReleasedAt          *string `json:"releasedAt"`
+	CreatedAt           string  `json:"createdAt"`
 }
 
 type InventoryListReservationsOutput struct {
@@ -590,7 +597,9 @@ func inventoryReleaseReservation(ctx context.Context, tx pgx.Tx, orgID string, i
 
 func inventoryListReservations(ctx context.Context, tx pgx.Tx, orgID string, input InventoryListReservationsInput) (InventoryListReservationsOutput, error) {
 	query := `
-		SELECT r.id::text, i.sku, r.quantity_thousandths, r.reason, r.status, r.created_at
+		SELECT r.id::text, r.org_id::text, r.item_id::text, i.sku, r.quantity_thousandths, r.reason,
+			r.ref_type, r.ref_id::text, r.status, r.created_by_actor_type, r.created_by_actor_id::text,
+			r.released_at, r.created_at
 		FROM stock_reservations r
 		INNER JOIN items i ON i.id = r.item_id
 		WHERE r.org_id = $1::uuid`
@@ -606,11 +615,20 @@ func inventoryListReservations(ctx context.Context, tx pgx.Tx, orgID string, inp
 	reservations := make([]InventoryListReservationRow, 0)
 	for rows.Next() {
 		var row InventoryListReservationRow
+		var releasedAt *time.Time
 		var createdAt time.Time
-		if err := rows.Scan(&row.ID, &row.SKU, &row.QuantityThousandths, &row.Reason, &row.Status, &createdAt); err != nil {
+		if err := rows.Scan(
+			&row.ID, &row.OrgID, &row.ItemID, &row.SKU, &row.QuantityThousandths, &row.Reason,
+			&row.RefType, &row.RefID, &row.Status, &row.CreatedByActorType, &row.CreatedByActorID,
+			&releasedAt, &createdAt,
+		); err != nil {
 			return InventoryListReservationsOutput{}, err
 		}
 		row.CreatedAt = createdAt.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+		if releasedAt != nil {
+			formatted := releasedAt.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+			row.ReleasedAt = &formatted
+		}
 		reservations = append(reservations, row)
 	}
 	if err := rows.Err(); err != nil {

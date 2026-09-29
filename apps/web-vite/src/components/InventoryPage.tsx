@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryItem, type InventoryLot } from "../api/inventory";
+import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryItem, type InventoryLocation, type InventoryLot } from "../api/inventory";
 import { legacyUrl } from "../legacy";
 import "./inventory-page.css";
 
@@ -8,7 +8,7 @@ type PageState =
   | { status: "loading" }
   | { status: "disabled" }
   | { status: "failed"; error: InventoryApiError }
-  | { status: "ready"; items: InventoryItem[]; totalValueMinor: number; lots: InventoryLot[] };
+  | { status: "ready"; items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[] };
 
 type ItemFilter = "all" | "reorder";
 const CURRENCY_PREFERENCES = ["org", "USD", "KES", "EUR", "GBP", "TZS", "UGX"];
@@ -106,7 +106,7 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
         <div>
           <p className="inventory-eyebrow">Operations · preview</p>
           <h1>Inventory</h1>
-          <p>Review stock availability, reorder needs, and lot details. Adjustments, transfers, and cycle counts stay in the full inventory workspace.</p>
+          <p>Review stock availability, reorder needs, lot details, and stock locations. Adjustments, transfers, and cycle counts stay in the full inventory workspace.</p>
         </div>
         <a className="inventory-full-workspace" href={legacyUrl("/inventory")}>Open full inventory workspace</a>
       </header>
@@ -209,6 +209,36 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
                         {showLotBalance && <td>{lot.balanceThousandths === undefined ? "Not provided" : formatQuantity(lot.balanceThousandths, unitLabelBySku.get(lot.sku) ?? "units")}</td>}
                       </tr>
                     ))}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+      {state.status === "ready" && (
+        <section className="inventory-lots" aria-labelledby="inventory-locations-title">
+          <div className="inventory-lots-heading">
+            <div>
+              <p className="inventory-eyebrow">Read only</p>
+              <h2 id="inventory-locations-title">Stock locations</h2>
+            </div>
+            <p>Location records are shown as returned by the inventory service.</p>
+          </div>
+          {state.locations.length === 0 ? (
+            <p className="inventory-empty inventory-lots-empty" role="status">No stock locations recorded yet.</p>
+          ) : (
+            <div className="inventory-table-card" aria-label="Stock locations">
+              <div className="inventory-table-scroll">
+                <table className="inventory-table">
+                  <thead>
+                    <tr><th scope="col">Location code</th><th scope="col">Location name</th></tr>
+                  </thead>
+                  <tbody>{state.locations.map((location) => (
+                    <tr key={location.id}>
+                      <th scope="row">{location.code}</th>
+                      <td>{location.name}</td>
+                    </tr>
+                  ))}</tbody>
                 </table>
               </div>
             </div>

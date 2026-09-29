@@ -14026,6 +14026,12 @@
                 "id": {
                   "type": "string"
                 },
+                "orgId": {
+                  "type": "string"
+                },
+                "itemId": {
+                  "type": "string"
+                },
                 "sku": {
                   "type": "string"
                 },
@@ -14035,8 +14041,59 @@
                 "reason": {
                   "type": "string"
                 },
+                "refType": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "refId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "status": {
                   "type": "string"
+                },
+                "createdByActorType": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdByActorId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "releasedAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "createdAt": {
                   "type": "string",
@@ -14045,10 +14102,17 @@
               },
               "required": [
                 "id",
+                "orgId",
+                "itemId",
                 "sku",
                 "quantityThousandths",
                 "reason",
+                "refType",
+                "refId",
                 "status",
+                "createdByActorType",
+                "createdByActorId",
+                "releasedAt",
                 "createdAt"
               ],
               "additionalProperties": false
