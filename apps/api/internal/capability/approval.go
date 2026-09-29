@@ -523,6 +523,34 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case signalsListCapabilityID:
+			parsed, parseErr := parseSignalsInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case skillsFindCapabilityID, skillsLoadCapabilityID:
+			parsed, parseErr := parseSkillsInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case routinesCreateCapabilityID, routinesListCapabilityID, routinesUpdateCapabilityID,
+			routinesDeleteCapabilityID, routinesRunNowCapabilityID:
+			parsed, parseErr := parseRoutinesInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case analyticsRenderReportCapabilityID, analyticsPipelineByStageCapabilityID,
+			analyticsRevenueByMonthCapabilityID, analyticsInvoiceAgingCapabilityID,
+			analyticsSalesByCustomerCapabilityID, analyticsStockLevelsCapabilityID,
+			analyticsExplainChangeCapabilityID, analyticsAskYourBusinessCapabilityID:
+			parsed, parseErr := parseAnalyticsInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
 			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 			parsed, parseErr := parseIAMInput(transition.row.CapabilityID, transition.row.Payload)
@@ -742,6 +770,22 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "iam.admin", true
 	case purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID, purchasingSupplierStatementCapabilityID:
 		return "purchasing.read", true
+	case signalsListCapabilityID:
+		return "signals.read", true
+	case skillsFindCapabilityID, skillsLoadCapabilityID:
+		return "documents.read", true
+	case routinesCreateCapabilityID, routinesUpdateCapabilityID, routinesDeleteCapabilityID, routinesRunNowCapabilityID:
+		return "routines.write", true
+	case routinesListCapabilityID:
+		return "routines.read", true
+	case analyticsRenderReportCapabilityID, analyticsExplainChangeCapabilityID, analyticsAskYourBusinessCapabilityID:
+		return "analytics.report", true
+	case analyticsPipelineByStageCapabilityID:
+		return "crm.read", true
+	case analyticsRevenueByMonthCapabilityID, analyticsInvoiceAgingCapabilityID, analyticsSalesByCustomerCapabilityID:
+		return "accounting.read", true
+	case analyticsStockLevelsCapabilityID:
+		return "inventory.read", true
 	case inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID:
 		return "inventory.write", true
 	case inventoryRebuildStockProjectionsCapabilityID:

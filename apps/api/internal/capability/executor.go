@@ -277,6 +277,22 @@ var capabilitySpecs = map[string]capabilitySpec{
 	purchasingSupplierPerformanceCapabilityID:           {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	purchasingPriceHistoryCapabilityID:                  {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	purchasingSupplierStatementCapabilityID:             {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	signalsListCapabilityID:                             {module: "signals", permission: "signals.read", risk: "read"},
+	skillsFindCapabilityID:                              {module: "skills", permission: "documents.read", risk: "read"},
+	skillsLoadCapabilityID:                              {module: "skills", permission: "documents.read", risk: "read"},
+	routinesCreateCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write"},
+	routinesListCapabilityID:                            {module: "routines", permission: "routines.read", risk: "read"},
+	routinesUpdateCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write"},
+	routinesDeleteCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write"},
+	routinesRunNowCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write"},
+	analyticsRenderReportCapabilityID:                   {module: "analytics", permission: "analytics.report", risk: "read"},
+	analyticsPipelineByStageCapabilityID:                {module: "analytics", permission: "crm.read", risk: "read"},
+	analyticsRevenueByMonthCapabilityID:                 {module: "accounting", permission: "accounting.read", risk: "read"},
+	analyticsInvoiceAgingCapabilityID:                   {module: "accounting", permission: "accounting.read", risk: "read"},
+	analyticsSalesByCustomerCapabilityID:                {module: "accounting", permission: "accounting.read", risk: "read"},
+	analyticsStockLevelsCapabilityID:                    {module: "inventory", permission: "inventory.read", risk: "read"},
+	analyticsExplainChangeCapabilityID:                  {module: "analytics", permission: "analytics.report", risk: "read"},
+	analyticsAskYourBusinessCapabilityID:                {module: "analytics", permission: "analytics.report", risk: "read"},
 	createProjectCapabilityID:                           {module: "projects", permission: "projects.write", risk: "write"},
 	ProjectBoardReadCapabilityID:                        {module: "projects", permission: "projects.read", risk: "read"},
 	archiveProjectCapabilityID:                          {module: "projects", permission: "projects.write", risk: "write"},
@@ -362,6 +378,13 @@ func supportedCapability(capabilityID string) bool {
 		iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID,
 		purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
 		purchasingSupplierStatementCapabilityID,
+		signalsListCapabilityID, skillsFindCapabilityID, skillsLoadCapabilityID,
+		routinesCreateCapabilityID, routinesListCapabilityID, routinesUpdateCapabilityID,
+		routinesDeleteCapabilityID, routinesRunNowCapabilityID,
+		analyticsRenderReportCapabilityID, analyticsPipelineByStageCapabilityID,
+		analyticsRevenueByMonthCapabilityID, analyticsInvoiceAgingCapabilityID,
+		analyticsSalesByCustomerCapabilityID, analyticsStockLevelsCapabilityID,
+		analyticsExplainChangeCapabilityID, analyticsAskYourBusinessCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID,
 		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 		return true
@@ -931,6 +954,34 @@ func (e *Executor) execute(
 		case purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
 			purchasingSupplierStatementCapabilityID:
 			parsed, err := parsePurchasingReadsInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case signalsListCapabilityID:
+			parsed, err := parseSignalsInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case skillsFindCapabilityID, skillsLoadCapabilityID:
+			parsed, err := parseSkillsInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case routinesCreateCapabilityID, routinesListCapabilityID, routinesUpdateCapabilityID,
+			routinesDeleteCapabilityID, routinesRunNowCapabilityID:
+			parsed, err := parseRoutinesInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case analyticsRenderReportCapabilityID, analyticsPipelineByStageCapabilityID,
+			analyticsRevenueByMonthCapabilityID, analyticsInvoiceAgingCapabilityID,
+			analyticsSalesByCustomerCapabilityID, analyticsStockLevelsCapabilityID,
+			analyticsExplainChangeCapabilityID, analyticsAskYourBusinessCapabilityID:
+			parsed, err := parseAnalyticsInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -2283,6 +2334,102 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case SignalsListInput:
+			output, err := signalsList(ctx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SkillsFindInput:
+			output, err := skillsFind(parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SkillsLoadInput:
+			output, err := skillsLoad(parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case RoutinesCreateInput:
+			output, err := routinesCreate(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case RoutinesListInput:
+			output, err := routinesList(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case RoutinesUpdateInput:
+			output, err := routinesUpdate(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case RoutinesDeleteInput:
+			output, err := routinesDelete(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case RoutinesRunNowInput:
+			output, err := routinesRunNow(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AnalyticsRenderReportInput:
+			output, err := analyticsRenderReport(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AnalyticsPipelineByStageInput:
+			output, err := analyticsPipelineByStage(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AnalyticsRevenueByMonthInput:
+			output, err := analyticsRevenueByMonth(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AnalyticsInvoiceAgingInput:
+			output, err := analyticsInvoiceAging(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AnalyticsSalesByCustomerInput:
+			output, err := analyticsSalesByCustomer(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AnalyticsStockLevelsInput:
+			output, err := analyticsStockLevels(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AnalyticsExplainChangeInput:
+			output, err := analyticsExplainChange(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case AnalyticsAskYourBusinessInput:
+			output, err := analyticsAskYourBusiness(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		default:
 			return Result{}, errors.New("unsupported capability input")
 		}
@@ -2392,6 +2539,11 @@ func canonicalInputHash(input any) (string, error) {
 		HRCreateOpeningInput, HRCloseOpeningInput,
 		IAMModulesInput, IAMSetModuleConfigInput, IAMSetOrgPolicyInput, IAMSetOrgBrandingInput,
 		PurchasingSupplierPerformanceInput, PurchasingPriceHistoryInput, PurchasingSupplierStatementInput,
+		SignalsListInput, SkillsFindInput, SkillsLoadInput,
+		RoutinesCreateInput, RoutinesListInput, RoutinesUpdateInput, RoutinesDeleteInput, RoutinesRunNowInput,
+		AnalyticsRenderReportInput, AnalyticsPipelineByStageInput, AnalyticsRevenueByMonthInput,
+		AnalyticsInvoiceAgingInput, AnalyticsSalesByCustomerInput, AnalyticsStockLevelsInput,
+		AnalyticsExplainChangeInput, AnalyticsAskYourBusinessInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput,
 		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput:
 		return canonicalHash(parsed)
