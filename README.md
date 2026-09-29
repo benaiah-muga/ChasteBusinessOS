@@ -207,6 +207,21 @@ location creation into the signed Go capability bridge. It requires `pnpm
 dev:api`; barcode lookup, listing, and other inventory actions remain on their
 existing handlers, and uncertain writes fail closed without a TypeScript
 retry. The flag defaults to `0`.
+`GO_ACCOUNTING_TAX_RETURNS_WRITE=1` opts sales tax return filing into the
+signed Go capability bridge. It requires `pnpm dev:api`; tax profile and code
+management ride the executor and worker without a route flag, other
+accounting actions remain on their existing handlers, and uncertain writes
+fail closed without a TypeScript retry. The flag defaults to `0`.
+`GO_HR_LEAVE_TIME_WRITES=1` opts leave requests, decisions, cancellation, and
+clock in/out into the signed Go capability bridge. It requires `pnpm dev:api`;
+leave balances, calendars, and reports stay on their existing handlers, and
+uncertain writes fail closed without a TypeScript retry. The flag defaults to
+`0`.
+`GO_HR_PAYROLL_APPLICANT_WRITES=1` opts payroll run creation, execution,
+voiding, and the applicant pipeline through hire into the signed Go
+capability bridge. It requires `pnpm dev:api`; applicant listing and other HR
+actions remain on their existing handlers, and uncertain writes fail closed
+without a TypeScript retry. The flag defaults to `0`.
 
 For a production-shaped local Docker run, use the full Compose stack instead:
 

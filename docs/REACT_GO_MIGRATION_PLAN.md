@@ -547,3 +547,13 @@ new owners and the manifest shows zero legacy runtime paths.
     org-scoped left join, 200-row limit, response fields, and ISO timestamps.
     Keep the legacy route owner and default behavior; fail closed after Go
     dispatch if the service or response is invalid.
+
+28. (Done) Add Go parity for tax profile and tax code masters, the sales
+    tax return lifecycle (create, cancel, restore, submission, amendment,
+    acknowledgment, filing), HR leave requests and time tracking, and HR
+    payroll runs with the applicant pipeline through the governed executor and
+    jobs worker. Preserve posting, approval gating, audit, replay, and response
+    shapes. Bridge `fileSalesTaxReturn` behind default-off
+    `GO_ACCOUNTING_TAX_RETURNS_WRITE`, the leave and time writes behind
+    `GO_HR_LEAVE_TIME_WRITES`, and the payroll and applicant writes behind
+    `GO_HR_PAYROLL_APPLICANT_WRITES`.
