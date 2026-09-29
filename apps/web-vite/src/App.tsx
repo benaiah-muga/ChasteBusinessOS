@@ -20,6 +20,7 @@ import "./app-shell.css";
 const InventoryPage = lazy(() => import("./components/InventoryPage").then((module) => ({ default: module.InventoryPage })));
 const PosShiftSummaryPage = lazy(() => import("./components/PosShiftSummaryPage").then((module) => ({ default: module.PosShiftSummaryPage })));
 const AccountingInvoicesPage = lazy(() => import("./components/AccountingInvoicesPage").then((module) => ({ default: module.AccountingInvoicesPage })));
+const AccountingCloseReadinessPage = lazy(() => import("./components/AccountingCloseReadinessPage").then((module) => ({ default: module.AccountingCloseReadinessPage })));
 const PurchasingPaymentRunsPage = lazy(() => import("./components/PurchasingPaymentRunsPage").then((module) => ({ default: module.PurchasingPaymentRunsPage })));
 const PurchasingReceiptsPage = lazy(() => import("./components/PurchasingReceiptsPage").then((module) => ({ default: module.PurchasingReceiptsPage })));
 
@@ -38,6 +39,7 @@ type AuthState =
 const navigationItems = [
   { label: "Approvals", href: "/approvals", icon: "✓" },
   { label: "Accounting", href: "/accounting/invoices", icon: "▤" },
+  { label: "Close readiness", href: "/accounting/close", icon: "◷" },
   { label: "Sales", href: "/sales", icon: "↗" },
   { label: "POS summary", href: "/pos/shift-summary", icon: "$" },
   { label: "Purchasing", href: "/purchasing/payment-runs", icon: "⇣" },
@@ -66,6 +68,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   const posSummaryPage = pathname === "/pos/shift-summary";
   const inventoryPage = pathname === "/inventory";
   const accountingInvoicesPage = pathname === "/accounting/invoices";
+  const accountingClosePage = pathname === "/accounting/close";
   const purchasingPaymentRunsPage = pathname === "/purchasing/payment-runs";
   const purchasingReceiptsPage = pathname === "/purchasing/receipts";
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
@@ -149,7 +152,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
               <span aria-hidden="true">{item.icon}</span><span>{item.label}</span>
             </a>
           ))}
-          <p className="rail-note">{pathname === "/" ? "Approvals, the event ledger, agent sessions, projects, analytics, team roles, CRM, sales orders, accounting invoices, purchasing payment runs and receipts, POS shift summaries, and inventory stock levels are available in this Vite preview. Other pages still open in the current app." : "This Vite preview uses the existing workspace APIs. Other pages still open in the current app."}</p>
+          <p className="rail-note">{pathname === "/" ? "Approvals, the event ledger, agent sessions, projects, analytics, team roles, CRM, sales orders, accounting invoices and close readiness, purchasing payment runs and receipts, POS shift summaries, and inventory stock levels are available in this Vite preview. Other pages still open in the current app." : "This Vite preview uses the existing workspace APIs. Other pages still open in the current app."}</p>
         </nav>
         <div className="rail-account">
           <div className="account-initial" aria-hidden="true">{(auth.user.name || auth.user.email).slice(0, 1).toUpperCase()}</div>
@@ -201,11 +204,13 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                 ? <InventoryPage key={organizationRevision} baseCurrency={baseCurrency} />
                                 : accountingInvoicesPage
                                   ? <AccountingInvoicesPage key={organizationRevision} />
-                                  : purchasingPaymentRunsPage
-                                  ? <PurchasingPaymentRunsPage key={organizationRevision} />
-                                    : purchasingReceiptsPage
-                                      ? <PurchasingReceiptsPage key={organizationRevision} />
-                                      : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
+                                  : accountingClosePage
+                                    ? <AccountingCloseReadinessPage key={organizationRevision} />
+                                    : purchasingPaymentRunsPage
+                                      ? <PurchasingPaymentRunsPage key={organizationRevision} />
+                                      : purchasingReceiptsPage
+                                        ? <PurchasingReceiptsPage key={organizationRevision} />
+                                        : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
           </Suspense>
         </PageErrorBoundary>
       </div>

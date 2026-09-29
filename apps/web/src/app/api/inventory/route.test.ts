@@ -491,3 +491,119 @@ describe("inventory Go transfer-list bridge", () => {
     expect(mocks.executeGoCapability).toHaveBeenCalledWith(expect.objectContaining({ session: user, capabilityId: "inventory.listTransfers" }));
   });
 });
+
+describe("inventory valuation summary Go bridge", () => {
+  const valuationOutput = {
+    posted: true,
+    entryId: "f3c65071-356d-48e4-b5cb-cccd4fc06f6d",
+    varianceMinor: 2000,
+    ledgerValueMinor: 12000,
+    glBalanceMinor: 10000,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "0");
+    vi.stubEnv("GO_INVENTORY_ITEM_WRITES", "0");
+    vi.stubEnv("GO_INVENTORY_STOCK_WRITES", "0");
+    mocks.getResolvedUser.mockResolvedValue(user);
+    mocks.actorFromResolved.mockReturnValue(ctx);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: valuationOutput });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps valuation posting on TypeScript by default", async () => {
+    const response = await POST(request({ action: "postValuationSummary", memo: "Monthly stock valuation" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: valuationOutput });
+    expect(mocks.execute).toHaveBeenCalledWith("inventory.postValuationSummary", ctx, { memo: "Monthly stock valuation" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches valuation posting through Go and preserves the full output contract", async () => {
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: valuationOutput, replayed: false }),
+    });
+
+    const response = await POST(request({ action: "postValuationSummary", memo: "Monthly stock valuation", intentId: "valuation-intent" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: valuationOutput });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.postValuationSummary",
+      input: { memo: "Monthly stock valuation" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves the Go no-op valuation result", async () => {
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
+    const noOp = { posted: false, entryId: null, varianceMinor: 0, ledgerValueMinor: 12000, glBalanceMinor: 12000 };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: noOp }) });
+
+    const response = await POST(request({ action: "postValuationSummary" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: noOp });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith(expect.objectContaining({
+      capabilityId: "inventory.postValuationSummary",
+      input: { memo: undefined },
+    }));
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves the legacy approval reason for Go valuation approvals", async () => {
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, pendingApproval: true, reason: "Inventory posting requires a reviewer" }, { status: 202 }),
+    });
+
+    const response = await POST(request({ action: "postValuationSummary" }));
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: false, pendingApproval: true, reason: "pending human approval" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on malformed Go output without retrying through TypeScript", async () => {
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { ...valuationOutput, ledgerValueMinor: "12000" } }),
+    });
+
+    const response = await POST(request({ action: "postValuationSummary" }));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { kind: "approval", result: { kind: "response", response: Response.json({ ok: false, pendingApproval: true, reason: "Inventory posting requires a reviewer" }, { status: 202 }) }, status: 202, body: { ok: false, pendingApproval: true, reason: "pending human approval" } },
+    { kind: "capability error", result: { kind: "response", response: Response.json({ ok: false, error: "inventory account is unavailable" }, { status: 422 }) }, status: 422, body: { ok: false, error: "inventory account is unavailable" } },
+    { kind: "unknown Go outcome", result: { kind: "outcome-unknown" }, status: 503, body: { ok: false, error: "inventory service unavailable; check stock status before retrying" } },
+  ])("preserves $kind and never retries through TypeScript", async ({ result, status, body }) => {
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(request({ action: "postValuationSummary" }));
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual(body);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

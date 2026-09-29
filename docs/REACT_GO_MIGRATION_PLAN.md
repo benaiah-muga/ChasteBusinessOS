@@ -751,3 +751,22 @@ new owners and the manifest shows zero legacy runtime paths.
     revaluation fields. Validate successful Go results and fail closed after
     dispatch without retrying the TypeScript executor. Focused route and Go FX
     database parity tests pass.
+
+56. (Done) Add a default-off signed Go bridge for the existing
+    `postValuationSummary` action on `POST /api/inventory` using
+    `GO_INVENTORY_VALUATION_SUMMARY_WRITE=1`. Preserve memo defaults,
+    `inventory.write` and module checks, approval and error responses, and the
+    full posted and no-op result. Validate all successful output fields and
+    fail closed after Go dispatch without retrying the TypeScript executor.
+    The Go reverse capability remains internal because no reverse action is
+    exposed by the existing route. Focused route and Go valuation DB parity
+    tests pass.
+
+57. (Done) Add a read-only Vite Accounting period-close readiness preview
+    using `GET /api/accounting/close`. Validate the complete consumed response,
+    preserve the selected month, task statuses, blocker list, bank reconciliation
+    count, and foreign currency exposure, and respect Accounting module enablement
+    and existing authentication. Provide accessible loading, empty, disabled, and
+    error states. Keep checklist edits, FX revaluation, close, and reopen in the
+    full `/accounting/close` workspace. Focused API and component tests, Vite
+    typecheck, and lint pass.

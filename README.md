@@ -85,6 +85,45 @@ pnpm dev                    # Vite app on :3000, legacy compatibility server on 
 pnpm dev:api
 ```
 
+## Why React and Go: measured build benefits
+
+We chose React and TypeScript on Vite to shorten frontend compile feedback and
+catch type errors early, and Go for fast, capable APIs and workers. This
+benchmark shows the build-time improvement measured so far; type safety and
+end-to-end request speed are migration goals that these build numbers do not
+measure.
+
+**Measured 2026-09-29**, on Linux x64 with an Intel Core i7-4600U, Node
+24.18.0, pnpm 11.9.0, and Go 1.27.1. Each command ran three times in sequence
+with shared dependency and compiler caches left warm between runs.
+
+| Build | Command | Median | p95 |
+| --- | --- | ---: | ---: |
+| Next.js | `pnpm --filter web build` | 31.44 s | 352.31 s |
+| Vite + React + TypeScript | `pnpm --filter @chaste/web-vite build` | 10.76 s | 11.31 s |
+| Go API and workers | `go -C apps/api build ./cmd/api ./cmd/jobs-worker ./cmd/outbox-worker` | 1.58 s | 2.15 s |
+
+In this sample, the Vite build median is about **66% lower** than the Next.js
+median, and the three Go binaries build in a **1.58-second median**. These are
+the compilation and build-time benefits measured so far in the migration.
+
+The first Next.js run was cold and took 352.31 s; the next two took 31.44 s and
+15.70 s. With only three samples, p95 reflects this cold-build outlier. The
+Vite command includes TypeScript checking. The full samples, peak memory, and
+toolchain details are in the [benchmark report](docs/migration/benchmarks/phase-4-previews.json)
+for revision [`e1f3567`](https://github.com/benaiah-muga/ChasteBusinessOS/commit/e1f3567fc44284a2b51f95bf5c7d6a04f7088600).
+
+This snapshot compares build commands while the Vite app still has less feature
+coverage than the existing app. It does not measure startup, edit-to-ready, or
+browser navigation, so it is a build-time baseline rather than an end-to-end
+development-speed claim. Refresh the report with:
+
+```sh
+pnpm benchmark:migration:builds --runs 3 --output docs/migration/benchmarks/phase-4-previews.json
+```
+
+Update this summary after recording a new comparable run.
+
 Generate a random `GO_INTERNAL_AUTH_SECRET` in `.env` (for example,
 `openssl rand -hex 32`). Set `GO_POLICY_SHADOW=1` to compare the Go policy read
 with the existing database read during development; shadow comparison runs
@@ -292,6 +331,12 @@ into the signed Go `inventory.listTransfers` read. It requires `pnpm dev:api`,
 preserves the 50-row limit, transfer routes, notes, and line quantities, and
 fails closed if Go is unavailable or returns invalid data. The flag defaults
 to `0`.
+`GO_INVENTORY_VALUATION_SUMMARY_WRITE=1` opts the existing
+`postValuationSummary` action on `POST /api/inventory` into the signed Go
+`inventory.postValuationSummary` capability. It requires `pnpm dev:api`,
+preserves the memo, approval, error, and no-op response behavior, and fails
+closed without a TypeScript retry if Go is unavailable or returns invalid data.
+The flag defaults to `0`.
 `GO_POS_WRITES=1` opts register opening, sales, closing, returns, and shift
 summaries into the signed Go capability bridge. It requires `pnpm dev:api`;
 uncertain writes fail closed without a TypeScript retry. The flag defaults to

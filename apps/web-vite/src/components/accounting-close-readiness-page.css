@@ -1,0 +1,50 @@
+.accounting-close-readiness-page { display: grid; gap: 1.25rem; padding: clamp(1rem, 2vw, 1.75rem); color: var(--text, #17252b); }
+.accounting-close-readiness-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; }
+.accounting-close-readiness-header h1 { margin: .2rem 0 .45rem; font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -.035em; }
+.accounting-close-readiness-header p { max-width: 56rem; margin: 0; color: var(--muted, #63727a); line-height: 1.55; }
+.accounting-close-readiness-eyebrow { color: var(--accent, #167d72) !important; font-size: .74rem; font-weight: 750; letter-spacing: .095em; text-transform: uppercase; }
+.accounting-close-readiness-full-workspace { display: inline-flex; align-items: center; justify-content: center; min-height: 2.65rem; padding: .65rem .95rem; border: 1px solid var(--line, #cbd6d5); border-radius: .7rem; color: var(--text, #17252b); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.accounting-close-readiness-full-workspace:hover { border-color: var(--accent, #167d72); }
+.accounting-close-readiness-page a:focus-visible, .accounting-close-readiness-page button:focus-visible, .accounting-close-readiness-page input:focus-visible { outline: 3px solid var(--accent, #167d72); outline-offset: 3px; }
+.accounting-close-period-picker, .accounting-close-readiness-message, .accounting-close-readiness-overview, .accounting-close-task-card { padding: 1.15rem; border: 1px solid var(--line, #cbd6d5); border-radius: .9rem; background: var(--surface, #fff); }
+.accounting-close-period-picker { display: grid; justify-items: start; gap: .45rem; }
+.accounting-close-period-picker label { font-weight: 700; }
+.accounting-close-period-picker input { min-height: 2.65rem; padding: .45rem .7rem; border: 1px solid var(--line, #cbd6d5); border-radius: .6rem; background: var(--surface, #fff); color: var(--text, #17252b); }
+.accounting-close-period-picker p { margin: 0; color: var(--muted, #63727a); }
+.accounting-close-readiness-message h2 { margin: .25rem 0 .5rem; }
+.accounting-close-readiness-message p { color: var(--muted, #63727a); }
+.accounting-close-readiness-error { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; border-color: #e7b5ab; background: #fff9f7; }
+.accounting-close-readiness-error-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.accounting-close-readiness-error-actions a { color: var(--text, #17252b); font-weight: 650; }
+.accounting-close-readiness-error-actions button { min-height: 2.5rem; padding: .55rem .85rem; border: 0; border-radius: .65rem; background: var(--accent, #167d72); color: #fff; cursor: pointer; font-weight: 700; }
+.accounting-close-readiness-content { display: grid; gap: 1.25rem; }
+.accounting-close-readiness-overview { display: grid; gap: 1rem; }
+.accounting-close-readiness-overview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.accounting-close-readiness-overview-heading h2 { margin: .2rem 0 0; font-size: clamp(1.25rem, 2.2vw, 1.65rem); }
+.accounting-close-readiness-badge, .accounting-close-task-status { flex: 0 0 auto; padding: .3rem .65rem; border-radius: 999px; background: #fff2d8; color: #744f0a; font-size: .75rem; font-weight: 750; }
+.accounting-close-readiness-badge.is-ready, .accounting-close-task-status.is-complete { background: #e3f4eb; color: #236140; }
+.accounting-close-readiness-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; margin: 0; }
+.accounting-close-readiness-metrics div { padding: .85rem 1rem; border: 1px solid var(--line, #e1e7e6); border-radius: .7rem; background: var(--surface, #fff); }
+.accounting-close-readiness-metrics dt { color: var(--muted, #63727a); font-size: .77rem; font-weight: 700; }
+.accounting-close-readiness-metrics dd { margin: .2rem 0 0; font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.accounting-close-blockers { padding-top: .9rem; border-top: 1px solid var(--line, #e1e7e6); }
+.accounting-close-blockers h3 { margin: 0; font-size: .92rem; }
+.accounting-close-blockers p { margin: .45rem 0 0; color: var(--muted, #63727a); }
+.accounting-close-blockers ul { display: flex; flex-wrap: wrap; gap: .5rem; margin: .55rem 0 0; padding: 0; list-style: none; }
+.accounting-close-blockers li { padding: .35rem .6rem; border: 1px solid #efc8bf; border-radius: .55rem; background: #fff9f7; color: #803a2b; font-size: .82rem; font-weight: 650; }
+.accounting-close-task-list { display: grid; gap: .75rem; }
+.accounting-close-task-list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.accounting-close-task-list-heading h2 { margin: 0; font-size: 1.1rem; }
+.accounting-close-task-list-heading p { margin: 0; color: var(--muted, #63727a); font-size: .85rem; }
+.accounting-close-task-card { display: grid; gap: .5rem; }
+.accounting-close-task-card.is-blocking { border-left: 4px solid #c75b45; }
+.accounting-close-task-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.accounting-close-task-card h3 { margin: 0; font-size: .98rem; }
+.accounting-close-task-card > p { margin: 0; color: var(--muted, #63727a); line-height: 1.5; }
+.accounting-close-task-status.is-blocking { background: #fce9e5; color: #8a382a; }
+.accounting-close-task-note { padding: .65rem .75rem; border-left: 3px solid var(--accent, #167d72); background: #f5f8f7; color: var(--text, #17252b) !important; }
+@media (max-width: 760px) {
+  .accounting-close-readiness-header, .accounting-close-readiness-error, .accounting-close-readiness-overview-heading, .accounting-close-task-card header { align-items: stretch; flex-direction: column; }
+  .accounting-close-readiness-full-workspace { align-self: flex-start; }
+  .accounting-close-readiness-metrics { grid-template-columns: 1fr; }
+}

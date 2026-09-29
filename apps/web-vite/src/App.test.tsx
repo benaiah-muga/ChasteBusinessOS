@@ -143,6 +143,27 @@ beforeEach(() => {
       outstandingMinor: 10000,
       issuedAt: "2026-09-29T09:00:00.000Z",
     }] });
+    if (path.startsWith("/api/accounting/close?")) {
+      const query = new URL(path, "http://localhost").searchParams;
+      const year = Number(query.get("year"));
+      const month = Number(query.get("month"));
+      const tasks = [
+        { key: "review_journal", label: "Review journals", detail: "Review posted journals for this month.", completed: true, note: "Reviewed with controller", blocking: false, status: "complete" },
+        { key: "bank_reconciliation", label: "Reconcile bank activity", detail: "3 statement lines remain unmatched.", completed: false, note: null, blocking: true, status: "blocked" },
+        { key: "fx_revaluation", label: "Revalue foreign receivables", detail: "Open foreign receivables: EUR, KES.", completed: false, note: null, blocking: true, status: "needs_revaluation" },
+      ];
+      return Response.json({ ok: true, data: {
+        year,
+        month,
+        start: new Date(Date.UTC(year, month - 1, 1)).toISOString(),
+        end: new Date(Date.UTC(year, month, 1) - 1).toISOString(),
+        tasks,
+        blockers: tasks.filter((task) => task.blocking).map((task) => task.key),
+        readyToClose: false,
+        unmatchedLineCount: 3,
+        currenciesWithExposure: ["EUR", "KES"],
+      } });
+    }
     if (path === "/api/purchasing/payment-runs") return Response.json({ ok: true, data: { runs: [{
       id: "10000000-0000-4000-8000-000000000003",
       reference: "PAY-204",
@@ -267,6 +288,23 @@ describe("Vite app frame", () => {
     expect(screen.getByRole("link", { name: "Accounting" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Open full Accounting workspace" })).not.toBeNull();
     expect(await screen.findByText("#1042")).not.toBeNull();
+  });
+
+  it("opens Accounting close readiness in the authenticated shell", async () => {
+    window.history.replaceState(null, "", "/accounting/close");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Period close readiness" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Not ready to close" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Close readiness" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Open full period close workspace" }).getAttribute("href"))
+      .toBe("http://localhost:3001/accounting/close");
+    expect(await screen.findByText("3 statement lines remain unmatched.")).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/accounting/close?"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("opens the supplier payment-run preview within the authenticated shell", async () => {

@@ -17,6 +17,14 @@ import { z } from "zod";
 import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
 
 const noStore = { "Cache-Control": "no-store" };
+const inventoryValuationInteger = z.number().int().refine(Number.isSafeInteger);
+const inventoryValuationSummaryOutputSchema = z.object({
+  posted: z.boolean(),
+  entryId: z.string().nullable(),
+  varianceMinor: inventoryValuationInteger,
+  ledgerValueMinor: inventoryValuationInteger,
+  glBalanceMinor: inventoryValuationInteger,
+});
 
 function goUnavailable() {
   return NextResponse.json({ ok: false, error: "inventory service unavailable; check stock status before retrying" }, { status: 503, headers: noStore });
@@ -63,6 +71,25 @@ async function dispatchInventoryGo(ctx: ReturnType<typeof actorFromResolved> & {
   } catch {
     return goUnavailable();
   }
+}
+
+async function dispatchInventoryValuationSummaryGo(
+  ctx: ReturnType<typeof actorFromResolved> & {},
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+  memo: string | undefined,
+) {
+  const response = await dispatchInventoryGo(ctx, session, "inventory.postValuationSummary", { memo });
+  if (response.status === 202) {
+    return NextResponse.json(
+      { ok: false, pendingApproval: true, reason: "pending human approval" },
+      { status: 202, headers: noStore },
+    );
+  }
+  if (response.status !== 200) return response;
+  const parsed = z.object({ ok: z.literal(true), data: inventoryValuationSummaryOutputSchema })
+    .safeParse(await response.clone().json().catch(() => null));
+  if (!parsed.success) return goUnavailable();
+  return NextResponse.json(parsed.data, { headers: noStore });
 }
 
 const inventoryHistoryMovementSchema = z.object({
@@ -439,6 +466,10 @@ export async function POST(req: Request) {
   const executor = buildExecutor(db, buildRegistry(db));
   const str = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : undefined);
   const num = (k: string) => (typeof body[k] === "number" ? (body[k] as number) : undefined);
+
+  if (body.action === "postValuationSummary" && process.env.GO_INVENTORY_VALUATION_SUMMARY_WRITE === "1") {
+    return await dispatchInventoryValuationSummaryGo(ctx, resolved, str("memo"));
+  }
 
   if (process.env.GO_INVENTORY_ITEM_WRITES === "1" && ["createItem", "updateItem", "archiveItem", "createLocation"].includes((body.action as string | undefined) ?? "")) {
     let capabilityId: string;
