@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { z } from "zod";
 import { ApprovalsPage } from "./components/ApprovalsPage";
 import { LedgerPage } from "./components/LedgerPage";
@@ -8,8 +8,7 @@ import { AnalyticsPage } from "./components/AnalyticsPage";
 import { TeamPage } from "./components/TeamPage";
 import { CRMPage } from "./components/CRMPage";
 import { SalesPage } from "./components/SalesPage";
-import { InventoryPage } from "./components/InventoryPage";
-import { PosShiftSummaryPage } from "./components/PosShiftSummaryPage";
+import { PageErrorBoundary } from "./components/PageErrorBoundary";
 import { DashboardPage } from "./components/DashboardPage";
 import { ActiveOrganization } from "./components/ActiveOrganization";
 import { LoginPage } from "./components/LoginPage";
@@ -17,6 +16,11 @@ import { authClient } from "./api/auth";
 import { navigate } from "./navigation";
 import { legacyUrl, redirectToLegacy } from "./legacy";
 import "./app-shell.css";
+
+const InventoryPage = lazy(() => import("./components/InventoryPage").then((module) => ({ default: module.InventoryPage })));
+const PosShiftSummaryPage = lazy(() => import("./components/PosShiftSummaryPage").then((module) => ({ default: module.PosShiftSummaryPage })));
+const AccountingInvoicesPage = lazy(() => import("./components/AccountingInvoicesPage").then((module) => ({ default: module.AccountingInvoicesPage })));
+const PurchasingPaymentRunsPage = lazy(() => import("./components/PurchasingPaymentRunsPage").then((module) => ({ default: module.PurchasingPaymentRunsPage })));
 
 const SessionUserSchema = z.object({
   id: z.string().min(1),
@@ -32,10 +36,10 @@ type AuthState =
 
 const navigationItems = [
   { label: "Approvals", href: "/approvals", icon: "✓" },
-  { label: "Accounting", href: "/accounting", icon: "▤" },
+  { label: "Accounting", href: "/accounting/invoices", icon: "▤" },
   { label: "Sales", href: "/sales", icon: "↗" },
   { label: "POS summary", href: "/pos/shift-summary", icon: "$" },
-  { label: "Purchasing", href: "/purchasing", icon: "⇣" },
+  { label: "Purchasing", href: "/purchasing/payment-runs", icon: "⇣" },
   { label: "Inventory", href: "/inventory", icon: "▦" },
   { label: "People", href: "/hr", icon: "◎" },
   { label: "Documents", href: "/documents", icon: "▧" },
@@ -46,6 +50,7 @@ const navigationItems = [
   { label: "Team", href: "/team", icon: "♙" },
   { label: "CRM", href: "/crm", icon: "◎" },
 ];
+const viteAppPaths = new Set(["/", ...navigationItems.map((item) => item.href)]);
 
 function AuthenticatedApp({ pathname }: { pathname: string }) {
   const approvalsPage = pathname === "/approvals";
@@ -58,6 +63,8 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   const salesPage = pathname === "/sales";
   const posSummaryPage = pathname === "/pos/shift-summary";
   const inventoryPage = pathname === "/inventory";
+  const accountingInvoicesPage = pathname === "/accounting/invoices";
+  const purchasingPaymentRunsPage = pathname === "/purchasing/payment-runs";
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const [organizationRevision, setOrganizationRevision] = useState(0);
   const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
@@ -125,21 +132,21 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
           <span className="rail-brand-copy">Chaste <strong>BusinessOS</strong></span>
         </a>
         <nav className="rail-nav">
-          <a className={`rail-link${!approvalsPage && !ledgerPage && !sessionsPage && !projectsPage && !analyticsPage && !teamPage && !crmPage && !salesPage && !posSummaryPage && !inventoryPage ? " rail-link-current" : ""}`} href="/" {...(!approvalsPage && !ledgerPage && !sessionsPage && !projectsPage && !analyticsPage && !teamPage && !crmPage && !salesPage && !posSummaryPage && !inventoryPage ? { "aria-current": "page" as const } : {})}>
+          <a className={`rail-link${pathname === "/" ? " rail-link-current" : ""}`} href="/" {...(pathname === "/" ? { "aria-current": "page" as const } : {})}>
             <span aria-hidden="true">⌂</span><span>Home</span>
           </a>
           <p className="rail-caption">Workspace</p>
           {navigationItems.map((item) => (
             <a
-              className={`rail-link${(approvalsPage && item.href === "/approvals") || (ledgerPage && item.href === "/ledger") || (sessionsPage && item.href === "/sessions") || (projectsPage && item.href === "/projects") || (analyticsPage && item.href === "/analytics") || (teamPage && item.href === "/team") || (crmPage && item.href === "/crm") || (salesPage && item.href === "/sales") || (posSummaryPage && item.href === "/pos/shift-summary") || (inventoryPage && item.href === "/inventory") ? " rail-link-current" : ""}`}
+              className={`rail-link${pathname === item.href ? " rail-link-current" : ""}`}
               key={item.href}
-              href={item.href === "/approvals" || item.href === "/ledger" || item.href === "/sessions" || item.href === "/projects" || item.href === "/analytics" || item.href === "/team" || item.href === "/crm" || item.href === "/sales" || item.href === "/pos/shift-summary" || item.href === "/inventory" ? item.href : legacyUrl(item.href)}
-              {...((approvalsPage && item.href === "/approvals") || (ledgerPage && item.href === "/ledger") || (sessionsPage && item.href === "/sessions") || (projectsPage && item.href === "/projects") || (analyticsPage && item.href === "/analytics") || (teamPage && item.href === "/team") || (crmPage && item.href === "/crm") || (salesPage && item.href === "/sales") || (posSummaryPage && item.href === "/pos/shift-summary") || (inventoryPage && item.href === "/inventory") ? { "aria-current": "page" as const } : {})}
+              href={viteAppPaths.has(item.href) ? item.href : legacyUrl(item.href)}
+              {...(pathname === item.href ? { "aria-current": "page" as const } : {})}
             >
               <span aria-hidden="true">{item.icon}</span><span>{item.label}</span>
             </a>
           ))}
-          <p className="rail-note">{approvalsPage || ledgerPage || sessionsPage || projectsPage || analyticsPage || teamPage || crmPage || salesPage || posSummaryPage || inventoryPage ? "This Vite preview uses the existing workspace APIs. Other pages still open in the current app." : "Approvals, the event ledger, agent sessions, projects, analytics, team roles, CRM, sales orders, POS shift summaries, and inventory stock levels are available in this Vite preview. Other pages still open in the current app."}</p>
+          <p className="rail-note">{pathname === "/" ? "Approvals, the event ledger, agent sessions, projects, analytics, team roles, CRM, sales orders, accounting invoices, purchasing payment runs, POS shift summaries, and inventory stock levels are available in this Vite preview. Other pages still open in the current app." : "This Vite preview uses the existing workspace APIs. Other pages still open in the current app."}</p>
         </nav>
         <div className="rail-account">
           <div className="account-initial" aria-hidden="true">{(auth.user.name || auth.user.email).slice(0, 1).toUpperCase()}</div>
@@ -167,27 +174,35 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
           </div>
         </header>
         {signOutError && <p className="shell-error" role="alert">{signOutError}</p>}
-        {approvalsPage
-          ? <ApprovalsPage key={organizationRevision} baseCurrency={baseCurrency} />
-          : ledgerPage
-            ? <LedgerPage key={organizationRevision} />
-          : sessionsPage
-              ? <SessionsPage key={organizationRevision} />
-              : projectsPage
-                  ? <ProjectsPage key={organizationRevision} />
-                  : analyticsPage
-                    ? <AnalyticsPage key={organizationRevision} />
-                    : teamPage
-                      ? <TeamPage key={organizationRevision} />
-                      : crmPage
-                        ? <CRMPage key={organizationRevision} />
-                        : salesPage
-                          ? <SalesPage key={organizationRevision} baseCurrency={baseCurrency} />
-                        : posSummaryPage
-                            ? <PosShiftSummaryPage key={organizationRevision} baseCurrency={baseCurrency} />
-                            : inventoryPage
-                              ? <InventoryPage key={organizationRevision} baseCurrency={baseCurrency} />
-                              : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
+        <PageErrorBoundary key={pathname}>
+          <Suspense fallback={<main className="auth-wait" role="status">Loading workspace page…</main>}>
+            {approvalsPage
+              ? <ApprovalsPage key={organizationRevision} baseCurrency={baseCurrency} />
+              : ledgerPage
+                ? <LedgerPage key={organizationRevision} />
+                : sessionsPage
+                  ? <SessionsPage key={organizationRevision} />
+                  : projectsPage
+                    ? <ProjectsPage key={organizationRevision} />
+                    : analyticsPage
+                      ? <AnalyticsPage key={organizationRevision} />
+                      : teamPage
+                        ? <TeamPage key={organizationRevision} />
+                        : crmPage
+                          ? <CRMPage key={organizationRevision} />
+                          : salesPage
+                            ? <SalesPage key={organizationRevision} baseCurrency={baseCurrency} />
+                            : posSummaryPage
+                              ? <PosShiftSummaryPage key={organizationRevision} baseCurrency={baseCurrency} />
+                              : inventoryPage
+                                ? <InventoryPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                : accountingInvoicesPage
+                                  ? <AccountingInvoicesPage key={organizationRevision} />
+                                  : purchasingPaymentRunsPage
+                                    ? <PurchasingPaymentRunsPage key={organizationRevision} />
+                                    : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
+          </Suspense>
+        </PageErrorBoundary>
       </div>
     </div>
   );
@@ -220,6 +235,6 @@ export function App() {
   }, []);
 
   if (pathname === "/login") return <LoginPage />;
-  if (pathname !== "/" && pathname !== "/approvals" && pathname !== "/ledger" && pathname !== "/sessions" && pathname !== "/projects" && pathname !== "/analytics" && pathname !== "/team" && pathname !== "/crm" && pathname !== "/sales" && pathname !== "/pos/shift-summary" && pathname !== "/inventory") return <LegacyRoute pathname={pathname} />;
+  if (!viteAppPaths.has(pathname) && pathname !== "/login") return <LegacyRoute pathname={pathname} />;
   return <AuthenticatedApp pathname={pathname} />;
 }

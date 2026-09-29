@@ -85,11 +85,13 @@ beforeEach(() => {
     if (path === "/api/my-work/summarize") return Response.json({ brief: "The ranked work is ready." });
     if (path === "/api/modules") return Response.json({
       catalog: [
+        { id: "accounting", label: "Accounting", description: "Financial reports and invoices", href: "/accounting/invoices" },
+        { id: "purchasing", label: "Purchasing", description: "Supplier purchasing and payment runs", href: "/purchasing/payment-runs" },
         { id: "projects", label: "Projects", description: "Project boards and tasks", href: "/projects" },
         { id: "analytics", label: "Analytics", description: "Governed reports", href: "/analytics" },
         { id: "inventory", label: "Inventory", description: "Stock levels and reorder needs", href: "/inventory" },
       ],
-      enabledModules: ["projects", "analytics", "inventory"],
+      enabledModules: ["accounting", "purchasing", "projects", "analytics", "inventory"],
       usingDefaults: false,
     });
     if (path === "/api/analytics" && init?.method === "POST") return Response.json({
@@ -129,6 +131,30 @@ beforeEach(() => {
       items: [{ sku: "MUG-1", name: "Ceramic mug", kind: "product", unitLabel: "unit", onHandThousandths: 4000, reservedThousandths: 1000, availableThousandths: 3000, totalValueMinor: 2000, reorderPointThousandths: 5000, reorderNeeded: true }],
       totalValueMinor: 2000,
     });
+    if (path === "/api/accounting") return Response.json({ invoices: [{
+      id: "f9184ddd-a042-4e24-9fe1-553cadc44df1",
+      number: 1042,
+      customerId: "348a55cb-0d16-47e0-aee3-6e61952e05af",
+      customerName: "Acme Supplies",
+      status: "sent",
+      currency: "USD",
+      totalMinor: 15000,
+      paidMinor: 5000,
+      outstandingMinor: 10000,
+      issuedAt: "2026-09-29T09:00:00.000Z",
+    }] });
+    if (path === "/api/purchasing/payment-runs") return Response.json({ ok: true, data: { runs: [{
+      id: "10000000-0000-4000-8000-000000000003",
+      reference: "PAY-204",
+      currency: "USD",
+      totalMinor: 45000,
+      status: "instructed",
+      createdAt: "2026-09-28T09:00:00.000Z",
+      instructedAt: "2026-09-28T10:00:00.000Z",
+      confirmedAt: null,
+      entryId: null,
+      lines: [{ billId: "10000000-0000-4000-8000-000000000004", billNumber: 88, vendorName: "Acme Supplies", vendorRef: null, amountMinor: 45000 }],
+    }] } });
     if (path === "/api/pos" && init?.method === "POST") return Response.json({ ok: true, data: {
       register: "Main register",
       status: "closed",
@@ -198,6 +224,26 @@ describe("Vite app frame", () => {
     expect(screen.getByRole("link", { name: "Open full inventory workspace" })).not.toBeNull();
     expect(await screen.findByText("MUG-1")).not.toBeNull();
     expect(await screen.findAllByText("$20.00")).toHaveLength(2);
+  });
+
+  it("opens the invoice preview within the authenticated shell", async () => {
+    window.history.replaceState(null, "", "/accounting/invoices");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Accounting invoices" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Accounting" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Open full Accounting workspace" })).not.toBeNull();
+    expect(await screen.findByText("#1042")).not.toBeNull();
+  });
+
+  it("opens the supplier payment-run preview within the authenticated shell", async () => {
+    window.history.replaceState(null, "", "/purchasing/payment-runs");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Supplier payment runs" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Purchasing" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Open full Purchasing workspace" })).not.toBeNull();
+    expect(await screen.findByText("PAY-204")).not.toBeNull();
   });
 
   it("refreshes dashboard context and currency after switching organizations", async () => {

@@ -727,3 +727,10 @@ new owners and the manifest shows zero legacy runtime paths.
     enablement, preserve currency minor-unit formatting, provide loading, empty,
     and error states, and link to the full workspaces for existing actions.
     Focused Vite component and authenticated-shell tests pass.
+
+53. (Done) Add read-only Vite previews for accounting invoices and supplier
+    payment runs using the existing authenticated API routes. Validate response
+    shapes, preserve each invoice or run currency's minor-unit formatting,
+    provide recoverable loading, empty, and error states, show a disabled state
+    when either module is off, and link to the full workspaces for existing
+    actions. Focused API, component, and authenticated-shell tests pass.

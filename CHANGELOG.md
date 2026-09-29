@@ -21,6 +21,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - **Opt-in Go CRM saved-view writes.** Saving customer views can use the signed Go capability executor behind `GO_CRM_VIEW_WRITES=1`. The flag defaults off; human session checks, private-view ownership, approval handling, audit receipts, snapshot restore, and the legacy response contract are preserved. Unavailable or invalid Go outcomes fail closed without a TypeScript retry.
 
 ### Added
+- **Vite accounting and purchasing previews.** Added read-only invoice and supplier payment-run pages with validated same-origin APIs, currency-aware amounts, accessible loading and error states, and links to the full legacy workspaces.
 - **Vite inventory and POS summaries.** Added read-only React previews for inventory stock levels, reorder needs, and POS shift summaries. Both use validated same-origin APIs, preserve workspace currency formatting, and link to the full legacy workspaces for actions.
 - **Vite sales order filters.** The Sales orders preview now filters by draft, confirmed, delivered, and cancelled status, while retaining customer/order search and the `/` search shortcut.
 - **Vite sales orders preview.** Added a React sales orders page with same-origin API loading, validated order data, search, totals, backorder labels, and recoverable loading and error states. Sales mutations remain on the current route owner.

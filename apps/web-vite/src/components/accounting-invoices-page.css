@@ -1,0 +1,30 @@
+.accounting-invoices-page { display: grid; gap: 1.25rem; color: var(--ink, #25231f); }
+.accounting-invoices-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; }
+.accounting-invoices-header h1 { margin: .15rem 0 .35rem; font-family: var(--display, Georgia, serif); font-size: clamp(1.8rem, 4vw, 2.5rem); font-weight: 500; letter-spacing: -.035em; }
+.accounting-invoices-header p { max-width: 42rem; margin: 0; color: var(--muted, #746f66); line-height: 1.55; }
+.accounting-invoices-header .accounting-invoices-eyebrow, .accounting-invoices-eyebrow { color: var(--accent, #8c5a22); font-size: .7rem; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+.accounting-invoices-full-workspace { flex: 0 0 auto; border: 1px solid var(--line, #ded9ce); border-radius: 999px; padding: .65rem .95rem; color: inherit; font-size: .83rem; font-weight: 700; text-decoration: none; }
+.accounting-invoices-full-workspace:hover { border-color: var(--accent, #8c5a22); color: var(--accent, #8c5a22); }
+.accounting-invoices-full-workspace:focus-visible, .accounting-invoices-page button:focus-visible, .accounting-invoices-error-actions a:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent, #8c5a22) 35%, transparent); outline-offset: 2px; }
+.accounting-invoices-message { border: 1px solid var(--line, #ded9ce); border-radius: 1rem; background: var(--surface, #fffefa); padding: 1.25rem; color: var(--muted, #746f66); }
+.accounting-invoices-message h2 { margin: .2rem 0 .35rem; color: var(--ink, #25231f); font-size: 1.05rem; }
+.accounting-invoices-message p { margin: .25rem 0; }
+.accounting-invoices-error { display: flex; justify-content: space-between; align-items: center; gap: 1rem; border-color: #e8c7bd; background: #fff8f5; }
+.accounting-invoices-error-actions { display: flex; flex: 0 0 auto; align-items: center; gap: .85rem; }
+.accounting-invoices-error-actions a { color: var(--accent, #8c5a22); font-weight: 700; }
+.accounting-invoices-page button { border: 1px solid var(--line, #ded9ce); border-radius: .7rem; background: #fff; padding: .55rem .8rem; color: var(--ink, #25231f); font: inherit; font-size: .83rem; font-weight: 700; cursor: pointer; }
+.accounting-invoices-metrics { display: grid; grid-template-columns: repeat(2, minmax(10rem, 1fr)); gap: .85rem; }
+.accounting-invoices-metrics article { display: grid; gap: .3rem; border: 1px solid var(--line, #ded9ce); border-radius: 1rem; background: var(--surface, #fffefa); padding: 1rem 1.1rem; }
+.accounting-invoices-metrics span { color: var(--muted, #746f66); font-size: .76rem; font-weight: 700; }
+.accounting-invoices-metrics strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.accounting-invoices-metrics small { color: var(--muted, #746f66); font-size: .7rem; }
+.accounting-invoices-table-card { overflow: hidden; border: 1px solid var(--line, #ded9ce); border-radius: 1rem; background: var(--surface, #fffefa); }
+.accounting-invoices-table-scroll { overflow-x: auto; }
+.accounting-invoices-table { width: 100%; border-collapse: collapse; font-size: .83rem; text-align: left; }
+.accounting-invoices-table th, .accounting-invoices-table td { padding: .8rem .85rem; border-bottom: 1px solid var(--line, #ece8df); white-space: nowrap; }
+.accounting-invoices-table thead th { background: #f8f6f0; color: var(--muted, #746f66); font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.accounting-invoices-table tbody tr:last-child th, .accounting-invoices-table tbody tr:last-child td { border-bottom: 0; }
+.accounting-invoices-table tbody th { font-weight: 750; }
+.accounting-invoices-status { display: inline-block; border-radius: 999px; background: #f0eee8; padding: .25rem .55rem; color: #514d45; font-size: .72rem; font-weight: 700; }
+.accounting-invoices-value { font-weight: 750; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .accounting-invoices-header { flex-direction: column; } .accounting-invoices-error { align-items: flex-start; flex-direction: column; } .accounting-invoices-metrics { grid-template-columns: 1fr 1fr; } }
