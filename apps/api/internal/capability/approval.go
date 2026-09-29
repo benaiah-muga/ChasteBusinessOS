@@ -439,6 +439,34 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case billCreditNoteCapabilityID, closePurchaseOrderCapabilityID, listReceiptsCapabilityID:
+			parsed, parseErr := parsePurchasingLifecycleInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID,
+			inventoryStockReportCapabilityID, inventoryItemHistoryCapabilityID, inventoryListLotsCapabilityID,
+			inventoryRebuildStockProjectionsCapabilityID:
+			parsed, parseErr := parseInventoryValuationInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case incomeStatementCapabilityID, balanceSheetCapabilityID, listInvoicesCapabilityID, arAgingCapabilityID,
+			cashBasisReportCapabilityID, customerStatementCapabilityID, salesTaxReportCapabilityID,
+			cashFlowCapabilityID, cashForecastCapabilityID:
+			parsed, parseErr := parseAccountingReportInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case unrealizedFxExposureCapabilityID, revalueForeignReceivablesCapabilityID, reversePeriodFxRevaluationCapabilityID:
+			parsed, parseErr := parseAccountingFxInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
 			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 			parsed, parseErr := parseIAMInput(transition.row.CapabilityID, transition.row.Payload)
@@ -525,7 +553,7 @@ type rejectionPayload struct {
 
 func permissionForCapability(capabilityID string) (string, bool) {
 	switch capabilityID {
-	case createCustomerCapabilityID, deactivateCustomerCapabilityID,
+	case createCustomerCapabilityID, saveCustomerViewCapabilityID, restoreCustomerViewCapabilityID, deactivateCustomerCapabilityID,
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
@@ -630,6 +658,24 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "hr.write", true
 	case hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID, hrListApplicantsCapabilityID:
 		return "hr.read", true
+	case billCreditNoteCapabilityID, closePurchaseOrderCapabilityID:
+		return "purchasing.write", true
+	case listReceiptsCapabilityID:
+		return "purchasing.read", true
+	case inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID:
+		return "inventory.write", true
+	case inventoryRebuildStockProjectionsCapabilityID:
+		return "inventory.admin", true
+	case inventoryStockReportCapabilityID, inventoryItemHistoryCapabilityID, inventoryListLotsCapabilityID:
+		return "inventory.read", true
+	case incomeStatementCapabilityID, balanceSheetCapabilityID, listInvoicesCapabilityID, arAgingCapabilityID,
+		cashBasisReportCapabilityID, customerStatementCapabilityID, salesTaxReportCapabilityID,
+		cashFlowCapabilityID, cashForecastCapabilityID:
+		return "accounting.read", true
+	case unrealizedFxExposureCapabilityID:
+		return "accounting.read", true
+	case revalueForeignReceivablesCapabilityID, reversePeriodFxRevaluationCapabilityID:
+		return "accounting.post", true
 	case iamListMembersCapabilityID:
 		return "iam.read", true
 	case iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:

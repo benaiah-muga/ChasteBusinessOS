@@ -107,6 +107,13 @@ func TestGoCRMReadHandlerForwardsLegacyTimelineAndTaskQueryModes(t *testing.T) {
 			input:      `{}`,
 			response:   `{"deals":[{"id":"deal-1","title":"Deal","stage":"lead","valueMinor":12500,"note":null,"customerId":null,"customerName":null,"createdAt":"2026-09-28T10:00:00.000Z","updatedAt":"2026-09-28T10:00:00.000Z"}]}`,
 		},
+		{
+			name:       "saved customer views",
+			query:      "views=1",
+			capability: "crm.listCustomerViews",
+			input:      `{}`,
+			response:   `{"views":[]}`,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -233,6 +240,7 @@ func TestCRMReadRequestMatchesLegacyModePrecedence(t *testing.T) {
 		{query: url.Values{"tasks": {"1"}, "open": {"1"}}, capID: "crm.listTasks", input: `{"openOnly":true}`},
 		{query: url.Values{"tasks": {"1"}}, capID: "crm.listTasks", input: `{}`},
 		{query: url.Values{"deals": {"1"}}, capID: "crm.listDeals", input: `{}`},
+		{query: url.Values{"views": {"1"}}, capID: "crm.listCustomerViews", input: `{}`},
 	} {
 		capID, input, err := crmReadRequest(test.query)
 		if err != nil || capID != test.capID || !reflect.DeepEqual(json.RawMessage(input), json.RawMessage(test.input)) {

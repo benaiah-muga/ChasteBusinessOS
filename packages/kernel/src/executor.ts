@@ -137,6 +137,10 @@ export class KernelExecutor {
       return { ok: false, error: `forbidden: ${decision.reason}` };
     }
 
+    if (ctx.actor.type === "system" && cap.risk === "money" && decision.requiresApproval && !opts.approvedApprovalId) {
+      return { ok: false, error: "system money actions require a verified human approval" };
+    }
+
     if (decision.requiresApproval && opts.approvedApprovalId) {
       // A claimed approval must match this capability and this exact payload.
       // The kernel verifies; callers are not trusted to have checked. An app

@@ -557,3 +557,36 @@ new owners and the manifest shows zero legacy runtime paths.
     `GO_ACCOUNTING_TAX_RETURNS_WRITE`, the leave and time writes behind
     `GO_HR_LEAVE_TIME_WRITES`, and the payroll and applicant writes behind
     `GO_HR_PAYROLL_APPLICANT_WRITES`.
+
+29. (Done) Add the governed `crm.listCustomerViews` capability and an
+    opt-in signed Go read for `GET /api/crm/views` behind
+    `GO_CRM_VIEW_READS=1`. Preserve organization scope, shared and current-user
+    private view visibility, pinned/update ordering, response fields, and ISO
+    timestamps. Keep legacy route ownership and defaults; fail closed after Go
+    dispatch when the service or response is invalid. Focused Go DB, signed
+    handler, and BFF response tests pass.
+
+30. (In progress) Add governed Go parity for accounting reports and FX
+    revaluation, inventory valuation and read models, and purchasing bill
+    credits, purchase order closure, and receipt listing. Capability parsers,
+    organization-scoped executor paths, approval verification, and worker
+    support are in place. System money jobs use configured amount thresholds
+    and require an executing human approval for unknown or above-threshold
+    amounts. Public API bridges, parity proofs, and any route ownership changes
+    remain open; route defaults stay on the existing owners until those gates
+    pass.
+
+31. (Done) Add Go parity for `crm.saveCustomerView` and its inverse,
+    `crm.restoreCustomerView`, behind default-off `GO_CRM_VIEW_WRITES=1` on the
+    existing `POST /api/crm/views` route. Preserve signed human session and
+    `crm.write` checks, organization scope, private-view ownership, approval
+    handling, audit and replay receipts, previous-state snapshots, and the
+    legacy response contract. Keep route ownership on the legacy handler and
+    fail closed after Go dispatch. Focused Go DB and BFF route tests pass.
+
+32. (Done) Add a default-off signed Go read bridge for the report capabilities
+    consumed by `GET /api/reports`. Preserve the report response shape, base
+    currency and unsupported-currency metadata, and optional null behavior.
+    Route ownership remains on the legacy handler; currency metadata remains a
+    TypeScript database read until a later migration slice. Focused route tests
+    and the existing Go report and FX capability proofs pass.

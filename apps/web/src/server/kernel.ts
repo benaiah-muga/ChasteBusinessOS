@@ -402,9 +402,9 @@ export class DbApprovalFlow implements ApprovalFlow {
     if (!row) return false;
     if (row.orgId !== ctx.actor.orgId) return false;
     if (row.capabilityId !== request.capabilityId) return false;
-    // Only an unclaimed or in-flight gate authorizes. Anything else
-    // (executed, rejected, failed) is consumed history and refuses.
-    if (!["pending", "executing"].includes(row.status)) return false;
+    // Approval IDs authorize execution only after a human has claimed the
+    // decision and moved it into the executing state.
+    if (row.status !== "executing") return false;
     if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) return false;
     return canonicalJson(row.payload) === canonicalJson(request.payload);
   }

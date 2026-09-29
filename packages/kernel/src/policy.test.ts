@@ -139,6 +139,14 @@ describe("actor-aware authority (ADR 0055)", () => {
     expect(decision.requiresApproval).toBe(true);
   });
 
+  it("system money actions use the same fail-closed amount thresholds as agents", async () => {
+    const engine = engineWith([{ capabilityPattern: "*", maxRiskAutonomous: "write", moneyThresholdMinor: 50_000 }]);
+    const small = await engine.evaluate(ctxWith("system"), moneyCapability(), { amountMinor: 40_000 });
+    const large = await engine.evaluate(ctxWith("system"), moneyCapability(), { amountMinor: 60_000 });
+    expect(small.requiresApproval).toBe(false);
+    expect(large.requiresApproval).toBe(true);
+  });
+
   it("strict mode (maker-checker) re-imposes identity gates on humans", async () => {
     const engine = engineWith([
       { capabilityPattern: "*", maxRiskAutonomous: "write", requiresApprovalFor: ["identity", "destructive"] },

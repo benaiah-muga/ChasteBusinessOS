@@ -383,6 +383,14 @@ func TestHRPayrollApplicantsDomainMathMirrorsErpCore(t *testing.T) {
 	}
 }
 
+func TestHRExecutePayrollMoneyAmountIsKnownBeforeExecution(t *testing.T) {
+	want := int64(40_000)
+	amount, known := moneyAmount(HRExecutePayrollRunInput{ExpectedTotalNetMinor: want})
+	if !known || amount == nil || *amount != want {
+		t.Fatalf("moneyAmount(payroll) = (%v, %t), want (%d, true)", amount, known, want)
+	}
+}
+
 func TestHRPayrollApplicantsCreateDraftsProratedPayslips(t *testing.T) {
 	fx := newExecutorFixture(t)
 	cleanupHRPayrollApplicantsFixture(t, fx)

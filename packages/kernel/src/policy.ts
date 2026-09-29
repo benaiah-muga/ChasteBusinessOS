@@ -28,7 +28,7 @@ export class DefaultPolicyEngine implements PolicyEngine {
     ctx: ActionContext,
     cap: Capability,
     _input: unknown,
-    opts: { humanGates?: ReadonlySet<RiskClass> | "*" } = {},
+    opts: { humanGates?: ReadonlySet<RiskClass> | "*"; deferMoneyThreshold?: boolean } = {},
   ): Promise<PolicyDecision> {
     if (!hasPermission(ctx.actor, cap.permission)) {
       return { allowed: false, requiresApproval: false, reason: `missing permission: ${cap.permission}` };
@@ -57,9 +57,9 @@ export class DefaultPolicyEngine implements PolicyEngine {
       };
     }
 
-    // Agents cannot self-approve money above the capability's threshold.
-    // A null amount (unknowable up front) gates unconditionally: fail closed.
-    if (cap.risk === "money" && ctx.actor.type === "agent") {
+    // Automated actors cannot self-approve money above the capability's
+    // threshold. A null amount (unknowable up front) gates unconditionally.
+    if (!opts.deferMoneyThreshold && cap.risk === "money" && (ctx.actor.type === "agent" || ctx.actor.type === "system")) {
       const amount = cap.moneyAmount ? cap.moneyAmount(_input as never) : null;
       const threshold = cap.moneyThresholdMinor ?? 0;
       if (amount === null || amount > threshold) {
@@ -123,7 +123,10 @@ export class OrgPolicyEngine implements PolicyEngine {
   async evaluate(ctx: ActionContext, cap: Capability, input: unknown): Promise<PolicyDecision> {
     const rules = await this.loadRules(ctx.actor.orgId);
     const humanGates = humanGateSet(rules, cap.id);
-    const base = await new DefaultPolicyEngine().evaluate(ctx, cap, input, { humanGates: humanGates ?? undefined });
+    const base = await new DefaultPolicyEngine().evaluate(ctx, cap, input, {
+      humanGates: humanGates ?? undefined,
+      deferMoneyThreshold: true,
+    });
     // A gate here (agent hard gates, or strict-mode human gates) is final:
     // the rule walk below may add gates, never remove one.
     if (!base.allowed || base.requiresApproval) return base;
@@ -150,7 +153,7 @@ export class OrgPolicyEngine implements PolicyEngine {
       const threshold = rule?.moneyThresholdMinor ?? cap.moneyThresholdMinor ?? 0;
       const amount = cap.moneyAmount ? cap.moneyAmount(input as never) : null;
       const humanStrict = humanGates === "*" || humanGates?.has("money") === true;
-      const gated = ctx.actor.type === "agent" || (ctx.actor.type === "human" && humanStrict);
+      const gated = ctx.actor.type !== "human" || humanStrict;
       // Null amount gates when the actor is gated at all: we cannot prove
       // this action is below it, so it waits for approval. Fail closed.
       if (gated && (amount === null || amount > threshold)) {

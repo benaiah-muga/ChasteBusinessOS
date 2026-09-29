@@ -112,6 +112,11 @@ history reads remain on the legacy handler.
 `pnpm dev:api`, keeps the legacy approval response shape, and fails closed when
 the invoice outcome cannot be confirmed. Every other accounting action and
 the GET route remain on the legacy handler. The flag defaults to `0`.
+`GO_ACCOUNTING_REPORTS_READ=1` opts the report capabilities used by
+`GET /api/reports` into the signed Go executor. It requires `pnpm dev:api`,
+preserves the response shape and currency metadata, and fails closed when Go
+is unavailable or returns invalid data. The TypeScript path remains the
+default and the flag defaults to `0`.
 `GO_CRM_DEAL_WRITES=1` opts deal creation, stage changes, and lead conversion
 into the signed Go capability bridge. It requires `pnpm dev:api`; reads and
 other CRM actions remain on the legacy handler, and uncertain writes fail
@@ -120,6 +125,15 @@ closed without a TypeScript retry. The flag defaults to `0`.
 read. It requires `pnpm dev:api`, preserves the org-scoped 200-row response,
 and fails closed if Go is unavailable or returns invalid data. The legacy route
 remains the default; the flag defaults to `0`.
+`GO_CRM_VIEW_READS=1` opts `GET /api/crm/views` into the signed Go saved-view
+reader. It requires `pnpm dev:api`, preserves shared views and views created by
+the current user, and fails closed if Go is unavailable or returns invalid
+data. The legacy route remains the default; the flag defaults to `0`.
+`GO_CRM_VIEW_WRITES=1` opts `POST /api/crm/views` into the signed Go capability
+bridge. It requires `pnpm dev:api`, preserves human session checks, approval
+responses, and save/restore audit receipts, and fails closed if Go is
+unavailable or returns invalid data. Other CRM actions remain on their current
+handlers; the legacy executor remains the default and the flag defaults to `0`.
 `GO_CRM_TASK_WRITES=1` opts CRM task creation, completion, and detail updates
 into the signed Go capability bridge. It requires `pnpm dev:api`; reads,
 follow-up drafting, and other CRM actions remain on their existing handlers.

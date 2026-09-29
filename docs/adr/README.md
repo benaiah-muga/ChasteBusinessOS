@@ -82,6 +82,7 @@ the next number; superseded ones get a Status update, never deletion.
 | 0075 | Go webhook outbox worker privilege boundary | accepted |
 | 0076 | Go capability jobs worker | accepted |
 | 0077 | OpenAPI contract generation | accepted for the React and Go migration |
+| 0078 | System money actions require human approval | accepted |
 
 Gaps in numbering are intentional placeholders for decisions not yet
 written down, if you made one of those calls, write the ADR.

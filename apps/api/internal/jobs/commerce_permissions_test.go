@@ -4,6 +4,7 @@ import "testing"
 
 func TestCommerceWorkerPermissionsAreLeastPrivilege(t *testing.T) {
 	want := map[string]string{
+		"crm.listCustomerViews":           "crm.read",
 		"accounting.decideExpenseClaim":   "expenses.decide",
 		"accounting.payExpenseClaim":      "accounting.post",
 		"accounting.listExpenseClaims":    "expenses.decide",

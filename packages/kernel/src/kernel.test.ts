@@ -5,7 +5,7 @@ import { KernelExecutor } from "./executor";
 import { InMemoryLedger } from "./ledger";
 import { CapabilityRegistry } from "./registry";
 
-function makeCtx(permissions: string[], type: "human" | "agent" = "agent"): ActionContext {
+function makeCtx(permissions: string[], type: "human" | "agent" | "system" = "agent"): ActionContext {
   return {
     actor: { type, id: "u1", orgId: "org1", permissions: new Set(permissions) },
     now: new Date("2026-08-21T00:00:00Z"),
@@ -190,6 +190,19 @@ describe("governance pipeline", () => {
     expect(res.ok).toBe(false);
     expect(res.pendingApproval).toBeDefined();
     expect(res.pendingApproval?.rationale).toContain("not knowable before execution");
+  });
+
+  it("refuses unapproved system money actions without creating approval requests", async () => {
+    const k = buildKernel({ proceed: false });
+    const res = await k.executor.execute(
+      "accounting.reverseEntry",
+      makeCtx(["accounting.post"], "system"),
+      { entryId: "e1" },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("system money actions require a verified human approval");
+    expect(k.wasApprovalRequested()).toBe(false);
+    expect(k.ledger.entries).toHaveLength(0);
   });
 
   it("refuses an approvedApprovalId that fails verification", async () => {
