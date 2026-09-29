@@ -91,11 +91,20 @@ type InventoryListTransfersInput struct {
 }
 
 type InventoryListTransferItem struct {
-	ID        string  `json:"id"`
-	Number    int64   `json:"number"`
-	Status    string  `json:"status"`
-	Note      *string `json:"note"`
-	CreatedAt string  `json:"createdAt"`
+	ID        string                      `json:"id"`
+	Number    int64                       `json:"number"`
+	Status    string                      `json:"status"`
+	Note      *string                     `json:"note"`
+	CreatedAt string                      `json:"createdAt"`
+	From      string                      `json:"from"`
+	To        string                      `json:"to"`
+	Lines     []InventoryListTransferLine `json:"lines"`
+}
+
+type InventoryListTransferLine struct {
+	SKU                  string `json:"sku"`
+	QuantityThousandths  int64  `json:"quantityThousandths"`
+	ConfirmedThousandths int64  `json:"confirmedThousandths"`
 }
 
 type InventoryListTransfersOutput struct {
@@ -877,29 +886,65 @@ func inventoryReverseTransfer(ctx context.Context, tx pgx.Tx, claims authbridge.
 
 func inventoryListTransfers(ctx context.Context, tx pgx.Tx, orgID string, input InventoryListTransfersInput) (InventoryListTransfersOutput, error) {
 	query := `
-		SELECT id::text, number, status, note, created_at
-		FROM stock_transfers WHERE org_id = $1::uuid`
+		SELECT st.id::text, st.number, st.status, st.note, st.created_at,
+		       COALESCE(source.code, '?'), COALESCE(destination.code, '?')
+		FROM stock_transfers st
+		LEFT JOIN stock_locations source ON source.id = st.from_location_id AND source.org_id = st.org_id
+		LEFT JOIN stock_locations destination ON destination.id = st.to_location_id AND destination.org_id = st.org_id
+		WHERE st.org_id = $1::uuid`
 	args := []any{orgID}
 	if input.OpenOnly {
-		query += ` AND status IN ('pending', 'partial')`
+		query += ` AND st.status IN ('pending', 'partial')`
 	}
-	query += ` ORDER BY created_at DESC LIMIT 100`
+	query += ` ORDER BY st.created_at DESC LIMIT 100`
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return InventoryListTransfersOutput{}, err
 	}
 	defer rows.Close()
 	transfers := make([]InventoryListTransferItem, 0)
+	transferIDs := make([]string, 0)
 	for rows.Next() {
 		var transfer InventoryListTransferItem
 		var createdAt time.Time
-		if err := rows.Scan(&transfer.ID, &transfer.Number, &transfer.Status, &transfer.Note, &createdAt); err != nil {
+		if err := rows.Scan(&transfer.ID, &transfer.Number, &transfer.Status, &transfer.Note, &createdAt, &transfer.From, &transfer.To); err != nil {
 			return InventoryListTransfersOutput{}, err
 		}
 		transfer.CreatedAt = createdAt.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+		transfer.Lines = make([]InventoryListTransferLine, 0)
+		transferIDs = append(transferIDs, transfer.ID)
 		transfers = append(transfers, transfer)
 	}
 	if err := rows.Err(); err != nil {
+		return InventoryListTransfersOutput{}, err
+	}
+	if len(transferIDs) == 0 {
+		return InventoryListTransfersOutput{Transfers: transfers}, nil
+	}
+	lineRows, err := tx.Query(ctx, `
+		SELECT lines.transfer_id::text, COALESCE(item.sku, ''), lines.quantity_thousandths, lines.confirmed_thousandths
+		FROM stock_transfer_lines lines
+		LEFT JOIN items item ON item.id = lines.item_id AND item.org_id = lines.org_id
+		WHERE lines.org_id = $1::uuid AND lines.transfer_id = ANY($2::uuid[])`, orgID, transferIDs)
+	if err != nil {
+		return InventoryListTransfersOutput{}, err
+	}
+	defer lineRows.Close()
+	indexByID := make(map[string]int, len(transfers))
+	for index := range transfers {
+		indexByID[transfers[index].ID] = index
+	}
+	for lineRows.Next() {
+		var transferID string
+		var line InventoryListTransferLine
+		if err := lineRows.Scan(&transferID, &line.SKU, &line.QuantityThousandths, &line.ConfirmedThousandths); err != nil {
+			return InventoryListTransfersOutput{}, err
+		}
+		if index, ok := indexByID[transferID]; ok {
+			transfers[index].Lines = append(transfers[index].Lines, line)
+		}
+	}
+	if err := lineRows.Err(); err != nil {
 		return InventoryListTransfersOutput{}, err
 	}
 	return InventoryListTransfersOutput{Transfers: transfers}, nil

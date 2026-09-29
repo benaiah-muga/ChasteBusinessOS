@@ -14066,6 +14066,39 @@
                 "createdAt": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sku": {
+                        "type": "string"
+                      },
+                      "quantityThousandths": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "confirmedThousandths": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "sku",
+                      "quantityThousandths",
+                      "confirmedThousandths"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [
@@ -14073,7 +14106,10 @@
                 "number",
                 "status",
                 "note",
-                "createdAt"
+                "createdAt",
+                "from",
+                "to",
+                "lines"
               ],
               "additionalProperties": false
             }

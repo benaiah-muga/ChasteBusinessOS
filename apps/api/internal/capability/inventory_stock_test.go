@@ -89,7 +89,7 @@ func TestInventoryStockParsersMirrorZodContracts(t *testing.T) {
 			output: InventoryListTransfersOutput{Transfers: []InventoryListTransferItem{{
 				ID: uuid, Number: 7, Status: "pending", Note: nil, CreatedAt: "2026-09-27T10:00:00.000Z",
 			}}},
-			outputJS: `{"transfers":[{"id":"` + uuid + `","number":7,"status":"pending","note":null,"createdAt":"2026-09-27T10:00:00.000Z"}]}`,
+			outputJS: `{"transfers":[{"id":"` + uuid + `","number":7,"status":"pending","note":null,"createdAt":"2026-09-27T10:00:00.000Z","from":"","to":"","lines":null}]}`,
 		},
 		{
 			name:     "listTransfersMinimal",
@@ -958,11 +958,14 @@ func TestInventoryStockTransferCancelListAndTenants(t *testing.T) {
 	if row := byID[second.TransferID]; row.Number != 2 || row.Status != "pending" || row.Note != nil {
 		t.Fatalf("pending create row = %+v, want number 2 pending with null note", row)
 	}
+	if row := byID[movedID]; row.From != "WH-A" || row.To != "WH-B" || len(row.Lines) != 1 || row.Lines[0] != (InventoryListTransferLine{SKU: "TRF-CHAIR", QuantityThousandths: 10000, ConfirmedThousandths: 5000}) {
+		t.Fatalf("transfer route and lines = %+v, want WH-A to WH-B and the seeded partial line", row)
+	}
 	newestEncoded, err := marshalJS(byID[pending])
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPending := fmt.Sprintf(`{"id":%q,"number":4,"status":"pending","note":null,"createdAt":"2026-09-20T10:00:00.000Z"}`, pending)
+	wantPending := fmt.Sprintf(`{"id":%q,"number":4,"status":"pending","note":null,"createdAt":"2026-09-20T10:00:00.000Z","from":"WH-A","to":"WH-B","lines":[]}`, pending)
 	if string(newestEncoded) != wantPending {
 		t.Fatalf("list row JSON = %s, want %s", newestEncoded, wantPending)
 	}

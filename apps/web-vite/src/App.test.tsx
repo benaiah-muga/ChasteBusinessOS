@@ -87,8 +87,9 @@ beforeEach(() => {
       catalog: [
         { id: "projects", label: "Projects", description: "Project boards and tasks", href: "/projects" },
         { id: "analytics", label: "Analytics", description: "Governed reports", href: "/analytics" },
+        { id: "inventory", label: "Inventory", description: "Stock levels and reorder needs", href: "/inventory" },
       ],
-      enabledModules: ["projects", "analytics"],
+      enabledModules: ["projects", "analytics", "inventory"],
       usingDefaults: false,
     });
     if (path === "/api/analytics" && init?.method === "POST") return Response.json({
@@ -124,6 +125,28 @@ beforeEach(() => {
     if (path === "/api/customers") return Response.json({ customers: [] });
     if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
     if (path === "/api/crm/views") return Response.json({ views: [] });
+    if (path === "/api/inventory") return Response.json({
+      items: [{ sku: "MUG-1", name: "Ceramic mug", kind: "product", unitLabel: "unit", onHandThousandths: 4000, reservedThousandths: 1000, availableThousandths: 3000, totalValueMinor: 2000, reorderPointThousandths: 5000, reorderNeeded: true }],
+      totalValueMinor: 2000,
+    });
+    if (path === "/api/pos" && init?.method === "POST") return Response.json({ ok: true, data: {
+      register: "Main register",
+      status: "closed",
+      salesCount: 4,
+      takingsMinor: 12_500,
+      tenderTotals: [{ method: "cash", amountMinor: 10_000 }, { method: "card", amountMinor: 2_500 }],
+      refundTotals: [],
+      expectedCashMinor: 10_000,
+      countedCashMinor: 10_000,
+      varianceMinor: 0,
+    } });
+    if (path === "/api/pos") return Response.json({ sessions: [{
+      id: "9f761d17-27fc-49c5-9d4a-327711a1f011",
+      number: 3,
+      status: "closed",
+      openedAt: "2026-09-29T08:00:00.000Z",
+      closedAt: "2026-09-29T16:00:00.000Z",
+    }], sales: [] });
     return new Response(null, { status: 404 });
   }));
 });
@@ -154,6 +177,27 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Good to see you." })).not.toBeNull();
     expect(authMocks.signOut).toHaveBeenCalledOnce();
+  });
+
+  it("opens the POS shift-summary preview within the authenticated shell", async () => {
+    window.history.replaceState(null, "", "/pos/shift-summary");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "POS shift summary" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "POS summary" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Open full POS workspace" })).not.toBeNull();
+    expect(await screen.findByText("$125.00")).not.toBeNull();
+  });
+
+  it("opens the inventory stock preview within the authenticated shell", async () => {
+    window.history.replaceState(null, "", "/inventory");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Inventory" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Inventory" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Open full inventory workspace" })).not.toBeNull();
+    expect(await screen.findByText("MUG-1")).not.toBeNull();
+    expect(await screen.findAllByText("$20.00")).toHaveLength(2);
   });
 
   it("refreshes dashboard context and currency after switching organizations", async () => {

@@ -280,6 +280,11 @@ capability calls. It requires `pnpm dev:api`, preserves the report and alert
 fields, and fails closed if Go is unavailable or either result is invalid.
 Other inventory reads remain on their existing handlers. TypeScript remains
 the default; the flag defaults to `0`.
+`GO_INVENTORY_TRANSFER_READS=1` opts the transfer list on `GET /api/inventory`
+into the signed Go `inventory.listTransfers` read. It requires `pnpm dev:api`,
+preserves the 50-row limit, transfer routes, notes, and line quantities, and
+fails closed if Go is unavailable or returns invalid data. The flag defaults
+to `0`.
 `GO_POS_WRITES=1` opts register opening, sales, closing, returns, and shift
 summaries into the signed Go capability bridge. It requires `pnpm dev:api`;
 uncertain writes fail closed without a TypeScript retry. The flag defaults to

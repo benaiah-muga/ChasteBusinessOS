@@ -213,6 +213,57 @@ function inventoryStockReportGoFailure(status: number, body: unknown): Response 
   );
 }
 
+const inventoryTransferLineSchema = z.object({
+  sku: z.string(),
+  quantityThousandths: z.number().int(),
+  confirmedThousandths: z.number().int(),
+});
+
+const inventoryTransferSchema = z.object({
+  id: z.string(),
+  number: z.number().int(),
+  status: z.string(),
+  note: z.string().nullable(),
+  createdAt: z.string(),
+  from: z.string(),
+  to: z.string(),
+  lines: z.array(inventoryTransferLineSchema),
+});
+
+async function dispatchInventoryTransfersGo(
+  ctx: ReturnType<typeof actorFromResolved> & {},
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+) {
+  try {
+    const result = await executeGoCapability({
+      actionContext: ctx,
+      session,
+      capabilityId: "inventory.listTransfers",
+      input: { openOnly: false },
+    });
+    if (result.kind !== "response") return goUnavailable();
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: z.object({ transfers: z.array(inventoryTransferSchema) }) }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return parsed.data.data.transfers.slice(0, 50);
+    }
+    if ([401, 403, 422].includes(result.response.status)) {
+      const parsed = result.response.status === 422
+        ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+        : z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(
+        { error: parsed.data.error },
+        { status: result.response.status, headers: noStore },
+      );
+    }
+    return goUnavailable();
+  } catch {
+    return goUnavailable();
+  }
+}
+
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -321,16 +372,34 @@ export async function GET(req: Request) {
 
   const lotRows = await db.select().from(lots).where(eq(lots.orgId, orgId)).orderBy(desc(lots.createdAt)).limit(200);
 
-  const transferRows = await db
-    .select()
-    .from(stockTransfers)
-    .where(eq(stockTransfers.orgId, orgId))
-    .orderBy(desc(stockTransfers.createdAt))
-    .limit(50);
-  const transferIds = transferRows.map((t) => t.id);
-  const transferLineRows = transferIds.length
-    ? await db.select().from(stockTransferLines).where(inArray(stockTransferLines.transferId, transferIds))
-    : [];
+  let transfers: { id: string; number: number; status: string; note: string | null; from: string; to: string; lines: { sku: string; quantityThousandths: number; confirmedThousandths: number }[] }[];
+  if (process.env.GO_INVENTORY_TRANSFER_READS === "1") {
+    const result = await dispatchInventoryTransfersGo(ctx, resolved);
+    if (result instanceof Response) return result;
+    transfers = result.map(({ id, number, status, note, from, to, lines }) => ({ id, number, status, note, from, to, lines }));
+  } else {
+    const transferRows = await db
+      .select()
+      .from(stockTransfers)
+      .where(eq(stockTransfers.orgId, orgId))
+      .orderBy(desc(stockTransfers.createdAt))
+      .limit(50);
+    const transferIds = transferRows.map((t) => t.id);
+    const transferLineRows = transferIds.length
+      ? await db.select().from(stockTransferLines).where(inArray(stockTransferLines.transferId, transferIds))
+      : [];
+    transfers = transferRows.map((t) => ({
+      id: t.id,
+      number: t.number,
+      status: t.status,
+      note: t.note,
+      from: locationCodeById.get(t.fromLocationId) ?? "?",
+      to: locationCodeById.get(t.toLocationId) ?? "?",
+      lines: transferLineRows
+        .filter((l) => l.transferId === t.id)
+        .map((l) => ({ sku: skuOf.get(l.itemId) ?? "", quantityThousandths: l.quantityThousandths, confirmedThousandths: l.confirmedThousandths })),
+    }));
+  }
   return NextResponse.json({
     items: reportItems.map((item) => ({ ...item, ...itemBySku.get(item.sku) })),
     totalValueMinor,
@@ -353,17 +422,7 @@ export async function GET(req: Request) {
         })),
     })),
     lots: lotRows.map((l) => ({ id: l.id, lotCode: l.lotCode, sku: skuOf.get(l.itemId) ?? "", expiresAt: l.expiresAt })),
-    transfers: transferRows.map((t) => ({
-      id: t.id,
-      number: t.number,
-      status: t.status,
-      note: t.note,
-      from: locationCodeById.get(t.fromLocationId) ?? "?",
-      to: locationCodeById.get(t.toLocationId) ?? "?",
-      lines: transferLineRows
-        .filter((l) => l.transferId === t.id)
-        .map((l) => ({ sku: skuOf.get(l.itemId) ?? "", quantityThousandths: l.quantityThousandths, confirmedThousandths: l.confirmedThousandths })),
-    })),
+    transfers,
   });
 }
 

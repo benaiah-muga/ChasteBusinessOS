@@ -1,0 +1,66 @@
+.pos-summary-page {
+  width: min(100%, 76rem);
+  margin: 0 auto;
+  padding: 2.5rem clamp(1rem, 3vw, 2.5rem) 4rem;
+}
+
+.pos-summary-header,
+.pos-summary-report-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.pos-summary-header { margin-bottom: 2rem; }
+.pos-summary-header h1,
+.pos-summary-message h2,
+.pos-summary-report h2 { margin: 0; color: #25241f; font-size: clamp(1.8rem, 3vw, 2.6rem); letter-spacing: -0.045em; }
+.pos-summary-header p:not(.pos-summary-eyebrow),
+.pos-summary-message p,
+.pos-summary-session-time { max-width: 42rem; margin: 0.65rem 0 0; color: #77756d; line-height: 1.6; }
+.pos-summary-eyebrow { margin: 0 0 0.55rem; color: #817f74; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.pos-summary-full-workspace,
+.pos-summary-empty a { border: 1px solid #302f29; border-radius: 0.7rem; padding: 0.65rem 0.85rem; background: #302f29; color: white; font-size: 0.82rem; font-weight: 600; text-decoration: none; }
+.pos-summary-full-workspace:focus-visible,
+.pos-summary-empty a:focus-visible,
+.pos-summary-error button:focus-visible,
+.pos-summary-session-picker select:focus-visible { outline: 3px solid #b88a4f; outline-offset: 2px; }
+.pos-summary-session-picker { display: grid; gap: 0.55rem; max-width: 37rem; margin-bottom: 1.25rem; }
+.pos-summary-session-picker label { color: #4d4b42; font-size: 0.82rem; font-weight: 700; }
+.pos-summary-session-picker select { min-height: 2.8rem; border: 1px solid #dcd9cf; border-radius: 0.65rem; padding: 0.5rem 0.7rem; background: white; color: #302f29; font: inherit; }
+.pos-summary-report { overflow: hidden; border: 1px solid #e8e5dc; border-radius: 1rem; background: #fff; box-shadow: 0 14px 36px rgb(38 37 31 / 5%); }
+.pos-summary-report-header { padding: 1.4rem 1.5rem; border-bottom: 1px solid #efede7; }
+.pos-summary-report-header h2 { font-size: 1.45rem; }
+.pos-summary-status { border-radius: 999px; padding: 0.4rem 0.7rem; background: #f1efe8; color: #555247; font-size: 0.78rem; font-weight: 700; }
+.pos-summary-status-open { background: #edf4e7; color: #47682d; }
+.pos-summary-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; padding: 1.5rem; gap: 0.8rem; }
+.pos-summary-metrics > div { min-width: 0; border-radius: 0.8rem; padding: 1rem; background: #f8f7f3; }
+.pos-summary-metrics dt,
+.pos-summary-totals dt { color: #77756d; font-size: 0.78rem; }
+.pos-summary-metrics dd { margin: 0.45rem 0 0; color: #292820; font-size: clamp(1.05rem, 1.8vw, 1.4rem); font-weight: 700; overflow-wrap: anywhere; }
+.pos-summary-negative dd { color: #a74035; }
+.pos-summary-totals-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; padding: 0 1.5rem 1.5rem; }
+.pos-summary-totals { border: 1px solid #efede7; border-radius: 0.8rem; padding: 1rem; }
+.pos-summary-totals h3 { margin: 0 0 0.8rem; color: #39382f; font-size: 0.95rem; }
+.pos-summary-totals p { margin: 0; color: #77756d; font-size: 0.85rem; }
+.pos-summary-totals dl { display: grid; gap: 0.65rem; margin: 0; }
+.pos-summary-totals dl > div { display: flex; justify-content: space-between; gap: 1rem; }
+.pos-summary-totals dd { margin: 0; color: #302f29; font-size: 0.86rem; font-weight: 650; }
+.pos-summary-session-time { padding: 0 1.5rem 1.4rem; font-size: 0.8rem; }
+.pos-summary-message { border: 1px solid #e8e5dc; border-radius: 0.9rem; padding: 1.4rem; background: #fff; }
+.pos-summary-message h2 { font-size: 1.35rem; }
+.pos-summary-error { border-color: #eed1cb; background: #fffaf9; }
+.pos-summary-error button { margin-top: 1rem; border: 0; border-radius: 0.6rem; padding: 0.65rem 0.9rem; background: #302f29; color: white; font: inherit; font-weight: 650; cursor: pointer; }
+.pos-summary-empty a { display: inline-flex; margin-top: 1rem; }
+
+@media (max-width: 800px) {
+  .pos-summary-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .pos-summary-header,
+  .pos-summary-report-header { align-items: flex-start; flex-direction: column; }
+  .pos-summary-metrics,
+  .pos-summary-totals-grid { grid-template-columns: 1fr; }
+}

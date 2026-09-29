@@ -65,6 +65,7 @@ describe("inventory Go route adapter", () => {
     vi.stubEnv("GO_INVENTORY_RESERVATION_WRITES", "0");
     vi.stubEnv("GO_INVENTORY_ITEM_HISTORY_READS", "0");
     vi.stubEnv("GO_INVENTORY_STOCK_REPORT_READS", "0");
+    vi.stubEnv("GO_INVENTORY_TRANSFER_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -393,5 +394,100 @@ describe("inventory Go item master bridge", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("inventory Go transfer-list bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_INVENTORY_ITEM_HISTORY_READS", "0");
+    vi.stubEnv("GO_INVENTORY_STOCK_REPORT_READS", "0");
+    vi.stubEnv("GO_INVENTORY_TRANSFER_READS", "0");
+    mocks.getResolvedUser.mockResolvedValue(user);
+    mocks.actorFromResolved.mockReturnValue(ctx);
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("preserves transfer routes and confirmed line quantities from Go", async () => {
+    vi.stubEnv("GO_INVENTORY_TRANSFER_READS", "1");
+    const transfers = [{
+      id: "transfer-1",
+      number: 7,
+      status: "partial",
+      note: "front counter",
+      createdAt: "2026-09-28T08:00:00.000Z",
+      from: "MAIN",
+      to: "SHOP",
+      lines: [{ sku: "MUG-1", quantityThousandths: 5000, confirmedThousandths: 2000 }],
+    }];
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { transfers } }) });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(200);
+    expect((await response.json()).transfers).toEqual([{
+      id: "transfer-1",
+      number: 7,
+      status: "partial",
+      note: "front counter",
+      from: "MAIN",
+      to: "SHOP",
+      lines: [{ sku: "MUG-1", quantityThousandths: 5000, confirmedThousandths: 2000 }],
+    }]);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.listTransfers",
+      input: { openOnly: false },
+    });
+  });
+
+  it.each([
+    { label: "Go unavailable", result: { kind: "not-dispatched" } },
+    { label: "malformed transfer line", result: { kind: "response", response: Response.json({ ok: true, data: { transfers: [{ id: "transfer-1", number: 1, status: "pending", note: null, createdAt: "2026-09-28T08:00:00.000Z", from: "MAIN", to: "SHOP", lines: [{ sku: "MUG-1" }] }] } }) } },
+  ])("fails closed on $label without retrying the transfer list", async ({ result }) => {
+    vi.stubEnv("GO_INVENTORY_TRANSFER_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith(expect.objectContaining({ capabilityId: "inventory.listTransfers" }));
+  });
+
+  it("preserves the legacy 50-transfer limit", async () => {
+    vi.stubEnv("GO_INVENTORY_TRANSFER_READS", "1");
+    const transfers = Array.from({ length: 51 }, (_, index) => ({
+      id: `transfer-${index}`,
+      number: index,
+      status: "pending",
+      note: null,
+      createdAt: "2026-09-28T08:00:00.000Z",
+      from: "MAIN",
+      to: "SHOP",
+      lines: [],
+    }));
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { transfers } }) });
+
+    const response = await GET(readRequest());
+    expect((await response.json()).transfers).toHaveLength(50);
+  });
+
+  it("preserves a Go inventory-read permission denial", async () => {
+    vi.stubEnv("GO_INVENTORY_TRANSFER_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "missing permission: inventory.read" }, { status: 403 }),
+    });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "missing permission: inventory.read" });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith(expect.objectContaining({ session: user, capabilityId: "inventory.listTransfers" }));
   });
 });

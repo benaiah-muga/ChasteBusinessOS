@@ -714,3 +714,16 @@ new owners and the manifest shows zero legacy runtime paths.
     response shape, validate summary fields, and fail closed after Go dispatch
     without a TypeScript retry. Focused route tests cover the default-off path,
     enabled Go dispatch, and malformed Go responses.
+
+51. (Done) Add a default-off signed Go read bridge for the inventory transfer
+    list in `GET /api/inventory` using `GO_INVENTORY_TRANSFER_READS=1`. Preserve
+    the legacy 50-row limit, source and destination codes, notes, SKU lines,
+    quantities, confirmation quantities, and organization scope. Malformed or
+    unavailable Go results fail closed without retrying the transfer query in
+    TypeScript. Focused route and Go database parity tests pass.
+
+52. (Done) Add read-only Vite previews for inventory stock levels and POS shift
+    summaries. Validate same-origin API responses, respect inventory module
+    enablement, preserve currency minor-unit formatting, provide loading, empty,
+    and error states, and link to the full workspaces for existing actions.
+    Focused Vite component and authenticated-shell tests pass.

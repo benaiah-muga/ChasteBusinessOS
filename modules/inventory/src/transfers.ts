@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { items, stockLocations, stockTransferLines, stockTransfers } from "@chaste/db";
 import { assertTransferFeasible, transferLegs } from "@chaste/erp-core";
@@ -367,6 +367,13 @@ const listTransfers = (deps: ModuleDeps) =>
           status: z.string(),
           note: z.string().nullable(),
           createdAt: z.date(),
+          from: z.string(),
+          to: z.string(),
+          lines: z.array(z.object({
+            sku: z.string(),
+            quantityThousandths: z.number().int(),
+            confirmedThousandths: z.number().int(),
+          })),
         }),
       ),
     }),
@@ -382,12 +389,53 @@ const listTransfers = (deps: ModuleDeps) =>
           status: stockTransfers.status,
           note: stockTransfers.note,
           createdAt: stockTransfers.createdAt,
+          fromLocationId: stockTransfers.fromLocationId,
+          toLocationId: stockTransfers.toLocationId,
         })
         .from(stockTransfers)
         .where(and(...conditions))
         .orderBy(desc(stockTransfers.createdAt))
         .limit(100);
-      return { transfers: rows };
+      const transferIDs = rows.map((row) => row.id);
+      const locations = transferIDs.length
+        ? await deps.db
+            .select({ id: stockLocations.id, code: stockLocations.code })
+            .from(stockLocations)
+            .where(eq(stockLocations.orgId, ctx.actor.orgId))
+        : [];
+      const locationCodeByID = new Map(locations.map((location) => [location.id, location.code]));
+      const lines = transferIDs.length
+        ? await deps.db
+            .select({
+              transferId: stockTransferLines.transferId,
+              sku: items.sku,
+              quantityThousandths: stockTransferLines.quantityThousandths,
+              confirmedThousandths: stockTransferLines.confirmedThousandths,
+            })
+            .from(stockTransferLines)
+            .leftJoin(items, and(
+              eq(stockTransferLines.itemId, items.id),
+              eq(stockTransferLines.orgId, items.orgId),
+            ))
+            .where(and(
+              eq(stockTransferLines.orgId, ctx.actor.orgId),
+              inArray(stockTransferLines.transferId, transferIDs),
+            ))
+        : [];
+      return {
+        transfers: rows.map(({ fromLocationId, toLocationId, ...transfer }) => ({
+          ...transfer,
+          from: locationCodeByID.get(fromLocationId) ?? "?",
+          to: locationCodeByID.get(toLocationId) ?? "?",
+          lines: lines
+            .filter((line) => line.transferId === transfer.id)
+            .map((line) => ({
+              sku: line.sku ?? "",
+              quantityThousandths: line.quantityThousandths,
+              confirmedThousandths: line.confirmedThousandths,
+            })),
+        })),
+      };
     },
   });
 
@@ -398,6 +446,3 @@ export function registerTransfersCapabilities(registry: CapabilityRegistry, deps
   registry.register(reverseTransfer(deps));
   registry.register(listTransfers(deps));
 }
-
-
-
