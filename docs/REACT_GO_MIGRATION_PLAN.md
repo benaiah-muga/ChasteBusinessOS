@@ -644,3 +644,14 @@ new owners and the manifest shows zero legacy runtime paths.
     response mapping and approvals, and fail closed after Go dispatch without
     retrying through TypeScript. Focused route tests and the full Go,
     typecheck, lint, and test gates pass.
+
+42. (Done) Add a default-off signed Go bridge for `accounting.reversePayment`
+    using `GO_ACCOUNTING_REVERSE_PAYMENT_WRITE=1`. Preserve the legacy output
+    and approval/error responses, validate reversal identifiers and amounts,
+    and fail closed after Go dispatch without a TypeScript retry. Focused route
+    tests and the full Go, typecheck, lint, and test gates pass.
+
+43. (Done) Add a default-off signed Go read bridge for `sales.listOrders`
+    using `GO_SALES_LIST_ORDERS_READS=1`. Preserve status filtering and the
+    `{ orders }` response; fail closed on unavailable or malformed Go results.
+    Focused route tests and the full Go, typecheck, lint, and test gates pass.

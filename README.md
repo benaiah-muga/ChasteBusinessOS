@@ -168,6 +168,11 @@ cancellation into the signed Go capability bridge. It requires `pnpm dev:api`;
 order listing and other sales actions remain on the legacy handler, and
 uncertain writes fail closed without a TypeScript retry. The flag defaults to
 `0`.
+`GO_SALES_LIST_ORDERS_READS=1` opts `GET /api/sales` into the signed Go
+`sales.listOrders` capability. It requires `pnpm dev:api`, preserves status
+filtering and the `{ orders }` response, and fails closed if Go is unavailable
+or returns invalid data. TypeScript remains the default; the flag defaults to
+`0`.
 `GO_ACCOUNTING_QUOTES_WRITE=1` opts quote creation, acceptance, decline, and
 expiry sweeps into the signed Go capability bridge. It requires `pnpm
 dev:api`; the dedicated quotes route and other accounting actions remain on
@@ -183,6 +188,10 @@ returns invalid data. TypeScript remains the default; the flag defaults to
 `pnpm dev:api`; other accounting actions stay on their existing handlers, and
 uncertain payment outcomes fail closed without a TypeScript retry. The flag
 defaults to `0`.
+`GO_ACCOUNTING_REVERSE_PAYMENT_WRITE=1` opts `accounting.reversePayment` on
+`POST /api/accounting` into the signed Go capability bridge. It requires
+`pnpm dev:api`; approval and error responses are preserved, and uncertain
+outcomes fail closed without a TypeScript retry. The flag defaults to `0`.
 `GO_ACCOUNTING_FX_RATE_WRITE=1` opts `accounting.recordFxRate` on
 `POST /api/accounting` into the signed Go capability bridge. It requires
 `pnpm dev:api`; other accounting actions stay on their existing handlers, and

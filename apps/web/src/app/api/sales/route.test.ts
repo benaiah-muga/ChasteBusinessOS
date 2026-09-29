@@ -48,6 +48,7 @@ describe("Sales route migration adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GO_SALES_WRITE", "0");
+    vi.stubEnv("GO_SALES_LIST_ORDERS_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(resolved);
     mocks.actorFromResolved.mockReturnValue(actionContext);
     mocks.getDb.mockReturnValue({ db: { handle: "legacy-db" } });
@@ -211,6 +212,131 @@ describe("Sales route migration adapter", () => {
     const invalid = await POST(request({ action: "cancel", orderId: "not-a-uuid" }));
     expect(invalid.status).toBe(400);
     expect(await invalid.json()).toEqual({ error: "invalid body" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("Sales Go order listing bridge", () => {
+  const order = {
+    id: orderId,
+    number: 42,
+    customerId,
+    status: "confirmed",
+    backordered: false,
+    totalMinor: 10000,
+    createdAt: "2026-09-29T10:15:30.123Z",
+  };
+  const data = { orders: [order] };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_SALES_LIST_ORDERS_READS", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: { handle: "legacy-db" } });
+    mocks.buildRegistry.mockReturnValue({ handle: "legacy-registry" });
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps order listing on the legacy executor by default and preserves status filtering", async () => {
+    delete process.env.GO_SALES_LIST_ORDERS_READS;
+
+    const response = await GET(new Request("http://localhost/api/sales?status=draft"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(data);
+    expect(mocks.execute).toHaveBeenCalledWith("sales.listOrders", actionContext, { status: "draft" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches valid status filters to Go and preserves the legacy response body", async () => {
+    vi.stubEnv("GO_SALES_LIST_ORDERS_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data, replayed: true }),
+    });
+
+    const response = await GET(new Request("http://localhost/api/sales?status=confirmed"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(data);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: resolved,
+      capabilityId: "sales.listOrders",
+      input: { status: "confirmed" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("continues to ignore unsupported status filters when Go is selected", async () => {
+    vi.stubEnv("GO_SALES_LIST_ORDERS_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { orders: [] } }),
+    });
+
+    const response = await GET(new Request("http://localhost/api/sales?status=unknown"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ orders: [] });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: resolved,
+      capabilityId: "sales.listOrders",
+      input: { status: undefined },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("maps Go permission failures to the legacy 422 error shape", async () => {
+    vi.stubEnv("GO_SALES_LIST_ORDERS_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "forbidden: missing permission: sales.read" }, { status: 403 }),
+    });
+
+    const response = await GET(new Request("http://localhost/api/sales"));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: "forbidden: missing permission: sales.read" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "missing dispatch", result: { kind: "not-dispatched" } },
+    { name: "unknown outcome", result: { kind: "outcome-unknown" } },
+    { name: "malformed success output", result: { kind: "response", response: Response.json({ ok: true, data: { orders: [{ ...order, totalMinor: "10000" }] } }) } },
+    { name: "backend failure", result: { kind: "response", response: Response.json({ error: "internal error" }, { status: 500 }) } },
+  ])("fails closed on $name without querying through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_SALES_LIST_ORDERS_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await GET(new Request("http://localhost/api/sales?status=confirmed"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "sales service unavailable; check order status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("preserves authentication and onboarding checks before Go dispatch", async () => {
+    vi.stubEnv("GO_SALES_LIST_ORDERS_READS", "1");
+    mocks.getResolvedUser.mockResolvedValueOnce(null);
+    const anonymous = await GET(new Request("http://localhost/api/sales"));
+    expect(anonymous.status).toBe(401);
+
+    mocks.actorFromResolved.mockReturnValueOnce(null);
+    const onboarding = await GET(new Request("http://localhost/api/sales"));
+    expect(onboarding.status).toBe(428);
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
   });

@@ -245,6 +245,23 @@ export async function POST(req: Request) {
     }
   }
 
+  if (body.action === "reversePayment" && body.paymentId && body.reason && body.reason.length >= 3 && process.env.GO_ACCOUNTING_REVERSE_PAYMENT_WRITE === "1") {
+    try {
+      return await goBridgeResponse(
+        await executeGoCapability({
+          actionContext: humanCtx,
+          session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+          capabilityId: "accounting.reversePayment",
+          input: { paymentId: body.paymentId, reason: body.reason },
+        }),
+        paymentReversalUnavailable,
+        reversePaymentOutputSchema,
+      );
+    } catch {
+      return paymentReversalUnavailable();
+    }
+  }
+
   if (body.action === "recordFxRate" && body.quoteCurrency && body.rate && process.env.GO_ACCOUNTING_FX_RATE_WRITE === "1") {
     try {
       return await goBridgeResponse(
@@ -707,9 +724,23 @@ const recordFxRateOutputSchema = z.object({
   den: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 });
 
+const reversePaymentOutputSchema = z.object({
+  reversalEntryIds: z.array(z.string().uuid()).min(1),
+  refundedMinor: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  invoiceNumber: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  outstandingMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
+
 function paymentUnavailable() {
   return NextResponse.json(
     { error: "accounting service unavailable; check payment status before retrying" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+function paymentReversalUnavailable() {
+  return NextResponse.json(
+    { error: "accounting service unavailable; check payment reversal status before retrying" },
     { status: 503, headers: { "Cache-Control": "no-store" } },
   );
 }

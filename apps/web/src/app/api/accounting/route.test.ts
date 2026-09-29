@@ -813,7 +813,7 @@ describe("POST /api/accounting Go FX rate bridge", () => {
       })
       .mockResolvedValueOnce({
         kind: "response",
-        response: Response.json({ error: "forbidden: missing permission: accounting.post" }, { status: 403 }),
+        response: Response.json({ ok: false, error: "forbidden: missing permission: accounting.post" }, { status: 422 }),
       });
 
     const pending = await POST(request(rateBody));
@@ -857,6 +857,131 @@ describe("POST /api/accounting Go FX rate bridge", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "accounting service unavailable; check FX rate status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/accounting Go payment reversal bridge", () => {
+  const paymentId = "22345678-1234-4234-8234-123456789abc";
+  const reversalEntryId = "32345678-1234-4234-8234-123456789abc";
+  const reverseBody = { action: "reversePayment", paymentId, reason: "Duplicate settlement" };
+  const reversalOutput = {
+    reversalEntryIds: [reversalEntryId],
+    refundedMinor: 50000,
+    invoiceNumber: 104,
+    outstandingMinor: 125000,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_REVERSE_PAYMENT_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_RECORD_PAYMENT_WRITE", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: reversalOutput });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps payment reversals on TypeScript by default", async () => {
+    vi.stubEnv("GO_ACCOUNTING_RECORD_PAYMENT_WRITE", "1");
+
+    const response = await POST(request(reverseBody));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: reversalOutput });
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.reversePayment", actionContext, { paymentId, reason: "Duplicate settlement" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches payment reversal through the signed Go bridge with validated output", async () => {
+    vi.stubEnv("GO_ACCOUNTING_REVERSE_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: reversalOutput, replayed: true }),
+    });
+
+    const response = await POST(request(reverseBody));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: reversalOutput });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+      capabilityId: "accounting.reversePayment",
+      input: { paymentId, reason: "Duplicate settlement" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("preserves approval, capability, permission, and membership error mappings", async () => {
+    vi.stubEnv("GO_ACCOUNTING_REVERSE_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, pendingApproval: true, reason: "Payment reversals require approval", approvalId: "private-id" }, { status: 202 }),
+      })
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, error: "payment has already been reversed" }, { status: 422 }),
+      })
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, error: "forbidden: missing permission: accounting.post" }, { status: 422 }),
+      })
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ error: "forbidden" }, { status: 403 }),
+      });
+
+    const pending = await POST(request(reverseBody));
+    const rejected = await POST(request(reverseBody));
+    const permissionDenied = await POST(request(reverseBody));
+    const membershipDenied = await POST(request(reverseBody));
+
+    expect(pending.status).toBe(202);
+    expect(await pending.json()).toEqual({ ok: false, pendingApproval: true, reason: "Payment reversals require approval" });
+    expect(rejected.status).toBe(422);
+    expect(await rejected.json()).toEqual({ ok: false, error: "payment has already been reversed" });
+    expect(permissionDenied.status).toBe(422);
+    expect(await permissionDenied.json()).toEqual({ ok: false, error: "forbidden: missing permission: accounting.post" });
+    expect(membershipDenied.status).toBe(422);
+    expect(await membershipDenied.json()).toEqual({ ok: false, error: "forbidden" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "missing dispatch", result: { kind: "not-dispatched" } },
+    { name: "unknown outcome", result: { kind: "outcome-unknown" } },
+    { name: "malformed output", result: { kind: "response", response: Response.json({ ok: true, data: { ...reversalOutput, refundedMinor: 50000.5 } }) } },
+    { name: "backend failure", result: { kind: "response", response: Response.json({ error: "internal error" }, { status: 500 }) } },
+  ])("fails closed on $name without retrying through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_ACCOUNTING_REVERSE_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(request(reverseBody));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "accounting service unavailable; check payment reversal status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("fails closed if the payment reversal Go dispatch throws", async () => {
+    vi.stubEnv("GO_ACCOUNTING_REVERSE_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability.mockRejectedValue(new Error("bridge timeout"));
+
+    const response = await POST(request(reverseBody));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "accounting service unavailable; check payment reversal status before retrying" });
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });

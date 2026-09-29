@@ -67,6 +67,47 @@ async function salesGoResponse(result: GoCapabilityBridgeResult, action: "create
   return salesGoUnavailable();
 }
 
+const salesListOrdersOutputSchema = z.object({
+  orders: z.array(z.object({
+    id: z.string(),
+    number: z.number().int(),
+    customerId: z.string(),
+    status: z.string(),
+    backordered: z.boolean(),
+    totalMinor: z.number().int(),
+    createdAt: z.string().datetime(),
+  })),
+});
+
+async function salesListOrdersGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return salesGoUnavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: salesListOrdersOutputSchema }).safeParse(body);
+      if (!parsed.success) return salesGoUnavailable();
+      return NextResponse.json(parsed.data.data, { headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return salesGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 401, headers: noStore });
+    }
+    if ([400, 403, 422].includes(result.response.status)) {
+      const parsed = result.response.status === 422
+        ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+        : z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return salesGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+  } catch {
+    return salesGoUnavailable();
+  }
+
+  return salesGoUnavailable();
+}
+
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("create"),
@@ -103,9 +144,21 @@ export async function GET(req: Request) {
   const status = new URL(req.url).searchParams.get("status") ?? undefined;
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
-  const result = await buildExecutor(getDb().db, buildRegistry(getDb().db)).execute("sales.listOrders", ctx, {
-    status: status && (ORDER_STATUSES as readonly string[]).includes(status) ? status : undefined,
-  });
+  const input = { status: status && (ORDER_STATUSES as readonly string[]).includes(status) ? status : undefined };
+  if (process.env.GO_SALES_LIST_ORDERS_READS === "1") {
+    try {
+      return await salesListOrdersGoResponse(await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "sales.listOrders",
+        input,
+      }));
+    } catch {
+      return salesGoUnavailable();
+    }
+  }
+  const db = getDb().db;
+  const result = await buildExecutor(db, buildRegistry(db)).execute("sales.listOrders", ctx, input);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 });
   return NextResponse.json(result.data);
 }
