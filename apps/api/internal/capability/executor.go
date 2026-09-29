@@ -134,6 +134,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	inventoryRecordCycleCountsCapabilityID:       {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryPostCycleCountCapabilityID:          {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryCancelCycleCountCapabilityID:        {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryListCycleCountsCapabilityID:         {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryCreateTransferCapabilityID:          {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryConfirmTransferCapabilityID:         {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryCancelTransferCapabilityID:          {module: "inventory", permission: "inventory.write", risk: "write"},
@@ -277,7 +278,7 @@ func supportedCapability(capabilityID string) bool {
 		inventoryAdjustStockCapabilityID, inventoryCreateTransferCapabilityID, inventoryConfirmTransferCapabilityID,
 		inventoryCancelTransferCapabilityID, inventoryReverseTransferCapabilityID, inventoryListTransfersCapabilityID,
 		inventoryCreateCycleCountCapabilityID, inventoryRecordCycleCountsCapabilityID,
-		inventoryPostCycleCountCapabilityID, inventoryCancelCycleCountCapabilityID,
+		inventoryPostCycleCountCapabilityID, inventoryCancelCycleCountCapabilityID, inventoryListCycleCountsCapabilityID,
 		posOpenSessionCapabilityID, posCompleteSaleCapabilityID, posCloseSessionCapabilityID, posReturnSaleCapabilityID, posShiftSummaryCapabilityID,
 		creditNoteCapabilityID, shareInvoiceCapabilityID, generateDueInvoicesCapabilityID, reverseEntryCapabilityID,
 		addBankAccountCapabilityID, importBankFeedCapabilityID, deleteBankTransactionCapabilityID, matchBankTransactionCapabilityID,
@@ -704,7 +705,7 @@ func (e *Executor) execute(
 			}
 			input = parsed
 		case inventoryCreateCycleCountCapabilityID, inventoryRecordCycleCountsCapabilityID,
-			inventoryPostCycleCountCapabilityID, inventoryCancelCycleCountCapabilityID:
+			inventoryPostCycleCountCapabilityID, inventoryCancelCycleCountCapabilityID, inventoryListCycleCountsCapabilityID:
 			parsed, err := parseInventoryCycleCountInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
@@ -1341,6 +1342,12 @@ func (e *Executor) execute(
 			data, err = marshalJS(output)
 		case InventoryCancelCycleCountInput:
 			output, err := inventoryCancelCycleCount(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case InventoryListCycleCountsInput:
+			output, err := inventoryListCycleCounts(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -2069,7 +2076,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreatePurchaseRequestInput, DecidePurchaseRequestInput, CreateRfqInput, RecordQuoteInput,
 		SelectWinningQuoteInput, ListPurchaseWorkflowInput,
 		InventoryCreateItemInput, InventoryItemPatchInput, InventoryArchiveItemInput, InventoryCreateLocationInput,
-		InventoryListLocationsInput, InventoryLookupByBarcodeInput,
+		InventoryListLocationsInput, InventoryLookupByBarcodeInput, InventoryListCycleCountsInput,
 		InventoryImportItemsInput, InventoryUndoItemImportInput, InventoryRestoreItemImportInput,
 		InventoryReserveStockInput, InventoryReleaseReservationInput, InventoryListReservationsInput,
 		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput,

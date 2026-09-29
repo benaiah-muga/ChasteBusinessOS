@@ -29,7 +29,7 @@ const items = [
   },
 ];
 const switchboard = { catalog: [{ id: "inventory" }], enabledModules: ["inventory"] };
-const report = { items, totalValueMinor: 12_000, lots: [], locations: [] };
+const report = { items, totalValueMinor: 12_000, lots: [], locations: [], cycleCounts: [] };
 
 function inventoryFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
@@ -113,6 +113,42 @@ describe("Vite inventory page", () => {
     expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
   });
 
+  it("shows read-only cycle count history and line variances", async () => {
+    const cycleCounts = [{
+      id: "d2b53ec3-1b61-4f05-a56f-4a0f9d4d3571",
+      status: "open",
+      note: "Aisle check",
+      locationCode: "MAIN",
+      createdAt: "2026-05-12T10:30:00.000Z",
+      lines: [
+        { sku: "MUG-1", expectedThousandths: 4_000, countedThousandths: 3_750, varianceThousandths: -250 },
+        { sku: "DESK-2", expectedThousandths: 2_000, countedThousandths: null, varianceThousandths: null },
+        { sku: "NEG-3", expectedThousandths: -250, countedThousandths: 0, varianceThousandths: 250 },
+      ],
+    }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      return Response.json({ ...report, cycleCounts });
+    }));
+    render(<InventoryPage />);
+
+    expect(await screen.findByRole("heading", { name: "Cycle count history" })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: /Count of/ })).not.toBeNull();
+    expect(screen.getByText("open")).not.toBeNull();
+    expect(screen.getByText("MAIN · Aisle check")).not.toBeNull();
+    expect(screen.getByText("2 of 3 items counted")).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Expected" })).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Counted" })).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Variance" })).not.toBeNull();
+    expect(screen.getByText("3.75 units")).not.toBeNull();
+    expect(screen.getAllByText("-0.25 units")).toHaveLength(2);
+    expect(screen.getByText("Not counted")).not.toBeNull();
+    expect(screen.getByText("Not available")).not.toBeNull();
+    expect(screen.getByText("+0.25 units")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
+    expect(screen.queryByRole("button", { name: /post|save|count/i })).toBeNull();
+  });
+
   it("announces an empty lot list and keeps loading and failures accessible", async () => {
     let resolveReport: ((response: Response) => void) | undefined;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -142,7 +178,9 @@ describe("Vite inventory page", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
       attempt += 1;
-      return attempt === 1 ? Response.json({ items: [{ sku: "MUG-1" }], totalValueMinor: 1 }) : Response.json(report);
+      return attempt === 1
+        ? Response.json({ ...report, cycleCounts: [{ id: "d2b53ec3-1b61-4f05-a56f-4a0f9d4d3571", status: "open", note: null, locationCode: null, createdAt: "not-a-date", lines: [] }] })
+        : Response.json(report);
     }));
     render(<InventoryPage />);
 
@@ -156,7 +194,7 @@ describe("Vite inventory page", () => {
   it("formats value using the active currency's minor-unit scale", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      return Response.json({ items, totalValueMinor: 1_234_560, lots: [], locations: [] });
+      return Response.json({ items, totalValueMinor: 1_234_560, lots: [], locations: [], cycleCounts: [] });
     }));
     render(<InventoryPage baseCurrency="BHD" />);
 

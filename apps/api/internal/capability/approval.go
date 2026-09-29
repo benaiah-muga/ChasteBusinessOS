@@ -339,7 +339,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
 		case inventoryCreateCycleCountCapabilityID, inventoryRecordCycleCountsCapabilityID,
-			inventoryPostCycleCountCapabilityID, inventoryCancelCycleCountCapabilityID:
+			inventoryPostCycleCountCapabilityID, inventoryCancelCycleCountCapabilityID, inventoryListCycleCountsCapabilityID:
 			parsed, parseErr := parseInventoryCycleCountInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := canonicalInputHash(parsed)
@@ -592,7 +592,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		inventoryCreateCycleCountCapabilityID, inventoryRecordCycleCountsCapabilityID,
 		inventoryPostCycleCountCapabilityID, inventoryCancelCycleCountCapabilityID:
 		return "inventory.write", true
-	case inventoryListTransfersCapabilityID:
+	case inventoryListTransfersCapabilityID, inventoryListCycleCountsCapabilityID:
 		return "inventory.read", true
 	case posOpenSessionCapabilityID, posCloseSessionCapabilityID:
 		return "pos.write", true

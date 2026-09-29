@@ -13883,6 +13883,126 @@
       }
     },
     {
+      "id": "inventory.listCycleCounts",
+      "title": "List recent cycle counts",
+      "intent": "Review recent physical stock counts with their location, status, notes, expected quantities, counted quantities, and variances",
+      "module": "inventory",
+      "risk": "read",
+      "permission": "inventory.read",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "cycleCounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "locationCode": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sku": {
+                        "type": "string"
+                      },
+                      "expectedThousandths": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "countedThousandths": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "varianceThousandths": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "sku",
+                      "expectedThousandths",
+                      "countedThousandths",
+                      "varianceThousandths"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "status",
+                "note",
+                "locationCode",
+                "createdAt",
+                "lines"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "cycleCounts"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "inventory.listLocations",
       "title": "List stock locations",
       "intent": "Show every registered stock location with its code and human name",

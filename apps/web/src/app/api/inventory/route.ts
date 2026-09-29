@@ -391,6 +391,57 @@ async function dispatchInventoryReservationsGo(
   }
 }
 
+const inventoryCycleCountSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  note: z.string().nullable(),
+  locationCode: z.string().nullable(),
+  createdAt: z.string().datetime({ offset: true }),
+  lines: z.array(z.object({
+    sku: z.string(),
+    expectedThousandths: inventoryValuationInteger,
+    countedThousandths: inventoryValuationInteger.nullable(),
+    varianceThousandths: inventoryValuationInteger.nullable(),
+  })),
+});
+
+async function dispatchInventoryCycleCountsGo(
+  ctx: ReturnType<typeof actorFromResolved> & {},
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+) {
+  try {
+    const result = await executeGoCapability({
+      actionContext: ctx,
+      session,
+      capabilityId: "inventory.listCycleCounts",
+      input: {},
+    });
+    if (result.kind !== "response") return goUnavailable();
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({
+        ok: z.literal(true),
+        data: z.object({ cycleCounts: z.array(inventoryCycleCountSchema) }),
+      }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return parsed.data.data.cycleCounts.slice(0, 20);
+    }
+    if (result.response.status === 401 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: result.response.status, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    return goUnavailable();
+  } catch {
+    return goUnavailable();
+  }
+}
+
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -493,18 +544,46 @@ export async function GET(req: Request) {
     reservations = reservationRows.map((r) => ({ ...r, sku: skuOf.get(r.itemId) ?? "" }));
   }
 
-  const counts = await db
-    .select()
-    .from(cycleCounts)
-    .where(eq(cycleCounts.orgId, orgId))
-    .orderBy(desc(cycleCounts.createdAt))
-    .limit(20);
-  const countIds = counts.map((c) => c.id);
-  const countLines = countIds.length
-    ? await db.select().from(cycleCountLines).where(inArray(cycleCountLines.countId, countIds))
-    : [];
   const locationCodeById = new Map(locations.map((l) => [l.id, l.code]));
-
+  let projectedCycleCounts: {
+    id: string;
+    status: string;
+    note: string | null;
+    locationCode: string | null;
+    createdAt: string | Date;
+    lines: { sku: string; expectedThousandths: number; countedThousandths: number | null; varianceThousandths: number | null }[];
+  }[];
+  if (process.env.GO_INVENTORY_CYCLE_COUNTS_READS === "1") {
+    const bridgedCycleCounts = await dispatchInventoryCycleCountsGo(ctx, resolved);
+    if (bridgedCycleCounts instanceof Response) return bridgedCycleCounts;
+    projectedCycleCounts = bridgedCycleCounts;
+  } else {
+    const counts = await db
+      .select()
+      .from(cycleCounts)
+      .where(eq(cycleCounts.orgId, orgId))
+      .orderBy(desc(cycleCounts.createdAt))
+      .limit(20);
+    const countIds = counts.map((c) => c.id);
+    const countLines = countIds.length
+      ? await db.select().from(cycleCountLines).where(inArray(cycleCountLines.countId, countIds))
+      : [];
+    projectedCycleCounts = counts.map((c) => ({
+      id: c.id,
+      status: c.status,
+      note: c.note,
+      locationCode: c.locationId ? (locationCodeById.get(c.locationId) ?? null) : null,
+      createdAt: c.createdAt,
+      lines: countLines
+        .filter((l) => l.countId === c.id)
+        .map((l) => ({
+          sku: skuOf.get(l.itemId) ?? "",
+          expectedThousandths: l.expectedThousandths,
+          countedThousandths: l.countedThousandths,
+          varianceThousandths: l.countedThousandths === null ? null : l.countedThousandths - l.expectedThousandths,
+        })),
+    }));
+  }
   let lotList: { id: string; lotCode: string; sku: string; expiresAt: string | Date | null }[];
   if (process.env.GO_INVENTORY_LOTS_READS === "1") {
     const bridgedLots = await dispatchInventoryLotsGo(ctx, resolved);
@@ -554,21 +633,7 @@ export async function GET(req: Request) {
     reorderAlerts,
     locations,
     reservations,
-    cycleCounts: counts.map((c) => ({
-      id: c.id,
-      status: c.status,
-      note: c.note,
-      locationCode: c.locationId ? (locationCodeById.get(c.locationId) ?? null) : null,
-      createdAt: c.createdAt,
-      lines: countLines
-        .filter((l) => l.countId === c.id)
-        .map((l) => ({
-          sku: skuOf.get(l.itemId) ?? "",
-          expectedThousandths: l.expectedThousandths,
-          countedThousandths: l.countedThousandths,
-          varianceThousandths: l.countedThousandths === null ? null : l.countedThousandths - l.expectedThousandths,
-        })),
-    })),
+    cycleCounts: projectedCycleCounts,
     lots: lotList,
     transfers,
   });

@@ -17,7 +17,30 @@ const (
 	inventoryRecordCycleCountsCapabilityID = "inventory.recordCycleCounts"
 	inventoryPostCycleCountCapabilityID    = "inventory.postCycleCount"
 	inventoryCancelCycleCountCapabilityID  = "inventory.cancelCycleCount"
+	inventoryListCycleCountsCapabilityID   = "inventory.listCycleCounts"
 )
+
+type InventoryListCycleCountsInput struct{}
+
+type InventoryListCycleCountLine struct {
+	SKU                 string `json:"sku"`
+	ExpectedThousandths int64  `json:"expectedThousandths"`
+	CountedThousandths  *int64 `json:"countedThousandths"`
+	VarianceThousandths *int64 `json:"varianceThousandths"`
+}
+
+type InventoryListCycleCount struct {
+	ID           string                        `json:"id"`
+	Status       string                        `json:"status"`
+	Note         *string                       `json:"note"`
+	LocationCode *string                       `json:"locationCode"`
+	CreatedAt    string                        `json:"createdAt"`
+	Lines        []InventoryListCycleCountLine `json:"lines"`
+}
+
+type InventoryListCycleCountsOutput struct {
+	CycleCounts []InventoryListCycleCount `json:"cycleCounts"`
+}
 
 type InventoryCreateCycleCountInput struct {
 	Note       *string   `json:"note,omitempty"`
@@ -72,9 +95,86 @@ func parseInventoryCycleCountInput(capabilityID string, raw json.RawMessage) (an
 		return ParseInventoryPostCycleCountInput(raw)
 	case inventoryCancelCycleCountCapabilityID:
 		return ParseInventoryCancelCycleCountInput(raw)
+	case inventoryListCycleCountsCapabilityID:
+		return ParseInventoryListCycleCountsInput(raw)
 	default:
 		return nil, errors.New("unsupported inventory cycle count capability")
 	}
+}
+
+func ParseInventoryListCycleCountsInput(raw json.RawMessage) (InventoryListCycleCountsInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return InventoryListCycleCountsInput{}, err
+	}
+	return InventoryListCycleCountsInput{}, nil
+}
+
+func inventoryListCycleCounts(ctx context.Context, tx pgx.Tx, orgID string, _ InventoryListCycleCountsInput) (InventoryListCycleCountsOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT counts.id::text, counts.status, counts.note, locations.code, counts.created_at
+		FROM cycle_counts counts
+		LEFT JOIN stock_locations locations
+		  ON locations.id = counts.location_id AND locations.org_id = counts.org_id
+		WHERE counts.org_id = $1::uuid
+		ORDER BY counts.created_at DESC
+		LIMIT 20`, orgID)
+	if err != nil {
+		return InventoryListCycleCountsOutput{}, err
+	}
+	cycleCounts := make([]InventoryListCycleCount, 0)
+	countIDs := make([]string, 0)
+	for rows.Next() {
+		var count InventoryListCycleCount
+		var createdAt time.Time
+		if err := rows.Scan(&count.ID, &count.Status, &count.Note, &count.LocationCode, &createdAt); err != nil {
+			rows.Close()
+			return InventoryListCycleCountsOutput{}, err
+		}
+		count.CreatedAt = createdAt.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+		count.Lines = make([]InventoryListCycleCountLine, 0)
+		countIDs = append(countIDs, count.ID)
+		cycleCounts = append(cycleCounts, count)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return InventoryListCycleCountsOutput{}, err
+	}
+	rows.Close()
+	if len(countIDs) == 0 {
+		return InventoryListCycleCountsOutput{CycleCounts: cycleCounts}, nil
+	}
+
+	lineRows, err := tx.Query(ctx, `
+		SELECT lines.count_id::text, COALESCE(items.sku, ''), lines.expected_thousandths, lines.counted_thousandths
+		FROM cycle_count_lines lines
+		LEFT JOIN items ON items.id = lines.item_id AND items.org_id = lines.org_id
+		WHERE lines.org_id = $1::uuid AND lines.count_id = ANY($2::uuid[])`, orgID, countIDs)
+	if err != nil {
+		return InventoryListCycleCountsOutput{}, err
+	}
+	defer lineRows.Close()
+	indexByID := make(map[string]int, len(cycleCounts))
+	for index := range cycleCounts {
+		indexByID[cycleCounts[index].ID] = index
+	}
+	for lineRows.Next() {
+		var countID string
+		var line InventoryListCycleCountLine
+		if err := lineRows.Scan(&countID, &line.SKU, &line.ExpectedThousandths, &line.CountedThousandths); err != nil {
+			return InventoryListCycleCountsOutput{}, err
+		}
+		if line.CountedThousandths != nil {
+			variance := *line.CountedThousandths - line.ExpectedThousandths
+			line.VarianceThousandths = &variance
+		}
+		if index, ok := indexByID[countID]; ok {
+			cycleCounts[index].Lines = append(cycleCounts[index].Lines, line)
+		}
+	}
+	if err := lineRows.Err(); err != nil {
+		return InventoryListCycleCountsOutput{}, err
+	}
+	return InventoryListCycleCountsOutput{CycleCounts: cycleCounts}, nil
 }
 
 func ParseInventoryCreateCycleCountInput(raw json.RawMessage) (InventoryCreateCycleCountInput, error) {

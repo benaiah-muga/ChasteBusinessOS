@@ -18,6 +18,22 @@ const InventoryItemSchema = z.object({
   reorderNeeded: z.boolean(),
 });
 
+const CycleCountLineSchema = z.object({
+  sku: z.string().min(1),
+  expectedThousandths: z.number().int().safe(),
+  countedThousandths: z.number().int().nonnegative().safe().nullable(),
+  varianceThousandths: z.number().int().safe().nullable(),
+});
+
+const CycleCountSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["open", "posted", "cancelled"]),
+  note: z.string().nullable(),
+  locationCode: z.string().min(1).nullable(),
+  createdAt: z.string().datetime({ offset: true }),
+  lines: z.array(CycleCountLineSchema),
+});
+
 const InventoryReportSchema = z.object({
   items: z.array(InventoryItemSchema),
   totalValueMinor: z.number().int().safe(),
@@ -33,11 +49,13 @@ const InventoryReportSchema = z.object({
     expiresAt: z.string().datetime({ offset: true }).nullable(),
     balanceThousandths: z.number().int().safe().optional(),
   })),
+  cycleCounts: z.array(CycleCountSchema),
 });
 
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 export type InventoryLocation = z.infer<typeof InventoryReportSchema>["locations"][number];
 export type InventoryLot = z.infer<typeof InventoryReportSchema>["lots"][number];
+export type InventoryCycleCount = z.infer<typeof CycleCountSchema>;
 
 export class InventoryApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -58,7 +76,7 @@ export async function fetchInventoryEnabled(signal?: AbortSignal): Promise<boole
   return parsed.data.enabledModules.includes("inventory");
 }
 
-export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[] }> {
+export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[] }> {
   const response = await fetchJson("/api/inventory", signal);
   if (!response.ok) {
     const error = z.object({ error: z.string() }).safeParse(response.body);

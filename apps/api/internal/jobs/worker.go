@@ -230,6 +230,7 @@ var GoCapabilityPermissions = map[string]string{
 	"inventory.stockReport":                    "inventory.read",
 	"inventory.itemHistory":                    "inventory.read",
 	"inventory.listLots":                       "inventory.read",
+	"inventory.listCycleCounts":                "inventory.read",
 	"inventory.rebuildStockProjections":        "inventory.admin",
 	"accounting.incomeStatement":               "accounting.read",
 	"accounting.balanceSheet":                  "accounting.read",

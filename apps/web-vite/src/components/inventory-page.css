@@ -104,6 +104,38 @@
   padding: 1rem;
 }
 
+.inventory-cycle-count-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.inventory-cycle-count-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1rem 0.7rem;
+}
+
+.inventory-cycle-count-heading h3 {
+  margin: 0;
+  color: #37352e;
+  font-size: 0.95rem;
+}
+
+.inventory-cycle-count-heading p,
+.inventory-cycle-count-progress {
+  margin: 0.35rem 0 0;
+  color: #77756d;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.inventory-cycle-count-progress {
+  margin: 0;
+  padding: 0 1rem 0.8rem;
+}
+
 .inventory-metrics article {
   display: grid;
   gap: 0.35rem;
@@ -308,6 +340,11 @@
   }
 
   .inventory-lots-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .inventory-cycle-count-heading {
     align-items: flex-start;
     flex-direction: column;
   }

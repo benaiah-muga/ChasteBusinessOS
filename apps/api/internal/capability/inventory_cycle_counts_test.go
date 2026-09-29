@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -75,6 +76,7 @@ func TestInventoryCycleCountParsersMirrorZodContracts(t *testing.T) {
 		inventoryRecordCycleCountsCapabilityID: `{"countId":"` + validID + `","counts":[{"sku":"S","countedThousandths":1}]}`,
 		inventoryPostCycleCountCapabilityID:    `{"countId":"` + validID + `"}`,
 		inventoryCancelCycleCountCapabilityID:  `{"countId":"` + validID + `"}`,
+		inventoryListCycleCountsCapabilityID:   `{}`,
 	} {
 		if _, err := parseInventoryCycleCountInput(id, json.RawMessage(raw)); err != nil {
 			t.Errorf("cycle count dispatch %s: %v", id, err)
@@ -82,6 +84,91 @@ func TestInventoryCycleCountParsersMirrorZodContracts(t *testing.T) {
 	}
 	if _, err := parseInventoryCycleCountInput("inventory.noop", json.RawMessage(`{}`)); err == nil {
 		t.Error("cycle count dispatcher accepted an unknown capability")
+	}
+}
+
+func TestInventoryListCycleCountsExecutorOrganizationProjectionAndLimit(t *testing.T) {
+	fx := newExecutorFixture(t)
+	grantWavePermission(t, fx, "inventory.read")
+	itemID := seedSalesItem(t, fx, fx.orgID, "COUNT-READ-1", "goods")
+	secondItemID := seedSalesItem(t, fx, fx.orgID, "COUNT-READ-2", "goods")
+	locationID := seedInventoryStockLocation(t, fx, fx.orgID, "COUNT-READ", "Count location")
+	base := time.Now().UTC().Truncate(time.Millisecond)
+	countIDs := make([]string, 21)
+	for index := range countIDs {
+		countIDs[index] = executorUUID(t)
+		createdAt := base.Add(time.Duration(index) * time.Second)
+		status := "open"
+		var locationArg any
+		var noteArg any
+		if index == len(countIDs)-1 {
+			status = "posted"
+			locationArg = locationID
+			noteArg = "Aisle 4"
+		}
+		if _, err := fx.owner.Exec(fx.ctx, `
+			INSERT INTO cycle_counts (id, org_id, status, note, location_id, created_at)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6)`,
+			countIDs[index], fx.orgID, status, noteArg, locationArg, createdAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, line := range []struct {
+		itemID   string
+		expected int64
+		counted  any
+	}{{itemID, 500, nil}, {secondItemID, 300, int64(250)}} {
+		if _, err := fx.owner.Exec(fx.ctx, `
+			INSERT INTO cycle_count_lines (org_id, count_id, item_id, expected_thousandths, counted_thousandths)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5)`,
+			fx.orgID, countIDs[len(countIDs)-1], line.itemID, line.expected, line.counted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	foreignID := executorUUID(t)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO cycle_counts (id, org_id, status, note, created_at)
+		VALUES ($1::uuid, $2::uuid, 'open', 'foreign', $3)`, foreignID, fx.otherOrgID, base.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	input := json.RawMessage(`{}`)
+	claims := waveModuleClaims(fx, inventoryListCycleCountsCapabilityID, "inventory.read", input, "human", "", "cycle-count-list")
+	result, err := fx.executor.Execute(fx.ctx, claims, inventoryListCycleCountsCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("list cycle counts result=%+v err=%v", result, err)
+	}
+	var output InventoryListCycleCountsOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.CycleCounts) != 20 {
+		t.Fatalf("cycle count length=%d, want newest 20", len(output.CycleCounts))
+	}
+	if output.CycleCounts[0].ID != countIDs[20] || output.CycleCounts[len(output.CycleCounts)-1].ID != countIDs[1] {
+		t.Fatalf("cycle count order = newest %q oldest %q, want %q then %q", output.CycleCounts[0].ID, output.CycleCounts[len(output.CycleCounts)-1].ID, countIDs[20], countIDs[1])
+	}
+	if output.CycleCounts[0].Status != "posted" || output.CycleCounts[0].Note == nil || *output.CycleCounts[0].Note != "Aisle 4" || output.CycleCounts[0].LocationCode == nil || *output.CycleCounts[0].LocationCode != "COUNT-READ" {
+		t.Fatalf("cycle count header=%+v, want status/note/location projection", output.CycleCounts[0])
+	}
+	if output.CycleCounts[0].CreatedAt != base.Add(20*time.Second).Format("2006-01-02T15:04:05.000Z") {
+		t.Fatalf("createdAt=%q, want UTC millisecond timestamp", output.CycleCounts[0].CreatedAt)
+	}
+	linesBySKU := make(map[string]InventoryListCycleCountLine)
+	for _, line := range output.CycleCounts[0].Lines {
+		linesBySKU[line.SKU] = line
+	}
+	if len(linesBySKU) != 2 || linesBySKU["COUNT-READ-1"].CountedThousandths != nil || linesBySKU["COUNT-READ-1"].VarianceThousandths != nil {
+		t.Fatalf("uncounted line projection=%+v, want both values null", linesBySKU["COUNT-READ-1"])
+	}
+	counted := linesBySKU["COUNT-READ-2"]
+	if counted.ExpectedThousandths != 300 || counted.CountedThousandths == nil || *counted.CountedThousandths != 250 || counted.VarianceThousandths == nil || *counted.VarianceThousandths != -50 {
+		t.Fatalf("counted line projection=%+v, want expected 300, counted 250, variance -50", counted)
+	}
+	for _, count := range output.CycleCounts {
+		if count.ID == countIDs[0] || count.ID == foreignID {
+			t.Fatalf("result includes excluded or foreign count %q", count.ID)
+		}
 	}
 }
 

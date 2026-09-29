@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   cycleCountLines,
@@ -708,6 +708,78 @@ const listLocations = (deps: ModuleDeps) =>
     },
   });
 
+const listCycleCounts = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "inventory.listCycleCounts",
+    title: "List recent cycle counts",
+    intent:
+      "Review recent physical stock counts with their location, status, notes, expected quantities, counted quantities, and variances",
+    module: "inventory",
+    risk: "read",
+    permission: "inventory.read",
+    input: z.object({}),
+    output: z.object({
+      cycleCounts: z.array(z.object({
+        id: z.string(),
+        status: z.string(),
+        note: z.string().nullable(),
+        locationCode: z.string().nullable(),
+        createdAt: z.date(),
+        lines: z.array(z.object({
+          sku: z.string(),
+          expectedThousandths: z.number().int(),
+          countedThousandths: z.number().int().nullable(),
+          varianceThousandths: z.number().int().nullable(),
+        })),
+      })),
+    }),
+    execute: async (ctx) => {
+      const counts = await deps.db
+        .select({ count: cycleCounts, locationCode: stockLocations.code })
+        .from(cycleCounts)
+        .leftJoin(stockLocations, and(
+          eq(cycleCounts.locationId, stockLocations.id),
+          eq(cycleCounts.orgId, stockLocations.orgId),
+        ))
+        .where(eq(cycleCounts.orgId, ctx.actor.orgId))
+        .orderBy(desc(cycleCounts.createdAt))
+        .limit(20);
+      const countIds = counts.map(({ count }) => count.id);
+      const lines = countIds.length
+        ? await deps.db
+            .select({ line: cycleCountLines, sku: items.sku })
+            .from(cycleCountLines)
+            .leftJoin(items, and(
+              eq(cycleCountLines.itemId, items.id),
+              eq(cycleCountLines.orgId, items.orgId),
+            ))
+            .where(and(
+              eq(cycleCountLines.orgId, ctx.actor.orgId),
+              inArray(cycleCountLines.countId, countIds),
+            ))
+        : [];
+      return {
+        cycleCounts: counts.map(({ count, locationCode }) => ({
+          id: count.id,
+          status: count.status,
+          note: count.note,
+          locationCode,
+          createdAt: count.createdAt,
+          lines: lines
+            .filter(({ line }) => line.countId === count.id)
+            .map(({ line, sku }) => ({
+              sku: sku ?? "",
+              expectedThousandths: line.expectedThousandths,
+              countedThousandths: line.countedThousandths,
+              varianceThousandths: line.countedThousandths === null
+                ? null
+                : line.countedThousandths - line.expectedThousandths,
+            })),
+        })),
+      };
+    },
+  });
+
 const listReservations = (deps: ModuleDeps) =>
   defineCapability({
     id: "inventory.listReservations",
@@ -825,6 +897,7 @@ export function registerInventoryCapabilities(registry: CapabilityRegistry, deps
   registry.register(cancelCycleCount(deps));
   registry.register(rebuildStockProjections(deps));
   registry.register(listLocations(deps));
+  registry.register(listCycleCounts(deps));
   registry.register(listReservations(deps));
   registry.register(listLots(deps));
   registerValuationCapabilities(registry, deps);

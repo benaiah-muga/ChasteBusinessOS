@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryItem, type InventoryLocation, type InventoryLot } from "../api/inventory";
+import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryCycleCount, type InventoryItem, type InventoryLocation, type InventoryLot } from "../api/inventory";
 import { legacyUrl } from "../legacy";
 import "./inventory-page.css";
 
@@ -8,7 +8,7 @@ type PageState =
   | { status: "loading" }
   | { status: "disabled" }
   | { status: "failed"; error: InventoryApiError }
-  | { status: "ready"; items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[] };
+  | { status: "ready"; items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[] };
 
 type ItemFilter = "all" | "reorder";
 const CURRENCY_PREFERENCES = ["org", "USD", "KES", "EUR", "GBP", "TZS", "UGX"];
@@ -52,6 +52,10 @@ function formatLotExpiry(expiresAt: string | null): string {
   if (!expiresAt) return "No expiry date";
   const timestamp = Date.parse(expiresAt);
   return Number.isNaN(timestamp) ? "Expiry date unavailable" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(timestamp);
+}
+
+function formatCountDate(createdAt: string): string {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(createdAt));
 }
 
 export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
@@ -99,6 +103,7 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
   const lots = state.status === "ready" ? state.lots : [];
   const unitLabelBySku = new Map(state.status === "ready" ? state.items.map((item) => [item.sku, item.unitLabel] as const) : []);
   const showLotBalance = lots.some((lot) => lot.balanceThousandths !== undefined);
+  const cycleCounts = state.status === "ready" ? state.cycleCounts : [];
 
   return (
     <main className="inventory-page">
@@ -211,6 +216,59 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
                     ))}</tbody>
                 </table>
               </div>
+            </div>
+          )}
+        </section>
+      )}
+      {state.status === "ready" && (
+        <section className="inventory-lots" aria-labelledby="inventory-cycle-counts-title">
+          <div className="inventory-lots-heading">
+            <div>
+              <p className="inventory-eyebrow">Read only</p>
+              <h2 id="inventory-cycle-counts-title">Cycle count history</h2>
+            </div>
+            <p>Review recorded counts here. Start, update, and post counts in the full inventory workspace.</p>
+          </div>
+          {cycleCounts.length === 0 ? (
+            <p className="inventory-empty inventory-lots-empty" role="status">No cycle counts recorded yet.</p>
+          ) : (
+            <div className="inventory-cycle-count-list">
+              {cycleCounts.map((count) => {
+                const countedLines = count.lines.filter((line) => line.countedThousandths !== null).length;
+                const headingId = `inventory-cycle-count-${count.id}`;
+                return (
+                  <article className="inventory-table-card" key={count.id} aria-labelledby={headingId}>
+                    <div className="inventory-cycle-count-heading">
+                      <div>
+                        <h3 id={headingId}>Count of {formatCountDate(count.createdAt)}</h3>
+                        <p>{count.locationCode ?? "All locations"}{count.note ? ` · ${count.note}` : " · No reason recorded"}</p>
+                      </div>
+                      <span className="inventory-status">{count.status}</span>
+                    </div>
+                    <p className="inventory-cycle-count-progress" role="status">{countedLines} of {count.lines.length} items counted</p>
+                    {count.lines.length === 0 ? (
+                      <p className="inventory-empty inventory-lots-empty">This count has no item lines.</p>
+                    ) : (
+                      <div className="inventory-table-scroll">
+                        <table className="inventory-table">
+                          <thead><tr><th scope="col">SKU</th><th scope="col">Expected</th><th scope="col">Counted</th><th scope="col">Variance</th></tr></thead>
+                          <tbody>{count.lines.map((line) => {
+                            const unit = unitLabelBySku.get(line.sku) ?? "units";
+                            return (
+                              <tr key={`${count.id}:${line.sku}`}>
+                                <th scope="row">{line.sku}</th>
+                                <td>{formatQuantity(line.expectedThousandths, unit)}</td>
+                                <td>{line.countedThousandths === null ? "Not counted" : formatQuantity(line.countedThousandths, unit)}</td>
+                                <td>{line.varianceThousandths === null ? "Not available" : `${line.varianceThousandths > 0 ? "+" : ""}${formatQuantity(line.varianceThousandths, unit)}`}</td>
+                              </tr>
+                            );
+                          })}</tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>

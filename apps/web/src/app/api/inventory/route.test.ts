@@ -68,6 +68,7 @@ describe("inventory Go route adapter", () => {
     vi.stubEnv("GO_INVENTORY_TRANSFER_READS", "0");
     vi.stubEnv("GO_INVENTORY_LOTS_READS", "0");
     vi.stubEnv("GO_INVENTORY_RESERVATIONS_READS", "0");
+    vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -247,6 +248,66 @@ describe("inventory Go route adapter", () => {
       capabilityId: "inventory.listLots",
       input: {},
     });
+  });
+
+  it("bridges cycle counts through Go with the legacy projection and newest-first limit", async () => {
+    vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.execute.mockImplementation(async (_id: string, _ctx: unknown, input: { belowReorderOnly: boolean }) => ({
+      ok: true,
+      data: { items: input.belowReorderOnly ? [stockReportItem] : [stockReportItem], totalValueMinor: 2000 },
+    }));
+    const cycleCounts = Array.from({ length: 21 }, (_, index) => ({
+      id: `count-${index}`,
+      status: index === 0 ? "posted" : "open",
+      note: index === 0 ? null : "Aisle count",
+      locationCode: index === 0 ? null : "MAIN",
+      createdAt: `2026-09-${String(29 - Math.floor(index / 3)).padStart(2, "0")}T10:00:00.000Z`,
+      lines: [{
+        sku: "MUG-1",
+        expectedThousandths: 500,
+        countedThousandths: index === 0 ? null : 450,
+        varianceThousandths: index === 0 ? null : -50,
+      }],
+    }));
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { cycleCounts } }) });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.cycleCounts).toHaveLength(20);
+    expect(body.cycleCounts[0]).toEqual(cycleCounts[0]);
+    expect(body.cycleCounts.at(-1)).toEqual(cycleCounts[19]);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.listCycleCounts",
+      input: {},
+    });
+  });
+
+  it("fails closed for malformed or unavailable Go cycle-count reads without TypeScript retry", async () => {
+    vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.execute.mockImplementation(async (_id: string, _ctx: unknown, input: { belowReorderOnly: boolean }) => ({
+      ok: true,
+      data: { items: input.belowReorderOnly ? [stockReportItem] : [stockReportItem], totalValueMinor: 2000 },
+    }));
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({
+      ok: true,
+      data: { cycleCounts: [{ id: "count-1", status: "open", note: null, locationCode: null, createdAt: "not-a-date", lines: [] }] },
+    }) });
+
+    const malformed = await GET(readRequest());
+    expect(malformed.status).toBe(503);
+    expect(malformed.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+    const unavailable = await GET(readRequest());
+    expect(unavailable.status).toBe(503);
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(2);
   });
 
   it("preserves the 200-lot limit for Go results", async () => {

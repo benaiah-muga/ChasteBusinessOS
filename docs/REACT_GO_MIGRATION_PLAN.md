@@ -804,3 +804,17 @@ new owners and the manifest shows zero legacy runtime paths.
     parity. Unavailable or malformed Go output fails closed without retrying
     the TypeScript reservation query. Focused route and Go organization-scope
     parity tests pass, as does capability manifest validation.
+
+62. (Done) Add a default-off signed Go bridge for inventory cycle-count reads on
+    `GET /api/inventory` using `GO_INVENTORY_CYCLE_COUNTS_READS=1`. Preserve the
+    20-row newest-first order, location, status, note, timestamps, and complete
+    line projection including nullable counted quantities and variances. Keep
+    authorization and module checks, validate the Go response, and fail closed
+    without retrying the TypeScript query. Route and Go organization-scope tests
+    cover the projection and limit.
+
+63. (Done) Extend the read-only Vite Inventory preview with cycle-count headers,
+    progress, and expected, counted, and signed variance quantities from the
+    existing same-origin API. Validate the response, handle empty and uncounted
+    lines, and keep count creation and posting in the full workspace. Focused
+    component/API tests, typecheck, lint, and production build pass.

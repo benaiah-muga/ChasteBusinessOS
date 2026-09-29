@@ -341,6 +341,12 @@ flag defaults to `0`.
 preserves all statuses, the 100-row newest-first order, the full route fields,
 and fails closed if Go is unavailable or returns invalid data. The flag
 defaults to `0`.
+`GO_INVENTORY_CYCLE_COUNTS_READS=1` opts the cycle-count list on
+`GET /api/inventory` into the signed Go `inventory.listCycleCounts` read. It
+requires `pnpm dev:api`, preserves the 20-row newest-first order, location,
+status, note, timestamps, line quantities, and nullable count and variance
+fields, and fails closed if Go is unavailable or returns invalid data. The
+flag defaults to `0`.
 `GO_INVENTORY_VALUATION_SUMMARY_WRITE=1` opts the existing
 `postValuationSummary` action on `POST /api/inventory` into the signed Go
 `inventory.postValuationSummary` capability. It requires `pnpm dev:api`,

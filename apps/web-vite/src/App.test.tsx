@@ -132,6 +132,7 @@ beforeEach(() => {
       totalValueMinor: 2000,
       lots: [],
       locations: [],
+      cycleCounts: [],
     });
     if (path === "/api/accounting") return Response.json({ invoices: [{
       id: "f9184ddd-a042-4e24-9fe1-553cadc44df1",
