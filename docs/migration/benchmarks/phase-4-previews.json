@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-09-29T12:22:24.040Z",
+  "gitRevision": "e1f3567fc44284a2b51f95bf5c7d6a04f7088600",
+  "machine": {
+    "platform": "linux 6.8.0-138-generic",
+    "architecture": "x64",
+    "cpuModel": "Intel(R) Core(TM) i7-4600U CPU @ 2.10GHz",
+    "logicalCpuCount": 4,
+    "totalMemoryBytes": 16663068672
+  },
+  "toolchain": {
+    "node": "v24.18.0",
+    "pnpm": "11.9.0",
+    "go": "go version go1.27.1 linux/amd64"
+  },
+  "protocol": {
+    "runsPerBuild": 3,
+    "order": "Next, Vite, then Go, sequentially per run",
+    "cachePolicy": "shared working-tree dependency and compiler caches, left warm between samples",
+    "metrics": "GNU time wall clock and maximum resident set size for each full command",
+    "commands": {
+      "next": [
+        "pnpm",
+        "--filter",
+        "web",
+        "build"
+      ],
+      "vite": [
+        "pnpm",
+        "--filter",
+        "@chaste/web-vite",
+        "build"
+      ],
+      "go": [
+        "go",
+        "-C",
+        "apps/api",
+        "build",
+        "./cmd/api",
+        "./cmd/jobs-worker",
+        "./cmd/outbox-worker"
+      ]
+    }
+  },
+  "summaries": {
+    "next": {
+      "successfulRuns": 3,
+      "failedRuns": 0,
+      "medianWallSeconds": 31.44,
+      "p95WallSeconds": 352.31,
+      "medianPeakRSSKilobytes": 1118892,
+      "samples": [
+        {
+          "run": 1,
+          "exitCode": 0,
+          "wallSeconds": 352.31,
+          "maxRSSKilobytes": 2866260
+        },
+        {
+          "run": 2,
+          "exitCode": 0,
+          "wallSeconds": 31.44,
+          "maxRSSKilobytes": 1118892
+        },
+        {
+          "run": 3,
+          "exitCode": 0,
+          "wallSeconds": 15.7,
+          "maxRSSKilobytes": 826500
+        }
+      ]
+    },
+    "vite": {
+      "successfulRuns": 3,
+      "failedRuns": 0,
+      "medianWallSeconds": 10.76,
+      "p95WallSeconds": 11.31,
+      "medianPeakRSSKilobytes": 662056,
+      "samples": [
+        {
+          "run": 1,
+          "exitCode": 0,
+          "wallSeconds": 11.31,
+          "maxRSSKilobytes": 662056
+        },
+        {
+          "run": 2,
+          "exitCode": 0,
+          "wallSeconds": 10.36,
+          "maxRSSKilobytes": 661040
+        },
+        {
+          "run": 3,
+          "exitCode": 0,
+          "wallSeconds": 10.76,
+          "maxRSSKilobytes": 662316
+        }
+      ]
+    },
+    "go": {
+      "successfulRuns": 3,
+      "failedRuns": 0,
+      "medianWallSeconds": 1.58,
+      "p95WallSeconds": 2.15,
+      "medianPeakRSSKilobytes": 247040,
+      "samples": [
+        {
+          "run": 1,
+          "exitCode": 0,
+          "wallSeconds": 2.15,
+          "maxRSSKilobytes": 247936
+        },
+        {
+          "run": 2,
+          "exitCode": 0,
+          "wallSeconds": 1.51,
+          "maxRSSKilobytes": 247040
+        },
+        {
+          "run": 3,
+          "exitCode": 0,
+          "wallSeconds": 1.58,
+          "maxRSSKilobytes": 242944
+        }
+      ]
+    }
+  }
+}
