@@ -223,6 +223,28 @@ export async function POST(req: Request) {
   const humanCtx = actorFromResolved(resolved, { intentId: body.intentId });
   if (!humanCtx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
+  if (body.action === "recordPayment" && body.invoiceNumber && body.amountMinor && process.env.GO_ACCOUNTING_RECORD_PAYMENT_WRITE === "1") {
+    try {
+      return await invoiceOpsGoResponse(
+        await executeGoCapability({
+          actionContext: humanCtx,
+          session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+          capabilityId: "accounting.recordPayment",
+          input: {
+            invoiceNumber: body.invoiceNumber,
+            amountMinor: body.amountMinor,
+            method: body.method ?? "bank_transfer",
+            settleFxRate: body.fxRate || undefined,
+          },
+        }),
+        recordPaymentOutputSchema,
+        paymentUnavailable,
+      );
+    } catch {
+      return paymentUnavailable();
+    }
+  }
+
   if (body.action === "createInvoice" && body.customerId) {
     const lines = body.lines;
     if (!lines?.length) return NextResponse.json({ error: "lines are required" }, { status: 400 });
@@ -572,41 +594,45 @@ async function createInvoiceGoResponse(result: GoCapabilityBridgeResult) {
   return accountingUnavailable();
 }
 
-async function invoiceOpsGoResponse(result: GoCapabilityBridgeResult, outputSchema: z.ZodTypeAny) {
-  if (result.kind !== "response") return accountingUnavailable();
+async function invoiceOpsGoResponse(
+  result: GoCapabilityBridgeResult,
+  outputSchema: z.ZodTypeAny,
+  unavailable: () => NextResponse = accountingUnavailable,
+) {
+  if (result.kind !== "response") return unavailable();
 
   try {
     const body: unknown = await result.response.json();
     const headers = { "Cache-Control": "no-store" };
     if (result.response.status === 200) {
       const parsed = z.object({ ok: z.literal(true), data: outputSchema }).safeParse(body);
-      if (!parsed.success) return accountingUnavailable();
+      if (!parsed.success) return unavailable();
       return NextResponse.json({ ok: true, data: parsed.data.data }, { status: 200, headers });
     }
     if (result.response.status === 202) {
       const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
-      if (!parsed.success) return accountingUnavailable();
+      if (!parsed.success) return unavailable();
       return NextResponse.json({ ok: false, pendingApproval: true, reason: parsed.data.reason }, { status: 202, headers });
     }
     if (result.response.status === 422) {
       const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
-      if (!parsed.success) return accountingUnavailable();
+      if (!parsed.success) return unavailable();
       return NextResponse.json(parsed.data, { status: 422, headers });
     }
     if (result.response.status === 401) {
       const parsed = z.object({ error: z.string() }).safeParse(body);
-      if (!parsed.success) return accountingUnavailable();
+      if (!parsed.success) return unavailable();
       return NextResponse.json(parsed.data, { status: 401, headers });
     }
     if (result.response.status === 403) {
       const parsed = z.object({ error: z.string() }).safeParse(body);
-      if (!parsed.success) return accountingUnavailable();
+      if (!parsed.success) return unavailable();
       return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers });
     }
   } catch {
-    return accountingUnavailable();
+    return unavailable();
   }
-  return accountingUnavailable();
+  return unavailable();
 }
 
 function respond(result: { ok: boolean; data?: unknown; error?: string; pendingApproval?: unknown }) {
@@ -644,6 +670,22 @@ const quoteExpireOutputSchema = z.object({ expiredCount: z.number().int() });
 const recurringCreateOutputSchema = z.object({ templateId: z.string(), nextRunAt: z.string().datetime() });
 const recurringPauseOutputSchema = z.object({ active: z.literal(false) });
 const recurringResumeOutputSchema = z.object({ active: z.literal(true) });
+
+const recordPaymentOutputSchema = z.object({
+  paymentId: z.string().uuid(),
+  entryId: z.string().uuid(),
+  fullyPaid: z.boolean(),
+  gainLossMinor: z.number().int().optional(),
+  baseEntryId: z.string().uuid().optional(),
+  foreignEntryId: z.string().uuid().optional(),
+});
+
+function paymentUnavailable() {
+  return NextResponse.json(
+    { error: "accounting service unavailable; check payment status before retrying" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
 
 function quoteUnavailable() {
   return NextResponse.json(

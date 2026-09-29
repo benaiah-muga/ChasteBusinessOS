@@ -432,11 +432,12 @@ new owners and the manifest shows zero legacy runtime paths.
    continuity inventories.
 3. (In progress) Capture old-runtime fixtures and benchmark scripts on a migrated database. Repeatable frontend and Go build timings are recorded by `pnpm benchmark:migration:builds`; request, startup, edit-to-ready, browser, and demo fixtures remain to be measured.
 4. (In progress) Define the versioned HTTP contract and auth bridge contract;
-   prove Go read-only policy and ledger endpoints under the existing session,
-   permission, and RLS policies. The first OpenAPI 3.1 contract now covers
-   `GET /__go/policy`; `pnpm migration:contracts:check` verifies generated Go
-   and TypeScript models. The assertion-claims contract and remaining endpoints
-   are still open.
+  prove Go read-only policy and ledger endpoints under the existing session,
+  permission, and RLS policies. The first OpenAPI 3.1 contract now covers
+  `GET /__go/policy`; `pnpm migration:contracts:check` verifies generated Go
+  and TypeScript models. Audience-specific signed assertion claims are now
+  specified for the existing Go bridge audiences; the remaining read endpoint
+  contracts and their session, permission, and RLS proofs are still open.
 5. Port the kernel trust spine and the customer-to-payment slice; do not
    switch any write before its parity and rollback gates pass.
 6. (Done) Bridge only `POST /api/accounting` invoice creation to the existing Go
@@ -619,3 +620,15 @@ new owners and the manifest shows zero legacy runtime paths.
     timelines using `GO_CRM_TIMELINE_READS=1`. Preserve timeline fields and
     task-read isolation, and fail closed when Go is unavailable or returns
     invalid data.
+
+38. (Done) Add a default-off signed Go bridge for supplier bill credit
+    notes using `GO_PURCHASING_BILL_CREDIT_WRITES=1`. Preserve input mapping,
+    approval and validation responses, and fail closed after Go dispatch
+    without retrying through TypeScript. Focused route tests and the full Go,
+    typecheck, lint, and test gates pass.
+
+39. (Done) Add a default-off signed Go bridge for invoice payment
+    recording using `GO_ACCOUNTING_RECORD_PAYMENT_WRITE=1`. Preserve method
+    and FX input mapping, approval and validation responses, and fail closed
+    after Go dispatch without retrying through TypeScript. Focused route tests
+    and the full Go, typecheck, lint, and test gates pass.

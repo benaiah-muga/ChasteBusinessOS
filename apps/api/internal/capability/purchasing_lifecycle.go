@@ -178,7 +178,7 @@ func purchasingBillCreditNote(ctx context.Context, tx pgx.Tx, claims authbridge.
 	}
 	openBalance := totalMinor - paidMinor - creditedMinor
 	if input.AmountMinor > openBalance {
-		return BillCreditNoteOutput{}, fmt.Errorf("credit %d exceeds the open balance %d (total %d - paid %d - credited %d)",
+		return BillCreditNoteOutput{}, fmt.Errorf("credit %d exceeds the open balance %d (total %d − paid %d − credited %d)",
 			input.AmountMinor, openBalance, totalMinor, paidMinor, creditedMinor)
 	}
 	var recoverableTax int64

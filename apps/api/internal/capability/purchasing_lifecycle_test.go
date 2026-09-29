@@ -274,7 +274,7 @@ func TestPurchasingLifecycleBillCreditNotePostsMirrorAndCreditsBill(t *testing.T
 		{executorUUID(t), 100, "bill not found"},
 		{foreignBillID, 100, "bill not found"},
 		{voidBillID, 100, "bill is void; nothing to credit"},
-		{taxBillID, 10_001, "credit 10001 exceeds the open balance 10000 (total 10000 - paid 0 - credited 0)"},
+		{taxBillID, 10_001, "credit 10001 exceeds the open balance 10000 (total 10000 − paid 0 − credited 0)"},
 	} {
 		lifecycleExpectError(t, fx, fx.orgID, bad.wantErr, func(tx pgx.Tx) error {
 			_, err := purchasingBillCreditNote(fx.ctx, tx, claims, BillCreditNoteInput{BillID: bad.billID, AmountMinor: bad.amount, Reason: "Attempted credit"}, now)
@@ -344,7 +344,7 @@ func TestPurchasingLifecycleBillCreditNotePostsMirrorAndCreditsBill(t *testing.T
 	if creditedMinor != 10_000 {
 		t.Fatalf("credited_minor = %d, want 10000", creditedMinor)
 	}
-	lifecycleExpectError(t, fx, fx.orgID, "credit 100 exceeds the open balance 0 (total 10000 - paid 0 - credited 10000)", func(tx pgx.Tx) error {
+	lifecycleExpectError(t, fx, fx.orgID, "credit 100 exceeds the open balance 0 (total 10000 − paid 0 − credited 10000)", func(tx pgx.Tx) error {
 		_, err := purchasingBillCreditNote(fx.ctx, tx, claims, BillCreditNoteInput{BillID: taxBillID, AmountMinor: 100, Reason: "One too many"}, now)
 		return err
 	})

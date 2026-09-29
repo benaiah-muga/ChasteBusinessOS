@@ -634,3 +634,99 @@ describe("POST /api/accounting Go tax return bridge", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/accounting Go payment bridge", () => {
+  const paymentId = "d02aa498-07c6-451b-bc24-4b7d1ac19523";
+  const paymentEntryId = "a1b8d329-9e2d-4e67-a4d6-356e9fd402bb";
+  const paymentBody = { action: "recordPayment", invoiceNumber: 104, amountMinor: 50000 };
+  const paymentOutput = { paymentId, entryId: paymentEntryId, fullyPaid: false };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_RECORD_PAYMENT_WRITE", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: paymentOutput });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps payment recording on TypeScript by default and preserves FX input mapping", async () => {
+    delete process.env.GO_ACCOUNTING_RECORD_PAYMENT_WRITE;
+
+    const response = await POST(request({ ...paymentBody, method: "cash", fxRate: "1.25" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: paymentOutput });
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.recordPayment", actionContext, {
+      invoiceNumber: 104,
+      amountMinor: 50000,
+      method: "cash",
+      settleFxRate: "1.25",
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches payment recording through the signed Go bridge and validates its output", async () => {
+    vi.stubEnv("GO_ACCOUNTING_RECORD_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: paymentOutput, replayed: true }),
+    });
+
+    const response = await POST(request({ ...paymentBody, fxRate: "1.25" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: paymentOutput });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+      capabilityId: "accounting.recordPayment",
+      input: {
+        invoiceNumber: 104,
+        amountMinor: 50000,
+        method: "bank_transfer",
+        settleFxRate: "1.25",
+      },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("normalizes Go approval without retrying the TypeScript write", async () => {
+    vi.stubEnv("GO_ACCOUNTING_RECORD_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, pendingApproval: true, reason: "Approval required", approvalId: "private-id" }, { status: 202 }),
+    });
+
+    const response = await POST(request(paymentBody));
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ ok: false, pendingApproval: true, reason: "Approval required" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "missing dispatch", result: { kind: "not-dispatched" } },
+    { name: "unknown outcome", result: { kind: "outcome-unknown" } },
+    { name: "malformed payment output", result: { kind: "response", response: Response.json({ ok: true, data: { ...paymentOutput, paymentId: "invalid" } }) } },
+    { name: "backend failure", result: { kind: "response", response: Response.json({ error: "internal error" }, { status: 500 }) } },
+  ])("fails closed on $name without retrying through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_ACCOUNTING_RECORD_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(request(paymentBody));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "accounting service unavailable; check payment status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+});

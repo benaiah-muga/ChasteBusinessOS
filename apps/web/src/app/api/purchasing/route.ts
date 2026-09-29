@@ -242,6 +242,34 @@ export async function POST(req: Request) {
     }
   }
 
+  if (body.action === "billCreditNote" && process.env.GO_PURCHASING_BILL_CREDIT_WRITES === "1") {
+    if (!body.billId || !body.amountMinor || !body.reason)
+      return NextResponse.json({ error: "billId, amountMinor and reason are required" }, { status: 400 });
+    const unavailableMessage = "purchasing bill credit service unavailable; check bill status before retrying";
+    try {
+      return await purchasingGoResponse(
+        await executeGoCapability({
+          actionContext: ctx,
+          session: resolved,
+          capabilityId: "purchasing.billCreditNote",
+          input: {
+            billId: body.billId as string,
+            amountMinor: body.amountMinor as number,
+            reason: body.reason as string,
+          },
+        }),
+        unavailableMessage,
+        z.object({
+          entryId: z.string(),
+          creditedMinor: z.number(),
+          billBalanceMinor: z.number(),
+        }),
+      );
+    } catch {
+      return goUnavailable(unavailableMessage);
+    }
+  }
+
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
 

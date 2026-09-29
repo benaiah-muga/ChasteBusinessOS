@@ -28,6 +28,141 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        GoPolicyAssertionClaims: {
+            /** @constant */
+            aud: "go.policy.read";
+            sub: string;
+            org_id: string;
+            can_edit: boolean;
+            /** Format: int64 */
+            iat: number;
+            /** Format: int64 */
+            exp: number;
+        };
+        GoLedgerAssertionClaims: {
+            /** @constant */
+            aud: "go.ledger.read";
+            sub: string;
+            org_id: string;
+            /** @constant */
+            can_read_ledger: true;
+            /** Format: int64 */
+            iat: number;
+            /** Format: int64 */
+            exp: number;
+        };
+        GoOrgSwitchAssertionClaims: {
+            /** @constant */
+            aud: "go.org.switch";
+            sub: string;
+            org_id: string;
+            /** @constant */
+            can_edit: false;
+            /** Format: int64 */
+            iat: number;
+            /** Format: int64 */
+            exp: number;
+        };
+        GoCapabilityAssertionClaims: {
+            /** @constant */
+            aud: "go.capability.execute";
+            sub: string;
+            org_id: string;
+            capability_id: string;
+            input_sha256: string;
+            actor_id: string | null;
+            /** @enum {string} */
+            actor_type: "human" | "agent" | "system";
+            permissions: string[];
+            auth_session_id: string;
+            agent_session_id?: string;
+            intent_id?: string;
+            /** Format: int64 */
+            iat: number;
+            /** Format: int64 */
+            exp: number;
+        };
+        GoApprovalDecisionAssertionClaims: {
+            /** @constant */
+            aud: "go.approval.decide";
+            sub: string;
+            org_id: string;
+            capability_id: string;
+            input_sha256: string;
+            actor_id: string | null;
+            /** @enum {string} */
+            actor_type: "human" | "agent" | "system";
+            permissions: string[];
+            auth_session_id: string;
+            approval_id: string;
+            /** @enum {string} */
+            decision: "approve" | "reject";
+            comment: string | null;
+            /** Format: int64 */
+            iat: number;
+            /** Format: int64 */
+            exp: number;
+        };
+        GoApprovalInboxAssertionClaims: {
+            /** @constant */
+            aud: "go.approvals.inbox.read";
+            sub: string;
+            org_id: string;
+            input_sha256: string;
+            actor_id: string | null;
+            /** @enum {string} */
+            actor_type: "human" | "agent" | "system";
+            permissions: string[];
+            auth_session_id: string;
+            /** Format: int64 */
+            iat: number;
+            /** Format: int64 */
+            exp: number;
+        };
+        GoMetricsAssertionClaims: {
+            /** @constant */
+            aud: "go.metrics.read";
+            sub: string;
+            org_id: string;
+            /** Format: int64 */
+            iat: number;
+            /** Format: int64 */
+            exp: number;
+        };
+        GoCRMReadAssertionClaims: {
+            /** @constant */
+            aud: "go.crm.read";
+            sub: string;
+            org_id: string;
+            capability_id: string;
+            input_sha256: string;
+            actor_id: string | null;
+            /** @constant */
+            actor_type: "human";
+            permissions: string[];
+            auth_session_id: string;
+            /** Format: int64 */
+            iat: number;
+            /** Format: int64 */
+            exp: number;
+        };
+        GoProjectsReadAssertionClaims: {
+            /** @constant */
+            aud: "go.projects.read";
+            sub: string;
+            org_id: string;
+            capability_id: string;
+            input_sha256: string;
+            actor_id: string | null;
+            /** @constant */
+            actor_type: "human";
+            permissions: string[];
+            auth_session_id: string;
+            /** Format: int64 */
+            iat: number;
+            /** Format: int64 */
+            exp: number;
+        };
         GoPolicyResponse: {
             policy: components["schemas"]["Policy"];
             canEdit: boolean;

@@ -178,6 +178,11 @@ TypeScript retry. The flag defaults to `0`.
 status filter and response shape, and fails closed if Go is unavailable or
 returns invalid data. TypeScript remains the default; the flag defaults to
 `0`.
+`GO_ACCOUNTING_RECORD_PAYMENT_WRITE=1` opts `accounting.recordPayment` on
+`POST /api/accounting` into the signed Go capability bridge. It requires
+`pnpm dev:api`; other accounting actions stay on their existing handlers, and
+uncertain payment outcomes fail closed without a TypeScript retry. The flag
+defaults to `0`.
 `GO_ACCOUNTING_RECURRING_WRITE=1` opts recurring invoice template creation,
 pausing, and resumption into the signed Go capability bridge. It requires
 `pnpm dev:api`; the dedicated recurring route and other accounting actions
@@ -208,6 +213,11 @@ TypeScript retry. The flag defaults to `0`.
 `pnpm dev:api`; approval responses are preserved and uncertain outcomes fail
 closed without a TypeScript retry. Purchase order creation and other actions
 remain on their existing handlers. The flag defaults to `0`.
+`GO_PURCHASING_BILL_CREDIT_WRITES=1` opts `billCreditNote` on
+`POST /api/purchasing` into the signed Go capability bridge. It requires
+`pnpm dev:api`; approval responses are preserved and uncertain outcomes fail
+closed without a TypeScript retry. Other purchasing actions remain on their
+existing handlers. The flag defaults to `0`.
 `GO_PURCHASING_RECEIPT_READS=1` opts the `receiptDetail` action on
 `POST /api/purchasing` into the signed Go read capability. It requires
 `pnpm dev:api`, preserves the receipts and order-line response, and fails

@@ -27,6 +27,7 @@ describe("purchasing Go route adapter", () => {
     vi.stubEnv("GO_PURCHASING_RECEIPT_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "0");
     vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_BILL_CREDIT_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_RETURN_WRITES", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
@@ -261,6 +262,94 @@ describe("purchasing Go route adapter", () => {
       billNumber: 8, amountMinor: 12000, method: "bank_transfer",
     });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps bill credit notes on TypeScript unless their independent flag is enabled", async () => {
+    vi.stubEnv("GO_PURCHASING_BILL_WRITES", "1");
+    const billId = "33333333-3333-4333-8333-333333333333";
+
+    await POST(request({ action: "billCreditNote", billId, amountMinor: 5000, reason: "Damaged delivery" }));
+
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.billCreditNote", ctx, {
+      billId,
+      amountMinor: 5000,
+      reason: "Damaged delivery",
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches bill credit notes to Go with the existing capability contract", async () => {
+    vi.stubEnv("GO_PURCHASING_BILL_CREDIT_WRITES", "1");
+    const billId = "33333333-3333-4333-8333-333333333333";
+    const input = { billId, amountMinor: 5000, reason: "Damaged delivery" };
+    const data = { entryId: "44444444-4444-4444-8444-444444444444", creditedMinor: 5000, billBalanceMinor: 7000 };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data, replayed: true }) });
+
+    const response = await POST(request({ action: "billCreditNote", ...input, intentId: "buy-intent" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.billCreditNote",
+      input,
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("validates bill credit note fields before Go dispatch", async () => {
+    vi.stubEnv("GO_PURCHASING_BILL_CREDIT_WRITES", "1");
+
+    const response = await POST(request({ action: "billCreditNote", billId: "33333333-3333-4333-8333-333333333333" }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "billId, amountMinor and reason are required" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves bill credit note approval and validation responses from Go", async () => {
+    vi.stubEnv("GO_PURCHASING_BILL_CREDIT_WRITES", "1");
+    const body = { action: "billCreditNote", billId: "33333333-3333-4333-8333-333333333333", amountMinor: 5000, reason: "Damaged delivery" };
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, pendingApproval: true, reason: "Supplier credit requires approval" }, { status: 202 }) })
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, error: "bill is void; nothing to credit" }, { status: 422 }) });
+
+    const pending = await POST(request(body));
+    expect(pending.status).toBe(202);
+    expect(pending.headers.get("cache-control")).toBe("no-store");
+    expect(await pending.json()).toEqual({ ok: false, pendingApproval: true, reason: "Supplier credit requires approval" });
+
+    const rejected = await POST(request(body));
+    expect(rejected.status).toBe(422);
+    expect(await rejected.json()).toEqual({ ok: false, error: "bill is void; nothing to credit" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "not dispatched", result: { kind: "not-dispatched" } },
+    { label: "outcome unknown", result: { kind: "outcome-unknown" } },
+    { label: "malformed success", result: { kind: "response", response: Response.json({ ok: true, data: {} }) } },
+  ])("fails closed on $label bill credit results without TypeScript retry", async ({ result }) => {
+    vi.stubEnv("GO_PURCHASING_BILL_CREDIT_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(request({
+      action: "billCreditNote",
+      billId: "33333333-3333-4333-8333-333333333333",
+      amountMinor: 5000,
+      reason: "Damaged delivery",
+    }));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing bill credit service unavailable; check bill status before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 
   it("keeps other purchasing actions on TypeScript", async () => {
