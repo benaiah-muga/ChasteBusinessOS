@@ -503,6 +503,18 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case supportStartConversationCapabilityID, supportPostMessageCapabilityID,
+			supportListConversationsCapabilityID, supportReadConversationCapabilityID,
+			supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
+			supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
+			supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
+			supportUpdateTicketCapabilityID, supportSuggestCategoryCapabilityID,
+			supportCreateCannedResponseCapabilityID, supportCreateKbArticleCapabilityID:
+			parsed, parseErr := parseSupportInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID:
 			parsed, parseErr := parseHROpeningInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
@@ -786,6 +798,16 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "accounting.read", true
 	case analyticsStockLevelsCapabilityID:
 		return "inventory.read", true
+	case supportStartConversationCapabilityID, supportPostMessageCapabilityID,
+		supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
+		supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
+		supportUpdateTicketCapabilityID, supportCreateCannedResponseCapabilityID,
+		supportCreateKbArticleCapabilityID:
+		return "support.write", true
+	case supportListConversationsCapabilityID, supportReadConversationCapabilityID,
+		supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
+		supportSuggestCategoryCapabilityID:
+		return "support.read", true
 	case inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID:
 		return "inventory.write", true
 	case inventoryRebuildStockProjectionsCapabilityID:

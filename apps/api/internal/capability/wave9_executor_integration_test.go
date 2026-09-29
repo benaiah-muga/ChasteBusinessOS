@@ -153,3 +153,62 @@ func TestGoWave9AnalyticsGovernedExecutorPath(t *testing.T) {
 		t.Fatalf("explain audit events=%d, want one", got)
 	}
 }
+
+func TestGoWave9SupportGovernedExecutorPath(t *testing.T) {
+	fx := newExecutorFixture(t)
+	grantWavePermission(t, fx, "support.write")
+	grantWavePermission(t, fx, "support.read")
+	customerID := seedReportsCustomer(t, fx, fx.orgID, "Wave9 Support Customer")
+
+	startInput := json.RawMessage(`{"customerId":"` + customerID + `","subject":"Wave9 delivery question"}`)
+	startClaims := waveModuleClaims(fx, supportStartConversationCapabilityID, "support.write", startInput, "human", "", "wave9-support-start")
+	started, err := fx.executor.Execute(fx.ctx, startClaims, supportStartConversationCapabilityID, startInput)
+	if err != nil || !started.OK {
+		t.Fatalf("startConversation result=%+v err=%v", started, err)
+	}
+	var startedOut SupportStartConversationOutput
+	if err := json.Unmarshal(started.Data, &startedOut); err != nil {
+		t.Fatal(err)
+	}
+	if !isUUID(startedOut.ConversationID) {
+		t.Fatalf("startConversation output=%+v, want UUID conversationId", startedOut)
+	}
+	replay, err := fx.executor.Execute(fx.ctx, startClaims, supportStartConversationCapabilityID, startInput)
+	if err != nil || !replay.OK || !replay.Replayed {
+		t.Fatalf("startConversation replay=%+v err=%v, want governed receipt replay", replay, err)
+	}
+
+	denied, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, supportStartConversationCapabilityID, "crm.write", startInput, "human", "", "wave9-support-denied"), supportStartConversationCapabilityID, startInput)
+	if err != nil || denied.OK || !strings.Contains(denied.Error, "forbidden: missing permission: support.write") {
+		t.Fatalf("startConversation denied result=%+v err=%v, want permission failure", denied, err)
+	}
+
+	messageInput := json.RawMessage(`{"conversationId":"` + startedOut.ConversationID + `","body":"Where is my order?","from":"customer"}`)
+	posted, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, supportPostMessageCapabilityID, "support.write", messageInput, "human", "", "wave9-support-post"), supportPostMessageCapabilityID, messageInput)
+	if err != nil || !posted.OK {
+		t.Fatalf("postMessage result=%+v err=%v", posted, err)
+	}
+	escalateInput := json.RawMessage(`{"conversationId":"` + startedOut.ConversationID + `","reason":"Needs a refund decision"}`)
+	escalated, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, supportEscalateConversationCapabilityID, "support.write", escalateInput, "human", "", "wave9-support-escalate"), supportEscalateConversationCapabilityID, escalateInput)
+	if err != nil || !escalated.OK {
+		t.Fatalf("escalateConversation result=%+v err=%v", escalated, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM support_conversations WHERE org_id=$1::uuid AND id=$2::uuid AND status='escalated'`, fx.orgID, startedOut.ConversationID); got != 1 {
+		t.Fatalf("escalated conversations=%d, want one", got)
+	}
+	categoryInput := json.RawMessage(`{"text":"The item arrived damaged, I want a refund"}`)
+	category, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, supportSuggestCategoryCapabilityID, "support.read", categoryInput, "human", "", "wave9-category"), supportSuggestCategoryCapabilityID, categoryInput)
+	if err != nil || !category.OK {
+		t.Fatalf("suggestCategory result=%+v err=%v", category, err)
+	}
+	var categoryOut SupportSuggestCategoryOutput
+	if err := json.Unmarshal(category.Data, &categoryOut); err != nil {
+		t.Fatal(err)
+	}
+	if categoryOut.Category != "billing" || !categoryOut.Draft {
+		t.Fatalf("suggestCategory output=%+v, want billing draft", categoryOut)
+	}
+	if got := fx.count(`SELECT count(*) FROM support_messages WHERE org_id=$1::uuid AND conversation_id=$2::uuid AND sender_type='system'`, fx.orgID, startedOut.ConversationID); got != 2 {
+		t.Fatalf("system messages=%d, want open plus escalation notes", got)
+	}
+}

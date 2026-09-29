@@ -293,6 +293,20 @@ var capabilitySpecs = map[string]capabilitySpec{
 	analyticsStockLevelsCapabilityID:                    {module: "inventory", permission: "inventory.read", risk: "read"},
 	analyticsExplainChangeCapabilityID:                  {module: "analytics", permission: "analytics.report", risk: "read"},
 	analyticsAskYourBusinessCapabilityID:                {module: "analytics", permission: "analytics.report", risk: "read"},
+	supportStartConversationCapabilityID:                {module: "support", permission: "support.write", risk: "write"},
+	supportPostMessageCapabilityID:                      {module: "support", permission: "support.write", risk: "write"},
+	supportListConversationsCapabilityID:                {module: "support", permission: "support.read", risk: "read"},
+	supportReadConversationCapabilityID:                 {module: "support", permission: "support.read", risk: "read"},
+	supportLookupOrderStatusCapabilityID:                {module: "support", permission: "support.read", risk: "read"},
+	supportSearchKnowledgeCapabilityID:                  {module: "support", permission: "support.read", risk: "read"},
+	supportEscalateConversationCapabilityID:             {module: "support", permission: "support.write", risk: "write"},
+	supportResolveConversationCapabilityID:              {module: "support", permission: "support.write", risk: "write"},
+	supportReopenConversationCapabilityID:               {module: "support", permission: "support.write", risk: "write"},
+	supportCreateTicketCapabilityID:                     {module: "support", permission: "support.write", risk: "write"},
+	supportUpdateTicketCapabilityID:                     {module: "support", permission: "support.write", risk: "write"},
+	supportSuggestCategoryCapabilityID:                  {module: "support", permission: "support.read", risk: "read"},
+	supportCreateCannedResponseCapabilityID:             {module: "support", permission: "support.write", risk: "write"},
+	supportCreateKbArticleCapabilityID:                  {module: "support", permission: "support.write", risk: "write"},
 	createProjectCapabilityID:                           {module: "projects", permission: "projects.write", risk: "write"},
 	ProjectBoardReadCapabilityID:                        {module: "projects", permission: "projects.read", risk: "read"},
 	archiveProjectCapabilityID:                          {module: "projects", permission: "projects.write", risk: "write"},
@@ -385,6 +399,13 @@ func supportedCapability(capabilityID string) bool {
 		analyticsRevenueByMonthCapabilityID, analyticsInvoiceAgingCapabilityID,
 		analyticsSalesByCustomerCapabilityID, analyticsStockLevelsCapabilityID,
 		analyticsExplainChangeCapabilityID, analyticsAskYourBusinessCapabilityID,
+		supportStartConversationCapabilityID, supportPostMessageCapabilityID,
+		supportListConversationsCapabilityID, supportReadConversationCapabilityID,
+		supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
+		supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
+		supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
+		supportUpdateTicketCapabilityID, supportSuggestCategoryCapabilityID,
+		supportCreateCannedResponseCapabilityID, supportCreateKbArticleCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID,
 		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 		return true
@@ -982,6 +1003,18 @@ func (e *Executor) execute(
 			analyticsSalesByCustomerCapabilityID, analyticsStockLevelsCapabilityID,
 			analyticsExplainChangeCapabilityID, analyticsAskYourBusinessCapabilityID:
 			parsed, err := parseAnalyticsInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case supportStartConversationCapabilityID, supportPostMessageCapabilityID,
+			supportListConversationsCapabilityID, supportReadConversationCapabilityID,
+			supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
+			supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
+			supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
+			supportUpdateTicketCapabilityID, supportSuggestCategoryCapabilityID,
+			supportCreateCannedResponseCapabilityID, supportCreateKbArticleCapabilityID:
+			parsed, err := parseSupportInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -2430,6 +2463,84 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case SupportStartConversationInput:
+			output, err := supportStartConversation(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportPostMessageInput:
+			output, err := supportPostMessage(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportListConversationsInput:
+			output, err := supportListConversations(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportReadConversationInput:
+			output, err := supportReadConversation(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportLookupOrderStatusInput:
+			output, err := supportLookupOrderStatus(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportSearchKnowledgeInput:
+			output, err := supportSearchKnowledge(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportEscalateConversationInput:
+			output, err := supportEscalateConversation(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportStatusInput:
+			output, err := supportResolveOrReopen(ctx, tx, claims, parsed, capabilityID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportCreateTicketInput:
+			output, err := supportCreateTicket(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportUpdateTicketInput:
+			output, err := supportUpdateTicket(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportSuggestCategoryInput:
+			output, err := supportSuggestCategory(ctx, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportCreateCannedResponseInput:
+			output, err := supportCreateCannedResponse(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SupportCreateKbArticleInput:
+			output, err := supportCreateKbArticle(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		default:
 			return Result{}, errors.New("unsupported capability input")
 		}
@@ -2544,6 +2655,11 @@ func canonicalInputHash(input any) (string, error) {
 		AnalyticsRenderReportInput, AnalyticsPipelineByStageInput, AnalyticsRevenueByMonthInput,
 		AnalyticsInvoiceAgingInput, AnalyticsSalesByCustomerInput, AnalyticsStockLevelsInput,
 		AnalyticsExplainChangeInput, AnalyticsAskYourBusinessInput,
+		SupportStartConversationInput, SupportPostMessageInput, SupportListConversationsInput,
+		SupportReadConversationInput, SupportLookupOrderStatusInput, SupportSearchKnowledgeInput,
+		SupportEscalateConversationInput, SupportStatusInput, SupportCreateTicketInput,
+		SupportUpdateTicketInput, SupportSuggestCategoryInput, SupportCreateCannedResponseInput,
+		SupportCreateKbArticleInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput,
 		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput:
 		return canonicalHash(parsed)
