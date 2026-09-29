@@ -709,6 +709,13 @@
       "when": 1790696988324,
       "tag": "0100_go_purchasing_ap_aging_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1790707933366,
+      "tag": "0101_go_wave7_capability_jobs",
+      "breakpoints": true
     }
   ]
 }

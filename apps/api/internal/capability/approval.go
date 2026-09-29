@@ -473,6 +473,42 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case buildRemindersCapabilityID:
+			parsed, parseErr := parseAccountingPolicyInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case manufacturingCreateWorkOrderCapabilityID, manufacturingReleaseWorkOrderCapabilityID,
+			manufacturingCompleteWorkOrderCapabilityID, manufacturingCancelWorkOrderCapabilityID,
+			manufacturingReverseProductionRunCapabilityID, manufacturingCheckProductionFeasibilityCapabilityID,
+			manufacturingWorkOrdersListCapabilityID, manufacturingProduceFromBomCapabilityID:
+			parsed, parseErr := parseManufacturingWorkOrderInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case manufacturingDefineBomCapabilityID, manufacturingDeleteBomCapabilityID, manufacturingBomTreeCapabilityID,
+			manufacturingBomReportCapabilityID, manufacturingCostPreviewCapabilityID, manufacturingLotTraceCapabilityID,
+			manufacturingProductionRunsCapabilityID:
+			parsed, parseErr := parseManufacturingBomInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case marketingCreateSegmentCapabilityID, marketingCreateCampaignCapabilityID, marketingSendCampaignCapabilityID,
+			marketingCampaignAnalyticsCapabilityID:
+			parsed, parseErr := parseMarketingCampaignInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID:
+			parsed, parseErr := parseHROpeningInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
 			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 			parsed, parseErr := parseIAMInput(transition.row.CapabilityID, transition.row.Payload)
@@ -670,6 +706,23 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "purchasing.read", true
 	case apAgingCapabilityID:
 		return "purchasing.read", true
+	case buildRemindersCapabilityID:
+		return "accounting.read", true
+	case manufacturingCreateWorkOrderCapabilityID, manufacturingReleaseWorkOrderCapabilityID,
+		manufacturingCompleteWorkOrderCapabilityID, manufacturingCancelWorkOrderCapabilityID,
+		manufacturingProduceFromBomCapabilityID, manufacturingDefineBomCapabilityID,
+		manufacturingReverseProductionRunCapabilityID, manufacturingDeleteBomCapabilityID:
+		return "manufacturing.write", true
+	case manufacturingCheckProductionFeasibilityCapabilityID, manufacturingWorkOrdersListCapabilityID,
+		manufacturingBomTreeCapabilityID, manufacturingBomReportCapabilityID, manufacturingCostPreviewCapabilityID,
+		manufacturingLotTraceCapabilityID, manufacturingProductionRunsCapabilityID:
+		return "manufacturing.read", true
+	case marketingCreateSegmentCapabilityID, marketingCreateCampaignCapabilityID, marketingSendCampaignCapabilityID:
+		return "marketing.write", true
+	case marketingCampaignAnalyticsCapabilityID:
+		return "marketing.read", true
+	case hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID:
+		return "hr.write", true
 	case inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID:
 		return "inventory.write", true
 	case inventoryRebuildStockProjectionsCapabilityID:
