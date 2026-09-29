@@ -75,6 +75,11 @@ afterAll(async () => {
 });
 
 describe("statements + reminders (M10.2)", () => {
+  it("registers the read-only report currency metadata capability", async () => {
+    const metadata = await run("accounting.reportCurrencyMetadata", {});
+    expect(metadata).toEqual({ baseCurrency: "USD", unsupportedCurrencies: [] });
+  });
+
   it("payment terms set the due date and the statement nets everything in order", async () => {
     const inv = await run("accounting.createInvoice", {
       customerId,

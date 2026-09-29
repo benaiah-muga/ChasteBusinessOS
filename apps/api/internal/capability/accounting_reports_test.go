@@ -12,6 +12,7 @@ import (
 
 func TestAccountingReportsParsersMirrorZodContracts(t *testing.T) {
 	for _, fn := range []func(json.RawMessage) error{
+		func(raw json.RawMessage) error { _, err := ParseReportCurrencyMetadataInput(raw); return err },
 		func(raw json.RawMessage) error { _, err := ParseIncomeStatementInput(raw); return err },
 		func(raw json.RawMessage) error { _, err := ParseBalanceSheetInput(raw); return err },
 		func(raw json.RawMessage) error { _, err := ParseArAgingInput(raw); return err },
@@ -23,6 +24,11 @@ func TestAccountingReportsParsersMirrorZodContracts(t *testing.T) {
 			if err := fn(json.RawMessage(bad)); err == nil {
 				t.Errorf("input %s must be refused like a non-object zod payload", bad)
 			}
+		}
+	}
+	for _, bad := range []string{`{"currency":"USD"}`, `{"unknown":true}`} {
+		if _, err := ParseReportCurrencyMetadataInput(json.RawMessage(bad)); err == nil {
+			t.Errorf("ParseReportCurrencyMetadataInput accepted %s", bad)
 		}
 	}
 

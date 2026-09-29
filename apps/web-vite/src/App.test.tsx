@@ -247,6 +247,17 @@ describe("Vite app frame", () => {
     expect(window.location.pathname).toBe("/login");
   });
 
+  it("keeps direct CRM access behind the existing session check", async () => {
+    window.history.replaceState(null, "", "/crm");
+    authMocks.getSession.mockResolvedValue({ data: { user: null } });
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Good to see you." })).not.toBeNull();
+    expect(window.location.pathname).toBe("/login");
+    expect(fetchMock.mock.calls.some(([input]) => ["/api/deals", "/api/customers", "/api/crm", "/api/crm/views"].includes(String(input)))).toBe(false);
+  });
+
   it("loads the authenticated home and signs out through Better Auth", async () => {
     render(<App />);
 

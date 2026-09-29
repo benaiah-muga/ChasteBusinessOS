@@ -535,12 +535,14 @@ new owners and the manifest shows zero legacy runtime paths.
     executor, bridge, and route tests pass, including database-backed RLS and
     concurrent last-owner proofs. The route remains legacy-owned by default.
 25. (In progress) Port the CRM workspace to Vite using the same-origin CRM,
-    customer, deal, task, team, and import APIs. Preserve pipeline actions,
-    lead conversion, AI follow-up drafting, customer profiles and merges, saved
-    views, imports and undo, tasks, approvals, deal board/table/search, and
-    customer timelines. Focused API and component tests pass. Keep API and page
-    ownership on the existing defaults until runtime and parity proofs pass;
-    browser proof remains deferred by user direction.
+    customer, deal, task, team, and import APIs. The `/crm` app route and nav
+    run inside the existing authenticated shell; a focused test confirms direct
+    unauthenticated access reaches Better Auth before CRM APIs load. Preserve
+    pipeline actions, lead conversion, AI follow-up drafting, customer profiles
+    and merges, saved views, imports and undo, tasks, approvals, deal
+    board/table/search, and customer timelines. Focused API and component tests
+    pass. Keep API and page ownership on the existing defaults until runtime
+    and parity proofs pass; browser proof remains deferred by user direction.
 26. (Done) Add an opt-in Go read for the approvals inbox and recent history
     behind `GO_APPROVALS_READ`. Bind the complete TypeScript capability
     permission map to the signed request, and recheck the verified session,
@@ -580,6 +582,7 @@ new owners and the manifest shows zero legacy runtime paths.
     and require an executing human approval for unknown or above-threshold
     amounts. Report reads, receipt detail, purchase order closure, supplier
     bill credit, and the inventory stock report are covered by items below.
+    Accounting report currency metadata now has a dedicated signed Go read.
     Remaining accounting and FX parity proofs, inventory valuation and other
     read models, broader purchasing parity proofs, and route ownership changes
     remain open; route defaults stay on the existing owners until those gates
@@ -593,12 +596,13 @@ new owners and the manifest shows zero legacy runtime paths.
     legacy response contract. Keep route ownership on the legacy handler and
     fail closed after Go dispatch. Focused Go DB and BFF route tests pass.
 
-32. (Done) Add a default-off signed Go read bridge for the report capabilities
-    consumed by `GET /api/reports`. Preserve the report response shape, base
-    currency and unsupported-currency metadata, and optional null behavior.
-    Route ownership remains on the legacy handler; currency metadata remains a
-    TypeScript database read until a later migration slice. Focused route tests
-    and the existing Go report and FX capability proofs pass.
+32. (Done) Add default-off signed Go reads for the report capabilities and
+    dedicated `accounting.reportCurrencyMetadata` capability consumed by
+    `GET /api/reports`. Preserve the report response shape, base currency,
+    sorted distinct unsupported-currency metadata, and optional null behavior.
+    Keep TypeScript report ownership and metadata reads as the default; Go
+    metadata queries use the governed accounting permission and organization
+    transaction. Focused route and Go organization-scope tests pass.
 
 33. (Done) Add a default-off signed Go read bridge for `receiptDetail`
     on `POST /api/purchasing`. Preserve the receipt and order-line response,

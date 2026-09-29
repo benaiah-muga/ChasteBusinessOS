@@ -15,16 +15,82 @@ import (
 )
 
 const (
-	incomeStatementCapabilityID   = "accounting.incomeStatement"
-	balanceSheetCapabilityID      = "accounting.balanceSheet"
-	listInvoicesCapabilityID      = "accounting.listInvoices"
-	arAgingCapabilityID           = "accounting.arAging"
-	cashBasisReportCapabilityID   = "accounting.cashBasisReport"
-	customerStatementCapabilityID = "accounting.customerStatement"
-	salesTaxReportCapabilityID    = "accounting.salesTaxReport"
-	cashFlowCapabilityID          = "accounting.cashFlow"
-	cashForecastCapabilityID      = "accounting.cashForecast"
+	incomeStatementCapabilityID        = "accounting.incomeStatement"
+	reportCurrencyMetadataCapabilityID = "accounting.reportCurrencyMetadata"
+	balanceSheetCapabilityID           = "accounting.balanceSheet"
+	listInvoicesCapabilityID           = "accounting.listInvoices"
+	arAgingCapabilityID                = "accounting.arAging"
+	cashBasisReportCapabilityID        = "accounting.cashBasisReport"
+	customerStatementCapabilityID      = "accounting.customerStatement"
+	salesTaxReportCapabilityID         = "accounting.salesTaxReport"
+	cashFlowCapabilityID               = "accounting.cashFlow"
+	cashForecastCapabilityID           = "accounting.cashForecast"
 )
+
+type ReportCurrencyMetadataInput struct{}
+
+type ReportCurrencyMetadataOutput struct {
+	BaseCurrency          string   `json:"baseCurrency"`
+	UnsupportedCurrencies []string `json:"unsupportedCurrencies"`
+}
+
+func ParseReportCurrencyMetadataInput(raw json.RawMessage) (ReportCurrencyMetadataInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return ReportCurrencyMetadataInput{}, err
+	}
+	if len(fields) != 0 {
+		return ReportCurrencyMetadataInput{}, errors.New("input does not accept fields")
+	}
+	return ReportCurrencyMetadataInput{}, nil
+}
+
+func reportCurrencyMetadata(ctx context.Context, tx pgx.Tx, orgID string) (ReportCurrencyMetadataOutput, error) {
+	baseCurrency, err := reportBaseCurrency(ctx, tx, orgID)
+	if err != nil {
+		return ReportCurrencyMetadataOutput{}, err
+	}
+	if !validReportCurrencyCode(baseCurrency) {
+		return ReportCurrencyMetadataOutput{}, errors.New("report base currency is invalid")
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT currency
+		FROM journal_entries
+		WHERE org_id = $1::uuid AND currency <> $2
+		ORDER BY currency`, orgID, baseCurrency)
+	if err != nil {
+		return ReportCurrencyMetadataOutput{}, err
+	}
+	defer rows.Close()
+	currencies := make([]string, 0)
+	for rows.Next() {
+		var currency string
+		if err := rows.Scan(&currency); err != nil {
+			return ReportCurrencyMetadataOutput{}, err
+		}
+		if !validReportCurrencyCode(currency) || currency == baseCurrency ||
+			(len(currencies) > 0 && currency <= currencies[len(currencies)-1]) {
+			return ReportCurrencyMetadataOutput{}, errors.New("report currency metadata is invalid")
+		}
+		currencies = append(currencies, currency)
+	}
+	if err := rows.Err(); err != nil {
+		return ReportCurrencyMetadataOutput{}, err
+	}
+	return ReportCurrencyMetadataOutput{BaseCurrency: baseCurrency, UnsupportedCurrencies: currencies}, nil
+}
+
+func validReportCurrencyCode(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for _, char := range value {
+		if char < 'A' || char > 'Z' {
+			return false
+		}
+	}
+	return true
+}
 
 type IncomeStatementInput struct{}
 
@@ -1948,6 +2014,8 @@ func salesTaxReport(ctx context.Context, tx pgx.Tx, orgID string, input SalesTax
 
 func parseAccountingReportInput(capabilityID string, raw json.RawMessage) (any, error) {
 	switch capabilityID {
+	case reportCurrencyMetadataCapabilityID:
+		return ParseReportCurrencyMetadataInput(raw)
 	case incomeStatementCapabilityID:
 		return ParseIncomeStatementInput(raw)
 	case balanceSheetCapabilityID:

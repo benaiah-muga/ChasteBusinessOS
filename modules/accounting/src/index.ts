@@ -917,6 +917,39 @@ const incomeStatement = (deps: ModuleDeps) =>
     },
   });
 
+const reportCurrencyMetadata = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "accounting.reportCurrencyMetadata",
+    title: "Read report currency metadata",
+    intent:
+      "Read the organization base currency and distinct journal currencies for accounting report context",
+    module: "accounting",
+    risk: "read",
+    permission: "accounting.read",
+    input: z.object({}),
+    output: z.object({
+      baseCurrency: z.string().regex(/^[A-Z]{3}$/),
+      unsupportedCurrencies: z.array(z.string().regex(/^[A-Z]{3}$/)),
+    }).strict().superRefine((metadata, ctx) => {
+      const sorted = [...metadata.unsupportedCurrencies].sort();
+      if (metadata.unsupportedCurrencies.some((currency) => currency === metadata.baseCurrency)) {
+        ctx.addIssue({ code: "custom", message: "unsupported currencies must exclude the base currency" });
+      }
+      if (new Set(metadata.unsupportedCurrencies).size !== metadata.unsupportedCurrencies.length ||
+          metadata.unsupportedCurrencies.some((currency, index) => currency !== sorted[index])) {
+        ctx.addIssue({ code: "custom", message: "unsupported currencies must be unique and sorted" });
+      }
+    }),
+    execute: async (ctx) => {
+      const baseCurrency = await baseCurrencyOf(deps.db, ctx.actor.orgId);
+      const entries = await deps.db
+        .selectDistinct({ currency: journalEntries.currency })
+        .from(journalEntries)
+        .where(and(eq(journalEntries.orgId, ctx.actor.orgId), sql`${journalEntries.currency} <> ${baseCurrency}`));
+      return { baseCurrency, unsupportedCurrencies: entries.map((entry) => entry.currency).sort() };
+    },
+  });
+
 const balanceSheet = (deps: ModuleDeps) =>
   defineCapability({
     id: "accounting.balanceSheet",
@@ -4296,6 +4329,7 @@ export function registerAccountingCapabilities(registry: CapabilityRegistry, dep
   registry.register(closePeriod(deps));
   registry.register(reopenPeriod(deps));
   registry.register(incomeStatement(deps));
+  registry.register(reportCurrencyMetadata(deps));
   registry.register(balanceSheet(deps));
   registry.register(cashBasisReport(deps));
   registry.register(closeYear(deps));

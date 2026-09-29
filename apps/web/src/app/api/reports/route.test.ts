@@ -67,6 +67,7 @@ describe("GET /api/reports Go bridge", () => {
     configureDatabase();
     mocks.buildRegistry.mockReturnValue({});
     mocks.buildExecutor.mockReturnValue({ execute: vi.fn()
+      .mockResolvedValueOnce({ ok: true, data: { baseCurrency: "UGX", unsupportedCurrencies: ["EUR", "USD"] } })
       .mockResolvedValueOnce({ ok: true, data: { revenueMinor: 10 } })
       .mockResolvedValueOnce({ ok: true, data: { assetsMinor: 20 } })
       .mockResolvedValueOnce({ ok: false, error: "cash flow unavailable" })
@@ -89,15 +90,23 @@ describe("GET /api/reports Go bridge", () => {
     });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
     expect(mocks.buildExecutor).toHaveBeenCalledOnce();
+    expect(mocks.buildExecutor.mock.results[0]?.value.execute.mock.calls.map(([capabilityId]: [string]) => capabilityId)).toEqual([
+      "accounting.reportCurrencyMetadata",
+      "accounting.incomeStatement",
+      "accounting.balanceSheet",
+      "accounting.cashFlow",
+      "accounting.unrealizedFxExposure",
+    ]);
   });
 
-  it("dispatches all four read capabilities to Go and preserves the response", async () => {
+  it("dispatches all report reads and currency metadata to Go and preserves the response", async () => {
     process.env.GO_ACCOUNTING_REPORTS_READ = "1";
     const reportData = [
       { revenueMinor: 10 },
       { assetsMinor: 20 },
       { netMinor: 30 },
       { exposures: [{ currency: "USD" }] },
+      { baseCurrency: "UGX", unsupportedCurrencies: ["EUR", "USD"] },
     ];
     mocks.executeGoCapability.mockImplementation(({ capabilityId }: { capabilityId: string }) =>
       Promise.resolve(success(reportData[[
@@ -105,6 +114,7 @@ describe("GET /api/reports Go bridge", () => {
         "accounting.balanceSheet",
         "accounting.cashFlow",
         "accounting.unrealizedFxExposure",
+        "accounting.reportCurrencyMetadata",
       ].indexOf(capabilityId)] ?? {})));
 
     const response = await GET();
@@ -118,12 +128,13 @@ describe("GET /api/reports Go bridge", () => {
       cashFlow: reportData[2],
       fxExposure: reportData[3],
     });
-    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(4);
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(5);
     expect(mocks.executeGoCapability.mock.calls.map(([input]) => input.capabilityId)).toEqual([
       "accounting.incomeStatement",
       "accounting.balanceSheet",
       "accounting.cashFlow",
       "accounting.unrealizedFxExposure",
+      "accounting.reportCurrencyMetadata",
     ]);
     expect(mocks.buildExecutor).not.toHaveBeenCalled();
   });
@@ -134,7 +145,8 @@ describe("GET /api/reports Go bridge", () => {
       .mockResolvedValueOnce(success({ revenueMinor: 10 }))
       .mockResolvedValueOnce(success({ assetsMinor: 20 }))
       .mockResolvedValueOnce({ kind: "outcome-unknown" })
-      .mockResolvedValueOnce(success({ exposures: [] }));
+      .mockResolvedValueOnce(success({ exposures: [] }))
+      .mockResolvedValueOnce(success({ baseCurrency: "UGX", unsupportedCurrencies: [] }));
 
     const response = await GET();
 
@@ -149,7 +161,8 @@ describe("GET /api/reports Go bridge", () => {
       .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, error: "P&L failed" }, { status: 422 }) })
       .mockResolvedValueOnce(success({ assetsMinor: 20 }))
       .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, error: "Cash flow failed" }, { status: 422 }) })
-      .mockResolvedValueOnce(success({ exposures: [] }));
+      .mockResolvedValueOnce(success({ exposures: [] }))
+      .mockResolvedValueOnce(success({ baseCurrency: "UGX", unsupportedCurrencies: [] }));
 
     const response = await GET();
 
@@ -163,11 +176,32 @@ describe("GET /api/reports Go bridge", () => {
       .mockResolvedValueOnce(success({ revenueMinor: 10 }))
       .mockResolvedValueOnce(success({ assetsMinor: 20 }))
       .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, error: "Cash flow failed" }, { status: 422 }) })
-      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, error: "FX exposure failed" }, { status: 422 }) });
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, error: "FX exposure failed" }, { status: 422 }) })
+      .mockResolvedValueOnce(success({ baseCurrency: "UGX", unsupportedCurrencies: [] }));
 
     const response = await GET();
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ cashFlow: null, fxExposure: null });
+  });
+
+  it.each([
+    { baseCurrency: "UGX", unsupportedCurrencies: ["USD", "EUR"] },
+    { baseCurrency: "ugx", unsupportedCurrencies: [] },
+    { baseCurrency: "UGX", unsupportedCurrencies: ["eur"] },
+    { baseCurrency: "UGX", unsupportedCurrencies: ["UGX"] },
+  ])("fails closed when Go returns malformed currency metadata: %j", async (metadata) => {
+    process.env.GO_ACCOUNTING_REPORTS_READ = "1";
+    mocks.executeGoCapability
+      .mockResolvedValueOnce(success({ revenueMinor: 10 }))
+      .mockResolvedValueOnce(success({ assetsMinor: 20 }))
+      .mockResolvedValueOnce(success({ netMinor: 30 }))
+      .mockResolvedValueOnce(success({ exposures: [] }))
+      .mockResolvedValueOnce(success(metadata));
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Accounting reports service unavailable" });
   });
 });

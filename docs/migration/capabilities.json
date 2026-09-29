@@ -3494,6 +3494,44 @@
       }
     },
     {
+      "id": "accounting.reportCurrencyMetadata",
+      "title": "Read report currency metadata",
+      "intent": "Read the organization base currency and distinct journal currencies for accounting report context",
+      "module": "accounting",
+      "risk": "read",
+      "permission": "accounting.read",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "baseCurrency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "unsupportedCurrencies": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            }
+          }
+        },
+        "required": [
+          "baseCurrency",
+          "unsupportedCurrencies"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "accounting.restoreBudgetScenarioVersion",
       "title": "Restore budget version",
       "intent": "Make a previously saved budget version current again while preserving every version in the audit history",
