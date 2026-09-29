@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryCycleCount, type InventoryItem, type InventoryLocation, type InventoryLot } from "../api/inventory";
+import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryCycleCount, type InventoryItem, type InventoryLocation, type InventoryLot, type InventoryTransfer } from "../api/inventory";
 import { legacyUrl } from "../legacy";
 import "./inventory-page.css";
 
@@ -8,7 +8,7 @@ type PageState =
   | { status: "loading" }
   | { status: "disabled" }
   | { status: "failed"; error: InventoryApiError }
-  | { status: "ready"; items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[] };
+  | { status: "ready"; items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[]; transfers: InventoryTransfer[] };
 
 type ItemFilter = "all" | "reorder";
 const CURRENCY_PREFERENCES = ["org", "USD", "KES", "EUR", "GBP", "TZS", "UGX"];
@@ -111,7 +111,7 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
         <div>
           <p className="inventory-eyebrow">Operations · preview</p>
           <h1>Inventory</h1>
-          <p>Review stock availability, reorder needs, lot details, and stock locations. Adjustments, transfers, and cycle counts stay in the full inventory workspace.</p>
+          <p>Review stock availability, reorder needs, lot details, stock locations, and transfer history. Adjustments, transfers, and cycle counts stay in the full inventory workspace.</p>
         </div>
         <a className="inventory-full-workspace" href={legacyUrl("/inventory")}>Open full inventory workspace</a>
       </header>
@@ -269,6 +269,54 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
                   </article>
                 );
               })}
+            </div>
+          )}
+        </section>
+      )}
+      {state.status === "ready" && (
+        <section className="inventory-lots" aria-labelledby="inventory-transfers-title">
+          <div className="inventory-lots-heading">
+            <div>
+              <p className="inventory-eyebrow">Read only</p>
+              <h2 id="inventory-transfers-title">Transfer history</h2>
+            </div>
+            <p>Review requested and confirmed quantities. Create and confirm transfers in the full inventory workspace.</p>
+          </div>
+          {state.transfers.length === 0 ? (
+            <p className="inventory-empty inventory-lots-empty" role="status">No inventory transfers recorded yet.</p>
+          ) : (
+            <div className="inventory-cycle-count-list">
+              {state.transfers.map((transfer) => (
+                <article className="inventory-table-card" key={transfer.id} aria-labelledby={`inventory-transfer-${transfer.id}`}>
+                  <div className="inventory-cycle-count-heading">
+                    <div>
+                      <h3 id={`inventory-transfer-${transfer.id}`}>Transfer #{transfer.number}</h3>
+                      <p>{transfer.from} to {transfer.to}{transfer.note ? ` · ${transfer.note}` : " · No note recorded"}</p>
+                    </div>
+                    <span className="inventory-status">{transfer.status}</span>
+                  </div>
+                  {transfer.lines.length === 0 ? (
+                    <p className="inventory-empty inventory-lots-empty">This transfer has no item lines.</p>
+                  ) : (
+                    <div className="inventory-table-scroll">
+                      <table className="inventory-table">
+                        <caption className="sr-only">Items for transfer {transfer.number}</caption>
+                        <thead><tr><th scope="col">SKU</th><th scope="col">Requested</th><th scope="col">Confirmed</th></tr></thead>
+                        <tbody>{transfer.lines.map((line, index) => {
+                          const unit = unitLabelBySku.get(line.sku) ?? "units";
+                          return (
+                            <tr key={`${transfer.id}:${line.sku}:${index}`}>
+                              <th scope="row">{line.sku || "SKU unavailable"}</th>
+                              <td>{formatQuantity(line.quantityThousandths, unit)}</td>
+                              <td>{formatQuantity(line.confirmedThousandths, unit)}</td>
+                            </tr>
+                          );
+                        })}</tbody>
+                      </table>
+                    </div>
+                  )}
+                </article>
+              ))}
             </div>
           )}
         </section>

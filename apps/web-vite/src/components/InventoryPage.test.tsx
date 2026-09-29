@@ -29,7 +29,7 @@ const items = [
   },
 ];
 const switchboard = { catalog: [{ id: "inventory" }], enabledModules: ["inventory"] };
-const report = { items, totalValueMinor: 12_000, lots: [], locations: [], cycleCounts: [] };
+const report = { items, totalValueMinor: 12_000, lots: [], locations: [], cycleCounts: [], transfers: [] };
 
 function inventoryFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
@@ -149,6 +149,52 @@ describe("Vite inventory page", () => {
     expect(screen.queryByRole("button", { name: /post|save|count/i })).toBeNull();
   });
 
+  it("shows read-only transfer history in API order with requested and confirmed quantities", async () => {
+    const transfers = [
+      {
+        id: "transfer-newest",
+        number: 42,
+        status: "partial",
+        note: "Urgent restock",
+        from: "MAIN",
+        to: "SHOP",
+        lines: [
+          { sku: "MUG-1", quantityThousandths: 2_500, confirmedThousandths: 1_000 },
+          { sku: "DESK-2", quantityThousandths: -500, confirmedThousandths: 0 },
+        ],
+      },
+      {
+        id: "transfer-older",
+        number: 41,
+        status: "cancelled",
+        note: null,
+        from: "SHOP",
+        to: "MAIN",
+        lines: [{ sku: "MUG-1", quantityThousandths: 1_000, confirmedThousandths: 1_000 }],
+      },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      return Response.json({ ...report, transfers });
+    }));
+    render(<InventoryPage />);
+
+    expect(await screen.findByRole("heading", { name: "Transfer history" })).not.toBeNull();
+    expect(screen.getByText("Review requested and confirmed quantities. Create and confirm transfers in the full inventory workspace.")).not.toBeNull();
+    const headings = screen.getAllByRole("heading", { name: /Transfer #/ });
+    expect(headings.map((heading) => heading.textContent)).toEqual(["Transfer #42", "Transfer #41"]);
+    expect(screen.getByText("MAIN to SHOP · Urgent restock")).not.toBeNull();
+    expect(screen.getByText("SHOP to MAIN · No note recorded")).not.toBeNull();
+    expect(screen.getAllByRole("columnheader", { name: "Requested" })).toHaveLength(2);
+    expect(screen.getAllByRole("columnheader", { name: "Confirmed" })).toHaveLength(2);
+    expect(screen.getByText("2.5 units")).not.toBeNull();
+    expect(screen.getAllByText("1 unit")).toHaveLength(4);
+    expect(screen.getByText("-0.5 units")).not.toBeNull();
+    expect(screen.getAllByText("0 units")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
+    expect(screen.queryByRole("button", { name: /transfer|confirm/i })).toBeNull();
+  });
+
   it("announces an empty lot list and keeps loading and failures accessible", async () => {
     let resolveReport: ((response: Response) => void) | undefined;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -161,6 +207,7 @@ describe("Vite inventory page", () => {
     await waitFor(() => expect(resolveReport).toBeDefined());
     await act(async () => { resolveReport?.(Response.json(report)); });
     expect(await screen.findByText("No inventory lots recorded yet.")).not.toBeNull();
+    expect(screen.getByText("No inventory transfers recorded yet.")).not.toBeNull();
     expect(screen.getByText("No stock locations recorded yet.")).not.toBeNull();
   });
 
@@ -194,7 +241,7 @@ describe("Vite inventory page", () => {
   it("formats value using the active currency's minor-unit scale", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      return Response.json({ items, totalValueMinor: 1_234_560, lots: [], locations: [], cycleCounts: [] });
+      return Response.json({ items, totalValueMinor: 1_234_560, lots: [], locations: [], cycleCounts: [], transfers: [] });
     }));
     render(<InventoryPage baseCurrency="BHD" />);
 

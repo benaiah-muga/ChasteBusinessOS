@@ -304,6 +304,12 @@ read. It requires `pnpm dev:api`, preserves decision reasons, vendor names,
 quote notes, ordering, and timestamps, and fails closed when Go is unavailable
 or returns invalid data. Other purchasing reads stay on their existing paths;
 the TypeScript path remains the default and the flag defaults to `0`.
+`GO_PURCHASING_AP_AGING_READS=1` opts the accounts payable aging report in
+`GET /api/purchasing` into the signed Go `purchasing.apAging` read. It requires
+`pnpm dev:api`, preserves the current, 31-60 day, 61-90 day, over-90 day, and
+total outstanding buckets in the workspace currency, and fails closed if Go
+is unavailable or returns invalid data. The TypeScript path remains the
+default and the flag defaults to `0`.
 `GO_PURCHASING_PAYMENT_RUN_READS=1` opts `GET /api/purchasing/payment-runs`
 into the signed Go `purchasing.listPaymentRuns` read. It requires
 `pnpm dev:api`, preserves run state and bill-level remittance fields, and fails
@@ -394,6 +400,10 @@ voiding, and the applicant pipeline through hire into the signed Go
 capability bridge. It requires `pnpm dev:api`; applicant listing and other HR
 actions remain on their existing handlers, and uncertain writes fail closed
 without a TypeScript retry. The flag defaults to `0`.
+`GO_PURCHASING_AP_AGING_READS=1` opts the supplier AP aging read into the
+signed Go capability bridge. It requires `pnpm dev:api`; other purchasing
+reads and all writes remain on their existing handlers. The flag defaults to
+`0`.
 
 For a production-shaped local Docker run, use the full Compose stack instead:
 

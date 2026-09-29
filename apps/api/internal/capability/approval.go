@@ -467,6 +467,12 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case apAgingCapabilityID:
+			parsed, parseErr := parsePurchasingAPAgingInput(transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
 			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 			parsed, parseErr := parseIAMInput(transition.row.CapabilityID, transition.row.Payload)
@@ -661,6 +667,8 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case billCreditNoteCapabilityID, closePurchaseOrderCapabilityID:
 		return "purchasing.write", true
 	case listReceiptsCapabilityID:
+		return "purchasing.read", true
+	case apAgingCapabilityID:
 		return "purchasing.read", true
 	case inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID:
 		return "inventory.write", true

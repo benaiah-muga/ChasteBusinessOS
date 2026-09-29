@@ -1,0 +1,46 @@
+.purchasing-aging-page { display: grid; gap: 1.25rem; padding: clamp(1rem, 2vw, 1.75rem); color: var(--text, #17252b); }
+.purchasing-aging-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; }
+.purchasing-aging-header h1 { margin: .2rem 0 .45rem; font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -.035em; }
+.purchasing-aging-header p { max-width: 54rem; margin: 0; color: var(--muted, #63727a); line-height: 1.55; }
+.purchasing-aging-eyebrow { color: var(--accent, #167d72) !important; font-size: .74rem; font-weight: 750; letter-spacing: .095em; text-transform: uppercase; }
+.purchasing-aging-full-workspace, .purchasing-aging-error-actions a { display: inline-flex; align-items: center; justify-content: center; min-height: 2.65rem; padding: .65rem .95rem; border: 1px solid var(--line, #cbd6d5); border-radius: .7rem; color: var(--text, #17252b); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.purchasing-aging-full-workspace:hover, .purchasing-aging-error-actions a:hover { border-color: var(--accent, #167d72); }
+.purchasing-aging-page a:focus-visible, .purchasing-aging-page button:focus-visible { outline: 3px solid var(--accent, #167d72); outline-offset: 3px; }
+.purchasing-aging-message, .purchasing-aging-report { border: 1px solid var(--line, #cbd6d5); border-radius: .9rem; background: var(--surface, #fff); }
+.purchasing-aging-message { padding: 1.25rem; }
+.purchasing-aging-message h2 { margin: .25rem 0 .5rem; }
+.purchasing-aging-message p, .purchasing-aging-note { color: var(--muted, #63727a); }
+.purchasing-aging-empty { display: grid; justify-items: start; gap: .3rem; }
+.purchasing-aging-empty h2, .purchasing-aging-empty p { margin: .15rem 0; }
+.purchasing-aging-error { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; border-color: #e7b5ab; background: #fff9f7; }
+.purchasing-aging-error-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.purchasing-aging-error-actions a { color: var(--text, #17252b); }
+.purchasing-aging-error-actions button { min-height: 2.5rem; padding: .55rem .85rem; border: 0; border-radius: .65rem; background: var(--accent, #167d72); color: #fff; cursor: pointer; font-weight: 700; }
+.purchasing-aging-total { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; padding: clamp(1.2rem, 3vw, 2rem); }
+.purchasing-aging-total h2 { margin: .3rem 0; font-size: clamp(2rem, 5vw, 3.3rem); font-weight: 650; letter-spacing: -.055em; font-variant-numeric: tabular-nums; }
+.purchasing-aging-total p { margin: 0; color: var(--muted, #63727a); }
+.purchasing-aging-clear { padding: .35rem .65rem; border: 1px solid #c8ded2; border-radius: 999px; background: #eff8f2; color: #236140; font-size: .78rem; font-weight: 700; }
+.purchasing-aging-meter { display: flex; height: .55rem; margin: 0 1.25rem; overflow: hidden; border-radius: 999px; background: #edf1f0; }
+.aging-meter-band { min-width: 0; transition: width 180ms ease-out; }
+.aging-meter-band.is-current, .aging-band-dot.is-current { background: #397b63; }
+.aging-meter-band.is-near, .aging-band-dot.is-near { background: #8f9e56; }
+.aging-meter-band.is-late, .aging-band-dot.is-late { background: #d49337; }
+.aging-meter-band.is-overdue, .aging-band-dot.is-overdue { background: #bb5844; }
+.purchasing-aging-table-wrap { overflow-x: auto; margin-top: .6rem; }
+.purchasing-aging-table { width: 100%; border-collapse: collapse; text-align: left; }
+.purchasing-aging-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.purchasing-aging-table th, .purchasing-aging-table td { padding: .8rem 1.25rem; border-top: 1px solid var(--line, #edf0ef); }
+.purchasing-aging-table thead th { color: var(--muted, #63727a); font-size: .75rem; font-weight: 700; }
+.purchasing-aging-table tbody th { font-size: .9rem; font-weight: 650; }
+.purchasing-aging-table td { color: var(--muted, #63727a); }
+.purchasing-aging-table td:nth-last-child(-n+2), .purchasing-aging-table tfoot td { text-align: right; font-variant-numeric: tabular-nums; }
+.aging-band-dot { display: inline-block; width: .55rem; height: .55rem; margin-right: .55rem; border-radius: 50%; }
+.purchasing-aging-table tfoot th, .purchasing-aging-table tfoot td { border-top: 2px solid var(--line, #cbd6d5); color: var(--text, #17252b); font-weight: 750; }
+.purchasing-aging-note { margin: 0; padding: .8rem 1.25rem 1rem; font-size: .82rem; }
+@media (prefers-reduced-motion: reduce) { .aging-meter-band { transition: none; } }
+@media (max-width: 760px) {
+  .purchasing-aging-header, .purchasing-aging-error, .purchasing-aging-total { align-items: stretch; flex-direction: column; }
+  .purchasing-aging-full-workspace { align-self: flex-start; }
+  .purchasing-aging-table { min-width: 35rem; }
+  .purchasing-aging-meter { margin-inline: 1rem; }
+}

@@ -45,6 +45,7 @@ describe("purchasing Go route adapter", () => {
     vi.stubEnv("GO_PURCHASING_BILL_CREDIT_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_RETURN_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_WORKFLOW_READS", "0");
+    vi.stubEnv("GO_PURCHASING_AP_AGING_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -107,6 +108,58 @@ describe("purchasing Go route adapter", () => {
       }],
     }]);
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches AP aging to Go behind its opt-in flag and keeps the same route shape", async () => {
+    vi.stubEnv("GO_PURCHASING_AP_AGING_READS", "1");
+    mocks.getDb.mockReturnValue({
+      db: {
+        select: vi.fn()
+          .mockReturnValueOnce(selectQuery([{ baseCurrency: "USD" }]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([])),
+      },
+    });
+    mocks.execute.mockResolvedValue({ ok: true, data: { rows: [] } });
+    const buckets = { current: 100, d30: 200, d60: 300, d90plus: 400, totalOutstanding: 1000 };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { buckets } }) });
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.apAging).toEqual({ buckets });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.apAging",
+      input: {},
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.apAging", ctx, {});
+  });
+
+  it("fails closed on malformed Go AP aging output without falling back to TypeScript", async () => {
+    vi.stubEnv("GO_PURCHASING_AP_AGING_READS", "1");
+    mocks.getDb.mockReturnValue({
+      db: {
+        select: vi.fn()
+          .mockReturnValueOnce(selectQuery([{ baseCurrency: "USD" }]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([])),
+      },
+    });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { buckets: { current: "100" } } }) });
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.apAging", ctx, {});
   });
 
   it("dispatches the purchasing workflow read to Go and preserves the full route payload", async () => {

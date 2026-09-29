@@ -8,6 +8,15 @@ import { z } from "zod";
 import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
 
 const noStore = { "Cache-Control": "no-store" };
+const apAgingOutputSchema = z.object({
+  buckets: z.object({
+    current: z.number().int().safe(),
+    d30: z.number().int().safe(),
+    d60: z.number().int().safe(),
+    d90plus: z.number().int().safe(),
+    totalOutstanding: z.number().int().safe(),
+  }).strict(),
+}).strict();
 const purchaseWorkflowSchema = z.object({
   requests: z.array(z.object({
     id: z.string(),
@@ -159,8 +168,32 @@ export async function GET() {
     .orderBy(desc(vendorBills.createdAt))
     .limit(100);
 
-  const aging = await executor.execute("purchasing.apAging", ctx, {});
-  if (!aging.ok) return NextResponse.json({ error: aging.error }, { status: 500 });
+  let apAging: unknown;
+  if (process.env.GO_PURCHASING_AP_AGING_READS === "1") {
+    const unavailableMessage = "purchasing AP aging service unavailable; reload the page before retrying";
+    let response: NextResponse;
+    try {
+      response = await purchasingGoResponse(
+        await executeGoCapability({
+          actionContext: ctx,
+          session: resolved,
+          capabilityId: "purchasing.apAging",
+          input: {},
+        }),
+        unavailableMessage,
+        apAgingOutputSchema,
+      );
+    } catch {
+      return goUnavailable(unavailableMessage);
+    }
+    if (response.status !== 200) return response;
+    const envelope = await response.json() as { data: z.infer<typeof apAgingOutputSchema> };
+    apAging = envelope.data;
+  } else {
+    const aging = await executor.execute("purchasing.apAging", ctx, {});
+    if (!aging.ok) return NextResponse.json({ error: aging.error }, { status: 500 });
+    apAging = aging.data ?? {};
+  }
 
   const priceHistory = await executor.execute("purchasing.priceHistory", ctx, {});
   if (!priceHistory.ok) return NextResponse.json({ error: priceHistory.error }, { status: 500 });
@@ -244,7 +277,7 @@ export async function GET() {
       dueMinor: documentOutstanding(b),
       createdAt: b.createdAt,
     })),
-    apAging: aging.data ?? {},
+    apAging,
     priceHistory: priceHistory.data ?? { rows: [] },
     supplierPerformance: supplierPerformance.data ?? { vendors: [] },
     requests: workflowRequests,

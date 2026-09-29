@@ -183,6 +183,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	instructPaymentRunCapabilityID:               {module: "purchasing", permission: "purchasing.post", risk: "money"},
 	reversePaymentRunCapabilityID:                {module: "purchasing", permission: "purchasing.post", risk: "money"},
 	listPaymentRunsCapabilityID:                  {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	apAgingCapabilityID:                          {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	periodCloseWorkbenchCapabilityID:             {module: "accounting", permission: "accounting.read", risk: "read"},
 	updatePeriodCloseCheckCapabilityID:           {module: "accounting", permission: "accounting.write", risk: "write"},
 	restorePeriodCloseCheckCapabilityID:          {module: "accounting", permission: "accounting.write", risk: "write"},
@@ -292,7 +293,7 @@ func supportedCapability(capabilityID string) bool {
 		inventoryImportItemsCapabilityID, inventoryUndoItemImportCapabilityID, inventoryRestoreItemImportCapabilityID,
 		inventoryReserveStockCapabilityID, inventoryReleaseReservationCapabilityID, inventoryListReservationsCapabilityID,
 		createPaymentRunCapabilityID, cancelPaymentRunDraftCapabilityID, restorePaymentRunDraftCapabilityID,
-		instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID,
+		instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID, apAgingCapabilityID,
 		periodCloseWorkbenchCapabilityID, updatePeriodCloseCheckCapabilityID, restorePeriodCloseCheckCapabilityID,
 		closePeriodCapabilityID, reopenPeriodCapabilityID, closeYearCapabilityID,
 		saveBudgetScenarioCapabilityID, undoBudgetScenarioVersionCapabilityID, restoreBudgetScenarioVersionCapabilityID,
@@ -756,6 +757,12 @@ func (e *Executor) execute(
 		case createPaymentRunCapabilityID, cancelPaymentRunDraftCapabilityID, restorePaymentRunDraftCapabilityID,
 			instructPaymentRunCapabilityID, reversePaymentRunCapabilityID, listPaymentRunsCapabilityID:
 			parsed, err := parsePurchasingPaymentRunInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case apAgingCapabilityID:
+			parsed, err := parsePurchasingAPAgingInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -1637,6 +1644,12 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case APAgingInput:
+			output, err := purchasingAPAging(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case ClosePeriodInput:
 			var output any
 			var execErr error
@@ -2079,7 +2092,7 @@ func canonicalInputHash(input any) (string, error) {
 		InventoryListLocationsInput, InventoryLookupByBarcodeInput, InventoryListCycleCountsInput,
 		InventoryImportItemsInput, InventoryUndoItemImportInput, InventoryRestoreItemImportInput,
 		InventoryReserveStockInput, InventoryReleaseReservationInput, InventoryListReservationsInput,
-		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput,
+		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput, APAgingInput,
 		ClosePeriodInput, PeriodCloseCheckInput, CloseYearInput,
 		SaveBudgetScenarioInput, BudgetScenarioVersionInput, ListBudgetScenariosInput, BudgetActualVsPlanInput,
 		CreateTaxProfileInput, RemoveTaxProfileInput, CreateTaxCodeInput, ArchiveTaxCodeInput, ActivateTaxCodeInput,

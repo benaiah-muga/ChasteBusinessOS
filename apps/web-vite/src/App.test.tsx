@@ -133,6 +133,7 @@ beforeEach(() => {
       lots: [],
       locations: [],
       cycleCounts: [],
+      transfers: [],
     });
     if (path === "/api/accounting") return Response.json({ invoices: [{
       id: "f9184ddd-a042-4e24-9fe1-553cadc44df1",
@@ -203,7 +204,13 @@ beforeEach(() => {
         remainingThousandths: 2000,
       }],
     } });
-    if (path === "/api/purchasing") return Response.json({ baseCurrency: "USD", orders: [{
+    if (path === "/api/purchasing") return Response.json({ baseCurrency: "USD", apAging: { buckets: {
+      current: 5000,
+      d30: 2000,
+      d60: 3000,
+      d90plus: 4000,
+      totalOutstanding: 14000,
+    } }, orders: [{
       id: "10000000-0000-4000-8000-000000000005",
       number: 204,
       vendorName: "Acme Supplies",
@@ -329,6 +336,20 @@ describe("Vite app frame", () => {
     expect(screen.getByRole("link", { name: "Purchasing" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Open full Purchasing workspace" })).not.toBeNull();
     expect(await screen.findByText("PAY-204")).not.toBeNull();
+  });
+
+  it("opens the accounts payable aging preview within the authenticated shell", async () => {
+    window.history.replaceState(null, "", "/purchasing/ap-aging");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Accounts payable aging" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Payables aging" }).getAttribute("aria-current")).toBe("page");
+    expect(await screen.findByRole("heading", { name: "$140.00" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Open full Purchasing workspace" }).getAttribute("href"))
+      .toBe("http://localhost:3001/purchasing?tab=bills");
+    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({ credentials: "same-origin" }));
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("opens the purchase receipt history preview within the authenticated shell", async () => {

@@ -225,6 +225,7 @@ var GoCapabilityPermissions = map[string]string{
 	"purchasing.billCreditNote":                "purchasing.write",
 	"purchasing.closePurchaseOrder":            "purchasing.write",
 	"purchasing.listReceipts":                  "purchasing.read",
+	"purchasing.apAging":                       "purchasing.read",
 	"inventory.postValuationSummary":           "inventory.write",
 	"inventory.reverseValuationSummary":        "inventory.write",
 	"inventory.stockReport":                    "inventory.read",

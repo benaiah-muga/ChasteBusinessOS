@@ -34,6 +34,22 @@ const CycleCountSchema = z.object({
   lines: z.array(CycleCountLineSchema),
 });
 
+const InventoryTransferLineSchema = z.object({
+  sku: z.string(),
+  quantityThousandths: z.number().int().safe(),
+  confirmedThousandths: z.number().int().safe(),
+});
+
+const InventoryTransferSchema = z.object({
+  id: z.string(),
+  number: z.number().int(),
+  status: z.string(),
+  note: z.string().nullable(),
+  from: z.string(),
+  to: z.string(),
+  lines: z.array(InventoryTransferLineSchema),
+});
+
 const InventoryReportSchema = z.object({
   items: z.array(InventoryItemSchema),
   totalValueMinor: z.number().int().safe(),
@@ -50,12 +66,14 @@ const InventoryReportSchema = z.object({
     balanceThousandths: z.number().int().safe().optional(),
   })),
   cycleCounts: z.array(CycleCountSchema),
+  transfers: z.array(InventoryTransferSchema),
 });
 
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 export type InventoryLocation = z.infer<typeof InventoryReportSchema>["locations"][number];
 export type InventoryLot = z.infer<typeof InventoryReportSchema>["lots"][number];
 export type InventoryCycleCount = z.infer<typeof CycleCountSchema>;
+export type InventoryTransfer = z.infer<typeof InventoryTransferSchema>;
 
 export class InventoryApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -76,7 +94,7 @@ export async function fetchInventoryEnabled(signal?: AbortSignal): Promise<boole
   return parsed.data.enabledModules.includes("inventory");
 }
 
-export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[] }> {
+export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[]; transfers: InventoryTransfer[] }> {
   const response = await fetchJson("/api/inventory", signal);
   if (!response.ok) {
     const error = z.object({ error: z.string() }).safeParse(response.body);

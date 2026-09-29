@@ -818,3 +818,28 @@ new owners and the manifest shows zero legacy runtime paths.
     existing same-origin API. Validate the response, handle empty and uncounted
     lines, and keep count creation and posting in the full workspace. Focused
     component/API tests, typecheck, lint, and production build pass.
+
+64. (Done) Add a default-off signed Go bridge for accounts payable aging in
+    `GET /api/purchasing` using `GO_PURCHASING_AP_AGING_READS=1`. Preserve the
+    existing balance filters, workspace currency, response shape, and floor-day
+    boundaries at 30, 60, and 90 days. Keep the purchasing.read permission,
+    module gate, and organization scope; malformed or unavailable Go output
+    fails closed. Go DB parity and route tests cover date edges and tenant scope.
+
+65. (Done) Add an authenticated read-only Vite Purchasing page for accounts
+    payable aging. Validate the existing same-origin response, display total and
+    age-band balances in the workspace currency, and keep bill actions in the
+    full workspace. Component tests cover success, zero balances, disabled
+    module, malformed response, retry, and authenticated route navigation.
+
+66. (Done) Extend the read-only Vite Inventory preview with transfer history
+    from the existing same-origin API. Preserve the API order, null notes,
+    signed requested quantities, and nullable confirmed quantities. Show
+    transfer routes and line details in accessible tables, keep transfer
+    actions in the full workspace, and cover normal, empty, and signed-quantity
+    cases with focused component tests.
+
+67. (Done) Add the Go read for the supplier AP aging report and bridge it
+    behind default-off `GO_PURCHASING_AP_AGING_READS`. Preserve aging buckets,
+    tenant isolation, and response shapes; other purchasing reads keep their
+    existing handlers.
