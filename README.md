@@ -404,6 +404,16 @@ without a TypeScript retry. The flag defaults to `0`.
 signed Go capability bridge. It requires `pnpm dev:api`; other purchasing
 reads and all writes remain on their existing handlers. The flag defaults to
 `0`.
+`GO_HR_OPENINGS_WRITE=1` opts job opening creation and closure into the
+signed Go capability bridge. It requires `pnpm dev:api`; applicant actions
+remain on their existing handlers, and uncertain writes fail closed without a
+TypeScript retry. The flag defaults to `0`.
+`GO_ACCOUNTING_REMINDERS_READS=1` opts payment reminder building into the
+signed Go capability bridge. It requires `pnpm dev:api`; everything else in
+accounting remains on its existing handlers. The flag defaults to `0`.
+Manufacturing and marketing capabilities run on the Go executor and worker
+without route flags: no public route serves them today, so they are reachable
+only through governed agent and worker dispatch.
 
 For a production-shaped local Docker run, use the full Compose stack instead:
 

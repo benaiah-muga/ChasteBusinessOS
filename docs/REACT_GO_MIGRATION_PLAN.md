@@ -843,3 +843,14 @@ new owners and the manifest shows zero legacy runtime paths.
     behind default-off `GO_PURCHASING_AP_AGING_READS`. Preserve aging buckets,
     tenant isolation, and response shapes; other purchasing reads keep their
     existing handlers.
+68. (Done) Add Go parity for the manufacturing BOM and work-order surface
+    (definition, explosion, costing, feasibility, release, completion,
+    cancellation, instant production, reversal, lot traceability, production
+    history) and the marketing campaign surface (segments, campaigns,
+    opt-out-honoring sends, delivery analytics) through the governed executor
+    and jobs worker. Manufacturing and marketing are reachable through
+    governed agent and worker dispatch; no public route serves them today.
+69. (Done) Add Go parity for HR job opening creation and closure and for
+    payment reminder building through the governed executor and jobs worker.
+    Bridge opening writes behind default-off `GO_HR_OPENINGS_WRITE` and
+    reminder building behind default-off `GO_ACCOUNTING_REMINDERS_READS`.
