@@ -716,6 +716,13 @@
       "when": 1790707933366,
       "tag": "0101_go_wave7_capability_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1790711368102,
+      "tag": "0102_go_wave8_capability_jobs",
+      "breakpoints": true
     }
   ]
 }

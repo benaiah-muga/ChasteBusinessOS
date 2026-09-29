@@ -269,6 +269,14 @@ var capabilitySpecs = map[string]capabilitySpec{
 	marketingCampaignAnalyticsCapabilityID:              {module: "marketing", permission: "marketing.read", risk: "read"},
 	hrCreateOpeningCapabilityID:                         {module: "hr", permission: "hr.write", risk: "write"},
 	hrCloseOpeningCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write"},
+	iamSetModulesCapabilityID:                           {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamRestoreModulesCapabilityID:                       {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamSetModuleConfigCapabilityID:                      {module: "iam", permission: "iam.admin", risk: "write"},
+	iamSetOrgPolicyCapabilityID:                         {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamSetOrgBrandingCapabilityID:                       {module: "iam", permission: "iam.admin", risk: "write"},
+	purchasingSupplierPerformanceCapabilityID:           {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	purchasingPriceHistoryCapabilityID:                  {module: "purchasing", permission: "purchasing.read", risk: "read"},
+	purchasingSupplierStatementCapabilityID:             {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	createProjectCapabilityID:                           {module: "projects", permission: "projects.write", risk: "write"},
 	ProjectBoardReadCapabilityID:                        {module: "projects", permission: "projects.read", risk: "read"},
 	archiveProjectCapabilityID:                          {module: "projects", permission: "projects.write", risk: "write"},
@@ -350,6 +358,10 @@ func supportedCapability(capabilityID string) bool {
 		marketingCreateSegmentCapabilityID, marketingCreateCampaignCapabilityID, marketingSendCampaignCapabilityID,
 		marketingCampaignAnalyticsCapabilityID,
 		hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID,
+		iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
+		iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID,
+		purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
+		purchasingSupplierStatementCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID,
 		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 		return true
@@ -905,6 +917,20 @@ func (e *Executor) execute(
 			input = parsed
 		case hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID:
 			parsed, err := parseHROpeningInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
+			iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID:
+			parsed, err := parseIAMOrgSettingsInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
+			purchasingSupplierStatementCapabilityID:
+			parsed, err := parsePurchasingReadsInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -2209,6 +2235,54 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case IAMModulesInput:
+			var output any
+			var execErr error
+			if capabilityID == iamRestoreModulesCapabilityID {
+				output, execErr = iamRestoreModules(ctx, tx, claims.OrganizationID, parsed)
+			} else {
+				output, execErr = iamSetModules(ctx, tx, claims.OrganizationID, parsed)
+			}
+			if execErr != nil {
+				return Result{}, execErr
+			}
+			data, err = marshalJS(output)
+		case IAMSetModuleConfigInput:
+			output, err := iamSetModuleConfig(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case IAMSetOrgPolicyInput:
+			output, err := iamSetOrgPolicy(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case IAMSetOrgBrandingInput:
+			output, err := iamSetOrgBranding(ctx, tx, claims.OrganizationID, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PurchasingSupplierPerformanceInput:
+			output, err := purchasingSupplierPerformance(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PurchasingPriceHistoryInput:
+			output, err := purchasingPriceHistory(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case PurchasingSupplierStatementInput:
+			output, err := purchasingSupplierStatement(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		default:
 			return Result{}, errors.New("unsupported capability input")
 		}
@@ -2316,6 +2390,8 @@ func canonicalInputHash(input any) (string, error) {
 		ManufacturingCostPreviewInput, ManufacturingLotTraceInput, ManufacturingProductionRunsInput,
 		MarketingCreateSegmentInput, MarketingCreateCampaignInput, MarketingSendCampaignInput, MarketingCampaignAnalyticsInput,
 		HRCreateOpeningInput, HRCloseOpeningInput,
+		IAMModulesInput, IAMSetModuleConfigInput, IAMSetOrgPolicyInput, IAMSetOrgBrandingInput,
+		PurchasingSupplierPerformanceInput, PurchasingPriceHistoryInput, PurchasingSupplierStatementInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput,
 		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput:
 		return canonicalHash(parsed)

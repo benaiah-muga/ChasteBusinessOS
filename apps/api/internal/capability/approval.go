@@ -509,6 +509,20 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
+			iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID:
+			parsed, parseErr := parseIAMOrgSettingsInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID,
+			purchasingSupplierStatementCapabilityID:
+			parsed, parseErr := parsePurchasingReadsInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
 			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 			parsed, parseErr := parseIAMInput(transition.row.CapabilityID, transition.row.Payload)
@@ -723,6 +737,11 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "marketing.read", true
 	case hrCreateOpeningCapabilityID, hrCloseOpeningCapabilityID:
 		return "hr.write", true
+	case iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetOrgPolicyCapabilityID,
+		iamSetModuleConfigCapabilityID, iamSetOrgBrandingCapabilityID:
+		return "iam.admin", true
+	case purchasingSupplierPerformanceCapabilityID, purchasingPriceHistoryCapabilityID, purchasingSupplierStatementCapabilityID:
+		return "purchasing.read", true
 	case inventoryPostValuationSummaryCapabilityID, inventoryReverseValuationSummaryCapabilityID:
 		return "inventory.write", true
 	case inventoryRebuildStockProjectionsCapabilityID:

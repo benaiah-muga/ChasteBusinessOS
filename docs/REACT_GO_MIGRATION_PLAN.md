@@ -854,3 +854,12 @@ new owners and the manifest shows zero legacy runtime paths.
     payment reminder building through the governed executor and jobs worker.
     Bridge opening writes behind default-off `GO_HR_OPENINGS_WRITE` and
     reminder building behind default-off `GO_ACCOUNTING_REMINDERS_READS`.
+70. (Done) Add Go parity for the IAM org settings family - module
+    switchboard with restore, per-module configuration, the blanket autonomy
+    policy, and print branding - through the governed executor and jobs worker
+    under `iam.admin`, preserving the protected spine union and previous-state
+    snapshot semantics. Settings routes keep their TypeScript handlers.
+71. (Done) Add Go parity for the purchasing supplier analytics reads -
+    supplier performance (lead time, on-time rate, fill rate, backorders),
+    price history, and the running-balance supplier statement - through the
+    governed executor and jobs worker under `purchasing.read`.
