@@ -21,6 +21,15 @@ const orders = [
     totalMinor: 75500,
     createdAt: "2026-09-28T11:30:00.000Z",
   },
+  {
+    id: "10000000-0000-4000-8000-000000000003",
+    number: 43,
+    customerId: "20000000-0000-4000-8000-000000000001",
+    status: "draft",
+    backordered: false,
+    totalMinor: 25000,
+    createdAt: "2026-09-28T12:00:00.000Z",
+  },
 ];
 const switchboard = { catalog: [{ id: "sales" }], enabledModules: ["sales"] };
 const customers = {
@@ -45,7 +54,7 @@ afterEach(() => {
 });
 
 describe("Vite sales page", () => {
-  it("shows sales order status, totals, backorder context, and searchable rows", async () => {
+  it("shows sales order status, totals, backorder context, searchable rows, and status filters", async () => {
     const fetchMock = salesFetch();
     vi.stubGlobal("fetch", fetchMock);
     render(<SalesPage baseCurrency="USD" />);
@@ -53,12 +62,21 @@ describe("Vite sales page", () => {
     expect(await screen.findByRole("heading", { name: "Sales orders" })).not.toBeNull();
     expect(screen.getByText("#41")).not.toBeNull();
     expect(screen.getByText("Backordered")).not.toBeNull();
-    expect(screen.getByText("Acme Foods")).not.toBeNull();
-    expect(screen.getByText("Confirmed")).not.toBeNull();
-    expect(screen.getByText("Delivered")).not.toBeNull();
+    expect(screen.getAllByText("Acme Foods")).toHaveLength(2);
+    expect(screen.getByRole("cell", { name: "Confirmed" })).not.toBeNull();
+    expect(screen.getByRole("cell", { name: "Delivered" })).not.toBeNull();
+    expect(screen.getByRole("cell", { name: "Draft" })).not.toBeNull();
     expect(screen.getByText("$1,299.00")).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith("/api/sales", expect.any(Object));
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirmed" }));
+    expect(screen.getByRole("button", { name: "Confirmed" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByText("#42")).toBeNull();
+    expect(screen.queryByText("#43")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.keyDown(window, { key: "/" });
+    expect(document.activeElement).toBe(screen.getByRole("searchbox", { name: "Find an order" }));
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Find an order" }), { target: { value: "Benaiah Market" } });
     expect(screen.getByText("#42")).not.toBeNull();

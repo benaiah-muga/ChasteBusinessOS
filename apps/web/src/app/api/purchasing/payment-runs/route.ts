@@ -4,7 +4,38 @@ import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel
 import { getResolvedUser } from "@/server/session";
 import { missingPermission } from "@/server/route-guards";
 import { getDb } from "@chaste/db";
-import { dispatchGoCapabilityRoute } from "@/server/go-route-response";
+import { dispatchGoCapabilityRoute, goCapabilityUnavailable } from "@/server/go-route-response";
+
+const paymentRunsOutputSchema = z.object({
+  runs: z.array(z.object({
+    id: z.string(),
+    reference: z.string(),
+    currency: z.string(),
+    totalMinor: z.number().int().refine(Number.isSafeInteger),
+    status: z.string(),
+    createdAt: z.string(),
+    instructedAt: z.string().nullable(),
+    confirmedAt: z.string().nullable(),
+    entryId: z.string().nullable(),
+    lines: z.array(z.object({
+      billId: z.string(),
+      billNumber: z.number().int().refine(Number.isSafeInteger),
+      vendorName: z.string(),
+      vendorRef: z.string().nullable(),
+      amountMinor: z.number().int().refine(Number.isSafeInteger),
+    })),
+  })),
+});
+
+async function dispatchPaymentRunsRead(ctx: NonNullable<ReturnType<typeof actorFromResolved>>, session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>) {
+  const unavailableMessage = "purchasing service unavailable; check payment run status before retrying";
+  const response = await dispatchGoCapabilityRoute({ actionContext: ctx, session, capabilityId: "purchasing.listPaymentRuns", input: {} }, unavailableMessage);
+  if (response.status !== 200) return response;
+
+  const parsed = z.object({ ok: z.literal(true), data: paymentRunsOutputSchema }).safeParse(await response.clone().json().catch(() => null));
+  if (!parsed.success) return goCapabilityUnavailable(unavailableMessage);
+  return NextResponse.json(parsed.data, { status: 200, headers: { "Cache-Control": "no-store" } });
+}
 
 function respond(result: { ok: boolean; data?: unknown; error?: string; pendingApproval?: unknown }) {
   if (result.pendingApproval) return NextResponse.json({ ok: false, pendingApproval: true, reason: result.error }, { status: 202 });
@@ -19,8 +50,8 @@ export async function GET() {
   if (denied) return denied;
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
-  if (process.env.GO_PURCHASING_PAYMENT_RUN_WRITES === "1") {
-    return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "purchasing.listPaymentRuns", input: {} }, "purchasing service unavailable; check payment run status before retrying");
+  if (process.env.GO_PURCHASING_PAYMENT_RUN_READS === "1" || process.env.GO_PURCHASING_PAYMENT_RUN_WRITES === "1") {
+    return dispatchPaymentRunsRead(ctx, resolved);
   }
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));

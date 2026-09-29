@@ -699,3 +699,18 @@ new owners and the manifest shows zero legacy runtime paths.
     status labels, backorder, loading, empty, and error states. Keep all existing
     quote and order actions available in the full Sales workspace. Vite API
     and component tests pass.
+
+49. (Done) Add a default-off signed Go read bridge for `purchasing.listPaymentRuns`
+    on `GET /api/purchasing/payment-runs` using
+    `GO_PURCHASING_PAYMENT_RUN_READS=1`. Preserve organization scope, run state,
+    timestamps, journal references, and bill-level remittance details. Validate
+    the complete response and fail closed after Go dispatch without a TypeScript
+    retry. Focused route tests pass, and the Go database test verifies run
+    ordering, remittance lines, and organization isolation.
+
+50. (Done) Add a default-off signed Go read bridge for the POS
+    `shiftSummary` action using `GO_POS_SHIFT_SUMMARY_READS=1`. Preserve the
+    existing authenticated, organization-scoped capability execution and
+    response shape, validate summary fields, and fail closed after Go dispatch
+    without a TypeScript retry. Focused route tests cover the default-off path,
+    enabled Go dispatch, and malformed Go responses.

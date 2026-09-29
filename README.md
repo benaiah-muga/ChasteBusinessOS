@@ -258,6 +258,12 @@ read. It requires `pnpm dev:api`, preserves decision reasons, vendor names,
 quote notes, ordering, and timestamps, and fails closed when Go is unavailable
 or returns invalid data. Other purchasing reads stay on their existing paths;
 the TypeScript path remains the default and the flag defaults to `0`.
+`GO_PURCHASING_PAYMENT_RUN_READS=1` opts `GET /api/purchasing/payment-runs`
+into the signed Go `purchasing.listPaymentRuns` read. It requires
+`pnpm dev:api`, preserves run state and bill-level remittance fields, and fails
+closed when Go is unavailable or returns invalid data. The TypeScript path
+remains the default and the flag defaults to `0`. Existing deployments with
+`GO_PURCHASING_PAYMENT_RUN_WRITES=1` continue to route this read through Go.
 `GO_INVENTORY_STOCK_WRITES=1` opts stock adjustments and stock transfer
 creation, confirmation, cancellation, and reversal into the signed Go
 capability bridge. Other inventory actions remain on their existing handlers.
@@ -278,6 +284,9 @@ the default; the flag defaults to `0`.
 summaries into the signed Go capability bridge. It requires `pnpm dev:api`;
 uncertain writes fail closed without a TypeScript retry. The flag defaults to
 `0`.
+`GO_POS_SHIFT_SUMMARY_READS=1` opts only the shift-summary action into Go
+independently of `GO_POS_WRITES`; its default is `0`. When `GO_POS_WRITES=1`,
+the existing Go dispatch behavior for shift summaries is preserved.
 `GO_ACCOUNTING_INVOICE_OPS_WRITE=1` opts credit notes and journal entry
 reversals into the signed Go capability bridge. It requires `pnpm dev:api`;
 other accounting actions remain on their existing handlers, and uncertain

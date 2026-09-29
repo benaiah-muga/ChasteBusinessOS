@@ -11,12 +11,16 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- **Opt-in Go POS shift-summary reads.** The `shiftSummary` action on `/api/pos` can use the signed `pos.shiftSummary` capability behind `GO_POS_SHIFT_SUMMARY_READS=1`. The flag defaults off, the summary response is validated and preserved, and unavailable or malformed Go responses fail closed without a TypeScript retry.
+- **Opt-in Go payment-run reads.** `GET /api/purchasing/payment-runs` can use the signed Go `purchasing.listPaymentRuns` capability behind `GO_PURCHASING_PAYMENT_RUN_READS=1`. The flag defaults off; run state, timestamps, journal references, and bill-level remittance fields are validated and preserved, and unavailable or malformed Go results fail closed.
+
 - **Opt-in Go purchasing workflow reads.** Purchase requests and RFQs in `GET /api/purchasing` can use the signed `purchasing.listPurchaseWorkflow` capability behind `GO_PURCHASING_WORKFLOW_READS=1`. The flag defaults off; decision reasons, vendor names, quote notes, ordering, timestamps, and the aggregate response stay stable, and unavailable or malformed Go responses fail closed.
 - **Opt-in Go accounting invoice reads.** The invoice list in `GET /api/accounting` can use the signed Go `accounting.listInvoices` capability behind `GO_ACCOUNTING_INVOICE_READS=1`. The flag defaults off; response fields are validated and preserved, and unavailable or malformed Go results fail closed without a TypeScript retry.
 - **Opt-in Go CRM saved-view reads.** Saved customer views can use a signed Go reader behind `GO_CRM_VIEW_READS=1`. The flag defaults off; shared and current-user private views retain their organization scope, ordering, and response fields, and unavailable or invalid Go responses fail closed.
 - **Opt-in Go CRM saved-view writes.** Saving customer views can use the signed Go capability executor behind `GO_CRM_VIEW_WRITES=1`. The flag defaults off; human session checks, private-view ownership, approval handling, audit receipts, snapshot restore, and the legacy response contract are preserved. Unavailable or invalid Go outcomes fail closed without a TypeScript retry.
 
 ### Added
+- **Vite sales order filters.** The Sales orders preview now filters by draft, confirmed, delivered, and cancelled status, while retaining customer/order search and the `/` search shortcut.
 - **Vite sales orders preview.** Added a React sales orders page with same-origin API loading, validated order data, search, totals, backorder labels, and recoverable loading and error states. Sales mutations remain on the current route owner.
 - **Opt-in Go authored-document reads.** The authored-document list in `GET /api/docs` can use signed Go `documents.listDocs` reads behind `GO_DOCUMENTS_LIST_READS=1`. The flag defaults off, templates stay on the legacy executor, the combined response is preserved, and unavailable or malformed Go results fail closed.
 - **Opt-in Go inventory stock report reads.** The main inventory report and reorder alerts can use signed Go `inventory.stockReport` reads behind `GO_INVENTORY_STOCK_REPORT_READS=1`. The flag defaults off, existing report fields stay stable, and unavailable or malformed Go results fail closed.

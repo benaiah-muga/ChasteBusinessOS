@@ -73,14 +73,62 @@
   outline-offset: 2px;
 }
 
+.sales-order-tools {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  margin: 1.75rem 0 1rem;
+}
+
+.sales-order-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  border: 1px solid #e5e2d9;
+  border-radius: 0.7rem;
+  padding: 0.25rem;
+  background: #fff;
+}
+
+.sales-order-filters button {
+  border: 0;
+  border-radius: 0.45rem;
+  padding: 0.55rem 0.7rem;
+  background: transparent;
+  color: #68665d;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sales-order-filters button[aria-pressed="true"] {
+  background: #302f29;
+  color: #fff;
+}
+
+.sales-order-filters button:focus-visible {
+  outline: 3px solid #b88a4f;
+  outline-offset: 2px;
+}
+
 .sales-search {
   display: grid;
   gap: 0.45rem;
   width: min(100%, 27rem);
-  margin: 1.75rem 0 1rem;
+  flex: 1 1 18rem;
+  margin: 0;
   color: #68665d;
   font-size: 0.78rem;
   font-weight: 600;
+}
+
+.sales-search-hint {
+  flex-basis: 100%;
+  margin-top: -0.5rem;
+  color: #77756d;
+  font-size: 0.72rem;
 }
 
 .sales-search input {

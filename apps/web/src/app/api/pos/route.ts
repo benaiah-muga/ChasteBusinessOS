@@ -9,6 +9,18 @@ import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-
 
 const noStore = { "Cache-Control": "no-store" };
 
+const posShiftSummarySchema = z.object({
+  register: z.string(),
+  status: z.string(),
+  salesCount: z.number().int(),
+  takingsMinor: z.number().int(),
+  tenderTotals: z.array(z.object({ method: z.string(), amountMinor: z.number().int() })),
+  refundTotals: z.array(z.object({ method: z.string(), amountMinor: z.number().int() })),
+  expectedCashMinor: z.number().int(),
+  countedCashMinor: z.number().int().nullable(),
+  varianceMinor: z.number().int().nullable(),
+});
+
 function goUnavailable() {
   return NextResponse.json({ error: "POS service unavailable; check register status before retrying" }, { status: 503, headers: noStore });
 }
@@ -56,6 +68,29 @@ async function dispatchPosGo(
 ) {
   try {
     return await posGoResponse(await executeGoCapability({ actionContext, session, capabilityId, input }));
+  } catch {
+    return goUnavailable();
+  }
+}
+
+async function dispatchPosShiftSummaryGo(
+  actionContext: NonNullable<ReturnType<typeof actorFromResolved>>,
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+  sessionId: string,
+) {
+  try {
+    const result = await executeGoCapability({
+      actionContext,
+      session,
+      capabilityId: "pos.shiftSummary",
+      input: { sessionId },
+    });
+    if (result.kind !== "response" || result.response.status !== 200) return posGoResponse(result);
+
+    const body: unknown = await result.response.json();
+    const parsed = z.object({ ok: z.literal(true), data: posShiftSummarySchema }).safeParse(body);
+    if (!parsed.success) return goUnavailable();
+    return NextResponse.json(parsed.data, { headers: noStore });
   } catch {
     return goUnavailable();
   }
@@ -284,7 +319,9 @@ export async function POST(req: Request) {
     if (goWrites) return dispatchPosGo(humanCtx, resolved, "pos.returnSale", input);
     result = await executor.execute("pos.returnSale", humanCtx, input);
   } else if (body.data.action === "shiftSummary") {
-    if (goWrites) return dispatchPosGo(humanCtx, resolved, "pos.shiftSummary", { sessionId: body.data.sessionId });
+    if (goWrites || process.env.GO_POS_SHIFT_SUMMARY_READS === "1") {
+      return dispatchPosShiftSummaryGo(humanCtx, resolved, body.data.sessionId);
+    }
     result = await executor.execute("pos.shiftSummary", humanCtx, {
       sessionId: body.data.sessionId,
     });

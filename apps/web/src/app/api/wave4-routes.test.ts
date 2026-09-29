@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   getDb: vi.fn(),
   dispatchGoCapabilityRoute: vi.fn(),
+  goCapabilityUnavailable: vi.fn(),
   executeGoCapability: vi.fn(),
   hasPermission: vi.fn(),
   missingPermission: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock("@chaste/kernel", () => ({ hasPermission: mocks.hasPermission }));
 vi.mock("@/server/kernel", () => ({ actorFromResolved: mocks.actorFromResolved, buildExecutor: mocks.buildExecutor, buildRegistry: mocks.buildRegistry }));
 vi.mock("@/server/session", () => ({ getResolvedUser: mocks.getResolvedUser }));
 vi.mock("@/server/route-guards", () => ({ missingPermission: mocks.missingPermission }));
-vi.mock("@/server/go-route-response", () => ({ dispatchGoCapabilityRoute: mocks.dispatchGoCapabilityRoute }));
+vi.mock("@/server/go-route-response", () => ({ dispatchGoCapabilityRoute: mocks.dispatchGoCapabilityRoute, goCapabilityUnavailable: mocks.goCapabilityUnavailable }));
 vi.mock("@/server/go-bridge", () => ({ executeGoCapability: mocks.executeGoCapability }));
 vi.mock("@/server/rate-limit", () => ({ checkRateLimit: mocks.checkRateLimit }));
 vi.mock("@/server/onboarding", () => ({ setOnboardingStep: mocks.setOnboardingStep }));
@@ -43,7 +44,7 @@ function request(path: string, body: unknown, method = "POST") {
 describe("Wave 4 Go route bridges", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    for (const name of ["GO_ACCOUNTING_BUDGET_WRITES", "GO_ACCOUNTING_PERIOD_CLOSE_WRITES", "GO_INVENTORY_IMPORT_WRITES", "GO_INVENTORY_RESERVATION_WRITES", "GO_PURCHASING_PAYMENT_RUN_WRITES"]) vi.stubEnv(name, "0");
+    for (const name of ["GO_ACCOUNTING_BUDGET_WRITES", "GO_ACCOUNTING_PERIOD_CLOSE_WRITES", "GO_INVENTORY_IMPORT_WRITES", "GO_INVENTORY_RESERVATION_WRITES", "GO_PURCHASING_PAYMENT_RUN_WRITES", "GO_PURCHASING_PAYMENT_RUN_READS"]) vi.stubEnv(name, "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -51,6 +52,7 @@ describe("Wave 4 Go route bridges", () => {
     mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
     mocks.execute.mockResolvedValue({ ok: true, data: { legacy: true } });
     mocks.dispatchGoCapabilityRoute.mockResolvedValue(Response.json({ ok: true, data: { go: true } }));
+    mocks.goCapabilityUnavailable.mockImplementation((message: string) => Response.json({ error: message }, { status: 503 }));
     mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { createdIds: [], imported: 0, skippedDuplicateRows: [] } }) });
     mocks.hasPermission.mockReturnValue(true);
     mocks.missingPermission.mockReturnValue(null);
@@ -106,6 +108,48 @@ describe("Wave 4 Go route bridges", () => {
     vi.stubEnv("GO_INVENTORY_RESERVATION_WRITES", "1");
     await inventoryPost(request("/api/inventory", { action: "reserveStock", sku: "MUG-1", quantityThousandths: 1000, reason: "order allocation" }));
     expect(mocks.executeGoCapability).toHaveBeenCalledWith(expect.objectContaining({ capabilityId: "inventory.reserveStock", input: { sku: "MUG-1", quantityThousandths: 1000, reason: "order allocation" } }));
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("opts payment-run reads into Go independently and fails closed on malformed run data", async () => {
+    const legacyResponse = await paymentRunsGet();
+    expect(await legacyResponse.json()).toEqual({ ok: true, data: { legacy: true } });
+    expect(mocks.dispatchGoCapabilityRoute).not.toHaveBeenCalled();
+    mocks.execute.mockClear();
+
+    vi.stubEnv("GO_PURCHASING_PAYMENT_RUN_READS", "1");
+    const run = {
+      id: "33333333-3333-4333-8333-333333333333",
+      reference: "PR-001",
+      currency: "USD",
+      totalMinor: 1250,
+      status: "draft",
+      createdAt: "2026-09-29T09:00:00.000Z",
+      instructedAt: null,
+      confirmedAt: null,
+      entryId: null,
+      lines: [{ billId: "44444444-4444-4444-8444-444444444444", billNumber: 7, vendorName: "Acme Supplies", vendorRef: "INV-7", amountMinor: 1250 }],
+    };
+    mocks.dispatchGoCapabilityRoute.mockResolvedValueOnce(Response.json({ ok: true, data: { runs: [run] } }));
+    const goResponse = await paymentRunsGet();
+    expect(goResponse.status).toBe(200);
+    expect(await goResponse.json()).toEqual({ ok: true, data: { runs: [run] } });
+    expect(mocks.dispatchGoCapabilityRoute).toHaveBeenCalledWith(expect.objectContaining({ actionContext: ctx, session: user, capabilityId: "purchasing.listPaymentRuns", input: {} }), expect.stringContaining("payment run status"));
+    expect(mocks.execute).not.toHaveBeenCalled();
+
+    const malformedRuns = [
+      { ...run, totalMinor: 1250.5 },
+      { ...run, totalMinor: Number.MAX_SAFE_INTEGER + 1 },
+      { ...run, lines: [{ ...run.lines[0], billNumber: 7.5 }] },
+      { ...run, lines: [{ ...run.lines[0], amountMinor: 1250.5 }] },
+      { ...run, lines: [{ ...run.lines[0], amountMinor: Number.MAX_SAFE_INTEGER + 1 }] },
+      { ...run, lines: [{ ...run.lines[0], amountMinor: "1250" }] },
+    ];
+    for (const malformedRun of malformedRuns) {
+      mocks.dispatchGoCapabilityRoute.mockResolvedValueOnce(Response.json({ ok: true, data: { runs: [malformedRun] } }));
+      const malformedResponse = await paymentRunsGet();
+      expect(malformedResponse.status).toBe(503);
+    }
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 

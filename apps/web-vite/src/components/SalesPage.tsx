@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchSalesEnabled, fetchSalesOrders, SalesApiError, type SalesOrder } from "../api/sales";
 import { CrmApiError, fetchCrmCustomers, type CrmCustomer } from "../api/crm";
@@ -12,6 +12,14 @@ type PageState =
   | { status: "ready"; orders: SalesOrder[]; customers: CrmCustomer[] };
 
 type CurrencyStyle = { symbol: string; minorUnits: number };
+type OrderFilter = "all" | "draft" | "confirmed" | "delivered" | "cancelled";
+const ORDER_FILTERS: { value: OrderFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "draft", label: "Draft" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "delivered", label: "Delivered" },
+  { value: "cancelled", label: "Cancelled" },
+];
 const CURRENCY_PREFERENCES = ["org", "USD", "KES", "EUR", "GBP", "TZS", "UGX"];
 const CURRENCY_SYMBOLS: Record<string, string> = { USD: "$", KES: "KSh", EUR: "€", GBP: "£", TZS: "TSh", UGX: "USh" };
 
@@ -58,6 +66,8 @@ function formatStatus(status: string): string {
 export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<OrderFilter>("all");
+  const searchRef = useRef<HTMLInputElement>(null);
   const currency = useMemo(() => currencyFor(baseCurrency), [baseCurrency]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -90,6 +100,19 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
     return () => controller.abort();
   }, [load]);
 
+  useEffect(() => {
+    function onShortcut(event: KeyboardEvent) {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return;
+      if (state.status !== "ready" || state.orders.length === 0) return;
+      event.preventDefault();
+      searchRef.current?.focus();
+    }
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, [state]);
+
   const customerNames = useMemo(() => state.status === "ready"
     ? new Map(state.customers.map((customer) => [customer.id, customer.name]))
     : new Map<string, string>(), [state]);
@@ -97,12 +120,13 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
   const filtered = useMemo(() => {
     if (state.status !== "ready") return [];
     const query = search.trim().toLocaleLowerCase();
-    if (!query) return state.orders;
-    return state.orders.filter((order) =>
-      [`#${order.number}`, customerNames.get(order.customerId) ?? "Unknown customer", order.status]
-        .some((value) => value.toLocaleLowerCase().includes(query)),
-    );
-  }, [customerNames, search, state]);
+    return state.orders.filter((order) => {
+      if (filter !== "all" && order.status !== filter) return false;
+      if (!query) return true;
+      return [`#${order.number}`, customerNames.get(order.customerId) ?? "Unknown customer", order.status]
+        .some((value) => value.toLocaleLowerCase().includes(query));
+    });
+  }, [customerNames, filter, search, state]);
 
   return (
     <main className="sales-page">
@@ -119,15 +143,31 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
       </header>
 
       {state.status === "ready" && state.orders.length > 0 && (
-        <label className="sales-search">
-          <span>Find an order</span>
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.currentTarget.value)}
-            placeholder="Order number, customer, or status"
-          />
-        </label>
+        <div className="sales-order-tools">
+          <div className="sales-order-filters" role="group" aria-label="Filter orders by status">
+            {ORDER_FILTERS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={filter === option.value}
+                onClick={() => setFilter(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <label className="sales-search">
+            <span>Find an order</span>
+            <input
+              ref={searchRef}
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.currentTarget.value)}
+              placeholder="Order number, customer, or status"
+            />
+          </label>
+          <span className="sales-search-hint">Press / to search</span>
+        </div>
       )}
 
       {state.status === "loading" && <p className="sales-loading" role="status">Loading sales orders…</p>}

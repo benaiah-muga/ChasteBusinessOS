@@ -25,6 +25,7 @@ describe("POS Go route adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GO_POS_WRITES", "0");
+    vi.stubEnv("GO_POS_SHIFT_SUMMARY_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     const db = {
@@ -46,11 +47,14 @@ describe("POS Go route adapter", () => {
     { body: { action: "shiftSummary", sessionId }, capabilityId: "pos.shiftSummary", input: { sessionId } },
   ])("dispatches $body.action to Go behind its flag", async ({ body, capabilityId, input }) => {
     vi.stubEnv("GO_POS_WRITES", "1");
-    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { done: true }, replayed: true }) });
+    const data = capabilityId === "pos.shiftSummary"
+      ? { register: "main", status: "open", salesCount: 0, takingsMinor: 0, tenderTotals: [], refundTotals: [], expectedCashMinor: 0, countedCashMinor: null, varianceMinor: null }
+      : { done: true };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data, replayed: true }) });
     const response = await POST(request({ ...body, intentId: "pos-intent" }));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ ok: true, data: { done: true } });
+    expect(await response.json()).toEqual({ ok: true, data });
     expect(mocks.executeGoCapability).toHaveBeenCalledWith({ actionContext: ctx, session: user, capabilityId, input });
     expect(mocks.execute).not.toHaveBeenCalled();
   });
@@ -59,6 +63,54 @@ describe("POS Go route adapter", () => {
     await POST(request({ action: "open", openingFloatMinor: 20000 }));
     expect(mocks.execute).toHaveBeenCalledWith("pos.openSession", ctx, { openingFloatMinor: 20000 });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps shift summary reads on TypeScript while the Go read flag is off", async () => {
+    await POST(request({ action: "shiftSummary", sessionId }));
+    expect(mocks.execute).toHaveBeenCalledWith("pos.shiftSummary", ctx, { sessionId });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches only the shift summary read through Go behind its own flag", async () => {
+    vi.stubEnv("GO_POS_SHIFT_SUMMARY_READS", "1");
+    const data = {
+      register: "main",
+      status: "open",
+      salesCount: 2,
+      takingsMinor: 5500,
+      tenderTotals: [{ method: "cash", amountMinor: 3500 }],
+      refundTotals: [],
+      expectedCashMinor: 3500,
+      countedCashMinor: null,
+      varianceMinor: null,
+    };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data }) });
+
+    const response = await POST(request({ action: "shiftSummary", sessionId, intentId: "pos-intent" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "pos.shiftSummary",
+      input: { sessionId },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on a malformed Go shift summary without retrying through TypeScript", async () => {
+    vi.stubEnv("GO_POS_SHIFT_SUMMARY_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { register: "main", status: "open" } }),
+    });
+
+    const response = await POST(request({ action: "shiftSummary", sessionId, intentId: "pos-intent" }));
+
+    expect(response.status).toBe(503);
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 
   it("preserves the pending-approval response without exposing its internal ID", async () => {
