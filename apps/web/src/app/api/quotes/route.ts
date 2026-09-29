@@ -58,6 +58,48 @@ async function quotesGoResponse(result: GoCapabilityBridgeResult, action: "creat
   return quotesGoUnavailable();
 }
 
+async function quotesReadGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return quotesGoUnavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const quoteSchema = z.object({
+        id: z.string(),
+        number: z.number().int(),
+        status: z.string(),
+        totalMinor: z.number().int(),
+        customerId: z.string(),
+        createdAt: z.string(),
+        expiresAt: z.string().nullable(),
+        invoiceId: z.string().nullable(),
+      });
+      const parsed = z.object({ ok: z.literal(true), data: z.object({ quotes: z.array(quoteSchema) }) }).safeParse(body);
+      if (!parsed.success) return quotesGoUnavailable();
+      return NextResponse.json(parsed.data.data, { headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return quotesGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return quotesGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return quotesGoUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+  } catch {
+    return quotesGoUnavailable();
+  }
+
+  return quotesGoUnavailable();
+}
+
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("create"),
@@ -86,10 +128,23 @@ export async function GET(req: Request) {
   const status = new URL(req.url).searchParams.get("status") ?? undefined;
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  const filteredStatus = status && ["draft", "sent", "accepted", "declined", "expired"].includes(status) ? status : undefined;
+  if (process.env.GO_ACCOUNTING_QUOTES_READS === "1") {
+    try {
+      return await quotesReadGoResponse(await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "accounting.listQuotes",
+        input: { status: filteredStatus },
+      }));
+    } catch {
+      return quotesGoUnavailable();
+    }
+  }
   const result = await buildExecutor(getDb().db, buildRegistry(getDb().db)).execute(
     "accounting.listQuotes",
     ctx,
-    { status: status && ["draft", "sent", "accepted", "declined", "expired"].includes(status) ? status : undefined },
+    { status: filteredStatus },
   );
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 });
   return NextResponse.json(result.data);

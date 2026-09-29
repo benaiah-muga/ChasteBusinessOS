@@ -129,6 +129,11 @@ remains the default; the flag defaults to `0`.
 reader. It requires `pnpm dev:api`, preserves shared views and views created by
 the current user, and fails closed if Go is unavailable or returns invalid
 data. The legacy route remains the default; the flag defaults to `0`.
+`GO_CRM_TIMELINE_READS=1` opts customer timeline reads on
+`GET /api/crm?timeline=<customerId>` into the signed Go read capability. It
+requires `pnpm dev:api`, preserves timeline fields, and fails closed when Go
+is unavailable or returns invalid data. Task reads remain isolated; the legacy
+route remains the default and the flag defaults to `0`.
 `GO_CRM_VIEW_WRITES=1` opts `POST /api/crm/views` into the signed Go capability
 bridge. It requires `pnpm dev:api`, preserves human session checks, approval
 responses, and save/restore audit receipts, and fails closed if Go is
@@ -168,6 +173,11 @@ expiry sweeps into the signed Go capability bridge. It requires `pnpm
 dev:api`; the dedicated quotes route and other accounting actions remain on
 their existing handlers, and uncertain writes fail closed without a
 TypeScript retry. The flag defaults to `0`.
+`GO_ACCOUNTING_QUOTES_READS=1` opts `GET /api/quotes` into the signed Go
+`accounting.listQuotes` read. It requires `pnpm dev:api`, preserves the
+status filter and response shape, and fails closed if Go is unavailable or
+returns invalid data. TypeScript remains the default; the flag defaults to
+`0`.
 `GO_ACCOUNTING_RECURRING_WRITE=1` opts recurring invoice template creation,
 pausing, and resumption into the signed Go capability bridge. It requires
 `pnpm dev:api`; the dedicated recurring route and other accounting actions
@@ -193,11 +203,26 @@ without a TypeScript retry. The flag defaults to `0`.
 capability bridge. Other purchasing actions remain on their existing
 handlers. It requires `pnpm dev:api`; uncertain writes fail closed without a
 TypeScript retry. The flag defaults to `0`.
+`GO_PURCHASING_PO_CLOSE_WRITES=1` opts only `closePurchaseOrder` on
+`POST /api/purchasing` into the signed Go capability bridge. It requires
+`pnpm dev:api`; approval responses are preserved and uncertain outcomes fail
+closed without a TypeScript retry. Purchase order creation and other actions
+remain on their existing handlers. The flag defaults to `0`.
+`GO_PURCHASING_RECEIPT_READS=1` opts the `receiptDetail` action on
+`POST /api/purchasing` into the signed Go read capability. It requires
+`pnpm dev:api`, preserves the receipts and order-line response, and fails
+closed if Go is unavailable or returns invalid data. The TypeScript path
+remains the default and the flag defaults to `0`.
 `GO_INVENTORY_STOCK_WRITES=1` opts stock adjustments and stock transfer
 creation, confirmation, cancellation, and reversal into the signed Go
 capability bridge. Other inventory actions remain on their existing handlers.
 It requires `pnpm dev:api`; uncertain writes fail closed without a TypeScript
 retry. The flag defaults to `0`.
+`GO_INVENTORY_ITEM_HISTORY_READS=1` opts `GET /api/inventory?sku=...` into
+the signed Go `inventory.itemHistory` read. It requires `pnpm dev:api`, keeps
+the `{ movements }` response and missing-item behavior, and fails closed if
+Go is unavailable or returns invalid data. TypeScript remains the default;
+the flag defaults to `0`.
 `GO_POS_WRITES=1` opts register opening, sales, closing, returns, and shift
 summaries into the signed Go capability bridge. It requires `pnpm dev:api`;
 uncertain writes fail closed without a TypeScript retry. The flag defaults to

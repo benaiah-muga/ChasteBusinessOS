@@ -65,25 +65,89 @@ async function dispatchInventoryGo(ctx: ReturnType<typeof actorFromResolved> & {
   }
 }
 
+const inventoryHistoryMovementSchema = z.object({
+  id: z.string(),
+  quantityDelta: z.number().int(),
+  reason: z.string(),
+  note: z.string().nullable(),
+  refType: z.string().nullable(),
+  unitCostMinor: z.number().int().nullable(),
+  lotCode: z.string().nullable(),
+  locationCode: z.string().nullable(),
+  actorType: z.string(),
+  createdAt: z.string(),
+});
+
+async function inventoryHistoryGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return goUnavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({
+        ok: z.literal(true),
+        data: z.object({ movements: z.array(inventoryHistoryMovementSchema) }),
+      }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ movements: parsed.data.data.movements }, { headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 404, headers: noStore });
+    }
+    if (result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 404, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+  } catch {
+    return goUnavailable();
+  }
+  return goUnavailable();
+}
+
+async function dispatchInventoryHistoryGo(ctx: ReturnType<typeof actorFromResolved> & {}, session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>, sku: string) {
+  try {
+    return await inventoryHistoryGoResponse(await executeGoCapability({
+      actionContext: ctx,
+      session,
+      capabilityId: "inventory.itemHistory",
+      input: { sku, limit: 100 },
+    }));
+  } catch {
+    return goUnavailable();
+  }
+}
+
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const orgId = resolved.orgId;
-  const db = getDb().db;
-
-  const registry = buildRegistry(db);
-  const executor = buildExecutor(db, registry);
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
 
   // Per-SKU movement history for the expandable ledger rows.
   const sku = new URL(req.url).searchParams.get("sku");
   if (sku) {
+    if (process.env.GO_INVENTORY_ITEM_HISTORY_READS === "1") {
+      return dispatchInventoryHistoryGo(ctx, resolved, sku);
+    }
+    const db = getDb().db;
+    const executor = buildExecutor(db, buildRegistry(db));
     const history = await executor.execute("inventory.itemHistory", ctx, { sku, limit: 100 });
     if (!history.ok) return NextResponse.json({ error: history.error }, { status: 404 });
     const movements = (history.data as { movements?: unknown[] } | null)?.movements ?? [];
     return NextResponse.json({ movements });
   }
+
+  const db = getDb().db;
+  const registry = buildRegistry(db);
+  const executor = buildExecutor(db, registry);
 
   const stock = await executor.execute("inventory.stockReport", ctx, { belowReorderOnly: false });
   if (!stock.ok) return NextResponse.json({ error: stock.error }, { status: 500 });

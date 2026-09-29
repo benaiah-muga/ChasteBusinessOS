@@ -65,6 +65,7 @@ describe("POST /api/quotes Go bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(resolved);
     mocks.actorFromResolved.mockReturnValue(actionContext);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -242,5 +243,85 @@ describe("POST /api/quotes Go bridge", () => {
     expect(await response.json()).toEqual({ quotes: [] });
     expect(mocks.execute).toHaveBeenCalledWith("accounting.listQuotes", actionContext, { status: "sent" });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("bridges quote listing through Go and keeps the status filter and response contract", async () => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_READS", "1");
+    const quotes = [{
+      id: quoteId,
+      number: 12,
+      status: "sent",
+      totalMinor: 125000,
+      customerId,
+      createdAt: "2026-09-27T12:00:00.000Z",
+      expiresAt: "2026-10-31T23:59:59.999Z",
+      invoiceId: null,
+    }];
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { quotes } }) });
+
+    const response = await GET(new Request("http://localhost/api/quotes?status=sent"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ quotes });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: resolved,
+      capabilityId: "accounting.listQuotes",
+      input: { status: "sent" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("ignores an unsupported quote status on the Go route as the TypeScript route does", async () => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { quotes: [] } }) });
+
+    const response = await GET(new Request("http://localhost/api/quotes?status=unknown"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith(expect.objectContaining({
+      capabilityId: "accounting.listQuotes",
+      input: { status: undefined },
+    }));
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "not-dispatched", result: { kind: "not-dispatched" } },
+    { label: "outcome-unknown", result: { kind: "outcome-unknown" } },
+    { label: "malformed response", result: { kind: "response", response: Response.json({ ok: true, data: { quotes: [{ id: quoteId }] } }) } },
+    { label: "null creation timestamp", result: { kind: "response", response: Response.json({ ok: true, data: { quotes: [{ id: quoteId, number: 12, status: "sent", totalMinor: 125000, customerId, createdAt: null, expiresAt: null, invoiceId: null }] } }) } },
+  ])("fails closed on $label without retrying the TypeScript read", async ({ result }) => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await GET(new Request("http://localhost/api/quotes?status=sent"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves the legacy validation error response from the Go quote list", async () => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: false, error: "quote status is invalid" }, { status: 422 }) });
+
+    const response = await GET(new Request("http://localhost/api/quotes?status=sent"));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: "quote status is invalid" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("maps Go membership denials to the legacy GET error response", async () => {
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ error: "organization membership required" }, { status: 403 }) });
+
+    const response = await GET(new Request("http://localhost/api/quotes?status=sent"));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: "organization membership required" });
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 });

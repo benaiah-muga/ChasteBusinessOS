@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CRMPage } from "./CRMPage";
 
@@ -87,6 +87,79 @@ describe("Vite CRM page", () => {
     fireEvent.click(within(updatedDialog).getByRole("button", { name: "Documents" }));
     expect(within(updatedDialog).getByText("Signed agreement")).not.toBeNull();
     expect(timelineReads).toBeGreaterThan(1);
+  });
+
+  it("keeps the selected customer's timeline when profile requests finish out of order", async () => {
+    const secondCustomerId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const secondCustomer = { ...customer("Contoso"), id: secondCustomerId };
+    let resolveFirstTimeline!: (response: Response) => void;
+    const firstTimeline = new Promise<Response>((resolve) => { resolveFirstTimeline = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [customer(), secondCustomer] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === `/api/crm?timeline=${customerId}`) return firstTimeline;
+      if (path === `/api/crm?timeline=${secondCustomerId}`) return Response.json({ entries: [
+        { kind: "document", date: "2026-09-21T12:00:00.000Z", refId: "doc-second", summary: "Contoso history" },
+      ] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(within(screen.getByRole("row", { name: /Northwind/ })).getByRole("button", { name: "Profile" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Northwind" })).getByRole("button", { name: "Activity" }));
+    fireEvent.click(within(screen.getByRole("row", { name: /Contoso/ })).getByRole("button", { name: "Profile" }));
+    const contosoDialog = await screen.findByRole("dialog", { name: "Contoso" });
+    fireEvent.click(within(contosoDialog).getByRole("button", { name: "Activity" }));
+    expect(await within(contosoDialog).findByText("Contoso history")).not.toBeNull();
+
+    resolveFirstTimeline(Response.json({ entries: [
+      { kind: "document", date: "2026-09-20T12:00:00.000Z", refId: "doc-first", summary: "Northwind history" },
+    ] }));
+    await waitFor(() => expect(within(contosoDialog).getByText("Contoso history")).not.toBeNull());
+    expect(within(contosoDialog).queryByText("Northwind history")).toBeNull();
+  });
+
+  it("ignores a pending timeline rejection after closing the customer profile", async () => {
+    let rejectTimeline!: (reason: unknown) => void;
+    let signalTimelineRejected!: () => void;
+    const timelineRejected = new Promise<void>((resolve) => { signalTimelineRejected = resolve; });
+    const pendingTimeline = new Promise<Response>((_resolve, reject) => { rejectTimeline = reject; }).catch((reason) => {
+      signalTimelineRejected();
+      throw reason;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === `/api/crm?timeline=${customerId}`) return pendingTimeline;
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Northwind" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close customer profile" }));
+    expect(screen.queryByRole("dialog", { name: "Northwind" })).toBeNull();
+
+    await act(async () => {
+      rejectTimeline(new Error("timeline request failed"));
+      await timelineRejected;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Northwind" })).toBeNull();
   });
 
   it("converts a lead into a new customer through the existing CRM capability route", async () => {

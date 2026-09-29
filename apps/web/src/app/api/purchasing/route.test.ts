@@ -25,6 +25,8 @@ describe("purchasing Go route adapter", () => {
     vi.stubEnv("GO_PURCHASING_BILL_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_PO_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_RECEIPT_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "0");
+    vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_RETURN_WRITES", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
@@ -35,6 +37,208 @@ describe("purchasing Go route adapter", () => {
     mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
   });
   afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps receipt detail on TypeScript while the Go read flag is off", async () => {
+    await POST(request({ action: "receiptDetail", poNumber: 14 }));
+
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.listReceipts", ctx, { poNumber: 14 });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches receipt detail to Go and preserves the response shape", async () => {
+    vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "1");
+    const data = {
+      receipts: [{ number: 4, receivedAt: "2026-09-23T10:30:00.000Z", note: null, lines: [] }],
+      orderLines: [{ position: 1, description: "Steel rod", orderedThousandths: 5000, acceptedThousandths: 3000, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 2000 }],
+    };
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data }),
+    });
+
+    const response = await POST(request({ action: "receiptDetail", poNumber: 14, intentId: "buy-intent" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.listReceipts",
+      input: { poNumber: 14 },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("validates receipt detail input before Go dispatch", async () => {
+    vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "1");
+
+    const response = await POST(request({ action: "receiptDetail" }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "poNumber is required" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it.each([{ kind: "not-dispatched" }, { kind: "outcome-unknown" }])(
+    "fails closed for a receipt read on $kind",
+    async (result) => {
+      vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "1");
+      mocks.executeGoCapability.mockResolvedValue(result);
+
+      const response = await POST(request({ action: "receiptDetail", poNumber: 14 }));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: "purchasing receipts service unavailable; reload the order before retrying",
+      });
+      expect(mocks.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps receiving writes on TypeScript when only receipt reads are enabled", async () => {
+    vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "1");
+    await POST(request({
+      action: "receiveGoods",
+      poNumber: 14,
+      lines: [{ lineNumber: 2, quantity: 1750 }],
+    }));
+
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.receiveGoods", ctx, {
+      poNumber: 14,
+      lines: [{ lineNumber: 2, quantity: 1750 }],
+      overreceiptTolerancePct: undefined,
+      authorityReason: undefined,
+      note: undefined,
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps purchase order closure on TypeScript while its Go flag is off", async () => {
+    await POST(request({ action: "closePurchaseOrder", poNumber: 14 }));
+
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.closePurchaseOrder", ctx, { poNumber: 14 });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches purchase order closure to Go and preserves its response", async () => {
+    vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "1");
+    const data = { closed: true, backordered: true, shortThousandths: 2500 };
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data }),
+    });
+
+    const response = await POST(request({ action: "closePurchaseOrder", poNumber: 14, intentId: "buy-intent" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.closePurchaseOrder",
+      input: { poNumber: 14 },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Go returns malformed purchase order closure data", async () => {
+    vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: {} }),
+    });
+
+    const response = await POST(request({ action: "closePurchaseOrder", poNumber: 14 }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing order closure service unavailable; check order status before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves approval responses for Go purchase order closure", async () => {
+    vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json(
+        { ok: false, pendingApproval: true, reason: "Closing this order requires approval" },
+        { status: 202 },
+      ),
+    });
+
+    const response = await POST(request({ action: "closePurchaseOrder", poNumber: 14 }));
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      ok: false,
+      pendingApproval: true,
+      reason: "Closing this order requires approval",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves Go purchase order closure errors", async () => {
+    vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, error: "order is already closed" }, { status: 422 }),
+    });
+
+    const response = await POST(request({ action: "closePurchaseOrder", poNumber: 14 }));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ ok: false, error: "order is already closed" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("validates purchase order closure input before Go dispatch", async () => {
+    vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "1");
+
+    const response = await POST(request({ action: "closePurchaseOrder" }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "poNumber is required" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it.each([{ kind: "not-dispatched" }, { kind: "outcome-unknown" }])(
+    "fails closed for purchase order closure on $kind without retrying TypeScript",
+    async (result) => {
+      vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "1");
+      mocks.executeGoCapability.mockResolvedValue(result);
+
+      const response = await POST(request({ action: "closePurchaseOrder", poNumber: 14 }));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        ok: false,
+        error: "purchasing order closure service unavailable; check order status before retrying",
+      });
+      expect(mocks.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps purchase order creation on TypeScript when only the close flag is enabled", async () => {
+    vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "1");
+    await POST(request({
+      action: "createPurchaseOrder",
+      vendorId: "vendor-1",
+      lines: [{ description: "Chair frame", quantity: 2500, unitPriceMinor: 4500 }],
+    }));
+
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.createPurchaseOrder", ctx, {
+      vendorId: "vendor-1",
+      lines: [{ description: "Chair frame", quantity: 2500, unitPriceMinor: 4500 }],
+      memo: undefined,
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
 
   it.each([
     { body: { action: "createVendor", name: "Kampala Supplies", email: "sales@example.test" }, capabilityId: "purchasing.createVendor", input: { name: "Kampala Supplies", email: "sales@example.test" } },
@@ -247,6 +451,8 @@ describe("purchasing Go request workflow bridge", () => {
     vi.stubEnv("GO_PURCHASING_BILL_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_PO_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_RECEIPT_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "0");
+    vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_REQUEST_WRITES", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);

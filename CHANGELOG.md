@@ -15,6 +15,11 @@ The full v1 changelog is preserved at the bottom of this file.
 - **Opt-in Go CRM saved-view writes.** Saving customer views can use the signed Go capability executor behind `GO_CRM_VIEW_WRITES=1`. The flag defaults off; human session checks, private-view ownership, approval handling, audit receipts, snapshot restore, and the legacy response contract are preserved. Unavailable or invalid Go outcomes fail closed without a TypeScript retry.
 
 ### Added
+- **Opt-in Go CRM timeline reads.** Customer timelines can use the signed Go reader behind `GO_CRM_TIMELINE_READS=1`. The flag defaults off; task reads stay on their current path, response fields are preserved, and unavailable or malformed Go results fail closed.
+- **Opt-in Go quote reads.** `GET /api/quotes` can use the signed Go `accounting.listQuotes` capability behind `GO_ACCOUNTING_QUOTES_READS=1`. The flag defaults off, status filtering and response fields stay stable, and unavailable or malformed Go results fail closed.
+- **Opt-in Go inventory item history.** `GET /api/inventory?sku=...` can read item movements through the signed Go capability behind `GO_INVENTORY_ITEM_HISTORY_READS=1`. The flag defaults off, preserves the movement response and missing-item behavior, and fails closed for unavailable or malformed Go results.
+- **Opt-in Go purchase receipt reads.** The purchasing `receiptDetail` action can use the signed Go `purchasing.listReceipts` capability behind `GO_PURCHASING_RECEIPT_READS=1`. The flag defaults off, preserves receipt and order-line response fields, and fails closed when Go is unavailable.
+- **Opt-in Go purchase order closure.** The `closePurchaseOrder` action can use the signed Go capability behind `GO_PURCHASING_PO_CLOSE_WRITES=1`. The flag defaults off, preserves approval and response behavior, and fails closed without a TypeScript retry when the Go outcome is uncertain.
 - **Opt-in Go accounting report reads.** The report capabilities consumed by `GET /api/reports` can use the signed Go executor behind `GO_ACCOUNTING_REPORTS_READ=1`. The flag defaults off, currency metadata and response fields stay stable, and unavailable Go responses fail closed.
 - **Go Wave 6 accounting, inventory, and purchasing capabilities.** Added governed Go execution and worker support for accounting reports and FX revaluation, inventory valuation and read models, and purchasing bill credits, purchase order closure, and receipt listing. Public route ownership remains unchanged while opt-in bridges and parity proofs are completed.
 - **Human approval for automated system money actions.** System jobs now use the configured money thresholds, and above-threshold or unknown amounts require a matching executing human approval. The legacy TypeScript and Go executors reject system jobs that try to create or reuse an unverified approval.
@@ -519,6 +524,7 @@ The full v1 changelog is preserved at the bottom of this file.
   for user-started runs, or the organization's configured model provider.
 
 ### Fixed
+- **CRM timeline profile switching.** Closing a customer profile or opening another surface invalidates its pending timeline request, so late results and errors do not update a dismissed profile.
 - **Unverified sessions could inspect organization membership names.** The organization list and switch endpoints now stop before querying memberships for unverified email sessions, preserving the empty organization context and preventing the active-org cookie from being set.
 - **Messages stayed on the loading screen.** The conversation list now loads on mount, and request failures leave loading state so the retry message can render.
 - **Templates outside the catalog were invisible in the gallery.** Built-in general templates (blank note, business letter, meeting notes, quote) and anything saved with Save as template lacked a catalog entry and silently skipped their cards; they now render under Other with their own paper thumbnails.

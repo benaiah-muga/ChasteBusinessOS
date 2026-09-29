@@ -287,7 +287,8 @@ export async function GET(req: Request) {
 
   if (!mode || !capabilityId || !capabilityInput) return NextResponse.json({ error: "nothing requested" }, { status: 400 });
 
-  const goReadEnabled = process.env.GO_CRM_READ === "1";
+  const goTimelineReadEnabled = mode === "timeline" && process.env.GO_CRM_TIMELINE_READS === "1";
+  const goReadEnabled = process.env.GO_CRM_READ === "1" || goTimelineReadEnabled;
   const shadowEnabled = !goReadEnabled && process.env.NODE_ENV === "development" && process.env.GO_CRM_SHADOW === "1";
   const legacyPayload = !goReadEnabled || shadowEnabled
     ? await buildExecutor(getDb().db, buildRegistry(getDb().db)).execute(capabilityId, ctx, capabilityInput)

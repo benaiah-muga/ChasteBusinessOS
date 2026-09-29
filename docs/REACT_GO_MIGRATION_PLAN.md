@@ -572,9 +572,10 @@ new owners and the manifest shows zero legacy runtime paths.
     organization-scoped executor paths, approval verification, and worker
     support are in place. System money jobs use configured amount thresholds
     and require an executing human approval for unknown or above-threshold
-    amounts. Public API bridges, parity proofs, and any route ownership changes
-    remain open; route defaults stay on the existing owners until those gates
-    pass.
+    amounts. The report read, receipt detail, and purchase order closure bridges
+    are recorded below. Remaining bill-credit and inventory-read bridges,
+    broader parity proofs, and route ownership changes remain open; route
+    defaults stay on the existing owners until those gates pass.
 
 31. (Done) Add Go parity for `crm.saveCustomerView` and its inverse,
     `crm.restoreCustomerView`, behind default-off `GO_CRM_VIEW_WRITES=1` on the
@@ -590,3 +591,31 @@ new owners and the manifest shows zero legacy runtime paths.
     Route ownership remains on the legacy handler; currency metadata remains a
     TypeScript database read until a later migration slice. Focused route tests
     and the existing Go report and FX capability proofs pass.
+
+33. (Done) Add a default-off signed Go read bridge for `receiptDetail`
+    on `POST /api/purchasing`. Preserve the receipt and order-line response,
+    millisecond timestamps, and the TypeScript default. Keep Go dispatch scoped
+    to this read action, separate from the existing receiving write flag.
+
+34. (Done) Add a default-off signed Go bridge for `closePurchaseOrder` on
+    `POST /api/purchasing` behind `GO_PURCHASING_PO_CLOSE_WRITES=1`. Preserve
+    the legacy validation, approval and error response behavior, shortfall
+    calculation, and response shape. Keep the flag independent from purchase
+    order creation, retain the legacy route default, and fail closed after Go
+    dispatch without a TypeScript retry. Focused route and Go capability tests
+    pass.
+
+35. (Done) Add a default-off signed Go read bridge for item movement
+    history on `GET /api/inventory?sku=...`. Preserve the legacy `{ movements }`
+    response and missing-item behavior; malformed or unavailable Go results
+    fail closed without a TypeScript retry.
+
+36. (Done) Add a default-off signed Go read bridge for `GET /api/quotes`
+    using `accounting.listQuotes`. Preserve status filtering, response fields,
+    legacy missing-quote behavior, and fail closed on unavailable or malformed
+    Go results.
+
+37. (Done) Add a default-off signed Go read bridge for CRM customer
+    timelines using `GO_CRM_TIMELINE_READS=1`. Preserve timeline fields and
+    task-read isolation, and fail closed when Go is unavailable or returns
+    invalid data.

@@ -9,43 +9,47 @@ import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-
 
 const noStore = { "Cache-Control": "no-store" };
 
-function goUnavailable() {
-  return NextResponse.json({ ok: false, error: "purchasing service unavailable; check bill status before retrying" }, { status: 503, headers: noStore });
+function goUnavailable(message = "purchasing service unavailable; check bill status before retrying") {
+  return NextResponse.json({ ok: false, error: message }, { status: 503, headers: noStore });
 }
 
-async function purchasingGoResponse(result: GoCapabilityBridgeResult) {
-  if (result.kind !== "response") return goUnavailable();
+async function purchasingGoResponse(
+  result: GoCapabilityBridgeResult,
+  unavailableMessage?: string,
+  successDataSchema: z.ZodType = z.record(z.string(), z.unknown()),
+) {
+  if (result.kind !== "response") return goUnavailable(unavailableMessage);
   try {
     const body: unknown = await result.response.json();
     if (result.response.status === 200) {
-      const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(body);
-      if (!parsed.success) return goUnavailable();
+      const parsed = z.object({ ok: z.literal(true), data: successDataSchema }).safeParse(body);
+      if (!parsed.success) return goUnavailable(unavailableMessage);
       return NextResponse.json(parsed.data, { headers: noStore });
     }
     if (result.response.status === 202) {
       const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
-      if (!parsed.success) return goUnavailable();
+      if (!parsed.success) return goUnavailable(unavailableMessage);
       return NextResponse.json({ ok: false, pendingApproval: true, reason: parsed.data.reason }, { status: 202, headers: noStore });
     }
     if (result.response.status === 422) {
       const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
-      if (!parsed.success) return goUnavailable();
+      if (!parsed.success) return goUnavailable(unavailableMessage);
       return NextResponse.json(parsed.data, { status: 422, headers: noStore });
     }
     if (result.response.status === 400 || result.response.status === 403) {
       const parsed = z.object({ error: z.string() }).safeParse(body);
-      if (!parsed.success) return goUnavailable();
+      if (!parsed.success) return goUnavailable(unavailableMessage);
       return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
     }
     if (result.response.status === 401) {
       const parsed = z.object({ error: z.string() }).safeParse(body);
-      if (!parsed.success) return goUnavailable();
+      if (!parsed.success) return goUnavailable(unavailableMessage);
       return NextResponse.json(parsed.data, { status: 401, headers: noStore });
     }
   } catch {
-    return goUnavailable();
+    return goUnavailable(unavailableMessage);
   }
-  return goUnavailable();
+  return goUnavailable(unavailableMessage);
 }
 
 /**
@@ -196,6 +200,47 @@ export async function POST(req: Request) {
   const intentId = typeof body.intentId === "string" ? body.intentId : undefined;
   const ctx = actorFromResolved(resolved, { intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+
+  if (body.action === "receiptDetail" && process.env.GO_PURCHASING_RECEIPT_READS === "1") {
+    if (!body.poNumber) return NextResponse.json({ error: "poNumber is required" }, { status: 400 });
+    const unavailableMessage = "purchasing receipts service unavailable; reload the order before retrying";
+    try {
+      return await purchasingGoResponse(
+        await executeGoCapability({
+          actionContext: ctx,
+          session: resolved,
+          capabilityId: "purchasing.listReceipts",
+          input: { poNumber: body.poNumber as number },
+        }),
+        unavailableMessage,
+      );
+    } catch {
+      return goUnavailable(unavailableMessage);
+    }
+  }
+
+  if (body.action === "closePurchaseOrder" && process.env.GO_PURCHASING_PO_CLOSE_WRITES === "1") {
+    if (!body.poNumber) return NextResponse.json({ error: "poNumber is required" }, { status: 400 });
+    const unavailableMessage = "purchasing order closure service unavailable; check order status before retrying";
+    try {
+      return await purchasingGoResponse(
+        await executeGoCapability({
+          actionContext: ctx,
+          session: resolved,
+          capabilityId: "purchasing.closePurchaseOrder",
+          input: { poNumber: body.poNumber as number },
+        }),
+        unavailableMessage,
+        z.object({
+          closed: z.literal(true),
+          backordered: z.boolean(),
+          shortThousandths: z.number().int().nonnegative(),
+        }),
+      );
+    } catch {
+      return goUnavailable(unavailableMessage);
+    }
+  }
 
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));

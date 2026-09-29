@@ -9,7 +9,7 @@ vi.mock("@/server/kernel", () => ({ actorFromResolved: mocks.actorFromResolved, 
 vi.mock("@/server/session", () => ({ getResolvedUser: mocks.getResolvedUser }));
 vi.mock("@/server/go-bridge", () => ({ executeGoCapability: mocks.executeGoCapability }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const user = { userId: "11111111-1111-4111-8111-111111111111", orgId: "22222222-2222-4222-8222-222222222222", permissions: new Set(["inventory.write"]) };
 const ctx = { actor: { type: "human", id: user.userId, orgId: user.orgId }, intentId: "inventory-intent" };
@@ -18,12 +18,17 @@ function request(body: unknown) {
   return new Request("http://localhost/api/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 }
 
+function readRequest(query = "") {
+  return new Request(`http://localhost/api/inventory${query}`);
+}
+
 describe("inventory Go route adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GO_INVENTORY_STOCK_WRITES", "0");
     vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS", "0");
     vi.stubEnv("GO_INVENTORY_RESERVATION_WRITES", "0");
+    vi.stubEnv("GO_INVENTORY_ITEM_HISTORY_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -33,6 +38,68 @@ describe("inventory Go route adapter", () => {
     mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
   });
   afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps item history on TypeScript while the Go read flag is off", async () => {
+    const movements = [{ id: "movement-1", quantityDelta: 1000, reason: "purchase", note: null, refType: null, unitCostMinor: 400, lotCode: null, locationCode: "MAIN", actorType: "human", createdAt: "2026-09-29T10:00:00.000Z" }];
+    mocks.execute.mockResolvedValue({ ok: true, data: { movements } });
+    const response = await GET(readRequest("?sku=MUG-1"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ movements });
+    expect(mocks.execute).toHaveBeenCalledWith("inventory.itemHistory", ctx, { sku: "MUG-1", limit: 100 });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("bridges item history through Go and preserves the movement response shape", async () => {
+    vi.stubEnv("GO_INVENTORY_ITEM_HISTORY_READS", "1");
+    const movements = [{ id: "movement-1", quantityDelta: 1000, reason: "purchase", note: null, refType: null, unitCostMinor: 400, lotCode: null, locationCode: "MAIN", actorType: "human", createdAt: "2026-09-29T10:00:00.000Z" }];
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { movements } }) });
+
+    const response = await GET(readRequest("?sku=MUG-1"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ movements });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.itemHistory",
+      input: { sku: "MUG-1", limit: 100 },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "not-dispatched", result: { kind: "not-dispatched" } },
+    { label: "outcome-unknown", result: { kind: "outcome-unknown" } },
+    { label: "malformed response", result: { kind: "response", response: Response.json({ ok: true, data: { movements: [{ id: "missing-fields" }] } }) } },
+  ])("fails closed on $label without falling back to TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_INVENTORY_ITEM_HISTORY_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await GET(readRequest("?sku=MUG-1"));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves the legacy not-found status for an unknown SKU", async () => {
+    vi.stubEnv("GO_INVENTORY_ITEM_HISTORY_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: false, error: "no item with SKU MISSING" }, { status: 422 }) });
+
+    const response = await GET(readRequest("?sku=MISSING"));
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "no item with SKU MISSING" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("maps a Go 403 denial to the legacy item-history not-found response", async () => {
+    vi.stubEnv("GO_INVENTORY_ITEM_HISTORY_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ error: "forbidden" }, { status: 403 }) });
+
+    const response = await GET(readRequest("?sku=MUG-1"));
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "forbidden" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
 
   it.each([
     { body: { action: "adjustStock", sku: "MUG-1", quantityDelta: 3000, note: "Opening stock", lotCode: "L1" }, capabilityId: "inventory.adjustStock", input: { sku: "MUG-1", quantityDelta: 3000, note: "Opening stock", lotCode: "L1" } },
