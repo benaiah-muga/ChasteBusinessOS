@@ -577,3 +577,60 @@ describe("POST /api/accounting Go year close bridge", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/accounting Go tax return bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_CREATE_INVOICE", "0");
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_OPS_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_TAX_RETURNS_WRITE", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { done: true } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("dispatches sales tax return filing through the signed Go bridge when enabled", async () => {
+    vi.stubEnv("GO_ACCOUNTING_TAX_RETURNS_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { filingId: "filing-1", taxReturnId: "return-1", entryId: "entry-9", taxMinor: -25000 } }),
+    });
+
+    const response = await POST(request({ action: "fileSalesTaxReturn", taxReturnId: "return-1" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      data: { filingId: "filing-1", taxReturnId: "return-1", entryId: "entry-9", taxMinor: -25000 },
+    });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+      capabilityId: "accounting.fileSalesTaxReturn",
+      input: { taxReturnId: "return-1" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps filing on TypeScript while the flag is off", async () => {
+    await POST(request({ action: "fileSalesTaxReturn", taxReturnId: "return-1" }));
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.fileSalesTaxReturn", actionContext, { taxReturnId: "return-1" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the Go outcome cannot be confirmed", async () => {
+    vi.stubEnv("GO_ACCOUNTING_TAX_RETURNS_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "outcome-unknown" });
+    const response = await POST(request({ action: "fileSalesTaxReturn", taxReturnId: "return-1" }));
+    expect(response.status).toBe(503);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

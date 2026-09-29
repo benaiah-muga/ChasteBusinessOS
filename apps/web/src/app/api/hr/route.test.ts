@@ -249,3 +249,85 @@ describe("HR route migration adapter", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("HR route Go leave-time and payroll-applicant bridges", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_HR_EMPLOYEE_WRITES", "0");
+    vi.stubEnv("GO_HR_LEAVE_TIME_WRITES", "0");
+    vi.stubEnv("GO_HR_PAYROLL_APPLICANT_WRITES", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: { handle: "legacy-db" } });
+    mocks.buildRegistry.mockReturnValue({ handle: "legacy-registry" });
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { done: true } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    { body: { action: "requestLeave", employeeId, kind: "annual", startDate: "2026-10-01", endDate: "2026-10-05" }, capabilityId: "hr.requestLeave", input: { employeeId, kind: "annual", startDate: "2026-10-01", endDate: "2026-10-05" } },
+    { body: { action: "decideLeave", requestId: "req-1", approve: true }, capabilityId: "hr.decideLeave", input: { requestId: "req-1", approve: true } },
+    { body: { action: "cancelLeave", requestId: "req-1" }, capabilityId: "hr.cancelLeave", input: { requestId: "req-1" } },
+    { body: { action: "clockIn", employeeId }, capabilityId: "hr.clockIn", input: { employeeId } },
+    { body: { action: "clockOut", employeeId }, capabilityId: "hr.clockOut", input: { employeeId } },
+  ])("dispatches $body.action through the signed Go bridge behind GO_HR_LEAVE_TIME_WRITES", async ({ body, capabilityId, input }) => {
+    vi.stubEnv("GO_HR_LEAVE_TIME_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { done: true }, replayed: true }) });
+    const response = await POST(request({ ...body, intentId: "hr-intent-5" }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: { done: true } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({ actionContext, session: resolved, capabilityId, input });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { body: { action: "createPayrollRun", year: 2026, month: 8 }, capabilityId: "hr.createPayrollRun", input: { year: 2026, month: 8 } },
+    { body: { action: "executePayrollRun", runId: "run-1", expectedTotalNetMinor: 96000 }, capabilityId: "hr.executePayrollRun", input: { runId: "run-1", expectedTotalNetMinor: 96000 } },
+    { body: { action: "voidPayrollRun", runId: "run-1" }, capabilityId: "hr.voidPayrollRun", input: { runId: "run-1" } },
+    { body: { action: "addApplicant", openingId: "opening-1", name: "Asha", email: "a@example.test", note: "Referral" }, capabilityId: "hr.addApplicant", input: { openingId: "opening-1", name: "Asha", email: "a@example.test", note: "Referral" } },
+    { body: { action: "moveApplicant", applicantId: "app-1", stage: "interview" }, capabilityId: "hr.moveApplicant", input: { applicantId: "app-1", stage: "interview" } },
+    { body: { action: "hireApplicant", applicantId: "app-1", monthlySalaryMinor: 3000000, annualLeaveDays: 21 }, capabilityId: "hr.hireApplicant", input: { applicantId: "app-1", monthlySalaryMinor: 3000000, annualLeaveDays: 21 } },
+  ])("dispatches $body.action through the signed Go bridge behind GO_HR_PAYROLL_APPLICANT_WRITES", async ({ body, capabilityId, input }) => {
+    vi.stubEnv("GO_HR_PAYROLL_APPLICANT_WRITES", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { done: true } }) });
+    const response = await POST(request({ ...body, intentId: "hr-intent-5" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: { done: true } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({ actionContext, session: resolved, capabilityId, input });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps leave, time, payroll, and applicant actions on the legacy executor while the flags are off", async () => {
+    await POST(request({ action: "requestLeave", employeeId, kind: "annual", startDate: "2026-10-01", endDate: "2026-10-05" }));
+    await POST(request({ action: "createPayrollRun", year: 2026, month: 8 }));
+    expect(mocks.execute).toHaveBeenCalledWith("hr.requestLeave", actionContext, {
+      employeeId, kind: "annual", startDate: "2026-10-01", endDate: "2026-10-05",
+    });
+    expect(mocks.execute).toHaveBeenCalledWith("hr.createPayrollRun", actionContext, { year: 2026, month: 8 });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("normalizes Go approvals and fails closed without retrying through TypeScript", async () => {
+    vi.stubEnv("GO_HR_PAYROLL_APPLICANT_WRITES", "1");
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, pendingApproval: true, reason: "Approval required", approvalId: "private-id" }, { status: 202 }),
+      })
+      .mockResolvedValueOnce({ kind: "outcome-unknown" });
+
+    const pending = await POST(request({ action: "executePayrollRun", runId: "run-1", expectedTotalNetMinor: 96000 }));
+    expect(pending.status).toBe(202);
+    expect(await pending.json()).toEqual({ ok: false, pendingApproval: true, reason: "Approval required" });
+
+    const unavailable = await POST(request({ action: "executePayrollRun", runId: "run-1", expectedTotalNetMinor: 96000 }));
+    expect(unavailable.status).toBe(503);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

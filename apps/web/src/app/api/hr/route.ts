@@ -16,6 +16,42 @@ function hrEmployeeGoUnavailable() {
   );
 }
 
+function hrUnavailable(message: string) {
+  return NextResponse.json({ error: message }, { status: 503, headers: noStore });
+}
+
+async function hrWaveGoResponse(result: GoCapabilityBridgeResult, unavailable: NextResponse) {
+  if (result.kind !== "response") return unavailable;
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).safeParse(body);
+      if (!parsed.success) return unavailable;
+      return NextResponse.json({ ok: true, data: parsed.data.data }, { headers: noStore });
+    }
+    if (result.response.status === 202) {
+      const parsed = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable;
+      return NextResponse.json({ ok: false, pendingApproval: true, reason: parsed.data.reason }, { status: 202, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable;
+      return NextResponse.json({ error: parsed.data.error }, { status: 401, headers: noStore });
+    }
+    if ([400, 403, 422].includes(result.response.status)) {
+      const parsed = result.response.status === 422
+        ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+        : z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable;
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+  } catch {
+    return unavailable;
+  }
+  return unavailable;
+}
+
 async function hrEmployeeGoResponse(
   result: GoCapabilityBridgeResult,
   action: "hireEmployee" | "deactivateEmployee" | "updateStructure",
@@ -250,6 +286,78 @@ export async function POST(req: Request) {
       return hrEmployeeGoResponse(result, body.action);
     } catch {
       return hrEmployeeGoUnavailable();
+    }
+  }
+
+  if (
+    process.env.GO_HR_LEAVE_TIME_WRITES === "1" &&
+    ["requestLeave", "decideLeave", "cancelLeave", "clockIn", "clockOut"].includes(body.action ?? "")
+  ) {
+    let capabilityId: string;
+    let input: Record<string, unknown>;
+    if (body.action === "requestLeave") {
+      if (!body.employeeId || !body.startDate || !body.endDate)
+        return NextResponse.json({ error: "employeeId, startDate and endDate are required" }, { status: 400 });
+      capabilityId = "hr.requestLeave";
+      input = { employeeId: body.employeeId as string, kind: body.kind as string, startDate: body.startDate as string, endDate: body.endDate as string };
+    } else if (body.action === "decideLeave") {
+      if (!body.requestId) return NextResponse.json({ error: "requestId is required" }, { status: 400 });
+      capabilityId = "hr.decideLeave";
+      input = { requestId: body.requestId as string, approve: Boolean(body.approve) };
+    } else if (body.action === "cancelLeave") {
+      if (!body.requestId) return NextResponse.json({ error: "requestId is required" }, { status: 400 });
+      capabilityId = "hr.cancelLeave";
+      input = { requestId: body.requestId as string };
+    } else {
+      if (!body.employeeId) return NextResponse.json({ error: "employeeId is required" }, { status: 400 });
+      capabilityId = body.action === "clockIn" ? "hr.clockIn" : "hr.clockOut";
+      input = { employeeId: body.employeeId as string };
+    }
+    const unavailable = hrUnavailable("HR service unavailable; check leave or time entry status before retrying");
+    try {
+      return await hrWaveGoResponse(await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId, input }), unavailable);
+    } catch {
+      return unavailable;
+    }
+  }
+
+  if (
+    process.env.GO_HR_PAYROLL_APPLICANT_WRITES === "1" &&
+    ["createPayrollRun", "executePayrollRun", "voidPayrollRun", "addApplicant", "moveApplicant", "hireApplicant"].includes(body.action ?? "")
+  ) {
+    let capabilityId: string;
+    let input: Record<string, unknown>;
+    if (body.action === "createPayrollRun") {
+      if (!body.year || !body.month) return NextResponse.json({ error: "year and month are required" }, { status: 400 });
+      capabilityId = "hr.createPayrollRun";
+      input = { year: body.year as number, month: body.month as number };
+    } else if (body.action === "executePayrollRun") {
+      if (!body.runId || body.expectedTotalNetMinor === undefined)
+        return NextResponse.json({ error: "runId and expectedTotalNetMinor are required" }, { status: 400 });
+      capabilityId = "hr.executePayrollRun";
+      input = { runId: body.runId as string, expectedTotalNetMinor: body.expectedTotalNetMinor as number };
+    } else if (body.action === "voidPayrollRun") {
+      if (!body.runId) return NextResponse.json({ error: "runId is required" }, { status: 400 });
+      capabilityId = "hr.voidPayrollRun";
+      input = { runId: body.runId as string };
+    } else if (body.action === "addApplicant") {
+      if (!body.openingId || !body.name) return NextResponse.json({ error: "openingId and name are required" }, { status: 400 });
+      capabilityId = "hr.addApplicant";
+      input = { openingId: body.openingId as string, name: body.name as string, email: (body.email as string) || undefined, note: (body.note as string) || undefined };
+    } else if (body.action === "moveApplicant") {
+      if (!body.applicantId || !body.stage) return NextResponse.json({ error: "applicantId and stage are required" }, { status: 400 });
+      capabilityId = "hr.moveApplicant";
+      input = { applicantId: body.applicantId as string, stage: body.stage as string };
+    } else {
+      if (!body.applicantId || !body.monthlySalaryMinor) return NextResponse.json({ error: "applicantId and monthlySalaryMinor are required" }, { status: 400 });
+      capabilityId = "hr.hireApplicant";
+      input = { applicantId: body.applicantId as string, monthlySalaryMinor: body.monthlySalaryMinor as number, annualLeaveDays: (body.annualLeaveDays as number) || undefined };
+    }
+    const unavailable = hrUnavailable("HR service unavailable; check payroll run or applicant status before retrying");
+    try {
+      return await hrWaveGoResponse(await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId, input }), unavailable);
+    } catch {
+      return unavailable;
     }
   }
 

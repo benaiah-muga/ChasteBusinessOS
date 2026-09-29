@@ -439,6 +439,21 @@ export async function POST(req: Request) {
     });
     return respond(result);
   }
+  if (body.action === "fileSalesTaxReturn" && body.taxReturnId && process.env.GO_ACCOUNTING_TAX_RETURNS_WRITE === "1") {
+    try {
+      return await invoiceOpsGoResponse(
+        await executeGoCapability({
+          actionContext: humanCtx,
+          session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+          capabilityId: "accounting.fileSalesTaxReturn",
+          input: { taxReturnId: body.taxReturnId as string },
+        }),
+        fileSalesTaxReturnOutputSchema,
+      );
+    } catch {
+      return accountingUnavailable();
+    }
+  }
   if (body.action === "fileSalesTaxReturn" && body.taxReturnId) {
     const result = await executor.execute("accounting.fileSalesTaxReturn", humanCtx, { taxReturnId: body.taxReturnId });
     return respond(result);
@@ -608,6 +623,12 @@ const creditNoteOutputSchema = z.object({
   invoiceBalanceMinor: z.number(),
 });
 const reverseEntryOutputSchema = z.object({ reversalEntryId: z.string() });
+const fileSalesTaxReturnOutputSchema = z.object({
+  filingId: z.string(),
+  taxReturnId: z.string(),
+  entryId: z.string(),
+  taxMinor: z.number(),
+});
 const quoteCreateOutputSchema = z.object({
   quoteId: z.string(),
   quoteNumber: z.number(),
