@@ -764,7 +764,13 @@ const listLots = (deps: ModuleDeps) =>
     input: z.object({}),
     output: z.object({
       lots: z.array(
-        z.object({ id: z.string(), sku: z.string(), lotCode: z.string(), balanceThousandths: z.number() }),
+        z.object({
+          id: z.string(),
+          sku: z.string(),
+          lotCode: z.string(),
+          balanceThousandths: z.number(),
+          expiresAt: z.string().nullable(),
+        }),
       ),
     }),
     execute: async (ctx) => {
@@ -775,6 +781,7 @@ const listLots = (deps: ModuleDeps) =>
           id: lots.id,
           itemId: lots.itemId,
           lotCode: lots.lotCode,
+          expiresAt: lots.expiresAt,
           balance: sql<number>`coalesce(sum(${stockMovements.quantityDelta}), 0)`,
         })
         .from(lots)
@@ -789,6 +796,7 @@ const listLots = (deps: ModuleDeps) =>
           sku: skuOf.get(l.itemId) ?? String(l.itemId),
           lotCode: l.lotCode,
           balanceThousandths: Number(l.balance),
+          expiresAt: l.expiresAt?.toISOString() ?? null,
         })),
       };
     },

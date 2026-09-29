@@ -13962,13 +13962,24 @@
                 },
                 "balanceThousandths": {
                   "type": "number"
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
                 "id",
                 "sku",
                 "lotCode",
-                "balanceThousandths"
+                "balanceThousandths",
+                "expiresAt"
               ],
               "additionalProperties": false
             }

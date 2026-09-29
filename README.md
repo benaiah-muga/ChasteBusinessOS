@@ -331,6 +331,11 @@ into the signed Go `inventory.listTransfers` read. It requires `pnpm dev:api`,
 preserves the 50-row limit, transfer routes, notes, and line quantities, and
 fails closed if Go is unavailable or returns invalid data. The flag defaults
 to `0`.
+`GO_INVENTORY_LOTS_READS=1` opts the lot list on `GET /api/inventory` into the
+signed Go `inventory.listLots` read. It requires `pnpm dev:api`, preserves the
+200-row newest-first order, SKU, lot code, expiration timestamp, and response
+fields, and fails closed if Go is unavailable or returns invalid data. The
+flag defaults to `0`.
 `GO_INVENTORY_VALUATION_SUMMARY_WRITE=1` opts the existing
 `postValuationSummary` action on `POST /api/inventory` into the signed Go
 `inventory.postValuationSummary` capability. It requires `pnpm dev:api`,

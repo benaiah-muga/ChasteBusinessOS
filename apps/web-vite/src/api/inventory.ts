@@ -21,9 +21,17 @@ const InventoryItemSchema = z.object({
 const InventoryReportSchema = z.object({
   items: z.array(InventoryItemSchema),
   totalValueMinor: z.number().int().safe(),
+  lots: z.array(z.object({
+    id: z.string(),
+    sku: z.string(),
+    lotCode: z.string(),
+    expiresAt: z.string().datetime({ offset: true }).nullable(),
+    balanceThousandths: z.number().int().safe().optional(),
+  })),
 });
 
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
+export type InventoryLot = z.infer<typeof InventoryReportSchema>["lots"][number];
 
 export class InventoryApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -44,7 +52,7 @@ export async function fetchInventoryEnabled(signal?: AbortSignal): Promise<boole
   return parsed.data.enabledModules.includes("inventory");
 }
 
-export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ items: InventoryItem[]; totalValueMinor: number }> {
+export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ items: InventoryItem[]; totalValueMinor: number; lots: InventoryLot[] }> {
   const response = await fetchJson("/api/inventory", signal);
   if (!response.ok) {
     const error = z.object({ error: z.string() }).safeParse(response.body);

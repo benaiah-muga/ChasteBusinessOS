@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryItem } from "../api/inventory";
+import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryItem, type InventoryLot } from "../api/inventory";
 import { legacyUrl } from "../legacy";
 import "./inventory-page.css";
 
@@ -8,7 +8,7 @@ type PageState =
   | { status: "loading" }
   | { status: "disabled" }
   | { status: "failed"; error: InventoryApiError }
-  | { status: "ready"; items: InventoryItem[]; totalValueMinor: number };
+  | { status: "ready"; items: InventoryItem[]; totalValueMinor: number; lots: InventoryLot[] };
 
 type ItemFilter = "all" | "reorder";
 const CURRENCY_PREFERENCES = ["org", "USD", "KES", "EUR", "GBP", "TZS", "UGX"];
@@ -46,6 +46,12 @@ function formatQuantity(thousandths: number, unit: string): string {
   const value = quantity.toLocaleString("en", { maximumFractionDigits: 3 });
   const label = new Intl.PluralRules("en").select(quantity) === "one" || unit.endsWith("s") ? unit : `${unit}s`;
   return `${value} ${label}`;
+}
+
+function formatLotExpiry(expiresAt: string | null): string {
+  if (!expiresAt) return "No expiry date";
+  const timestamp = Date.parse(expiresAt);
+  return Number.isNaN(timestamp) ? "Expiry date unavailable" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(timestamp);
 }
 
 export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
@@ -90,6 +96,9 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
       return !query || `${item.sku} ${item.name} ${item.kind}`.toLocaleLowerCase().includes(query);
     });
   }, [filter, search, state]);
+  const lots = state.status === "ready" ? state.lots : [];
+  const unitLabelBySku = new Map(state.status === "ready" ? state.items.map((item) => [item.sku, item.unitLabel] as const) : []);
+  const showLotBalance = lots.some((lot) => lot.balanceThousandths !== undefined);
 
   return (
     <main className="inventory-page">
@@ -97,7 +106,7 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
         <div>
           <p className="inventory-eyebrow">Operations · preview</p>
           <h1>Inventory</h1>
-          <p>Review stock availability and reorder needs. Adjustments, transfers, cycle counts, and lots stay in the full inventory workspace.</p>
+          <p>Review stock availability, reorder needs, and lot details. Adjustments, transfers, and cycle counts stay in the full inventory workspace.</p>
         </div>
         <a className="inventory-full-workspace" href={legacyUrl("/inventory")}>Open full inventory workspace</a>
       </header>
@@ -168,6 +177,43 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
             </section>
           )}
         </>
+      )}
+      {state.status === "ready" && (
+        <section className="inventory-lots" aria-labelledby="inventory-lots-title">
+          <div className="inventory-lots-heading">
+            <div>
+              <p className="inventory-eyebrow">Read only</p>
+              <h2 id="inventory-lots-title">Inventory lots</h2>
+            </div>
+            <p>Lot details are shown as returned by the inventory service.</p>
+          </div>
+          {lots.length === 0 ? (
+            <p className="inventory-empty inventory-lots-empty" role="status">No inventory lots recorded yet.</p>
+          ) : (
+            <div className="inventory-table-card" aria-label="Inventory lots">
+              <div className="inventory-table-scroll">
+                <table className="inventory-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">SKU</th>
+                      <th scope="col">Lot code</th>
+                      <th scope="col">Expiry date</th>
+                      {showLotBalance && <th scope="col">Current balance</th>}
+                    </tr>
+                  </thead>
+                  <tbody>{lots.map((lot) => (
+                      <tr key={lot.id}>
+                        <th scope="row">{lot.sku || "SKU unavailable"}</th>
+                        <td>{lot.lotCode}</td>
+                        <td>{formatLotExpiry(lot.expiresAt)}</td>
+                        {showLotBalance && <td>{lot.balanceThousandths === undefined ? "Not provided" : formatQuantity(lot.balanceThousandths, unitLabelBySku.get(lot.sku) ?? "units")}</td>}
+                      </tr>
+                    ))}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
       )}
     </main>
   );

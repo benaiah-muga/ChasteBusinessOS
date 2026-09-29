@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InventoryPage } from "./InventoryPage";
 
@@ -29,7 +29,7 @@ const items = [
   },
 ];
 const switchboard = { catalog: [{ id: "inventory" }], enabledModules: ["inventory"] };
-const report = { items, totalValueMinor: 12_000 };
+const report = { items, totalValueMinor: 12_000, lots: [] };
 
 function inventoryFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
@@ -68,6 +68,44 @@ describe("Vite inventory page", () => {
     expect(screen.queryByText("MUG-1")).toBeNull();
   });
 
+  it("shows read-only lot details and balances only when the API provides them", async () => {
+    const lots = [
+      { id: "lot-1", sku: "MUG-1", lotCode: "MUG-MAR-26", expiresAt: "2026-03-12T00:00:00.000Z", balanceThousandths: 1_500 },
+      { id: "lot-2", sku: "DESK-2", lotCode: "DESK-APR-26", expiresAt: null },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      return Response.json({ ...report, lots });
+    }));
+    render(<InventoryPage />);
+
+    expect(await screen.findByRole("heading", { name: "Inventory lots" })).not.toBeNull();
+    expect(screen.getAllByRole("columnheader", { name: "SKU" })).toHaveLength(2);
+    expect(screen.getByRole("columnheader", { name: "Lot code" })).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Expiry date" })).not.toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Current balance" })).not.toBeNull();
+    expect(screen.getByText("MUG-MAR-26")).not.toBeNull();
+    expect(screen.getByText("Mar 12, 2026")).not.toBeNull();
+    expect(screen.getByText("1.5 units")).not.toBeNull();
+    expect(screen.getByText("No expiry date")).not.toBeNull();
+    expect(screen.getByText("Not provided")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
+  });
+
+  it("announces an empty lot list and keeps loading and failures accessible", async () => {
+    let resolveReport: ((response: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Promise.resolve(Response.json(switchboard));
+      return new Promise<Response>((resolve) => { resolveReport = resolve; });
+    }));
+    render(<InventoryPage />);
+
+    expect(screen.getByRole("status").textContent).toContain("Loading stock levels");
+    await waitFor(() => expect(resolveReport).toBeDefined());
+    await act(async () => { resolveReport?.(Response.json(report)); });
+    expect(await screen.findByText("No inventory lots recorded yet.")).not.toBeNull();
+  });
+
   it("does not request stock data when Inventory is disabled", async () => {
     const fetchMock = vi.fn(async () => Response.json({ catalog: [{ id: "inventory" }], enabledModules: [] }));
     vi.stubGlobal("fetch", fetchMock);
@@ -87,6 +125,7 @@ describe("Vite inventory page", () => {
     render(<InventoryPage />);
 
     expect(await screen.findByRole("heading", { name: "Could not load stock levels" })).not.toBeNull();
+    expect(screen.getByRole("alert")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("MUG-1")).not.toBeNull();
     expect(attempt).toBe(2);
@@ -95,7 +134,7 @@ describe("Vite inventory page", () => {
   it("formats value using the active currency's minor-unit scale", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (input === "/api/modules") return Response.json(switchboard);
-      return Response.json({ items, totalValueMinor: 1_234_560 });
+      return Response.json({ items, totalValueMinor: 1_234_560, lots: [] });
     }));
     render(<InventoryPage baseCurrency="BHD" />);
 

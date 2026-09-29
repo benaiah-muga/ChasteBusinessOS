@@ -291,6 +291,52 @@ async function dispatchInventoryTransfersGo(
   }
 }
 
+const inventoryLotSchema = z.object({
+  id: z.string(),
+  sku: z.string(),
+  lotCode: z.string(),
+  balanceThousandths: inventoryValuationInteger,
+  expiresAt: z.string().datetime({ offset: true }).nullable(),
+});
+
+async function dispatchInventoryLotsGo(
+  ctx: ReturnType<typeof actorFromResolved> & {},
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+) {
+  try {
+    const result = await executeGoCapability({
+      actionContext: ctx,
+      session,
+      capabilityId: "inventory.listLots",
+      input: {},
+    });
+    if (result.kind !== "response") return goUnavailable();
+
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({
+        ok: z.literal(true),
+        data: z.object({ lots: z.array(inventoryLotSchema) }),
+      }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return parsed.data.data.lots.slice(0, 200).map(({ id, lotCode, sku, expiresAt }) => ({ id, lotCode, sku, expiresAt }));
+    }
+    if (result.response.status === 401 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: result.response.status, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    return goUnavailable();
+  } catch {
+    return goUnavailable();
+  }
+}
+
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -397,7 +443,20 @@ export async function GET(req: Request) {
     : [];
   const locationCodeById = new Map(locations.map((l) => [l.id, l.code]));
 
-  const lotRows = await db.select().from(lots).where(eq(lots.orgId, orgId)).orderBy(desc(lots.createdAt)).limit(200);
+  let lotList: { id: string; lotCode: string; sku: string; expiresAt: string | Date | null }[];
+  if (process.env.GO_INVENTORY_LOTS_READS === "1") {
+    const bridgedLots = await dispatchInventoryLotsGo(ctx, resolved);
+    if (bridgedLots instanceof Response) return bridgedLots;
+    lotList = bridgedLots;
+  } else {
+    const lotRows = await db.select().from(lots).where(eq(lots.orgId, orgId)).orderBy(desc(lots.createdAt)).limit(200);
+    lotList = lotRows.map((lot) => ({
+      id: lot.id,
+      lotCode: lot.lotCode,
+      sku: skuOf.get(lot.itemId) ?? "",
+      expiresAt: lot.expiresAt,
+    }));
+  }
 
   let transfers: { id: string; number: number; status: string; note: string | null; from: string; to: string; lines: { sku: string; quantityThousandths: number; confirmedThousandths: number }[] }[];
   if (process.env.GO_INVENTORY_TRANSFER_READS === "1") {
@@ -448,7 +507,7 @@ export async function GET(req: Request) {
           varianceThousandths: l.countedThousandths === null ? null : l.countedThousandths - l.expectedThousandths,
         })),
     })),
-    lots: lotRows.map((l) => ({ id: l.id, lotCode: l.lotCode, sku: skuOf.get(l.itemId) ?? "", expiresAt: l.expiresAt })),
+    lots: lotList,
     transfers,
   });
 }

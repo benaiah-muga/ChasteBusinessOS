@@ -66,6 +66,7 @@ describe("inventory Go route adapter", () => {
     vi.stubEnv("GO_INVENTORY_ITEM_HISTORY_READS", "0");
     vi.stubEnv("GO_INVENTORY_STOCK_REPORT_READS", "0");
     vi.stubEnv("GO_INVENTORY_TRANSFER_READS", "0");
+    vi.stubEnv("GO_INVENTORY_LOTS_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -110,6 +111,105 @@ describe("inventory Go route adapter", () => {
     expect(mocks.execute).toHaveBeenCalledWith("inventory.stockReport", ctx, { belowReorderOnly: false });
     expect(mocks.execute).toHaveBeenCalledWith("inventory.stockReport", ctx, { belowReorderOnly: true });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps lot rows on TypeScript by default", async () => {
+    const expiresAt = new Date("2026-10-01T00:00:00.000Z");
+    const db = inventoryReadDb([[], [], [], [], [{ id: "lot-1", itemId: "item-1", lotCode: "BATCH-1", expiresAt }]]);
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockImplementation(async (_id: string, _ctx: unknown, input: { belowReorderOnly: boolean }) => ({
+      ok: true,
+      data: { items: input.belowReorderOnly ? [stockReportItem] : [stockReportItem], totalValueMinor: 2000 },
+    }));
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(200);
+    expect((await response.json()).lots).toEqual([{ id: "lot-1", lotCode: "BATCH-1", sku: "", expiresAt: "2026-10-01T00:00:00.000Z" }]);
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("bridges the existing lot list through Go and returns only legacy lot fields", async () => {
+    vi.stubEnv("GO_INVENTORY_LOTS_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.execute.mockImplementation(async (_id: string, _ctx: unknown, input: { belowReorderOnly: boolean }) => ({
+      ok: true,
+      data: { items: input.belowReorderOnly ? [stockReportItem] : [stockReportItem], totalValueMinor: 2000 },
+    }));
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({
+      ok: true,
+      data: { lots: [{ id: "lot-1", sku: "MUG-1", lotCode: "BATCH-1", balanceThousandths: 400, expiresAt: "2026-10-01T00:00:00.000Z" }] },
+    }) });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(200);
+    expect((await response.json()).lots).toEqual([{ id: "lot-1", lotCode: "BATCH-1", sku: "MUG-1", expiresAt: "2026-10-01T00:00:00.000Z" }]);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.listLots",
+      input: {},
+    });
+  });
+
+  it("preserves the 200-lot limit for Go results", async () => {
+    vi.stubEnv("GO_INVENTORY_LOTS_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.execute.mockImplementation(async (_id: string, _ctx: unknown, input: { belowReorderOnly: boolean }) => ({
+      ok: true,
+      data: { items: input.belowReorderOnly ? [stockReportItem] : [stockReportItem], totalValueMinor: 2000 },
+    }));
+    const lots = Array.from({ length: 201 }, (_, index) => ({
+      id: `lot-${index}`,
+      sku: "MUG-1",
+      lotCode: `BATCH-${index}`,
+      balanceThousandths: 400,
+      expiresAt: null,
+    }));
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { lots } }) });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(200);
+    const returnedLots = (await response.json()).lots;
+    expect(returnedLots).toHaveLength(200);
+    expect(returnedLots[0]).toEqual({ id: "lot-0", lotCode: "BATCH-0", sku: "MUG-1", expiresAt: null });
+    expect(returnedLots.at(-1)?.id).toBe("lot-199");
+  });
+
+  it("preserves the Go inventory-read permission denial", async () => {
+    vi.stubEnv("GO_INVENTORY_LOTS_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.execute.mockImplementation(async (_id: string, _ctx: unknown, input: { belowReorderOnly: boolean }) => ({
+      ok: true,
+      data: { items: input.belowReorderOnly ? [stockReportItem] : [stockReportItem], totalValueMinor: 2000 },
+    }));
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "missing permission: inventory.read" }, { status: 403 }),
+    });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "missing permission: inventory.read" });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith(expect.objectContaining({ capabilityId: "inventory.listLots" }));
+  });
+
+  it("fails closed for an unavailable or malformed Go lot read without retrying in TypeScript", async () => {
+    vi.stubEnv("GO_INVENTORY_LOTS_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.execute.mockImplementation(async (_id: string, _ctx: unknown, input: { belowReorderOnly: boolean }) => ({
+      ok: true,
+      data: { items: input.belowReorderOnly ? [stockReportItem] : [stockReportItem], totalValueMinor: 2000 },
+    }));
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({
+      ok: true,
+      data: { lots: [{ id: "lot-1", sku: "MUG-1", lotCode: "BATCH-1", balanceThousandths: 400, expiresAt: "not-a-date" }] },
+    }) });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith(expect.objectContaining({ capabilityId: "inventory.listLots" }));
   });
 
   it("bridges the main stock report through Go and preserves legacy report fields", async () => {

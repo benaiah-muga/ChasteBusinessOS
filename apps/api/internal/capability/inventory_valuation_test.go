@@ -137,6 +137,8 @@ func seedInventoryValuationItem(t *testing.T, fx *executorFixture, orgID, sku, k
 
 func inventoryValuationIntPointer(value int64) *int64 { return &value }
 
+func inventoryValuationStringPointer(value string) *string { return &value }
+
 func inventoryValuationGLLines(t *testing.T, fx *executorFixture, entryID string) map[string][2]int64 {
 	t.Helper()
 	rows, err := fx.owner.Query(fx.ctx, `
@@ -244,8 +246,8 @@ func TestInventoryValuationParsersMirrorZodContracts(t *testing.T) {
 			parse:    func(raw json.RawMessage) (any, error) { return ParseInventoryListLotsInput(raw) },
 			raw:      `{"unknown":1}`,
 			wantJSON: `{}`,
-			output:   InventoryListLotsOutput{Lots: []InventoryListLotRow{{ID: uuid, SKU: "VAL-A", LotCode: "LOT-1", BalanceThousandths: 3000}}},
-			outputJS: `{"lots":[{"id":"` + uuid + `","sku":"VAL-A","lotCode":"LOT-1","balanceThousandths":3000}]}`,
+			output:   InventoryListLotsOutput{Lots: []InventoryListLotRow{{ID: uuid, SKU: "VAL-A", LotCode: "LOT-1", BalanceThousandths: 3000, ExpiresAt: inventoryValuationStringPointer("2026-10-01T00:00:00.000Z")}}},
+			outputJS: `{"lots":[{"id":"` + uuid + `","sku":"VAL-A","lotCode":"LOT-1","balanceThousandths":3000,"expiresAt":"2026-10-01T00:00:00.000Z"}]}`,
 		},
 		{
 			name:     "rebuildStockProjections",
@@ -673,6 +675,10 @@ func TestInventoryValuationItemHistoryAndLotsRead(t *testing.T) {
 	base := time.Date(2026, 9, 4, 8, 0, 0, 0, time.UTC)
 	lot1 := seedInventoryValuationLot(t, fx, fx.orgID, itemID, "LOT-1", base)
 	lot2 := seedInventoryValuationLot(t, fx, fx.orgID, itemID, "LOT-2", base.Add(time.Hour))
+	expiresAt := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE lots SET expires_at = $2 WHERE id = $1::uuid`, lot1, expiresAt); err != nil {
+		t.Fatal(err)
+	}
 	seedInventoryValuationLot(t, fx, fx.otherOrgID, foreignItem, "LOT-FOREIGN", base)
 	seedInventoryValuationMovement(t, fx, fx.orgID, itemID, 5000, "purchase", inventoryValuationIntPointer(1200), &lot1, &locationID, "system", base.Add(2*time.Hour))
 	seedInventoryValuationNotedMovement(t, fx, fx.orgID, itemID, -2000, "sale", "counter sale", "pos_sale", "human", base.Add(3*time.Hour), &lot1, nil)
@@ -725,8 +731,14 @@ func TestInventoryValuationItemHistoryAndLotsRead(t *testing.T) {
 	if lots.Lots[0].LotCode != "LOT-2" || lots.Lots[0].BalanceThousandths != 7000 || lots.Lots[0].SKU != "VAL-H" {
 		t.Fatalf("first lot = %+v, want LOT-2 newest with balance 7000", lots.Lots[0])
 	}
+	if lots.Lots[0].ExpiresAt != nil {
+		t.Fatalf("first lot expiresAt = %v, want null", *lots.Lots[0].ExpiresAt)
+	}
 	if lots.Lots[1].LotCode != "LOT-1" || lots.Lots[1].BalanceThousandths != 3000 || lots.Lots[1].SKU != "VAL-H" {
 		t.Fatalf("second lot = %+v, want LOT-1 with balance 3000", lots.Lots[1])
+	}
+	if lots.Lots[1].ExpiresAt == nil || *lots.Lots[1].ExpiresAt != "2026-10-01T00:00:00.000Z" {
+		t.Fatalf("second lot expiresAt = %v, want the millisecond UTC timestamp", lots.Lots[1].ExpiresAt)
 	}
 	for _, lot := range lots.Lots {
 		if lot.ID == "" || !isUUID(lot.ID) {

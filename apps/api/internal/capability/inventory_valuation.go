@@ -106,10 +106,11 @@ type InventoryItemHistoryOutput struct {
 type InventoryListLotsInput struct{}
 
 type InventoryListLotRow struct {
-	ID                 string `json:"id"`
-	SKU                string `json:"sku"`
-	LotCode            string `json:"lotCode"`
-	BalanceThousandths int64  `json:"balanceThousandths"`
+	ID                 string  `json:"id"`
+	SKU                string  `json:"sku"`
+	LotCode            string  `json:"lotCode"`
+	BalanceThousandths int64   `json:"balanceThousandths"`
+	ExpiresAt          *string `json:"expiresAt"`
 }
 
 type InventoryListLotsOutput struct {
@@ -748,7 +749,7 @@ func inventoryListLots(ctx context.Context, tx pgx.Tx, orgID string, input Inven
 	}
 	rows.Close()
 	lotRows, err := tx.Query(ctx, `
-		SELECT lots.id::text, lots.item_id::text, lots.lot_code, COALESCE(SUM(stock_movements.quantity_delta), 0)
+		SELECT lots.id::text, lots.item_id::text, lots.lot_code, COALESCE(SUM(stock_movements.quantity_delta), 0), lots.expires_at
 		FROM lots
 		LEFT JOIN stock_movements ON stock_movements.lot_id = lots.id
 		WHERE lots.org_id = $1::uuid
@@ -763,8 +764,13 @@ func inventoryListLots(ctx context.Context, tx pgx.Tx, orgID string, input Inven
 	for lotRows.Next() {
 		var lot InventoryListLotRow
 		var itemID string
-		if err := lotRows.Scan(&lot.ID, &itemID, &lot.LotCode, &lot.BalanceThousandths); err != nil {
+		var expiresAt *time.Time
+		if err := lotRows.Scan(&lot.ID, &itemID, &lot.LotCode, &lot.BalanceThousandths, &expiresAt); err != nil {
 			return InventoryListLotsOutput{}, err
+		}
+		if expiresAt != nil {
+			formatted := expiresAt.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+			lot.ExpiresAt = &formatted
 		}
 		lot.SKU = skuOf[itemID]
 		if lot.SKU == "" {

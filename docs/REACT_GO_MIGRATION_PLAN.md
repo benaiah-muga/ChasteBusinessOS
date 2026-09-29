@@ -774,3 +774,18 @@ new owners and the manifest shows zero legacy runtime paths.
     error states. Keep checklist edits, FX revaluation, close, and reopen in the
     full `/accounting/close` workspace. Focused API and component tests, Vite
     typecheck, and lint pass.
+
+58. (Done) Extend the read-only Vite inventory preview with lot SKU,
+    lot code, expiry date, and current balance when present in the existing
+    inventory response. Keep lot mutations in the full workspace and provide
+    accessible loading, empty, and error states. Focused Vite component/API
+    tests, typecheck, lint, and production build pass.
+
+59. (Done) Add a default-off signed Go bridge for the existing lot list in
+    `GET /api/inventory` using `GO_INVENTORY_LOTS_READS=1`. Preserve the 200-row
+    newest-first order, lot id, lot code, SKU, nullable expiration timestamp,
+    and exact route fields while keeping inventory read authorization and
+    module checks. Extend the registered `inventory.listLots` contract and Go
+    output in parity. Unavailable or malformed Go output fails closed without
+    retrying the TypeScript lot query. Focused route and Go database parity
+    tests pass, as does capability manifest validation.

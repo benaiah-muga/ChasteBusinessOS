@@ -78,6 +78,32 @@
   box-shadow: 0 12px 36px rgb(40 37 25 / 4%);
 }
 
+.inventory-lots {
+  margin-top: 1.5rem;
+}
+
+.inventory-lots-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.inventory-lots-heading h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.inventory-lots-heading > p {
+  margin: 0;
+  color: #77756d;
+}
+
+.inventory-lots-empty {
+  padding: 1rem;
+}
+
 .inventory-metrics article {
   display: grid;
   gap: 0.35rem;
@@ -277,6 +303,11 @@
   }
 
   .inventory-error {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .inventory-lots-heading {
     align-items: flex-start;
     flex-direction: column;
   }
