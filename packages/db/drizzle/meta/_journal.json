@@ -688,6 +688,13 @@
       "when": 1790615250549,
       "tag": "0097_go_purchasing_return_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1790640551618,
+      "tag": "0098_go_wave5_capability_jobs",
+      "breakpoints": true
     }
   ]
 }

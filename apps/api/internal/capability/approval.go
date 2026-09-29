@@ -408,6 +408,37 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case createTaxProfileCapabilityID, removeTaxProfileCapabilityID, createTaxCodeCapabilityID,
+			archiveTaxCodeCapabilityID, activateTaxCodeCapabilityID:
+			parsed, parseErr := parseAccountingTaxMasterInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case createTaxReturnCapabilityID, cancelTaxReturnDraftCapabilityID, restoreTaxReturnDraftCapabilityID,
+			recordTaxReturnSubmissionCapabilityID, createTaxReturnAmendmentCapabilityID,
+			recordTaxReturnAcknowledgmentCapabilityID, fileSalesTaxReturnCapabilityID:
+			parsed, parseErr := parseAccountingTaxReturnInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case hrRequestLeaveCapabilityID, hrCancelLeaveCapabilityID, hrDecideLeaveCapabilityID,
+			hrLogTimeCapabilityID, hrDecideTimeEntryCapabilityID, hrClockInCapabilityID, hrClockOutCapabilityID,
+			hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID:
+			parsed, parseErr := parseHRLeaveTimeInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case hrCreatePayrollRunCapabilityID, hrExecutePayrollRunCapabilityID, hrVoidPayrollRunCapabilityID,
+			hrReversePayrollPostingCapabilityID, hrAddApplicantCapabilityID, hrMoveApplicantCapabilityID,
+			hrHireApplicantCapabilityID, hrListApplicantsCapabilityID:
+			parsed, parseErr := parseHRPayrollApplicantInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID,
 			iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 			parsed, parseErr := parseIAMInput(transition.row.CapabilityID, transition.row.Payload)
@@ -581,6 +612,24 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "accounting.write", true
 	case listBudgetScenariosCapabilityID, budgetActualVsPlanCapabilityID:
 		return "accounting.read", true
+	case createTaxProfileCapabilityID, removeTaxProfileCapabilityID, createTaxCodeCapabilityID,
+		archiveTaxCodeCapabilityID, activateTaxCodeCapabilityID:
+		return "accounting.admin", true
+	case createTaxReturnCapabilityID, cancelTaxReturnDraftCapabilityID, restoreTaxReturnDraftCapabilityID,
+		createTaxReturnAmendmentCapabilityID:
+		return "accounting.write", true
+	case recordTaxReturnSubmissionCapabilityID, fileSalesTaxReturnCapabilityID:
+		return "accounting.post", true
+	case recordTaxReturnAcknowledgmentCapabilityID:
+		return "accounting.admin", true
+	case hrRequestLeaveCapabilityID, hrCancelLeaveCapabilityID, hrDecideLeaveCapabilityID,
+		hrLogTimeCapabilityID, hrDecideTimeEntryCapabilityID, hrClockInCapabilityID, hrClockOutCapabilityID,
+		hrCreatePayrollRunCapabilityID, hrExecutePayrollRunCapabilityID, hrVoidPayrollRunCapabilityID,
+		hrReversePayrollPostingCapabilityID, hrAddApplicantCapabilityID, hrMoveApplicantCapabilityID,
+		hrHireApplicantCapabilityID:
+		return "hr.write", true
+	case hrLeaveBalanceCapabilityID, hrLeaveCalendarCapabilityID, hrTimeReportCapabilityID, hrListApplicantsCapabilityID:
+		return "hr.read", true
 	case iamListMembersCapabilityID:
 		return "iam.read", true
 	case iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
