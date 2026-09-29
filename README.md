@@ -117,6 +117,11 @@ the GET route remain on the legacy handler. The flag defaults to `0`.
 preserves the response shape and currency metadata, and fails closed when Go
 is unavailable or returns invalid data. The TypeScript path remains the
 default and the flag defaults to `0`.
+`GO_ACCOUNTING_INVOICE_READS=1` opts only the governed
+`accounting.listInvoices` read inside `GET /api/accounting` into the signed Go
+executor. It requires `pnpm dev:api`, preserves invoice fields, and fails
+closed without a TypeScript retry when Go is unavailable or returns invalid
+data. The TypeScript path remains the default and the flag defaults to `0`.
 `GO_CRM_DEAL_WRITES=1` opts deal creation, stage changes, and lead conversion
 into the signed Go capability bridge. It requires `pnpm dev:api`; reads and
 other CRM actions remain on the legacy handler, and uncertain writes fail
@@ -247,6 +252,12 @@ flag defaults to `0`.
 `pnpm dev:api`, preserves the receipts and order-line response, and fails
 closed if Go is unavailable or returns invalid data. The TypeScript path
 remains the default and the flag defaults to `0`.
+`GO_PURCHASING_WORKFLOW_READS=1` opts the requests and RFQs section of
+`GET /api/purchasing` into the signed Go `purchasing.listPurchaseWorkflow`
+read. It requires `pnpm dev:api`, preserves decision reasons, vendor names,
+quote notes, ordering, and timestamps, and fails closed when Go is unavailable
+or returns invalid data. Other purchasing reads stay on their existing paths;
+the TypeScript path remains the default and the flag defaults to `0`.
 `GO_INVENTORY_STOCK_WRITES=1` opts stock adjustments and stock transfer
 creation, confirmation, cancellation, and reversal into the signed Go
 capability bridge. Other inventory actions remain on their existing handlers.

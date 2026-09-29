@@ -1276,14 +1276,17 @@ const listPurchaseWorkflow = (deps: ModuleDeps) =>
           justification: z.string(),
           estimatedAmountMinor: z.number().nullable(),
           status: z.string(),
+          decisionReason: z.string().nullable(),
           createdAt: z.string(),
           rfqs: z.array(
             z.object({
               id: z.string(),
               vendorId: z.string(),
+              vendorName: z.string(),
               status: z.string(),
               quoteAmountMinor: z.number().nullable(),
               quoteLeadTimeDays: z.number().nullable(),
+              quoteNotes: z.string().nullable(),
             }),
           ),
         }),
@@ -1297,7 +1300,20 @@ const listPurchaseWorkflow = (deps: ModuleDeps) =>
         .orderBy(desc(purchaseRequests.createdAt))
         .limit(50);
       const rfqRows = reqRows.length
-        ? await deps.db.select().from(rfqs).where(eq(rfqs.orgId, ctx.actor.orgId))
+        ? await deps.db
+            .select({
+              id: rfqs.id,
+              requestId: rfqs.requestId,
+              vendorId: rfqs.vendorId,
+              vendorName: vendors.name,
+              status: rfqs.status,
+              quoteAmountMinor: rfqs.quoteAmountMinor,
+              quoteLeadTimeDays: rfqs.quoteLeadTimeDays,
+              quoteNotes: rfqs.quoteNotes,
+            })
+            .from(rfqs)
+            .leftJoin(vendors, and(eq(vendors.id, rfqs.vendorId), eq(vendors.orgId, ctx.actor.orgId)))
+            .where(eq(rfqs.orgId, ctx.actor.orgId))
         : [];
       return {
         requests: reqRows.map((r) => ({
@@ -1306,15 +1322,18 @@ const listPurchaseWorkflow = (deps: ModuleDeps) =>
           justification: r.justification,
           estimatedAmountMinor: r.estimatedAmountMinor,
           status: r.status,
+          decisionReason: r.decisionReason,
           createdAt: r.createdAt.toISOString(),
           rfqs: rfqRows
             .filter((f) => f.requestId === r.id)
             .map((f) => ({
               id: f.id,
               vendorId: f.vendorId,
+              vendorName: f.vendorName ?? "",
               status: f.status,
               quoteAmountMinor: f.quoteAmountMinor,
               quoteLeadTimeDays: f.quoteLeadTimeDays,
+              quoteNotes: f.quoteNotes,
             })),
         })),
       };

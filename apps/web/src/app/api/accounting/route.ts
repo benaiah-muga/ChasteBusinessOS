@@ -23,6 +23,22 @@ import { executeAtomically } from "@/server/unit-of-work";
 import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
 import { dispatchGoCapabilityRoute } from "@/server/go-route-response";
 
+const goInvoiceListSchema = z.object({
+  invoices: z.array(z.object({
+    id: z.string(),
+    number: z.number().int(),
+    customerId: z.string(),
+    customerName: z.string(),
+    status: z.string(),
+    currency: z.string(),
+    totalMinor: z.number().int(),
+    paidMinor: z.number().int(),
+    creditedMinor: z.number().int(),
+    outstandingMinor: z.number().int(),
+    issuedAt: z.string().nullable(),
+  })),
+});
+
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -32,7 +48,8 @@ export async function GET() {
   const db = getDb().db;
   const [org] = await db.select({ baseCurrency: organizations.baseCurrency }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
   const ctx = actorFromResolved(resolved, {});
-  const executor = ctx ? buildExecutor(db, buildRegistry(db)) : null;
+  const useGoInvoiceReads = process.env.GO_ACCOUNTING_INVOICE_READS === "1";
+  const executor = ctx && !useGoInvoiceReads ? buildExecutor(db, buildRegistry(db)) : null;
 
   const entries = await db
     .select({
@@ -123,10 +140,53 @@ export async function GET() {
     .orderBy(asc(customers.name));
 
   // Governed invoice read + payment history (no list capability for payments).
-  const invoiceList =
-    executor && ctx
+  let invoiceRows: unknown[] = [];
+  if (useGoInvoiceReads) {
+    if (!ctx) return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+    let result: GoCapabilityBridgeResult;
+    try {
+      result = await executeGoCapability({
+        actionContext: ctx,
+        session: {
+          userId: resolved.userId,
+          orgId: resolved.orgId,
+          authSessionId: resolved.authSessionId,
+        },
+        capabilityId: "accounting.listInvoices",
+        input: { limit: 50 },
+      });
+    } catch {
+      return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+    }
+    if (result.kind !== "response") {
+      return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+    }
+
+    const body: unknown = await result.response.json().catch(() => null);
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: goInvoiceListSchema }).safeParse(body);
+      if (!parsed.success) return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+      invoiceRows = parsed.data.data.invoices;
+    } else if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+    } else if (result.response.status === 401) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    } else if (result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+      return NextResponse.json({ error: "forbidden: missing accounting.read" }, { status: 403 });
+    } else {
+      return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+    }
+  } else {
+    const invoiceList = executor && ctx
       ? await executor.execute("accounting.listInvoices", ctx, { limit: 50 })
       : { ok: false as const, data: undefined };
+    invoiceRows = invoiceList.ok && invoiceList.data
+      ? (invoiceList.data as { invoices: unknown[] }).invoices
+      : [];
+  }
   const paymentRows = await db
     .select({
       id: payments.id,
@@ -171,10 +231,7 @@ export async function GET() {
       filedAt: f.createdAt.toISOString(),
     })),
     customers: customerRows,
-    invoices:
-      invoiceList.ok && invoiceList.data
-        ? (invoiceList.data as { invoices: unknown[] }).invoices
-        : [],
+    invoices: invoiceRows,
     payments: paymentRows.map((p) => ({ ...p, receivedAt: p.receivedAt.toISOString() })),
   });
 }

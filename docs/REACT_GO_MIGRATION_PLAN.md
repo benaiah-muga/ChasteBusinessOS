@@ -578,10 +578,12 @@ new owners and the manifest shows zero legacy runtime paths.
     organization-scoped executor paths, approval verification, and worker
     support are in place. System money jobs use configured amount thresholds
     and require an executing human approval for unknown or above-threshold
-    amounts. The report read, receipt detail, and purchase order closure bridges
-    are recorded below. Remaining bill-credit and inventory-read bridges,
-    broader parity proofs, and route ownership changes remain open; route
-    defaults stay on the existing owners until those gates pass.
+    amounts. Report reads, receipt detail, purchase order closure, supplier
+    bill credit, and the inventory stock report are covered by items below.
+    Remaining accounting and FX parity proofs, inventory valuation and other
+    read models, broader purchasing parity proofs, and route ownership changes
+    remain open; route defaults stay on the existing owners until those gates
+    pass.
 
 31. (Done) Add Go parity for `crm.saveCustomerView` and its inverse,
     `crm.restoreCustomerView`, behind default-off `GO_CRM_VIEW_WRITES=1` on the
@@ -675,3 +677,25 @@ new owners and the manifest shows zero legacy runtime paths.
     executor and fail closed when Go is unavailable or returns malformed data.
     The focused Go database and seven BFF route tests pass, as do the full
     TypeScript, Go, vet, and contract gates.
+
+46. (Done) Add a default-off signed Go bridge for the governed
+    `accounting.listInvoices` read in `GET /api/accounting`. Validate every
+    invoice row, preserve the existing response and permission behavior, and
+    fail closed after Go dispatch without a TypeScript retry. Focused route
+    tests pass (66 tests), as do web typecheck and targeted ESLint.
+
+47. (Done) Add a default-off signed Go read bridge for purchase requests and
+    RFQs in `GET /api/purchasing` using `GO_PURCHASING_WORKFLOW_READS=1`.
+    Preserve decision reasons, vendor names, quote notes, organization scope,
+    request ordering, timestamps, and the aggregate route response. The Go
+    read model and TypeScript capability contract include every field the
+    route exposes; unavailable or malformed Go responses fail closed without
+    a TypeScript retry. BFF route tests pass, and the Go database query parity
+    test passes with the repository database configured.
+
+48. (Done) Add a read-only Sales orders preview to the Vite app using the
+    same-origin order and customer APIs. Preserve module enablement, customer
+    names, user display currency and core minor-unit rules; provide search,
+    status labels, backorder, loading, empty, and error states. Keep all existing
+    quote and order actions available in the full Sales workspace. Vite API
+    and component tests pass.

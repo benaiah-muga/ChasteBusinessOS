@@ -8,6 +8,29 @@ import { z } from "zod";
 import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
 
 const noStore = { "Cache-Control": "no-store" };
+const purchaseWorkflowSchema = z.object({
+  requests: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    justification: z.string(),
+    estimatedAmountMinor: z.number().int().max(Number.MAX_SAFE_INTEGER).nullable(),
+    status: z.string(),
+    decisionReason: z.string().nullable(),
+    createdAt: z.string(),
+    rfqs: z.array(z.object({
+      id: z.string(),
+      vendorId: z.string(),
+      vendorName: z.string(),
+      status: z.string(),
+      quoteAmountMinor: z.number().int().max(Number.MAX_SAFE_INTEGER).nullable(),
+      quoteLeadTimeDays: z.number().int().max(Number.MAX_SAFE_INTEGER).nullable(),
+      quoteNotes: z.string().nullable(),
+    })),
+  })),
+});
+type PurchaseWorkflowRequest = Omit<z.infer<typeof purchaseWorkflowSchema>["requests"][number], "rfqs"> & {
+  rfqs: Array<Omit<z.infer<typeof purchaseWorkflowSchema>["requests"][number]["rfqs"][number], "vendorId">>;
+};
 
 function goUnavailable(message = "purchasing service unavailable; check bill status before retrying") {
   return NextResponse.json({ ok: false, error: message }, { status: 503, headers: noStore });
@@ -119,16 +142,62 @@ export async function GET() {
   const supplierPerformance = await executor.execute("purchasing.supplierPerformance", ctx, {});
   if (!supplierPerformance.ok) return NextResponse.json({ error: supplierPerformance.error }, { status: 500 });
 
-  // Procure-to-pay workflow: requests with their RFQ bids.
-  const requestRows = await db
-    .select()
-    .from(purchaseRequests)
-    .where(eq(purchaseRequests.orgId, orgId))
-    .orderBy(desc(purchaseRequests.createdAt))
-    .limit(50);
-  const rfqRows = requestRows.length
-    ? await db.select().from(rfqs).where(eq(rfqs.orgId, orgId))
-    : [];
+  let workflowRequests: PurchaseWorkflowRequest[];
+  if (process.env.GO_PURCHASING_WORKFLOW_READS === "1") {
+    const workflowResponse = await purchasingGoResponse(
+      await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "purchasing.listPurchaseWorkflow",
+        input: {},
+      }),
+      "purchasing workflow service unavailable; reload the page before retrying",
+      purchaseWorkflowSchema,
+    );
+    if (workflowResponse.status !== 200) return workflowResponse;
+    const workflowEnvelope = await workflowResponse.json() as { data: z.infer<typeof purchaseWorkflowSchema> };
+    workflowRequests = workflowEnvelope.data.requests.map(({ rfqs: requestRFQs, ...request }) => ({
+      ...request,
+      rfqs: requestRFQs.map((rfq) => ({
+        id: rfq.id,
+        vendorName: rfq.vendorName,
+        status: rfq.status,
+        quoteAmountMinor: rfq.quoteAmountMinor,
+        quoteLeadTimeDays: rfq.quoteLeadTimeDays,
+        quoteNotes: rfq.quoteNotes,
+      })),
+    }));
+  } else {
+    // Procure-to-pay workflow: requests with their RFQ bids.
+    const requestRows = await db
+      .select()
+      .from(purchaseRequests)
+      .where(eq(purchaseRequests.orgId, orgId))
+      .orderBy(desc(purchaseRequests.createdAt))
+      .limit(50);
+    const rfqRows = requestRows.length
+      ? await db.select().from(rfqs).where(eq(rfqs.orgId, orgId))
+      : [];
+    workflowRequests = requestRows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      justification: r.justification,
+      estimatedAmountMinor: r.estimatedAmountMinor,
+      status: r.status,
+      decisionReason: r.decisionReason,
+      createdAt: r.createdAt.toISOString(),
+      rfqs: rfqRows
+        .filter((f) => f.requestId === r.id)
+        .map((f) => ({
+          id: f.id,
+          vendorName: vendorName.get(f.vendorId) ?? "",
+          status: f.status,
+          quoteAmountMinor: f.quoteAmountMinor,
+          quoteLeadTimeDays: f.quoteLeadTimeDays,
+          quoteNotes: f.quoteNotes,
+        })),
+    }));
+  }
 
   void sql;
   return NextResponse.json({
@@ -152,25 +221,7 @@ export async function GET() {
     apAging: aging.data ?? {},
     priceHistory: priceHistory.data ?? { rows: [] },
     supplierPerformance: supplierPerformance.data ?? { vendors: [] },
-    requests: requestRows.map((r) => ({
-      id: r.id,
-      title: r.title,
-      justification: r.justification,
-      estimatedAmountMinor: r.estimatedAmountMinor,
-      status: r.status,
-      decisionReason: r.decisionReason,
-      createdAt: r.createdAt,
-      rfqs: rfqRows
-        .filter((f) => f.requestId === r.id)
-        .map((f) => ({
-          id: f.id,
-          vendorName: vendorName.get(f.vendorId) ?? "",
-          status: f.status,
-          quoteAmountMinor: f.quoteAmountMinor,
-          quoteLeadTimeDays: f.quoteLeadTimeDays,
-          quoteNotes: f.quoteNotes,
-        })),
-    })),
+    requests: workflowRequests,
   });
 }
 

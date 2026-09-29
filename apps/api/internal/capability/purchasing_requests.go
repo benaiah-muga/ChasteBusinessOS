@@ -74,11 +74,13 @@ type SelectWinningQuoteOutput struct {
 type ListPurchaseWorkflowInput struct{}
 
 type PurchaseWorkflowRFQItem struct {
-	ID                string `json:"id"`
-	VendorID          string `json:"vendorId"`
-	Status            string `json:"status"`
-	QuoteAmountMinor  *int64 `json:"quoteAmountMinor"`
-	QuoteLeadTimeDays *int64 `json:"quoteLeadTimeDays"`
+	ID                string  `json:"id"`
+	VendorID          string  `json:"vendorId"`
+	VendorName        string  `json:"vendorName"`
+	Status            string  `json:"status"`
+	QuoteAmountMinor  *int64  `json:"quoteAmountMinor"`
+	QuoteLeadTimeDays *int64  `json:"quoteLeadTimeDays"`
+	QuoteNotes        *string `json:"quoteNotes"`
 }
 
 type PurchaseWorkflowRequestItem struct {
@@ -87,6 +89,7 @@ type PurchaseWorkflowRequestItem struct {
 	Justification        string                    `json:"justification"`
 	EstimatedAmountMinor *int64                    `json:"estimatedAmountMinor"`
 	Status               string                    `json:"status"`
+	DecisionReason       *string                   `json:"decisionReason"`
 	CreatedAt            string                    `json:"createdAt"`
 	RFQs                 []PurchaseWorkflowRFQItem `json:"rfqs"`
 }
@@ -414,7 +417,7 @@ func selectWinningQuote(ctx context.Context, tx pgx.Tx, orgID string, input Sele
 
 func listPurchaseWorkflow(ctx context.Context, tx pgx.Tx, orgID string, input ListPurchaseWorkflowInput) (ListPurchaseWorkflowOutput, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, title, justification, estimated_amount_minor, status, created_at
+		SELECT id::text, title, justification, estimated_amount_minor, status, decision_reason, created_at
 		FROM purchase_requests
 		WHERE org_id = $1::uuid
 		ORDER BY created_at DESC
@@ -427,7 +430,7 @@ func listPurchaseWorkflow(ctx context.Context, tx pgx.Tx, orgID string, input Li
 	for rows.Next() {
 		var item PurchaseWorkflowRequestItem
 		var createdAt time.Time
-		if err := rows.Scan(&item.ID, &item.Title, &item.Justification, &item.EstimatedAmountMinor, &item.Status, &createdAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Title, &item.Justification, &item.EstimatedAmountMinor, &item.Status, &item.DecisionReason, &createdAt); err != nil {
 			rows.Close()
 			return ListPurchaseWorkflowOutput{}, err
 		}
@@ -445,9 +448,12 @@ func listPurchaseWorkflow(ctx context.Context, tx pgx.Tx, orgID string, input Li
 		return ListPurchaseWorkflowOutput{Requests: requests}, nil
 	}
 	rfqRows, err := tx.Query(ctx, `
-		SELECT id::text, request_id::text, vendor_id::text, status, quote_amount_minor, quote_lead_time_days
+		SELECT rfqs.id::text, rfqs.request_id::text, rfqs.vendor_id::text,
+		       COALESCE(vendors.name, ''), rfqs.status, rfqs.quote_amount_minor,
+		       rfqs.quote_lead_time_days, rfqs.quote_notes
 		FROM rfqs
-		WHERE org_id = $1::uuid`, orgID)
+		LEFT JOIN vendors ON vendors.id = rfqs.vendor_id AND vendors.org_id = rfqs.org_id
+		WHERE rfqs.org_id = $1::uuid`, orgID)
 	if err != nil {
 		return ListPurchaseWorkflowOutput{}, err
 	}
@@ -455,7 +461,7 @@ func listPurchaseWorkflow(ctx context.Context, tx pgx.Tx, orgID string, input Li
 	for rfqRows.Next() {
 		var rfq PurchaseWorkflowRFQItem
 		var requestID string
-		if err := rfqRows.Scan(&rfq.ID, &requestID, &rfq.VendorID, &rfq.Status, &rfq.QuoteAmountMinor, &rfq.QuoteLeadTimeDays); err != nil {
+		if err := rfqRows.Scan(&rfq.ID, &requestID, &rfq.VendorID, &rfq.VendorName, &rfq.Status, &rfq.QuoteAmountMinor, &rfq.QuoteLeadTimeDays, &rfq.QuoteNotes); err != nil {
 			rfqRows.Close()
 			return ListPurchaseWorkflowOutput{}, err
 		}

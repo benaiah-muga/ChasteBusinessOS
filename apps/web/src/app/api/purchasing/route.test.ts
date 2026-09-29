@@ -10,13 +10,28 @@ vi.mock("@/server/session", () => ({ getResolvedUser: mocks.getResolvedUser }));
 vi.mock("@/server/balances", () => ({ documentOutstanding: vi.fn() }));
 vi.mock("@/server/go-bridge", () => ({ executeGoCapability: mocks.executeGoCapability }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const user = { userId: "11111111-1111-4111-8111-111111111111", orgId: "22222222-2222-4222-8222-222222222222", permissions: new Set(["purchasing.write", "purchasing.post"]) };
 const ctx = { actor: { type: "human", id: user.userId, orgId: user.orgId }, intentId: "buy-intent" };
 
 function request(body: unknown) {
   return new Request("http://localhost/api/purchasing", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+}
+
+function selectQuery(rows: unknown[]) {
+  const query = {
+    from: vi.fn(),
+    where: vi.fn(),
+    orderBy: vi.fn(),
+    limit: vi.fn(),
+    then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) => Promise.resolve(rows).then(resolve, reject),
+  };
+  query.from.mockReturnValue(query);
+  query.where.mockReturnValue(query);
+  query.orderBy.mockReturnValue(query);
+  query.limit.mockReturnValue(query);
+  return query;
 }
 
 describe("purchasing Go route adapter", () => {
@@ -29,6 +44,7 @@ describe("purchasing Go route adapter", () => {
     vi.stubEnv("GO_PURCHASING_PO_CLOSE_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_BILL_CREDIT_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_RETURN_WRITES", "0");
+    vi.stubEnv("GO_PURCHASING_WORKFLOW_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -38,6 +54,170 @@ describe("purchasing Go route adapter", () => {
     mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
   });
   afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps the purchase workflow read on TypeScript by default", async () => {
+    const createdAt = new Date("2026-09-26T09:30:00.000Z");
+    mocks.getDb.mockReturnValue({
+      db: {
+        select: vi.fn()
+          .mockReturnValueOnce(selectQuery([{ baseCurrency: "USD" }]))
+          .mockReturnValueOnce(selectQuery([{ id: "vendor-1", name: "Acme Supply" }]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([{
+            id: "request-1",
+            title: "Shelving",
+            justification: "Increase storage",
+            estimatedAmountMinor: 450000,
+            status: "rejected",
+            decisionReason: "Budget deferred",
+            createdAt,
+          }]))
+          .mockReturnValueOnce(selectQuery([{
+            id: "rfq-1",
+            requestId: "request-1",
+            vendorId: "vendor-1",
+            status: "quoted",
+            quoteAmountMinor: 420000,
+            quoteLeadTimeDays: 5,
+            quoteNotes: "Delivery available next week",
+          }])),
+      },
+    });
+    mocks.execute.mockResolvedValue({ ok: true, data: { buckets: {}, rows: [], vendors: [] } });
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(body.requests).toEqual([{
+      id: "request-1",
+      title: "Shelving",
+      justification: "Increase storage",
+      estimatedAmountMinor: 450000,
+      status: "rejected",
+      decisionReason: "Budget deferred",
+      createdAt: "2026-09-26T09:30:00.000Z",
+      rfqs: [{
+        id: "rfq-1",
+        vendorName: "Acme Supply",
+        status: "quoted",
+        quoteAmountMinor: 420000,
+        quoteLeadTimeDays: 5,
+        quoteNotes: "Delivery available next week",
+      }],
+    }]);
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the purchasing workflow read to Go and preserves the full route payload", async () => {
+    vi.stubEnv("GO_PURCHASING_WORKFLOW_READS", "1");
+    mocks.getDb.mockReturnValue({
+      db: {
+        select: vi.fn()
+          .mockReturnValueOnce(selectQuery([{ baseCurrency: "UGX" }]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([])),
+      },
+    });
+    mocks.execute.mockResolvedValue({ ok: true, data: { buckets: {}, rows: [], vendors: [] } });
+    const workflow = {
+      requests: [{
+        id: "request-1",
+        title: "Shelving",
+        justification: "Increase storage",
+        estimatedAmountMinor: 450000,
+        status: "rejected",
+        decisionReason: "Budget deferred",
+        createdAt: "2026-09-26T09:30:00.000Z",
+        rfqs: [{
+          id: "rfq-1",
+          vendorId: "vendor-1",
+          vendorName: "Acme Supply",
+          status: "quoted",
+          quoteAmountMinor: 420000,
+          quoteLeadTimeDays: 5,
+          quoteNotes: "Delivery available next week",
+        }],
+      }],
+    };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: workflow }) });
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      baseCurrency: "UGX",
+      requests: [{
+        ...workflow.requests[0],
+        rfqs: [{
+          id: "rfq-1",
+          vendorName: "Acme Supply",
+          status: "quoted",
+          quoteAmountMinor: 420000,
+          quoteLeadTimeDays: 5,
+          quoteNotes: "Delivery available next week",
+        }],
+      }],
+    });
+    expect(body.requests[0].rfqs[0]).not.toHaveProperty("vendorId");
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.listPurchaseWorkflow",
+      input: {},
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.listPurchaseWorkflow", expect.anything(), expect.anything());
+  });
+
+  it.each([{ kind: "not-dispatched" }, { kind: "outcome-unknown" }])("fails closed for purchasing workflow read on $kind", async (result) => {
+    vi.stubEnv("GO_PURCHASING_WORKFLOW_READS", "1");
+    mocks.getDb.mockReturnValue({
+      db: {
+        select: vi.fn()
+          .mockReturnValueOnce(selectQuery([{ baseCurrency: "USD" }]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([])),
+      },
+    });
+    mocks.execute.mockResolvedValue({ ok: true, data: { buckets: {}, rows: [], vendors: [] } });
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing workflow service unavailable; reload the page before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.listPurchaseWorkflow", expect.anything(), expect.anything());
+  });
+
+  it("fails closed when Go returns an invalid purchasing workflow payload", async () => {
+    vi.stubEnv("GO_PURCHASING_WORKFLOW_READS", "1");
+    mocks.getDb.mockReturnValue({
+      db: {
+        select: vi.fn()
+          .mockReturnValueOnce(selectQuery([{ baseCurrency: "USD" }]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([]))
+          .mockReturnValueOnce(selectQuery([])),
+      },
+    });
+    mocks.execute.mockResolvedValue({ ok: true, data: { buckets: {}, rows: [], vendors: [] } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { requests: [{ id: "broken" }] } }) });
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing workflow service unavailable; reload the page before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.listPurchaseWorkflow", expect.anything(), expect.anything());
+  });
 
   it("keeps receipt detail on TypeScript while the Go read flag is off", async () => {
     await POST(request({ action: "receiptDetail", poNumber: 14 }));

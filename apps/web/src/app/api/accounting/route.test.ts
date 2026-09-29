@@ -39,7 +39,7 @@ vi.mock("@/server/unit-of-work", () => ({ executeAtomically: vi.fn() }));
 vi.mock("@/server/go-bridge", () => ({ executeGoCapability: mocks.executeGoCapability }));
 vi.mock("@/server/go-route-response", () => ({ dispatchGoCapabilityRoute: mocks.dispatchGoCapabilityRoute }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const resolved = {
   userId: "0b9e1bd3-8432-4059-a0b1-902ff8d520d0",
@@ -96,6 +96,163 @@ function request(body: unknown) {
     body: JSON.stringify(body),
   });
 }
+
+function configureReadDatabase() {
+  const rows = [
+    [{ baseCurrency: "UGX" }],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+  ];
+  const terminals = ["limit", "limit", "orderBy", "where", "orderBy", "limit", "orderBy", "limit"];
+  let queryIndex = 0;
+  const query = (result: unknown[], terminal: string) => {
+    const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ["from", "leftJoin", "innerJoin", "where", "groupBy", "orderBy", "limit"]) {
+      builder[method] = vi.fn().mockImplementation(() => method === terminal ? Promise.resolve(result) : builder);
+    }
+    return builder;
+  };
+  mocks.getDb.mockReturnValue({ db: {
+    select: vi.fn(() => {
+      const index = queryIndex++;
+      return query(rows[index] ?? [], terminals[index] ?? "limit");
+    }),
+  } });
+}
+
+const listedInvoice = {
+  id: invoiceId,
+  number: 104,
+  customerId: "d00d512e-ab21-4f45-9199-f53d81e9597f",
+  customerName: "Example customer",
+  status: "sent",
+  currency: "UGX",
+  totalMinor: 125000,
+  paidMinor: 0,
+  creditedMinor: 0,
+  outstandingMinor: 125000,
+  issuedAt: "2026-09-27T12:00:00.000Z",
+};
+
+describe("GET /api/accounting Go invoice read bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_READS", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    configureReadDatabase();
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { invoices: [listedInvoice] } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps the governed TypeScript invoice read by default", async () => {
+    delete process.env.GO_ACCOUNTING_INVOICE_READS;
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.invoices).toEqual([listedInvoice]);
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.listInvoices", actionContext, { limit: 50 });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches only the invoice-list capability to Go and validates its output", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { invoices: [listedInvoice] } }),
+    });
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.invoices).toEqual([listedInvoice]);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: {
+        userId: resolved.userId,
+        orgId: resolved.orgId,
+        authSessionId: resolved.authSessionId,
+      },
+      capabilityId: "accounting.listInvoices",
+      input: { limit: 50 },
+    });
+    expect(mocks.buildExecutor).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves invoice statuses accepted by the legacy capability contract", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_READS", "1");
+    const legacyStatusInvoice = { ...listedInvoice, status: "legacyArchived" };
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { invoices: [legacyStatusInvoice] } }),
+    });
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).invoices).toEqual([legacyStatusInvoice]);
+  });
+
+  it("keeps a valid Go capability error equivalent to the legacy empty invoice list", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, error: "Invoice list unavailable" }, { status: 422 }),
+    });
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).invoices).toEqual([]);
+    expect(mocks.buildExecutor).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves the route permission response when Go denies the read", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "membership or permission denied" }, { status: 403 }),
+    });
+
+    const response = await GET();
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "forbidden: missing accounting.read" });
+    expect(mocks.buildExecutor).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without a TypeScript retry when the Go read is unavailable or malformed", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_READS", "1");
+    mocks.executeGoCapability.mockResolvedValueOnce({ kind: "outcome-unknown" });
+    const unavailable = await GET();
+    expect(unavailable.status).toBe(503);
+
+    configureReadDatabase();
+    mocks.executeGoCapability.mockResolvedValueOnce({
+      kind: "response",
+      response: Response.json({ ok: true, data: { invoices: [{ id: "bad" }] } }),
+    });
+    const malformed = await GET();
+    expect(malformed.status).toBe(503);
+    expect(mocks.buildExecutor).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
 
 describe("POST /api/accounting Go invoice bridge", () => {
   beforeEach(() => {

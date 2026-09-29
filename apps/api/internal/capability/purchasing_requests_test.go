@@ -617,8 +617,14 @@ func TestPurchasingRequestsListReturnsWorkflow(t *testing.T) {
 	secondCreatedAt := time.Date(2026, 9, 26, 9, 30, 0, 0, time.UTC)
 	firstRequest := seedPurchasingRequest(t, fx, fx.orgID, fx.userID, "Shop shelving", "Approved for quoting", "approved", crmInt64Pointer(900000), firstCreatedAt)
 	secondRequest := seedPurchasingRequest(t, fx, fx.orgID, fx.userID, "Second shelving", "Awaiting reviewer decision", "pending_review", nil, secondCreatedAt)
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE purchase_requests SET decision_reason = 'Budget approved' WHERE id = $1::uuid`, firstRequest); err != nil {
+		t.Fatal(err)
+	}
 	seedPurchasingRequest(t, fx, fx.otherOrgID, fx.userID, "Foreign order", "Belongs to another org", "pending_review", nil, secondCreatedAt)
 	wonRFQ := seedPurchasingRFQ(t, fx, fx.orgID, firstRequest, vendorA, "won", crmInt64Pointer(4400), crmInt64Pointer(7), &firstCreatedAt)
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE rfqs SET quote_notes = 'delivers next week' WHERE id = $1::uuid`, wonRFQ); err != nil {
+		t.Fatal(err)
+	}
 	seedPurchasingRFQ(t, fx, fx.orgID, firstRequest, vendorB, "lost", nil, nil, nil)
 
 	listed, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (ListPurchaseWorkflowOutput, error) {
@@ -640,7 +646,7 @@ func TestPurchasingRequestsListReturnsWorkflow(t *testing.T) {
 	if len(second.RFQs) != 0 {
 		t.Fatalf("second request rfqs = %+v, want empty list", second.RFQs)
 	}
-	if first.Title != "Shop shelving" || first.EstimatedAmountMinor == nil || *first.EstimatedAmountMinor != 900000 {
+	if first.Title != "Shop shelving" || first.EstimatedAmountMinor == nil || *first.EstimatedAmountMinor != 900000 || first.DecisionReason == nil || *first.DecisionReason != "Budget approved" {
 		t.Fatalf("first request item = %+v, want estimate 900000", first)
 	}
 	if len(first.RFQs) != 2 {
@@ -654,7 +660,7 @@ func TestPurchasingRequestsListReturnsWorkflow(t *testing.T) {
 			t.Fatalf("sibling RFQ item = %+v, want the lost bid for vendor B", rfq)
 		}
 	}
-	if won.Status != "won" || won.VendorID != vendorA || won.QuoteAmountMinor == nil || *won.QuoteAmountMinor != 4400 || won.QuoteLeadTimeDays == nil || *won.QuoteLeadTimeDays != 7 {
+	if won.Status != "won" || won.VendorID != vendorA || won.VendorName != "Purchasing fixture vendor" || won.QuoteAmountMinor == nil || *won.QuoteAmountMinor != 4400 || won.QuoteLeadTimeDays == nil || *won.QuoteLeadTimeDays != 7 || won.QuoteNotes == nil || *won.QuoteNotes != "delivers next week" {
 		t.Fatalf("winning RFQ item = %+v, want the accepted bid details", won)
 	}
 

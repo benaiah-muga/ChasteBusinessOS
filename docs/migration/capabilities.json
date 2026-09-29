@@ -19346,6 +19346,16 @@
                 "status": {
                   "type": "string"
                 },
+                "decisionReason": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "createdAt": {
                   "type": "string"
                 },
@@ -19358,6 +19368,9 @@
                         "type": "string"
                       },
                       "vendorId": {
+                        "type": "string"
+                      },
+                      "vendorName": {
                         "type": "string"
                       },
                       "status": {
@@ -19382,14 +19395,26 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "quoteNotes": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       }
                     },
                     "required": [
                       "id",
                       "vendorId",
+                      "vendorName",
                       "status",
                       "quoteAmountMinor",
-                      "quoteLeadTimeDays"
+                      "quoteLeadTimeDays",
+                      "quoteNotes"
                     ],
                     "additionalProperties": false
                   }
@@ -19401,6 +19426,7 @@
                 "justification",
                 "estimatedAmountMinor",
                 "status",
+                "decisionReason",
                 "createdAt",
                 "rfqs"
               ],
