@@ -251,6 +251,61 @@ describe("purchasing Go route adapter", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
+  it("fails closed when Go returns malformed receipt data", async () => {
+    vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { receipts: [{ number: 1, lines: [] }], orderLines: [] } }),
+    });
+
+    const response = await POST(request({ action: "receiptDetail", poNumber: 14 }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing receipts service unavailable; reload the order before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["negative quantities", {
+      receipts: [],
+      orderLines: [{ position: 1, description: "Steel rod", orderedThousandths: -1, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1 }],
+    }],
+    ["fractional quantities", {
+      receipts: [],
+      orderLines: [{ position: 1, description: "Steel rod", orderedThousandths: 1000, acceptedThousandths: 0.5, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1000 }],
+    }],
+    ["unsafe integers", {
+      receipts: [],
+      orderLines: [{ position: 1, description: "Steel rod", orderedThousandths: Number.MAX_SAFE_INTEGER + 1, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1000 }],
+    }],
+    ["zero positions", {
+      receipts: [],
+      orderLines: [{ position: 0, description: "Steel rod", orderedThousandths: 1000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1000 }],
+    }],
+    ["invalid receipt timestamps", {
+      receipts: [{ number: 1, receivedAt: "2026-09-28", note: null, lines: [] }],
+      orderLines: [],
+    }],
+    ["unexpected receipt fields", {
+      receipts: [],
+      orderLines: [{ position: 1, description: "Steel rod", orderedThousandths: 1000, acceptedThousandths: 0, rejectedThousandths: 0, returnedThousandths: 0, remainingThousandths: 1000, unexpected: true }],
+    }],
+  ])("fails closed when Go returns %s", async (_label, data) => {
+    vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data }),
+    });
+
+    const response = await POST(request({ action: "receiptDetail", poNumber: 14 }));
+
+    expect(response.status).toBe(503);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it("validates receipt detail input before Go dispatch", async () => {
     vi.stubEnv("GO_PURCHASING_RECEIPT_READS", "1");
 

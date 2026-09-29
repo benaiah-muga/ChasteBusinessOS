@@ -207,6 +207,13 @@ outcomes fail closed without a TypeScript retry. The flag defaults to `0`.
 `pnpm dev:api`; other accounting actions stay on their existing handlers, and
 uncertain outcomes fail closed without a TypeScript retry. The flag defaults
 to `0`.
+`GO_ACCOUNTING_FX_REVALUATION_WRITE=1` opts the `revalue` action on
+`POST /api/accounting/close` into the signed Go
+`accounting.revalueForeignReceivables` capability. It requires `pnpm dev:api`,
+preserves the permission check, approval responses, and revaluation result,
+and fails closed on unavailable or malformed Go responses without a TypeScript
+retry. Other period-close actions remain controlled by
+`GO_ACCOUNTING_PERIOD_CLOSE_WRITES`; this flag defaults to `0`.
 `GO_ACCOUNTING_RECURRING_WRITE=1` opts recurring invoice template creation,
 pausing, and resumption into the signed Go capability bridge. It requires
 `pnpm dev:api`; the dedicated recurring route and other accounting actions

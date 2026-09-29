@@ -1,0 +1,40 @@
+.purchasing-receipts-page { display: grid; gap: 1.25rem; padding: clamp(1rem, 2vw, 1.75rem); color: var(--text, #17252b); }
+.purchasing-receipts-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; }
+.purchasing-receipts-header h1 { margin: .2rem 0 .45rem; font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -.035em; }
+.purchasing-receipts-header p { max-width: 54rem; margin: 0; color: var(--muted, #63727a); line-height: 1.55; }
+.purchasing-receipts-eyebrow { color: var(--accent, #167d72) !important; font-size: .74rem; font-weight: 750; letter-spacing: .095em; text-transform: uppercase; }
+.purchasing-receipts-full-workspace, .purchasing-receipts-message > a { display: inline-flex; align-items: center; justify-content: center; min-height: 2.65rem; padding: .65rem .95rem; border: 1px solid var(--line, #cbd6d5); border-radius: .7rem; color: var(--text, #17252b); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.purchasing-receipts-full-workspace:hover, .purchasing-receipts-message > a:hover { border-color: var(--accent, #167d72); }
+.purchasing-receipts-page a:focus-visible, .purchasing-receipts-page button:focus-visible, .purchasing-receipts-page select:focus-visible { outline: 3px solid var(--accent, #167d72); outline-offset: 3px; }
+.purchasing-receipts-message, .purchasing-receipts-order-picker, .purchasing-receipts-summary, .purchasing-receipt-card { padding: 1.15rem; border: 1px solid var(--line, #cbd6d5); border-radius: .9rem; background: var(--surface, #fff); }
+.purchasing-receipts-message h2 { margin: .25rem 0 .5rem; }
+.purchasing-receipts-message p { color: var(--muted, #63727a); }
+.purchasing-receipts-error { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; border-color: #e7b5ab; background: #fff9f7; }
+.purchasing-receipts-error-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.purchasing-receipts-error-actions a { color: var(--text, #17252b); font-weight: 650; }
+.purchasing-receipts-error-actions button { min-height: 2.5rem; padding: .55rem .85rem; border: 0; border-radius: .65rem; background: var(--accent, #167d72); color: #fff; cursor: pointer; font-weight: 700; }
+.purchasing-receipts-order-picker { display: grid; justify-items: start; gap: .5rem; }
+.purchasing-receipts-order-picker label { font-weight: 700; }
+.purchasing-receipts-order-picker select { width: min(100%, 32rem); min-height: 2.65rem; padding: .5rem .7rem; border: 1px solid var(--line, #cbd6d5); border-radius: .6rem; background: var(--surface, #fff); color: var(--text, #17252b); }
+.purchasing-receipts-order-picker p { margin: 0; color: var(--muted, #63727a); text-transform: capitalize; }
+.purchasing-receipts-content { display: grid; gap: 1.25rem; }
+.purchasing-receipts-summary h2, .purchasing-receipt-heading h2 { margin: 0; font-size: 1.05rem; }
+.purchasing-receipts-table-wrap { overflow-x: auto; }
+.purchasing-receipts-table { width: 100%; border-collapse: collapse; text-align: left; }
+.purchasing-receipts-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.purchasing-receipts-table th, .purchasing-receipts-table td { padding: .72rem .8rem; border-bottom: 1px solid var(--line, #edf0ef); vertical-align: top; }
+.purchasing-receipts-table thead th { color: var(--muted, #63727a); font-size: .75rem; font-weight: 700; white-space: nowrap; }
+.purchasing-receipts-table tbody th { font-weight: 650; }
+.purchasing-receipts-table td { font-size: .87rem; font-variant-numeric: tabular-nums; }
+.purchasing-receipts-table tbody tr:last-child th, .purchasing-receipts-table tbody tr:last-child td { border-bottom: 0; }
+.purchasing-receipts-list { display: grid; gap: 1rem; }
+.purchasing-receipt-card { overflow: hidden; padding: 0; }
+.purchasing-receipt-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.2rem; border-bottom: 1px solid var(--line, #e1e7e6); }
+.purchasing-receipt-heading p { margin: .3rem 0 0; color: var(--muted, #63727a); font-size: .87rem; }
+.purchasing-receipt-note { max-width: 40rem; overflow-wrap: anywhere; }
+.purchasing-receipt-card .purchasing-receipts-table th, .purchasing-receipt-card .purchasing-receipts-table td { padding: .72rem 1.2rem; }
+@media (max-width: 760px) {
+  .purchasing-receipts-header, .purchasing-receipts-error, .purchasing-receipt-heading { align-items: stretch; flex-direction: column; }
+  .purchasing-receipts-full-workspace { align-self: flex-start; }
+  .purchasing-receipts-table { min-width: 42rem; }
+}

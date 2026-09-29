@@ -28,6 +28,32 @@ const purchaseWorkflowSchema = z.object({
     })),
   })),
 });
+const receiptQuantity = z.number().int().safe().nonnegative();
+const receiptPosition = z.number().int().safe().positive();
+const purchasingReceiptOutputSchema = z.object({
+  receipts: z.array(z.object({
+    number: receiptPosition,
+    receivedAt: z.string().datetime({ offset: true }),
+    note: z.string().nullable(),
+    lines: z.array(z.object({
+      position: receiptPosition,
+      description: z.string(),
+      acceptedThousandths: receiptQuantity,
+      rejectedThousandths: receiptQuantity,
+      returnedThousandths: receiptQuantity,
+      rejectionNote: z.string().nullable(),
+    }).strict()),
+  }).strict()),
+  orderLines: z.array(z.object({
+    position: receiptPosition,
+    description: z.string(),
+    orderedThousandths: receiptQuantity,
+    acceptedThousandths: receiptQuantity,
+    rejectedThousandths: receiptQuantity,
+    returnedThousandths: receiptQuantity,
+    remainingThousandths: receiptQuantity,
+  }).strict()),
+}).strict();
 type PurchaseWorkflowRequest = Omit<z.infer<typeof purchaseWorkflowSchema>["requests"][number], "rfqs"> & {
   rfqs: Array<Omit<z.infer<typeof purchaseWorkflowSchema>["requests"][number]["rfqs"][number], "vendorId">>;
 };
@@ -264,6 +290,7 @@ export async function POST(req: Request) {
           input: { poNumber: body.poNumber as number },
         }),
         unavailableMessage,
+        purchasingReceiptOutputSchema,
       );
     } catch {
       return goUnavailable(unavailableMessage);

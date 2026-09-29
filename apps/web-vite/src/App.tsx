@@ -21,6 +21,7 @@ const InventoryPage = lazy(() => import("./components/InventoryPage").then((modu
 const PosShiftSummaryPage = lazy(() => import("./components/PosShiftSummaryPage").then((module) => ({ default: module.PosShiftSummaryPage })));
 const AccountingInvoicesPage = lazy(() => import("./components/AccountingInvoicesPage").then((module) => ({ default: module.AccountingInvoicesPage })));
 const PurchasingPaymentRunsPage = lazy(() => import("./components/PurchasingPaymentRunsPage").then((module) => ({ default: module.PurchasingPaymentRunsPage })));
+const PurchasingReceiptsPage = lazy(() => import("./components/PurchasingReceiptsPage").then((module) => ({ default: module.PurchasingReceiptsPage })));
 
 const SessionUserSchema = z.object({
   id: z.string().min(1),
@@ -40,6 +41,7 @@ const navigationItems = [
   { label: "Sales", href: "/sales", icon: "↗" },
   { label: "POS summary", href: "/pos/shift-summary", icon: "$" },
   { label: "Purchasing", href: "/purchasing/payment-runs", icon: "⇣" },
+  { label: "Receipts", href: "/purchasing/receipts", icon: "⇢" },
   { label: "Inventory", href: "/inventory", icon: "▦" },
   { label: "People", href: "/hr", icon: "◎" },
   { label: "Documents", href: "/documents", icon: "▧" },
@@ -65,6 +67,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   const inventoryPage = pathname === "/inventory";
   const accountingInvoicesPage = pathname === "/accounting/invoices";
   const purchasingPaymentRunsPage = pathname === "/purchasing/payment-runs";
+  const purchasingReceiptsPage = pathname === "/purchasing/receipts";
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const [organizationRevision, setOrganizationRevision] = useState(0);
   const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
@@ -146,7 +149,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
               <span aria-hidden="true">{item.icon}</span><span>{item.label}</span>
             </a>
           ))}
-          <p className="rail-note">{pathname === "/" ? "Approvals, the event ledger, agent sessions, projects, analytics, team roles, CRM, sales orders, accounting invoices, purchasing payment runs, POS shift summaries, and inventory stock levels are available in this Vite preview. Other pages still open in the current app." : "This Vite preview uses the existing workspace APIs. Other pages still open in the current app."}</p>
+          <p className="rail-note">{pathname === "/" ? "Approvals, the event ledger, agent sessions, projects, analytics, team roles, CRM, sales orders, accounting invoices, purchasing payment runs and receipts, POS shift summaries, and inventory stock levels are available in this Vite preview. Other pages still open in the current app." : "This Vite preview uses the existing workspace APIs. Other pages still open in the current app."}</p>
         </nav>
         <div className="rail-account">
           <div className="account-initial" aria-hidden="true">{(auth.user.name || auth.user.email).slice(0, 1).toUpperCase()}</div>
@@ -199,8 +202,10 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                 : accountingInvoicesPage
                                   ? <AccountingInvoicesPage key={organizationRevision} />
                                   : purchasingPaymentRunsPage
-                                    ? <PurchasingPaymentRunsPage key={organizationRevision} />
-                                    : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
+                                  ? <PurchasingPaymentRunsPage key={organizationRevision} />
+                                    : purchasingReceiptsPage
+                                      ? <PurchasingReceiptsPage key={organizationRevision} />
+                                      : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
           </Suspense>
         </PageErrorBoundary>
       </div>

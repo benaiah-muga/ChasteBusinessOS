@@ -734,3 +734,20 @@ new owners and the manifest shows zero legacy runtime paths.
     provide recoverable loading, empty, and error states, show a disabled state
     when either module is off, and link to the full workspaces for existing
     actions. Focused API, component, and authenticated-shell tests pass.
+
+54. (Done) Add a read-only Vite purchase receipt history preview using the
+    existing same-origin Purchasing APIs. Let the user select a purchase order,
+    preserve receipt dates and accepted, rejected, returned, and outstanding
+    thousandth-unit quantities, including pre-receipt stock movement rollups,
+    validate consumed API fields, and keep the currency-aware purchase-order
+    total. Respect Purchasing module enablement, provide accessible loading,
+    empty, and recoverable error states, and keep receipt writes in the full
+    receiving workspace. The full Vite package suite, typecheck, and lint pass.
+
+55. (Done) Add a default-off signed Go bridge for month-end foreign
+    receivables revaluation on `POST /api/accounting/close` using
+    `GO_ACCOUNTING_FX_REVALUATION_WRITE=1`. Preserve `accounting.post`
+    permission checks, the year/month input, approval responses, and all
+    revaluation fields. Validate successful Go results and fail closed after
+    dispatch without retrying the TypeScript executor. Focused route and Go FX
+    database parity tests pass.

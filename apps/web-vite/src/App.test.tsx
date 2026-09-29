@@ -155,6 +155,39 @@ beforeEach(() => {
       entryId: null,
       lines: [{ billId: "10000000-0000-4000-8000-000000000004", billNumber: 88, vendorName: "Acme Supplies", vendorRef: null, amountMinor: 45000 }],
     }] } });
+    if (path === "/api/purchasing" && init?.method === "POST") return Response.json({ ok: true, data: {
+      receipts: [{
+        number: 2,
+        receivedAt: "2026-09-28T09:30:00.000Z",
+        note: "Second delivery",
+        lines: [{
+          position: 1,
+          description: "Steel rods",
+          acceptedThousandths: 7000,
+          rejectedThousandths: 1000,
+          returnedThousandths: 500,
+          rejectionNote: "Damaged ends",
+        }],
+      }],
+      orderLines: [{
+        position: 1,
+        description: "Steel rods",
+        orderedThousandths: 10000,
+        acceptedThousandths: 7000,
+        rejectedThousandths: 1000,
+        returnedThousandths: 500,
+        remainingThousandths: 2000,
+      }],
+    } });
+    if (path === "/api/purchasing") return Response.json({ baseCurrency: "USD", orders: [{
+      id: "10000000-0000-4000-8000-000000000005",
+      number: 204,
+      vendorName: "Acme Supplies",
+      status: "partially_received",
+      memo: null,
+      orderedMinor: 150000,
+      lines: [{ lineNumber: 1, description: "Steel rods", quantity: 10000, unitPriceMinor: 15000 }],
+    }] });
     if (path === "/api/pos" && init?.method === "POST") return Response.json({ ok: true, data: {
       register: "Main register",
       status: "closed",
@@ -244,6 +277,27 @@ describe("Vite app frame", () => {
     expect(screen.getByRole("link", { name: "Purchasing" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Open full Purchasing workspace" })).not.toBeNull();
     expect(await screen.findByText("PAY-204")).not.toBeNull();
+  });
+
+  it("opens the purchase receipt history preview within the authenticated shell", async () => {
+    window.history.replaceState(null, "", "/purchasing/receipts");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Purchase receipt history" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Receipts" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Open full receiving workspace" }).getAttribute("href"))
+      .toBe("http://localhost:3001/purchasing/receiving");
+    expect(await screen.findByText("Damaged ends")).not.toBeNull();
+    expect(screen.getByText("2.000")).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/purchasing", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ action: "receiptDetail", poNumber: 204 }),
+      credentials: "same-origin",
+    }));
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("refreshes dashboard context and currency after switching organizations", async () => {
