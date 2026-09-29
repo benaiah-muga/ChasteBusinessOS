@@ -173,6 +173,11 @@ uncertain writes fail closed without a TypeScript retry. The flag defaults to
 filtering and the `{ orders }` response, and fails closed if Go is unavailable
 or returns invalid data. TypeScript remains the default; the flag defaults to
 `0`.
+`GO_DOCUMENTS_LIST_READS=1` opts the authored-document list in `GET /api/docs`
+into the signed Go `documents.listDocs` capability. It requires `pnpm dev:api`;
+template reads remain on the legacy executor, and the combined response is
+preserved. Unavailable or invalid Go results fail closed. TypeScript remains
+the default; the flag defaults to `0`.
 `GO_ACCOUNTING_QUOTES_WRITE=1` opts quote creation, acceptance, decline, and
 expiry sweeps into the signed Go capability bridge. It requires `pnpm
 dev:api`; the dedicated quotes route and other accounting actions remain on
@@ -252,6 +257,12 @@ the signed Go `inventory.itemHistory` read. It requires `pnpm dev:api`, keeps
 the `{ movements }` response and missing-item behavior, and fails closed if
 Go is unavailable or returns invalid data. TypeScript remains the default;
 the flag defaults to `0`.
+`GO_INVENTORY_STOCK_REPORT_READS=1` opts the stock report and reorder-alert
+reads on `GET /api/inventory` into two signed Go `inventory.stockReport`
+capability calls. It requires `pnpm dev:api`, preserves the report and alert
+fields, and fails closed if Go is unavailable or either result is invalid.
+Other inventory reads remain on their existing handlers. TypeScript remains
+the default; the flag defaults to `0`.
 `GO_POS_WRITES=1` opts register opening, sales, closing, returns, and shift
 summaries into the signed Go capability bridge. It requires `pnpm dev:api`;
 uncertain writes fail closed without a TypeScript retry. The flag defaults to

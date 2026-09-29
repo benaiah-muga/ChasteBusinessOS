@@ -22,6 +22,41 @@ function readRequest(query = "") {
   return new Request(`http://localhost/api/inventory${query}`);
 }
 
+function inventoryReadDb(rows: unknown[][] = [[], [], [], [], [], []]) {
+  const pendingRows = [...rows];
+  return {
+    select: vi.fn(() => {
+      const data = pendingRows.shift() ?? [];
+      const query = {
+        from: vi.fn(() => query),
+        where: vi.fn(() => query),
+        orderBy: vi.fn(() => query),
+        limit: vi.fn(() => query),
+        then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) => Promise.resolve(data).then(resolve, reject),
+      };
+      return query;
+    }),
+  };
+}
+
+const stockReportItem = {
+  sku: "MUG-1",
+  name: "Mug",
+  kind: "goods",
+  unitLabel: "each",
+  salePriceMinor: 5000,
+  imageUrl: null,
+  tags: ["core"],
+  barcode: null,
+  onHandThousandths: 500,
+  valueMinor: 2000,
+  avgUnitCostMinor: 4000,
+  reservedThousandths: 100,
+  availableThousandths: 400,
+  reorderPointThousandths: 1000,
+  reorderNeeded: true,
+};
+
 describe("inventory Go route adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -29,6 +64,7 @@ describe("inventory Go route adapter", () => {
     vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS", "0");
     vi.stubEnv("GO_INVENTORY_RESERVATION_WRITES", "0");
     vi.stubEnv("GO_INVENTORY_ITEM_HISTORY_READS", "0");
+    vi.stubEnv("GO_INVENTORY_STOCK_REPORT_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -47,6 +83,101 @@ describe("inventory Go route adapter", () => {
     expect(await response.json()).toEqual({ movements });
     expect(mocks.execute).toHaveBeenCalledWith("inventory.itemHistory", ctx, { sku: "MUG-1", limit: 100 });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps the main stock report on TypeScript while the Go read flag is off", async () => {
+    const db = inventoryReadDb();
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockImplementation(async (_id: string, _ctx: unknown, input: { belowReorderOnly: boolean }) => ({
+      ok: true,
+      data: { items: input.belowReorderOnly ? [stockReportItem] : [stockReportItem], totalValueMinor: 2000 },
+    }));
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.items).toEqual([{ ...stockReportItem, totalValueMinor: 2000 }]);
+    expect(result.totalValueMinor).toBe(2000);
+    expect(result.reorderAlerts).toEqual([{
+      sku: "MUG-1",
+      name: "Mug",
+      onHandThousandths: 500,
+      reorderPointThousandths: 1000,
+      shortfallThousandths: 500,
+      avgUnitCostMinor: 4000,
+    }]);
+    expect(mocks.execute).toHaveBeenCalledWith("inventory.stockReport", ctx, { belowReorderOnly: false });
+    expect(mocks.execute).toHaveBeenCalledWith("inventory.stockReport", ctx, { belowReorderOnly: true });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("bridges the main stock report through Go and preserves legacy report fields", async () => {
+    vi.stubEnv("GO_INVENTORY_STOCK_REPORT_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: true, data: { items: [stockReportItem], totalValueMinor: 2000 } }) })
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: true, data: { items: [stockReportItem], totalValueMinor: 2000 } }) });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBeNull();
+    const result = await response.json();
+    expect(result.items).toEqual([{ ...stockReportItem, totalValueMinor: 2000 }]);
+    expect(result.totalValueMinor).toBe(2000);
+    expect(result.reorderAlerts).toEqual([{
+      sku: "MUG-1",
+      name: "Mug",
+      onHandThousandths: 500,
+      reorderPointThousandths: 1000,
+      shortfallThousandths: 500,
+      avgUnitCostMinor: 4000,
+    }]);
+    expect(mocks.executeGoCapability).toHaveBeenNthCalledWith(1, {
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.stockReport",
+      input: { belowReorderOnly: false },
+    });
+    expect(mocks.executeGoCapability).toHaveBeenNthCalledWith(2, {
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.stockReport",
+      input: { belowReorderOnly: true },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "Go unavailable", first: { kind: "not-dispatched" }, second: { kind: "not-dispatched" } },
+    { label: "malformed report", first: { kind: "response", response: Response.json({ ok: true, data: { items: [{ sku: "MUG-1" }], totalValueMinor: 0 } }) }, second: { kind: "response", response: Response.json({ ok: true, data: { items: [], totalValueMinor: 0 } }) } },
+    { label: "malformed reorder report", first: { kind: "response", response: Response.json({ ok: true, data: { items: [stockReportItem], totalValueMinor: 2000 } }) }, second: { kind: "response", response: Response.json({ ok: true, data: { items: [{ sku: "MUG-1" }], totalValueMinor: 0 } }) } },
+  ])("fails closed on $label without retrying through TypeScript", async ({ first, second }) => {
+    vi.stubEnv("GO_INVENTORY_STOCK_REPORT_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.executeGoCapability.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { status: 401, body: { error: "session assertion expired" }, expectedError: "session assertion expired" },
+    { status: 403, body: { error: "organization membership is inactive" }, expectedError: "organization membership is inactive" },
+    { status: 422, body: { ok: false, error: "missing permission: inventory.read" }, expectedError: "missing permission: inventory.read" },
+  ])("preserves Go authorization failure status $status", async ({ status, body, expectedError }) => {
+    vi.stubEnv("GO_INVENTORY_STOCK_REPORT_READS", "1");
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb() });
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({ kind: "response", response: Response.json(body, { status }) })
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: true, data: { items: [stockReportItem], totalValueMinor: 2000 } }) });
+
+    const response = await GET(readRequest());
+    expect(response.status).toBe(status);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: expectedError });
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 
   it("bridges item history through Go and preserves the movement response shape", async () => {

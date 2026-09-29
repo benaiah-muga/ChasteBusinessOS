@@ -342,7 +342,12 @@ for old and new runtimes. Record ten runs each and publish median and p95 for:
 the current Next app, Vite app, and Go services, including wall time and peak
 resident memory. Its raw samples and toolchain metadata are written to
 `docs/migration/benchmarks/phase-0-builds.json`. This is a build baseline only;
-it does not establish UI, request, or end-to-end parity.
+it does not establish UI, request, or end-to-end parity. The 2026-09-29 warm
+medians are 24.46s for Next, 11.91s for Vite including TypeScript, and 2.46s
+for the three Go binaries. The first cold sample is included in p95, so the
+reported p95 is not representative of warm runs. The Vite app is still a
+migration shell, so these timings do not compare equivalent feature coverage
+or prove a faster development loop.
 
 - cold dev startup until the login and dashboard are usable;
 - warm edit-to-ready for one UI component, one business API, and one pure
@@ -430,7 +435,7 @@ new owners and the manifest shows zero legacy runtime paths.
    capability, and database table manifests with CI drift detection; source-cite
    the worker, event, integration, auth/session, data, demo, and action
    continuity inventories.
-3. (In progress) Capture old-runtime fixtures and benchmark scripts on a migrated database. Repeatable frontend and Go build timings are recorded by `pnpm benchmark:migration:builds`; request, startup, edit-to-ready, browser, and demo fixtures remain to be measured.
+3. (In progress) Capture old-runtime fixtures and benchmark scripts on a migrated database. Repeatable frontend and Go build timings are recorded by `pnpm benchmark:migration:builds`. On 2026-09-29, warm command medians were 24.46s for Next, 11.91s for the current Vite shell including TypeScript, and 2.46s for the three Go binaries. The Vite app does not yet have equivalent feature coverage, and the first cold sample is included in p95; do not treat this as proof of faster end-to-end development. Request, startup, edit-to-ready, browser, and demo fixtures remain to be measured.
 4. (Done) Define the versioned HTTP contract and auth bridge contract, and
   prove Go read-only policy and ledger endpoints under existing session,
   permission, and RLS policies. OpenAPI 3.1 covers `GET /__go/policy` and
@@ -655,3 +660,18 @@ new owners and the manifest shows zero legacy runtime paths.
     using `GO_SALES_LIST_ORDERS_READS=1`. Preserve status filtering and the
     `{ orders }` response; fail closed on unavailable or malformed Go results.
     Focused route tests and the full Go, typecheck, lint, and test gates pass.
+
+44. (Done) Add a default-off signed Go read bridge for the main inventory
+    stock report and reorder alerts using `GO_INVENTORY_STOCK_REPORT_READS=1`.
+    Preserve report fields and alert calculations, keep other reads on their
+    existing handlers, and fail closed when either Go result is unavailable or
+    malformed. Preserve authorization response statuses. The 43 focused route
+    tests and the full TypeScript, Go, vet, and contract gates pass.
+
+45. (Done) Add a default-off signed Go read bridge for the authored-document
+    list using `GO_DOCUMENTS_LIST_READS=1`. Preserve organization scope,
+    version counts, metadata, ordering, ISO timestamps, and the combined
+    `{ documents, templates }` response. Keep template reads on the legacy
+    executor and fail closed when Go is unavailable or returns malformed data.
+    The focused Go database and seven BFF route tests pass, as do the full
+    TypeScript, Go, vet, and contract gates.

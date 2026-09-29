@@ -124,6 +124,95 @@ async function dispatchInventoryHistoryGo(ctx: ReturnType<typeof actorFromResolv
   }
 }
 
+const inventoryStockReportItemSchema = z.object({
+  sku: z.string(),
+  name: z.string(),
+  kind: z.string(),
+  unitLabel: z.string(),
+  salePriceMinor: z.number().int(),
+  imageUrl: z.string().nullable(),
+  tags: z.array(z.string()),
+  barcode: z.string().nullable(),
+  onHandThousandths: z.number().int(),
+  valueMinor: z.number().int(),
+  avgUnitCostMinor: z.number().int(),
+  reservedThousandths: z.number().int(),
+  availableThousandths: z.number().int(),
+  reorderPointThousandths: z.number().int(),
+  reorderNeeded: z.boolean(),
+});
+
+const inventoryStockReportDataSchema = z.object({
+  items: z.array(inventoryStockReportItemSchema),
+  totalValueMinor: z.number().int(),
+});
+
+async function dispatchInventoryStockReportGo(
+  ctx: ReturnType<typeof actorFromResolved> & {},
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+) {
+  try {
+    const [stockResult, alertsResult] = await Promise.all([
+      executeGoCapability({
+        actionContext: ctx,
+        session,
+        capabilityId: "inventory.stockReport",
+        input: { belowReorderOnly: false },
+      }),
+      executeGoCapability({
+        actionContext: ctx,
+        session,
+        capabilityId: "inventory.stockReport",
+        input: { belowReorderOnly: true },
+      }),
+    ]);
+    if (stockResult.kind !== "response" || alertsResult.kind !== "response") return goUnavailable();
+
+    const [stockBody, alertsBody] = await Promise.all([stockResult.response.json(), alertsResult.response.json()]);
+    const stockFailure = inventoryStockReportGoFailure(stockResult.response.status, stockBody);
+    const alertsFailure = inventoryStockReportGoFailure(alertsResult.response.status, alertsBody);
+    if (stockFailure) return stockFailure;
+    if (alertsFailure) return alertsFailure;
+    const stockEnvelope = z.object({ ok: z.literal(true), data: inventoryStockReportDataSchema }).safeParse(stockBody);
+    const alertsEnvelope = z.object({ ok: z.literal(true), data: inventoryStockReportDataSchema }).safeParse(alertsBody);
+    if (stockResult.response.status !== 200 || alertsResult.response.status !== 200 || !stockEnvelope.success || !alertsEnvelope.success) {
+      return goUnavailable();
+    }
+
+    const reportItems = stockEnvelope.data.data.items.map((item) => ({
+      ...item,
+      totalValueMinor: item.valueMinor,
+    }));
+    const reorderAlerts = alertsEnvelope.data.data.items.map((item) => ({
+      sku: item.sku,
+      name: item.name,
+      onHandThousandths: item.onHandThousandths,
+      reorderPointThousandths: item.reorderPointThousandths,
+      shortfallThousandths: Math.max(0, item.reorderPointThousandths - item.onHandThousandths),
+      avgUnitCostMinor: item.avgUnitCostMinor,
+    }));
+    return {
+      reportItems,
+      reorderAlerts,
+      totalValueMinor: stockEnvelope.data.data.totalValueMinor,
+    };
+  } catch {
+    return goUnavailable();
+  }
+}
+
+function inventoryStockReportGoFailure(status: number, body: unknown): Response | null {
+  if (status !== 401 && status !== 403 && status !== 422) return null;
+  const parsed = status === 422
+    ? z.object({ ok: z.literal(false), error: z.string() }).safeParse(body)
+    : z.object({ error: z.string() }).safeParse(body);
+  if (!parsed.success) return goUnavailable();
+  return NextResponse.json(
+    { error: parsed.data.error },
+    { status, headers: noStore },
+  );
+}
+
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -149,10 +238,6 @@ export async function GET(req: Request) {
   const registry = buildRegistry(db);
   const executor = buildExecutor(db, registry);
 
-  const stock = await executor.execute("inventory.stockReport", ctx, { belowReorderOnly: false });
-  if (!stock.ok) return NextResponse.json({ error: stock.error }, { status: 500 });
-  const alertsRun = await executor.execute("inventory.stockReport", ctx, { belowReorderOnly: true });
-
   type ReportItem = {
     sku: string;
     name: string;
@@ -165,20 +250,35 @@ export async function GET(req: Request) {
     reorderPointThousandths: number;
     reorderNeeded: boolean;
   };
-  const reportItems = ((stock.data as { items?: ReportItem[] } | undefined)?.items ?? []).map((i) => ({
-    ...i,
-    totalValueMinor: i.valueMinor,
-  }));
-  const reorderAlerts = (((alertsRun.ok ? alertsRun.data : undefined) as { items?: ReportItem[] } | undefined)?.items ?? []).map(
-    (a) => ({
-      sku: a.sku,
-      name: a.name,
-      onHandThousandths: a.onHandThousandths,
-      reorderPointThousandths: a.reorderPointThousandths,
-      shortfallThousandths: Math.max(0, a.reorderPointThousandths - a.onHandThousandths),
-      avgUnitCostMinor: a.avgUnitCostMinor,
-    }),
-  );
+  let reportItems: (ReportItem & { totalValueMinor: number })[];
+  let reorderAlerts: { sku: string; name: string; onHandThousandths: number; reorderPointThousandths: number; shortfallThousandths: number; avgUnitCostMinor: number }[];
+  let totalValueMinor: number;
+  if (process.env.GO_INVENTORY_STOCK_REPORT_READS === "1") {
+    const report = await dispatchInventoryStockReportGo(ctx, resolved);
+    if (report instanceof Response) return report;
+    reportItems = report.reportItems;
+    reorderAlerts = report.reorderAlerts;
+    totalValueMinor = report.totalValueMinor;
+  } else {
+    const stock = await executor.execute("inventory.stockReport", ctx, { belowReorderOnly: false });
+    if (!stock.ok) return NextResponse.json({ error: stock.error }, { status: 500 });
+    const alertsRun = await executor.execute("inventory.stockReport", ctx, { belowReorderOnly: true });
+    reportItems = ((stock.data as { items?: ReportItem[] } | undefined)?.items ?? []).map((i) => ({
+      ...i,
+      totalValueMinor: i.valueMinor,
+    }));
+    reorderAlerts = (((alertsRun.ok ? alertsRun.data : undefined) as { items?: ReportItem[] } | undefined)?.items ?? []).map(
+      (a) => ({
+        sku: a.sku,
+        name: a.name,
+        onHandThousandths: a.onHandThousandths,
+        reorderPointThousandths: a.reorderPointThousandths,
+        shortfallThousandths: Math.max(0, a.reorderPointThousandths - a.onHandThousandths),
+        avgUnitCostMinor: a.avgUnitCostMinor,
+      }),
+    );
+    totalValueMinor = (stock.data as { totalValueMinor?: number } | undefined)?.totalValueMinor ?? 0;
+  }
 
   const itemRows = await db
     .select({
@@ -233,7 +333,7 @@ export async function GET(req: Request) {
     : [];
   return NextResponse.json({
     items: reportItems.map((item) => ({ ...item, ...itemBySku.get(item.sku) })),
-    totalValueMinor: (stock.data as { totalValueMinor?: number } | undefined)?.totalValueMinor ?? 0,
+    totalValueMinor,
     reorderAlerts,
     locations,
     reservations: reservations.map((r) => ({ ...r, sku: skuOf.get(r.itemId) ?? "" })),

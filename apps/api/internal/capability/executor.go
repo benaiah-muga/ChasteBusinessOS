@@ -82,6 +82,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	listCustomersCapabilityID:                    {module: "crm", permission: "crm.read", risk: "read"},
 	listCustomerViewsCapabilityID:                {module: "crm", permission: "crm.read", risk: "read"},
 	listDealsCapabilityID:                        {module: "crm", permission: "crm.read", risk: "read"},
+	documentsListDocsCapabilityID:                {module: "documents", permission: "documents.read", risk: "read"},
 	pipelineReportCapabilityID:                   {module: "crm", permission: "crm.read", risk: "read"},
 	listTasksCapabilityID:                        {module: "crm", permission: "crm.read", risk: "read"},
 	customerTimelineCapabilityID:                 {module: "crm", permission: "crm.read", risk: "read"},
@@ -262,7 +263,7 @@ func supportedCapability(capabilityID string) bool {
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
-		listCustomersCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
+		listCustomersCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID, pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
 		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID,
 		createTaskCapabilityID, completeTaskCapabilityID, updateTaskDetailsCapabilityID, restoreTaskDetailsCapabilityID,
 		createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID,
@@ -492,6 +493,12 @@ func (e *Executor) execute(
 			input = parsed
 		case listDealsCapabilityID:
 			parsed, err := ParseListDealsInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case documentsListDocsCapabilityID:
+			parsed, err := ParseListAuthoredDocsInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -1135,6 +1142,12 @@ func (e *Executor) execute(
 			data, err = marshalJS(output)
 		case SalesListOrdersInput:
 			output, err := salesListOrders(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListAuthoredDocsInput:
+			output, err := listAuthoredDocs(ctx, tx, claims.OrganizationID)
 			if err != nil {
 				return Result{}, err
 			}
@@ -2028,7 +2041,7 @@ func canonicalInputHash(input any) (string, error) {
 		return parsed.CanonicalHash()
 	case CustomerProfileSnapshotsInput:
 		return parsed.CanonicalHash()
-	case ListCustomersInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
+	case ListCustomersInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput, ListAuthoredDocsInput,
 		CreateDealInput, MoveDealStageInput, ConvertLeadInput,
 		CreateTaskInput, CompleteTaskInput, UpdateTaskDetailsInput,
 		CreateQuoteInput, AcceptQuoteInput, DeclineQuoteInput, ExpireQuoteInput, ListQuotesInput,

@@ -4,6 +4,48 @@ import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel
 import { getResolvedUser } from "@/server/session";
 import { getDb } from "@chaste/db";
 import { ensureBuiltinTemplates } from "@/server/doc-templates";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+const authoredDocumentSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  status: z.string(),
+  versions: z.number().int().nonnegative(),
+  templateId: z.string().uuid().nullable(),
+  folder: z.string().nullable(),
+  documentType: z.string().nullable(),
+  linkedRecordType: z.string().nullable(),
+  linkedRecordId: z.string().uuid().nullable(),
+  linkedRecordLabel: z.string().nullable(),
+  updatedAt: z.string().datetime(),
+}).strict();
+const listDocsOutputSchema = z.object({ documents: z.array(authoredDocumentSchema) }).strict();
+
+async function listDocsFromGo(result: GoCapabilityBridgeResult): Promise<{ documents: unknown[] } | Response> {
+  const unavailable = () => NextResponse.json({ error: "Go documents service unavailable" }, { status: 503, headers: noStore });
+  if (result.kind !== "response") return unavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: listDocsOutputSchema }).strict().safeParse(body);
+      return parsed.success ? parsed.data.data : unavailable();
+    }
+    if (result.response.status === 401 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      return parsed.success
+        ? NextResponse.json(parsed.data, { status: result.response.status, headers: noStore })
+        : unavailable();
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      return parsed.success ? NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore }) : unavailable();
+    }
+  } catch {
+    return unavailable();
+  }
+  return unavailable();
+}
 
 /**
  * Authored documents gallery: list (with built-in template seeding) and
@@ -26,14 +68,26 @@ export async function GET(req: Request) {
   }
 
   await ensureBuiltinTemplates(db, resolved.orgId);
-  const docs = await executor.execute("documents.listDocs", ctx, {});
+  let documents: unknown[];
+  if (process.env.GO_DOCUMENTS_LIST_READS === "1") {
+    if (ctx.actor.type !== "human" || ctx.actor.id !== resolved.userId || ctx.actor.orgId !== resolved.orgId || !resolved.authSessionId) {
+      return NextResponse.json({ error: "Go documents service unavailable" }, { status: 503, headers: noStore });
+    }
+    const result = await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId: "documents.listDocs", input: {} });
+    const goDocs = await listDocsFromGo(result);
+    if (goDocs instanceof Response) return goDocs;
+    documents = goDocs.documents;
+  } else {
+    const docs = await executor.execute("documents.listDocs", ctx, {});
+    if (!docs.ok) return NextResponse.json({ error: docs.error }, { status: 422 });
+    const docRows = (docs.data ?? {}) as { documents?: unknown[] };
+    documents = docRows.documents ?? [];
+  }
   const templates = await executor.execute("documents.listTemplates", ctx, {});
-  if (!docs.ok) return NextResponse.json({ error: docs.error }, { status: 422 });
   if (!templates.ok) return NextResponse.json({ error: templates.error }, { status: 422 });
-  const docRows = (docs.data ?? {}) as { documents?: unknown[] };
   const tplRows = (templates.data ?? {}) as { templates?: unknown[] };
   return NextResponse.json({
-    documents: docRows.documents ?? [],
+    documents,
     templates: tplRows.templates ?? [],
   });
 }
