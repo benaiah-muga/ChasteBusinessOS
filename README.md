@@ -183,6 +183,11 @@ returns invalid data. TypeScript remains the default; the flag defaults to
 `pnpm dev:api`; other accounting actions stay on their existing handlers, and
 uncertain payment outcomes fail closed without a TypeScript retry. The flag
 defaults to `0`.
+`GO_ACCOUNTING_FX_RATE_WRITE=1` opts `accounting.recordFxRate` on
+`POST /api/accounting` into the signed Go capability bridge. It requires
+`pnpm dev:api`; other accounting actions stay on their existing handlers, and
+uncertain outcomes fail closed without a TypeScript retry. The flag defaults
+to `0`.
 `GO_ACCOUNTING_RECURRING_WRITE=1` opts recurring invoice template creation,
 pausing, and resumption into the signed Go capability bridge. It requires
 `pnpm dev:api`; the dedicated recurring route and other accounting actions
@@ -218,6 +223,11 @@ remain on their existing handlers. The flag defaults to `0`.
 `pnpm dev:api`; approval responses are preserved and uncertain outcomes fail
 closed without a TypeScript retry. Other purchasing actions remain on their
 existing handlers. The flag defaults to `0`.
+`GO_PURCHASING_REVERSE_VENDOR_PAYMENT_WRITE=1` opts
+`purchasing.reverseVendorPayment` on `POST /api/purchasing` into the signed Go
+capability bridge. It requires `pnpm dev:api`; approval responses are
+preserved and uncertain outcomes fail closed without a TypeScript retry. The
+flag defaults to `0`.
 `GO_PURCHASING_RECEIPT_READS=1` opts the `receiptDetail` action on
 `POST /api/purchasing` into the signed Go read capability. It requires
 `pnpm dev:api`, preserves the receipts and order-line response, and fails

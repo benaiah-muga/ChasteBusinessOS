@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/ledger"
 )
@@ -63,8 +65,18 @@ func TestGoLedgerHandlerUsesSignedOrganizationAndPreservesEventShape(t *testing.
 	if reader.orgID != "org-verified" || reader.limit != 17 || reader.calls != 1 {
 		t.Fatalf("reader called with org=%q limit=%d calls=%d", reader.orgID, reader.limit, reader.calls)
 	}
-	if got, want := response.Body.String(), `{"events":[{"seq":42,"kind":"capability.executed","capabilityId":"crm.createCustomer","actorType":"human","actorId":null,"sessionId":null,"payload":{"customerId":"c-1"},"hash":"hash-42","prevHash":null,"occurredAt":"2026-09-27T10:11:12.130Z"}]}`+"\n"; got != want {
-		t.Fatalf("body = %q, want %q", got, want)
+	var got apicontract.GoLedgerResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode generated ledger response: %v", err)
+	}
+	if len(got.Events) != 1 {
+		t.Fatalf("event count = %d, want 1", len(got.Events))
+	}
+	event := got.Events[0]
+	if event.Seq != 42 || event.Kind != "capability.executed" || event.CapabilityId == nil || *event.CapabilityId != "crm.createCustomer" ||
+		event.ActorType != "human" || event.ActorId != nil || event.SessionId != nil || string(event.Payload) != `{"customerId":"c-1"}` ||
+		event.Hash != "hash-42" || event.PrevHash != nil || event.OccurredAt != "2026-09-27T10:11:12.130Z" {
+		t.Fatalf("ledger event = %+v, want legacy event fields and timestamp", event)
 	}
 	if got := response.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control = %q, want no-store", got)

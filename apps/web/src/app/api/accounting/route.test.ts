@@ -730,3 +730,133 @@ describe("POST /api/accounting Go payment bridge", () => {
     expect(mocks.getDb).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/accounting Go FX rate bridge", () => {
+  const rateBody = {
+    action: "recordFxRate",
+    quoteCurrency: "EUR",
+    rate: "1.2500",
+    effectiveAt: "2026-09-27T12:00:00.000Z",
+  };
+  const rateOutput = {
+    rateId: "bcdab99d-9220-46f0-8fb9-327246732012",
+    num: 5,
+    den: 4,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_FX_RATE_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_RECORD_PAYMENT_WRITE", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: rateOutput });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps FX rate recording on TypeScript by default", async () => {
+    vi.stubEnv("GO_ACCOUNTING_RECORD_PAYMENT_WRITE", "1");
+
+    const response = await POST(request(rateBody));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: rateOutput });
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.recordFxRate", actionContext, {
+      quoteCurrency: "EUR",
+      rate: "1.2500",
+      effectiveAt: "2026-09-27T12:00:00.000Z",
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches FX rate recording through Go and validates the output shape", async () => {
+    vi.stubEnv("GO_ACCOUNTING_FX_RATE_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: rateOutput, replayed: true }),
+    });
+
+    const response = await POST(request(rateBody));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: rateOutput });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+      capabilityId: "accounting.recordFxRate",
+      input: {
+        quoteCurrency: "EUR",
+        rate: "1.2500",
+        effectiveAt: "2026-09-27T12:00:00.000Z",
+      },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("preserves legacy approval and capability error response shapes", async () => {
+    vi.stubEnv("GO_ACCOUNTING_FX_RATE_WRITE", "1");
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, pendingApproval: true, reason: "Approval required", approvalId: "private-id" }, { status: 202 }),
+      })
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, error: "invalid rate; use a positive decimal like 1.0875" }, { status: 422 }),
+      })
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ error: "forbidden: missing permission: accounting.post" }, { status: 403 }),
+      });
+
+    const pending = await POST(request(rateBody));
+    const invalid = await POST(request(rateBody));
+    const forbidden = await POST(request(rateBody));
+
+    expect(pending.status).toBe(202);
+    expect(await pending.json()).toEqual({ ok: false, pendingApproval: true, reason: "Approval required" });
+    expect(invalid.status).toBe(422);
+    expect(await invalid.json()).toEqual({ ok: false, error: "invalid rate; use a positive decimal like 1.0875" });
+    expect(forbidden.status).toBe(422);
+    expect(await forbidden.json()).toEqual({ ok: false, error: "forbidden: missing permission: accounting.post" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "missing dispatch", result: { kind: "not-dispatched" } },
+    { name: "unknown outcome", result: { kind: "outcome-unknown" } },
+    { name: "malformed output", result: { kind: "response", response: Response.json({ ok: true, data: { ...rateOutput, den: "4" } }) } },
+    { name: "fractional output", result: { kind: "response", response: Response.json({ ok: true, data: { ...rateOutput, num: 1.5 } }) } },
+    { name: "nonpositive output", result: { kind: "response", response: Response.json({ ok: true, data: { ...rateOutput, den: 0 } }) } },
+    { name: "backend failure", result: { kind: "response", response: Response.json({ error: "internal error" }, { status: 500 }) } },
+  ])("fails closed on $name without retrying through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_ACCOUNTING_FX_RATE_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(request(rateBody));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "accounting service unavailable; check FX rate status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("fails closed if the FX rate Go dispatch throws", async () => {
+    vi.stubEnv("GO_ACCOUNTING_FX_RATE_WRITE", "1");
+    mocks.executeGoCapability.mockRejectedValue(new Error("bridge timeout"));
+
+    const response = await POST(request(rateBody));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "accounting service unavailable; check FX rate status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

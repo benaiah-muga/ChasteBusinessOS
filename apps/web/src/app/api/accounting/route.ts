@@ -245,6 +245,27 @@ export async function POST(req: Request) {
     }
   }
 
+  if (body.action === "recordFxRate" && body.quoteCurrency && body.rate && process.env.GO_ACCOUNTING_FX_RATE_WRITE === "1") {
+    try {
+      return await goBridgeResponse(
+        await executeGoCapability({
+          actionContext: humanCtx,
+          session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+          capabilityId: "accounting.recordFxRate",
+          input: {
+            quoteCurrency: body.quoteCurrency,
+            rate: body.rate,
+            effectiveAt: body.effectiveAt || undefined,
+          },
+        }),
+        fxRateUnavailable,
+        recordFxRateOutputSchema,
+      );
+    } catch {
+      return fxRateUnavailable();
+    }
+  }
+
   if (body.action === "createInvoice" && body.customerId) {
     const lines = body.lines;
     if (!lines?.length) return NextResponse.json({ error: "lines are required" }, { status: 400 });
@@ -680,9 +701,22 @@ const recordPaymentOutputSchema = z.object({
   foreignEntryId: z.string().uuid().optional(),
 });
 
+const recordFxRateOutputSchema = z.object({
+  rateId: z.string(),
+  num: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  den: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+});
+
 function paymentUnavailable() {
   return NextResponse.json(
     { error: "accounting service unavailable; check payment status before retrying" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+function fxRateUnavailable() {
+  return NextResponse.json(
+    { error: "accounting service unavailable; check FX rate status before retrying" },
     { status: 503, headers: { "Cache-Control": "no-store" } },
   );
 }

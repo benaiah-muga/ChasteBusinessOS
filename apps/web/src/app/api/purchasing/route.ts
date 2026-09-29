@@ -270,6 +270,34 @@ export async function POST(req: Request) {
     }
   }
 
+  if (body.action === "reverseVendorPayment" && process.env.GO_PURCHASING_REVERSE_VENDOR_PAYMENT_WRITE === "1") {
+    if (!body.vendorPaymentId || !body.reason)
+      return NextResponse.json({ error: "vendorPaymentId and reason are required" }, { status: 400 });
+    const unavailableMessage = "purchasing payment reversal service unavailable; check payment status before retrying";
+    try {
+      return await purchasingGoResponse(
+        await executeGoCapability({
+          actionContext: ctx,
+          session: resolved,
+          capabilityId: "purchasing.reverseVendorPayment",
+          input: {
+            vendorPaymentId: body.vendorPaymentId as string,
+            reason: body.reason as string,
+          },
+        }),
+        unavailableMessage,
+        z.object({
+          reversalEntryId: z.string(),
+          refundedMinor: z.number().int(),
+          billNumber: z.number().int(),
+          outstandingMinor: z.number().int(),
+        }),
+      );
+    } catch {
+      return goUnavailable(unavailableMessage);
+    }
+  }
+
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
 
@@ -420,6 +448,15 @@ export async function POST(req: Request) {
   }
 
   switch (body.action) {
+    case "reverseVendorPayment":
+      if (!body.vendorPaymentId || !body.reason)
+        return NextResponse.json({ error: "vendorPaymentId and reason are required" }, { status: 400 });
+      return respond(
+        await executor.execute("purchasing.reverseVendorPayment", ctx, {
+          vendorPaymentId: body.vendorPaymentId as string,
+          reason: body.reason as string,
+        }),
+      );
     case "createVendor":
       return respond(
         await executor.execute("purchasing.createVendor", ctx, {

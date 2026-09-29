@@ -36,6 +36,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /__go/ledger:
+    get:
+      operationId: readGoLedger
+      summary: Read recent organization ledger events
+      description: Reads recent events only for the organization in the signed assertion, which must include the ledger-read grant.
+      security:
+        - chasteSessionAssertion: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Optional numeric row limit. Omitted or malformed values use 60; values are floored and clamped to the inclusive range 1 through 200.
+          schema:
+            type: string
+          example: "100"
+      responses:
+        "200":
+          description: Recent ledger events for the signed organization, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoLedgerResponse"
+        "401":
+          description: The signed assertion is missing, invalid, or expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: The assertion does not grant ledger read access.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The ledger could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The private bridge is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   securitySchemes:
     chasteSessionAssertion:
@@ -64,6 +110,42 @@ components:
         go.projects.read:
           $ref: "#/components/schemas/GoProjectsReadAssertionClaims"
   schemas:
+    GoLedgerResponse:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/GoLedgerEvent"
+    GoLedgerEvent:
+      type: object
+      additionalProperties: false
+      required: [seq, kind, capabilityId, actorType, actorId, sessionId, payload, hash, prevHash, occurredAt]
+      properties:
+        seq:
+          type: integer
+          format: int64
+        kind:
+          type: string
+        capabilityId:
+          type: [string, "null"]
+        actorType:
+          type: string
+        actorId:
+          type: [string, "null"]
+        sessionId:
+          type: [string, "null"]
+        payload:
+          x-go-type: RawJSON
+        hash:
+          type: string
+        prevHash:
+          type: [string, "null"]
+        occurredAt:
+          type: string
+          description: UTC timestamp formatted with millisecond precision.
     GoPolicyAssertionClaims:
       type: object
       additionalProperties: false

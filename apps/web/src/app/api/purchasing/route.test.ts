@@ -587,3 +587,101 @@ describe("purchasing Go request workflow bridge", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("purchasing Go vendor payment reversal bridge", () => {
+  const vendorPaymentId = "d1ab207a-b4f8-4aca-a28c-b8127ae017af";
+  const reversalEntryId = "452635a8-2b7b-4da4-93b6-274e44ee1fa9";
+  const body = { action: "reverseVendorPayment", vendorPaymentId, reason: "Duplicate payment" };
+  const data = { reversalEntryId, refundedMinor: 25000, billNumber: 84, outstandingMinor: 75000 };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_PURCHASING_REVERSE_VENDOR_PAYMENT_WRITE", "0");
+    mocks.getResolvedUser.mockResolvedValue(user);
+    mocks.actorFromResolved.mockReturnValue(ctx);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps reversals on the TypeScript capability when the flag is off", async () => {
+    delete process.env.GO_PURCHASING_REVERSE_VENDOR_PAYMENT_WRITE;
+
+    const response = await POST(request(body));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.reverseVendorPayment", ctx, {
+      vendorPaymentId,
+      reason: "Duplicate payment",
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches reversals to Go and preserves the legacy output contract", async () => {
+    vi.stubEnv("GO_PURCHASING_REVERSE_VENDOR_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data, replayed: true }),
+    });
+
+    const response = await POST(request({ ...body, intentId: "reverse-vendor-payment-1" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.reverseVendorPayment",
+      input: { vendorPaymentId, reason: "Duplicate payment" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves Go approvals and capability errors without retrying through TypeScript", async () => {
+    vi.stubEnv("GO_PURCHASING_REVERSE_VENDOR_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, pendingApproval: true, reason: "Human approval required" }, { status: 202 }),
+      })
+      .mockResolvedValueOnce({
+        kind: "response",
+        response: Response.json({ ok: false, error: "vendor payment has already been reversed" }, { status: 422 }),
+      });
+
+    const approval = await POST(request(body));
+    const failure = await POST(request(body));
+
+    expect(approval.status).toBe(202);
+    expect(await approval.json()).toEqual({ ok: false, pendingApproval: true, reason: "Human approval required" });
+    expect(failure.status).toBe(422);
+    expect(await failure.json()).toEqual({ ok: false, error: "vendor payment has already been reversed" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "missing Go dispatch", result: { kind: "not-dispatched" } },
+    { name: "unknown outcome", result: { kind: "outcome-unknown" } },
+    { name: "malformed success output", result: { kind: "response", response: Response.json({ ok: true, data: { ...data, refundedMinor: "25000" } }) } },
+    { name: "backend failure", result: { kind: "response", response: Response.json({ error: "internal error" }, { status: 500 }) } },
+  ])("fails closed on $name without retrying through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_PURCHASING_REVERSE_VENDOR_PAYMENT_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(request(body));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing payment reversal service unavailable; check payment status before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

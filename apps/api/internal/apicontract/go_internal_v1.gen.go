@@ -8,6 +8,27 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// GoLedgerEvent defines model for GoLedgerEvent.
+type GoLedgerEvent struct {
+	ActorId      *string `json:"actorId"`
+	ActorType    string  `json:"actorType"`
+	CapabilityId *string `json:"capabilityId"`
+	Hash         string  `json:"hash"`
+	Kind         string  `json:"kind"`
+
+	// OccurredAt UTC timestamp formatted with millisecond precision.
+	OccurredAt string  `json:"occurredAt"`
+	Payload    RawJSON `json:"payload"`
+	PrevHash   *string `json:"prevHash"`
+	Seq        int64   `json:"seq"`
+	SessionId  *string `json:"sessionId"`
+}
+
+// GoLedgerResponse defines model for GoLedgerResponse.
+type GoLedgerResponse struct {
+	Events []GoLedgerEvent `json:"events"`
+}
+
 // GoPolicyResponse defines model for GoPolicyResponse.
 type GoPolicyResponse struct {
 	CanEdit bool   `json:"canEdit"`
@@ -19,4 +40,10 @@ type Policy struct {
 	MaxRiskAutonomous   string  `json:"maxRiskAutonomous"`
 	MoneyThresholdMinor int64   `json:"moneyThresholdMinor"`
 	RequiresApprovalFor RawJSON `json:"requiresApprovalFor"`
+}
+
+// ReadGoLedgerParams defines parameters for ReadGoLedger.
+type ReadGoLedgerParams struct {
+	// Limit Optional numeric row limit. Omitted or malformed values use 60; values are floored and clamped to the inclusive range 1 through 200.
+	Limit *string `form:"limit,omitempty" json:"limit,omitempty"`
 }

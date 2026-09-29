@@ -24,10 +24,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/__go/ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read recent organization ledger events
+         * @description Reads recent events only for the organization in the signed assertion, which must include the ledger-read grant.
+         */
+        get: operations["readGoLedger"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        GoLedgerResponse: {
+            events: components["schemas"]["GoLedgerEvent"][];
+        };
+        GoLedgerEvent: {
+            /** Format: int64 */
+            seq: number;
+            kind: string;
+            capabilityId: string | null;
+            actorType: string;
+            actorId: string | null;
+            sessionId: string | null;
+            payload: unknown;
+            hash: string;
+            prevHash: string | null;
+            /** @description UTC timestamp formatted with millisecond precision. */
+            occurredAt: string;
+        };
         GoPolicyAssertionClaims: {
             /** @constant */
             aud: "go.policy.read";
@@ -213,6 +250,68 @@ export interface operations {
                 };
             };
             /** @description The policy could not be read. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The private bridge is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    readGoLedger: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Optional numeric row limit. Omitted or malformed values use 60; values are floored and clamped to the inclusive range 1 through 200.
+                 * @example 100
+                 */
+                limit?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent ledger events for the signed organization, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoLedgerResponse"];
+                };
+            };
+            /** @description The signed assertion is missing, invalid, or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The assertion does not grant ledger read access. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The ledger could not be read. */
             500: {
                 headers: {
                     [name: string]: unknown;

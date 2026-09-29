@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/apicontract"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/ledger"
 )
@@ -51,9 +52,22 @@ func (h *GoLedgerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
-		Events []ledger.Event `json:"events"`
-	}{Events: events})
+	response := apicontract.GoLedgerResponse{Events: make([]apicontract.GoLedgerEvent, 0, len(events))}
+	for _, event := range events {
+		response.Events = append(response.Events, apicontract.GoLedgerEvent{
+			Seq:          event.Seq,
+			Kind:         event.Kind,
+			CapabilityId: event.CapabilityID,
+			ActorType:    event.ActorType,
+			ActorId:      event.ActorID,
+			SessionId:    event.SessionID,
+			Payload:      event.Payload,
+			Hash:         event.Hash,
+			PrevHash:     event.PrevHash,
+			OccurredAt:   event.OccurredAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func parseLedgerLimit(value string, present bool) int {
