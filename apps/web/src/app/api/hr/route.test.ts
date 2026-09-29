@@ -331,3 +331,59 @@ describe("HR route Go leave-time and payroll-applicant bridges", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("HR route Go openings bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_HR_EMPLOYEE_WRITES", "0");
+    vi.stubEnv("GO_HR_LEAVE_TIME_WRITES", "0");
+    vi.stubEnv("GO_HR_PAYROLL_APPLICANT_WRITES", "0");
+    vi.stubEnv("GO_HR_OPENINGS_WRITE", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: { handle: "legacy-db" } });
+    mocks.buildRegistry.mockReturnValue({ handle: "legacy-registry" });
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { done: true } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("dispatches opening create and close through the signed Go bridge when enabled", async () => {
+    vi.stubEnv("GO_HR_OPENINGS_WRITE", "1");
+    mocks.executeGoCapability.mockImplementation(async () => ({
+      kind: "response",
+      response: Response.json({ ok: true, data: { openingId: "opening-1" }, replayed: true }),
+    }));
+
+    const created = await POST(request({ action: "createOpening", title: "Technician", department: "Ops", note: "Backfill" }));
+    expect(created.status).toBe(200);
+    expect(await created.json()).toEqual({ ok: true, data: { openingId: "opening-1" } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext, session: resolved, capabilityId: "hr.createOpening",
+      input: { title: "Technician", department: "Ops", note: "Backfill" },
+    });
+
+    const closed = await POST(request({ action: "closeOpening", openingId: "opening-1" }));
+    expect(closed.status).toBe(200);
+    expect(mocks.executeGoCapability).toHaveBeenLastCalledWith({
+      actionContext, session: resolved, capabilityId: "hr.closeOpening",
+      input: { openingId: "opening-1" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps openings on the legacy executor while the flag is off", async () => {
+    await POST(request({ action: "createOpening", title: "Technician" }));
+    expect(mocks.execute).toHaveBeenCalledWith("hr.createOpening", actionContext, { title: "Technician" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without retrying through TypeScript when Go is unavailable", async () => {
+    vi.stubEnv("GO_HR_OPENINGS_WRITE", "1");
+    const response = await POST(request({ action: "closeOpening", openingId: "opening-1" }));
+    expect(response.status).toBe(503);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

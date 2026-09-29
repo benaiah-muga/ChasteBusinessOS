@@ -581,6 +581,21 @@ export async function POST(req: Request) {
     });
     return respond(result);
   }
+  if (body.action === "buildReminders" && process.env.GO_ACCOUNTING_REMINDERS_READS === "1") {
+    try {
+      return await invoiceOpsGoResponse(
+        await executeGoCapability({
+          actionContext: humanCtx,
+          session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+          capabilityId: "accounting.buildReminders",
+          input: {},
+        }),
+        z.record(z.string(), z.unknown()),
+      );
+    } catch {
+      return accountingUnavailable();
+    }
+  }
   if (body.action === "buildReminders") {
     const result = await executor.execute("accounting.buildReminders", humanCtx, {});
     return respond(result);

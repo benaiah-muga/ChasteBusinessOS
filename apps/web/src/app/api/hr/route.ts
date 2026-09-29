@@ -361,6 +361,28 @@ export async function POST(req: Request) {
     }
   }
 
+  if (
+    process.env.GO_HR_OPENINGS_WRITE === "1" &&
+    (body.action === "createOpening" || (body.action === "closeOpening" && body.openingId))
+  ) {
+    let capabilityId: string;
+    let input: Record<string, unknown>;
+    if (body.action === "createOpening") {
+      if (!body.title) return NextResponse.json({ error: "title is required" }, { status: 400 });
+      capabilityId = "hr.createOpening";
+      input = { title: body.title as string, department: (body.department as string) || undefined, note: (body.note as string) || undefined };
+    } else {
+      capabilityId = "hr.closeOpening";
+      input = { openingId: body.openingId as string };
+    }
+    const unavailable = hrUnavailable("HR service unavailable; check opening status before retrying");
+    try {
+      return await hrWaveGoResponse(await executeGoCapability({ actionContext: ctx, session: resolved, capabilityId, input }), unavailable);
+    } catch {
+      return unavailable;
+    }
+  }
+
   // Dispatch explicitly so each capability gets exactly the input its schema declares.
   switch (body.action) {
     case "hireEmployee": {

@@ -1142,3 +1142,58 @@ describe("POST /api/accounting Go payment reversal bridge", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/accounting Go reminders bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_CREATE_INVOICE", "0");
+    vi.stubEnv("GO_ACCOUNTING_QUOTES_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_OPS_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_TAX_RETURNS_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_REMINDERS_READS", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { reminders: [] } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("dispatches reminder building through the signed Go bridge when enabled", async () => {
+    vi.stubEnv("GO_ACCOUNTING_REMINDERS_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { reminders: [{ invoiceId: "inv-1" }] } }),
+    });
+
+    const response = await POST(request({ action: "buildReminders" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: { reminders: [{ invoiceId: "inv-1" }] } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+      capabilityId: "accounting.buildReminders",
+      input: {},
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps reminder building on TypeScript while the flag is off", async () => {
+    await POST(request({ action: "buildReminders" }));
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.buildReminders", actionContext, {});
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the Go outcome cannot be confirmed", async () => {
+    vi.stubEnv("GO_ACCOUNTING_REMINDERS_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "outcome-unknown" });
+    const response = await POST(request({ action: "buildReminders" }));
+    expect(response.status).toBe(503);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
