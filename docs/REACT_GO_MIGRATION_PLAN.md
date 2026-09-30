@@ -136,13 +136,30 @@ database-backed parity tests. The legacy TypeScript worker remains the default
 runtime owner. A separate Go capability-jobs worker now claims only its
 verified capability allowlist and reuses existing job rows, receipts,
 approval payloads, audit events, and durable-run transitions under a dedicated
-least-privilege role. The default TypeScript worker still owns all production
-queue traffic. Go routine capabilities can enqueue `routines.executeRoutine`,
-but the Go capability worker does not claim or execute that job: the existing
-TypeScript worker owns its agent loop, tool dispatch, and routine occurrence
-finalization. Port that agent-run path and its durable occurrence handling
-before moving routine jobs or cutting over the worker. Email delivery and
-broader worker cutover also remain pending.
+least-privilege role. Go can claim and execute `routines.executeRoutine` jobs
+through a dedicated agent runner when `GO_ROUTINE_AGENT_RUNNER=1`. The flag
+defaults off, and scheduler opt-in does not enable routine execution. It
+resolves the stored workspace AI provider or the environment fallback only
+when the organization has no stored AI config, decrypts the shared AES-GCM
+credential format, creates routine sessions and events, runs a six-step
+OpenAI-compatible tool loop, and dispatches schema-described CRM customer,
+invoice, and support read tools through the Go system capability executor.
+These tools use the existing read-mostly routine permission bundle. A
+database-backed integration test covers scheduled and manual runs through a
+governed CRM read and verifies session-linked audit history. Broader routine
+tool parity remains open because the other legacy routine tools do not yet
+have Go model input schemas. Due routine discovery can move to Go behind
+`GO_ROUTINE_SCHEDULER=1`, which defaults off; the TypeScript worker skips only
+routine scheduling when this flag is enabled. Go gets a globally ordered,
+bounded candidate set through a function-only jobs-worker grant, then claims
+each organization's due rows inside `dbx.WithOrgTx` using ordered
+`FOR UPDATE SKIP LOCKED`, unique occurrence insertion, linked job creation,
+and next-run/status advancement. The Go agent runner stays separately
+default-off until its tool and messaging parity gates pass. During staged use,
+set `GO_ROUTINE_SCHEDULER=1` on both workers; if
+`GO_ROUTINE_AGENT_RUNNER` remains off, keep the legacy worker running to
+consume the scheduled routine jobs. Email delivery and broader worker cutover
+also remain pending.
 
 The Vite client now includes `/sessions`, `/projects`, and `/analytics`
 previews. Analytics preserves permission-filtered dataset discovery, governed
@@ -544,10 +561,11 @@ new owners and the manifest shows zero legacy runtime paths.
     unauthenticated access reaches Better Auth before CRM APIs load. Preserve
     pipeline actions, lead conversion, AI follow-up drafting, customer profiles
     and merges, saved views, imports and undo, tasks, approvals, deal
-    board/table/search, customer timelines, and bulk customer owner/tag updates.
-    Focused API and component tests pass. Keep API and page ownership on the
-    existing defaults until runtime and parity proofs pass; browser proof
-    remains deferred by user direction.
+    board/table/search, customer timelines, bulk customer owner/tag updates,
+    and selected-customer CSV export with the legacy columns and spreadsheet
+    formula protection. Focused API and component tests pass. Keep API and
+    page ownership on the existing defaults until runtime and parity proofs pass;
+    browser proof remains deferred by user direction.
 26. (Done) Add an opt-in Go read for the approvals inbox and recent history
     behind `GO_APPROVALS_READ`. Bind the complete TypeScript capability
     permission map to the signed request, and recheck the verified session,
@@ -869,8 +887,17 @@ new owners and the manifest shows zero legacy runtime paths.
     supplier performance (lead time, on-time rate, fill rate, backorders),
     price history, and the running-balance supplier statement - through the
     governed executor and jobs worker under `purchasing.read`.
-72. Add Go parity for authored document version history and single-version
+72. (Done) Add Go parity for authored document version history and single-version
     reads through the governed executor and jobs worker. Bridge the existing
     `GET /api/docs/:id` reads behind default-off `GO_DOCUMENTS_VERSION_READS`,
     preserving tenant scope, author labels, millisecond timestamps, and the
     current response projection.
+
+73. (Done) Validate and bridge the existing period-close readiness read on
+    `GET /api/accounting/close` through the signed Go
+    `accounting.periodCloseWorkbench` capability when
+    `GO_ACCOUNTING_PERIOD_CLOSE_WRITES=1`. Keep TypeScript as the default,
+    preserve period, checklist, blocker, and FX exposure fields, and fail
+    closed on unavailable, malformed, wrong-period, or wrong UTC window Go
+    output. Focused route tests cover default ownership, Go dispatch, and
+    response validation.

@@ -78,7 +78,7 @@ func TestGoCapabilityJobWorkerMatchesLegacy(t *testing.T) {
 	}
 
 	unsupportedID := insertJobsTestJob(t, ctx, owner, orgA, "documents.parseDocument", json.RawMessage(`{"documentId":"00000000-0000-4000-8000-000000000000"}`), 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
-	routineID := insertJobsTestJob(t, ctx, owner, orgA, "routines.executeRoutine", json.RawMessage(`{"routineId":"00000000-0000-4000-8000-000000000000","trigger":"schedule"}`), 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	routineID := insertJobsTestJob(t, ctx, owner, orgA, "routines.executeRoutine", json.RawMessage(`{"routineId":"00000000-0000-4000-8000-000000000000","trigger":"schedule"}`), 3, time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC))
 	foreignID := insertJobsTestJob(t, ctx, owner, orgB, "crm.createCustomer", json.RawMessage(`{"name":"Foreign tenant customer"}`), 3, time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC))
 
 	var unscopedPayload []byte

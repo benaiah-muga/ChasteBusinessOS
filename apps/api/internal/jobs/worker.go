@@ -31,6 +31,10 @@ type SystemCapabilityExecutor interface {
 	ExecuteSystem(context.Context, capability.SystemClaims, json.RawMessage) (capability.Result, error)
 }
 
+type RoutineJobRunner interface {
+	Run(context.Context, string, string, json.RawMessage) error
+}
+
 type ClaimedJob struct {
 	ID                 string
 	OrgID              string
@@ -47,29 +51,36 @@ type ClaimedJob struct {
 }
 
 type Options struct {
-	WorkerID      string
-	LeaseDuration time.Duration
-	PollInterval  time.Duration
-	Now           func() time.Time
-	Logger        *slog.Logger
+	WorkerID           string
+	LeaseDuration      time.Duration
+	PollInterval       time.Duration
+	Now                func() time.Time
+	Logger             *slog.Logger
+	RoutineRunner      RoutineJobRunner
+	RoutineAgentRunner bool
+	RoutineScheduler   bool
 }
 
 type Worker struct {
-	queueDB  dbx.Beginner
-	claimDB  QueryRower
-	effectDB dbx.Beginner
-	executor SystemCapabilityExecutor
-	workerID string
-	lease    time.Duration
-	poll     time.Duration
-	now      func() time.Time
-	logger   *slog.Logger
+	queueDB            dbx.Beginner
+	claimDB            QueryRower
+	effectDB           dbx.Beginner
+	executor           SystemCapabilityExecutor
+	workerID           string
+	lease              time.Duration
+	poll               time.Duration
+	now                func() time.Time
+	logger             *slog.Logger
+	routines           RoutineJobRunner
+	routineAgentRunner bool
+	routineScheduler   bool
 }
 
 // GoCapabilityPermissions is the explicit bridge between SQL claim ownership
 // and capabilities with an established Go executor implementation. Keep the
-// migration's claim list in sync with these IDs. Routine and document jobs are
-// deliberately absent and remain with the legacy worker.
+// migration's claim list in sync with these IDs. Document processing remains
+// with the legacy worker; routine agent jobs use RoutineJobRunner because they
+// contain a model/tool loop and are not single-capability executions.
 var GoCapabilityPermissions = map[string]string{
 	"documents.listDocs":                       "documents.read",
 	"documents.listDocVersions":                "documents.read",
@@ -343,9 +354,15 @@ func NewWorker(queueDB dbx.Beginner, claimDB QueryRower, effectDB dbx.Beginner, 
 	if logger == nil {
 		logger = slog.Default()
 	}
+	routineRunner := options.RoutineRunner
+	if routineRunner == nil {
+		routineRunner = newRoutineAgent(effectDB, executor)
+	}
 	return &Worker{
 		queueDB: queueDB, claimDB: claimDB, effectDB: effectDB, executor: executor,
 		workerID: workerID, lease: lease, poll: poll, now: now, logger: logger,
+		routines: routineRunner, routineAgentRunner: options.RoutineAgentRunner,
+		routineScheduler: options.RoutineScheduler,
 	}, nil
 }
 
@@ -375,7 +392,15 @@ func (w *Worker) ClaimOne(ctx context.Context) (*ClaimedJob, error) {
 	var job ClaimedJob
 	var runID, approvalID *string
 	var runStepIndex *int
-	err := w.claimDB.QueryRow(ctx, `
+	tx, err := w.queueDB.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.go_routine_agent_runner', $1, true)`, map[bool]string{true: "1", false: "0"}[w.routineAgentRunner]); err != nil {
+		return nil, err
+	}
+	err = tx.QueryRow(ctx, `
 		SELECT id, org_id, type, attempts, max_attempts, fencing_token,
 		       lease_owner, lease_expires_at, run_id, run_step_index, approved_approval_id
 		FROM jobs_worker.claim_capability_job($1, $2)`, w.workerID, w.lease.Milliseconds()).Scan(
@@ -384,6 +409,9 @@ func (w *Worker) ClaimOne(ctx context.Context) (*ClaimedJob, error) {
 		&runID, &runStepIndex, &approvalID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 	if err != nil {
@@ -392,17 +420,23 @@ func (w *Worker) ClaimOne(ctx context.Context) (*ClaimedJob, error) {
 	if job.ID == "" || job.OrgID == "" || job.WorkerID != w.workerID || job.FencingToken < 1 || job.Attempts < 1 || job.MaxAttempts < job.Attempts {
 		return nil, errors.New("capability jobs claim returned invalid lease metadata")
 	}
-	if _, ok := GoCapabilityPermissions[job.Type]; !ok {
+	if _, ok := GoCapabilityPermissions[job.Type]; !ok && job.Type != routineJobType {
 		return nil, fmt.Errorf("claim function returned unsupported Go job type %q", job.Type)
 	}
 	job.RunID = runID
 	job.RunStepIndex = runStepIndex
 	job.ApprovedApprovalID = approvalID
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
 	return &job, nil
 }
 
 func (w *Worker) loadPayload(ctx context.Context, job *ClaimedJob) error {
 	_, err := dbx.WithOrgTx(ctx, w.queueDB, job.OrgID, func(tx pgx.Tx) (struct{}, error) {
+		if err := w.setRoutineRunnerGate(ctx, tx, job); err != nil {
+			return struct{}{}, err
+		}
 		var payload []byte
 		err := tx.QueryRow(ctx, `
 			SELECT payload
@@ -427,6 +461,9 @@ func (w *Worker) renewLease(ctx context.Context, job *ClaimedJob) (bool, error) 
 	now := w.now().UTC()
 	var updated string
 	_, err := dbx.WithOrgTx(ctx, w.queueDB, job.OrgID, func(tx pgx.Tx) (struct{}, error) {
+		if err := w.setRoutineRunnerGate(ctx, tx, job); err != nil {
+			return struct{}{}, err
+		}
 		return struct{}{}, tx.QueryRow(ctx, `
 			UPDATE public.jobs
 			SET lease_expires_at = $5::timestamptz, updated_at = $5::timestamptz
@@ -451,6 +488,9 @@ func (w *Worker) finalize(ctx context.Context, job *ClaimedJob, status, lastErro
 	now := w.now().UTC()
 	var updated string
 	_, err := dbx.WithOrgTx(ctx, w.queueDB, job.OrgID, func(tx pgx.Tx) (struct{}, error) {
+		if err := w.setRoutineRunnerGate(ctx, tx, job); err != nil {
+			return struct{}{}, err
+		}
 		return struct{}{}, tx.QueryRow(ctx, `
 			UPDATE public.jobs
 			SET status = $5,
@@ -473,7 +513,22 @@ func (w *Worker) finalize(ctx context.Context, job *ClaimedJob, status, lastErro
 	return updated != "", nil
 }
 
+func (w *Worker) setRoutineRunnerGate(ctx context.Context, tx pgx.Tx, job *ClaimedJob) error {
+	if job.Type != routineJobType {
+		return nil
+	}
+	value := "0"
+	if w.routineAgentRunner {
+		value = "1"
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('app.go_routine_agent_runner', $1, true)`, value)
+	return err
+}
+
 func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
+	if _, err := w.scheduleDueRoutines(ctx, w.now()); err != nil {
+		return false, err
+	}
 	job, err := w.ClaimOne(ctx)
 	if err != nil || job == nil {
 		return job != nil, err
@@ -521,8 +576,26 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 
 	processErr := w.loadPayload(ctx, job)
 	if processErr == nil {
-		permission, ok := GoCapabilityPermissions[job.Type]
-		if !ok {
+		if job.Type == routineJobType {
+			if w.routines == nil {
+				processErr = errors.New("Go routine agent runner is unavailable")
+			} else {
+				processErr = w.routines.Run(ctx, job.OrgID, job.ID, job.Payload)
+				if processErr == nil {
+					if !leaseLost.Load() {
+						finalized, err := w.finalize(ctx, job, "done", "", nil)
+						if err != nil {
+							return true, err
+						}
+						if !finalized {
+							log.Warn("routine completed after lease was lost; acknowledgement fenced")
+						}
+					}
+					log.Info("routine job done", "attempts", job.Attempts)
+					return true, nil
+				}
+			}
+		} else if permission, ok := GoCapabilityPermissions[job.Type]; !ok {
 			processErr = fmt.Errorf("unknown job capability: %s", job.Type)
 		} else {
 			result, executeErr := w.executor.ExecuteSystem(ctx, capability.SystemClaims{

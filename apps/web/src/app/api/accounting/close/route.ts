@@ -27,6 +27,65 @@ const fxRevaluationOutputSchema = z.object({
   alreadyReviewed: z.boolean(),
 }).strict();
 const fxRevaluationEnvelopeSchema = z.object({ ok: z.literal(true), data: fxRevaluationOutputSchema }).strict();
+const closeTaskKeys = [
+  "review_journal",
+  "review_receivables",
+  "review_payables",
+  "review_tax",
+  "bank_reconciliation",
+  "fx_revaluation",
+] as const;
+const periodCloseWorkbenchSchema = z.object({
+  year: z.number().int().safe().min(2000).max(2100),
+  month: z.number().int().safe().min(1).max(12),
+  start: z.string().datetime({ offset: true }),
+  end: z.string().datetime({ offset: true }),
+  tasks: z.array(z.object({
+    key: z.enum(closeTaskKeys),
+    label: z.string().min(1),
+    detail: z.string(),
+    completed: z.boolean(),
+    note: z.string().nullable(),
+    blocking: z.boolean(),
+    status: z.string().min(1),
+  }).strict()),
+  blockers: z.array(z.string().min(1)),
+  readyToClose: z.boolean(),
+  unmatchedLineCount: z.number().int().safe().nonnegative(),
+  currenciesWithExposure: z.array(z.string().regex(/^[A-Z]{3}$/)),
+}).strict().superRefine((readiness, context) => {
+  const taskKeys = readiness.tasks.map((task) => task.key);
+  if (taskKeys.length !== closeTaskKeys.length || closeTaskKeys.some((key, index) => taskKeys[index] !== key)) {
+    context.addIssue({ code: "custom", path: ["tasks"], message: "Close tasks must contain the six supported keys in order." });
+  }
+  for (const task of readiness.tasks) {
+    const completedStatus = task.completed ? "complete" : task.key === "bank_reconciliation"
+      ? "blocked"
+      : task.key === "fx_revaluation" ? "needs_revaluation" : "needs_review";
+    if (task.blocking === task.completed || task.status !== completedStatus) {
+      context.addIssue({ code: "custom", path: ["tasks"], message: `Close task ${task.key} has inconsistent completion, blocking, or status fields.` });
+    }
+  }
+  const blockingKeys = readiness.tasks.filter((task) => task.blocking).map((task) => task.key);
+  if (readiness.blockers.length !== blockingKeys.length || readiness.blockers.some((key, index) => key !== blockingKeys[index])) {
+    context.addIssue({ code: "custom", path: ["blockers"], message: "Close blockers must match the blocking tasks." });
+  }
+  if (readiness.readyToClose !== (readiness.blockers.length === 0)) {
+    context.addIssue({ code: "custom", path: ["readyToClose"], message: "Readiness must match the blocker list." });
+  }
+  const bankTask = readiness.tasks.find((task) => task.key === "bank_reconciliation");
+  if (bankTask && bankTask.completed !== (readiness.unmatchedLineCount === 0)) {
+    context.addIssue({ code: "custom", path: ["tasks"], message: "Bank reconciliation status must match the unmatched line count." });
+  }
+  const fxTask = readiness.tasks.find((task) => task.key === "fx_revaluation");
+  if (fxTask && readiness.currenciesWithExposure.length === 0 && !fxTask.completed) {
+    context.addIssue({ code: "custom", path: ["tasks"], message: "FX review cannot block when there is no foreign exposure." });
+  }
+});
+const periodCloseWorkbenchEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: periodCloseWorkbenchSchema,
+}).strict();
 
 function respond(result: { ok: boolean; data?: unknown; error?: string; pendingApproval?: unknown }) {
   if (result.pendingApproval) return NextResponse.json({ ok: false, pendingApproval: true, reason: result.error }, { status: 202 });
@@ -71,7 +130,31 @@ export async function GET(req: Request) {
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
   if (process.env.GO_ACCOUNTING_PERIOD_CLOSE_WRITES === "1") {
-    return dispatchGoCapabilityRoute({ actionContext: ctx, session: resolved, capabilityId: "accounting.periodCloseWorkbench", input: period }, "accounting service unavailable; check period close status before retrying");
+    const unavailable = "accounting service unavailable; check period close status before retrying";
+    try {
+      const response = await dispatchGoCapabilityRoute({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "accounting.periodCloseWorkbench",
+        input: period,
+      }, unavailable);
+      if (response.status !== 200) return response;
+      const parsed = periodCloseWorkbenchEnvelopeSchema.safeParse(await response.clone().json().catch(() => null));
+      const expectedStart = new Date(Date.UTC(period.year, period.month - 1, 1)).toISOString();
+      const expectedEnd = new Date(Date.UTC(period.year, period.month, 1) - 1).toISOString();
+      if (
+        !parsed.success ||
+        parsed.data.data.year !== period.year ||
+        parsed.data.data.month !== period.month ||
+        parsed.data.data.start !== expectedStart ||
+        parsed.data.data.end !== expectedEnd
+      ) {
+        return NextResponse.json({ error: unavailable }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      }
+      return NextResponse.json(parsed.data, { headers: { "Cache-Control": "no-store" } });
+    } catch {
+      return NextResponse.json({ error: unavailable }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
   }
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));

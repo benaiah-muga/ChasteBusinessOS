@@ -1,0 +1,187 @@
+package jobs
+
+import (
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestRoutineToolsMatchLegacyReadOnlyPermissionBundle(t *testing.T) {
+	tools, _, err := routineToolSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) == 0 {
+		t.Fatal("routine tool registry is empty")
+	}
+	for _, tool := range tools {
+		switch tool.Permission {
+		case "accounting.read", "analytics.report", "crm.read", "documents.read", "hr.read", "inventory.read", "manufacturing.read", "messaging.read", "messaging.write", "purchasing.read", "routines.read", "support.read":
+		default:
+			t.Errorf("routine tool %s exposes permission %q outside the legacy routine bundle", tool.Capability, tool.Permission)
+		}
+	}
+	for _, denied := range []string{"crm.createCustomer", "iam.setModules", "accounting.recordPayment", "routines.runNow"} {
+		for _, tool := range tools {
+			if tool.Capability == denied {
+				t.Errorf("routine tool set contains write capability %s", denied)
+			}
+		}
+	}
+}
+
+func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
+	tools, _, err := routineToolSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge"} {
+		var found *routineTool
+		for index := range tools {
+			if tools[index].Capability == capabilityID {
+				found = &tools[index]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("missing routine tool %s", capabilityID)
+		}
+		required, ok := found.Schema["required"].([]string)
+		if !ok || len(required) != 1 {
+			t.Fatalf("schema for %s has no required parameter list: %#v", capabilityID, found.Schema)
+		}
+		properties, ok := found.Schema["properties"].(map[string]any)
+		if !ok || properties[required[0]] == nil {
+			t.Fatalf("schema for %s omits required field %q: %#v", capabilityID, required[0], found.Schema)
+		}
+	}
+	var customers *routineTool
+	for index := range tools {
+		if tools[index].Capability == "crm.listCustomers" {
+			customers = &tools[index]
+		}
+	}
+	if customers == nil {
+		t.Fatal("customer search capability is missing")
+	}
+	properties := customers.Schema["properties"].(map[string]any)
+	query := properties["query"].(map[string]any)
+	if query["type"] != "string" {
+		t.Fatalf("customer query schema=%#v", query)
+	}
+}
+
+func TestRoutineIntentIsDeterministicUUID(t *testing.T) {
+	first := routineIntent("00000000-0000-4000-8000-000000000001", 2, 1, "call-1")
+	if first != routineIntent("00000000-0000-4000-8000-000000000001", 2, 1, "call-1") || !routineUUID(first) {
+		t.Fatalf("routine intent is not stable UUID: %q", first)
+	}
+	if first == routineIntent("00000000-0000-4000-8000-000000000001", 2, 2, "call-1") {
+		t.Fatal("different routine tool calls shared one capability intent")
+	}
+}
+
+func TestDecryptProviderKeyMatchesTypeScriptEnvelope(t *testing.T) {
+	t.Setenv("AI_CONFIG_ENCRYPTION_KEY", "routine-test-secret")
+	plain := "provider-key-value"
+	key := sha256.Sum256([]byte("routine-test-secret"))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iv := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(iv); err != nil {
+		t.Fatal(err)
+	}
+	sealed := gcm.Seal(nil, iv, []byte(plain), nil)
+	value := "v1:" + base64.RawURLEncoding.EncodeToString(iv) + ":" + base64.RawURLEncoding.EncodeToString(sealed[len(sealed)-gcm.Overhead():]) + ":" + base64.RawURLEncoding.EncodeToString(sealed[:len(sealed)-gcm.Overhead()])
+	got, err := decryptProviderKey(value)
+	if err != nil || got != plain {
+		t.Fatalf("decrypted key=%q err=%v", got, err)
+	}
+	if _, err := decryptProviderKey(value + ":tampered"); err == nil {
+		t.Fatal("accepted malformed credential envelope")
+	}
+}
+
+func TestStoredProviderConfigDoesNotFallBackToGlobalCredential(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "global-provider-key")
+	config := routineConfig{Provider: "openai"}
+	if err := decryptStoredProviderKey(&config); err != nil {
+		t.Fatal(err)
+	}
+	if config.APIKey != nil {
+		t.Fatalf("cleared organization key fell back to global credential %q", *config.APIKey)
+	}
+	emptyConfig := routineConfig{Provider: "openai", APIKey: stringPointer("")}
+	if err := decryptStoredProviderKey(&emptyConfig); err != nil {
+		t.Fatal(err)
+	}
+	if emptyConfig.APIKey != nil {
+		t.Fatalf("empty organization credential was not treated as cleared: %#v", emptyConfig.APIKey)
+	}
+}
+
+func TestRoutineProviderUsesOpenAICompatibleChatCompletions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("request=%s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-provider-key" {
+			t.Errorf("authorization=%q", got)
+		}
+		var body struct {
+			Model string            `json:"model"`
+			Tools []json.RawMessage `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Model != "test-model" || len(body.Tools) != 1 {
+			t.Errorf("provider request model=%q tools=%d", body.Model, len(body.Tools))
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"routine finished"}}],"usage":{"prompt_tokens":12,"completion_tokens":4}}`))
+	}))
+	defer server.Close()
+	agent := newRoutineAgent(nil, nil)
+	agent.client = server.Client()
+	config := routineConfig{BaseURL: server.URL + "/v1", APIKey: stringPointer("test-provider-key")}
+	config.Models.Primary = "test-model"
+	result, err := agent.complete(context.Background(), config, []routineMessage{{Role: "user", Content: json.RawMessage(`"run"`)}}, []map[string]any{{"type": "function"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Choices) != 1 || string(result.Choices[0].Message.Content) != `"routine finished"` || result.Usage.Input != 12 || result.Usage.Output != 4 {
+		t.Fatalf("provider response=%+v", result)
+	}
+}
+
+func stringPointer(value string) *string { return &value }
+
+func TestRoutineProviderErrorDoesNotExposeBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("secret provider response"))
+	}))
+	defer server.Close()
+	agent := newRoutineAgent(nil, nil)
+	agent.client = server.Client()
+	config := routineConfig{BaseURL: server.URL, APIKey: stringPointer("key")}
+	config.Models.Primary = "model"
+	_, err := agent.complete(context.Background(), config, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 401") || strings.Contains(err.Error(), "secret provider response") {
+		t.Fatalf("provider error=%v", err)
+	}
+}

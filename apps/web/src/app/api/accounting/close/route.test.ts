@@ -18,7 +18,7 @@ vi.mock("@/server/route-guards", () => ({ missingPermission: mocks.missingPermis
 vi.mock("@chaste/db", () => ({ getDb: mocks.getDb }));
 vi.mock("@/server/go-route-response", () => ({ dispatchGoCapabilityRoute: mocks.dispatchGoCapabilityRoute }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const session = {
   userId: "0b9e1bd3-8432-4059-a0b1-902ff8d520d0",
@@ -41,6 +41,24 @@ const output = {
     rateDen: 10,
   }],
   alreadyReviewed: false,
+};
+const readiness = {
+  year: 2026,
+  month: 8,
+  start: "2026-08-01T00:00:00.000Z",
+  end: "2026-08-31T23:59:59.999Z",
+  tasks: [
+    { key: "review_journal", label: "Review journal", detail: "Review journal entries.", completed: false, note: null, blocking: true, status: "needs_review" },
+    { key: "review_receivables", label: "Review receivables", detail: "Review receivables.", completed: false, note: null, blocking: true, status: "needs_review" },
+    { key: "review_payables", label: "Review payables", detail: "Review payables.", completed: false, note: null, blocking: true, status: "needs_review" },
+    { key: "review_tax", label: "Review tax", detail: "Review tax.", completed: false, note: null, blocking: true, status: "needs_review" },
+    { key: "bank_reconciliation", label: "Reconcile bank activity", detail: "No unmatched statement lines in this period.", completed: true, note: null, blocking: false, status: "complete" },
+    { key: "fx_revaluation", label: "Revalue foreign receivables", detail: "Open foreign receivables: EUR.", completed: false, note: null, blocking: true, status: "needs_revaluation" },
+  ],
+  blockers: ["review_journal", "review_receivables", "review_payables", "review_tax", "fx_revaluation"],
+  readyToClose: false,
+  unmatchedLineCount: 0,
+  currenciesWithExposure: ["EUR"],
 };
 
 function request(body: unknown) {
@@ -146,5 +164,71 @@ describe("accounting FX revaluation Go bridge", () => {
     expect(response).toBe(denied);
     expect(mocks.missingPermission).toHaveBeenCalledWith(session, "accounting.post");
     expect(mocks.dispatchGoCapabilityRoute).not.toHaveBeenCalled();
+  });
+});
+
+describe("accounting period close readiness Go bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_PERIOD_CLOSE_WRITES", "0");
+    mocks.getResolvedUser.mockResolvedValue(session);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.missingPermission.mockReturnValue(null);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: readiness });
+    mocks.dispatchGoCapabilityRoute.mockResolvedValue(Response.json({ ok: true, data: readiness }));
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps close readiness on TypeScript by default", async () => {
+    const response = await GET(new Request("http://localhost/api/accounting/close?year=2026&month=8"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: readiness });
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.periodCloseWorkbench", actionContext, { year: 2026, month: 8 });
+    expect(mocks.dispatchGoCapabilityRoute).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the validated close readiness read to Go and preserves FX fields", async () => {
+    vi.stubEnv("GO_ACCOUNTING_PERIOD_CLOSE_WRITES", "1");
+
+    const response = await GET(new Request("http://localhost/api/accounting/close?year=2026&month=8"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: readiness });
+    expect(mocks.dispatchGoCapabilityRoute).toHaveBeenCalledWith({
+      actionContext,
+      session,
+      capabilityId: "accounting.periodCloseWorkbench",
+      input: { year: 2026, month: 8 },
+    }, "accounting service unavailable; check period close status before retrying");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing task fields", { ...readiness, tasks: [{ key: "fx_revaluation" }] }],
+    ["invalid currency codes", { ...readiness, currenciesWithExposure: ["EURO"] }],
+    ["unexpected fields", { ...readiness, extra: true }],
+    ["a different requested period", { ...readiness, month: 7 }],
+    ["a mismatched UTC start", { ...readiness, start: "2026-08-02T00:00:00.000Z" }],
+    ["a mismatched UTC end", { ...readiness, end: "2026-08-30T23:59:59.999Z" }],
+    ["empty tasks claiming readiness", { ...readiness, tasks: [], blockers: [], readyToClose: true }],
+    ["an unknown task key", { ...readiness, tasks: readiness.tasks.map((task, index) => index === 0 ? { ...task, key: "unknown_task" } : task) }],
+    ["missing task keys", { ...readiness, tasks: readiness.tasks.slice(1) }],
+    ["inconsistent completion and blocking", { ...readiness, tasks: readiness.tasks.map((task, index) => index === 0 ? { ...task, blocking: false } : task) }],
+    ["inconsistent task status", { ...readiness, tasks: readiness.tasks.map((task, index) => index === 0 ? { ...task, status: "complete" } : task) }],
+  ])("fails closed on malformed Go readiness data (%s)", async (_label, data) => {
+    vi.stubEnv("GO_ACCOUNTING_PERIOD_CLOSE_WRITES", "1");
+    mocks.dispatchGoCapabilityRoute.mockResolvedValue(Response.json({ ok: true, data }));
+
+    const response = await GET(new Request("http://localhost/api/accounting/close?year=2026&month=8"));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "accounting service unavailable; check period close status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 });

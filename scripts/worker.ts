@@ -16,7 +16,11 @@ const POLL_INTERVAL_MS = 2_000;
 
 async function main(): Promise<void> {
   const db = getDb().db;
-  logger.info("worker started", { pollIntervalMs: POLL_INTERVAL_MS });
+  const goOwnsRoutineScheduling = process.env.GO_ROUTINE_SCHEDULER === "1";
+  logger.info("worker started", {
+    pollIntervalMs: POLL_INTERVAL_MS,
+    routineScheduler: goOwnsRoutineScheduling ? "go" : "typescript",
+  });
   let running = true;
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
@@ -28,7 +32,7 @@ async function main(): Promise<void> {
     try {
       // Routines are claimed before draining jobs so a due routine's run
       // job is enqueued in the same tick that advances its schedule.
-      await tickRoutines(db, logger);
+      if (!goOwnsRoutineScheduling) await tickRoutines(db, logger);
       const worked = await processOneJob(db, logger);
       const outboundWorked = await processOneOutbox(db, logger);
       if (!worked && !outboundWorked) await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));

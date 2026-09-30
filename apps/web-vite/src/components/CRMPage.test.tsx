@@ -127,6 +127,43 @@ describe("Vite CRM page", () => {
     await waitFor(() => expect(screen.getByText("0 selected")).not.toBeNull());
   });
 
+  it("downloads a CSV containing the selected customer rows", async () => {
+    const exportedCustomer = { ...customer(), name: "=1+1" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [exportedCustomer] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    const originalCreateObjectURL = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    let downloadedBlob: Blob | undefined;
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: (blob: Blob) => { downloadedBlob = blob; return "blob:customers"; } });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      render(<CRMPage />);
+      fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+      fireEvent.click(await screen.findByRole("checkbox", { name: "Select =1+1" }));
+      fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+
+      expect(click).toHaveBeenCalledOnce();
+      expect(click.mock.contexts[0]).toMatchObject({ download: "customers.csv", href: "blob:customers" });
+      await expect(downloadedBlob?.text()).resolves.toBe([
+        "Name,Email,Owner,Tags,Status",
+        `"'=1+1","contact@northwind.test","","renewal","Active"`,
+      ].join("\n"));
+    } finally {
+      if (originalCreateObjectURL) Object.defineProperty(URL, "createObjectURL", originalCreateObjectURL);
+      else Reflect.deleteProperty(URL, "createObjectURL");
+      if (originalRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", originalRevokeObjectURL);
+      else Reflect.deleteProperty(URL, "revokeObjectURL");
+    }
+  });
+
   it("keeps the selected customer's timeline when profile requests finish out of order", async () => {
     const secondCustomerId = "3cebf482-832f-4bf2-b322-03ca9c123456";
     const secondCustomer = { ...customer("Contoso"), id: secondCustomerId };

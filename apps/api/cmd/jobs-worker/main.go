@@ -60,15 +60,19 @@ func run(logger *slog.Logger) error {
 	}
 	executor := capability.NewExecutor(appPool, os.Getenv("NOTIFICATION_WEBHOOK_URL"), os.Getenv("SMTP_HOST"), os.Getenv("SMTP_TO"))
 	worker, err := jobs.NewWorker(workerPool, workerPool, appPool, executor, jobs.Options{
-		WorkerID: workerID,
-		Logger:   logger,
+		WorkerID:           workerID,
+		Logger:             logger,
+		RoutineScheduler:   os.Getenv("GO_ROUTINE_SCHEDULER") == "1",
+		RoutineAgentRunner: os.Getenv("GO_ROUTINE_AGENT_RUNNER") == "1",
 	})
 	if err != nil {
 		return err
 	}
 	runCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	logger.Info("Go capability jobs worker started", "worker_id", workerID)
+	logger.Info("Go capability jobs worker started", "worker_id", workerID,
+		"routine_scheduler_enabled", os.Getenv("GO_ROUTINE_SCHEDULER") == "1",
+		"routine_agent_runner_enabled", os.Getenv("GO_ROUTINE_AGENT_RUNNER") == "1")
 	return worker.Run(runCtx)
 }
 

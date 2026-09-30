@@ -187,6 +187,10 @@ func routinesAtOrAfter(from time.Time, atTime string) time.Time {
 }
 
 func routinesNextRun(schedule RoutineSchedule, from time.Time) time.Time {
+	return RoutinesNextRun(schedule, from)
+}
+
+func RoutinesNextRun(schedule RoutineSchedule, from time.Time) time.Time {
 	switch schedule.Kind {
 	case "interval":
 		minutes := int64(60)
@@ -252,6 +256,10 @@ func routinesValidateSchedule(schedule RoutineSchedule) error {
 		return errors.New("weekly schedules need dayOfWeek (0=Sunday..6=Saturday)")
 	}
 	return nil
+}
+
+func ValidateRoutineSchedule(schedule RoutineSchedule) error {
+	return routinesValidateSchedule(schedule)
 }
 
 type RoutinesCreateInput struct {

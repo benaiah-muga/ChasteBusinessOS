@@ -19,11 +19,30 @@ func TestIAMOrgSettingsParsersMirrorZodContracts(t *testing.T) {
 		t.Fatal("empty modules refused")
 	}
 	config, err := ParseIAMSetModuleConfigInput(json.RawMessage(`{"module":"inventory","settings":{"defaultUnit":"pc"}}`))
-	if err != nil || config.Module != "inventory" {
+	if err != nil || config.Module != "inventory" || string(config.Settings) != `{}` {
 		t.Fatalf("config parse=%+v err=%v", config, err)
+	}
+	config, err = ParseIAMSetModuleConfigInput(json.RawMessage(`{"module":"inventory","settings":{"defaultUnitLabel":"  each ","defaultReorderPointUnits":3,"unknown":true}}`))
+	if err != nil || string(config.Settings) != `{"defaultReorderPointUnits":3,"defaultUnitLabel":"each"}` {
+		t.Fatalf("inventory settings should trim known fields and strip unknown keys, got %s err=%v", config.Settings, err)
+	}
+	if _, err := ParseIAMSetModuleConfigInput(json.RawMessage(`{"module":"inventory","settings":{"defaultUnitLabel":"😀😀😀😀😀😀😀😀😀😀"}}`)); err != nil {
+		t.Fatalf("10 supplementary Unicode characters should fit the 20 UTF-16 code-unit limit: %v", err)
 	}
 	if _, err := ParseIAMSetModuleConfigInput(json.RawMessage(`{"module":"inventory","settings":[1]}`)); err == nil {
 		t.Fatal("non-object settings refused")
+	}
+	for _, raw := range []string{
+		`{"module":"inventory","settings":null}`,
+		`{"module":"inventory","settings":{"defaultUnitLabel":" "}}`,
+		`{"module":"inventory","settings":{"defaultUnitLabel":"123456789012345678901"}}`,
+		`{"module":"inventory","settings":{"defaultReorderPointUnits":-1}}`,
+		`{"module":"inventory","settings":{"defaultReorderPointUnits":1000001}}`,
+		`{"module":"inventory","settings":{"defaultReorderPointUnits":1.5}}`,
+	} {
+		if _, err := ParseIAMSetModuleConfigInput(json.RawMessage(raw)); err == nil {
+			t.Errorf("invalid module settings accepted: %s", raw)
+		}
 	}
 	policy, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"money","moneyThresholdMinor":250000,"requiresApprovalFor":["identity","*"]}`))
 	if err != nil || policy.MaxRiskAutonomous != "money" || *policy.MoneyThresholdMinor != 250000 {
@@ -31,6 +50,13 @@ func TestIAMOrgSettingsParsersMirrorZodContracts(t *testing.T) {
 	}
 	if _, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"cosmic"}`)); err == nil {
 		t.Fatal("unknown risk class refused")
+	}
+	if _, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"read","requiresApprovalFor":null}`)); err == nil {
+		t.Fatal("explicit null approval list should be rejected")
+	}
+	defaultPolicy, err := ParseIAMSetOrgPolicyInput(json.RawMessage(`{"maxRiskAutonomous":"read"}`))
+	if err != nil || defaultPolicy.RequiresApprovalFor == nil || len(defaultPolicy.RequiresApprovalFor) != 0 {
+		t.Fatalf("omitted approval list should default to empty array, policy=%+v err=%v", defaultPolicy, err)
 	}
 	branding, err := ParseIAMSetOrgBrandingInput(json.RawMessage(`{"accentColor":"#33AAFF","layout":"modern"}`))
 	if err != nil || branding.Layout == nil || *branding.Layout != "modern" {

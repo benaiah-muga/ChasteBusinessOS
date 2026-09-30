@@ -262,7 +262,11 @@ describe("capability jobs worker role provisioning", () => {
                 WHERE relation.relkind IN ('r', 'p', 'v', 'm', 'S')
                   AND rel_namespace.nspname = 'public'
                   AND has_any_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', relation.oid, 'SELECT')
-                  AND relation.oid <> 'public.jobs'::regclass
+                  AND relation.oid NOT IN (
+                    'public.jobs'::regclass,
+                    'public.organizations'::regclass,
+                    'public.routines'::regclass
+                  )
               ) AS claim_other_table_access
        FROM pg_proc procedure
        JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
@@ -286,6 +290,49 @@ describe("capability jobs worker role provisioning", () => {
       claim_fence_update: true,
       claim_other_table_access: false,
       worker_schema_create: false,
+    });
+  });
+
+  it("limits Go routine scheduling to a metadata-only definer function", async () => {
+    const result = await admin.unsafe<{
+      owner: string;
+      security_definer: boolean;
+      worker_execute: boolean;
+      public_execute: boolean;
+      worker_routines_select: boolean;
+      worker_organizations_select: boolean;
+      owner_routine_id_select: boolean;
+      owner_routine_prompt_select: boolean;
+      owner_org_id_select: boolean;
+    }[]>(
+      `SELECT owner.rolname AS owner,
+              procedure.prosecdef AS security_definer,
+              has_function_privilege('${JOBS_WORKER_ROLE_NAME}', procedure.oid, 'EXECUTE') AS worker_execute,
+              EXISTS (
+                SELECT 1 FROM aclexplode(COALESCE(procedure.proacl, acldefault('f', procedure.proowner))) acl
+                WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+              ) AS public_execute,
+              has_table_privilege('${JOBS_WORKER_ROLE_NAME}', 'public.routines', 'SELECT') AS worker_routines_select,
+              has_table_privilege('${JOBS_WORKER_ROLE_NAME}', 'public.organizations', 'SELECT') AS worker_organizations_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.routines', 'id', 'SELECT') AS owner_routine_id_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.routines', 'prompt', 'SELECT') AS owner_routine_prompt_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.organizations', 'id', 'SELECT') AS owner_org_id_select
+       FROM pg_proc procedure
+       JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
+       JOIN pg_roles owner ON owner.oid = procedure.proowner
+       WHERE namespace.nspname = 'jobs_worker' AND procedure.proname = 'list_due_routine_candidates'`,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      owner: JOBS_CLAIM_OWNER_ROLE_NAME,
+      security_definer: true,
+      worker_execute: true,
+      public_execute: false,
+      worker_routines_select: false,
+      worker_organizations_select: false,
+      owner_routine_id_select: true,
+      owner_routine_prompt_select: false,
+      owner_org_id_select: true,
     });
   });
 

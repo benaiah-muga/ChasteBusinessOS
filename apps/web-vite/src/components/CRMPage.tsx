@@ -19,6 +19,7 @@ import {
   submitCrmAction,
   undoCrmImport,
 } from "../api/crm";
+import { selectedCustomersCsv } from "./customer-export";
 
 type Tab = "overview" | "pipeline" | "customers" | "tasks";
 type ProfileTab = "overview" | "activity" | "invoices" | "documents";
@@ -355,6 +356,16 @@ export function CRMPage() {
     }
   }
 
+  function exportSelectedCustomers() {
+    const csv = selectedCustomersCsv(customers, selectedCustomerIds);
+    const href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = "customers.csv";
+    anchor.click();
+    URL.revokeObjectURL(href);
+  }
+
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!taskDraft.title.trim()) return;
@@ -506,7 +517,7 @@ export function CRMPage() {
         <span>{selectedCustomerIds.length} selected</span>
         <label>Assign owner<select aria-label="Bulk owner" value={bulkOwner} onChange={(event) => setBulkOwner(event.target.value)}><option value="unchanged">Keep current owner</option><option value="unassigned">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label>
         <label>Add tag<input aria-label="Bulk tag" value={bulkTag} onChange={(event) => setBulkTag(event.target.value)} maxLength={40} /></label>
-        <button type="submit" disabled={busy || selectedCustomerIds.length === 0 || (bulkOwner === "unchanged" && !bulkTag.trim())}>Apply to selected</button>
+        <button type="submit" disabled={busy || selectedCustomerIds.length === 0 || (bulkOwner === "unchanged" && !bulkTag.trim())}>Apply to selected</button><button type="button" disabled={selectedCustomerIds.length === 0} onClick={exportSelectedCustomers}>Export CSV</button>
       </form>
       <div className="crm-table-wrap"><table className="crm-table"><thead><tr><th><input type="checkbox" aria-label="Select all visible customers" checked={visibleCustomers.length > 0 && visibleCustomers.every((customer) => selectedCustomerIds.includes(customer.id))} onChange={(event) => setSelectedCustomerIds((current) => event.target.checked ? [...new Set([...current, ...visibleCustomers.map((customer) => customer.id)])] : current.filter((id) => !visibleCustomers.some((customer) => customer.id === id)))} /></th><th>Customer</th><th>Contact</th><th>Owner</th><th>Tags</th><th>Last activity</th><th>Next step</th><th>Actions</th></tr></thead><tbody>{visibleCustomers.map((customer) => <tr key={customer.id}><td><input type="checkbox" aria-label={`Select ${customer.name}`} checked={selectedCustomerIds.includes(customer.id)} onChange={(event) => setSelectedCustomerIds((current) => event.target.checked ? [...current, customer.id] : current.filter((id) => id !== customer.id))} /></td><td><button type="button" className="crm-link" onClick={() => void openProfile(customer)}>{customer.name}</button>{customer.deactivatedAt && <small>Inactive</small>}</td><td>{customer.email ?? ""}<small>{customer.phone ?? ""}</small></td><td>{customer.ownerName ?? "Unassigned"}</td><td>{(customer.tags ?? []).map((tag) => <span className="crm-tag" key={tag}>{tag}</span>)}</td><td>{customer.lastActivityAt ? new Date(customer.lastActivityAt).toLocaleDateString() : "No activity"}</td><td>{customer.nextStep?.summary ?? "-"}</td><td><button type="button" onClick={() => void openProfile(customer)}>Profile</button>{!customer.deactivatedAt && <button type="button" disabled={busy} onClick={() => setDeactivateTarget(customer)}>Deactivate</button>}<button type="button" onClick={() => { setMergeTarget(customer); setMergeSurvivorId(customer.id); }}>Merge</button></td></tr>)}</tbody></table>{visibleCustomers.length === 0 && <p className="crm-empty">No customers match these filters.</p>}</div>
     </section>}

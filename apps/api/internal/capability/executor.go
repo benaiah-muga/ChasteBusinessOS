@@ -442,6 +442,7 @@ type SystemClaims struct {
 	Permission         string
 	IntentID           string
 	ApprovedApprovalID string
+	AgentSessionID     string
 }
 
 type Executor struct {
@@ -484,6 +485,9 @@ func (e *Executor) ExecuteSystem(ctx context.Context, request SystemClaims, rawI
 	if request.ApprovedApprovalID != "" && !isUUID(request.ApprovedApprovalID) {
 		return Result{}, ErrScopeMismatch
 	}
+	if request.AgentSessionID != "" && !isUUID(request.AgentSessionID) {
+		return Result{}, ErrScopeMismatch
+	}
 	digest, err := InputHash(rawInput)
 	if err != nil {
 		return Result{}, err
@@ -496,6 +500,7 @@ func (e *Executor) ExecuteSystem(ctx context.Context, request SystemClaims, rawI
 		ActorType:      "system",
 		Permissions:    []string{spec.permission},
 		IntentID:       request.IntentID,
+		AgentSessionID: request.AgentSessionID,
 	}
 	return e.execute(ctx, claims, request.CapabilityID, rawInput, true, request.ApprovedApprovalID)
 }
@@ -522,7 +527,7 @@ func (e *Executor) execute(
 		return Result{}, ErrScopeMismatch
 	}
 	if system {
-		if claims.ActorType != "system" || claims.Subject != "" || claims.ActorID != nil || claims.AuthSessionID != "" || claims.AgentSessionID != "" {
+		if claims.ActorType != "system" || claims.Subject != "" || claims.ActorID != nil || claims.AuthSessionID != "" || (claims.AgentSessionID != "" && !isUUID(claims.AgentSessionID)) {
 			return Result{}, ErrSessionInvalid
 		}
 	} else if !isUUID(claims.Subject) || !isUUID(claims.OrganizationID) || claims.ActorID == nil || !isUUID(*claims.ActorID) || *claims.ActorID != claims.Subject {
@@ -544,6 +549,15 @@ func (e *Executor) execute(
 		}
 		if system && claims.IntentID == "" {
 			return Result{}, ErrScopeMismatch
+		}
+		if system && claims.AgentSessionID != "" {
+			var sessionExists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE id=$1::uuid AND org_id=$2::uuid)`, claims.AgentSessionID, claims.OrganizationID).Scan(&sessionExists); err != nil {
+				return Result{}, err
+			}
+			if !sessionExists {
+				return Result{}, ErrSessionInvalid
+			}
 		}
 
 		enabled, err := isModuleEnabled(ctx, tx, claims.OrganizationID, spec.module)

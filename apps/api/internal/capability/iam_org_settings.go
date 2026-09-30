@@ -1,10 +1,12 @@
 package capability
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -132,11 +134,40 @@ func ParseIAMSetModuleConfigInput(raw json.RawMessage) (IAMSetModuleConfigInput,
 		return IAMSetModuleConfigInput{}, errors.New("settings is required")
 	}
 	var settingsObject map[string]json.RawMessage
-	if err := json.Unmarshal(rawSettings, &settingsObject); err != nil {
+	if err := json.Unmarshal(rawSettings, &settingsObject); err != nil || settingsObject == nil {
 		return IAMSetModuleConfigInput{}, errors.New("settings must be an object")
 	}
-	input.Settings = rawSettings
+	if input.Settings, err = parseIAMModuleSettings(input.Module, settingsObject); err != nil {
+		return IAMSetModuleConfigInput{}, err
+	}
 	return input, nil
+}
+
+func parseIAMModuleSettings(module string, fields map[string]json.RawMessage) (json.RawMessage, error) {
+	if module != "inventory" {
+		return json.Marshal(fields)
+	}
+
+	settings := make(map[string]any, 2)
+	if raw, ok := fields["defaultUnitLabel"]; ok {
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, errors.New("defaultUnitLabel must be a string")
+		}
+		value = strings.TrimSpace(value)
+		if utf16Length(value) < 1 || utf16Length(value) > 20 {
+			return nil, errors.New("defaultUnitLabel must contain between 1 and 20 characters")
+		}
+		settings["defaultUnitLabel"] = value
+	}
+	if raw, ok := fields["defaultReorderPointUnits"]; ok {
+		value, err := requiredSafeInteger(map[string]json.RawMessage{"value": raw}, "value")
+		if err != nil || value < 0 || value > 1_000_000 {
+			return nil, errors.New("defaultReorderPointUnits must be an integer between 0 and 1000000")
+		}
+		settings["defaultReorderPointUnits"] = value
+	}
+	return json.Marshal(settings)
 }
 
 func ParseIAMSetOrgPolicyInput(raw json.RawMessage) (IAMSetOrgPolicyInput, error) {
@@ -144,7 +175,7 @@ func ParseIAMSetOrgPolicyInput(raw json.RawMessage) (IAMSetOrgPolicyInput, error
 	if err != nil {
 		return IAMSetOrgPolicyInput{}, err
 	}
-	var input IAMSetOrgPolicyInput
+	input := IAMSetOrgPolicyInput{RequiresApprovalFor: []string{}}
 	if input.MaxRiskAutonomous, err = projectRequiredEnum(fields, "maxRiskAutonomous", []string{"read", "write", "money", "identity", "destructive"}); err != nil {
 		return IAMSetOrgPolicyInput{}, err
 	}
@@ -159,6 +190,9 @@ func ParseIAMSetOrgPolicyInput(raw json.RawMessage) (IAMSetOrgPolicyInput, error
 		input.MoneyThresholdMinor = &threshold
 	}
 	if rawRequires, ok := fields["requiresApprovalFor"]; ok {
+		if bytes.Equal(bytes.TrimSpace(rawRequires), []byte("null")) {
+			return IAMSetOrgPolicyInput{}, errors.New("requiresApprovalFor must be an array of strings")
+		}
 		var requires []string
 		if err := json.Unmarshal(rawRequires, &requires); err != nil {
 			return IAMSetOrgPolicyInput{}, errors.New("requiresApprovalFor must be an array of strings")
