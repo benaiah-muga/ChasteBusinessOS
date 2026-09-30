@@ -774,6 +774,39 @@ func TestInventoryValuationItemHistoryAndLotsRead(t *testing.T) {
 	}
 }
 
+func TestInventoryListLotsPreservesArchivedItemHistoryWithinOrganization(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupInventoryValuationFixture(t, fx)
+	base := time.Date(2026, 9, 6, 8, 0, 0, 0, time.UTC)
+	localItem := seedInventoryValuationItem(t, fx, fx.orgID, "VAL-ARCHIVED-LOT", "goods", 0, 0, nil)
+	localLot := seedInventoryValuationLot(t, fx, fx.orgID, localItem, "LOT-ARCHIVED", base)
+	seedInventoryValuationMovement(t, fx, fx.orgID, localItem, 4500, "purchase", nil, &localLot, nil, "system", base.Add(time.Hour))
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE items SET archived_at=$2 WHERE id=$1::uuid`, localItem, base.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	foreignItem := seedInventoryValuationItem(t, fx, fx.otherOrgID, "VAL-ARCHIVED-LOT", "goods", 0, 0, nil)
+	foreignLot := seedInventoryValuationLot(t, fx, fx.otherOrgID, foreignItem, "LOT-FOREIGN-ARCHIVED", base)
+	seedInventoryValuationMovement(t, fx, fx.otherOrgID, foreignItem, 9000, "purchase", nil, &foreignLot, nil, "system", base.Add(time.Hour))
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE items SET archived_at=$2 WHERE id=$1::uuid`, foreignItem, base.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	local := inventoryInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (InventoryListLotsOutput, error) {
+		return inventoryListLots(fx.ctx, tx, fx.orgID, InventoryListLotsInput{})
+	})
+	if len(local.Lots) != 1 || local.Lots[0].LotCode != "LOT-ARCHIVED" || local.Lots[0].SKU != "VAL-ARCHIVED-LOT" || local.Lots[0].BalanceThousandths != 4500 {
+		t.Fatalf("local archived-item lots=%+v, want its 4500 balance and SKU without the foreign lot", local.Lots)
+	}
+
+	foreign := inventoryInOrgTx(t, fx, fx.otherOrgID, func(tx pgx.Tx) (InventoryListLotsOutput, error) {
+		return inventoryListLots(fx.ctx, tx, fx.otherOrgID, InventoryListLotsInput{})
+	})
+	if len(foreign.Lots) != 1 || foreign.Lots[0].LotCode != "LOT-FOREIGN-ARCHIVED" || foreign.Lots[0].SKU != "VAL-ARCHIVED-LOT" || foreign.Lots[0].BalanceThousandths != 9000 {
+		t.Fatalf("foreign archived-item lots=%+v, want only its 9000 balance", foreign.Lots)
+	}
+}
+
 func TestInventoryValuationRebuildRepairsProjection(t *testing.T) {
 	fx := newExecutorFixture(t)
 	cleanupInventoryValuationFixture(t, fx)

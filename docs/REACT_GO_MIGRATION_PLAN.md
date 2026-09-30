@@ -1087,3 +1087,10 @@ new owners and the manifest shows zero legacy runtime paths.
 103. (Done) Match Go stock report average unit cost to TypeScript by dividing
      ledger valuation by the report's projected on-hand level. Add a database
      proof where projected stock differs from movement replay.
+
+104. (Done) Prove `accounting.trialBalance` through the governed Go Executor
+     with multiple currency groups, sorted wire output, permission denial,
+     organization isolation, and a human audit event.
+
+105. (Done) Prove `inventory.listLots` includes archived-item lot history
+     within the owning organization and excludes another organization's lot.
