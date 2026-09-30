@@ -136,11 +136,11 @@ const crmTasksResponseSchema = z.object({
     doneAt: z.string().nullable(),
     refType: z.string().nullable(),
     refId: z.string().nullable(),
-    assigneeUserId: z.string().nullable(),
+    assigneeUserId: z.string().uuid().nullable(),
     assigneeName: z.string().nullable(),
     customerName: z.string().nullable(),
-  })),
-});
+  }).strict()),
+}).strict();
 
 type CRMReadMode = "timeline" | "tasks";
 type CRMReadResult = z.infer<typeof crmTimelineResponseSchema> | z.infer<typeof crmTasksResponseSchema>;
@@ -288,7 +288,8 @@ export async function GET(req: Request) {
   if (!mode || !capabilityId || !capabilityInput) return NextResponse.json({ error: "nothing requested" }, { status: 400 });
 
   const goTimelineReadEnabled = mode === "timeline" && process.env.GO_CRM_TIMELINE_READS === "1";
-  const goReadEnabled = process.env.GO_CRM_READ === "1" || goTimelineReadEnabled;
+  const goTasksReadEnabled = mode === "tasks" && process.env.GO_CRM_TASK_READS === "1";
+  const goReadEnabled = process.env.GO_CRM_READ === "1" || goTimelineReadEnabled || goTasksReadEnabled;
   const shadowEnabled = !goReadEnabled && process.env.NODE_ENV === "development" && process.env.GO_CRM_SHADOW === "1";
   const legacyPayload = !goReadEnabled || shadowEnabled
     ? await buildExecutor(getDb().db, buildRegistry(getDb().db)).execute(capabilityId, ctx, capabilityInput)

@@ -1001,3 +1001,14 @@ new owners and the manifest shows zero legacy runtime paths.
     and optional per-activity result limit. Verify reverse-chronological
     timeline entries, organization scope, and the session-linked system
     capability audit event in the database-backed routine proof.
+
+88. (Done) Add a default-off signed Go bridge for CRM task-list reads on
+    `GET /api/crm` using `GO_CRM_TASK_READS=1`. Preserve open-only filtering and
+    the existing task response shape, strictly validate rows, and fail closed
+    on unavailable or malformed Go results. Verify default TypeScript behavior,
+    independent flag dispatch, and fail-closed handling in route tests.
+
+89. (Done) Harden the existing support inbox Go bridge so missing actor context
+    and malformed customer IDs or statuses fail closed without TypeScript
+    fallback. Verify the strict response schema and no-store 503 behavior in
+    focused route tests; document all opt-in route flags in the README.

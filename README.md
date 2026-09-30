@@ -192,6 +192,11 @@ data. The legacy route remains the default; the flag defaults to `0`.
 requires `pnpm dev:api`, preserves timeline fields, and fails closed when Go
 is unavailable or returns invalid data. Task reads remain isolated; the legacy
 route remains the default and the flag defaults to `0`.
+`GO_SUPPORT_CONVERSATION_READS=1` opts customer-bound conversation lists on
+`GET /api/support` into the signed Go `support.listConversations` read. It
+requires `pnpm dev:api`; conversation detail and knowledge-library reads stay
+on their existing handlers. The flag defaults to `0`, and unavailable or
+invalid Go results fail closed without a TypeScript retry.
 `GO_CRM_VIEW_WRITES=1` opts `POST /api/crm/views` into the signed Go capability
 bridge. It requires `pnpm dev:api`, preserves human session checks, approval
 responses, and save/restore audit receipts, and fails closed if Go is
@@ -202,6 +207,11 @@ into the signed Go capability bridge. It requires `pnpm dev:api`; reads,
 follow-up drafting, and other CRM actions remain on their existing handlers.
 The flag defaults to `0`, and uncertain task writes fail closed without a
 TypeScript retry.
+`GO_CRM_TASK_READS=1` opts the task-list query on `GET /api/crm` into the
+signed Go `crm.listTasks` capability. It requires `pnpm dev:api`, preserves
+open-task filtering and the existing response shape, and fails closed on
+unavailable or invalid Go results. Other CRM reads remain on their current
+handlers. The flag defaults to `0`.
 `GO_CRM_IMPORT_WRITES=1` opts customer imports and customer import undo into
 the signed Go capability bridge. It requires `pnpm dev:api`; product imports
 remain on `GO_INVENTORY_IMPORT_WRITES`. The flag defaults to `0`, and uncertain

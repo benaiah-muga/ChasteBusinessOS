@@ -48,6 +48,7 @@ describe("CRM route migration adapter", () => {
     vi.stubEnv("GO_API_INTERNAL_URL", "http://127.0.0.1:8080");
     vi.stubEnv("GO_CRM_READ", "0");
     vi.stubEnv("GO_CRM_TIMELINE_READS", "0");
+    vi.stubEnv("GO_CRM_TASK_READS", "0");
     vi.stubEnv("GO_CRM_SHADOW", "0");
     vi.stubEnv("GO_CRM_DEAL_WRITES", "0");
     vi.stubEnv("GO_CRM_TASK_WRITES", "0");
@@ -146,6 +147,61 @@ describe("CRM route migration adapter", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(`http://127.0.0.1:8080/__go/crm?timeline=${customerId}`);
     expect(mocks.execute).toHaveBeenCalledWith("crm.listTasks", { actor }, { openOnly: undefined });
+  });
+
+  it("enables signed Go task reads alone and preserves the task response shape", async () => {
+    vi.stubEnv("GO_CRM_TASK_READS", "1");
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(tasks));
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.execute.mockResolvedValue({ ok: true, data: timeline });
+
+    const response = await GET(new Request("http://localhost/api/crm?tasks=1&open=1"));
+    const timelineResponse = await GET(new Request(`http://localhost/api/crm?timeline=${customerId}`));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(tasks);
+    expect(timelineResponse.status).toBe(200);
+    expect(await timelineResponse.json()).toEqual(timeline);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("http://127.0.0.1:8080/__go/crm?tasks=1&open=1");
+    expect(mocks.execute).toHaveBeenCalledWith("crm.customerTimeline", { actor }, { customerId });
+    const options = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(options.cache).toBe("no-store");
+    expect(options.credentials).toBe("omit");
+    const token = (options.headers as Record<string, string>)["X-Chaste-Session-Assertion"] ?? "";
+    const claims = JSON.parse(Buffer.from(token.split(".")[0]!, "base64url").toString("utf8")) as Record<string, unknown>;
+    expect(claims).toMatchObject({
+      aud: "go.crm.read",
+      sub: resolved.userId,
+      org_id: resolved.orgId,
+      capability_id: "crm.listTasks",
+      input_sha256: "c".repeat(64),
+      actor_id: resolved.userId,
+      actor_type: "human",
+      auth_session_id: resolved.authSessionId,
+    });
+    expect(claims.permissions).toEqual(["crm.read"]);
+  });
+
+  it.each([
+    { name: "not dispatched", result: null },
+    { name: "invalid response fields", result: { tasks: [{ ...tasks.tasks[0], unexpected: true }] } },
+    { name: "invalid assignee ID", result: { tasks: [{ ...tasks.tasks[0], assigneeUserId: "not-a-uuid" }] } },
+  ])("fails closed on task Go $name without TypeScript retry", async ({ result }) => {
+    vi.stubEnv("GO_CRM_TASK_READS", "1");
+    const fetchMock = vi.fn().mockResolvedValue(
+      result === null ? Response.json({ error: "internal error" }, { status: 500 }) : Response.json(result),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await GET(new Request("http://localhost/api/crm?tasks=1"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "CRM service unavailable" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 
   it("fails closed for a timeline Go failure without retrying through TypeScript", async () => {
