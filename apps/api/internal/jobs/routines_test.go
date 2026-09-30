@@ -77,6 +77,26 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if query["type"] != "string" {
 		t.Fatalf("customer query schema=%#v", query)
 	}
+	var stockReport *routineTool
+	for index := range tools {
+		if tools[index].Capability == "inventory.stockReport" {
+			stockReport = &tools[index]
+		}
+	}
+	if stockReport == nil || stockReport.Permission != "inventory.read" {
+		t.Fatalf("inventory stock report tool=%+v, want inventory.read", stockReport)
+	}
+	stockProperties, ok := stockReport.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("inventory stock report schema has no properties: %#v", stockReport.Schema)
+	}
+	belowReorder, ok := stockProperties["belowReorderOnly"].(map[string]any)
+	if !ok || belowReorder["type"] != "boolean" {
+		t.Fatalf("inventory stock report filter schema=%#v", stockProperties["belowReorderOnly"])
+	}
+	if _, required := stockReport.Schema["required"]; required {
+		t.Fatalf("inventory stock report filter should remain optional: %#v", stockReport.Schema)
+	}
 }
 
 func TestRoutineIntentIsDeterministicUUID(t *testing.T) {

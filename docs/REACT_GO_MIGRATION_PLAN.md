@@ -143,10 +143,10 @@ resolves the stored workspace AI provider or the environment fallback only
 when the organization has no stored AI config, decrypts the shared AES-GCM
 credential format, creates routine sessions and events, runs a six-step
 OpenAI-compatible tool loop, and dispatches schema-described CRM customer,
-invoice, and support read tools through the Go system capability executor.
+invoice, inventory stock report, and support read tools through the Go system capability executor.
 These tools use the existing read-mostly routine permission bundle. A
 database-backed integration test covers scheduled and manual runs through a
-governed CRM read and verifies session-linked audit history. Broader routine
+governed CRM read and inventory report and verifies session-linked audit history. Broader routine
 tool parity remains open because the other legacy routine tools do not yet
 have Go model input schemas. Due routine discovery can move to Go behind
 `GO_ROUTINE_SCHEDULER=1`, which defaults off; the TypeScript worker skips only

@@ -69,10 +69,10 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		}
 		call := serverCalls.Add(1)
 		if call%2 == 1 {
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call-routine-1","type":"function","function":{"name":"crm_listCustomers","arguments":"{}"}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":3}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call-routine-1","type":"function","function":{"name":"crm_listCustomers","arguments":"{}"}},{"id":"call-routine-inventory","type":"function","function":{"name":"inventory_stockReport","arguments":"{\"belowReorderOnly\":false}"}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":3}}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine found the customer list."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customer and stock data."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
 	}))
 	defer server.Close()
 	settings, err := json.Marshal(map[string]any{"ai": map[string]any{"provider": "custom", "baseUrl": server.URL + "/v1", "models": map[string]string{"primary": "routine-test-model", "fast": "routine-test-model", "reasoning": "routine-test-model", "embeddings": "routine-test-model"}, "encryptedApiKey": encryptRoutineKey(t, secret, "integration-provider-key"), "keyHint": "••••key", "updatedAt": time.Now().UTC().Format(time.RFC3339)}})
@@ -128,7 +128,10 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		t.Fatalf("routine session events=%d, want user and assistant", got)
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.listCustomers' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
-		t.Fatalf("session-linked system capability audit events=%d", got)
+		t.Fatalf("session-linked CRM system capability audit events=%d", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='inventory.stockReport' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
+		t.Fatalf("session-linked inventory system capability audit events=%d", got)
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM notifications WHERE org_id=$1::uuid AND kind='routine.run' AND href='/sessions'`, orgID); got != 1 {
 		t.Fatalf("routine finding notifications=%d", got)
