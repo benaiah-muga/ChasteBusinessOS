@@ -1012,3 +1012,11 @@ new owners and the manifest shows zero legacy runtime paths.
     and malformed customer IDs or statuses fail closed without TypeScript
     fallback. Verify the strict response schema and no-store 503 behavior in
     focused route tests; document all opt-in route flags in the README.
+
+90. (Done) Add a default-off signed Go bridge for support conversation detail
+    reads on `GET /api/support?id=<id>` using
+    `GO_SUPPORT_CONVERSATION_DETAIL_READS=1`. Preserve every legacy detail
+    fields and the oldest-first 200-message route limit, return 404 for missing or unbound
+    conversations, and fail closed on unavailable or malformed output. Keep
+    the routine's default 20-message output unchanged when no limit is given.
+    Verify with tenant-scoped database parity and route tests.

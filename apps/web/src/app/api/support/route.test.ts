@@ -65,6 +65,7 @@ describe("support conversation list Go bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GO_SUPPORT_CONVERSATION_READS", "0");
+    vi.stubEnv("GO_SUPPORT_CONVERSATION_DETAIL_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.hasPermission.mockReturnValue(true);
@@ -176,6 +177,105 @@ describe("support conversation list Go bridge", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("dispatches conversation detail through its independent Go flag and preserves the full legacy response", async () => {
+    vi.stubEnv("GO_SUPPORT_CONVERSATION_DETAIL_READS", "1");
+    const conversationId = "33333333-3333-4333-8333-333333333333";
+    const customerId = "44444444-4444-4444-8444-444444444444";
+    const messageId = "55555555-5555-4555-8555-555555555555";
+    const messageUserId = "66666666-6666-4666-8666-666666666666";
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({
+        ok: true,
+        data: {
+          conversation: {
+            id: conversationId,
+            customerId,
+            customerName: "Ada Customer",
+            subject: "Order question",
+            status: "escalated",
+            priority: "urgent",
+            category: "shipping",
+            assignedUserId: messageUserId,
+            slaDueAt: "2026-10-01T10:30:00.000Z",
+            customerEmail: "ada@example.test",
+          },
+          messages: [{
+            id: messageId,
+            orgId: user.orgId,
+            conversationId,
+            senderType: "staff",
+            senderUserId: messageUserId,
+            body: "I will check the delivery.",
+            createdAt: "2026-09-30T08:15:00.000Z",
+          }],
+        },
+      }),
+    });
+
+    const response = await GET(request(`/api/support?id=${conversationId}`));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      conversation: {
+        id: conversationId,
+        customerId,
+        customerName: "Ada Customer",
+        subject: "Order question",
+        status: "escalated",
+        priority: "urgent",
+        category: "shipping",
+        assignedUserId: messageUserId,
+        slaDueAt: "2026-10-01T10:30:00.000Z",
+      },
+      messages: [{
+        id: messageId,
+        orgId: user.orgId,
+        conversationId,
+        senderType: "staff",
+        senderUserId: messageUserId,
+        body: "I will check the delivery.",
+        createdAt: "2026-09-30T08:15:00.000Z",
+      }],
+    });
+    expect(body.conversation).not.toHaveProperty("customerEmail");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "support.readConversation",
+      input: { conversationId, limit: 200 },
+    });
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("maps a missing Go conversation to the legacy 404 response", async () => {
+    vi.stubEnv("GO_SUPPORT_CONVERSATION_DETAIL_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, error: "conversation not found" }, { status: 422 }),
+    });
+
+    const response = await GET(request("/api/support?id=33333333-3333-4333-8333-333333333333"));
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "not found" });
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for malformed detail output without falling back to TypeScript", async () => {
+    vi.stubEnv("GO_SUPPORT_CONVERSATION_DETAIL_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { conversation: {}, messages: [] } }) });
+
+    const response = await GET(request("/api/support?id=33333333-3333-4333-8333-333333333333"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.getDb).not.toHaveBeenCalled();
   });
 

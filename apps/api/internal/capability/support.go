@@ -36,24 +36,31 @@ const (
 )
 
 type SupportBoundConversation struct {
-	ID            string
-	Status        string
-	CustomerID    *string
-	Subject       string
-	CustomerName  string
-	CustomerEmail *string
+	ID             string
+	Status         string
+	CustomerID     *string
+	Subject        string
+	CustomerName   string
+	CustomerEmail  *string
+	Priority       string
+	Category       *string
+	AssignedUserID *string
+	SLADueAt       *string
 }
 
 func supportLoadBoundConversation(ctx context.Context, tx pgx.Tx, orgID, conversationID string) (*SupportBoundConversation, error) {
 	var conv SupportBoundConversation
 	var customerName, visitorEmail *string
 	var customerEmail *string
+	var slaDueAt *time.Time
 	err := tx.QueryRow(ctx, `
-		SELECT c.id::text, c.status, c.customer_id::text, c.subject, cu.name, cu.email, c.visitor_email
+		SELECT c.id::text, c.status, c.customer_id::text, c.subject, cu.name, cu.email, c.visitor_email,
+			c.priority, c.category, c.assigned_user_id::text, c.sla_due_at
 		FROM support_conversations c
 		LEFT JOIN customers cu ON cu.id = c.customer_id AND cu.org_id=$1::uuid
 		WHERE c.id=$2::uuid AND c.org_id=$1::uuid LIMIT 1`, orgID, conversationID).Scan(
-		&conv.ID, &conv.Status, &conv.CustomerID, &conv.Subject, &customerName, &customerEmail, &visitorEmail)
+		&conv.ID, &conv.Status, &conv.CustomerID, &conv.Subject, &customerName, &customerEmail, &visitorEmail,
+		&conv.Priority, &conv.Category, &conv.AssignedUserID, &slaDueAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -71,6 +78,10 @@ func supportLoadBoundConversation(ctx context.Context, tx pgx.Tx, orgID, convers
 		conv.CustomerEmail = customerEmail
 	} else if visitorEmail != nil {
 		conv.CustomerEmail = visitorEmail
+	}
+	if slaDueAt != nil {
+		formatted := slaDueAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+		conv.SLADueAt = &formatted
 	}
 	return &conv, nil
 }
@@ -117,25 +128,45 @@ type SupportListConversationsOutput struct {
 
 type SupportReadConversationInput struct {
 	ConversationID string `json:"conversationId"`
+	Limit          int64  `json:"limit"`
+	FullDetail     bool   `json:"-"`
 }
 
 type SupportTranscriptMessage struct {
-	SenderType string `json:"senderType"`
-	Body       string `json:"body"`
-	CreatedAt  string `json:"createdAt"`
+	ID             string  `json:"id"`
+	OrgID          string  `json:"orgId"`
+	ConversationID string  `json:"conversationId"`
+	SenderType     string  `json:"senderType"`
+	SenderUserID   *string `json:"senderUserId"`
+	Body           string  `json:"body"`
+	CreatedAt      string  `json:"createdAt"`
 }
 
 type SupportReadConversationOutput struct {
 	Conversation SupportConversationHeader  `json:"conversation"`
 	Messages     []SupportTranscriptMessage `json:"messages"`
+	FullDetail   bool                       `json:"-"`
+}
+
+func (output SupportReadConversationOutput) MarshalJSON() ([]byte, error) {
+	if !output.FullDetail {
+		return json.Marshal(legacyReadConversationOutput(output))
+	}
+	type fullOutput SupportReadConversationOutput
+	return json.Marshal(fullOutput(output))
 }
 
 type SupportConversationHeader struct {
-	ID            string  `json:"id"`
-	Status        string  `json:"status"`
-	CustomerName  string  `json:"customerName"`
-	CustomerEmail *string `json:"customerEmail"`
-	Subject       string  `json:"subject"`
+	ID             string  `json:"id"`
+	CustomerID     *string `json:"customerId"`
+	CustomerName   string  `json:"customerName"`
+	Subject        string  `json:"subject"`
+	Status         string  `json:"status"`
+	Priority       string  `json:"priority"`
+	Category       *string `json:"category"`
+	AssignedUserID *string `json:"assignedUserId"`
+	SLADueAt       *string `json:"slaDueAt"`
+	CustomerEmail  *string `json:"customerEmail"`
 }
 
 type SupportLookupOrderStatusInput struct {
@@ -335,7 +366,53 @@ func ParseSupportConversationIDInput(raw json.RawMessage) (SupportReadConversati
 	if input.ConversationID, err = projectRequiredUUID(fields, "conversationId"); err != nil {
 		return SupportReadConversationInput{}, err
 	}
+	input.Limit = supportTranscriptMaxMessages
+	if _, ok := fields["limit"]; ok {
+		input.FullDetail = true
+		if input.Limit, err = requiredSafeInteger(fields, "limit"); err != nil {
+			return SupportReadConversationInput{}, err
+		}
+		if input.Limit < 1 || input.Limit > 200 {
+			return SupportReadConversationInput{}, errors.New("limit must be between 1 and 200")
+		}
+	}
 	return input, nil
+}
+
+type supportLegacyTranscriptMessage struct {
+	SenderType string `json:"senderType"`
+	Body       string `json:"body"`
+	CreatedAt  string `json:"createdAt"`
+}
+
+type supportLegacyConversationHeader struct {
+	ID            string  `json:"id"`
+	Status        string  `json:"status"`
+	CustomerName  string  `json:"customerName"`
+	CustomerEmail *string `json:"customerEmail"`
+	Subject       string  `json:"subject"`
+}
+
+type supportLegacyReadConversationOutput struct {
+	Conversation supportLegacyConversationHeader  `json:"conversation"`
+	Messages     []supportLegacyTranscriptMessage `json:"messages"`
+}
+
+func legacyReadConversationOutput(output SupportReadConversationOutput) supportLegacyReadConversationOutput {
+	legacy := supportLegacyReadConversationOutput{
+		Conversation: supportLegacyConversationHeader{
+			ID: output.Conversation.ID, Status: output.Conversation.Status,
+			CustomerName: output.Conversation.CustomerName, CustomerEmail: output.Conversation.CustomerEmail,
+			Subject: output.Conversation.Subject,
+		},
+		Messages: make([]supportLegacyTranscriptMessage, 0, len(output.Messages)),
+	}
+	for _, message := range output.Messages {
+		legacy.Messages = append(legacy.Messages, supportLegacyTranscriptMessage{
+			SenderType: message.SenderType, Body: message.Body, CreatedAt: message.CreatedAt,
+		})
+	}
+	return legacy
 }
 
 func ParseSupportSearchKnowledgeInput(raw json.RawMessage) (SupportSearchKnowledgeInput, error) {
@@ -663,9 +740,21 @@ func supportReadConversation(ctx context.Context, tx pgx.Tx, orgID string, input
 	if conv == nil {
 		return SupportReadConversationOutput{}, errors.New("conversation not found")
 	}
-	msgRows, err := tx.Query(ctx, `
-		SELECT sender_type, body, created_at FROM support_messages
-		WHERE conversation_id=$1::uuid ORDER BY created_at DESC LIMIT $2`, conv.ID, supportTranscriptMaxMessages)
+	limit := input.Limit
+	if limit == 0 {
+		limit = supportTranscriptMaxMessages
+	}
+	query := `
+		SELECT id::text, org_id::text, conversation_id::text, sender_type, sender_user_id::text, body, created_at
+		FROM support_messages
+		WHERE org_id=$1::uuid AND conversation_id=$2::uuid ORDER BY created_at DESC LIMIT $3`
+	if input.FullDetail {
+		query = `
+		SELECT id::text, org_id::text, conversation_id::text, sender_type, sender_user_id::text, body, created_at
+		FROM support_messages
+		WHERE org_id=$1::uuid AND conversation_id=$2::uuid ORDER BY created_at ASC LIMIT $3`
+	}
+	msgRows, err := tx.Query(ctx, query, orgID, conv.ID, limit)
 	if err != nil {
 		return SupportReadConversationOutput{}, err
 	}
@@ -673,7 +762,7 @@ func supportReadConversation(ctx context.Context, tx pgx.Tx, orgID string, input
 	for msgRows.Next() {
 		var message SupportTranscriptMessage
 		var createdAt time.Time
-		if err := msgRows.Scan(&message.SenderType, &message.Body, &createdAt); err != nil {
+		if err := msgRows.Scan(&message.ID, &message.OrgID, &message.ConversationID, &message.SenderType, &message.SenderUserID, &message.Body, &createdAt); err != nil {
 			msgRows.Close()
 			return SupportReadConversationOutput{}, err
 		}
@@ -681,15 +770,18 @@ func supportReadConversation(ctx context.Context, tx pgx.Tx, orgID string, input
 		messages = append(messages, message)
 	}
 	msgRows.Close()
-	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
-		messages[i], messages[j] = messages[j], messages[i]
+	if !input.FullDetail {
+		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+			messages[i], messages[j] = messages[j], messages[i]
+		}
 	}
 	return SupportReadConversationOutput{
 		Conversation: SupportConversationHeader{
-			ID: conv.ID, Status: conv.Status, CustomerName: conv.CustomerName,
-			CustomerEmail: conv.CustomerEmail, Subject: conv.Subject,
+			ID: conv.ID, CustomerID: conv.CustomerID, CustomerName: conv.CustomerName, Subject: conv.Subject,
+			Status: conv.Status, Priority: conv.Priority, Category: conv.Category, AssignedUserID: conv.AssignedUserID,
+			SLADueAt: conv.SLADueAt, CustomerEmail: conv.CustomerEmail,
 		},
-		Messages: messages,
+		Messages: messages, FullDetail: input.FullDetail,
 	}, nil
 }
 

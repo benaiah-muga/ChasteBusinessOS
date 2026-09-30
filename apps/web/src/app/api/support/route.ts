@@ -63,15 +63,98 @@ const actionSchema = z.discriminatedUnion("action", [
 
 /** Conversation list with customer names and last activity. */
 export async function GET(req: Request) {
-  const resolved = await getResolvedUser();
-  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!supportEnabled(resolved)) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!hasPermissionFor({ permissions: resolved.permissions }, "support.read")) {
-    return NextResponse.json({ error: "forbidden: missing permission: support.read" }, { status: 403 });
-  }
   const url = new URL(req.url);
   const conversationId = url.searchParams.get("id");
   const library = Boolean(url.searchParams.get("library"));
+  const detailBridgeEnabled = process.env.GO_SUPPORT_CONVERSATION_DETAIL_READS === "1" && Boolean(conversationId) && !library;
+  const detailNoStore = detailBridgeEnabled ? { headers: { "Cache-Control": "no-store" } } : undefined;
+  const resolved = await getResolvedUser();
+  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401, ...detailNoStore });
+  if (!supportEnabled(resolved)) return NextResponse.json({ error: "not found" }, { status: 404, ...detailNoStore });
+  if (!hasPermissionFor({ permissions: resolved.permissions }, "support.read")) {
+    return NextResponse.json({ error: "forbidden: missing permission: support.read" }, { status: 403, ...detailNoStore });
+  }
+  if (detailBridgeEnabled && conversationId) {
+    const unavailable = () => NextResponse.json({ error: "support service unavailable; reload the conversation" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    const actionContext = actorFromResolved(resolved, {});
+    if (!actionContext) return unavailable();
+    try {
+      const result = await executeGoCapability({
+        actionContext,
+        session: resolved,
+        capabilityId: "support.readConversation",
+        input: { conversationId, limit: 200 },
+      });
+      if (result.kind !== "response") return unavailable();
+      const body: unknown = await result.response.json().catch(() => null);
+      if (result.response.status === 200) {
+        const messageSchema = z.object({
+          id: z.string().uuid(),
+          orgId: z.string().uuid(),
+          conversationId: z.string().uuid(),
+          senderType: z.enum(["customer", "staff", "agent", "system"]),
+          senderUserId: z.string().uuid().nullable(),
+          body: z.string(),
+          createdAt: z.string().datetime(),
+        }).strict();
+        const parsed = z.object({
+          ok: z.literal(true),
+          data: z.object({
+            conversation: z.object({
+              id: z.string().uuid(),
+              customerId: z.string().uuid().nullable(),
+              customerName: z.string(),
+              subject: z.string(),
+              status: z.enum(["open", "escalated", "resolved"]),
+              priority: z.enum(["low", "normal", "high", "urgent"]),
+              category: z.string().nullable(),
+              assignedUserId: z.string().uuid().nullable(),
+              slaDueAt: z.string().datetime().nullable(),
+              customerEmail: z.string().nullable(),
+            }).strict(),
+            messages: z.array(messageSchema).max(200),
+          }).strict(),
+        }).strict().safeParse(body);
+        if (!parsed.success) return unavailable();
+        const { conversation, messages } = parsed.data.data;
+        if (conversation.id !== conversationId || messages.some((message) => message.orgId !== resolved.orgId || message.conversationId !== conversation.id)) return unavailable();
+        if (!conversation.customerId) return NextResponse.json({ error: "not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+        return NextResponse.json({
+          conversation: {
+            id: conversation.id,
+            customerId: conversation.customerId,
+            customerName: conversation.customerName,
+            subject: conversation.subject,
+            status: conversation.status,
+            priority: conversation.priority,
+            category: conversation.category,
+            assignedUserId: conversation.assignedUserId,
+            slaDueAt: conversation.slaDueAt ? new Date(conversation.slaDueAt).toISOString() : null,
+          },
+          messages: messages.map((message) => ({
+            ...message,
+            createdAt: new Date(message.createdAt).toISOString(),
+          })),
+        }, { headers: { "Cache-Control": "no-store" } });
+      }
+      if (result.response.status === 422) {
+        const error = z.object({ ok: z.literal(false), error: z.string() }).strict().safeParse(body);
+        if (!error.success) return unavailable();
+        if (error.data.error === "conversation not found") {
+          return NextResponse.json({ error: "not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+        }
+        return NextResponse.json({ error: error.data.error }, { status: 422, headers: { "Cache-Control": "no-store" } });
+      }
+      if (result.response.status === 401 || result.response.status === 403) {
+        const error = z.object({ error: z.string() }).strict().safeParse(body);
+        if (!error.success) return unavailable();
+        return NextResponse.json(error.data, { status: result.response.status, headers: { "Cache-Control": "no-store" } });
+      }
+      return unavailable();
+    } catch {
+      return unavailable();
+    }
+  }
   if (process.env.GO_SUPPORT_CONVERSATION_READS === "1" && !conversationId && !library) {
     const unavailable = () => NextResponse.json({ error: "support service unavailable; reload the inbox" }, { status: 503, headers: { "Cache-Control": "no-store" } });
     const actionContext = actorFromResolved(resolved, {});

@@ -197,6 +197,11 @@ route remains the default and the flag defaults to `0`.
 requires `pnpm dev:api`; conversation detail and knowledge-library reads stay
 on their existing handlers. The flag defaults to `0`, and unavailable or
 invalid Go results fail closed without a TypeScript retry.
+`GO_SUPPORT_CONVERSATION_DETAIL_READS=1` opts `GET /api/support?id=<id>` into
+the signed Go `support.readConversation` capability. It requires
+`pnpm dev:api`, preserves the full conversation and message fields, returns the
+oldest 200 messages in ascending order like the legacy route, and fails closed
+on unavailable or invalid Go results. The flag defaults to `0`.
 `GO_CRM_VIEW_WRITES=1` opts `POST /api/crm/views` into the signed Go capability
 bridge. It requires `pnpm dev:api`, preserves human session checks, approval
 responses, and save/restore audit receipts, and fails closed if Go is
