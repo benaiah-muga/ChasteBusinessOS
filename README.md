@@ -97,15 +97,17 @@ measure.
 24.18.0, pnpm 11.9.0, and Go 1.27.1. Each command ran three times in sequence
 with shared dependency and compiler caches left warm between runs.
 
-| Build | Command | Median | p95 |
-| --- | --- | ---: | ---: |
-| Next.js | `pnpm --filter web build` | 31.44 s | 352.31 s |
-| Vite + React + TypeScript | `pnpm --filter @chaste/web-vite build` | 10.76 s | 11.31 s |
-| Go API and workers | `go -C apps/api build ./cmd/api ./cmd/jobs-worker ./cmd/outbox-worker` | 1.58 s | 2.15 s |
+| Build | Command | Median | p95 | Median peak RSS |
+| --- | --- | ---: | ---: | ---: |
+| Next.js | `pnpm --filter web build` | 31.44 s | 352.31 s | 1,118,892 kB |
+| Vite + React + TypeScript | `pnpm --filter @chaste/web-vite build` | 10.76 s | 11.31 s | 662,056 kB |
+| Go API and workers | `go -C apps/api build ./cmd/api ./cmd/jobs-worker ./cmd/outbox-worker` | 1.58 s | 2.15 s | 247,040 kB |
 
 In this sample, the Vite build median is about **66% lower** than the Next.js
-median, and the three Go binaries build in a **1.58-second median**. These are
-the compilation and build-time benefits measured so far in the migration.
+median, and its median peak memory use is about **41% lower**. The three Go
+binaries build in a **1.58-second median** with a 247,040 kB median peak RSS.
+These are the compilation, build-time, and peak-memory benefits measured so
+far in the migration.
 
 The first Next.js run was cold and took 352.31 s; the next two took 31.44 s and
 15.70 s. With only three samples, p95 reflects this cold-build outlier. The
