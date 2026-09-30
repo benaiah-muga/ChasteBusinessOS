@@ -1094,3 +1094,7 @@ new owners and the manifest shows zero legacy runtime paths.
 
 105. (Done) Prove `inventory.listLots` includes archived-item lot history
      within the owning organization and excludes another organization's lot.
+
+106. (Done) Add focused Vite CRM component coverage for customer merge and
+     undo, verifying the chosen survivor and duplicate IDs in the merge request
+     and the full returned snapshot in the restore request.

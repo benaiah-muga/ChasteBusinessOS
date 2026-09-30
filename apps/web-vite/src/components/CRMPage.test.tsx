@@ -357,4 +357,92 @@ describe("Vite CRM page", () => {
     const importPost = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/import" && init?.method === "POST");
     expect(JSON.parse(String(importPost?.[1]?.body)).rows).toHaveLength(45);
   });
+
+  it("merges into the selected survivor and sends the undo snapshot when Undo merge is used", async () => {
+    const survivorCustomerId = "69e5831e-cb62-4f9a-91d5-4b9e7c62d949";
+    const duplicateCustomerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
+    const customers = [
+      { ...customer("Survivor Company"), id: survivorCustomerId, email: "survivor@example.test" },
+      { ...customer("Duplicate Company"), id: duplicateCustomerId, email: "duplicate@example.test" },
+    ];
+    const undoSnapshot = {
+      survivorCustomerId,
+      duplicateCustomerId,
+      previous: [
+        {
+          customerId: survivorCustomerId,
+          email: "survivor@example.test",
+          phone: null,
+          preferredContactMethod: "email",
+          doNotContact: false,
+          reminderOptOut: false,
+          marketingOptOut: false,
+          ownerUserId: null,
+          tags: ["renewal"],
+          notes: "Priority account",
+          creditLimitMinor: 0,
+          paymentTermDays: 0,
+          deactivatedAt: null,
+          mergedIntoCustomerId: null,
+          mergedAt: null,
+        },
+        {
+          customerId: duplicateCustomerId,
+          email: "duplicate@example.test",
+          phone: null,
+          preferredContactMethod: "email",
+          doNotContact: false,
+          reminderOptOut: false,
+          marketingOptOut: false,
+          ownerUserId: null,
+          tags: ["renewal"],
+          notes: "Priority account",
+          creditLimitMinor: 0,
+          paymentTermDays: 0,
+          deactivatedAt: null,
+          mergedIntoCustomerId: null,
+          mergedAt: null,
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/customers" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { action: string };
+        return Response.json({ ok: true, data: body.action === "merge" ? undoSnapshot : {} });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    const duplicateRow = screen.getByRole("row", { name: /Duplicate Company/ });
+    fireEvent.click(within(duplicateRow).getByRole("button", { name: "Merge" }));
+    const mergeDialog = await screen.findByRole("dialog", { name: "Merge customer records" });
+    const duplicateSelect = within(mergeDialog).getByLabelText("Duplicate record") as HTMLSelectElement;
+    expect(duplicateSelect.value).toBe(duplicateCustomerId);
+    fireEvent.change(within(mergeDialog).getByLabelText("Keep this customer"), { target: { value: survivorCustomerId } });
+    fireEvent.click(within(mergeDialog).getByRole("button", { name: "Merge records" }));
+
+    const mergePost = await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/customers" && init?.method === "POST");
+      expect(post).toBeDefined();
+      return post;
+    });
+    expect(JSON.parse(String(mergePost?.[1]?.body))).toMatchObject({
+      action: "merge",
+      survivorCustomerId,
+      duplicateCustomerId,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Undo merge" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")).toHaveLength(2));
+    const undoPost = fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")[1];
+    expect(JSON.parse(String(undoPost?.[1]?.body))).toMatchObject({ action: "undoMerge", ...undoSnapshot });
+  });
 });
