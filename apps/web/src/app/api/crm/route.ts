@@ -121,12 +121,12 @@ async function crmTaskGoResponse(
 
 const crmTimelineResponseSchema = z.object({
   entries: z.array(z.object({
-    kind: z.string(),
-    date: z.string(),
-    refId: z.string(),
-    summary: z.string(),
-  })),
-});
+    kind: z.enum(["invoice", "payment", "quote", "deal", "task", "document"]),
+    date: z.string().datetime(),
+    refId: z.string().uuid(),
+    summary: z.string().min(1),
+  }).strict()),
+}).strict();
 
 const crmTasksResponseSchema = z.object({
   tasks: z.array(z.object({

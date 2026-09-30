@@ -169,6 +169,12 @@ data. The TypeScript path remains the default and the flag defaults to `0`.
 the `{ ok, data }` response shape, and fails closed without a TypeScript retry
 when Go is unavailable or returns invalid data. The TypeScript path remains
 the default and the flag defaults to `0`.
+`GO_ACCOUNTING_CASH_FORECAST_READS=1` opts the cash forecast action on
+`POST /api/accounting` into the signed Go `accounting.cashForecast` capability.
+It requires `pnpm dev:api`, validates the 13-week forecast response, and fails
+closed when Go is unavailable or returns invalid data. Missing stored scenario
+assumptions use their defaults; explicit null values are rejected. The flag
+defaults to `0`.
 `GO_CRM_DEAL_WRITES=1` opts deal creation, stage changes, and lead conversion
 into the signed Go capability bridge. It requires `pnpm dev:api`; reads and
 other CRM actions remain on the legacy handler, and uncertain writes fail
@@ -429,6 +435,11 @@ without a TypeScript retry. The flag defaults to `0`.
 signed Go capability bridge. It requires `pnpm dev:api`; other purchasing
 reads and all writes remain on their existing handlers. The flag defaults to
 `0`.
+`GO_PURCHASING_PRICE_HISTORY_READS=1` opts the supplier price history read into
+the signed Go `purchasing.priceHistory` capability. It requires `pnpm dev:api`,
+preserves the existing response shape, and fails closed if Go is unavailable
+or returns invalid data. Other purchasing reads and all writes remain on their
+existing handlers. The flag defaults to `0`.
 `GO_HR_OPENINGS_WRITE=1` opts job opening creation and closure into the
 signed Go capability bridge. It requires `pnpm dev:api`; applicant actions
 remain on their existing handlers, and uncertain writes fail closed without a

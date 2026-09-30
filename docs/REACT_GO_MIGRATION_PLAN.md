@@ -653,8 +653,9 @@ new owners and the manifest shows zero legacy runtime paths.
 
 37. (Done) Add a default-off signed Go read bridge for CRM customer
     timelines using `GO_CRM_TIMELINE_READS=1`. Preserve timeline fields and
-    task-read isolation, and fail closed when Go is unavailable or returns
-    invalid data.
+    task-read isolation, validate timeline kinds, UUID references, timestamps,
+    summaries, and object shape, and fail closed when Go is unavailable or
+    returns invalid data. Focused route tests cover malformed entries.
 
 38. (Done) Add a default-off signed Go bridge for supplier bill credit
     notes using `GO_PURCHASING_BILL_CREDIT_WRITES=1`. Preserve input mapping,

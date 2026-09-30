@@ -38,7 +38,7 @@ const actor = {
   orgId: resolved.orgId,
   permissions: resolved.permissions,
 };
-const timeline = { entries: [{ kind: "invoice", date: "2026-09-27T10:00:00.000Z", refId: "invoice-1", summary: "Invoice #1 (draft, 12.34)" }] };
+const timeline = { entries: [{ kind: "invoice", date: "2026-09-27T10:00:00.000Z", refId: "f3c65071-356d-48e4-b5cc-cccd4fc06f6d", summary: "Invoice #1 (draft, 12.34)" }] };
 const tasks = { tasks: [{ id: "task-1", title: "Call customer", dueAt: null, doneAt: null, refType: "customer", refId: "customer-1", assigneeUserId: null, assigneeName: null, customerName: "Acme" }] };
 
 describe("CRM route migration adapter", () => {
@@ -157,6 +157,22 @@ describe("CRM route migration adapter", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ error: "CRM service unavailable" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { kind: "unknown", date: "2026-09-27T10:00:00.000Z", refId: taskId, summary: "Invoice" },
+    { kind: "invoice", date: "not-a-date", refId: taskId, summary: "Invoice" },
+    { kind: "invoice", date: "2026-09-27T10:00:00.000Z", refId: "invoice-1", summary: "Invoice" },
+    { kind: "invoice", date: "2026-09-27T10:00:00.000Z", refId: taskId, summary: "Invoice", extra: true },
+  ])("fails closed on malformed Go timeline entry $kind/$date", async (entry) => {
+    vi.stubEnv("GO_CRM_TIMELINE_READS", "1");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ entries: [entry] })));
+
+    const response = await GET(new Request(`http://localhost/api/crm?timeline=${customerId}`));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 

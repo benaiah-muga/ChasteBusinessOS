@@ -98,15 +98,6 @@ describe("support conversation list Go bridge", () => {
               lastMessageAt: "2026-09-30T08:15:00.000Z",
               lastMessagePreview: "Could you check the delivery?",
             },
-            {
-              id: "55555555-5555-4555-8555-555555555555",
-              customerId: "",
-              customerName: "Website visitor",
-              subject: "Visitor thread",
-              status: "open",
-              lastMessageAt: "2026-09-30T08:10:00.000Z",
-              lastMessagePreview: "Hello",
-            },
           ],
         },
       }),
@@ -142,6 +133,49 @@ describe("support conversation list Go bridge", () => {
     const response = await GET(request());
 
     expect(response.status).toBe(503);
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["unknown status", { status: "pending" }],
+    ["invalid customer id", { customerId: "not-a-uuid" }],
+  ])("fails closed when Go returns %s", async (_caseName, override) => {
+    vi.stubEnv("GO_SUPPORT_CONVERSATION_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({
+        ok: true,
+        data: {
+          conversations: [{
+            id: "33333333-3333-4333-8333-333333333333",
+            customerId: "44444444-4444-4444-8444-444444444444",
+            customerName: "Ada Customer",
+            subject: "Order question",
+            status: "open",
+            lastMessageAt: "2026-09-30T08:15:00.000Z",
+            lastMessagePreview: "Could you check the delivery?",
+            ...override,
+          }],
+        },
+      }),
+    });
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of using TypeScript when Go actor context is unavailable", async () => {
+    vi.stubEnv("GO_SUPPORT_CONVERSATION_READS", "1");
+    mocks.actorFromResolved.mockReturnValue(null);
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
     expect(mocks.getDb).not.toHaveBeenCalled();
   });
 
