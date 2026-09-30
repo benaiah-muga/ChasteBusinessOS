@@ -498,6 +498,23 @@ export async function POST(req: Request) {
     }
   }
 
+  if (body.action === "cashForecast" && process.env.GO_ACCOUNTING_CASH_FORECAST_READS === "1") {
+    try {
+      return await invoiceOpsGoResponse(
+        await executeGoCapability({
+          actionContext: humanCtx,
+          session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+          capabilityId: "accounting.cashForecast",
+          input: { budgetScenarioId: body.budgetScenarioId },
+        }),
+        cashForecastOutputSchema,
+        cashForecastUnavailable,
+      );
+    } catch {
+      return cashForecastUnavailable();
+    }
+  }
+
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
 
@@ -833,6 +850,21 @@ const customerStatementOutputSchema = z.object({
     })),
   })),
 });
+const cashForecastOutputSchema = z.object({
+  startMinor: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+  finalMinor: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+  lowestCloseMinor: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+  lowestWeekIndex: z.number().int().min(-1).max(12),
+  scenarioName: z.string().nullable(),
+  minimumCashBufferMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  unsupportedCurrencies: z.array(z.string()),
+  weeks: z.array(z.object({
+    weekStart: z.string().datetime(),
+    inflowMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    outflowMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    closeMinor: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+  }).strict()).length(13),
+}).strict();
 
 function paymentUnavailable() {
   return NextResponse.json(
@@ -858,6 +890,13 @@ function fxRateUnavailable() {
 function customerStatementUnavailable() {
   return NextResponse.json(
     { error: "accounting customer statement unavailable; reload before retrying" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+function cashForecastUnavailable() {
+  return NextResponse.json(
+    { error: "accounting cash forecast unavailable; reload before retrying" },
     { status: 503, headers: { "Cache-Control": "no-store" } },
   );
 }

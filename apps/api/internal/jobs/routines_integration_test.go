@@ -108,10 +108,16 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		RETURNING id::text`, orgID, localQuoteCustomerID, quoteExpiresAt, quoteCreatedAt).Scan(&localQuoteID); err != nil {
 		t.Fatal(err)
 	}
+	var localAcceptedQuoteID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO quotes (org_id, customer_id, number, status, subtotal_minor, tax_minor, total_minor, created_at, created_by_actor_type)
+		VALUES ($1::uuid, $2::uuid, 82, 'accepted', 20000, 0, 20000, $3, 'human')
+		RETURNING id::text`, orgID, localQuoteCustomerID, quoteCreatedAt.Add(time.Hour)).Scan(&localAcceptedQuoteID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := owner.Exec(ctx, `
 		INSERT INTO quotes (org_id, customer_id, number, status, subtotal_minor, tax_minor, total_minor, created_at, created_by_actor_type)
-		VALUES ($1::uuid, $2::uuid, 82, 'accepted', 20000, 0, 20000, $3, 'human'),
-		       ($4::uuid, $5::uuid, 81, 'sent', 99000, 0, 99000, $3, 'human')`, orgID, localQuoteCustomerID, quoteCreatedAt.Add(time.Hour), otherOrgID, foreignQuoteCustomerID); err != nil {
+		VALUES ($1::uuid, $2::uuid, 81, 'sent', 99000, 0, 99000, $3, 'human')`, otherOrgID, foreignQuoteCustomerID, quoteCreatedAt.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	secret := "routine-test-encryption-secret"
@@ -127,6 +133,11 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		call := serverCalls.Add(1)
 		if call%2 == 1 {
 			quoteFilterArgs := `{"status":"sent"}`
+			timelineArgs, err := json.Marshal(map[string]any{"customerId": localQuoteCustomerID, "limit": 20})
+			if err != nil {
+				t.Errorf("encode CRM customer timeline arguments: %v", err)
+				return
+			}
 			localVersionArgs, err := json.Marshal(map[string]string{"documentId": localDocumentID})
 			if err != nil {
 				t.Errorf("encode local document version arguments: %v", err)
@@ -156,6 +167,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				"choices": []any{map[string]any{"message": map[string]any{"content": nil, "tool_calls": []any{
 					map[string]any{"id": "call-routine-1", "type": "function", "function": map[string]any{"name": "crm_listCustomers", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-tasks", "type": "function", "function": map[string]any{"name": "crm_listTasks", "arguments": `{"openOnly":true}`}},
+					map[string]any{"id": "call-routine-crm-timeline", "type": "function", "function": map[string]any{"name": "crm_customerTimeline", "arguments": string(timelineArgs)}},
 					map[string]any{"id": "call-routine-accounting-quotes", "type": "function", "function": map[string]any{"name": "accounting_listQuotes", "arguments": quoteFilterArgs}},
 					map[string]any{"id": "call-routine-inventory-locations", "type": "function", "function": map[string]any{"name": "inventory_listLocations", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-inventory", "type": "function", "function": map[string]any{"name": "inventory_stockReport", "arguments": `{"belowReorderOnly":false}`}},
@@ -189,6 +201,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundDocumentResult := false
 		foundLocationResult := false
 		foundQuoteResult := false
+		foundTimelineResult := false
 		foundLocalVersionResult := false
 		foundForeignVersionResult := false
 		foundLocalVersionDetailResult := false
@@ -262,6 +275,32 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				if quote.ID != localQuoteID || quote.Number != 81 || quote.Status != "sent" || quote.TotalMinor != 13500 || quote.CustomerID != localQuoteCustomerID ||
 					quote.CreatedAt == nil || *quote.CreatedAt != "2026-09-30T10:11:12.345Z" || quote.ExpiresAt == nil || *quote.ExpiresAt != "2026-12-31T00:00:00.000Z" || quote.InvoiceID != nil {
 					t.Errorf("accounting.listQuotes quote = %+v, want matching local quote and nullable invoice", quote)
+				}
+			case "call-routine-crm-timeline":
+				foundTimelineResult = true
+				var result struct {
+					OK   bool `json:"ok"`
+					Data struct {
+						Entries []struct {
+							Kind    string `json:"kind"`
+							Date    string `json:"date"`
+							RefID   string `json:"refId"`
+							Summary string `json:"summary"`
+						} `json:"entries"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode crm.customerTimeline tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Entries) != 2 {
+					t.Errorf("crm.customerTimeline result = %+v, want this customer's two quote timeline entries", result)
+					continue
+				}
+				newestEntry, oldestEntry := result.Data.Entries[0], result.Data.Entries[1]
+				if newestEntry.Kind != "quote" || newestEntry.RefID != localAcceptedQuoteID || newestEntry.Summary != "Quote #82 (accepted, 200.00)" || newestEntry.Date != "2026-09-30T11:11:12.345Z" ||
+					oldestEntry.Kind != "quote" || oldestEntry.RefID != localQuoteID || oldestEntry.Summary != "Quote #81 (sent, 135.00)" || oldestEntry.Date != "2026-09-30T10:11:12.345Z" {
+					t.Errorf("crm.customerTimeline entries = %+v, want local quotes in reverse chronological order", result.Data.Entries)
 				}
 			case "call-routine-inventory-locations":
 				foundLocationResult = true
@@ -391,13 +430,16 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundQuoteResult {
 			t.Errorf("follow-up provider request omitted the accounting.listQuotes tool result")
 		}
+		if !foundTimelineResult {
+			t.Errorf("follow-up provider request omitted the crm.customerTimeline tool result")
+		}
 		if !foundLocalVersionResult || !foundForeignVersionResult {
 			t.Errorf("follow-up provider request omitted document version tool results, local=%v foreign=%v", foundLocalVersionResult, foundForeignVersionResult)
 		}
 		if !foundLocalVersionDetailResult || !foundLocalNullNoteVersionDetailResult || !foundForeignVersionDetailResult {
 			t.Errorf("follow-up provider request omitted document version detail tool results, local=%v null-note-local=%v foreign=%v", foundLocalVersionDetailResult, foundLocalNullNoteVersionDetailResult, foundForeignVersionDetailResult)
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customers, follow-up tasks, sent quotes, warehouse locations, stock, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customers, follow-up tasks, customer history, sent quotes, warehouse locations, stock, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
 	}))
 	defer server.Close()
 	settings, err := json.Marshal(map[string]any{"ai": map[string]any{"provider": "custom", "baseUrl": server.URL + "/v1", "models": map[string]string{"primary": "routine-test-model", "fast": "routine-test-model", "reasoning": "routine-test-model", "embeddings": "routine-test-model"}, "encryptedApiKey": encryptRoutineKey(t, secret, "integration-provider-key"), "keyHint": "••••key", "updatedAt": time.Now().UTC().Format(time.RFC3339)}})
@@ -457,6 +499,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.listTasks' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
 		t.Fatalf("session-linked CRM task-list system capability audit events=%d", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.customerTimeline' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
+		t.Fatalf("session-linked CRM customer-timeline system capability audit events=%d", got)
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='inventory.listLocations' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
 		t.Fatalf("session-linked inventory location-list system capability audit events=%d", got)

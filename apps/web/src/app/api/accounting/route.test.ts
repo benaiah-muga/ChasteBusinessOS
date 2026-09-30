@@ -348,6 +348,94 @@ describe("POST /api/accounting Go customer statement read bridge", () => {
   });
 });
 
+const cashForecastOutput = {
+  startMinor: 500000,
+  finalMinor: 500000,
+  lowestCloseMinor: 500000,
+  lowestWeekIndex: -1,
+  scenarioName: null,
+  minimumCashBufferMinor: 0,
+  unsupportedCurrencies: [],
+  weeks: Array.from({ length: 13 }, (_, index) => ({
+    weekStart: new Date(Date.UTC(2026, 8, 28 + index * 7)).toISOString(),
+    inflowMinor: 0,
+    outflowMinor: 0,
+    closeMinor: 500000,
+  })),
+};
+
+describe("POST /api/accounting Go cash forecast read bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_CASH_FORECAST_READS", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: cashForecastOutput });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps the governed TypeScript cash forecast by default", async () => {
+    delete process.env.GO_ACCOUNTING_CASH_FORECAST_READS;
+
+    const response = await POST(request({ action: "cashForecast" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: cashForecastOutput });
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.cashForecast", actionContext, { budgetScenarioId: undefined });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the governed cash forecast capability to Go and validates its contract", async () => {
+    vi.stubEnv("GO_ACCOUNTING_CASH_FORECAST_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: cashForecastOutput }),
+    });
+
+    const response = await POST(request({ action: "cashForecast", budgetScenarioId: "d00d512e-ab21-4f45-9199-f53d81e9597f" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: cashForecastOutput });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: {
+        userId: resolved.userId,
+        orgId: resolved.orgId,
+        authSessionId: resolved.authSessionId,
+      },
+      capabilityId: "accounting.cashForecast",
+      input: { budgetScenarioId: "d00d512e-ab21-4f45-9199-f53d81e9597f" },
+    });
+    expect(mocks.buildExecutor).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on unavailable or malformed Go results without a TypeScript retry", async () => {
+    vi.stubEnv("GO_ACCOUNTING_CASH_FORECAST_READS", "1");
+    mocks.executeGoCapability.mockResolvedValueOnce({ kind: "outcome-unknown" });
+
+    const unavailable = await POST(request({ action: "cashForecast" }));
+    expect(unavailable.status).toBe(503);
+
+    mocks.executeGoCapability.mockResolvedValueOnce({
+      kind: "response",
+      response: Response.json({ ok: true, data: { ...cashForecastOutput, weeks: [] } }),
+    });
+    const malformed = await POST(request({ action: "cashForecast" }));
+
+    expect(malformed.status).toBe(503);
+    expect(await malformed.json()).toEqual({ error: "accounting cash forecast unavailable; reload before retrying" });
+    expect(mocks.buildExecutor).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/accounting Go invoice bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();

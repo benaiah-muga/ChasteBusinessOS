@@ -17,6 +17,15 @@ const apAgingOutputSchema = z.object({
     totalOutstanding: z.number().int().safe(),
   }).strict(),
 }).strict();
+const priceHistoryOutputSchema = z.object({
+  rows: z.array(z.object({
+    vendorName: z.string(),
+    itemSku: z.string().nullable(),
+    itemDescription: z.string(),
+    unitPriceMinor: z.number().int().safe(),
+    orderedAt: z.string().datetime({ offset: true }).nullable(),
+  }).strict()),
+}).strict();
 const purchaseWorkflowSchema = z.object({
   requests: z.array(z.object({
     id: z.string(),
@@ -195,8 +204,31 @@ export async function GET() {
     apAging = aging.data ?? {};
   }
 
-  const priceHistory = await executor.execute("purchasing.priceHistory", ctx, {});
-  if (!priceHistory.ok) return NextResponse.json({ error: priceHistory.error }, { status: 500 });
+  let priceHistoryData: z.infer<typeof priceHistoryOutputSchema>;
+  if (process.env.GO_PURCHASING_PRICE_HISTORY_READS === "1") {
+    const unavailableMessage = "purchasing price history service unavailable; reload the page before retrying";
+    try {
+      const response = await purchasingGoResponse(
+        await executeGoCapability({
+          actionContext: ctx,
+          session: resolved,
+          capabilityId: "purchasing.priceHistory",
+          input: {},
+        }),
+        unavailableMessage,
+        priceHistoryOutputSchema,
+      );
+      if (response.status !== 200) return response;
+      const envelope = await response.json() as { data: z.infer<typeof priceHistoryOutputSchema> };
+      priceHistoryData = envelope.data;
+    } catch {
+      return goUnavailable(unavailableMessage);
+    }
+  } else {
+    const priceHistory = await executor.execute("purchasing.priceHistory", ctx, {});
+    if (!priceHistory.ok) return NextResponse.json({ error: priceHistory.error }, { status: 500 });
+    priceHistoryData = priceHistory.data as z.infer<typeof priceHistoryOutputSchema>;
+  }
 
   const supplierPerformance = await executor.execute("purchasing.supplierPerformance", ctx, {});
   if (!supplierPerformance.ok) return NextResponse.json({ error: supplierPerformance.error }, { status: 500 });
@@ -278,7 +310,7 @@ export async function GET() {
       createdAt: b.createdAt,
     })),
     apAging,
-    priceHistory: priceHistory.data ?? { rows: [] },
+    priceHistory: priceHistoryData ?? { rows: [] },
     supplierPerformance: supplierPerformance.data ?? { vendors: [] },
     requests: workflowRequests,
   });

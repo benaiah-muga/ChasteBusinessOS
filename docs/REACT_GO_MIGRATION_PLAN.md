@@ -980,3 +980,23 @@ new owners and the manifest shows zero legacy runtime paths.
     retrying through TypeScript. Focused route tests cover default ownership,
     dispatch, errors, and fail-closed behavior; Go database proof covers
     tenant scope and ordering.
+
+85. (Done) Add a default-off signed Go bridge for the `cashForecast` action on
+    `POST /api/accounting` using `GO_ACCOUNTING_CASH_FORECAST_READS=1`. Validate
+    the 13-week forecast and integer minor-unit values, preserve the legacy
+    response, reject explicit null assumptions while defaulting missing fields
+    like TypeScript, and fail closed on unavailable or malformed Go output.
+    Focused route tests cover default ownership, dispatch, and fail-closed
+    behavior; database proof covers null and defaulted saved assumptions.
+
+86. (Done) Add a default-off signed Go bridge for purchasing price history on
+    `GET /api/purchasing` using `GO_PURCHASING_PRICE_HISTORY_READS=1`. Preserve
+    the existing summary response shape, validate each history row, and fail
+    closed on unavailable or malformed Go results. Focused route tests cover
+    TypeScript default ownership, Go dispatch, and failure handling.
+
+87. (Done) Expose Go `crm.customerTimeline` to routines as the
+    `crm_customerTimeline` tool under `crm.read`, with a required customer ID
+    and optional per-activity result limit. Verify reverse-chronological
+    timeline entries, organization scope, and the session-linked system
+    capability audit event in the database-backed routine proof.

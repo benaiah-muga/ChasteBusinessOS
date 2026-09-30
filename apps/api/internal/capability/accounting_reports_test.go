@@ -167,6 +167,18 @@ func TestAccountingReportsParsersMirrorZodContracts(t *testing.T) {
 	}
 }
 
+func TestCashForecastBudgetAssumptionsMatchZodIntegerParsing(t *testing.T) {
+	assumptions, err := parseCashForecastBudgetAssumptions([]byte(`{"collectionDelayDays":1.0,"spendUpliftBasisPoints":1e0}`))
+	if err != nil || assumptions.CollectionDelayDays != 1 || assumptions.SpendUpliftBasisPoints != 1 {
+		t.Fatalf("whole-number JSON spellings = %+v, err=%v, want both fields to parse as 1", assumptions, err)
+	}
+	for _, raw := range []string{"null", `{"collectionDelayDays":null}`, `{"collectionDelayDays":"1"}`, `{"collectionDelayDays":1.5}`, `{"collectionDelayDays":1e100}`} {
+		if _, err := parseCashForecastBudgetAssumptions([]byte(raw)); err == nil {
+			t.Errorf("parseCashForecastBudgetAssumptions accepted %s", raw)
+		}
+	}
+}
+
 func TestAccountingReportsDomainMathMirrorsErpCore(t *testing.T) {
 	if got := reportSignedBalance(accountBalanceRow{debitMinor: 100, accountType: "asset"}); got != 100 {
 		t.Fatalf("asset debit signed balance = %d, want 100", got)
@@ -1002,6 +1014,31 @@ func TestAccountingReportsCashFlowForecastStatement(t *testing.T) {
 		return cashForecast(fx.ctx, tx, fx.orgID, CashForecastInput{CashAccountCodes: []string{"1000"}, BudgetScenarioID: &euroScenario}, now)
 	}); err == nil || err.Error() != "cash scenario currency must match the organization's base currency" {
 		t.Fatalf("euro scenario error = %v, want currency mismatch refusal", err)
+	}
+	invalidAssumptions := []string{
+		"null",
+		`{"collectionDelayDays":null}`,
+		`{"spendUpliftBasisPoints":null}`,
+		`{"expectedMonthlyInflowMinor":null}`,
+		`{"expectedMonthlyOutflowMinor":null}`,
+		`{"minimumCashBufferMinor":null}`,
+	}
+	for index, assumptions := range invalidAssumptions {
+		scenarioID := seedBudgetScenarioRow(t, fx, fx.orgID, fmt.Sprintf("null-assumptions-%d", index), "Invalid Forecast", 2026, 1, "USD", true,
+			assumptions, time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
+		if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CashForecastOutput, error) {
+			return cashForecast(fx.ctx, tx, fx.orgID, CashForecastInput{CashAccountCodes: []string{"1000"}, BudgetScenarioID: &scenarioID}, now)
+		}); err == nil || err.Error() != "invalid budget scenario assumptions" {
+			t.Errorf("cashForecast with assumptions %s error = %v, want invalid budget scenario assumptions", assumptions, err)
+		}
+	}
+	defaultsScenarioID := seedBudgetScenarioRow(t, fx, fx.orgID, "forecast-defaults", "Forecast Defaults", 2026, 1, "USD", true,
+		"{}", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
+	defaults, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CashForecastOutput, error) {
+		return cashForecast(fx.ctx, tx, fx.orgID, CashForecastInput{CashAccountCodes: []string{"1000"}, BudgetScenarioID: &defaultsScenarioID}, now)
+	})
+	if err != nil || defaults.ScenarioName == nil || *defaults.ScenarioName != "Forecast Defaults" || defaults.MinimumCashBufferMinor != 0 {
+		t.Fatalf("cashForecast with missing defaulted assumptions = %+v, err=%v", defaults, err)
 	}
 }
 

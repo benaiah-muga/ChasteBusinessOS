@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"strconv"
@@ -1302,8 +1303,8 @@ func cashForecast(ctx context.Context, tx pgx.Tx, orgID string, input CashForeca
 		if currency != baseCurrency {
 			return CashForecastOutput{}, errors.New("cash scenario currency must match the organization's base currency")
 		}
-		var assumptions BudgetScenarioAssumptions
-		if err := json.Unmarshal(assumptionsRaw, &assumptions); err != nil {
+		assumptions, err := parseCashForecastBudgetAssumptions(assumptionsRaw)
+		if err != nil {
 			return CashForecastOutput{}, errors.New("invalid budget scenario assumptions")
 		}
 		if assumptions.CollectionDelayDays < 0 || assumptions.CollectionDelayDays > 180 ||
@@ -1443,6 +1444,36 @@ func cashForecast(ctx context.Context, tx pgx.Tx, orgID string, input CashForeca
 
 func reportISODateTime(t time.Time) string {
 	return t.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+}
+
+func parseCashForecastBudgetAssumptions(raw []byte) (BudgetScenarioAssumptions, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return BudgetScenarioAssumptions{}, err
+	}
+	assumptions := BudgetScenarioAssumptions{}
+	for key, target := range map[string]*int64{
+		"collectionDelayDays":         &assumptions.CollectionDelayDays,
+		"spendUpliftBasisPoints":      &assumptions.SpendUpliftBasisPoints,
+		"expectedMonthlyInflowMinor":  &assumptions.ExpectedMonthlyInflowMinor,
+		"expectedMonthlyOutflowMinor": &assumptions.ExpectedMonthlyOutflowMinor,
+		"minimumCashBufferMinor":      &assumptions.MinimumCashBufferMinor,
+	} {
+		rawValue, ok := fields[key]
+		if !ok {
+			continue
+		}
+		if bytes.Equal(bytes.TrimSpace(rawValue), []byte("null")) {
+			return BudgetScenarioAssumptions{}, errors.New("assumption must be an integer")
+		}
+		number, err := strconv.ParseFloat(string(bytes.TrimSpace(rawValue)), 64)
+		if err != nil || math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number ||
+			number < -9223372036854775808.0 || number >= 9223372036854775808.0 {
+			return BudgetScenarioAssumptions{}, errors.New("assumption must be an integer")
+		}
+		*target = int64(number)
+	}
+	return assumptions, nil
 }
 
 type reportsStatementRow struct {

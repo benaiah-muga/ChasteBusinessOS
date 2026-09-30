@@ -46,6 +46,7 @@ describe("purchasing Go route adapter", () => {
     vi.stubEnv("GO_PURCHASING_RETURN_WRITES", "0");
     vi.stubEnv("GO_PURCHASING_WORKFLOW_READS", "0");
     vi.stubEnv("GO_PURCHASING_AP_AGING_READS", "0");
+    vi.stubEnv("GO_PURCHASING_PRICE_HISTORY_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -108,6 +109,124 @@ describe("purchasing Go route adapter", () => {
       }],
     }]);
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps price history on TypeScript by default", async () => {
+    mocks.getDb.mockReturnValue({ db: { select: vi.fn()
+      .mockReturnValueOnce(selectQuery([{ baseCurrency: "USD" }]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([])),
+    } });
+    mocks.execute.mockImplementation(async (capabilityId: string) => ({
+      ok: true,
+      data: capabilityId === "purchasing.priceHistory" ? { rows: [{
+        vendorName: "Acme Supply",
+        itemSku: "WIRE",
+        itemDescription: "Copper wire",
+        unitPriceMinor: 45000,
+        orderedAt: "2026-09-23T10:30:00.000Z",
+      }] } : capabilityId === "purchasing.supplierPerformance" ? { vendors: [] } : { buckets: {} },
+    }));
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).priceHistory).toEqual({ rows: [{
+      vendorName: "Acme Supply",
+      itemSku: "WIRE",
+      itemDescription: "Copper wire",
+      unitPriceMinor: 45000,
+      orderedAt: "2026-09-23T10:30:00.000Z",
+    }] });
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.priceHistory", ctx, {});
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches price history to Go behind its opt-in flag with the legacy response shape", async () => {
+    vi.stubEnv("GO_PURCHASING_PRICE_HISTORY_READS", "1");
+    mocks.getDb.mockReturnValue({ db: { select: vi.fn()
+      .mockReturnValueOnce(selectQuery([{ baseCurrency: "UGX" }]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([])),
+    } });
+    const history = { rows: [{
+      vendorName: "Acme Supply",
+      itemSku: "WIRE",
+      itemDescription: "Copper wire",
+      unitPriceMinor: 45000,
+      orderedAt: "2026-09-23T10:30:00.000Z",
+    }] };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: history }) });
+    mocks.execute.mockImplementation(async (capabilityId: string) => ({
+      ok: true,
+      data: capabilityId === "purchasing.supplierPerformance" ? { vendors: [] } : { buckets: {} },
+    }));
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ baseCurrency: "UGX", priceHistory: history });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.priceHistory",
+      input: {},
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.priceHistory", ctx, {});
+  });
+
+  it.each([{ kind: "not-dispatched" }, { kind: "outcome-unknown" }])("fails closed for price history on $kind", async (bridgeResult) => {
+    vi.stubEnv("GO_PURCHASING_PRICE_HISTORY_READS", "1");
+    mocks.getDb.mockReturnValue({ db: { select: vi.fn()
+      .mockReturnValueOnce(selectQuery([{ baseCurrency: "USD" }]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([])),
+    } });
+    mocks.executeGoCapability.mockResolvedValue(bridgeResult);
+    mocks.execute.mockImplementation(async (capabilityId: string) => ({
+      ok: true,
+      data: capabilityId === "purchasing.priceHistory" ? { rows: [] } : capabilityId === "purchasing.supplierPerformance" ? { vendors: [] } : { buckets: {} },
+    }));
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing price history service unavailable; reload the page before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.priceHistory", ctx, {});
+  });
+
+  it("fails closed for malformed Go price history without falling back to TypeScript", async () => {
+    vi.stubEnv("GO_PURCHASING_PRICE_HISTORY_READS", "1");
+    mocks.getDb.mockReturnValue({ db: { select: vi.fn()
+      .mockReturnValueOnce(selectQuery([{ baseCurrency: "USD" }]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([])),
+    } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { rows: [{ vendorName: "Acme", itemSku: null, itemDescription: "wire", unitPriceMinor: "45000", orderedAt: null }] } }) });
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing price history service unavailable; reload the page before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.priceHistory", ctx, {});
   });
 
   it("dispatches AP aging to Go behind its opt-in flag and keeps the same route shape", async () => {

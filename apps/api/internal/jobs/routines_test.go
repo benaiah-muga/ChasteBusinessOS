@@ -161,6 +161,28 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if !ok || len(quoteStatuses) != 5 || quoteStatuses[0] != "draft" || quoteStatuses[1] != "sent" || quoteStatuses[2] != "accepted" || quoteStatuses[3] != "declined" || quoteStatuses[4] != "expired" {
 		t.Fatalf("accounting quote status values=%#v, want the legacy status set", quoteStatus["enum"])
 	}
+	var timeline *routineTool
+	for index := range tools {
+		if tools[index].Capability == "crm.customerTimeline" {
+			timeline = &tools[index]
+			break
+		}
+	}
+	if timeline == nil || timeline.Name != "crm_customerTimeline" || timeline.Permission != "crm.read" {
+		t.Fatalf("CRM customer timeline tool=%+v, want crm_customerTimeline with crm.read", timeline)
+	}
+	timelineProperties, ok := timeline.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("CRM customer timeline schema has no properties: %#v", timeline.Schema)
+	}
+	timelineLimit, ok := timelineProperties["limit"].(map[string]any)
+	if !ok || timelineLimit["type"] != "integer" || timelineLimit["minimum"] != 1 || timelineLimit["maximum"] != 200 {
+		t.Fatalf("CRM customer timeline limit schema=%#v, want optional integer from 1 to 200", timelineProperties["limit"])
+	}
+	timelineRequired, ok := timeline.Schema["required"].([]string)
+	if !ok || len(timelineRequired) != 1 || timelineRequired[0] != "customerId" {
+		t.Fatalf("CRM customer timeline required fields=%#v, want customerId only", timeline.Schema["required"])
+	}
 	var documents *routineTool
 	for index := range tools {
 		if tools[index].Capability == "documents.listDocs" {
