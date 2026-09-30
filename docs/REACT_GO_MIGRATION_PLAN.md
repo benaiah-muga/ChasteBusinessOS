@@ -954,3 +954,15 @@ new owners and the manifest shows zero legacy runtime paths.
     millisecond timestamp for a local version, deny a foreign-tenant version,
     and assert session-linked system capability audit events in the
     database-backed routine proof.
+
+81. (Done) Add a default-off signed Go bridge for the customer-bound inbox
+    list on `GET /api/support` using `GO_SUPPORT_CONVERSATION_READS=1`.
+    Preserve legacy response projection and ensure customer filtering happens
+    before the 100-row limit, while leaving detail and library reads on their
+    existing handlers. Verify the visitor-heavy pagination edge case, invalid
+    Go output fail-closed behavior, and default TypeScript ownership.
+
+82. (Done) Expose Go `inventory.listLocations` to routines as the
+    `inventory_listLocations` tool under `inventory.read`. Verify code ordering,
+    organization scope, and the session-linked system capability audit event
+    in the database-backed routine proof.

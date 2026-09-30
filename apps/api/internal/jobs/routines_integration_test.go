@@ -87,6 +87,11 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		VALUES ($1::uuid, $2::uuid, 1, '{"title":"Foreign version","sequence":1}'::jsonb, '<p>Foreign</p>', 'Foreign version', 'human')`, otherOrgID, foreignDocumentID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO stock_locations (org_id, code, name)
+		VALUES ($1::uuid, 'MAIN', 'Main warehouse'), ($2::uuid, 'MAIN', 'Foreign warehouse'), ($1::uuid, 'RETAIL', 'Retail floor')`, orgID, otherOrgID); err != nil {
+		t.Fatal(err)
+	}
 	secret := "routine-test-encryption-secret"
 	t.Setenv("AI_CONFIG_ENCRYPTION_KEY", secret)
 	serverCalls := atomic.Int32{}
@@ -128,6 +133,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				"choices": []any{map[string]any{"message": map[string]any{"content": nil, "tool_calls": []any{
 					map[string]any{"id": "call-routine-1", "type": "function", "function": map[string]any{"name": "crm_listCustomers", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-tasks", "type": "function", "function": map[string]any{"name": "crm_listTasks", "arguments": `{"openOnly":true}`}},
+					map[string]any{"id": "call-routine-inventory-locations", "type": "function", "function": map[string]any{"name": "inventory_listLocations", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-inventory", "type": "function", "function": map[string]any{"name": "inventory_stockReport", "arguments": `{"belowReorderOnly":false}`}},
 					map[string]any{"id": "call-routine-documents", "type": "function", "function": map[string]any{"name": "documents_listDocs", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(localVersionArgs)}},
@@ -157,6 +163,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 			return
 		}
 		foundDocumentResult := false
+		foundLocationResult := false
 		foundLocalVersionResult := false
 		foundForeignVersionResult := false
 		foundLocalVersionDetailResult := false
@@ -201,6 +208,30 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					document.Label == nil || *document.Label != "Acme" || document.UpdatedAt != "2026-09-30T10:11:12.345Z" {
 					t.Errorf("documents.listDocs document = %+v, want the seeded metadata and version count", document)
 				}
+			case "call-routine-inventory-locations":
+				foundLocationResult = true
+				var result struct {
+					OK   bool `json:"ok"`
+					Data struct {
+						Locations []struct {
+							Code string `json:"code"`
+							Name string `json:"name"`
+						} `json:"locations"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode inventory.listLocations tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Locations) != 2 {
+					t.Errorf("inventory.listLocations result = %+v, want only this organization's two locations", result)
+					continue
+				}
+				locations := result.Data.Locations
+				if locations[0].Code != "MAIN" || locations[0].Name != "Main warehouse" ||
+					locations[1].Code != "RETAIL" || locations[1].Name != "Retail floor" {
+					t.Errorf("inventory.listLocations result = %+v, want ordered local locations without the foreign same-code row", locations)
+				}
 			case "call-routine-document-versions", "call-routine-foreign-document-versions":
 				var result struct {
 					OK   bool `json:"ok"`
@@ -244,7 +275,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 						Version   int             `json:"version"`
 						Content   json.RawMessage `json:"content"`
 						HTML      string          `json:"html"`
-						Note      *string         `json:"note"`
+						Note      json.RawMessage `json:"note"`
 						CreatedAt string          `json:"createdAt"`
 					} `json:"data"`
 				}
@@ -255,6 +286,11 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				switch message.ToolCallID {
 				case "call-routine-document-version-detail":
 					foundLocalVersionDetailResult = true
+					var note *string
+					if len(result.Data.Note) == 0 || string(result.Data.Note) == "null" || json.Unmarshal(result.Data.Note, &note) != nil {
+						t.Errorf("documents.getDocVersion non-null note = %s, want a string", result.Data.Note)
+						continue
+					}
 					var content struct {
 						Title    string `json:"title"`
 						Sequence int    `json:"sequence"`
@@ -264,7 +300,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 						continue
 					}
 					if !result.OK || result.Data.Version != 2 || content.Title != "Routine proof second version" || content.Sequence != 2 ||
-						result.Data.HTML != "<p>Updated version</p>" || result.Data.Note == nil || *result.Data.Note != "Routine proof second version" ||
+						result.Data.HTML != "<p>Updated version</p>" || note == nil || *note != "Routine proof second version" ||
 						result.Data.CreatedAt != "2026-09-30T10:12:13.456Z" {
 						t.Errorf("documents.getDocVersion local result = %+v content=%+v, want version 2 content and exact metadata", result.Data, content)
 					}
@@ -279,7 +315,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 						continue
 					}
 					if !result.OK || result.Data.Version != 1 || content.Title != "Routine original version" || content.Sequence != 1 ||
-						result.Data.HTML != "<p>Original version</p>" || result.Data.Note != nil ||
+						result.Data.HTML != "<p>Original version</p>" || string(result.Data.Note) != "null" ||
 						result.Data.CreatedAt != "2026-09-30T10:11:12.345Z" {
 						t.Errorf("documents.getDocVersion null-note local result = %+v content=%+v, want version 1 content and nullable note", result.Data, content)
 					}
@@ -294,13 +330,16 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundDocumentResult {
 			t.Errorf("follow-up provider request omitted the documents.listDocs tool result")
 		}
+		if !foundLocationResult {
+			t.Errorf("follow-up provider request omitted the inventory.listLocations tool result")
+		}
 		if !foundLocalVersionResult || !foundForeignVersionResult {
 			t.Errorf("follow-up provider request omitted document version tool results, local=%v foreign=%v", foundLocalVersionResult, foundForeignVersionResult)
 		}
 		if !foundLocalVersionDetailResult || !foundLocalNullNoteVersionDetailResult || !foundForeignVersionDetailResult {
 			t.Errorf("follow-up provider request omitted document version detail tool results, local=%v null-note-local=%v foreign=%v", foundLocalVersionDetailResult, foundLocalNullNoteVersionDetailResult, foundForeignVersionDetailResult)
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customer, task, stock, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customers, follow-up tasks, warehouse locations, stock, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
 	}))
 	defer server.Close()
 	settings, err := json.Marshal(map[string]any{"ai": map[string]any{"provider": "custom", "baseUrl": server.URL + "/v1", "models": map[string]string{"primary": "routine-test-model", "fast": "routine-test-model", "reasoning": "routine-test-model", "embeddings": "routine-test-model"}, "encryptedApiKey": encryptRoutineKey(t, secret, "integration-provider-key"), "keyHint": "••••key", "updatedAt": time.Now().UTC().Format(time.RFC3339)}})
@@ -360,6 +399,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.listTasks' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
 		t.Fatalf("session-linked CRM task-list system capability audit events=%d", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='inventory.listLocations' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
+		t.Fatalf("session-linked inventory location-list system capability audit events=%d", got)
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='inventory.stockReport' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
 		t.Fatalf("session-linked inventory system capability audit events=%d", got)

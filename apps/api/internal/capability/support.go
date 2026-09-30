@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -95,8 +96,9 @@ type SupportPostMessageOutput struct {
 }
 
 type SupportListConversationsInput struct {
-	Status *string `json:"status"`
-	Limit  int64   `json:"limit"`
+	Status            *string `json:"status"`
+	Limit             int64   `json:"limit"`
+	CustomerBoundOnly bool    `json:"customerBoundOnly"`
 }
 
 type SupportConversationListItem struct {
@@ -314,6 +316,11 @@ func ParseSupportListConversationsInput(raw json.RawMessage) (SupportListConvers
 		}
 		if input.Limit < 1 || input.Limit > 100 {
 			return SupportListConversationsInput{}, errors.New("limit must be between 1 and 100")
+		}
+	}
+	if rawCustomerBoundOnly, ok := fields["customerBoundOnly"]; ok {
+		if bytes.Equal(bytes.TrimSpace(rawCustomerBoundOnly), []byte("null")) || json.Unmarshal(rawCustomerBoundOnly, &input.CustomerBoundOnly) != nil {
+			return SupportListConversationsInput{}, errors.New("customerBoundOnly must be a boolean")
 		}
 	}
 	return input, nil
@@ -610,16 +617,20 @@ func supportPostMessage(ctx context.Context, tx pgx.Tx, claims authbridge.Capabi
 }
 
 func supportListConversations(ctx context.Context, tx pgx.Tx, orgID string, input SupportListConversationsInput) (SupportListConversationsOutput, error) {
-	query := `
+	customerJoin := "LEFT JOIN"
+	if input.CustomerBoundOnly {
+		customerJoin = "JOIN"
+	}
+	query := fmt.Sprintf(`
 		SELECT c.id::text, coalesce(c.customer_id::text, ''), coalesce(cu.name, c.visitor_email, 'Website visitor'),
 		       c.subject, c.status, COALESCE(m.created_at, c.created_at), coalesce(left(m.body, 140), '')
 		FROM support_conversations c
-		LEFT JOIN customers cu ON cu.id = c.customer_id AND cu.org_id=$1::uuid
+		%s customers cu ON cu.id = c.customer_id AND cu.org_id=$1::uuid
 		LEFT JOIN LATERAL (
 			SELECT body, created_at FROM support_messages sm
 			WHERE sm.conversation_id = c.id ORDER BY created_at DESC LIMIT 1
 		) m ON true
-		WHERE c.org_id=$1::uuid`
+		WHERE c.org_id=$1::uuid`, customerJoin)
 	args := []any{orgID}
 	if input.Status != nil {
 		args = append(args, *input.Status)

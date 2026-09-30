@@ -152,6 +152,23 @@ describe("inventory Go route adapter", () => {
     expect(db.select).toHaveBeenCalledTimes(6);
   });
 
+  it("preserves empty location strings accepted by the legacy output contract", async () => {
+    vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "1");
+    const location = { id: "location-empty", orgId: user.orgId, code: "", name: "" };
+    const db = inventoryReadDb([[], [location]]);
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { locations: [{ code: "", name: "" }] } }),
+    });
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).locations).toEqual([location]);
+  });
+
   it.each([
     { name: "malformed response", result: { kind: "response", response: Response.json({ ok: true, data: { locations: [{ code: "MAIN", name: 9 }] } }) } },
     { name: "Go unavailable", result: { kind: "not-dispatched" } },

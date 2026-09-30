@@ -242,3 +242,58 @@ func TestGoWave9SupportListHandlesConversationWithoutMessages(t *testing.T) {
 		t.Fatalf("lastMessageAt=%q, want the conversation creation timestamp", output.Conversations[0].LastMessageAt)
 	}
 }
+
+func TestGoWave9SupportBoundListFiltersBeforeLimit(t *testing.T) {
+	fx := newExecutorFixture(t)
+	grantWavePermission(t, fx, "support.read")
+	var customerID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO customers (org_id, name)
+		VALUES ($1::uuid, 'Bound support customer')
+		RETURNING id::text`, fx.orgID).Scan(&customerID); err != nil {
+		t.Fatal(err)
+	}
+	var customerConversationID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO support_conversations (org_id, customer_id, subject, status, created_by_actor_type, created_at)
+		VALUES ($1::uuid, $2::uuid, 'Customer inbox item', 'open', 'human', now() - interval '1 minute')
+		RETURNING id::text`, fx.orgID, customerID).Scan(&customerConversationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO support_conversations (org_id, subject, status, created_by_actor_type, created_at)
+		SELECT $1::uuid, 'Visitor inbox item', 'open', 'human', now() + interval '1 minute'
+		FROM generate_series(1, 105)`, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+
+	executeList := func(input json.RawMessage, intent string) SupportListConversationsOutput {
+		t.Helper()
+		result, err := fx.executor.Execute(fx.ctx,
+			waveModuleClaims(fx, supportListConversationsCapabilityID, "support.read", input, "human", "", intent),
+			supportListConversationsCapabilityID, input)
+		if err != nil || !result.OK {
+			t.Fatalf("support.listConversations result=%+v err=%v", result, err)
+		}
+		var output SupportListConversationsOutput
+		if err := json.Unmarshal(result.Data, &output); err != nil {
+			t.Fatal(err)
+		}
+		return output
+	}
+
+	legacyShape := executeList(json.RawMessage(`{"limit":100}`), "wave9-support-all-list")
+	if len(legacyShape.Conversations) != 100 {
+		t.Fatalf("unfiltered conversations=%d, want 100", len(legacyShape.Conversations))
+	}
+	for _, conversation := range legacyShape.Conversations {
+		if conversation.CustomerID != "" {
+			t.Fatalf("unfiltered first 100 unexpectedly included customer %q", conversation.CustomerID)
+		}
+	}
+
+	bound := executeList(json.RawMessage(`{"limit":100,"customerBoundOnly":true}`), "wave9-support-bound-list")
+	if len(bound.Conversations) != 1 || bound.Conversations[0].ID != customerConversationID || bound.Conversations[0].CustomerID != customerID {
+		t.Fatalf("customer-bound conversations=%+v, want the customer row despite 105 newer visitor rows", bound.Conversations)
+	}
+}

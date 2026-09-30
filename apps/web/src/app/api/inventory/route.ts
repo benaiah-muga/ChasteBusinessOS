@@ -509,7 +509,7 @@ async function dispatchInventoryLocationsGo(
       const parsed = z.object({
         ok: z.literal(true),
         data: z.object({
-          locations: z.array(z.object({ code: z.string().min(1), name: z.string().min(1) })),
+          locations: z.array(z.object({ code: z.string(), name: z.string() })),
         }),
       }).safeParse(body);
       if (!parsed.success) return goUnavailable();

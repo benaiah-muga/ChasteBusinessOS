@@ -14,6 +14,7 @@ import { actorFromResolved, buildExecutor, buildRegistry, createNotificationSink
 import { getResolvedUser } from "@/server/session";
 import { checkRateLimit } from "@/server/rate-limit";
 import { SupportDraftError, draftSupportReply } from "@/server/support-agent";
+import { executeGoCapability } from "@/server/go-bridge";
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("create"), customerId: z.string().uuid(), subject: z.string().min(1).max(200) }),
@@ -68,12 +69,60 @@ export async function GET(req: Request) {
   if (!hasPermissionFor({ permissions: resolved.permissions }, "support.read")) {
     return NextResponse.json({ error: "forbidden: missing permission: support.read" }, { status: 403 });
   }
+  const url = new URL(req.url);
+  const conversationId = url.searchParams.get("id");
+  const library = Boolean(url.searchParams.get("library"));
+  if (process.env.GO_SUPPORT_CONVERSATION_READS === "1" && !conversationId && !library) {
+    const actionContext = actorFromResolved(resolved, {});
+    if (actionContext) {
+      const unavailable = () => NextResponse.json({ error: "support service unavailable; reload the inbox" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      try {
+        const result = await executeGoCapability({
+          actionContext,
+          session: resolved,
+          capabilityId: "support.listConversations",
+          input: { limit: 100, customerBoundOnly: true },
+        });
+        if (result.kind !== "response") return unavailable();
+        const body: unknown = await result.response.json().catch(() => null);
+        if (result.response.status === 200) {
+          const parsed = z.object({
+            ok: z.literal(true),
+            data: z.object({
+              conversations: z.array(z.object({
+                id: z.string().uuid(),
+                customerId: z.string(),
+                customerName: z.string(),
+                subject: z.string(),
+                status: z.string(),
+                lastMessageAt: z.string().datetime(),
+                lastMessagePreview: z.string(),
+              }).strict()),
+            }).strict(),
+          }).strict().safeParse(body);
+          if (!parsed.success) return unavailable();
+          return NextResponse.json({
+            conversations: parsed.data.data.conversations
+              .filter((conversation) => conversation.customerId.length > 0)
+              .map((conversation) => ({ ...conversation, lastMessageAt: new Date(conversation.lastMessageAt).toISOString() })),
+          }, { headers: { "Cache-Control": "no-store" } });
+        }
+        if ([401, 403, 422].includes(result.response.status)) {
+          const error = z.object({ error: z.string() }).strict().safeParse(body);
+          if (!error.success) return unavailable();
+          return NextResponse.json(error.data, { status: result.response.status, headers: { "Cache-Control": "no-store" } });
+        }
+        return unavailable();
+      } catch {
+        return unavailable();
+      }
+    }
+  }
   const db = getDb().db;
-  const conversationId = new URL(req.url).searchParams.get("id");
 
   // Canned responses + knowledge base: no list capabilities exist, so the
   // library surface is a plain read (writes stay governed).
-  if (new URL(req.url).searchParams.get("library")) {
+  if (library) {
     const canned = await db
       .select()
       .from(supportCannedResponses)

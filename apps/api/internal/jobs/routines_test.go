@@ -117,6 +117,25 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if _, required := stockReport.Schema["required"]; required {
 		t.Fatalf("inventory stock report filter should remain optional: %#v", stockReport.Schema)
 	}
+	var locations *routineTool
+	for index := range tools {
+		if tools[index].Capability == "inventory.listLocations" {
+			locations = &tools[index]
+			break
+		}
+	}
+	if locations == nil || locations.Name != "inventory_listLocations" || locations.Permission != "inventory.read" {
+		t.Fatalf("inventory location list tool=%+v, want inventory_listLocations with inventory.read", locations)
+	}
+	if locations.Schema["type"] != "object" || locations.Schema["additionalProperties"] != false {
+		t.Fatalf("inventory location list schema must be an input-free object: %#v", locations.Schema)
+	}
+	if properties, ok := locations.Schema["properties"].(map[string]any); !ok || len(properties) != 0 {
+		t.Fatalf("inventory location list schema should have no properties: %#v", locations.Schema)
+	}
+	if _, required := locations.Schema["required"]; required {
+		t.Fatalf("inventory location list schema should not require input fields: %#v", locations.Schema)
+	}
 	var documents *routineTool
 	for index := range tools {
 		if tools[index].Capability == "documents.listDocs" {
