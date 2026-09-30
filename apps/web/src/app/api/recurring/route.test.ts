@@ -65,6 +65,7 @@ describe("POST /api/recurring Go bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GO_ACCOUNTING_RECURRING_WRITE", "0");
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(resolved);
     mocks.actorFromResolved.mockReturnValue(actionContext);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -215,7 +216,7 @@ describe("POST /api/recurring Go bridge", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
-  it("keeps the recurring listing GET on TypeScript even when the write flag is on", async () => {
+  it("keeps the recurring listing GET on TypeScript by default, independently of the write flag", async () => {
     vi.stubEnv("GO_ACCOUNTING_RECURRING_WRITE", "1");
     mocks.execute.mockResolvedValue({ ok: true, data: { templates: [] } });
 
@@ -225,5 +226,98 @@ describe("POST /api/recurring Go bridge", () => {
     expect(await response.json()).toEqual({ templates: [] });
     expect(mocks.execute).toHaveBeenCalledWith("accounting.listRecurringTemplates", actionContext, {});
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the recurring template listing through the signed Go bridge when enabled", async () => {
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_READS", "1");
+    const templates = [{
+      id: templateId,
+      customerId,
+      frequency: "monthly",
+      active: true,
+      nextRunAt: "2026-10-01T00:00:00.000Z",
+    }];
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { templates } }),
+    });
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ templates });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: resolved,
+      capabilityId: "accounting.listRecurringTemplates",
+      input: {},
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "missing dispatch", result: { kind: "not-dispatched" } },
+    { name: "unknown outcome", result: { kind: "outcome-unknown" } },
+    {
+      name: "malformed output",
+      result: {
+        kind: "response",
+        response: Response.json({ ok: true, data: { templates: [{ id: templateId, customerId, frequency: "monthly", active: "yes", nextRunAt: "not-a-date" }] } }),
+      },
+    },
+    {
+      name: "unexpected output key",
+      result: { kind: "response", response: Response.json({ ok: true, data: { templates: [], extra: true } }) },
+    },
+    {
+      name: "backend failure",
+      result: { kind: "response", response: Response.json({ error: "internal error" }, { status: 500 }) },
+    },
+  ])("fails closed on $name without retrying through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "recurring template service unavailable; reload the template list" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("preserves read authorization and capability error statuses", async () => {
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_READS", "1");
+    mocks.executeGoCapability
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ error: "unauthorized" }, { status: 401 }) })
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ error: "forbidden: missing permission: accounting.read" }, { status: 403 }) })
+      .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, error: "accounting module is disabled" }, { status: 422 }) });
+
+    const unauthorized = await GET();
+    const denied = await GET();
+    const invalid = await GET();
+
+    expect(unauthorized.status).toBe(401);
+    expect(await unauthorized.json()).toEqual({ error: "unauthorized" });
+    expect(denied.status).toBe(422);
+    expect(await denied.json()).toEqual({ error: "forbidden: missing permission: accounting.read" });
+    expect(invalid.status).toBe(422);
+    expect(await invalid.json()).toEqual({ error: "accounting module is disabled" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the Go dispatch throws", async () => {
+    vi.stubEnv("GO_ACCOUNTING_RECURRING_READS", "1");
+    mocks.executeGoCapability.mockRejectedValue(new Error("bridge timeout"));
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "recurring template service unavailable; reload the template list" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
   });
 });

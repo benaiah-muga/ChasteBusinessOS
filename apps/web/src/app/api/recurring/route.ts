@@ -14,6 +14,56 @@ function recurringGoUnavailable() {
   );
 }
 
+function recurringListGoUnavailable() {
+  return NextResponse.json(
+    { error: "recurring template service unavailable; reload the template list" },
+    { status: 503, headers: noStore },
+  );
+}
+
+const recurringTemplatesOutputSchema = z.object({
+  templates: z.array(z.object({
+    id: z.string(),
+    customerId: z.string(),
+    frequency: z.string(),
+    active: z.boolean(),
+    nextRunAt: z.string().datetime(),
+  }).strict()),
+}).strict();
+
+async function recurringListGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return recurringListGoUnavailable();
+
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: recurringTemplatesOutputSchema }).strict().safeParse(body);
+      return parsed.success ? NextResponse.json(parsed.data.data, { headers: noStore }) : recurringListGoUnavailable();
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).strict().safeParse(body);
+      return parsed.success
+        ? NextResponse.json(parsed.data, { status: 401, headers: noStore })
+        : recurringListGoUnavailable();
+    }
+    if (result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).strict().safeParse(body);
+      return parsed.success
+        ? NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore })
+        : recurringListGoUnavailable();
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).strict().safeParse(body);
+      return parsed.success
+        ? NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore })
+        : recurringListGoUnavailable();
+    }
+  } catch {
+    return recurringListGoUnavailable();
+  }
+  return recurringListGoUnavailable();
+}
+
 async function recurringGoResponse(result: GoCapabilityBridgeResult, action: "create" | "pause" | "resume") {
   if (result.kind !== "response") return recurringGoUnavailable();
 
@@ -78,9 +128,21 @@ const actionSchema = z.discriminatedUnion("action", [
 export async function GET() {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const db = getDb().db;
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  if (process.env.GO_ACCOUNTING_RECURRING_READS === "1") {
+    try {
+      return await recurringListGoResponse(await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "accounting.listRecurringTemplates",
+        input: {},
+      }));
+    } catch {
+      return recurringListGoUnavailable();
+    }
+  }
+  const db = getDb().db;
   const result = await buildExecutor(db, buildRegistry(db)).execute(
     "accounting.listRecurringTemplates",
     ctx,

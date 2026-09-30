@@ -136,6 +136,31 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if _, required := locations.Schema["required"]; required {
 		t.Fatalf("inventory location list schema should not require input fields: %#v", locations.Schema)
 	}
+	var quotes *routineTool
+	for index := range tools {
+		if tools[index].Capability == "accounting.listQuotes" {
+			quotes = &tools[index]
+			break
+		}
+	}
+	if quotes == nil || quotes.Name != "accounting_listQuotes" || quotes.Permission != "accounting.read" {
+		t.Fatalf("accounting quote list tool=%+v, want accounting_listQuotes with accounting.read", quotes)
+	}
+	quoteProperties, ok := quotes.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("accounting quote list schema has no properties: %#v", quotes.Schema)
+	}
+	quoteStatus, ok := quoteProperties["status"].(map[string]any)
+	if !ok || quoteStatus["type"] != "string" {
+		t.Fatalf("accounting quote status filter schema=%#v", quoteProperties["status"])
+	}
+	if _, required := quotes.Schema["required"]; required {
+		t.Fatalf("accounting quote status filter should remain optional: %#v", quotes.Schema)
+	}
+	quoteStatuses, ok := quoteStatus["enum"].([]string)
+	if !ok || len(quoteStatuses) != 5 || quoteStatuses[0] != "draft" || quoteStatuses[1] != "sent" || quoteStatuses[2] != "accepted" || quoteStatuses[3] != "declined" || quoteStatuses[4] != "expired" {
+		t.Fatalf("accounting quote status values=%#v, want the legacy status set", quoteStatus["enum"])
+	}
 	var documents *routineTool
 	for index := range tools {
 		if tools[index].Capability == "documents.listDocs" {

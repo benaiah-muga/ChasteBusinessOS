@@ -966,3 +966,17 @@ new owners and the manifest shows zero legacy runtime paths.
     `inventory_listLocations` tool under `inventory.read`. Verify code ordering,
     organization scope, and the session-linked system capability audit event
     in the database-backed routine proof.
+
+83. (Done) Expose Go `accounting.listQuotes` to routines as the
+    `accounting_listQuotes` tool under `accounting.read`, with the optional
+    legacy quote-status filter. Verify status filtering, newest-first order,
+    quote totals, nullable expiry and invoice fields, tenant isolation, and
+    session-linked system capability audit events in database-backed proofs.
+
+84. (Done) Add a default-off signed Go bridge for recurring-template reads on
+    `GET /api/recurring` using `GO_ACCOUNTING_RECURRING_READS=1`. Preserve the
+    response shape and authorization/error mapping, strictly validate Go
+    output, and fail closed when Go is unavailable or malformed without
+    retrying through TypeScript. Focused route tests cover default ownership,
+    dispatch, errors, and fail-closed behavior; Go database proof covers
+    tenant scope and ordering.
