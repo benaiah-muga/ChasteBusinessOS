@@ -158,6 +158,32 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if !ok || len(versionRequired) != 1 || versionRequired[0] != "documentId" {
 		t.Fatalf("document version list required fields=%#v, want documentId", documentVersions.Schema["required"])
 	}
+	var documentVersion *routineTool
+	for index := range tools {
+		if tools[index].Capability == "documents.getDocVersion" {
+			documentVersion = &tools[index]
+			break
+		}
+	}
+	if documentVersion == nil || documentVersion.Name != "documents_getDocVersion" || documentVersion.Permission != "documents.read" {
+		t.Fatalf("document version detail tool=%+v, want documents_getDocVersion with documents.read", documentVersion)
+	}
+	detailProperties, ok := documentVersion.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("document version detail schema has no properties: %#v", documentVersion.Schema)
+	}
+	detailDocumentID, ok := detailProperties["documentId"].(map[string]any)
+	if !ok || detailDocumentID["type"] != "string" || detailDocumentID["format"] != "uuid" {
+		t.Fatalf("document version detail documentId schema=%#v", detailProperties["documentId"])
+	}
+	detailVersion, ok := detailProperties["version"].(map[string]any)
+	if !ok || detailVersion["type"] != "integer" || detailVersion["minimum"] != 1 {
+		t.Fatalf("document version detail version schema=%#v", detailProperties["version"])
+	}
+	detailRequired, ok := documentVersion.Schema["required"].([]string)
+	if !ok || len(detailRequired) != 2 || detailRequired[0] != "documentId" || detailRequired[1] != "version" {
+		t.Fatalf("document version detail required fields=%#v, want documentId and version", documentVersion.Schema["required"])
+	}
 }
 
 func TestRoutineIntentIsDeterministicUUID(t *testing.T) {

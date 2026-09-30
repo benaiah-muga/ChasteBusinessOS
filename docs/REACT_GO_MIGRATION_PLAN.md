@@ -946,3 +946,11 @@ new owners and the manifest shows zero legacy runtime paths.
     millisecond timestamps, tenant-scoped empty reads for a foreign document,
     and session-linked system capability audit events in the database-backed
     routine proof.
+
+80. (Done) Expose Go `documents.getDocVersion` to routines as the
+    `documents_getDocVersion` tool under `documents.read`, with required UUID
+    `documentId` and positive integer `version` inputs matching the legacy
+    capability. Verify the full content object, HTML, nullable note, and
+    millisecond timestamp for a local version, deny a foreign-tenant version,
+    and assert session-linked system capability audit events in the
+    database-backed routine proof.

@@ -78,13 +78,13 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	secondVersionAt := time.Date(2026, 9, 30, 10, 12, 13, 456000000, time.UTC)
 	if _, err := owner.Exec(ctx, `
 		INSERT INTO authored_doc_versions (org_id, document_id, version, content_json, html, note, created_by_actor_type, created_at)
-		VALUES ($1::uuid, $2::uuid, 1, '{}'::jsonb, '', NULL, 'human', $3),
-		       ($1::uuid, $2::uuid, 2, '{}'::jsonb, '', 'Routine proof second version', 'agent', $4)`, orgID, localDocumentID, firstVersionAt, secondVersionAt); err != nil {
+		VALUES ($1::uuid, $2::uuid, 1, '{"title":"Routine original version","sequence":1}'::jsonb, '<p>Original version</p>', NULL, 'human', $3),
+		       ($1::uuid, $2::uuid, 2, '{"title":"Routine proof second version","sequence":2}'::jsonb, '<p>Updated version</p>', 'Routine proof second version', 'agent', $4)`, orgID, localDocumentID, firstVersionAt, secondVersionAt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := owner.Exec(ctx, `
 		INSERT INTO authored_doc_versions (org_id, document_id, version, content_json, html, note, created_by_actor_type)
-		VALUES ($1::uuid, $2::uuid, 1, '{}'::jsonb, '', 'Foreign version', 'human')`, otherOrgID, foreignDocumentID); err != nil {
+		VALUES ($1::uuid, $2::uuid, 1, '{"title":"Foreign version","sequence":1}'::jsonb, '<p>Foreign</p>', 'Foreign version', 'human')`, otherOrgID, foreignDocumentID); err != nil {
 		t.Fatal(err)
 	}
 	secret := "routine-test-encryption-secret"
@@ -109,6 +109,21 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				t.Errorf("encode foreign document version arguments: %v", err)
 				return
 			}
+			localVersionDetailArgs, err := json.Marshal(map[string]any{"documentId": localDocumentID, "version": 2})
+			if err != nil {
+				t.Errorf("encode local document version detail arguments: %v", err)
+				return
+			}
+			localNullNoteVersionDetailArgs, err := json.Marshal(map[string]any{"documentId": localDocumentID, "version": 1})
+			if err != nil {
+				t.Errorf("encode local null-note document version detail arguments: %v", err)
+				return
+			}
+			foreignVersionDetailArgs, err := json.Marshal(map[string]any{"documentId": foreignDocumentID, "version": 1})
+			if err != nil {
+				t.Errorf("encode foreign document version detail arguments: %v", err)
+				return
+			}
 			providerResponse, err := json.Marshal(map[string]any{
 				"choices": []any{map[string]any{"message": map[string]any{"content": nil, "tool_calls": []any{
 					map[string]any{"id": "call-routine-1", "type": "function", "function": map[string]any{"name": "crm_listCustomers", "arguments": "{}"}},
@@ -117,6 +132,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-documents", "type": "function", "function": map[string]any{"name": "documents_listDocs", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(localVersionArgs)}},
 					map[string]any{"id": "call-routine-foreign-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(foreignVersionArgs)}},
+					map[string]any{"id": "call-routine-document-version-detail", "type": "function", "function": map[string]any{"name": "documents_getDocVersion", "arguments": string(localVersionDetailArgs)}},
+					map[string]any{"id": "call-routine-document-version-detail-null-note", "type": "function", "function": map[string]any{"name": "documents_getDocVersion", "arguments": string(localNullNoteVersionDetailArgs)}},
+					map[string]any{"id": "call-routine-foreign-document-version-detail", "type": "function", "function": map[string]any{"name": "documents_getDocVersion", "arguments": string(foreignVersionDetailArgs)}},
 				}}}},
 				"usage": map[string]int{"prompt_tokens": 12, "completion_tokens": 3},
 			})
@@ -141,6 +159,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundDocumentResult := false
 		foundLocalVersionResult := false
 		foundForeignVersionResult := false
+		foundLocalVersionDetailResult := false
+		foundLocalNullNoteVersionDetailResult := false
+		foundForeignVersionDetailResult := false
 		for _, message := range request.Messages {
 			if message.Role != "tool" {
 				continue
@@ -215,6 +236,59 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 						t.Errorf("documents.listDocVersions leaked foreign tenant data: %+v", result.Data.Versions)
 					}
 				}
+			case "call-routine-document-version-detail", "call-routine-document-version-detail-null-note", "call-routine-foreign-document-version-detail":
+				var result struct {
+					OK    bool   `json:"ok"`
+					Error string `json:"error"`
+					Data  struct {
+						Version   int             `json:"version"`
+						Content   json.RawMessage `json:"content"`
+						HTML      string          `json:"html"`
+						Note      *string         `json:"note"`
+						CreatedAt string          `json:"createdAt"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode documents.getDocVersion tool result %s: %v", message.Content, err)
+					continue
+				}
+				switch message.ToolCallID {
+				case "call-routine-document-version-detail":
+					foundLocalVersionDetailResult = true
+					var content struct {
+						Title    string `json:"title"`
+						Sequence int    `json:"sequence"`
+					}
+					if err := json.Unmarshal(result.Data.Content, &content); err != nil {
+						t.Errorf("decode documents.getDocVersion content %s: %v", result.Data.Content, err)
+						continue
+					}
+					if !result.OK || result.Data.Version != 2 || content.Title != "Routine proof second version" || content.Sequence != 2 ||
+						result.Data.HTML != "<p>Updated version</p>" || result.Data.Note == nil || *result.Data.Note != "Routine proof second version" ||
+						result.Data.CreatedAt != "2026-09-30T10:12:13.456Z" {
+						t.Errorf("documents.getDocVersion local result = %+v content=%+v, want version 2 content and exact metadata", result.Data, content)
+					}
+				case "call-routine-document-version-detail-null-note":
+					foundLocalNullNoteVersionDetailResult = true
+					var content struct {
+						Title    string `json:"title"`
+						Sequence int    `json:"sequence"`
+					}
+					if err := json.Unmarshal(result.Data.Content, &content); err != nil {
+						t.Errorf("decode null-note documents.getDocVersion content %s: %v", result.Data.Content, err)
+						continue
+					}
+					if !result.OK || result.Data.Version != 1 || content.Title != "Routine original version" || content.Sequence != 1 ||
+						result.Data.HTML != "<p>Original version</p>" || result.Data.Note != nil ||
+						result.Data.CreatedAt != "2026-09-30T10:11:12.345Z" {
+						t.Errorf("documents.getDocVersion null-note local result = %+v content=%+v, want version 1 content and nullable note", result.Data, content)
+					}
+				default:
+					foundForeignVersionDetailResult = true
+					if result.OK || result.Error == "" || result.Data.Content != nil {
+						t.Errorf("documents.getDocVersion exposed a foreign document version: %+v", result)
+					}
+				}
 			}
 		}
 		if !foundDocumentResult {
@@ -223,7 +297,10 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundLocalVersionResult || !foundForeignVersionResult {
 			t.Errorf("follow-up provider request omitted document version tool results, local=%v foreign=%v", foundLocalVersionResult, foundForeignVersionResult)
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customer, task, stock, and authored-document data."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+		if !foundLocalVersionDetailResult || !foundLocalNullNoteVersionDetailResult || !foundForeignVersionDetailResult {
+			t.Errorf("follow-up provider request omitted document version detail tool results, local=%v null-note-local=%v foreign=%v", foundLocalVersionDetailResult, foundLocalNullNoteVersionDetailResult, foundForeignVersionDetailResult)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customer, task, stock, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
 	}))
 	defer server.Close()
 	settings, err := json.Marshal(map[string]any{"ai": map[string]any{"provider": "custom", "baseUrl": server.URL + "/v1", "models": map[string]string{"primary": "routine-test-model", "fast": "routine-test-model", "reasoning": "routine-test-model", "embeddings": "routine-test-model"}, "encryptedApiKey": encryptRoutineKey(t, secret, "integration-provider-key"), "keyHint": "••••key", "updatedAt": time.Now().UTC().Format(time.RFC3339)}})
@@ -292,6 +369,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='documents.listDocVersions' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 2 {
 		t.Fatalf("session-linked document-version system capability audit events=%d, want local and tenant-scoped empty reads", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='documents.getDocVersion' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 2 {
+		t.Fatalf("session-linked document-version detail system capability audit events=%d, want both successful local reads", got)
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM notifications WHERE org_id=$1::uuid AND kind='routine.run' AND href='/sessions'`, orgID); got != 1 {
 		t.Fatalf("routine finding notifications=%d", got)
