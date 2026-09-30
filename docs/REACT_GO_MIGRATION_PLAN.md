@@ -931,3 +931,10 @@ new owners and the manifest shows zero legacy runtime paths.
     the existing system capability executor and verify the session-linked
     system audit event in the database-backed routine proof. Broader routine
     tool parity remains open.
+
+78. (Done) Expose Go `documents.listDocs` to routines as the
+    `documents_listDocs` tool under `documents.read`, with the same input-free
+    object contract available to the legacy routine actor. Verify organization
+    scope, document metadata and version counts in the provider-visible tool
+    result, plus the session-linked system audit event in the database-backed
+    routine proof.

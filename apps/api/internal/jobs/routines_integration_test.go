@@ -57,6 +57,28 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	tag := fmt.Sprintf("go-routine-agent-%d", time.Now().UnixNano())
 	orgID := insertJobsTestOrg(t, ctx, owner, tag)
 	defer cleanupJobsTestOrgs(t, owner, orgID)
+	otherOrgID := insertJobsTestOrg(t, ctx, owner, tag+"-other")
+	defer cleanupJobsTestOrgs(t, owner, otherOrgID)
+	updatedAt := time.Date(2026, 9, 30, 10, 11, 12, 345000000, time.UTC)
+	seedDocument := func(documentOrgID, title string) string {
+		t.Helper()
+		var id string
+		if err := owner.QueryRow(ctx, `
+			INSERT INTO authored_docs (org_id, title, content_json, html, status, created_by_actor_type, updated_at, folder,
+			                          document_type, linked_record_type, linked_record_label)
+			VALUES ($1::uuid, $2, '{}'::jsonb, '', 'draft', 'human', $3, 'Finance', 'invoice', 'customer', 'Acme')
+			RETURNING id::text`, documentOrgID, title, updatedAt).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	localDocumentID := seedDocument(orgID, "Routine local proof")
+	seedDocument(otherOrgID, "Routine foreign proof")
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO authored_doc_versions (org_id, document_id, version, content_json, html, created_by_actor_type)
+		VALUES ($1::uuid, $2::uuid, 1, '{}'::jsonb, '', 'human')`, orgID, localDocumentID); err != nil {
+		t.Fatal(err)
+	}
 	secret := "routine-test-encryption-secret"
 	t.Setenv("AI_CONFIG_ENCRYPTION_KEY", secret)
 	serverCalls := atomic.Int32{}
@@ -69,8 +91,61 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		}
 		call := serverCalls.Add(1)
 		if call%2 == 1 {
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call-routine-1","type":"function","function":{"name":"crm_listCustomers","arguments":"{}"}},{"id":"call-routine-tasks","type":"function","function":{"name":"crm_listTasks","arguments":"{\"openOnly\":true}"}},{"id":"call-routine-inventory","type":"function","function":{"name":"inventory_stockReport","arguments":"{\"belowReorderOnly\":false}"}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":3}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call-routine-1","type":"function","function":{"name":"crm_listCustomers","arguments":"{}"}},{"id":"call-routine-tasks","type":"function","function":{"name":"crm_listTasks","arguments":"{\"openOnly\":true}"}},{"id":"call-routine-inventory","type":"function","function":{"name":"inventory_stockReport","arguments":"{\"belowReorderOnly\":false}"}},{"id":"call-routine-documents","type":"function","function":{"name":"documents_listDocs","arguments":"{}"}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":3}}`))
 			return
+		}
+		var request struct {
+			Messages []struct {
+				Role       string          `json:"role"`
+				ToolCallID string          `json:"tool_call_id"`
+				Content    json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode routine follow-up request: %v", err)
+			return
+		}
+		foundDocumentResult := false
+		for _, message := range request.Messages {
+			if message.Role != "tool" || message.ToolCallID != "call-routine-documents" {
+				continue
+			}
+			foundDocumentResult = true
+			var result struct {
+				OK   bool `json:"ok"`
+				Data struct {
+					Documents []struct {
+						ID        string  `json:"id"`
+						Title     string  `json:"title"`
+						Status    string  `json:"status"`
+						Versions  int     `json:"versions"`
+						Template  *string `json:"templateId"`
+						Folder    *string `json:"folder"`
+						DocType   *string `json:"documentType"`
+						Linked    *string `json:"linkedRecordType"`
+						Label     *string `json:"linkedRecordLabel"`
+						UpdatedAt string  `json:"updatedAt"`
+					} `json:"documents"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(message.Content, &result); err != nil {
+				t.Errorf("decode documents.listDocs tool result %s: %v", message.Content, err)
+				continue
+			}
+			if !result.OK || len(result.Data.Documents) != 1 {
+				t.Errorf("documents.listDocs result = %+v, want only this organization's document", result)
+				continue
+			}
+			document := result.Data.Documents[0]
+			if document.ID != localDocumentID || document.Title != "Routine local proof" || document.Status != "draft" ||
+				document.Versions != 1 || document.Template != nil || document.Folder == nil || *document.Folder != "Finance" ||
+				document.DocType == nil || *document.DocType != "invoice" || document.Linked == nil || *document.Linked != "customer" ||
+				document.Label == nil || *document.Label != "Acme" || document.UpdatedAt != "2026-09-30T10:11:12.345Z" {
+				t.Errorf("documents.listDocs document = %+v, want the seeded metadata and version count", document)
+			}
+		}
+		if !foundDocumentResult {
+			t.Errorf("follow-up provider request omitted the documents.listDocs tool result")
 		}
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customer, task, and stock data."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
 	}))
@@ -135,6 +210,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='inventory.stockReport' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
 		t.Fatalf("session-linked inventory system capability audit events=%d", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='documents.listDocs' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
+		t.Fatalf("session-linked document-list system capability audit events=%d", got)
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM notifications WHERE org_id=$1::uuid AND kind='routine.run' AND href='/sessions'`, orgID); got != 1 {
 		t.Fatalf("routine finding notifications=%d", got)

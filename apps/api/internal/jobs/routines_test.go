@@ -117,6 +117,25 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if _, required := stockReport.Schema["required"]; required {
 		t.Fatalf("inventory stock report filter should remain optional: %#v", stockReport.Schema)
 	}
+	var documents *routineTool
+	for index := range tools {
+		if tools[index].Capability == "documents.listDocs" {
+			documents = &tools[index]
+			break
+		}
+	}
+	if documents == nil || documents.Name != "documents_listDocs" || documents.Permission != "documents.read" {
+		t.Fatalf("document list tool=%+v, want documents_listDocs with documents.read", documents)
+	}
+	if documents.Schema["type"] != "object" || documents.Schema["additionalProperties"] != false {
+		t.Fatalf("document list schema must be an input-free object: %#v", documents.Schema)
+	}
+	if properties, ok := documents.Schema["properties"].(map[string]any); !ok || len(properties) != 0 {
+		t.Fatalf("document list schema should have no properties: %#v", documents.Schema)
+	}
+	if _, required := documents.Schema["required"]; required {
+		t.Fatalf("document list schema should not require input fields: %#v", documents.Schema)
+	}
 }
 
 func TestRoutineIntentIsDeterministicUUID(t *testing.T) {
