@@ -938,3 +938,11 @@ new owners and the manifest shows zero legacy runtime paths.
     scope, document metadata and version counts in the provider-visible tool
     result, plus the session-linked system audit event in the database-backed
     routine proof.
+
+79. (Done) Expose Go `documents.listDocVersions` to routines as the
+    `documents_listDocVersions` tool under `documents.read`, with a required
+    UUID `documentId` matching the legacy capability input. Verify ascending
+    version order, nullable notes and authors, `workmate` agent labels,
+    millisecond timestamps, tenant-scoped empty reads for a foreign document,
+    and session-linked system capability audit events in the database-backed
+    routine proof.

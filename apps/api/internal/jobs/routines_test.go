@@ -43,7 +43,7 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge"} {
+	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge", "documents.listDocVersions"} {
 		var found *routineTool
 		for index := range tools {
 			if tools[index].Capability == capabilityID {
@@ -135,6 +135,28 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	}
 	if _, required := documents.Schema["required"]; required {
 		t.Fatalf("document list schema should not require input fields: %#v", documents.Schema)
+	}
+	var documentVersions *routineTool
+	for index := range tools {
+		if tools[index].Capability == "documents.listDocVersions" {
+			documentVersions = &tools[index]
+			break
+		}
+	}
+	if documentVersions == nil || documentVersions.Name != "documents_listDocVersions" || documentVersions.Permission != "documents.read" {
+		t.Fatalf("document version list tool=%+v, want documents_listDocVersions with documents.read", documentVersions)
+	}
+	versionProperties, ok := documentVersions.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("document version list schema has no properties: %#v", documentVersions.Schema)
+	}
+	documentID, ok := versionProperties["documentId"].(map[string]any)
+	if !ok || documentID["type"] != "string" || documentID["format"] != "uuid" {
+		t.Fatalf("document version list documentId schema=%#v", versionProperties["documentId"])
+	}
+	versionRequired, ok := documentVersions.Schema["required"].([]string)
+	if !ok || len(versionRequired) != 1 || versionRequired[0] != "documentId" {
+		t.Fatalf("document version list required fields=%#v, want documentId", documentVersions.Schema["required"])
 	}
 }
 
