@@ -67,12 +67,14 @@ export async function GET(req: Request) {
   const conversationId = url.searchParams.get("id");
   const library = Boolean(url.searchParams.get("library"));
   const detailBridgeEnabled = process.env.GO_SUPPORT_CONVERSATION_DETAIL_READS === "1" && Boolean(conversationId) && !library;
+  const libraryBridgeEnabled = process.env.GO_SUPPORT_LIBRARY_READS === "1" && library;
   const detailNoStore = detailBridgeEnabled ? { headers: { "Cache-Control": "no-store" } } : undefined;
+  const libraryNoStore = libraryBridgeEnabled ? { headers: { "Cache-Control": "no-store" } } : undefined;
   const resolved = await getResolvedUser();
-  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401, ...detailNoStore });
-  if (!supportEnabled(resolved)) return NextResponse.json({ error: "not found" }, { status: 404, ...detailNoStore });
+  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401, ...detailNoStore, ...libraryNoStore });
+  if (!supportEnabled(resolved)) return NextResponse.json({ error: "not found" }, { status: 404, ...detailNoStore, ...libraryNoStore });
   if (!hasPermissionFor({ permissions: resolved.permissions }, "support.read")) {
-    return NextResponse.json({ error: "forbidden: missing permission: support.read" }, { status: 403, ...detailNoStore });
+    return NextResponse.json({ error: "forbidden: missing permission: support.read" }, { status: 403, ...detailNoStore, ...libraryNoStore });
   }
   if (detailBridgeEnabled && conversationId) {
     const unavailable = () => NextResponse.json({ error: "support service unavailable; reload the conversation" }, { status: 503, headers: { "Cache-Control": "no-store" } });
@@ -190,6 +192,50 @@ export async function GET(req: Request) {
         }, { headers: { "Cache-Control": "no-store" } });
       }
       if ([401, 403, 422].includes(result.response.status)) {
+        const error = z.object({ error: z.string() }).strict().safeParse(body);
+        if (!error.success) return unavailable();
+        return NextResponse.json(error.data, { status: result.response.status, headers: { "Cache-Control": "no-store" } });
+      }
+      return unavailable();
+    } catch {
+      return unavailable();
+    }
+  }
+  if (libraryBridgeEnabled) {
+    const unavailable = () => NextResponse.json({ error: "support service unavailable; reload the library" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    const actionContext = actorFromResolved(resolved, {});
+    if (!actionContext) return unavailable();
+    try {
+      const result = await executeGoCapability({
+        actionContext,
+        session: resolved,
+        capabilityId: "support.listLibrary",
+        input: {},
+      });
+      if (result.kind !== "response") return unavailable();
+      const body: unknown = await result.response.json().catch(() => null);
+      if (result.response.status === 200) {
+        const parsed = z.object({
+          ok: z.literal(true),
+          data: z.object({
+            canned: z.array(z.object({
+              id: z.string().uuid(),
+              shortcut: z.string(),
+              title: z.string(),
+              body: z.string(),
+            }).strict()).max(100),
+            articles: z.array(z.object({
+              id: z.string().uuid(),
+              title: z.string(),
+              body: z.string(),
+              category: z.string().nullable(),
+            }).strict()).max(100),
+          }).strict(),
+        }).strict().safeParse(body);
+        if (!parsed.success) return unavailable();
+        return NextResponse.json(parsed.data.data, { headers: { "Cache-Control": "no-store" } });
+      }
+      if (result.response.status === 401 || result.response.status === 403) {
         const error = z.object({ error: z.string() }).strict().safeParse(body);
         if (!error.success) return unavailable();
         return NextResponse.json(error.data, { status: result.response.status, headers: { "Cache-Control": "no-store" } });

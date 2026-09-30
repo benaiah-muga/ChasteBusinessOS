@@ -7,6 +7,70 @@ import (
 	"time"
 )
 
+func TestGoSupportLibraryReadMatchesLegacyListsAndScopesOrganization(t *testing.T) {
+	fx := newExecutorFixture(t)
+	grantWavePermission(t, fx, "support.read")
+
+	var refundID, billingID, foreignCannedID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO support_canned_responses (org_id, shortcut, title, body)
+		VALUES ($1::uuid, '/refund', 'Refund help', 'Refund policy text')
+		RETURNING id::text`, fx.orgID).Scan(&refundID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO support_canned_responses (org_id, shortcut, title, body)
+		VALUES ($1::uuid, '/billing', 'Billing help', 'Billing policy text')
+		RETURNING id::text`, fx.orgID).Scan(&billingID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO support_canned_responses (org_id, shortcut, title, body)
+		VALUES ($1::uuid, '/foreign', 'Foreign help', 'Must stay hidden')
+		RETURNING id::text`, fx.otherOrgID).Scan(&foreignCannedID); err != nil {
+		t.Fatal(err)
+	}
+
+	var faqID, returnsID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO support_kb_articles (org_id, title, body, category)
+		VALUES ($1::uuid, 'Returns', 'Returns article', 'billing')
+		RETURNING id::text`, fx.orgID).Scan(&returnsID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO support_kb_articles (org_id, title, body, category)
+		VALUES ($1::uuid, 'Delivery FAQ', 'Delivery article', NULL)
+		RETURNING id::text`, fx.orgID).Scan(&faqID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO support_kb_articles (org_id, title, body, category)
+		VALUES ($1::uuid, 'Foreign article', 'Must stay hidden', 'other')`, fx.otherOrgID); err != nil {
+		t.Fatal(err)
+	}
+
+	input := json.RawMessage(`{}`)
+	result, err := fx.executor.Execute(fx.ctx,
+		waveModuleClaims(fx, supportListLibraryCapabilityID, "support.read", input, "human", "", "support-library-parity"),
+		supportListLibraryCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("support.listLibrary result=%+v err=%v", result, err)
+	}
+	var output SupportLibraryOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatalf("decode support.listLibrary output: %v", err)
+	}
+	if len(output.Canned) != 2 || output.Canned[0].ID != billingID || output.Canned[0].Shortcut != "/billing" ||
+		output.Canned[1].ID != refundID || output.Canned[1].Shortcut != "/refund" || output.Canned[0].ID == foreignCannedID {
+		t.Fatalf("canned responses=%+v, want this organization's two rows ordered by shortcut", output.Canned)
+	}
+	if len(output.Articles) != 2 || output.Articles[0].ID != faqID || output.Articles[0].Category != nil ||
+		output.Articles[1].ID != returnsID || output.Articles[1].Category == nil || *output.Articles[1].Category != "billing" {
+		t.Fatalf("articles=%+v, want this organization's rows ordered by title with nullable category", output.Articles)
+	}
+}
+
 func TestGoSupportReadConversationMatchesLegacyDetail(t *testing.T) {
 	fx := newExecutorFixture(t)
 	grantWavePermission(t, fx, "support.read")

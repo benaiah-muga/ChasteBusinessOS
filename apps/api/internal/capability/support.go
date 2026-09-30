@@ -18,6 +18,7 @@ const (
 	supportStartConversationCapabilityID    = "support.startConversation"
 	supportPostMessageCapabilityID          = "support.postMessage"
 	supportListConversationsCapabilityID    = "support.listConversations"
+	supportListLibraryCapabilityID          = "support.listLibrary"
 	supportReadConversationCapabilityID     = "support.readConversation"
 	supportLookupOrderStatusCapabilityID    = "support.lookupOrderStatus"
 	supportSearchKnowledgeCapabilityID      = "support.searchKnowledge"
@@ -124,6 +125,27 @@ type SupportConversationListItem struct {
 
 type SupportListConversationsOutput struct {
 	Conversations []SupportConversationListItem `json:"conversations"`
+}
+
+type SupportLibraryInput struct{}
+
+type SupportCannedResponse struct {
+	ID       string `json:"id"`
+	Shortcut string `json:"shortcut"`
+	Title    string `json:"title"`
+	Body     string `json:"body"`
+}
+
+type SupportKnowledgeArticle struct {
+	ID       string  `json:"id"`
+	Title    string  `json:"title"`
+	Body     string  `json:"body"`
+	Category *string `json:"category"`
+}
+
+type SupportLibraryOutput struct {
+	Canned   []SupportCannedResponse   `json:"canned"`
+	Articles []SupportKnowledgeArticle `json:"articles"`
 }
 
 type SupportReadConversationInput struct {
@@ -355,6 +377,17 @@ func ParseSupportListConversationsInput(raw json.RawMessage) (SupportListConvers
 		}
 	}
 	return input, nil
+}
+
+func ParseSupportLibraryInput(raw json.RawMessage) (SupportLibraryInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return SupportLibraryInput{}, err
+	}
+	if len(fields) != 0 {
+		return SupportLibraryInput{}, errors.New("input must be an empty object")
+	}
+	return SupportLibraryInput{}, nil
 }
 
 func ParseSupportConversationIDInput(raw json.RawMessage) (SupportReadConversationInput, error) {
@@ -590,6 +623,8 @@ func parseSupportInput(capabilityID string, raw json.RawMessage) (any, error) {
 		return ParseSupportPostMessageInput(raw)
 	case supportListConversationsCapabilityID:
 		return ParseSupportListConversationsInput(raw)
+	case supportListLibraryCapabilityID:
+		return ParseSupportLibraryInput(raw)
 	case supportReadConversationCapabilityID, supportLookupOrderStatusCapabilityID:
 		return ParseSupportConversationIDInput(raw)
 	case supportResolveConversationCapabilityID, supportReopenConversationCapabilityID:
@@ -730,6 +765,57 @@ func supportListConversations(ctx context.Context, tx pgx.Tx, orgID string, inpu
 		out.Conversations = append(out.Conversations, item)
 	}
 	return out, rows.Err()
+}
+
+func supportListLibrary(ctx context.Context, tx pgx.Tx, orgID string) (SupportLibraryOutput, error) {
+	cannedRows, err := tx.Query(ctx, `
+		SELECT id::text, shortcut, title, body
+		FROM support_canned_responses
+		WHERE org_id=$1::uuid
+		ORDER BY shortcut
+		LIMIT 100`, orgID)
+	if err != nil {
+		return SupportLibraryOutput{}, err
+	}
+	canned := make([]SupportCannedResponse, 0)
+	for cannedRows.Next() {
+		var row SupportCannedResponse
+		if err := cannedRows.Scan(&row.ID, &row.Shortcut, &row.Title, &row.Body); err != nil {
+			cannedRows.Close()
+			return SupportLibraryOutput{}, err
+		}
+		canned = append(canned, row)
+	}
+	if err := cannedRows.Err(); err != nil {
+		cannedRows.Close()
+		return SupportLibraryOutput{}, err
+	}
+	cannedRows.Close()
+
+	articleRows, err := tx.Query(ctx, `
+		SELECT id::text, title, body, category
+		FROM support_kb_articles
+		WHERE org_id=$1::uuid
+		ORDER BY title
+		LIMIT 100`, orgID)
+	if err != nil {
+		return SupportLibraryOutput{}, err
+	}
+	articles := make([]SupportKnowledgeArticle, 0)
+	for articleRows.Next() {
+		var row SupportKnowledgeArticle
+		if err := articleRows.Scan(&row.ID, &row.Title, &row.Body, &row.Category); err != nil {
+			articleRows.Close()
+			return SupportLibraryOutput{}, err
+		}
+		articles = append(articles, row)
+	}
+	if err := articleRows.Err(); err != nil {
+		articleRows.Close()
+		return SupportLibraryOutput{}, err
+	}
+	articleRows.Close()
+	return SupportLibraryOutput{Canned: canned, Articles: articles}, nil
 }
 
 func supportReadConversation(ctx context.Context, tx pgx.Tx, orgID string, input SupportReadConversationInput) (SupportReadConversationOutput, error) {

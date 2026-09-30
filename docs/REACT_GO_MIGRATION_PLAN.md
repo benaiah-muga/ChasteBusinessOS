@@ -1054,3 +1054,15 @@ new owners and the manifest shows zero legacy runtime paths.
     serialize empty Go support transcripts as `[]` for default and full-detail
     responses, and apply no-store headers to early unauthorized and permission
     denials when Go invoice reads are enabled.
+
+98. (Done) Add a default-off signed Go bridge for the Support library list on
+    `GET /api/support?library=1` using `GO_SUPPORT_LIBRARY_READS=1`. Preserve
+    the legacy organization-scoped canned response and article projections,
+    keep no-store headers, and fail closed without a TypeScript retry. Verify
+    response parity and tenant scope with route and database-backed tests.
+
+99. (Done) Add a default-off signed Go bridge for Inventory item metadata on
+    `GET /api/inventory` using `GO_INVENTORY_ITEM_METADATA_READS=1`. Preserve
+    item IDs and catalog fields merged into stock report rows, organization
+    scope, and default TypeScript behavior. Validate Go output strictly and
+    fail closed without retrying the TypeScript metadata query.

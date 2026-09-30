@@ -31,6 +31,27 @@ func TestParseSupportListConversationsCustomerBoundOnly(t *testing.T) {
 	}
 }
 
+func TestParseSupportLibraryInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{name: "empty object", input: `{}`},
+		{name: "rejects extra fields", input: `{"limit":1}`, wantErr: true},
+		{name: "rejects null", input: `null`, wantErr: true},
+		{name: "rejects trailing data", input: `{} {}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSupportLibraryInput(json.RawMessage(tt.input))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseSupportLibraryInput(%s) error=%v, wantErr=%t", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseSupportConversationIDInputLimit(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -194,14 +194,19 @@ is unavailable or returns invalid data. Task reads remain isolated; the legacy
 route remains the default and the flag defaults to `0`.
 `GO_SUPPORT_CONVERSATION_READS=1` opts customer-bound conversation lists on
 `GET /api/support` into the signed Go `support.listConversations` read. It
-requires `pnpm dev:api`; conversation detail and knowledge-library reads stay
-on their existing handlers. The flag defaults to `0`, and unavailable or
-invalid Go results fail closed without a TypeScript retry.
+requires `pnpm dev:api`; conversation detail and library reads use their own
+flags. The flag defaults to `0`, and unavailable or invalid Go results fail
+closed without a TypeScript retry.
 `GO_SUPPORT_CONVERSATION_DETAIL_READS=1` opts `GET /api/support?id=<id>` into
 the signed Go `support.readConversation` capability. It requires
 `pnpm dev:api`, preserves the full conversation and message fields, returns the
 oldest 200 messages in ascending order like the legacy route, and fails closed
 on unavailable or invalid Go results. The flag defaults to `0`.
+`GO_SUPPORT_LIBRARY_READS=1` opts `GET /api/support?library=1` into the signed
+Go `support.listLibrary` capability. It requires `pnpm dev:api`, preserves
+organization-scoped canned responses and knowledge articles, and returns
+no-store responses while failing closed if Go is unavailable or returns
+invalid data. The flag defaults to `0`.
 `GO_CRM_VIEW_WRITES=1` opts `POST /api/crm/views` into the signed Go capability
 bridge. It requires `pnpm dev:api`, preserves human session checks, approval
 responses, and save/restore audit receipts, and fails closed if Go is
@@ -368,6 +373,11 @@ fields, and fails closed if Go is unavailable or either result is invalid.
 Other inventory reads remain on their existing handlers unless their dedicated
 read flags below are enabled. TypeScript remains the default; the flag defaults
 to `0`.
+`GO_INVENTORY_ITEM_METADATA_READS=1` opts the item metadata query on
+`GET /api/inventory` into the signed Go `inventory.listItemMetadata` read. It
+requires `pnpm dev:api`, preserves the item IDs and catalog fields merged into
+stock report rows, and fails closed if Go is unavailable or returns invalid
+data. The TypeScript path remains the default and the flag defaults to `0`.
 `GO_INVENTORY_TRANSFER_READS=1` opts the transfer list on `GET /api/inventory`
 into the signed Go `inventory.listTransfers` read. It requires `pnpm dev:api`,
 preserves the 50-row limit, transfer routes, notes, and line quantities, and

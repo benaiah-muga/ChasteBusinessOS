@@ -173,6 +173,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	inventoryCreateLocationCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryListLocationsCapabilityID:                  {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryListLocationRecordsCapabilityID:            {module: "inventory", permission: "inventory.read", risk: "read"},
+	inventoryListItemMetadataCapabilityID:               {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryLookupByBarcodeCapabilityID:                {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryImportItemsCapabilityID:                    {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryUndoItemImportCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
@@ -299,6 +300,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	supportStartConversationCapabilityID:                {module: "support", permission: "support.write", risk: "write"},
 	supportPostMessageCapabilityID:                      {module: "support", permission: "support.write", risk: "write"},
 	supportListConversationsCapabilityID:                {module: "support", permission: "support.read", risk: "read"},
+	supportListLibraryCapabilityID:                      {module: "support", permission: "support.read", risk: "read"},
 	supportReadConversationCapabilityID:                 {module: "support", permission: "support.read", risk: "read"},
 	supportLookupOrderStatusCapabilityID:                {module: "support", permission: "support.read", risk: "read"},
 	supportSearchKnowledgeCapabilityID:                  {module: "support", permission: "support.read", risk: "read"},
@@ -355,6 +357,7 @@ func supportedCapability(capabilityID string) bool {
 		inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
 		inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
 		inventoryListLocationRecordsCapabilityID,
+		inventoryListItemMetadataCapabilityID,
 		inventoryLookupByBarcodeCapabilityID,
 		inventoryImportItemsCapabilityID, inventoryUndoItemImportCapabilityID, inventoryRestoreItemImportCapabilityID,
 		inventoryReserveStockCapabilityID, inventoryReleaseReservationCapabilityID, inventoryListReservationsCapabilityID,
@@ -406,7 +409,7 @@ func supportedCapability(capabilityID string) bool {
 		analyticsSalesByCustomerCapabilityID, analyticsStockLevelsCapabilityID,
 		analyticsExplainChangeCapabilityID, analyticsAskYourBusinessCapabilityID,
 		supportStartConversationCapabilityID, supportPostMessageCapabilityID,
-		supportListConversationsCapabilityID, supportReadConversationCapabilityID,
+		supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 		supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
 		supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
 		supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
@@ -862,7 +865,7 @@ func (e *Executor) execute(
 			input = parsed
 		case inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
 			inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
-			inventoryListLocationRecordsCapabilityID,
+			inventoryListLocationRecordsCapabilityID, inventoryListItemMetadataCapabilityID,
 			inventoryLookupByBarcodeCapabilityID:
 			parsed, err := parseInventoryItemInput(capabilityID, rawInput)
 			if err != nil {
@@ -1041,7 +1044,7 @@ func (e *Executor) execute(
 			}
 			input = parsed
 		case supportStartConversationCapabilityID, supportPostMessageCapabilityID,
-			supportListConversationsCapabilityID, supportReadConversationCapabilityID,
+			supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 			supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
 			supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
 			supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
@@ -1802,6 +1805,12 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case InventoryListItemMetadataInput:
+			output, err := inventoryListItemMetadata(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case InventoryLookupByBarcodeInput:
 			output, err := inventoryLookupByBarcode(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -2535,6 +2544,12 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case SupportLibraryInput:
+			output, err := supportListLibrary(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case SupportReadConversationInput:
 			output, err := supportReadConversation(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -2677,7 +2692,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreatePurchaseRequestInput, DecidePurchaseRequestInput, CreateRfqInput, RecordQuoteInput,
 		SelectWinningQuoteInput, ListPurchaseWorkflowInput,
 		InventoryCreateItemInput, InventoryItemPatchInput, InventoryArchiveItemInput, InventoryCreateLocationInput,
-		InventoryListLocationsInput, InventoryListLocationRecordsInput, InventoryLookupByBarcodeInput, InventoryListCycleCountsInput,
+		InventoryListLocationsInput, InventoryListLocationRecordsInput, InventoryListItemMetadataInput, InventoryLookupByBarcodeInput, InventoryListCycleCountsInput,
 		InventoryImportItemsInput, InventoryUndoItemImportInput, InventoryRestoreItemImportInput,
 		InventoryReserveStockInput, InventoryReleaseReservationInput, InventoryListReservationsInput,
 		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput, APAgingInput,
@@ -2710,7 +2725,7 @@ func canonicalInputHash(input any) (string, error) {
 		AnalyticsRenderReportInput, AnalyticsPipelineByStageInput, AnalyticsRevenueByMonthInput,
 		AnalyticsInvoiceAgingInput, AnalyticsSalesByCustomerInput, AnalyticsStockLevelsInput,
 		AnalyticsExplainChangeInput, AnalyticsAskYourBusinessInput,
-		SupportStartConversationInput, SupportPostMessageInput, SupportListConversationsInput,
+		SupportStartConversationInput, SupportPostMessageInput, SupportListConversationsInput, SupportLibraryInput,
 		SupportReadConversationInput, SupportLookupOrderStatusInput, SupportSearchKnowledgeInput,
 		SupportEscalateConversationInput, SupportStatusInput, SupportCreateTicketInput,
 		SupportUpdateTicketInput, SupportSuggestCategoryInput, SupportCreateCannedResponseInput,

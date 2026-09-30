@@ -374,6 +374,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 			}
 		case inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
 			inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
+			inventoryListLocationRecordsCapabilityID, inventoryListItemMetadataCapabilityID,
 			inventoryLookupByBarcodeCapabilityID:
 			parsed, parseErr := parseInventoryItemInput(transition.row.CapabilityID, transition.row.Payload)
 			if parseErr == nil {
@@ -504,7 +505,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
 		case supportStartConversationCapabilityID, supportPostMessageCapabilityID,
-			supportListConversationsCapabilityID, supportReadConversationCapabilityID,
+			supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 			supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
 			supportEscalateConversationCapabilityID, supportResolveConversationCapabilityID,
 			supportReopenConversationCapabilityID, supportCreateTicketCapabilityID,
@@ -725,7 +726,8 @@ func permissionForCapability(capabilityID string) (string, bool) {
 	case inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
 		inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID:
 		return "inventory.write", true
-	case inventoryListLocationsCapabilityID, inventoryLookupByBarcodeCapabilityID:
+	case inventoryListLocationsCapabilityID, inventoryListLocationRecordsCapabilityID,
+		inventoryListItemMetadataCapabilityID, inventoryLookupByBarcodeCapabilityID:
 		return "inventory.read", true
 	case inventoryImportItemsCapabilityID, inventoryUndoItemImportCapabilityID, inventoryRestoreItemImportCapabilityID,
 		inventoryReserveStockCapabilityID, inventoryReleaseReservationCapabilityID:
@@ -816,7 +818,7 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		supportUpdateTicketCapabilityID, supportCreateCannedResponseCapabilityID,
 		supportCreateKbArticleCapabilityID:
 		return "support.write", true
-	case supportListConversationsCapabilityID, supportReadConversationCapabilityID,
+	case supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 		supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
 		supportSuggestCategoryCapabilityID:
 		return "support.read", true

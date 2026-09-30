@@ -66,6 +66,7 @@ describe("support conversation list Go bridge", () => {
     vi.clearAllMocks();
     vi.stubEnv("GO_SUPPORT_CONVERSATION_READS", "0");
     vi.stubEnv("GO_SUPPORT_CONVERSATION_DETAIL_READS", "0");
+    vi.stubEnv("GO_SUPPORT_LIBRARY_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.hasPermission.mockReturnValue(true);
@@ -297,5 +298,96 @@ describe("support conversation list Go bridge", () => {
     expect(emptyLibraryValue.status).toBe(200);
     expect(await emptyLibraryValue.json()).toEqual({ conversations: [] });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+});
+
+describe("support library Go bridge", () => {
+  const canned = [{
+    id: "33333333-3333-4333-8333-333333333333",
+    shortcut: "/refund",
+    title: "Refund policy",
+    body: "We can help with a refund.",
+  }];
+  const articles = [{
+    id: "44444444-4444-4444-8444-444444444444",
+    title: "Delivery times",
+    body: "Delivery usually takes two days.",
+    category: null,
+  }];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_SUPPORT_LIBRARY_READS", "0");
+    mocks.getResolvedUser.mockResolvedValue(user);
+    mocks.actorFromResolved.mockReturnValue(ctx);
+    mocks.hasPermission.mockReturnValue(true);
+    mocks.getDb.mockReturnValue({ db: { execute: vi.fn().mockResolvedValue([]), select: vi.fn(() => selectQuery([])) } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps the TypeScript library reads by default", async () => {
+    delete process.env.GO_SUPPORT_LIBRARY_READS;
+    const db = {
+      select: vi.fn()
+        .mockReturnValueOnce(selectQuery(canned))
+        .mockReturnValueOnce(selectQuery(articles)),
+    };
+    mocks.getDb.mockReturnValue({ db });
+
+    const response = await GET(request("/api/support?library=1"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ canned, articles });
+    expect(db.select).toHaveBeenCalledTimes(2);
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the signed library capability and preserves the strict response shape", async () => {
+    vi.stubEnv("GO_SUPPORT_LIBRARY_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { canned, articles } }),
+    });
+
+    const response = await GET(request("/api/support?library=1"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ canned, articles });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "support.listLibrary",
+      input: {},
+    });
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["malformed output", { ok: true, data: { canned: [{ ...canned[0], unexpected: true }], articles } }],
+    ["missing output", { ok: true, data: { canned } }],
+  ])("fails closed on %s without retrying the legacy query", async (_caseName, body) => {
+    vi.stubEnv("GO_SUPPORT_LIBRARY_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json(body) });
+
+    const response = await GET(request("/api/support?library=1"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "support service unavailable; reload the library" });
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Go does not dispatch", async () => {
+    vi.stubEnv("GO_SUPPORT_LIBRARY_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({ kind: "outcome-unknown" });
+
+    const response = await GET(request("/api/support?library=1"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.getDb).not.toHaveBeenCalled();
   });
 });

@@ -70,6 +70,7 @@ describe("inventory Go route adapter", () => {
     vi.stubEnv("GO_INVENTORY_RESERVATIONS_READS", "0");
     vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS_READS", "0");
     vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "0");
+    vi.stubEnv("GO_INVENTORY_ITEM_METADATA_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -114,6 +115,84 @@ describe("inventory Go route adapter", () => {
     expect(mocks.execute).toHaveBeenCalledWith("inventory.stockReport", ctx, { belowReorderOnly: false });
     expect(mocks.execute).toHaveBeenCalledWith("inventory.stockReport", ctx, { belowReorderOnly: true });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps item metadata on the org-scoped TypeScript query by default", async () => {
+    const metadata = { id: "11111111-1111-4111-8111-111111111111", sku: "MUG-1", kind: "goods", unitLabel: "each", salePriceMinor: 5000, barcode: null };
+    const db = inventoryReadDb([[metadata], [], [], [], [], []]);
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [stockReportItem], totalValueMinor: 2000 } });
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).items).toEqual([{ ...stockReportItem, totalValueMinor: 2000, ...metadata }]);
+    expect(db.select).toHaveBeenCalledTimes(6);
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches item metadata to Go and preserves the merged inventory response", async () => {
+    vi.stubEnv("GO_INVENTORY_ITEM_METADATA_READS", "1");
+    const metadata = { id: "11111111-1111-4111-8111-111111111111", sku: "MUG-1", kind: "goods", unitLabel: "each", salePriceMinor: 5000, barcode: null };
+    const db = inventoryReadDb([[], [], [], [], []]);
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [stockReportItem], totalValueMinor: 2000 } });
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { items: [metadata] } }),
+    });
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect((await response.json()).items).toEqual([{ ...stockReportItem, totalValueMinor: 2000, ...metadata }]);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.listItemMetadata",
+      input: {},
+    });
+    expect(db.select).toHaveBeenCalledTimes(5);
+  });
+
+  it.each([
+    { name: "malformed item", result: { kind: "response", response: Response.json({ ok: true, data: { items: [{ id: "not-a-uuid", sku: "MUG-1", kind: "goods", unitLabel: "each", salePriceMinor: 5000, barcode: null }] } }) }, selects: 0 },
+    { name: "unexpected item field", result: { kind: "response", response: Response.json({ ok: true, data: { items: [{ id: "11111111-1111-4111-8111-111111111111", sku: "MUG-1", kind: "goods", unitLabel: "each", salePriceMinor: 5000, barcode: null, secret: true }] } }) }, selects: 0 },
+    { name: "unexpected envelope field", result: { kind: "response", response: Response.json({ ok: true, data: { items: [] }, secret: true }) }, selects: 0 },
+    { name: "Go unavailable", result: { kind: "not-dispatched" }, selects: 0 },
+    { name: "uncertain result", result: { kind: "outcome-unknown" }, selects: 0 },
+  ])("fails closed on $name without retrying the metadata query through TypeScript", async ({ result, selects }) => {
+    vi.stubEnv("GO_INVENTORY_ITEM_METADATA_READS", "1");
+    const db = inventoryReadDb();
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+    expect(db.select).toHaveBeenCalledTimes(selects);
+  });
+
+  it("preserves Go item metadata permission denials without a TypeScript retry", async () => {
+    vi.stubEnv("GO_INVENTORY_ITEM_METADATA_READS", "1");
+    const db = inventoryReadDb();
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "missing permission: inventory.read" }, { status: 403 }),
+    });
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "missing permission: inventory.read" });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(db.select).toHaveBeenCalledTimes(0);
   });
 
   it("keeps inventory locations on the legacy database read by default", async () => {

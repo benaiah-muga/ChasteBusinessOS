@@ -201,6 +201,8 @@ func parseInventoryItemInput(capabilityID string, raw json.RawMessage) (any, err
 		return ParseInventoryListLocationsInput(raw)
 	case inventoryListLocationRecordsCapabilityID:
 		return ParseInventoryListLocationRecordsInput(raw)
+	case inventoryListItemMetadataCapabilityID:
+		return ParseInventoryListItemMetadataInput(raw)
 	case inventoryLookupByBarcodeCapabilityID:
 		return ParseInventoryLookupByBarcodeInput(raw)
 	default:

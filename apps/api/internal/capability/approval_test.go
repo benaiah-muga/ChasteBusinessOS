@@ -171,6 +171,33 @@ func TestGoApprovalDecisionChecksPermissionBeforeClaimAndConsumesPayloadMismatch
 	}
 }
 
+func TestGoApprovalDecisionVerifiesInventoryReadCapabilityInputs(t *testing.T) {
+	fx := newExecutorFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'inventory.read', $2::uuid) ON CONFLICT DO NOTHING`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	decider := NewApprovalDecider(fx.runtime, fx.executor)
+
+	for _, capabilityID := range []string{inventoryListLocationRecordsCapabilityID, inventoryListItemMetadataCapabilityID} {
+		t.Run(capabilityID, func(t *testing.T) {
+			customerInput := json.RawMessage(`{"name":"Approval payload seed for ` + capabilityID + `","preferredContactMethod":"email","doNotContact":false}`)
+			approvalID := createPendingCustomerApproval(t, fx, customerInput)
+			input := json.RawMessage(`{}`)
+			if _, err := fx.owner.Exec(fx.ctx, `UPDATE approvals SET capability_id = $2, payload = $3::jsonb WHERE id = $1::uuid`, approvalID, capabilityID, input); err != nil {
+				t.Fatal(err)
+			}
+
+			claims := fx.humanClaims(input, "")
+			claims.CapabilityID = capabilityID
+			claims.Permissions = []string{"inventory.read"}
+			result, err := decider.Decide(fx.ctx, claims, ApprovalDecisionInput{ApprovalID: approvalID, Decision: "approve"})
+			if err != nil || !result.OK || result.Status != "executed" || result.Result == nil || !result.Result.OK {
+				t.Fatalf("inventory approval result=%+v err=%v, want verified read capability execution", result, err)
+			}
+		})
+	}
+}
+
 func TestGoApprovalDecisionRechecksMembershipAndExpiry(t *testing.T) {
 	fx := newExecutorFixture(t)
 	input := json.RawMessage(`{"name":"Membership approval customer","preferredContactMethod":"email","doNotContact":false}`)

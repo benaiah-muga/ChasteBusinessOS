@@ -224,6 +224,15 @@ const inventoryStockReportDataSchema = z.object({
   totalValueMinor: z.number().int(),
 });
 
+const inventoryItemMetadataSchema = z.object({
+  id: z.string().uuid(),
+  sku: z.string(),
+  kind: z.string(),
+  unitLabel: z.string(),
+  salePriceMinor: z.number().int().refine(Number.isSafeInteger),
+  barcode: z.string().nullable(),
+}).strict();
+
 async function dispatchInventoryStockReportGo(
   ctx: ReturnType<typeof actorFromResolved> & {},
   session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
@@ -276,6 +285,43 @@ async function dispatchInventoryStockReportGo(
   } catch {
     return goUnavailable();
   }
+}
+
+async function dispatchInventoryItemMetadataGo(
+  ctx: ReturnType<typeof actorFromResolved> & {},
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+) {
+  try {
+    const result = await executeGoCapability({
+      actionContext: ctx,
+      session,
+      capabilityId: "inventory.listItemMetadata",
+      input: {},
+    });
+    if (result.kind !== "response") return goUnavailable();
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({
+        ok: z.literal(true),
+        data: z.object({ items: z.array(inventoryItemMetadataSchema) }).strict(),
+      }).strict().safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return parsed.data.data.items;
+    }
+    if (result.response.status === 401 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).strict().safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: result.response.status, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).strict().safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers: noStore });
+    }
+  } catch {
+    return goUnavailable();
+  }
+  return goUnavailable();
 }
 
 function inventoryStockReportGoFailure(status: number, body: unknown): Response | null {
@@ -606,17 +652,25 @@ export async function GET(req: Request) {
     totalValueMinor = (stock.data as { totalValueMinor?: number } | undefined)?.totalValueMinor ?? 0;
   }
 
-  const itemRows = await db
-    .select({
-      id: items.id,
-      sku: items.sku,
-      kind: items.kind,
-      unitLabel: items.unitLabel,
-      salePriceMinor: items.salePriceMinor,
-      barcode: items.barcode,
-    })
-    .from(items)
-    .where(eq(items.orgId, orgId));
+  let itemRows: { id: string; sku: string; kind: string; unitLabel: string; salePriceMinor: number; barcode: string | null }[];
+  const itemMetadataGoEnabled = process.env.GO_INVENTORY_ITEM_METADATA_READS === "1";
+  if (itemMetadataGoEnabled) {
+    const bridgedItems = await dispatchInventoryItemMetadataGo(ctx, resolved);
+    if (bridgedItems instanceof Response) return bridgedItems;
+    itemRows = bridgedItems;
+  } else {
+    itemRows = await db
+      .select({
+        id: items.id,
+        sku: items.sku,
+        kind: items.kind,
+        unitLabel: items.unitLabel,
+        salePriceMinor: items.salePriceMinor,
+        barcode: items.barcode,
+      })
+      .from(items)
+      .where(eq(items.orgId, orgId));
+  }
   const skuOf = new Map(itemRows.map((r) => [r.id, r.sku]));
   const itemBySku = new Map(itemRows.map(({ sku, ...item }) => [sku, item]));
 
@@ -740,7 +794,7 @@ export async function GET(req: Request) {
     cycleCounts: projectedCycleCounts,
     lots: lotList,
     transfers,
-  });
+  }, itemMetadataGoEnabled ? { headers: noStore } : undefined);
 }
 
 export async function POST(req: Request) {
