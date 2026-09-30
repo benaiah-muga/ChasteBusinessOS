@@ -119,7 +119,16 @@ func purchasingAcceptedMinusReturnedForLine(ctx context.Context, tx pgx.Tx, poLi
 	err := tx.QueryRow(ctx, `
 		SELECT COALESCE(SUM(accepted_thousandths), 0) - COALESCE(SUM(returned_thousandths), 0)
 		FROM goods_receipt_lines WHERE po_line_id=$1::uuid`, poLineID).Scan(&net)
-	return net, err
+	if err != nil {
+		return 0, err
+	}
+	var legacy int64
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(quantity_delta), 0)
+		FROM stock_movements WHERE ref_type='po_line' AND ref_id=$1::uuid`, poLineID).Scan(&legacy); err != nil {
+		return 0, err
+	}
+	return net + legacy, nil
 }
 
 func purchasingFirstReceiptAt(ctx context.Context, tx pgx.Tx, orgID, poID string) (*time.Time, error) {
@@ -158,6 +167,10 @@ func purchasingSupplierPerformance(ctx context.Context, tx pgx.Tx, orgID string,
 		}
 		vendors = append(vendors, vendor)
 	}
+	if err := vendorRows.Err(); err != nil {
+		vendorRows.Close()
+		return PurchasingSupplierPerformanceOutput{}, err
+	}
 	vendorRows.Close()
 
 	out := PurchasingSupplierPerformanceOutput{Vendors: []PurchasingSupplierPerformanceVendor{}}
@@ -182,6 +195,10 @@ func purchasingSupplierPerformance(ctx context.Context, tx pgx.Tx, orgID string,
 				return PurchasingSupplierPerformanceOutput{}, err
 			}
 			orders = append(orders, order)
+		}
+		if err := poRows.Err(); err != nil {
+			poRows.Close()
+			return PurchasingSupplierPerformanceOutput{}, err
 		}
 		poRows.Close()
 
@@ -222,6 +239,10 @@ func purchasingSupplierPerformance(ctx context.Context, tx pgx.Tx, orgID string,
 					return PurchasingSupplierPerformanceOutput{}, err
 				}
 				lines = append(lines, line)
+			}
+			if err := lineRows.Err(); err != nil {
+				lineRows.Close()
+				return PurchasingSupplierPerformanceOutput{}, err
 			}
 			lineRows.Close()
 

@@ -63,6 +63,7 @@ func TestPurchasingReadsSupplierAnalytics(t *testing.T) {
 			`DELETE FROM goods_receipts WHERE org_id=$1::uuid`,
 			`DELETE FROM po_lines WHERE po_id IN (SELECT id FROM purchase_orders WHERE org_id=$1::uuid)`,
 			`DELETE FROM purchase_orders WHERE org_id=$1::uuid`,
+			`DELETE FROM stock_movements WHERE org_id=$1::uuid`,
 			`DELETE FROM vendor_payments WHERE org_id=$1::uuid`,
 			`DELETE FROM vendor_bills WHERE org_id=$1::uuid`,
 			`DELETE FROM journal_lines WHERE entry_id IN (SELECT id FROM journal_entries WHERE org_id=$1::uuid)`,
@@ -108,8 +109,16 @@ func TestPurchasingReadsSupplierAnalytics(t *testing.T) {
 	}
 	if _, err := fx.owner.Exec(fx.ctx, `
 		INSERT INTO goods_receipt_lines (org_id, receipt_id, po_line_id, position, accepted_thousandths, rejected_thousandths, returned_thousandths)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 2000, 0, 200)`, fx.orgID, receiptID, poLineID); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 1200, 0, 200)`, fx.orgID, receiptID, poLineID); err != nil {
 		t.Fatal(err)
+	}
+	for _, delta := range []int64{500, -100} {
+		if _, err := fx.owner.Exec(fx.ctx, `
+			INSERT INTO stock_movements (org_id, item_id, quantity_delta, reason, ref_type, ref_id, actor_type)
+			VALUES ($1::uuid, $2::uuid, $3, 'purchase', 'po_line', $4::uuid, 'human')`,
+			fx.orgID, itemID, delta, poLineID); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if _, err := dbx.WithOrgTx(fx.ctx, fx.owner, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
@@ -130,8 +139,8 @@ func TestPurchasingReadsSupplierAnalytics(t *testing.T) {
 		if vendor.OnTimeRate == nil || *vendor.OnTimeRate != 100 {
 			t.Fatalf("onTimeRate=%v, want 100", vendor.OnTimeRate)
 		}
-		if vendor.FillRate == nil || *vendor.FillRate != 90 {
-			t.Fatalf("fillRate=%v, want 90 after the 200 returned thousandths", vendor.FillRate)
+		if vendor.FillRate == nil || *vendor.FillRate != 70 {
+			t.Fatalf("fillRate=%v, want 70 after legacy +500 accepted, -100 returned, and receipt quantities", vendor.FillRate)
 		}
 
 		history, err := purchasingPriceHistory(context.Background(), tx, fx.orgID, PurchasingPriceHistoryInput{SKU: strPtrPurchasing("WIRE")})

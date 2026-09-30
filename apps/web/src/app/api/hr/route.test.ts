@@ -25,7 +25,7 @@ vi.mock("@/server/session", () => ({ getResolvedUser: mocks.getResolvedUser }));
 vi.mock("@/server/route-guards", () => ({ missingPermission: vi.fn(() => null) }));
 vi.mock("@/server/go-bridge", () => ({ executeGoCapability: mocks.executeGoCapability }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 
 const resolved = {
   userId: "0b9e1bd3-8432-4059-a0b1-902ff8d520d0",
@@ -42,6 +42,8 @@ const actor = {
 const actionContext = { actor, intentId: "hr-intent-1" };
 const employeeId = "f3c65071-356d-48e4-b5cb-cccd4fc06f6d";
 const managerId = "229cda1d-0ad9-4198-bec0-58858b11610e";
+const openingId = "e56d931d-dc62-48cc-81fd-19ca648978aa";
+const applicant = { id: "adcb9db9-7864-4d57-94ec-9254f11a6d96", name: "Mira Okello", stage: "screen", note: null };
 
 function request(body: unknown) {
   return new Request("http://localhost/api/hr", {
@@ -50,6 +52,106 @@ function request(body: unknown) {
     body: JSON.stringify(body),
   });
 }
+
+function configureHrReadDatabase() {
+  const rows = [
+    [],
+    [],
+    [],
+    [{ id: openingId, status: "open", title: "Analyst", department: "Finance", note: null, createdAt: new Date("2026-09-30T10:00:00.000Z") }],
+    [],
+  ];
+  let queryIndex = 0;
+  mocks.getDb.mockReturnValue({ db: {
+    select: vi.fn(() => {
+      const result = rows[queryIndex++] ?? [];
+      const builder: Record<string, ReturnType<typeof vi.fn>> = {};
+      for (const method of ["from", "innerJoin", "where", "orderBy", "limit"]) {
+        builder[method] = vi.fn().mockImplementation(() => method === "limit" ? Promise.resolve(result) : builder);
+      }
+      return builder;
+    }),
+  } });
+}
+
+describe("GET /api/hr Go applicant read bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_HR_APPLICANT_READS", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    configureHrReadDatabase();
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { applicants: [applicant] } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps applicant reads on the TypeScript executor by default", async () => {
+    delete process.env.GO_HR_APPLICANT_READS;
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBeNull();
+    expect(body.applicants).toEqual([{ ...applicant, openingId }]);
+    expect(mocks.execute).toHaveBeenCalledWith("hr.listApplicants", actionContext, { openingId });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the matching applicant read with strict output validation", async () => {
+    vi.stubEnv("GO_HR_APPLICANT_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { applicants: [applicant] } }),
+    });
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(body.applicants).toEqual([{ ...applicant, openingId }]);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: {
+        userId: resolved.userId,
+        orgId: resolved.orgId,
+        authSessionId: resolved.authSessionId,
+      },
+      capabilityId: "hr.listApplicants",
+      input: { openingId },
+    });
+    expect(mocks.buildExecutor).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without retrying through TypeScript when Go is unavailable or malformed", async () => {
+    vi.stubEnv("GO_HR_APPLICANT_READS", "1");
+    mocks.executeGoCapability.mockResolvedValueOnce({ kind: "outcome-unknown" });
+
+    const unavailable = await GET();
+
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+
+    configureHrReadDatabase();
+    mocks.executeGoCapability.mockResolvedValueOnce({
+      kind: "response",
+      response: Response.json({ ok: true, data: { applicants: [{ ...applicant, unexpected: true }] } }),
+    });
+
+    const malformed = await GET();
+
+    expect(malformed.status).toBe(503);
+    expect(malformed.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
 
 describe("HR route migration adapter", () => {
   beforeEach(() => {

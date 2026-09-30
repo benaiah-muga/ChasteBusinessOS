@@ -36,6 +36,17 @@ const supplierStatementOutputSchema = z.object({
     balanceMinor: z.number().int().safe(),
   }).strict()),
 }).strict();
+const supplierPerformanceOutputSchema = z.object({
+  vendors: z.array(z.object({
+    vendorId: z.string(),
+    vendorName: z.string(),
+    orders: z.number().int().safe().nonnegative(),
+    avgLeadTimeDays: z.number().finite().nullable(),
+    onTimeRate: z.number().int().safe().nullable(),
+    fillRate: z.number().int().safe().nullable(),
+    backorderedOrders: z.number().int().safe().nonnegative(),
+  }).strict()),
+}).strict();
 const purchaseWorkflowSchema = z.object({
   requests: z.array(z.object({
     id: z.string(),
@@ -135,15 +146,22 @@ async function purchasingGoResponse(
  * the same governed executor.
  */
 export async function GET() {
+  const supplierPerformanceGoEnabled = process.env.GO_PURCHASING_SUPPLIER_PERFORMANCE_READS === "1";
   const resolved = await getResolvedUser();
-  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, {
+    status: 401,
+    ...(supplierPerformanceGoEnabled ? { headers: noStore } : {}),
+  });
   const orgId = resolved.orgId;
   const db = getDb().db;
 
   const registry = buildRegistry(db);
   const executor = buildExecutor(db, registry);
   const ctx = actorFromResolved(resolved, {});
-  if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  if (!ctx) return NextResponse.json({ error: "onboarding required" }, {
+    status: 428,
+    ...(supplierPerformanceGoEnabled ? { headers: noStore } : {}),
+  });
 
   const [organization] = await db.select({ baseCurrency: organizations.baseCurrency }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
 
@@ -210,7 +228,10 @@ export async function GET() {
     apAging = envelope.data;
   } else {
     const aging = await executor.execute("purchasing.apAging", ctx, {});
-    if (!aging.ok) return NextResponse.json({ error: aging.error }, { status: 500 });
+    if (!aging.ok) return NextResponse.json({ error: aging.error }, {
+      status: 500,
+      ...(supplierPerformanceGoEnabled ? { headers: noStore } : {}),
+    });
     apAging = aging.data ?? {};
   }
 
@@ -236,12 +257,52 @@ export async function GET() {
     }
   } else {
     const priceHistory = await executor.execute("purchasing.priceHistory", ctx, {});
-    if (!priceHistory.ok) return NextResponse.json({ error: priceHistory.error }, { status: 500 });
+    if (!priceHistory.ok) return NextResponse.json({ error: priceHistory.error }, {
+      status: 500,
+      ...(supplierPerformanceGoEnabled ? { headers: noStore } : {}),
+    });
     priceHistoryData = priceHistory.data as z.infer<typeof priceHistoryOutputSchema>;
   }
 
-  const supplierPerformance = await executor.execute("purchasing.supplierPerformance", ctx, {});
-  if (!supplierPerformance.ok) return NextResponse.json({ error: supplierPerformance.error }, { status: 500 });
+  let supplierPerformanceData: z.infer<typeof supplierPerformanceOutputSchema>;
+  if (supplierPerformanceGoEnabled) {
+    const unavailableMessage = "purchasing supplier performance service unavailable; reload the page before retrying";
+    let result: GoCapabilityBridgeResult;
+    try {
+      result = await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "purchasing.supplierPerformance",
+        input: {},
+      });
+    } catch {
+      return goUnavailable(unavailableMessage);
+    }
+    if (result.kind !== "response") return goUnavailable(unavailableMessage);
+    if (result.response.status === 403) {
+      const body: unknown = await result.response.json().catch(() => null);
+      const parsed = z.object({ error: z.string() }).strict().safeParse(body);
+      if (!parsed.success) return goUnavailable(unavailableMessage);
+      return NextResponse.json({ error: parsed.data.error }, { status: 500, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const body: unknown = await result.response.json().catch(() => null);
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).strict().safeParse(body);
+      if (!parsed.success) return goUnavailable(unavailableMessage);
+      return NextResponse.json({ error: parsed.data.error }, { status: 500, headers: noStore });
+    }
+    if (result.response.status !== 200) {
+      return purchasingGoResponse(result, unavailableMessage, supplierPerformanceOutputSchema);
+    }
+    const body: unknown = await result.response.json().catch(() => null);
+    const parsed = z.object({ ok: z.literal(true), data: supplierPerformanceOutputSchema }).strict().safeParse(body);
+    if (!parsed.success) return goUnavailable(unavailableMessage);
+    supplierPerformanceData = parsed.data.data;
+  } else {
+    const supplierPerformance = await executor.execute("purchasing.supplierPerformance", ctx, {});
+    if (!supplierPerformance.ok) return NextResponse.json({ error: supplierPerformance.error }, { status: 500 });
+    supplierPerformanceData = supplierPerformance.data as z.infer<typeof supplierPerformanceOutputSchema>;
+  }
 
   let workflowRequests: PurchaseWorkflowRequest[];
   if (process.env.GO_PURCHASING_WORKFLOW_READS === "1") {
@@ -321,9 +382,9 @@ export async function GET() {
     })),
     apAging,
     priceHistory: priceHistoryData ?? { rows: [] },
-    supplierPerformance: supplierPerformance.data ?? { vendors: [] },
+    supplierPerformance: supplierPerformanceData ?? { vendors: [] },
     requests: workflowRequests,
-  });
+  }, supplierPerformanceGoEnabled ? { headers: noStore } : undefined);
 }
 
 interface Body {

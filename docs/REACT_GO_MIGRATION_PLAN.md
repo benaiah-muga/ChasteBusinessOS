@@ -1066,3 +1066,15 @@ new owners and the manifest shows zero legacy runtime paths.
     item IDs and catalog fields merged into stock report rows, organization
     scope, and default TypeScript behavior. Validate Go output strictly and
     fail closed without retrying the TypeScript metadata query.
+
+100. (Done) Add a default-off signed Go bridge for supplier performance in
+     `GET /api/purchasing` using `GO_PURCHASING_SUPPLIER_PERFORMANCE_READS=1`.
+     Preserve nullable metrics and response fields, and fail
+     closed without a TypeScript retry. Check database row-stream errors so
+     partial Go metrics cannot be returned as successful results.
+
+101. (Done) Add a default-off signed Go bridge for per-opening applicant lists
+     in `GET /api/hr` using `GO_HR_APPLICANT_READS=1`. Preserve the
+     `hr.listApplicants` output and default TypeScript path; strictly validate
+     results and fail closed without a TypeScript retry when Go is unavailable
+     or returns invalid output.

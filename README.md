@@ -350,6 +350,12 @@ the TypeScript path remains the default and the flag defaults to `0`.
 total outstanding buckets in the workspace currency, and fails closed if Go
 is unavailable or returns invalid data. The TypeScript path remains the
 default and the flag defaults to `0`.
+`GO_PURCHASING_SUPPLIER_PERFORMANCE_READS=1` opts the supplier performance
+metrics in `GET /api/purchasing` into the signed Go
+`purchasing.supplierPerformance` read. It requires `pnpm dev:api`, preserves
+vendor order counts, average lead times, on-time and fill rates, and backorder
+counts, and fails closed if Go is unavailable or returns invalid data. The
+TypeScript path remains the default and the flag defaults to `0`.
 `GO_PURCHASING_PAYMENT_RUN_READS=1` opts `GET /api/purchasing/payment-runs`
 into the signed Go `purchasing.listPaymentRuns` read. It requires
 `pnpm dev:api`, preserves run state and bill-level remittance fields, and fails
@@ -455,9 +461,14 @@ uncertain writes fail closed without a TypeScript retry. The flag defaults to
 `0`.
 `GO_HR_PAYROLL_APPLICANT_WRITES=1` opts payroll run creation, execution,
 voiding, and the applicant pipeline through hire into the signed Go
-capability bridge. It requires `pnpm dev:api`; applicant listing and other HR
-actions remain on their existing handlers, and uncertain writes fail closed
-without a TypeScript retry. The flag defaults to `0`.
+capability bridge. It requires `pnpm dev:api`; applicant listing has its own
+read flag, and other HR actions remain on their existing handlers. Uncertain
+writes fail closed without a TypeScript retry. The flag defaults to `0`.
+`GO_HR_APPLICANT_READS=1` opts applicant lists in `GET /api/hr` into the signed
+Go `hr.listApplicants` read. It requires `pnpm dev:api`, preserves each
+opening's applicant fields and ordering, and fails closed if Go is unavailable
+or returns invalid data. The TypeScript path remains the default and the flag
+defaults to `0`.
 `GO_PURCHASING_AP_AGING_READS=1` opts the supplier AP aging read into the
 signed Go capability bridge. It requires `pnpm dev:api`; other purchasing
 reads and all writes remain on their existing handlers. The flag defaults to

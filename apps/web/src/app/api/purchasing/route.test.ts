@@ -34,6 +34,17 @@ function selectQuery(rows: unknown[]) {
   return query;
 }
 
+function purchasingReadDb() {
+  return {
+    select: vi.fn()
+      .mockReturnValueOnce(selectQuery([{ baseCurrency: "USD" }]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([]))
+      .mockReturnValueOnce(selectQuery([])),
+  };
+}
+
 describe("purchasing Go route adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -48,6 +59,7 @@ describe("purchasing Go route adapter", () => {
     vi.stubEnv("GO_PURCHASING_AP_AGING_READS", "0");
     vi.stubEnv("GO_PURCHASING_PRICE_HISTORY_READS", "0");
     vi.stubEnv("GO_PURCHASING_SUPPLIER_STATEMENT_READS", "0");
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_PERFORMANCE_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -230,7 +242,159 @@ describe("purchasing Go route adapter", () => {
       orderedAt: "2026-09-23T10:30:00.000Z",
     }] });
     expect(mocks.execute).toHaveBeenCalledWith("purchasing.priceHistory", ctx, {});
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.supplierPerformance", ctx, {});
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches supplier performance to Go with strict response validation and no-store", async () => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_PERFORMANCE_READS", "1");
+    mocks.getDb.mockReturnValue({ db: purchasingReadDb() });
+    mocks.execute.mockImplementation(async (capabilityId: string) => ({
+      ok: true,
+      data: capabilityId === "purchasing.apAging" ? { buckets: {} } : { rows: [] },
+    }));
+    const performance = { vendors: [{
+      vendorId: "33333333-3333-4333-8333-333333333333",
+      vendorName: "Acme Supply",
+      orders: 3,
+      avgLeadTimeDays: 5.2,
+      onTimeRate: 67,
+      fillRate: 94,
+      backorderedOrders: 1,
+    }] };
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: performance }),
+    });
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect((await response.json()).supplierPerformance).toEqual(performance);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.supplierPerformance",
+      input: {},
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.supplierPerformance", ctx, {});
+  });
+
+  it("marks supplier bridge unauthorized responses no-store only while opted in", async () => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_PERFORMANCE_READS", "1");
+    mocks.getResolvedUser.mockResolvedValue(null);
+
+    const response = await GET();
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_PERFORMANCE_READS", "0");
+    const legacyResponse = await GET();
+    expect(legacyResponse.status).toBe(401);
+    expect(legacyResponse.headers.get("cache-control")).toBeNull();
+  });
+
+  it("marks supplier bridge onboarding responses no-store while opted in", async () => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_PERFORMANCE_READS", "1");
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.actorFromResolved.mockReturnValue(null);
+
+    const response = await GET();
+
+    expect(response.status).toBe(428);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("maps Go supplier capability failures to the legacy HTTP 500 response", async () => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_PERFORMANCE_READS", "1");
+    mocks.getDb.mockReturnValue({ db: purchasingReadDb() });
+    mocks.execute.mockImplementation(async (capabilityId: string) => ({
+      ok: true,
+      data: capabilityId === "purchasing.apAging" ? { buckets: {} } : { rows: [] },
+    }));
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, error: "vendor analytics failed" }, { status: 422 }),
+    });
+
+    const response = await GET();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "vendor analytics failed" });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.supplierPerformance", ctx, {});
+  });
+
+  it("maps supplier membership failures from Go to legacy HTTP 500", async () => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_PERFORMANCE_READS", "1");
+    mocks.getDb.mockReturnValue({ db: purchasingReadDb() });
+    mocks.execute.mockImplementation(async (capabilityId: string) => ({
+      ok: true,
+      data: capabilityId === "purchasing.apAging" ? { buckets: {} } : { rows: [] },
+    }));
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "forbidden: not a purchasing member" }, { status: 403 }),
+    });
+
+    const response = await GET();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "forbidden: not a purchasing member" });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.supplierPerformance", ctx, {});
+  });
+
+  it.each([
+    { capabilityId: "purchasing.apAging", expectedError: "aging read failed" },
+    { capabilityId: "purchasing.priceHistory", expectedError: "price history read failed" },
+  ])("sets no-store when opted-in supplier reads precede a TypeScript $capabilityId failure", async ({ capabilityId, expectedError }) => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_PERFORMANCE_READS", "1");
+    mocks.getDb.mockReturnValue({ db: purchasingReadDb() });
+    mocks.execute.mockImplementation(async (requestedCapabilityId: string) => requestedCapabilityId === capabilityId
+      ? { ok: false, error: expectedError }
+      : { ok: true, data: requestedCapabilityId === "purchasing.apAging" ? { buckets: {} } : { rows: [] } });
+
+    const response = await GET();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: expectedError });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "malformed response",
+      result: { kind: "response", response: Response.json({ ok: true, data: { vendors: [{ vendorId: "vendor-1", vendorName: "Acme", orders: "3", avgLeadTimeDays: null, onTimeRate: null, fillRate: null, backorderedOrders: 0 }] } }) },
+    },
+    {
+      name: "unexpected vendor field",
+      result: { kind: "response", response: Response.json({ ok: true, data: { vendors: [{ vendorId: "33333333-3333-4333-8333-333333333333", vendorName: "Acme", orders: 0, avgLeadTimeDays: null, onTimeRate: null, fillRate: null, backorderedOrders: 0, secret: true }] } }) },
+    },
+    {
+      name: "unexpected envelope field",
+      result: { kind: "response", response: Response.json({ ok: true, data: { vendors: [] }, secret: true }) },
+    },
+    { name: "Go unavailable", result: { kind: "not-dispatched" } },
+    { name: "uncertain result", result: { kind: "outcome-unknown" } },
+  ])("fails closed on $name without retrying supplier performance through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_PERFORMANCE_READS", "1");
+    mocks.getDb.mockReturnValue({ db: purchasingReadDb() });
+    mocks.execute.mockImplementation(async (capabilityId: string) => ({
+      ok: true,
+      data: capabilityId === "purchasing.apAging" ? { buckets: {} } : { rows: [] },
+    }));
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.supplierPerformance", ctx, {});
   });
 
   it("dispatches price history to Go behind its opt-in flag with the legacy response shape", async () => {

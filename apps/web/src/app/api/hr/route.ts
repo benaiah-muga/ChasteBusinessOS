@@ -8,6 +8,14 @@ import { missingPermission } from "@/server/route-guards";
 import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
 
 const noStore = { "Cache-Control": "no-store" };
+const hrApplicantListSchema = z.object({
+  applicants: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    stage: z.string(),
+    note: z.string().nullable(),
+  }).strict()),
+}).strict();
 
 function hrEmployeeGoUnavailable() {
   return NextResponse.json(
@@ -98,9 +106,14 @@ async function hrEmployeeGoResponse(
 }
 
 export async function GET() {
+  const useGoApplicantReads = process.env.GO_HR_APPLICANT_READS === "1";
   const resolved = await getResolvedUser();
-  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!resolved?.orgId) return NextResponse.json(
+    { error: "unauthorized" },
+    { status: 401, ...(useGoApplicantReads ? { headers: noStore } : {}) },
+  );
   const denied = missingPermission(resolved, "hr.read");
+  if (denied && useGoApplicantReads) denied.headers.set("Cache-Control", "no-store");
   if (denied) return denied;
   const db = getDb().db;
   const orgId = resolved.orgId;
@@ -146,9 +159,41 @@ export async function GET() {
     .limit(50);
 
   const ctx = actorFromResolved(resolved, {});
-  const executor = ctx ? buildExecutor(db, buildRegistry(db)) : null;
+  const executor = ctx && !useGoApplicantReads ? buildExecutor(db, buildRegistry(db)) : null;
   const applicants: Array<{ id: string; openingId: string; name: string; stage: string; note: string | null }> = [];
-  if (executor && ctx) {
+  if (useGoApplicantReads && !ctx) return hrUnavailable("HR service unavailable; check employee status before retrying");
+  if (useGoApplicantReads && ctx) {
+    for (const opening of openings.filter((o) => o.status === "open")) {
+      let result: GoCapabilityBridgeResult;
+      try {
+        result = await executeGoCapability({
+          actionContext: ctx,
+          session: {
+            userId: resolved.userId,
+            orgId: resolved.orgId,
+            authSessionId: resolved.authSessionId,
+          },
+          capabilityId: "hr.listApplicants",
+          input: { openingId: opening.id },
+        });
+      } catch {
+        return hrUnavailable("HR service unavailable; check employee status before retrying");
+      }
+      if (result.kind !== "response" || result.response.status !== 200) {
+        return hrUnavailable("HR service unavailable; check employee status before retrying");
+      }
+      const body: unknown = await result.response.json().catch(() => null);
+      const parsed = z.object({
+        ok: z.literal(true),
+        data: hrApplicantListSchema,
+        replayed: z.boolean().optional(),
+      }).strict().safeParse(body);
+      if (!parsed.success) return hrUnavailable("HR service unavailable; check employee status before retrying");
+      for (const applicant of parsed.data.data.applicants) {
+        applicants.push({ ...applicant, openingId: opening.id });
+      }
+    }
+  } else if (executor && ctx) {
     for (const opening of openings.filter((o) => o.status === "open")) {
       const result = await executor.execute("hr.listApplicants", ctx, { openingId: opening.id });
       const data = result.data as { applicants: { id: string; name: string; stage: string; note: string | null }[] } | undefined;
@@ -170,7 +215,7 @@ export async function GET() {
     )
     .limit(200);
 
-  return NextResponse.json({
+  const responseBody = {
     employees: staff.map((e) => ({
       id: e.id,
       name: e.name,
@@ -204,7 +249,10 @@ export async function GET() {
       clockedInAt: c.clockedInAt!.toISOString(),
       late: c.late,
     })),
-  });
+  };
+  return useGoApplicantReads
+    ? NextResponse.json(responseBody, { headers: noStore })
+    : NextResponse.json(responseBody);
 }
 
 export async function POST(req: Request) {
