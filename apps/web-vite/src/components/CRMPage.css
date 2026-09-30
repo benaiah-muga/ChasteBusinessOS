@@ -63,6 +63,10 @@
 .crm-saved-views > input { width: 145px !important; }
 .crm-saved-views > button, .crm-view-chip button { min-height: 29px !important; }
 .crm-view-chip { display: inline-flex; align-items: center; gap: 3px; border: 1px solid #e8e5db; border-radius: 7px; padding: 2px 4px 2px 8px; color: #74766d; font-size: 9px; }
+.crm-bulk-customer-form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; border-bottom: 1px solid #efede7; padding: 10px 0; color: #72756c; font-size: 9px; }
+.crm-bulk-customer-form > span { min-height: 32px; display: flex; align-items: center; font-weight: 650; }
+.crm-bulk-customer-form label { display: grid; min-width: 145px; gap: 5px; font-weight: 650; }
+.crm-bulk-customer-form button { min-height: 32px; }
 .crm-table-wrap { overflow-x: auto; margin-top: 9px; }
 .crm-table { width: 100%; border-collapse: collapse; font-size: 10px; text-align: left; }
 .crm-table th { color: #919289; font-size: 9px; font-weight: 650; }

@@ -212,3 +212,33 @@ func TestGoWave9SupportGovernedExecutorPath(t *testing.T) {
 		t.Fatalf("system messages=%d, want open plus escalation notes", got)
 	}
 }
+
+func TestGoWave9SupportListHandlesConversationWithoutMessages(t *testing.T) {
+	fx := newExecutorFixture(t)
+	grantWavePermission(t, fx, "support.read")
+	var conversationID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO support_conversations (org_id, subject, status, created_by_actor_type)
+		VALUES ($1::uuid, 'Empty transcript', 'open', 'human')
+		RETURNING id::text`, fx.orgID).Scan(&conversationID); err != nil {
+		t.Fatal(err)
+	}
+
+	input := json.RawMessage(`{"limit":50}`)
+	result, err := fx.executor.Execute(fx.ctx,
+		waveModuleClaims(fx, supportListConversationsCapabilityID, "support.read", input, "human", "", "wave9-empty-support-list"),
+		supportListConversationsCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("support.listConversations result=%+v err=%v", result, err)
+	}
+	var output SupportListConversationsOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Conversations) != 1 || output.Conversations[0].ID != conversationID || output.Conversations[0].LastMessagePreview != "" {
+		t.Fatalf("conversations=%+v, want the empty transcript row with an empty preview", output.Conversations)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, output.Conversations[0].LastMessageAt); err != nil {
+		t.Fatalf("lastMessageAt=%q, want the conversation creation timestamp", output.Conversations[0].LastMessageAt)
+	}
+}

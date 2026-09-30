@@ -3,6 +3,72 @@ import { z } from "zod";
 import { getDb } from "@chaste/db";
 import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+const documentVersionsSchema = z.object({
+  versions: z.array(z.object({
+    version: z.number().int().positive(),
+    note: z.string().nullable(),
+    createdBy: z.string().nullable(),
+    createdAt: z.string().datetime(),
+  }).strict()),
+}).strict();
+
+type DocumentVersionGoOutcome =
+  | { kind: "versions"; versions: { versions: z.infer<typeof documentVersionsSchema>["versions"] } }
+  | { kind: "response"; response: NextResponse };
+
+async function documentVersionGoResponse(result: GoCapabilityBridgeResult, kind: "list" | "get"): Promise<DocumentVersionGoOutcome> {
+  const unavailable = (): DocumentVersionGoOutcome => ({
+    kind: "response",
+    response: NextResponse.json({ error: "Go documents service unavailable" }, { status: 503, headers: noStore }),
+  });
+  if (result.kind !== "response") return unavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const dataSchema = kind === "list"
+        ? documentVersionsSchema
+        : z.object({
+            version: z.number().int().positive(),
+            content: z.record(z.string(), z.unknown()),
+            html: z.string(),
+            note: z.string().nullable(),
+            createdAt: z.string().datetime(),
+          }).strict();
+      const parsed = z.object({ ok: z.literal(true), data: dataSchema }).strict().safeParse(body);
+      if (!parsed.success) return unavailable();
+      if (kind === "list") {
+        const data = parsed.data.data;
+        if (!("versions" in data)) return unavailable();
+        return { kind: "versions", versions: { versions: data.versions } };
+      }
+      const data = parsed.data.data;
+      if (!("version" in data)) return unavailable();
+      return {
+        kind: "response",
+        response: NextResponse.json({ version: data.version, html: data.html, note: data.note, createdAt: data.createdAt }, { headers: noStore }),
+      };
+    }
+    if (result.response.status === 401 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      return parsed.success
+        ? { kind: "response", response: NextResponse.json({ error: parsed.data.error }, { status: result.response.status, headers: noStore }) }
+        : unavailable();
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      return parsed.success
+        ? { kind: "response", response: NextResponse.json({ error: parsed.data.error }, { status: kind === "get" ? 404 : 422, headers: noStore }) }
+        : unavailable();
+    }
+  } catch {
+    return unavailable();
+  }
+  return unavailable();
+}
 
 /**
  * One authored document: full read (content + version history) for the
@@ -20,6 +86,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const version = new URL(req.url).searchParams.get("version");
   if (version) {
+    const versionNumber = Number(version);
+    if (
+      process.env.GO_DOCUMENTS_VERSION_READS === "1" &&
+      Number.isSafeInteger(versionNumber) && versionNumber >= 1 &&
+      ctx.actor.type === "human" && ctx.actor.id === resolved.userId &&
+      ctx.actor.orgId === resolved.orgId && resolved.authSessionId
+    ) {
+      try {
+        const result = await documentVersionGoResponse(await executeGoCapability({
+          actionContext: ctx,
+          session: resolved,
+          capabilityId: "documents.getDocVersion",
+          input: { documentId: id, version: versionNumber },
+        }), "get");
+        if (result.kind !== "response") return NextResponse.json({ error: "Go documents service unavailable" }, { status: 503, headers: noStore });
+        return result.response;
+      } catch {
+        return NextResponse.json({ error: "Go documents service unavailable" }, { status: 503, headers: noStore });
+      }
+    }
     const one = await executor.execute("documents.getDocVersion", ctx, { documentId: id, version: Number(version) });
     if (!one.ok) return NextResponse.json({ error: one.error }, { status: 404 });
     const v = (one.data ?? {}) as { version?: number; html?: string; note?: string | null; createdAt?: string };
@@ -28,9 +114,30 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const doc = await executor.execute("documents.getDoc", ctx, { documentId: id });
   if (!doc.ok) return NextResponse.json({ error: doc.error }, { status: doc.error === "document not found" ? 404 : 422 });
-  const versions = await executor.execute("documents.listDocVersions", ctx, { documentId: id });
   const payload = (doc.data ?? {}) as { document?: unknown };
-  const versionRows = (versions.ok ? versions.data : {}) as { versions?: unknown[] } | undefined;
+  let versionRows: { versions?: unknown[] } | undefined;
+  if (
+    process.env.GO_DOCUMENTS_VERSION_READS === "1" &&
+    ctx.actor.type === "human" && ctx.actor.id === resolved.userId &&
+    ctx.actor.orgId === resolved.orgId && resolved.authSessionId
+  ) {
+    try {
+      const result = await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "documents.listDocVersions",
+        input: { documentId: id },
+      });
+      const goVersions = await documentVersionGoResponse(result, "list");
+      if (goVersions.kind === "response") return goVersions.response;
+      versionRows = goVersions.versions;
+    } catch {
+      return NextResponse.json({ error: "Go documents service unavailable" }, { status: 503, headers: noStore });
+    }
+  } else {
+    const versions = await executor.execute("documents.listDocVersions", ctx, { documentId: id });
+    versionRows = (versions.ok ? versions.data : {}) as { versions?: unknown[] } | undefined;
+  }
   return NextResponse.json({
     document: payload.document ?? null,
     versions: versionRows?.versions ?? [],

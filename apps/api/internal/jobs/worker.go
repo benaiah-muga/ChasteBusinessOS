@@ -71,6 +71,9 @@ type Worker struct {
 // migration's claim list in sync with these IDs. Routine and document jobs are
 // deliberately absent and remain with the legacy worker.
 var GoCapabilityPermissions = map[string]string{
+	"documents.listDocs":                       "documents.read",
+	"documents.listDocVersions":                "documents.read",
+	"documents.getDocVersion":                  "documents.read",
 	"crm.createCustomer":                       "crm.write",
 	"crm.deactivateCustomer":                   "crm.write",
 	"crm.mergeCustomers":                       "crm.write",

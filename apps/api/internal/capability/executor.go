@@ -83,6 +83,8 @@ var capabilitySpecs = map[string]capabilitySpec{
 	listCustomerViewsCapabilityID:                       {module: "crm", permission: "crm.read", risk: "read"},
 	listDealsCapabilityID:                               {module: "crm", permission: "crm.read", risk: "read"},
 	documentsListDocsCapabilityID:                       {module: "documents", permission: "documents.read", risk: "read"},
+	documentsListDocVersionsCapabilityID:                {module: "documents", permission: "documents.read", risk: "read"},
+	documentsGetDocVersionCapabilityID:                  {module: "documents", permission: "documents.read", risk: "read"},
 	pipelineReportCapabilityID:                          {module: "crm", permission: "crm.read", risk: "read"},
 	listTasksCapabilityID:                               {module: "crm", permission: "crm.read", risk: "read"},
 	customerTimelineCapabilityID:                        {module: "crm", permission: "crm.read", risk: "read"},
@@ -326,7 +328,9 @@ func supportedCapability(capabilityID string) bool {
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
-		listCustomersCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID, pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
+		listCustomersCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID,
+		documentsListDocVersionsCapabilityID, documentsGetDocVersionCapabilityID,
+		pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
 		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID,
 		createTaskCapabilityID, completeTaskCapabilityID, updateTaskDetailsCapabilityID, restoreTaskDetailsCapabilityID,
 		createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID,
@@ -591,6 +595,18 @@ func (e *Executor) execute(
 			input = parsed
 		case documentsListDocsCapabilityID:
 			parsed, err := ParseListAuthoredDocsInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case documentsListDocVersionsCapabilityID:
+			parsed, err := ParseListDocumentVersionsInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case documentsGetDocVersionCapabilityID:
+			parsed, err := parseDocumentVersionInput(capabilityID, rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -1337,6 +1353,21 @@ func (e *Executor) execute(
 		case ListAuthoredDocsInput:
 			output, err := listAuthoredDocs(ctx, tx, claims.OrganizationID)
 			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case ListDocumentVersionsInput:
+			output, err := listDocumentVersions(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case DocumentVersionIDInput:
+			output, err := getDocumentVersion(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				if errors.Is(err, ErrDocumentVersionNotFound) {
+					return Result{OK: false, Error: fmt.Sprintf("no version %d", parsed.Version)}, nil
+				}
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
@@ -2601,7 +2632,8 @@ func canonicalInputHash(input any) (string, error) {
 		return parsed.CanonicalHash()
 	case CustomerProfileSnapshotsInput:
 		return parsed.CanonicalHash()
-	case ListCustomersInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput, ListAuthoredDocsInput,
+	case ListCustomersInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
+		ListAuthoredDocsInput, ListDocumentVersionsInput, DocumentVersionIDInput,
 		CreateDealInput, MoveDealStageInput, ConvertLeadInput,
 		CreateTaskInput, CompleteTaskInput, UpdateTaskDetailsInput,
 		CreateQuoteInput, AcceptQuoteInput, DeclineQuoteInput, ExpireQuoteInput, ListQuotesInput,

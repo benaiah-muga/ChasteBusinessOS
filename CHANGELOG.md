@@ -11,6 +11,11 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- **Fixed accounting report input parity.** Go's `accounting.reportCurrencyMetadata` parser now accepts and strips unknown object keys, matching the TypeScript Zod contract.
+- **Vite CRM customer bulk updates.** Select visible customer records to assign an owner and add a tag through the existing governed profile API, retaining its approval-pending behavior.
+- **Fixed Go read parity for supplier metrics and support conversations.** Void purchase orders no longer affect supplier performance, and support conversation lists use the conversation creation time when a thread has no messages.
+- **Opt-in Go authored-document version reads.** Version history and single-version content reads on `GET /api/docs/:id` can use signed Go capabilities behind `GO_DOCUMENTS_VERSION_READS=1`. The flag defaults off, preserves the legacy response projection, and fails closed when Go is unavailable or returns invalid data.
+- **Routine worker migration remains in progress.** Go routine capabilities can enqueue `routines.executeRoutine`, but the legacy TypeScript worker still owns that agent-run job until the Go routine agent runner is implemented.
 - **Opt-in Go POS shift-summary reads.** The `shiftSummary` action on `/api/pos` can use the signed `pos.shiftSummary` capability behind `GO_POS_SHIFT_SUMMARY_READS=1`. The flag defaults off, the summary response is validated and preserved, and unavailable or malformed Go responses fail closed without a TypeScript retry.
 - **Opt-in Go payment-run reads.** `GET /api/purchasing/payment-runs` can use the signed Go `purchasing.listPaymentRuns` capability behind `GO_PURCHASING_PAYMENT_RUN_READS=1`. The flag defaults off; run state, timestamps, journal references, and bill-level remittance fields are validated and preserved, and unavailable or malformed Go results fail closed.
 - **Opt-in Go inventory transfer reads.** The transfer list on `GET /api/inventory` can use signed Go `inventory.listTransfers` reads behind `GO_INVENTORY_TRANSFER_READS=1`. The flag defaults off; transfer routes, notes, the 50-row limit, and line quantities are preserved, and unavailable or malformed Go results fail closed.

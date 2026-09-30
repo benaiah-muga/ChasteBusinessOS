@@ -612,7 +612,7 @@ func supportPostMessage(ctx context.Context, tx pgx.Tx, claims authbridge.Capabi
 func supportListConversations(ctx context.Context, tx pgx.Tx, orgID string, input SupportListConversationsInput) (SupportListConversationsOutput, error) {
 	query := `
 		SELECT c.id::text, coalesce(c.customer_id::text, ''), coalesce(cu.name, c.visitor_email, 'Website visitor'),
-		       c.subject, c.status, m.created_at, coalesce(left(m.body, 140), '')
+		       c.subject, c.status, COALESCE(m.created_at, c.created_at), coalesce(left(m.body, 140), '')
 		FROM support_conversations c
 		LEFT JOIN customers cu ON cu.id = c.customer_id AND cu.org_id=$1::uuid
 		LEFT JOIN LATERAL (

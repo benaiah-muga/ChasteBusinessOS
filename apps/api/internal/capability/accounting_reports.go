@@ -35,12 +35,8 @@ type ReportCurrencyMetadataOutput struct {
 }
 
 func ParseReportCurrencyMetadataInput(raw json.RawMessage) (ReportCurrencyMetadataInput, error) {
-	fields, err := decodeJSONObject(raw)
-	if err != nil {
+	if _, err := decodeJSONObject(raw); err != nil {
 		return ReportCurrencyMetadataInput{}, err
-	}
-	if len(fields) != 0 {
-		return ReportCurrencyMetadataInput{}, errors.New("input does not accept fields")
 	}
 	return ReportCurrencyMetadataInput{}, nil
 }

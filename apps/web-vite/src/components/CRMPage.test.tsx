@@ -89,6 +89,44 @@ describe("Vite CRM page", () => {
     expect(timelineReads).toBeGreaterThan(1);
   });
 
+  it("bulk assigns selected customers and adds a tag through the governed profile action", async () => {
+    const secondCustomerId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
+    const customers = [customer(), { ...customer("Contoso"), id: secondCustomerId, tags: [] }];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method === "POST") return Response.json({ ok: true, data: { updatedCount: 2, previous: [] } });
+      if (path === "/api/customers") return Response.json({ customers });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select Northwind" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Contoso" }));
+    await screen.findAllByRole("option", { name: "Avery" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Bulk owner" }), { target: { value: ownerId } });
+    const bulkTag = screen.getByRole("textbox", { name: "Bulk tag" });
+    expect(bulkTag).toHaveProperty("maxLength", 40);
+    fireEvent.change(bulkTag, { target: { value: "renewal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply to selected" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")).toBe(true));
+    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/customers" && init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      action: "updateProfile",
+      customerIds: [customerId, secondCustomerId],
+      ownerUserId: ownerId,
+      addTags: ["renewal"],
+    });
+    await waitFor(() => expect(screen.getByText("0 selected")).not.toBeNull());
+  });
+
   it("keeps the selected customer's timeline when profile requests finish out of order", async () => {
     const secondCustomerId = "3cebf482-832f-4bf2-b322-03ca9c123456";
     const secondCustomer = { ...customer("Contoso"), id: secondCustomerId };

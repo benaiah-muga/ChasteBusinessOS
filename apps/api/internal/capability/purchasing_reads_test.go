@@ -84,6 +84,12 @@ func TestPurchasingReadsSupplierAnalytics(t *testing.T) {
 	promisedAt := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
 	receivedAt := time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)
 	vendorID, poID := seedPurchasingReadsVendorWithPO(t, fx, 1, &orderedAt, &promisedAt)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO purchase_orders (org_id, vendor_id, number, status, memo, ordered_at, promised_at, backordered)
+		VALUES ($1::uuid, $2::uuid, 2, 'void', 'void wave8 order', $3, $4, true)`,
+		fx.orgID, vendorID, orderedAt, promisedAt); err != nil {
+		t.Fatal(err)
+	}
 	itemID := seedManufacturingBomItem(t, fx, fx.orgID, "WIRE", "Wire")
 
 	var poLineID string
@@ -146,7 +152,7 @@ func TestPurchasingReadsSupplierAnalytics(t *testing.T) {
 			fx.orgID, vendorID, time.Date(2026, 8, 6, 9, 0, 0, 0, time.UTC)); err != nil {
 			return struct{}{}, err
 		}
-			if _, err := tx.Exec(context.Background(), `
+		if _, err := tx.Exec(context.Background(), `
 			INSERT INTO accounts (org_id, code, name, type) VALUES ($1::uuid, '2000', 'Accounts Payable', 'liability'), ($1::uuid, '1000', 'Cash', 'asset')`, fx.orgID); err != nil {
 			return struct{}{}, err
 		}

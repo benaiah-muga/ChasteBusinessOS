@@ -309,6 +309,7 @@ NVIDIA_API_KEY=""      # default; free tier at build.nvidia.com
 | AP aging read shows an upstream error | `GO_PURCHASING_AP_AGING_READS=1` but Go is unavailable | Start `pnpm dev:api` or set `GO_PURCHASING_AP_AGING_READS=0` |
 | Job opening write shows an upstream error | `GO_HR_OPENINGS_WRITE=1` but Go is unavailable or the write outcome could not be confirmed | Check the opening before retrying; start `pnpm dev:api` or set `GO_HR_OPENINGS_WRITE=0` |
 | Reminder read shows an upstream error | `GO_ACCOUNTING_REMINDERS_READS=1` but Go is unavailable | Start `pnpm dev:api` or set `GO_ACCOUNTING_REMINDERS_READS=0` |
+| Document version history shows an upstream error | `GO_DOCUMENTS_VERSION_READS=1` but Go is unavailable or returned an invalid response | Start `pnpm dev:api` or set `GO_DOCUMENTS_VERSION_READS=0` |
 | `NVIDIA_API_KEY is not set` at runtime | No provider key | Expected without one - see [§5](#5-optional-the-ai-provider-key) |
 
 **Still stuck?** The `packages/db` package has `db:studio` (Drizzle Studio) for

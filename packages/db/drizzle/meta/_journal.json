@@ -737,6 +737,13 @@
       "when": 1790715123971,
       "tag": "0104_go_support_capability_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1790780065659,
+      "tag": "0105_go_document_version_reads",
+      "breakpoints": true
     }
   ]
 }

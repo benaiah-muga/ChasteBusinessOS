@@ -164,7 +164,7 @@ func purchasingSupplierPerformance(ctx context.Context, tx pgx.Tx, orgID string,
 	for _, vendor := range vendors {
 		poRows, err := tx.Query(ctx, `
 			SELECT id::text, backordered, ordered_at, promised_at FROM purchase_orders
-			WHERE org_id=$1::uuid AND vendor_id=$2::uuid`, orgID, vendor.id)
+			WHERE org_id=$1::uuid AND vendor_id=$2::uuid AND status <> 'void'`, orgID, vendor.id)
 		if err != nil {
 			return PurchasingSupplierPerformanceOutput{}, err
 		}

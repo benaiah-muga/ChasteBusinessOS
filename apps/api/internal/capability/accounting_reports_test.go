@@ -26,9 +26,9 @@ func TestAccountingReportsParsersMirrorZodContracts(t *testing.T) {
 			}
 		}
 	}
-	for _, bad := range []string{`{"currency":"USD"}`, `{"unknown":true}`} {
-		if _, err := ParseReportCurrencyMetadataInput(json.RawMessage(bad)); err == nil {
-			t.Errorf("ParseReportCurrencyMetadataInput accepted %s", bad)
+	for _, extra := range []string{`{"currency":"USD"}`, `{"unknown":true}`} {
+		if _, err := ParseReportCurrencyMetadataInput(json.RawMessage(extra)); err != nil {
+			t.Errorf("ParseReportCurrencyMetadataInput must strip unknown fields like z.object({}): %s: %v", extra, err)
 		}
 	}
 

@@ -222,6 +222,12 @@ into the signed Go `documents.listDocs` capability. It requires `pnpm dev:api`;
 template reads remain on the legacy executor, and the combined response is
 preserved. Unavailable or invalid Go results fail closed. TypeScript remains
 the default; the flag defaults to `0`.
+`GO_DOCUMENTS_VERSION_READS=1` opts authored document version history and
+single-version reads on `GET /api/docs/:id` into the signed Go
+`documents.listDocVersions` and `documents.getDocVersion` capabilities. It
+requires `pnpm dev:api`, preserves the current document read and public
+response projections, and fails closed after Go dispatch. TypeScript remains
+the default; the flag defaults to `0`.
 `GO_ACCOUNTING_QUOTES_WRITE=1` opts quote creation, acceptance, decline, and
 expiry sweeps into the signed Go capability bridge. It requires `pnpm
 dev:api`; the dedicated quotes route and other accounting actions remain on

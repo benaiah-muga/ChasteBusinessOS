@@ -137,8 +137,12 @@ runtime owner. A separate Go capability-jobs worker now claims only its
 verified capability allowlist and reuses existing job rows, receipts,
 approval payloads, audit events, and durable-run transitions under a dedicated
 least-privilege role. The default TypeScript worker still owns all production
-queue traffic; routine scheduling, email delivery, and worker cutover remain
-pending.
+queue traffic. Go routine capabilities can enqueue `routines.executeRoutine`,
+but the Go capability worker does not claim or execute that job: the existing
+TypeScript worker owns its agent loop, tool dispatch, and routine occurrence
+finalization. Port that agent-run path and its durable occurrence handling
+before moving routine jobs or cutting over the worker. Email delivery and
+broader worker cutover also remain pending.
 
 The Vite client now includes `/sessions`, `/projects`, and `/analytics`
 previews. Analytics preserves permission-filtered dataset discovery, governed
@@ -540,9 +544,10 @@ new owners and the manifest shows zero legacy runtime paths.
     unauthenticated access reaches Better Auth before CRM APIs load. Preserve
     pipeline actions, lead conversion, AI follow-up drafting, customer profiles
     and merges, saved views, imports and undo, tasks, approvals, deal
-    board/table/search, and customer timelines. Focused API and component tests
-    pass. Keep API and page ownership on the existing defaults until runtime
-    and parity proofs pass; browser proof remains deferred by user direction.
+    board/table/search, customer timelines, and bulk customer owner/tag updates.
+    Focused API and component tests pass. Keep API and page ownership on the
+    existing defaults until runtime and parity proofs pass; browser proof
+    remains deferred by user direction.
 26. (Done) Add an opt-in Go read for the approvals inbox and recent history
     behind `GO_APPROVALS_READ`. Bind the complete TypeScript capability
     permission map to the signed request, and recheck the verified session,
@@ -583,7 +588,8 @@ new owners and the manifest shows zero legacy runtime paths.
     amounts. Report reads, receipt detail, purchase order closure, supplier
     bill credit, and the inventory stock report are covered by items below.
     Accounting report currency metadata now has a dedicated signed Go read.
-    Remaining accounting and FX parity proofs, inventory valuation and other
+    Its Go input parser now has a regression proof for Zod-compatible unknown
+    key stripping. Remaining accounting and FX parity proofs, inventory valuation and other
     read models, broader purchasing parity proofs, and route ownership changes
     remain open; route defaults stay on the existing owners until those gates
     pass.
@@ -863,3 +869,8 @@ new owners and the manifest shows zero legacy runtime paths.
     supplier performance (lead time, on-time rate, fill rate, backorders),
     price history, and the running-balance supplier statement - through the
     governed executor and jobs worker under `purchasing.read`.
+72. Add Go parity for authored document version history and single-version
+    reads through the governed executor and jobs worker. Bridge the existing
+    `GET /api/docs/:id` reads behind default-off `GO_DOCUMENTS_VERSION_READS`,
+    preserving tenant scope, author labels, millisecond timestamps, and the
+    current response projection.

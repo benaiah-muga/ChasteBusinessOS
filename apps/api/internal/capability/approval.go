@@ -521,6 +521,18 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case documentsListDocVersionsCapabilityID:
+			parsed, parseErr := ParseListDocumentVersionsInput(transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case documentsGetDocVersionCapabilityID:
+			parsed, parseErr := ParseDocumentVersionIDInput(transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case iamSetModulesCapabilityID, iamRestoreModulesCapabilityID, iamSetModuleConfigCapabilityID,
 			iamSetOrgPolicyCapabilityID, iamSetOrgBrandingCapabilityID:
 			parsed, parseErr := parseIAMOrgSettingsInput(transition.row.CapabilityID, transition.row.Payload)
@@ -824,6 +836,8 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "accounting.post", true
 	case iamListMembersCapabilityID:
 		return "iam.read", true
+	case documentsListDocsCapabilityID, documentsListDocVersionsCapabilityID, documentsGetDocVersionCapabilityID:
+		return "documents.read", true
 	case iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
 		return "iam.admin", true
 	default:
