@@ -481,6 +481,23 @@ export async function POST(req: Request) {
     }
   }
 
+  if (body.action === "customerStatement" && body.customerId && process.env.GO_ACCOUNTING_CUSTOMER_STATEMENT_READS === "1") {
+    try {
+      return await invoiceOpsGoResponse(
+        await executeGoCapability({
+          actionContext: humanCtx,
+          session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+          capabilityId: "accounting.customerStatement",
+          input: { customerId: body.customerId },
+        }),
+        customerStatementOutputSchema,
+        customerStatementUnavailable,
+      );
+    } catch {
+      return customerStatementUnavailable();
+    }
+  }
+
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
 
@@ -802,6 +819,20 @@ const reversePaymentOutputSchema = z.object({
   invoiceNumber: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   outstandingMinor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
+const customerStatementOutputSchema = z.object({
+  currencies: z.array(z.object({
+    currency: z.string(),
+    openingBalanceMinor: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+    closingBalanceMinor: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+    rows: z.array(z.object({
+      date: z.string().datetime(),
+      kind: z.string(),
+      ref: z.string(),
+      amountMinor: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+      balanceMinor: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+    })),
+  })),
+});
 
 function paymentUnavailable() {
   return NextResponse.json(
@@ -820,6 +851,13 @@ function paymentReversalUnavailable() {
 function fxRateUnavailable() {
   return NextResponse.json(
     { error: "accounting service unavailable; check FX rate status before retrying" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+function customerStatementUnavailable() {
+  return NextResponse.json(
+    { error: "accounting customer statement unavailable; reload before retrying" },
     { status: 503, headers: { "Cache-Control": "no-store" } },
   );
 }

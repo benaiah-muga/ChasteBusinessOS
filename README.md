@@ -161,6 +161,12 @@ default and the flag defaults to `0`.
 executor. It requires `pnpm dev:api`, preserves invoice fields, and fails
 closed without a TypeScript retry when Go is unavailable or returns invalid
 data. The TypeScript path remains the default and the flag defaults to `0`.
+`GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1` opts only the
+`customerStatement` action on `POST /api/accounting` into the signed Go
+`accounting.customerStatement` capability. It requires `pnpm dev:api`, keeps
+the `{ ok, data }` response shape, and fails closed without a TypeScript retry
+when Go is unavailable or returns invalid data. The TypeScript path remains
+the default and the flag defaults to `0`.
 `GO_CRM_DEAL_WRITES=1` opts deal creation, stage changes, and lead conversion
 into the signed Go capability bridge. It requires `pnpm dev:api`; reads and
 other CRM actions remain on the legacy handler, and uncertain writes fail
@@ -336,8 +342,9 @@ the flag defaults to `0`.
 reads on `GET /api/inventory` into two signed Go `inventory.stockReport`
 capability calls. It requires `pnpm dev:api`, preserves the report and alert
 fields, and fails closed if Go is unavailable or either result is invalid.
-Other inventory reads remain on their existing handlers. TypeScript remains
-the default; the flag defaults to `0`.
+Other inventory reads remain on their existing handlers unless their dedicated
+read flags below are enabled. TypeScript remains the default; the flag defaults
+to `0`.
 `GO_INVENTORY_TRANSFER_READS=1` opts the transfer list on `GET /api/inventory`
 into the signed Go `inventory.listTransfers` read. It requires `pnpm dev:api`,
 preserves the 50-row limit, transfer routes, notes, and line quantities, and
@@ -359,6 +366,11 @@ requires `pnpm dev:api`, preserves the 20-row newest-first order, location,
 status, note, timestamps, line quantities, and nullable count and variance
 fields, and fails closed if Go is unavailable or returns invalid data. The
 flag defaults to `0`.
+`GO_INVENTORY_LOCATIONS_READS=1` opts the stock location list on
+`GET /api/inventory` into the signed Go `inventory.listLocations` read. It
+requires `pnpm dev:api`, preserves the legacy row fields and code ordering,
+resolves location IDs within the active organization, and fails closed if Go is
+unavailable or returns invalid data. The flag defaults to `0`.
 `GO_INVENTORY_VALUATION_SUMMARY_WRITE=1` opts the existing
 `postValuationSummary` action on `POST /api/inventory` into the signed Go
 `inventory.postValuationSummary` capability. It requires `pnpm dev:api`,
@@ -388,9 +400,9 @@ on their existing handlers, and uncertain writes fail closed without a
 TypeScript retry. The flag defaults to `0`.
 `GO_INVENTORY_ITEM_WRITES=1` opts item creation, updates, archiving, and
 location creation into the signed Go capability bridge. It requires `pnpm
-dev:api`; barcode lookup, listing, and other inventory actions remain on their
-existing handlers, and uncertain writes fail closed without a TypeScript
-retry. The flag defaults to `0`.
+dev:api`; barcode lookup and other inventory actions remain on their existing
+handlers, and uncertain writes fail closed without a TypeScript retry. The flag
+defaults to `0`.
 `GO_ACCOUNTING_TAX_RETURNS_WRITE=1` opts sales tax return filing into the
 signed Go capability bridge. It requires `pnpm dev:api`; tax profile and code
 management ride the executor and worker without a route flag, other

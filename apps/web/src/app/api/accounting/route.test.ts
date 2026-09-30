@@ -254,6 +254,100 @@ describe("GET /api/accounting Go invoice read bridge", () => {
   });
 });
 
+const customerStatementOutput = {
+  currencies: [{
+    currency: "UGX",
+    openingBalanceMinor: 0,
+    closingBalanceMinor: 80000,
+    rows: [{
+      date: "2026-09-27T12:00:00.000Z",
+      kind: "invoice",
+      ref: "Invoice #104",
+      amountMinor: 80000,
+      balanceMinor: 80000,
+    }],
+  }],
+};
+
+describe("POST /api/accounting Go customer statement read bridge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_ACCOUNTING_CUSTOMER_STATEMENT_READS", "0");
+    mocks.getResolvedUser.mockResolvedValue(resolved);
+    mocks.actorFromResolved.mockReturnValue(actionContext);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: customerStatementOutput });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps customer statements on the TypeScript executor by default", async () => {
+    delete process.env.GO_ACCOUNTING_CUSTOMER_STATEMENT_READS;
+
+    const response = await POST(request({ action: "customerStatement", customerId: "d00d512e-ab21-4f45-9199-f53d81e9597f" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: customerStatementOutput });
+    expect(mocks.execute).toHaveBeenCalledWith("accounting.customerStatement", actionContext, {
+      customerId: "d00d512e-ab21-4f45-9199-f53d81e9597f",
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the governed statement read and preserves its validated response", async () => {
+    vi.stubEnv("GO_ACCOUNTING_CUSTOMER_STATEMENT_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: customerStatementOutput }),
+    });
+
+    const response = await POST(request({ action: "customerStatement", customerId: "d00d512e-ab21-4f45-9199-f53d81e9597f" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: customerStatementOutput });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext,
+      session: {
+        userId: resolved.userId,
+        orgId: resolved.orgId,
+        authSessionId: resolved.authSessionId,
+      },
+      capabilityId: "accounting.customerStatement",
+      input: { customerId: "d00d512e-ab21-4f45-9199-f53d81e9597f" },
+    });
+    expect(mocks.buildExecutor).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves valid capability errors and fails closed without a TypeScript retry", async () => {
+    vi.stubEnv("GO_ACCOUNTING_CUSTOMER_STATEMENT_READS", "1");
+    mocks.executeGoCapability.mockResolvedValueOnce({
+      kind: "response",
+      response: Response.json({ ok: false, error: "forbidden: missing permission: accounting.read" }, { status: 422 }),
+    });
+    const denied = await POST(request({ action: "customerStatement", customerId: "d00d512e-ab21-4f45-9199-f53d81e9597f" }));
+    expect(denied.status).toBe(422);
+    expect(await denied.json()).toEqual({ ok: false, error: "forbidden: missing permission: accounting.read" });
+
+    mocks.executeGoCapability.mockResolvedValueOnce({ kind: "outcome-unknown" });
+    const unavailable = await POST(request({ action: "customerStatement", customerId: "d00d512e-ab21-4f45-9199-f53d81e9597f" }));
+    expect(unavailable.status).toBe(503);
+
+    mocks.executeGoCapability.mockResolvedValueOnce({
+      kind: "response",
+      response: Response.json({ ok: true, data: { currencies: [{ currency: "UGX", rows: [{ amountMinor: 3.5 }] }] } }),
+    });
+    const malformed = await POST(request({ action: "customerStatement", customerId: "d00d512e-ab21-4f45-9199-f53d81e9597f" }));
+    expect(malformed.status).toBe(503);
+    expect(await malformed.json()).toEqual({ error: "accounting customer statement unavailable; reload before retrying" });
+    expect(mocks.buildExecutor).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/accounting Go invoice bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();

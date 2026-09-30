@@ -69,6 +69,7 @@ describe("inventory Go route adapter", () => {
     vi.stubEnv("GO_INVENTORY_LOTS_READS", "0");
     vi.stubEnv("GO_INVENTORY_RESERVATIONS_READS", "0");
     vi.stubEnv("GO_INVENTORY_CYCLE_COUNTS_READS", "0");
+    vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -113,6 +114,96 @@ describe("inventory Go route adapter", () => {
     expect(mocks.execute).toHaveBeenCalledWith("inventory.stockReport", ctx, { belowReorderOnly: false });
     expect(mocks.execute).toHaveBeenCalledWith("inventory.stockReport", ctx, { belowReorderOnly: true });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps inventory locations on the legacy database read by default", async () => {
+    const location = { id: "location-1", orgId: user.orgId, code: "MAIN", name: "Main warehouse" };
+    mocks.getDb.mockReturnValue({ db: inventoryReadDb([[], [location], [], [], [], []]) });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).locations).toEqual([location]);
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches inventory locations to Go and preserves the legacy row shape", async () => {
+    vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "1");
+    const location = { id: "location-1", orgId: user.orgId, code: "MAIN", name: "Legacy warehouse name" };
+    const db = inventoryReadDb([[], [location], [], [], [], []]);
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { locations: [{ code: "MAIN", name: "Main warehouse" }] } }),
+    });
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).locations).toEqual([{ ...location, name: "Main warehouse" }]);
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.listLocations",
+      input: {},
+    });
+    expect(db.select).toHaveBeenCalledTimes(6);
+  });
+
+  it.each([
+    { name: "malformed response", result: { kind: "response", response: Response.json({ ok: true, data: { locations: [{ code: "MAIN", name: 9 }] } }) } },
+    { name: "Go unavailable", result: { kind: "not-dispatched" } },
+    { name: "uncertain result", result: { kind: "outcome-unknown" } },
+  ])("fails closed on $name without loading locations through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "1");
+    const db = inventoryReadDb([[]]);
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+    expect(db.select).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a Go inventory read permission denial", async () => {
+    vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "1");
+    const db = inventoryReadDb([[]]);
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "missing permission: inventory.read" }, { status: 403 }),
+    });
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "missing permission: inventory.read" });
+    expect(db.select).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when Go locations cannot be matched to active-organization IDs", async () => {
+    vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "1");
+    const db = inventoryReadDb([[], [{ id: "location-1", orgId: user.orgId, code: "MAIN", name: "Main warehouse" }]]);
+    mocks.getDb.mockReturnValue({ db });
+    mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { locations: [{ code: "OTHER", name: "Other warehouse" }] } }),
+    });
+
+    const response = await GET(readRequest());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+    expect(db.select).toHaveBeenCalledTimes(2);
   });
 
   it("keeps lot rows on TypeScript by default", async () => {

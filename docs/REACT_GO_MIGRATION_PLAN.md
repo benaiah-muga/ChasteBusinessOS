@@ -901,3 +901,19 @@ new owners and the manifest shows zero legacy runtime paths.
     closed on unavailable, malformed, wrong-period, or wrong UTC window Go
     output. Focused route tests cover default ownership, Go dispatch, and
     response validation.
+
+74. (Done) Add a default-off signed Go bridge for the stock location list in
+    `GET /api/inventory` using `GO_INVENTORY_LOCATIONS_READS=1`. Preserve the
+    legacy location row fields and code ordering, correlate Go's code/name rows
+    with IDs from the active organization, and fail closed when Go is
+    unavailable, malformed, or cannot be reconciled with those IDs. Route tests
+    cover default TypeScript ownership, Go dispatch, response parity, and
+    fail-closed behavior.
+
+75. (Done) Add a default-off signed Go bridge for the
+    `accounting.customerStatement` read action on `POST /api/accounting` using
+    `GO_ACCOUNTING_CUSTOMER_STATEMENT_READS=1`. Validate currency balances,
+    dated rows, and integer minor-unit amounts; preserve the legacy response
+    envelope and capability errors; fail closed on unavailable or malformed
+    Go responses without a TypeScript retry. Focused route tests cover default
+    ownership, dispatch, errors, and response validation.
