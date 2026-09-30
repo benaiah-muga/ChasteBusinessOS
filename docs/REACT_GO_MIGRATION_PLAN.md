@@ -905,11 +905,10 @@ new owners and the manifest shows zero legacy runtime paths.
 
 74. (Done) Add a default-off signed Go bridge for the stock location list in
     `GET /api/inventory` using `GO_INVENTORY_LOCATIONS_READS=1`. Preserve the
-    legacy location row fields and code ordering, correlate Go's code/name rows
-    with IDs from the active organization, and fail closed when Go is
-    unavailable, malformed, or cannot be reconciled with those IDs. Route tests
-    cover default TypeScript ownership, Go dispatch, response parity, and
-    fail-closed behavior.
+    legacy location row fields and code ordering through Go's
+    `inventory.listLocationRecords` capability, and fail closed on unavailable
+    or malformed output. Route tests cover default TypeScript ownership, Go
+    dispatch, response parity, and fail-closed behavior.
 
 75. (Done) Add a default-off signed Go bridge for the
     `accounting.customerStatement` read action on `POST /api/accounting` using
@@ -1015,8 +1014,43 @@ new owners and the manifest shows zero legacy runtime paths.
 
 90. (Done) Add a default-off signed Go bridge for support conversation detail
     reads on `GET /api/support?id=<id>` using
-    `GO_SUPPORT_CONVERSATION_DETAIL_READS=1`. Preserve every legacy detail
-    fields and the oldest-first 200-message route limit, return 404 for missing or unbound
-    conversations, and fail closed on unavailable or malformed output. Keep
-    the routine's default 20-message output unchanged when no limit is given.
-    Verify with tenant-scoped database parity and route tests.
+    `GO_SUPPORT_CONVERSATION_DETAIL_READS=1`. Preserve all legacy detail
+    fields and the oldest-first 200-message route limit, return 404 for missing
+    or unbound conversations, and fail closed on unavailable or malformed
+    output. Keep the routine's default 20-message output unchanged when no
+    limit is given. Verify with tenant-scoped database parity and route tests.
+
+91. (Done) Close support detail review findings: accept valid uppercase UUID
+    query values when matching canonical Go IDs, and fail closed when message
+    row iteration returns a database error. Verify the uppercase route case
+    and Go support capability tests.
+
+92. (Done) Add a default-off signed Go bridge for the `supplierStatement`
+    action on `POST /api/purchasing` using
+    `GO_PURCHASING_SUPPLIER_STATEMENT_READS=1`. Preserve the governed
+    `purchasing.read` capability, the legacy statement response, no-store
+    behavior, and fail-closed handling without a TypeScript retry.
+
+93. (Done) Expose `purchasing.supplierStatement` to Go routines as
+    `purchasing_supplierStatement` with a required UUID `vendorId`, the
+    `purchasing.read` permission, tenant-scoped result coverage, and a
+    session-linked system audit event.
+
+94. (Done) Make supplier statement reads fail closed on bill, credit, or
+    payment row-iteration errors, and use stable date/kind ordering to match
+    TypeScript behavior for tied rows.
+
+95. (Done) Add explicit `Cache-Control: no-store` headers to the Go-backed
+    invoice-list responses from `GET /api/accounting`, including error paths.
+
+96. (Done) Close the inventory location bridge review finding by adding a
+    separate tenant-scoped `inventory.listLocationRecords` capability with the
+    full legacy row fields. Remove the follow-up TypeScript location query from
+    the Go route while keeping `inventory.listLocations` routine output
+    unchanged. Verify organization filtering, timestamp and response parity,
+    default TypeScript behavior, and fail-closed Go handling.
+
+97. (Done) Close the latest support and accounting read review findings:
+    serialize empty Go support transcripts as `[]` for default and full-detail
+    responses, and apply no-store headers to early unauthorized and permission
+    denials when Go invoice reads are enabled.

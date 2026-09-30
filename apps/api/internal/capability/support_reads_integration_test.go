@@ -87,4 +87,36 @@ func TestGoSupportReadConversationMatchesLegacyDetail(t *testing.T) {
 	if len(legacyMessages) != supportTranscriptMaxMessages || len(legacyConversation) != 5 || len(legacyMessage) != 3 {
 		t.Fatalf("default detail shape conversation=%v firstMessage=%v messages=%d, want unchanged header/message fields and default limit %d", legacyConversation, legacyMessage, len(legacyMessages), supportTranscriptMaxMessages)
 	}
+
+	var emptyConversationID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO support_conversations (org_id, customer_id, subject, status, priority, created_by_actor_type)
+		VALUES ($1::uuid, $2::uuid, 'No messages yet', 'open', 'normal', 'human')
+		RETURNING id::text`, fx.orgID, customerID).Scan(&emptyConversationID); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name  string
+		input string
+	}{
+		{name: "default projection", input: `{"conversationId":"` + emptyConversationID + `"}`},
+		{name: "full detail", input: `{"conversationId":"` + emptyConversationID + `","fullDetail":true}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := json.RawMessage(test.input)
+			result, err := fx.executor.Execute(fx.ctx,
+				waveModuleClaims(fx, supportReadConversationCapabilityID, "support.read", input, "human", "", "support-empty-detail"),
+				supportReadConversationCapabilityID, input)
+			if err != nil || !result.OK {
+				t.Fatalf("support.readConversation result=%+v err=%v", result, err)
+			}
+			var output map[string]json.RawMessage
+			if err := json.Unmarshal(result.Data, &output); err != nil {
+				t.Fatalf("decode support.readConversation output: %v", err)
+			}
+			if got := string(output["messages"]); got != "[]" {
+				t.Fatalf("messages JSON=%s, want an empty array", got)
+			}
+		})
+	}
 }

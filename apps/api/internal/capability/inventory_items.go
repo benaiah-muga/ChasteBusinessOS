@@ -15,13 +15,14 @@ import (
 )
 
 const (
-	inventoryCreateItemCapabilityID      = "inventory.createItem"
-	inventoryUpdateItemCapabilityID      = "inventory.updateItem"
-	inventoryRestoreItemCapabilityID     = "inventory.restoreItem"
-	inventoryArchiveItemCapabilityID     = "inventory.archiveItem"
-	inventoryCreateLocationCapabilityID  = "inventory.createLocation"
-	inventoryListLocationsCapabilityID   = "inventory.listLocations"
-	inventoryLookupByBarcodeCapabilityID = "inventory.lookupByBarcode"
+	inventoryCreateItemCapabilityID          = "inventory.createItem"
+	inventoryUpdateItemCapabilityID          = "inventory.updateItem"
+	inventoryRestoreItemCapabilityID         = "inventory.restoreItem"
+	inventoryArchiveItemCapabilityID         = "inventory.archiveItem"
+	inventoryCreateLocationCapabilityID      = "inventory.createLocation"
+	inventoryListLocationsCapabilityID       = "inventory.listLocations"
+	inventoryListLocationRecordsCapabilityID = "inventory.listLocationRecords"
+	inventoryLookupByBarcodeCapabilityID     = "inventory.lookupByBarcode"
 )
 
 type InventoryCreateItemInput struct {
@@ -155,6 +156,20 @@ type InventoryListLocationsOutput struct {
 	Locations []InventoryListLocationRow `json:"locations"`
 }
 
+type InventoryListLocationRecordsInput struct{}
+
+type InventoryLocationRecordRow struct {
+	ID        string `json:"id"`
+	OrgID     string `json:"orgId"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type InventoryListLocationRecordsOutput struct {
+	Locations []InventoryLocationRecordRow `json:"locations"`
+}
+
 type InventoryLookupByBarcodeInput struct {
 	Barcode string `json:"barcode"`
 }
@@ -184,6 +199,8 @@ func parseInventoryItemInput(capabilityID string, raw json.RawMessage) (any, err
 		return ParseInventoryCreateLocationInput(raw)
 	case inventoryListLocationsCapabilityID:
 		return ParseInventoryListLocationsInput(raw)
+	case inventoryListLocationRecordsCapabilityID:
+		return ParseInventoryListLocationRecordsInput(raw)
 	case inventoryLookupByBarcodeCapabilityID:
 		return ParseInventoryLookupByBarcodeInput(raw)
 	default:
@@ -477,6 +494,13 @@ func ParseInventoryListLocationsInput(raw json.RawMessage) (InventoryListLocatio
 	return InventoryListLocationsInput{}, nil
 }
 
+func ParseInventoryListLocationRecordsInput(raw json.RawMessage) (InventoryListLocationRecordsInput, error) {
+	if _, err := decodeJSONObject(raw); err != nil {
+		return InventoryListLocationRecordsInput{}, err
+	}
+	return InventoryListLocationRecordsInput{}, nil
+}
+
 func ParseInventoryLookupByBarcodeInput(raw json.RawMessage) (InventoryLookupByBarcodeInput, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
@@ -700,6 +724,30 @@ func inventoryListLocations(ctx context.Context, tx pgx.Tx, orgID string, input 
 		return InventoryListLocationsOutput{}, err
 	}
 	return InventoryListLocationsOutput{Locations: locations}, nil
+}
+
+func inventoryListLocationRecords(ctx context.Context, tx pgx.Tx, orgID string, input InventoryListLocationRecordsInput) (InventoryListLocationRecordsOutput, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, org_id::text, code, name, created_at
+		FROM stock_locations WHERE org_id = $1::uuid ORDER BY code ASC`, orgID)
+	if err != nil {
+		return InventoryListLocationRecordsOutput{}, err
+	}
+	defer rows.Close()
+	locations := make([]InventoryLocationRecordRow, 0)
+	for rows.Next() {
+		var location InventoryLocationRecordRow
+		var createdAt time.Time
+		if err := rows.Scan(&location.ID, &location.OrgID, &location.Code, &location.Name, &createdAt); err != nil {
+			return InventoryListLocationRecordsOutput{}, err
+		}
+		location.CreatedAt = createdAt.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+		locations = append(locations, location)
+	}
+	if err := rows.Err(); err != nil {
+		return InventoryListLocationRecordsOutput{}, err
+	}
+	return InventoryListLocationRecordsOutput{Locations: locations}, nil
 }
 
 func inventoryLookupByBarcode(ctx context.Context, tx pgx.Tx, orgID string, input InventoryLookupByBarcodeInput) (InventoryLookupByBarcodeOutput, error) {

@@ -182,6 +182,7 @@ var GoCapabilityPermissions = map[string]string{
 	"inventory.archiveItem":                    "inventory.write",
 	"inventory.createLocation":                 "inventory.write",
 	"inventory.listLocations":                  "inventory.read",
+	"inventory.listLocationRecords":            "inventory.read",
 	"inventory.lookupByBarcode":                "inventory.read",
 	"inventory.importItems":                    "inventory.write",
 	"inventory.undoItemImport":                 "inventory.write",

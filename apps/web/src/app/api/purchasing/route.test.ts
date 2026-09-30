@@ -47,6 +47,7 @@ describe("purchasing Go route adapter", () => {
     vi.stubEnv("GO_PURCHASING_WORKFLOW_READS", "0");
     vi.stubEnv("GO_PURCHASING_AP_AGING_READS", "0");
     vi.stubEnv("GO_PURCHASING_PRICE_HISTORY_READS", "0");
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_STATEMENT_READS", "0");
     mocks.getResolvedUser.mockResolvedValue(user);
     mocks.actorFromResolved.mockReturnValue(ctx);
     mocks.getDb.mockReturnValue({ db: {} });
@@ -109,6 +110,93 @@ describe("purchasing Go route adapter", () => {
       }],
     }]);
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("keeps supplier statements on TypeScript by default", async () => {
+    const statement = {
+      closingBalanceMinor: 7500,
+      rows: [{
+        date: "2026-09-24T10:15:00.000Z",
+        kind: "bill",
+        ref: "Bill #12",
+        amountMinor: 7500,
+        balanceMinor: 7500,
+      }],
+    };
+    mocks.execute.mockResolvedValue({ ok: true, data: statement });
+
+    const response = await POST(request({ action: "supplierStatement", vendorId: "33333333-3333-4333-8333-333333333333" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: statement });
+    expect(mocks.execute).toHaveBeenCalledWith("purchasing.supplierStatement", ctx, { vendorId: "33333333-3333-4333-8333-333333333333" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches supplier statements to Go behind the opt-in flag with no-store and the legacy response shape", async () => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_STATEMENT_READS", "1");
+    const statement = {
+      closingBalanceMinor: 7500,
+      rows: [{
+        date: "2026-09-24T10:15:00.000Z",
+        kind: "bill",
+        ref: "Bill #12",
+        amountMinor: 7500,
+        balanceMinor: 7500,
+      }],
+    };
+    mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: statement }) });
+
+    const response = await POST(request({ action: "supplierStatement", vendorId: "33333333-3333-4333-8333-333333333333" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: statement });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "purchasing.supplierStatement",
+      input: { vendorId: "33333333-3333-4333-8333-333333333333" },
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.supplierStatement", ctx, expect.anything());
+  });
+
+  it.each([
+    { kind: "not-dispatched" },
+    { kind: "outcome-unknown" },
+  ])("fails closed for supplier statements on $kind without falling back to TypeScript", async (bridgeResult) => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_STATEMENT_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue(bridgeResult);
+
+    const response = await POST(request({ action: "supplierStatement", vendorId: "33333333-3333-4333-8333-333333333333" }));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing supplier statement service unavailable; reload before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.supplierStatement", ctx, expect.anything());
+  });
+
+  it("fails closed for malformed Go supplier statement output without TypeScript fallback", async () => {
+    vi.stubEnv("GO_PURCHASING_SUPPLIER_STATEMENT_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: {
+        closingBalanceMinor: 7500,
+        rows: [{ date: "not-a-date", kind: "bill", ref: "Bill #12", amountMinor: "7500", balanceMinor: 7500 }],
+      } }),
+    });
+
+    const response = await POST(request({ action: "supplierStatement", vendorId: "33333333-3333-4333-8333-333333333333" }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "purchasing supplier statement service unavailable; reload before retrying",
+    });
+    expect(mocks.execute).not.toHaveBeenCalledWith("purchasing.supplierStatement", ctx, expect.anything());
   });
 
   it("keeps price history on TypeScript by default", async () => {

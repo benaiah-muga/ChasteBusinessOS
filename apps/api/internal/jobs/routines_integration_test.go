@@ -120,6 +120,26 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		VALUES ($1::uuid, $2::uuid, 81, 'sent', 99000, 0, 99000, $3, 'human')`, otherOrgID, foreignQuoteCustomerID, quoteCreatedAt.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	var localVendorID, foreignVendorID string
+	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Routine local supplier') RETURNING id::text`, orgID).Scan(&localVendorID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `INSERT INTO vendors (org_id, name) VALUES ($1::uuid, 'Routine foreign supplier') RETURNING id::text`, otherOrgID).Scan(&foreignVendorID); err != nil {
+		t.Fatal(err)
+	}
+	statementAt := time.Date(2026, 9, 30, 9, 10, 11, 123000000, time.UTC)
+	var localBillID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO vendor_bills (org_id, vendor_id, number, status, currency, total_minor, bill_date, created_at)
+		VALUES ($1::uuid, $2::uuid, 71, 'open', 'USD', 12345, $3, $3)
+		RETURNING id::text`, orgID, localVendorID, statementAt).Scan(&localBillID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO vendor_bills (org_id, vendor_id, number, status, currency, total_minor, bill_date, created_at)
+		VALUES ($1::uuid, $2::uuid, 71, 'open', 'USD', 98765, $3, $3)`, otherOrgID, foreignVendorID, statementAt); err != nil {
+		t.Fatal(err)
+	}
 	secret := "routine-test-encryption-secret"
 	t.Setenv("AI_CONFIG_ENCRYPTION_KEY", secret)
 	serverCalls := atomic.Int32{}
@@ -133,6 +153,11 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		call := serverCalls.Add(1)
 		if call%2 == 1 {
 			quoteFilterArgs := `{"status":"sent"}`
+			statementArgs, err := json.Marshal(map[string]string{"vendorId": localVendorID})
+			if err != nil {
+				t.Errorf("encode supplier statement arguments: %v", err)
+				return
+			}
 			timelineArgs, err := json.Marshal(map[string]any{"customerId": localQuoteCustomerID, "limit": 20})
 			if err != nil {
 				t.Errorf("encode CRM customer timeline arguments: %v", err)
@@ -171,6 +196,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-accounting-quotes", "type": "function", "function": map[string]any{"name": "accounting_listQuotes", "arguments": quoteFilterArgs}},
 					map[string]any{"id": "call-routine-inventory-locations", "type": "function", "function": map[string]any{"name": "inventory_listLocations", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-inventory", "type": "function", "function": map[string]any{"name": "inventory_stockReport", "arguments": `{"belowReorderOnly":false}`}},
+					map[string]any{"id": "call-routine-supplier-statement", "type": "function", "function": map[string]any{"name": "purchasing_supplierStatement", "arguments": string(statementArgs)}},
 					map[string]any{"id": "call-routine-documents", "type": "function", "function": map[string]any{"name": "documents_listDocs", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(localVersionArgs)}},
 					map[string]any{"id": "call-routine-foreign-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(foreignVersionArgs)}},
@@ -201,6 +227,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundDocumentResult := false
 		foundLocationResult := false
 		foundQuoteResult := false
+		foundSupplierStatementResult := false
 		foundTimelineResult := false
 		foundLocalVersionResult := false
 		foundForeignVersionResult := false
@@ -212,6 +239,33 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				continue
 			}
 			switch message.ToolCallID {
+			case "call-routine-supplier-statement":
+				foundSupplierStatementResult = true
+				var result struct {
+					OK   bool `json:"ok"`
+					Data struct {
+						ClosingBalanceMinor int64 `json:"closingBalanceMinor"`
+						Rows                []struct {
+							Date         string `json:"date"`
+							Kind         string `json:"kind"`
+							Ref          string `json:"ref"`
+							AmountMinor  int64  `json:"amountMinor"`
+							BalanceMinor int64  `json:"balanceMinor"`
+						} `json:"rows"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode purchasing.supplierStatement tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || result.Data.ClosingBalanceMinor != 12345 || len(result.Data.Rows) != 1 {
+					t.Errorf("purchasing.supplierStatement result = %+v, want one local bill and closing balance 12345", result)
+					continue
+				}
+				row := result.Data.Rows[0]
+				if row.Date != "2026-09-30T09:10:11.123Z" || row.Kind != "bill" || row.Ref != "Bill #71" || row.AmountMinor != 12345 || row.BalanceMinor != 12345 {
+					t.Errorf("purchasing.supplierStatement row = %+v, want the seeded local bill", row)
+				}
 			case "call-routine-documents":
 				foundDocumentResult = true
 				var result struct {
@@ -430,6 +484,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundQuoteResult {
 			t.Errorf("follow-up provider request omitted the accounting.listQuotes tool result")
 		}
+		if !foundSupplierStatementResult {
+			t.Errorf("follow-up provider request omitted the purchasing.supplierStatement tool result")
+		}
 		if !foundTimelineResult {
 			t.Errorf("follow-up provider request omitted the crm.customerTimeline tool result")
 		}
@@ -508,6 +565,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='accounting.listQuotes' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
 		t.Fatalf("session-linked accounting quote-list system capability audit events=%d", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='purchasing.supplierStatement' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
+		t.Fatalf("session-linked purchasing supplier-statement system capability audit events=%d", got)
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='inventory.stockReport' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 1 {
 		t.Fatalf("session-linked inventory system capability audit events=%d", got)

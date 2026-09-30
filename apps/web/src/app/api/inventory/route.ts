@@ -495,12 +495,13 @@ async function dispatchInventoryCycleCountsGo(
 async function dispatchInventoryLocationsGo(
   ctx: ReturnType<typeof actorFromResolved> & {},
   session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+  orgId: string,
 ) {
   try {
     const result = await executeGoCapability({
       actionContext: ctx,
       session,
-      capabilityId: "inventory.listLocations",
+      capabilityId: "inventory.listLocationRecords",
       input: {},
     });
     if (result.kind !== "response") return goUnavailable();
@@ -509,10 +510,17 @@ async function dispatchInventoryLocationsGo(
       const parsed = z.object({
         ok: z.literal(true),
         data: z.object({
-          locations: z.array(z.object({ code: z.string(), name: z.string() })),
-        }),
-      }).safeParse(body);
+          locations: z.array(z.object({
+            id: z.string().uuid(),
+            orgId: z.string().uuid(),
+            code: z.string(),
+            name: z.string(),
+            createdAt: z.string().datetime({ offset: true }),
+          }).strict()),
+        }).strict(),
+      }).strict().safeParse(body);
       if (!parsed.success) return goUnavailable();
+      if (parsed.data.data.locations.some((location) => location.orgId !== orgId)) return goUnavailable();
       return parsed.data.data.locations;
     }
     if (result.response.status === 401 || result.response.status === 403) {
@@ -612,19 +620,11 @@ export async function GET(req: Request) {
   const skuOf = new Map(itemRows.map((r) => [r.id, r.sku]));
   const itemBySku = new Map(itemRows.map(({ sku, ...item }) => [sku, item]));
 
-  let locations: (typeof stockLocations.$inferSelect)[];
+  let locations: Array<Omit<typeof stockLocations.$inferSelect, "createdAt"> & { createdAt: Date | string }>;
   if (process.env.GO_INVENTORY_LOCATIONS_READS === "1") {
-    const goLocations = await dispatchInventoryLocationsGo(ctx, resolved);
+    const goLocations = await dispatchInventoryLocationsGo(ctx, resolved, orgId);
     if (goLocations instanceof Response) return goLocations;
-    const locationRows = await db
-      .select()
-      .from(stockLocations)
-      .where(eq(stockLocations.orgId, orgId))
-      .orderBy(stockLocations.code);
-    if (locationRows.length !== goLocations.length || goLocations.some((location, index) => location.code !== locationRows[index]?.code)) {
-      return goUnavailable();
-    }
-    locations = goLocations.map((location, index) => ({ ...locationRows[index]!, ...location }));
+    locations = goLocations;
   } else {
     locations = await db
       .select()

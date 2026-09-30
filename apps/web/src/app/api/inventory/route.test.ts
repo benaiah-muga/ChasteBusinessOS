@@ -130,37 +130,37 @@ describe("inventory Go route adapter", () => {
 
   it("dispatches inventory locations to Go and preserves the legacy row shape", async () => {
     vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "1");
-    const location = { id: "location-1", orgId: user.orgId, code: "MAIN", name: "Legacy warehouse name" };
-    const db = inventoryReadDb([[], [location], [], [], [], []]);
+    const location = { id: "11111111-1111-4111-8111-111111111111", orgId: user.orgId, code: "MAIN", name: "Legacy warehouse name", createdAt: "2026-09-29T10:00:00.000Z" };
+    const db = inventoryReadDb([[], [], [], [], []]);
     mocks.getDb.mockReturnValue({ db });
     mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
     mocks.executeGoCapability.mockResolvedValue({
       kind: "response",
-      response: Response.json({ ok: true, data: { locations: [{ code: "MAIN", name: "Main warehouse" }] } }),
+      response: Response.json({ ok: true, data: { locations: [location] } }),
     });
 
     const response = await GET(readRequest());
 
     expect(response.status).toBe(200);
-    expect((await response.json()).locations).toEqual([{ ...location, name: "Main warehouse" }]);
+    expect((await response.json()).locations).toEqual([location]);
     expect(mocks.executeGoCapability).toHaveBeenCalledWith({
       actionContext: ctx,
       session: user,
-      capabilityId: "inventory.listLocations",
+      capabilityId: "inventory.listLocationRecords",
       input: {},
     });
-    expect(db.select).toHaveBeenCalledTimes(6);
+    expect(db.select).toHaveBeenCalledTimes(5);
   });
 
   it("preserves empty location strings accepted by the legacy output contract", async () => {
     vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "1");
-    const location = { id: "location-empty", orgId: user.orgId, code: "", name: "" };
-    const db = inventoryReadDb([[], [location]]);
+    const location = { id: "22222222-2222-4222-8222-222222222222", orgId: user.orgId, code: "", name: "", createdAt: "2026-09-29T10:00:00.000Z" };
+    const db = inventoryReadDb([[]]);
     mocks.getDb.mockReturnValue({ db });
     mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
     mocks.executeGoCapability.mockResolvedValue({
       kind: "response",
-      response: Response.json({ ok: true, data: { locations: [{ code: "", name: "" }] } }),
+      response: Response.json({ ok: true, data: { locations: [location] } }),
     });
 
     const response = await GET(readRequest());
@@ -171,6 +171,7 @@ describe("inventory Go route adapter", () => {
 
   it.each([
     { name: "malformed response", result: { kind: "response", response: Response.json({ ok: true, data: { locations: [{ code: "MAIN", name: 9 }] } }) } },
+    { name: "unexpected response fields", result: { kind: "response", response: Response.json({ ok: true, data: { locations: [{ id: "11111111-1111-4111-8111-111111111111", orgId: user.orgId, code: "MAIN", name: "Warehouse", createdAt: "2026-09-29T10:00:00.000Z", secret: "unexpected" }] } }) } },
     { name: "Go unavailable", result: { kind: "not-dispatched" } },
     { name: "uncertain result", result: { kind: "outcome-unknown" } },
   ])("fails closed on $name without loading locations through TypeScript", async ({ result }) => {
@@ -205,14 +206,14 @@ describe("inventory Go route adapter", () => {
     expect(db.select).toHaveBeenCalledTimes(1);
   });
 
-  it("fails closed when Go locations cannot be matched to active-organization IDs", async () => {
+  it("rejects location records outside the active organization", async () => {
     vi.stubEnv("GO_INVENTORY_LOCATIONS_READS", "1");
-    const db = inventoryReadDb([[], [{ id: "location-1", orgId: user.orgId, code: "MAIN", name: "Main warehouse" }]]);
+    const db = inventoryReadDb([[]]);
     mocks.getDb.mockReturnValue({ db });
     mocks.execute.mockResolvedValue({ ok: true, data: { items: [], totalValueMinor: 0 } });
     mocks.executeGoCapability.mockResolvedValue({
       kind: "response",
-      response: Response.json({ ok: true, data: { locations: [{ code: "OTHER", name: "Other warehouse" }] } }),
+      response: Response.json({ ok: true, data: { locations: [{ id: "33333333-3333-4333-8333-333333333333", orgId: "44444444-4444-4444-8444-444444444444", code: "OTHER", name: "Other warehouse", createdAt: "2026-09-29T10:00:00.000Z" }] } }),
     });
 
     const response = await GET(readRequest());
@@ -220,7 +221,7 @@ describe("inventory Go route adapter", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
-    expect(db.select).toHaveBeenCalledTimes(2);
+    expect(db.select).toHaveBeenCalledTimes(1);
   });
 
   it("keeps lot rows on TypeScript by default", async () => {

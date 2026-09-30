@@ -172,6 +172,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	inventoryArchiveItemCapabilityID:                    {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryCreateLocationCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryListLocationsCapabilityID:                  {module: "inventory", permission: "inventory.read", risk: "read"},
+	inventoryListLocationRecordsCapabilityID:            {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryLookupByBarcodeCapabilityID:                {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryImportItemsCapabilityID:                    {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryUndoItemImportCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
@@ -353,6 +354,7 @@ func supportedCapability(capabilityID string) bool {
 		selectWinningQuoteCapabilityID, listPurchaseWorkflowCapabilityID,
 		inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
 		inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
+		inventoryListLocationRecordsCapabilityID,
 		inventoryLookupByBarcodeCapabilityID,
 		inventoryImportItemsCapabilityID, inventoryUndoItemImportCapabilityID, inventoryRestoreItemImportCapabilityID,
 		inventoryReserveStockCapabilityID, inventoryReleaseReservationCapabilityID, inventoryListReservationsCapabilityID,
@@ -860,6 +862,7 @@ func (e *Executor) execute(
 			input = parsed
 		case inventoryCreateItemCapabilityID, inventoryUpdateItemCapabilityID, inventoryRestoreItemCapabilityID,
 			inventoryArchiveItemCapabilityID, inventoryCreateLocationCapabilityID, inventoryListLocationsCapabilityID,
+			inventoryListLocationRecordsCapabilityID,
 			inventoryLookupByBarcodeCapabilityID:
 			parsed, err := parseInventoryItemInput(capabilityID, rawInput)
 			if err != nil {
@@ -1793,6 +1796,12 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case InventoryListLocationRecordsInput:
+			output, err := inventoryListLocationRecords(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case InventoryLookupByBarcodeInput:
 			output, err := inventoryLookupByBarcode(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -2668,7 +2677,7 @@ func canonicalInputHash(input any) (string, error) {
 		CreatePurchaseRequestInput, DecidePurchaseRequestInput, CreateRfqInput, RecordQuoteInput,
 		SelectWinningQuoteInput, ListPurchaseWorkflowInput,
 		InventoryCreateItemInput, InventoryItemPatchInput, InventoryArchiveItemInput, InventoryCreateLocationInput,
-		InventoryListLocationsInput, InventoryLookupByBarcodeInput, InventoryListCycleCountsInput,
+		InventoryListLocationsInput, InventoryListLocationRecordsInput, InventoryLookupByBarcodeInput, InventoryListCycleCountsInput,
 		InventoryImportItemsInput, InventoryUndoItemImportInput, InventoryRestoreItemImportInput,
 		InventoryReserveStockInput, InventoryReleaseReservationInput, InventoryListReservationsInput,
 		CreatePaymentRunInput, PaymentRunIDInput, ReversePaymentRunInput, ListPaymentRunsInput, APAgingInput,

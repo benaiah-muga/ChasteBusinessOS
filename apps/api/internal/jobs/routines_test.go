@@ -39,11 +39,11 @@ func TestRoutineToolsMatchLegacyReadOnlyPermissionBundle(t *testing.T) {
 }
 
 func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
-	tools, _, err := routineToolSet()
+	tools, byName, err := routineToolSet()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge", "documents.listDocVersions"} {
+	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge", "documents.listDocVersions", "purchasing.supplierStatement"} {
 		var found *routineTool
 		for index := range tools {
 			if tools[index].Capability == capabilityID {
@@ -62,6 +62,27 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 		if !ok || properties[required[0]] == nil {
 			t.Fatalf("schema for %s omits required field %q: %#v", capabilityID, required[0], found.Schema)
 		}
+	}
+	var supplierStatement *routineTool
+	for index := range tools {
+		if tools[index].Capability == "purchasing.supplierStatement" {
+			supplierStatement = &tools[index]
+			break
+		}
+	}
+	if supplierStatement == nil || supplierStatement.Name != "purchasing_supplierStatement" || supplierStatement.Permission != "purchasing.read" {
+		t.Fatalf("supplier statement tool=%+v, want purchasing_supplierStatement with purchasing.read", supplierStatement)
+	}
+	statementProperties, ok := supplierStatement.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("supplier statement schema has no properties: %#v", supplierStatement.Schema)
+	}
+	vendorID, ok := statementProperties["vendorId"].(map[string]any)
+	if !ok || vendorID["type"] != "string" || vendorID["format"] != "uuid" {
+		t.Fatalf("supplier statement vendorId schema=%#v, want UUID string", statementProperties["vendorId"])
+	}
+	if got := byName[supplierStatement.Name]; got != "purchasing.supplierStatement" {
+		t.Fatalf("supplier statement routine dispatch maps to %q", got)
 	}
 	var customers *routineTool
 	for index := range tools {

@@ -216,7 +216,8 @@ describe("support conversation list Go bridge", () => {
       }),
     });
 
-    const response = await GET(request(`/api/support?id=${conversationId}`));
+    const uppercaseConversationId = conversationId.toUpperCase();
+    const response = await GET(request(`/api/support?id=${uppercaseConversationId}`));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -248,7 +249,7 @@ describe("support conversation list Go bridge", () => {
       actionContext: ctx,
       session: user,
       capabilityId: "support.readConversation",
-      input: { conversationId, limit: 200 },
+      input: { conversationId: uppercaseConversationId, limit: 200 },
     });
     expect(mocks.getDb).not.toHaveBeenCalled();
   });

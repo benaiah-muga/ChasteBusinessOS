@@ -758,7 +758,7 @@ func supportReadConversation(ctx context.Context, tx pgx.Tx, orgID string, input
 	if err != nil {
 		return SupportReadConversationOutput{}, err
 	}
-	var messages []SupportTranscriptMessage
+	messages := make([]SupportTranscriptMessage, 0)
 	for msgRows.Next() {
 		var message SupportTranscriptMessage
 		var createdAt time.Time
@@ -768,6 +768,10 @@ func supportReadConversation(ctx context.Context, tx pgx.Tx, orgID string, input
 		}
 		message.CreatedAt = createdAt.UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		messages = append(messages, message)
+	}
+	if err := msgRows.Err(); err != nil {
+		msgRows.Close()
+		return SupportReadConversationOutput{}, err
 	}
 	msgRows.Close()
 	if !input.FullDetail {

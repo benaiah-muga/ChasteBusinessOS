@@ -390,10 +390,12 @@ status, note, timestamps, line quantities, and nullable count and variance
 fields, and fails closed if Go is unavailable or returns invalid data. The
 flag defaults to `0`.
 `GO_INVENTORY_LOCATIONS_READS=1` opts the stock location list on
-`GET /api/inventory` into the signed Go `inventory.listLocations` read. It
+`GET /api/inventory` into the signed Go `inventory.listLocationRecords` read. It
 requires `pnpm dev:api`, preserves the legacy row fields and code ordering,
-resolves location IDs within the active organization, and fails closed if Go is
-unavailable or returns invalid data. The flag defaults to `0`.
+returns full org-scoped rows from Go without a second TypeScript location query,
+and fails closed if Go is unavailable or returns invalid data. The existing
+`inventory.listLocations` routine tool keeps its code/name response shape. The
+flag defaults to `0`.
 `GO_INVENTORY_BARCODE_LOOKUP_READS=1` opts the `lookupByBarcode` action on
 `POST /api/inventory` into the signed Go `inventory.lookupByBarcode` read. It
 requires `pnpm dev:api`, preserves the legacy response envelope and nullable
@@ -455,6 +457,12 @@ the signed Go `purchasing.priceHistory` capability. It requires `pnpm dev:api`,
 preserves the existing response shape, and fails closed if Go is unavailable
 or returns invalid data. Other purchasing reads and all writes remain on their
 existing handlers. The flag defaults to `0`.
+`GO_PURCHASING_SUPPLIER_STATEMENT_READS=1` opts the `supplierStatement` action
+on `POST /api/purchasing` into the signed Go `purchasing.supplierStatement`
+capability. It requires `pnpm dev:api`, preserves the existing response shape,
+and fails closed if Go is unavailable or returns invalid data. Other purchasing
+reads and all writes remain on their existing handlers. The flag defaults to
+`0`.
 `GO_HR_OPENINGS_WRITE=1` opts job opening creation and closure into the
 signed Go capability bridge. It requires `pnpm dev:api`; applicant actions
 remain on their existing handlers, and uncertain writes fail closed without a

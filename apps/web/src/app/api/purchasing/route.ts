@@ -26,6 +26,16 @@ const priceHistoryOutputSchema = z.object({
     orderedAt: z.string().datetime({ offset: true }).nullable(),
   }).strict()),
 }).strict();
+const supplierStatementOutputSchema = z.object({
+  closingBalanceMinor: z.number().int().safe(),
+  rows: z.array(z.object({
+    date: z.string().datetime({ offset: true }),
+    kind: z.string(),
+    ref: z.string(),
+    amountMinor: z.number().int().safe(),
+    balanceMinor: z.number().int().safe(),
+  }).strict()),
+}).strict();
 const purchaseWorkflowSchema = z.object({
   requests: z.array(z.object({
     id: z.string(),
@@ -710,6 +720,23 @@ export async function POST(req: Request) {
       );
     case "supplierStatement": {
       if (!body.vendorId) return NextResponse.json({ error: "vendorId is required" }, { status: 400 });
+      if (process.env.GO_PURCHASING_SUPPLIER_STATEMENT_READS === "1") {
+        const unavailableMessage = "purchasing supplier statement service unavailable; reload before retrying";
+        try {
+          return await purchasingGoResponse(
+            await executeGoCapability({
+              actionContext: ctx,
+              session: resolved,
+              capabilityId: "purchasing.supplierStatement",
+              input: { vendorId: body.vendorId as string },
+            }),
+            unavailableMessage,
+            supplierStatementOutputSchema,
+          );
+        } catch {
+          return goUnavailable(unavailableMessage);
+        }
+      }
       return respond(
         await executor.execute("purchasing.supplierStatement", ctx, { vendorId: body.vendorId as string }),
       );

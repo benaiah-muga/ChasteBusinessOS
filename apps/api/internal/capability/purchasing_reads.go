@@ -386,6 +386,10 @@ func purchasingSupplierStatement(ctx context.Context, tx pgx.Tx, orgID string, i
 		}
 		bills = append(bills, bill)
 	}
+	if err := billRows.Err(); err != nil {
+		billRows.Close()
+		return PurchasingSupplierStatementOutput{}, err
+	}
 	billRows.Close()
 
 	type statementRow struct {
@@ -434,6 +438,10 @@ func purchasingSupplierStatement(ctx context.Context, tx pgx.Tx, orgID string, i
 				amountMinor: -(debit - credit),
 			})
 		}
+		if err := creditRows.Err(); err != nil {
+			creditRows.Close()
+			return PurchasingSupplierStatementOutput{}, err
+		}
 		creditRows.Close()
 	}
 
@@ -459,9 +467,13 @@ func purchasingSupplierStatement(ctx context.Context, tx pgx.Tx, orgID string, i
 		}
 		rows = append(rows, statementRow{date: *paidAt, kind: "payment", ref: "Payment sent", amountMinor: -amount})
 	}
+	if err := paymentRows.Err(); err != nil {
+		paymentRows.Close()
+		return PurchasingSupplierStatementOutput{}, err
+	}
 	paymentRows.Close()
 
-	sort.Slice(rows, func(i, j int) bool {
+	sort.SliceStable(rows, func(i, j int) bool {
 		if !rows[i].date.Equal(rows[j].date) {
 			return rows[i].date.Before(rows[j].date)
 		}

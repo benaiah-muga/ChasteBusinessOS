@@ -166,6 +166,29 @@ describe("GET /api/accounting Go invoice read bridge", () => {
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
   });
 
+  it("marks early unauthorized Go-read responses as no-store", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_READS", "1");
+    mocks.getResolvedUser.mockResolvedValue(null);
+
+    const response = await GET();
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("marks early permission-denial Go-read responses as no-store", async () => {
+    vi.stubEnv("GO_ACCOUNTING_INVOICE_READS", "1");
+    const { missingPermission } = await import("@/server/route-guards");
+    vi.mocked(missingPermission).mockReturnValueOnce(Response.json({ error: "forbidden" }, { status: 403 }) as never);
+
+    const response = await GET();
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
   it("dispatches only the invoice-list capability to Go and validates its output", async () => {
     vi.stubEnv("GO_ACCOUNTING_INVOICE_READS", "1");
     mocks.executeGoCapability.mockResolvedValue({
@@ -177,6 +200,7 @@ describe("GET /api/accounting Go invoice read bridge", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(body.invoices).toEqual([listedInvoice]);
     expect(mocks.executeGoCapability).toHaveBeenCalledWith({
       actionContext,
@@ -216,6 +240,7 @@ describe("GET /api/accounting Go invoice read bridge", () => {
     const response = await GET();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect((await response.json()).invoices).toEqual([]);
     expect(mocks.buildExecutor).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
@@ -231,6 +256,7 @@ describe("GET /api/accounting Go invoice read bridge", () => {
     const response = await GET();
 
     expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ error: "forbidden: missing accounting.read" });
     expect(mocks.buildExecutor).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
@@ -241,6 +267,7 @@ describe("GET /api/accounting Go invoice read bridge", () => {
     mocks.executeGoCapability.mockResolvedValueOnce({ kind: "outcome-unknown" });
     const unavailable = await GET();
     expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("cache-control")).toBe("no-store");
 
     configureReadDatabase();
     mocks.executeGoCapability.mockResolvedValueOnce({
@@ -249,6 +276,7 @@ describe("GET /api/accounting Go invoice read bridge", () => {
     });
     const malformed = await GET();
     expect(malformed.status).toBe(503);
+    expect(malformed.headers.get("cache-control")).toBe("no-store");
     expect(mocks.buildExecutor).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
   });

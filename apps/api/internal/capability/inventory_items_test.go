@@ -89,6 +89,16 @@ func TestInventoryItemsParsersMirrorZodContracts(t *testing.T) {
 			outputJS: `{"locations":[{"code":"WH-A","name":"Main warehouse"}]}`,
 		},
 		{
+			name:     "listLocationRecords",
+			parse:    func(raw json.RawMessage) (any, error) { return ParseInventoryListLocationRecordsInput(raw) },
+			raw:      `{"ignored":true}`,
+			wantJSON: `{}`,
+			output: InventoryListLocationRecordsOutput{Locations: []InventoryLocationRecordRow{
+				{ID: "11111111-1111-4111-8111-111111111111", OrgID: "22222222-2222-4222-8222-222222222222", Code: "WH-A", Name: "Main warehouse", CreatedAt: "2026-09-29T10:00:00.000Z"},
+			}},
+			outputJS: `{"locations":[{"id":"11111111-1111-4111-8111-111111111111","orgId":"22222222-2222-4222-8222-222222222222","code":"WH-A","name":"Main warehouse","createdAt":"2026-09-29T10:00:00.000Z"}]}`,
+		},
+		{
 			name:     "lookupByBarcodeHit",
 			parse:    func(raw json.RawMessage) (any, error) { return ParseInventoryLookupByBarcodeInput(raw) },
 			raw:      `{"barcode":"4006381333931","unknown":6}`,
@@ -664,5 +674,73 @@ func TestInventoryItemsLocationsAndBarcodeLookup(t *testing.T) {
 	})
 	if archivedHit.Item == nil || archivedHit.Item.ID != scanned.ItemID {
 		t.Fatalf("archived lookup = %+v, want the archived item still found as the TS lookup does not filter it", archivedHit.Item)
+	}
+}
+
+func TestInventoryListLocationRecordsExecutionPreservesLegacyRowsAndScope(t *testing.T) {
+	fx := newExecutorFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'inventory.read', $2::uuid) ON CONFLICT DO NOTHING`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	localIDs := []string{executorUUID(t), executorUUID(t)}
+	foreignID := executorUUID(t)
+	for _, row := range []struct {
+		id, orgID, code, name string
+	}{
+		{localIDs[1], fx.orgID, "WH-Z", "Last warehouse"},
+		{foreignID, fx.otherOrgID, "WH-A", "Foreign warehouse"},
+		{localIDs[0], fx.orgID, "WH-A", "Main warehouse"},
+	} {
+		if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO stock_locations (id, org_id, code, name) VALUES ($1::uuid, $2::uuid, $3, $4)`, row.id, row.orgID, row.code, row.name); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	input := json.RawMessage(`{}`)
+	claims := fx.humanClaims(input, "")
+	claims.CapabilityID = inventoryListLocationRecordsCapabilityID
+	claims.Permissions = []string{"inventory.read"}
+	result, err := fx.executor.Execute(fx.ctx, claims, inventoryListLocationRecordsCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("list location records result=%+v err=%v", result, err)
+	}
+	var output InventoryListLocationRecordsOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil {
+		t.Fatalf("decode location records %s: %v", result.Data, err)
+	}
+	if len(output.Locations) != 2 {
+		t.Fatalf("location records = %+v, want only two local rows", output.Locations)
+	}
+	for index, want := range []struct{ id, code, name string }{
+		{localIDs[0], "WH-A", "Main warehouse"},
+		{localIDs[1], "WH-Z", "Last warehouse"},
+	} {
+		got := output.Locations[index]
+		if got.ID != want.id || got.OrgID != fx.orgID || got.Code != want.code || got.Name != want.name {
+			t.Fatalf("location record %d = %+v, want id/org/code/name %s/%s/%s/%s", index, got, want.id, fx.orgID, want.code, want.name)
+		}
+		var createdAt time.Time
+		if err := fx.owner.QueryRow(fx.ctx, `SELECT created_at FROM stock_locations WHERE id=$1::uuid`, want.id).Scan(&createdAt); err != nil {
+			t.Fatal(err)
+		}
+		wantCreatedAt := createdAt.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
+		if got.CreatedAt != wantCreatedAt {
+			t.Fatalf("createdAt = %q, want legacy millisecond ISO %q", got.CreatedAt, wantCreatedAt)
+		}
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2 AND kind='capability.executed'`, fx.orgID, inventoryListLocationRecordsCapabilityID); got != 1 {
+		t.Fatalf("location-record read audit rows=%d, want one", got)
+	}
+
+	legacyInput := json.RawMessage(`{}`)
+	legacyClaims := fx.humanClaims(legacyInput, "")
+	legacyClaims.CapabilityID = inventoryListLocationsCapabilityID
+	legacyClaims.Permissions = []string{"inventory.read"}
+	legacyResult, err := fx.executor.Execute(fx.ctx, legacyClaims, inventoryListLocationsCapabilityID, legacyInput)
+	if err != nil || !legacyResult.OK {
+		t.Fatalf("routine location list result=%+v err=%v", legacyResult, err)
+	}
+	if string(legacyResult.Data) != `{"locations":[{"code":"WH-A","name":"Main warehouse"},{"code":"WH-Z","name":"Last warehouse"}]}` {
+		t.Fatalf("routine location-list output = %s, want unchanged code/name-only shape", legacyResult.Data)
 	}
 }

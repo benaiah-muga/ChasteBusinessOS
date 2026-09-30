@@ -40,15 +40,26 @@ const goInvoiceListSchema = z.object({
 });
 
 export async function GET() {
+  const useGoInvoiceReads = process.env.GO_ACCOUNTING_INVOICE_READS === "1";
+  const goInvoiceResponse = (body: unknown, init?: ResponseInit) => NextResponse.json(body, {
+    ...init,
+    headers: { ...init?.headers, "Cache-Control": "no-store" },
+  });
   const resolved = await getResolvedUser();
-  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!resolved?.orgId) {
+    return useGoInvoiceReads
+      ? goInvoiceResponse({ error: "unauthorized" }, { status: 401 })
+      : NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const denied = missingPermission(resolved, "accounting.read");
-  if (denied) return denied;
+  if (denied) {
+    if (useGoInvoiceReads) denied.headers.set("Cache-Control", "no-store");
+    return denied;
+  }
   const orgId = resolved.orgId;
   const db = getDb().db;
   const [org] = await db.select({ baseCurrency: organizations.baseCurrency }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
   const ctx = actorFromResolved(resolved, {});
-  const useGoInvoiceReads = process.env.GO_ACCOUNTING_INVOICE_READS === "1";
   const executor = ctx && !useGoInvoiceReads ? buildExecutor(db, buildRegistry(db)) : null;
 
   const entries = await db
@@ -142,7 +153,7 @@ export async function GET() {
   // Governed invoice read + payment history (no list capability for payments).
   let invoiceRows: unknown[] = [];
   if (useGoInvoiceReads) {
-    if (!ctx) return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+    if (!ctx) return goInvoiceResponse({ error: "Accounting invoices service unavailable" }, { status: 503 });
     let result: GoCapabilityBridgeResult;
     try {
       result = await executeGoCapability({
@@ -156,28 +167,28 @@ export async function GET() {
         input: { limit: 50 },
       });
     } catch {
-      return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+      return goInvoiceResponse({ error: "Accounting invoices service unavailable" }, { status: 503 });
     }
     if (result.kind !== "response") {
-      return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+      return goInvoiceResponse({ error: "Accounting invoices service unavailable" }, { status: 503 });
     }
 
     const body: unknown = await result.response.json().catch(() => null);
     if (result.response.status === 200) {
       const parsed = z.object({ ok: z.literal(true), data: goInvoiceListSchema }).safeParse(body);
-      if (!parsed.success) return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+      if (!parsed.success) return goInvoiceResponse({ error: "Accounting invoices service unavailable" }, { status: 503 });
       invoiceRows = parsed.data.data.invoices;
     } else if (result.response.status === 422) {
       const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
-      if (!parsed.success) return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+      if (!parsed.success) return goInvoiceResponse({ error: "Accounting invoices service unavailable" }, { status: 503 });
     } else if (result.response.status === 401) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+      return goInvoiceResponse({ error: "unauthorized" }, { status: 401 });
     } else if (result.response.status === 403) {
       const parsed = z.object({ error: z.string() }).safeParse(body);
-      if (!parsed.success) return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
-      return NextResponse.json({ error: "forbidden: missing accounting.read" }, { status: 403 });
+      if (!parsed.success) return goInvoiceResponse({ error: "Accounting invoices service unavailable" }, { status: 503 });
+      return goInvoiceResponse({ error: "forbidden: missing accounting.read" }, { status: 403 });
     } else {
-      return NextResponse.json({ error: "Accounting invoices service unavailable" }, { status: 503 });
+      return goInvoiceResponse({ error: "Accounting invoices service unavailable" }, { status: 503 });
     }
   } else {
     const invoiceList = executor && ctx
@@ -210,7 +221,7 @@ export async function GET() {
     }))
     .sort((a, b) => b.ageDays - a.ageDays);
 
-  return NextResponse.json({
+  const responseBody = {
     entries: entries.map((e) => ({
       ...e,
       amountMinor: Number(e.debitMinor),
@@ -233,7 +244,10 @@ export async function GET() {
     customers: customerRows,
     invoices: invoiceRows,
     payments: paymentRows.map((p) => ({ ...p, receivedAt: p.receivedAt.toISOString() })),
-  });
+  };
+  return useGoInvoiceReads
+    ? goInvoiceResponse(responseBody)
+    : NextResponse.json(responseBody);
 }
 
 export async function POST(req: Request) {

@@ -117,7 +117,7 @@ export async function GET(req: Request) {
         }).strict().safeParse(body);
         if (!parsed.success) return unavailable();
         const { conversation, messages } = parsed.data.data;
-        if (conversation.id !== conversationId || messages.some((message) => message.orgId !== resolved.orgId || message.conversationId !== conversation.id)) return unavailable();
+        if (conversation.id !== conversationId.toLowerCase() || messages.some((message) => message.orgId !== resolved.orgId || message.conversationId !== conversation.id)) return unavailable();
         if (!conversation.customerId) return NextResponse.json({ error: "not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
         return NextResponse.json({
           conversation: {
