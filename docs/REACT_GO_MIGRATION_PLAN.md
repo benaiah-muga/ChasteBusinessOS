@@ -917,3 +917,11 @@ new owners and the manifest shows zero legacy runtime paths.
     envelope and capability errors; fail closed on unavailable or malformed
     Go responses without a TypeScript retry. Focused route tests cover default
     ownership, dispatch, errors, and response validation.
+
+76. (Done) Add a default-off signed Go bridge for `lookupByBarcode` on
+    `POST /api/inventory` using `GO_INVENTORY_BARCODE_LOOKUP_READS=1`. Preserve
+    required-input validation, the legacy response envelope, and explicit
+    `item: null` misses; validate the full item shape and fail closed on
+    unavailable, malformed, or uncertain Go results without TypeScript retry.
+    Focused route tests cover default ownership, hits and misses, errors, and
+    fail-closed behavior.

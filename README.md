@@ -371,6 +371,11 @@ flag defaults to `0`.
 requires `pnpm dev:api`, preserves the legacy row fields and code ordering,
 resolves location IDs within the active organization, and fails closed if Go is
 unavailable or returns invalid data. The flag defaults to `0`.
+`GO_INVENTORY_BARCODE_LOOKUP_READS=1` opts the `lookupByBarcode` action on
+`POST /api/inventory` into the signed Go `inventory.lookupByBarcode` read. It
+requires `pnpm dev:api`, preserves the legacy response envelope and nullable
+item result, validates every item field, and fails closed if Go is unavailable
+or returns invalid data. The flag defaults to `0`.
 `GO_INVENTORY_VALUATION_SUMMARY_WRITE=1` opts the existing
 `postValuationSummary` action on `POST /api/inventory` into the signed Go
 `inventory.postValuationSummary` capability. It requires `pnpm dev:api`,
@@ -400,9 +405,9 @@ on their existing handlers, and uncertain writes fail closed without a
 TypeScript retry. The flag defaults to `0`.
 `GO_INVENTORY_ITEM_WRITES=1` opts item creation, updates, archiving, and
 location creation into the signed Go capability bridge. It requires `pnpm
-dev:api`; barcode lookup and other inventory actions remain on their existing
-handlers, and uncertain writes fail closed without a TypeScript retry. The flag
-defaults to `0`.
+dev:api`; other inventory actions remain on their existing handlers, and
+uncertain writes fail closed without a TypeScript retry. The flag defaults to
+`0`.
 `GO_ACCOUNTING_TAX_RETURNS_WRITE=1` opts sales tax return filing into the
 signed Go capability bridge. It requires `pnpm dev:api`; tax profile and code
 management ride the executor and worker without a route flag, other

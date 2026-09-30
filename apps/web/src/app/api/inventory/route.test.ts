@@ -699,6 +699,127 @@ describe("inventory Go route adapter", () => {
   });
 });
 
+describe("inventory Go barcode lookup bridge", () => {
+  const barcodeItem = {
+    id: "item-1",
+    sku: "MUG-1",
+    name: "Mug",
+    unitLabel: "each",
+    imageUrl: "https://example.test/mug.png",
+    tags: ["core"],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_INVENTORY_BARCODE_LOOKUP_READS", "0");
+    mocks.getResolvedUser.mockResolvedValue(user);
+    mocks.actorFromResolved.mockReturnValue(ctx);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: { item: barcodeItem } });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps barcode lookup on TypeScript by default", async () => {
+    const response = await POST(request({ action: "lookupByBarcode", barcode: "123456789" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: { item: barcodeItem } });
+    expect(mocks.execute).toHaveBeenCalledWith("inventory.lookupByBarcode", ctx, { barcode: "123456789" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "known barcode", item: barcodeItem },
+    { label: "unknown barcode", item: null },
+  ])("preserves the $label response through Go", async ({ item }) => {
+    vi.stubEnv("GO_INVENTORY_BARCODE_LOOKUP_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: { item }, replayed: true }),
+    });
+
+    const response = await POST(request({ action: "lookupByBarcode", barcode: "123456789", intentId: "scan-intent" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: { item } });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.lookupByBarcode",
+      input: { barcode: "123456789" },
+    });
+    expect(mocks.getDb).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps missing-barcode validation before Go dispatch", async () => {
+    vi.stubEnv("GO_INVENTORY_BARCODE_LOOKUP_READS", "1");
+
+    const response = await POST(request({ action: "lookupByBarcode" }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "barcode required" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("preserves capability validation errors for short barcodes", async () => {
+    vi.stubEnv("GO_INVENTORY_BARCODE_LOOKUP_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, error: "barcode must contain at least 3 character(s)" }, { status: 422 }),
+    });
+
+    const response = await POST(request({ action: "lookupByBarcode", barcode: "12" }));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ ok: false, error: "barcode must contain at least 3 character(s)" });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith(expect.objectContaining({
+      capabilityId: "inventory.lookupByBarcode",
+      input: { barcode: "12" },
+    }));
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("maps Go permission failures to the legacy capability error envelope", async () => {
+    vi.stubEnv("GO_INVENTORY_BARCODE_LOOKUP_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "missing permission: inventory.read" }, { status: 403 }),
+    });
+
+    const response = await POST(request({ action: "lookupByBarcode", barcode: "123456789" }));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ ok: false, error: "missing permission: inventory.read" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "malformed item output", result: { kind: "response", response: Response.json({ ok: true, data: { item: { ...barcodeItem, tags: "core" } } }) } },
+    { label: "missing item output", result: { kind: "response", response: Response.json({ ok: true, data: {} }) } },
+    { label: "Go unavailable", result: { kind: "not-dispatched" } },
+    { label: "unknown outcome", result: { kind: "outcome-unknown" } },
+    { label: "backend failure", result: { kind: "response", response: Response.json({ error: "internal error" }, { status: 500 }) } },
+  ])("fails closed on $label without a TypeScript retry", async ({ result }) => {
+    vi.stubEnv("GO_INVENTORY_BARCODE_LOOKUP_READS", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(request({ action: "lookupByBarcode", barcode: "123456789" }));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: false, error: "inventory service unavailable; check stock status before retrying" });
+    expect(mocks.executeGoCapability).toHaveBeenCalledTimes(1);
+    expect(mocks.getDb).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
 describe("inventory Go item master bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();

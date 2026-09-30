@@ -25,6 +25,16 @@ const inventoryValuationSummaryOutputSchema = z.object({
   ledgerValueMinor: inventoryValuationInteger,
   glBalanceMinor: inventoryValuationInteger,
 });
+const inventoryBarcodeLookupOutputSchema = z.object({
+  item: z.object({
+    id: z.string(),
+    sku: z.string(),
+    name: z.string(),
+    unitLabel: z.string(),
+    imageUrl: z.string().nullable(),
+    tags: z.array(z.string()),
+  }).nullable(),
+});
 
 function goUnavailable() {
   return NextResponse.json({ ok: false, error: "inventory service unavailable; check stock status before retrying" }, { status: 503, headers: noStore });
@@ -68,6 +78,46 @@ async function inventoryGoResponse(result: GoCapabilityBridgeResult) {
 async function dispatchInventoryGo(ctx: ReturnType<typeof actorFromResolved> & {}, session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>, capabilityId: string, input: Record<string, unknown>) {
   try {
     return await inventoryGoResponse(await executeGoCapability({ actionContext: ctx, session, capabilityId, input }));
+  } catch {
+    return goUnavailable();
+  }
+}
+
+async function dispatchInventoryBarcodeLookupGo(
+  ctx: ReturnType<typeof actorFromResolved> & {},
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+  barcode: string,
+) {
+  try {
+    const result = await executeGoCapability({
+      actionContext: ctx,
+      session,
+      capabilityId: "inventory.lookupByBarcode",
+      input: { barcode },
+    });
+    if (result.kind !== "response") return goUnavailable();
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: inventoryBarcodeLookupOutputSchema }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json(parsed.data, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 400 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      if (!parsed.success) return goUnavailable();
+      return NextResponse.json({ ok: false, error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    return goUnavailable();
   } catch {
     return goUnavailable();
   }
@@ -701,6 +751,12 @@ export async function POST(req: Request) {
   const intentId = typeof body.intentId === "string" ? body.intentId : undefined;
   const ctx = actorFromResolved(resolved, { intentId });
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+
+  if (body.action === "lookupByBarcode" && process.env.GO_INVENTORY_BARCODE_LOOKUP_READS === "1") {
+    const barcode = typeof body.barcode === "string" ? body.barcode : undefined;
+    if (!barcode) return NextResponse.json({ error: "barcode required" }, { status: 400 });
+    return dispatchInventoryBarcodeLookupGo(ctx, resolved, barcode);
+  }
 
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
