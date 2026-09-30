@@ -77,6 +77,26 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if query["type"] != "string" {
 		t.Fatalf("customer query schema=%#v", query)
 	}
+	var tasks *routineTool
+	for index := range tools {
+		if tools[index].Capability == "crm.listTasks" {
+			tasks = &tools[index]
+		}
+	}
+	if tasks == nil || tasks.Name != "crm_listTasks" || tasks.Permission != "crm.read" {
+		t.Fatalf("CRM task list tool=%+v, want crm_listTasks with crm.read", tasks)
+	}
+	taskProperties, ok := tasks.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("CRM task list schema has no properties: %#v", tasks.Schema)
+	}
+	openOnly, ok := taskProperties["openOnly"].(map[string]any)
+	if !ok || openOnly["type"] != "boolean" {
+		t.Fatalf("CRM task list openOnly schema=%#v", taskProperties["openOnly"])
+	}
+	if _, required := tasks.Schema["required"]; required {
+		t.Fatalf("CRM task list openOnly filter should remain optional: %#v", tasks.Schema)
+	}
 	var stockReport *routineTool
 	for index := range tools {
 		if tools[index].Capability == "inventory.stockReport" {

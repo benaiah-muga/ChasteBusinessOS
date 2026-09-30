@@ -925,3 +925,9 @@ new owners and the manifest shows zero legacy runtime paths.
     unavailable, malformed, or uncertain Go results without TypeScript retry.
     Focused route tests cover default ownership, hits and misses, errors, and
     fail-closed behavior.
+
+77. (Done) Expose Go `crm.listTasks` to routines as the `crm_listTasks` tool
+    with `crm.read` and an optional boolean `openOnly` filter. Execute through
+    the existing system capability executor and verify the session-linked
+    system audit event in the database-backed routine proof. Broader routine
+    tool parity remains open.
