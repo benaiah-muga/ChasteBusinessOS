@@ -665,6 +665,27 @@ func TestInventoryValuationStockReportAggregatesLedgerTruth(t *testing.T) {
 	}
 }
 
+func TestInventoryValuationStockReportAverageCostUsesDisplayedProjectionLevel(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupInventoryValuationFixture(t, fx)
+	itemID := seedInventoryValuationItem(t, fx, fx.orgID, "VAL-PROJECTION", "goods", 0, 0, nil)
+	seedInventoryValuationMovement(t, fx, fx.orgID, itemID, 20000, "purchase", inventoryValuationIntPointer(1200), nil, nil, "system", time.Date(2026, 9, 5, 8, 0, 0, 0, time.UTC))
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE stock_balances SET quantity=10000 WHERE org_id=$1::uuid AND item_id=$2::uuid`, fx.orgID, itemID); err != nil {
+		t.Fatal(err)
+	}
+
+	report := inventoryInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (InventoryStockReportOutput, error) {
+		return inventoryStockReport(fx.ctx, tx, fx.orgID, InventoryStockReportInput{})
+	})
+	if len(report.Items) != 1 {
+		t.Fatalf("stockReport items=%+v, want one projected item", report.Items)
+	}
+	item := report.Items[0]
+	if item.OnHandThousandths != 10000 || item.ValueMinor != 24000 || item.AvgUnitCostMinor != 2400 {
+		t.Fatalf("stockReport item=%+v, want displayed 10000 on hand, ledger value 24000, and projection-based average 2400", item)
+	}
+}
+
 func TestInventoryValuationItemHistoryAndLotsRead(t *testing.T) {
 	fx := newExecutorFixture(t)
 	cleanupInventoryValuationFixture(t, fx)

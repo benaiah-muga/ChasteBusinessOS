@@ -1078,3 +1078,12 @@ new owners and the manifest shows zero legacy runtime paths.
      `hr.listApplicants` output and default TypeScript path; strictly validate
      results and fail closed without a TypeScript retry when Go is unavailable
      or returns invalid output.
+
+102. (Done) Add a governed Executor-path integration proof for FX revaluation
+     and reversal. Verify permission denial prevents writes, revaluation replay
+     is idempotent, reversal mirrors journal lines, and both operations create
+     audit events.
+
+103. (Done) Match Go stock report average unit cost to TypeScript by dividing
+     ledger valuation by the report's projected on-hand level. Add a database
+     proof where projected stock differs from movement replay.

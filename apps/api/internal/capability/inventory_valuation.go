@@ -665,7 +665,7 @@ func inventoryStockReport(ctx context.Context, tx pgx.Tx, orgID string, input In
 		}
 		var avgUnitCostMinor int64
 		if level > 0 {
-			avgUnitCostMinor, err = inventoryAverageUnitCost(valuation)
+			avgUnitCostMinor, err = inventoryJsRoundProductDiv(valuation.totalValueMinor, 1000, level)
 			if err != nil {
 				return InventoryStockReportOutput{}, err
 			}
