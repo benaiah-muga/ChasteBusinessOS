@@ -93,27 +93,28 @@ benchmark shows the build-time improvement measured so far; type safety and
 end-to-end request speed are migration goals that these build numbers do not
 measure.
 
-**Measured 2026-09-29**, on Linux x64 with an Intel Core i7-4600U, Node
+**Measured 2026-10-01**, on Linux x64 with an Intel Core i7-4600U, Node
 24.18.0, pnpm 11.9.0, and Go 1.27.1. Each command ran three times in sequence
 with shared dependency and compiler caches left warm between runs.
 
 | Build | Command | Median | p95 | Median peak RSS |
 | --- | --- | ---: | ---: | ---: |
-| Next.js | `pnpm --filter web build` | 31.44 s | 352.31 s | 1,118,892 kB |
-| Vite + React + TypeScript | `pnpm --filter @chaste/web-vite build` | 10.76 s | 11.31 s | 662,056 kB |
-| Go API and workers | `go -C apps/api build ./cmd/api ./cmd/jobs-worker ./cmd/outbox-worker` | 1.58 s | 2.15 s | 247,040 kB |
+| Next.js | `pnpm --filter web build` | 34.90 s | 340.19 s | 886,408 kB |
+| Vite + React + TypeScript | `pnpm --filter @chaste/web-vite build` | 25.77 s | 27.20 s | 739,596 kB |
+| Go API and workers | `go -C apps/api build ./cmd/api ./cmd/jobs-worker ./cmd/outbox-worker` | 4.41 s | 4.59 s | 255,360 kB |
 
-In this sample, the Vite build median is about **66% lower** than the Next.js
-median, and its median peak memory use is about **41% lower**. The three Go
-binaries build in a **1.58-second median** with a 247,040 kB median peak RSS.
+In this sample, the Vite build median is about **26% lower** than the Next.js
+median, and its median peak memory use is about **17% lower**. The three Go
+binaries build in a **4.41-second median** with a 255,360 kB median peak RSS.
 These are the compilation, build-time, and peak-memory benefits measured so
 far in the migration.
 
-The first Next.js run was cold and took 352.31 s; the next two took 31.44 s and
-15.70 s. With only three samples, p95 reflects this cold-build outlier. The
-Vite command includes TypeScript checking. The full samples, peak memory, and
-toolchain details are in the [benchmark report](docs/migration/benchmarks/phase-4-previews.json)
-for revision [`e1f3567`](https://github.com/benaiah-muga/ChasteBusinessOS/commit/e1f3567fc44284a2b51f95bf5c7d6a04f7088600).
+The first Next.js run was cold and took 340.19 s; the next two took 34.02 s
+and 34.90 s. With only three samples, p95 reflects this cold-build outlier.
+The Vite command includes TypeScript checking. The full samples, peak memory,
+and toolchain details are in the
+[benchmark report](docs/migration/benchmarks/phase-4-previews.json) for
+revision [`9bcce00`](https://github.com/benaiah-muga/ChasteBusinessOS/commit/9bcce00fc019cf24c1ab16db7b8cfd2ee78e3b21).
 
 This snapshot compares build commands while the Vite app still has less feature
 coverage than the existing app. It does not measure edit-to-ready or browser

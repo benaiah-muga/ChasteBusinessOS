@@ -11,7 +11,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
-- **Migration performance measurements.** README now separates build results from development-server startup. A repeatable startup benchmark records process-spawn to TCP-listener times and makes clear that it does not measure route readiness, edit-to-ready, or browser navigation.
+- **Migration performance measurements.** README and benchmark reports now reflect the current branch. The three-run Vite build median is 25.77s versus 34.90s for Next; server startup medians are 4.459s for Vite and 4.341s for Next, measured to the first TCP listener connection.
 - **Go accounting and inventory parity proofs.** Database-backed executor tests cover concurrent invoice-payment overage prevention, approved stock-adjustment audit details, and cross-organization item isolation.
 - **Go Purchasing receipt-history parity proof.** The database-backed Go projection test now confirms legacy stock movements appear in accepted and remaining order-line totals without creating synthetic receipt records.
 - **HR interaction parity.** Preserve draft input when an action is waiting for approval, and add arrow, Home, and End keyboard navigation to People workspace tabs. Inventory history and marketplace reads now time out instead of remaining in loading states indefinitely.

@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "measuredAt": "2026-09-29T12:22:24.040Z",
-  "gitRevision": "e1f3567fc44284a2b51f95bf5c7d6a04f7088600",
+  "measuredAt": "2026-10-01T15:15:22.095Z",
+  "gitRevision": "9bcce00fc019cf24c1ab16db7b8cfd2ee78e3b21",
   "machine": {
     "platform": "linux 6.8.0-138-generic",
     "architecture": "x64",
     "cpuModel": "Intel(R) Core(TM) i7-4600U CPU @ 2.10GHz",
     "logicalCpuCount": 4,
-    "totalMemoryBytes": 16663068672
+    "totalMemoryBytes": 16663064576
   },
   "toolchain": {
     "node": "v24.18.0",
@@ -47,81 +47,81 @@
     "next": {
       "successfulRuns": 3,
       "failedRuns": 0,
-      "medianWallSeconds": 31.44,
-      "p95WallSeconds": 352.31,
-      "medianPeakRSSKilobytes": 1118892,
+      "medianWallSeconds": 34.9,
+      "p95WallSeconds": 340.19,
+      "medianPeakRSSKilobytes": 886408,
       "samples": [
         {
           "run": 1,
           "exitCode": 0,
-          "wallSeconds": 352.31,
-          "maxRSSKilobytes": 2866260
+          "wallSeconds": 340.19,
+          "maxRSSKilobytes": 2156396
         },
         {
           "run": 2,
           "exitCode": 0,
-          "wallSeconds": 31.44,
-          "maxRSSKilobytes": 1118892
+          "wallSeconds": 34.02,
+          "maxRSSKilobytes": 886408
         },
         {
           "run": 3,
           "exitCode": 0,
-          "wallSeconds": 15.7,
-          "maxRSSKilobytes": 826500
+          "wallSeconds": 34.9,
+          "maxRSSKilobytes": 885904
         }
       ]
     },
     "vite": {
       "successfulRuns": 3,
       "failedRuns": 0,
-      "medianWallSeconds": 10.76,
-      "p95WallSeconds": 11.31,
-      "medianPeakRSSKilobytes": 662056,
+      "medianWallSeconds": 25.77,
+      "p95WallSeconds": 27.2,
+      "medianPeakRSSKilobytes": 739596,
       "samples": [
         {
           "run": 1,
           "exitCode": 0,
-          "wallSeconds": 11.31,
-          "maxRSSKilobytes": 662056
+          "wallSeconds": 27.2,
+          "maxRSSKilobytes": 739524
         },
         {
           "run": 2,
           "exitCode": 0,
-          "wallSeconds": 10.36,
-          "maxRSSKilobytes": 661040
+          "wallSeconds": 24.3,
+          "maxRSSKilobytes": 739596
         },
         {
           "run": 3,
           "exitCode": 0,
-          "wallSeconds": 10.76,
-          "maxRSSKilobytes": 662316
+          "wallSeconds": 25.77,
+          "maxRSSKilobytes": 740256
         }
       ]
     },
     "go": {
       "successfulRuns": 3,
       "failedRuns": 0,
-      "medianWallSeconds": 1.58,
-      "p95WallSeconds": 2.15,
-      "medianPeakRSSKilobytes": 247040,
+      "medianWallSeconds": 4.41,
+      "p95WallSeconds": 4.59,
+      "medianPeakRSSKilobytes": 255360,
       "samples": [
         {
           "run": 1,
           "exitCode": 0,
-          "wallSeconds": 2.15,
-          "maxRSSKilobytes": 247936
+          "wallSeconds": 3.18,
+          "maxRSSKilobytes": 254208
         },
         {
           "run": 2,
           "exitCode": 0,
-          "wallSeconds": 1.51,
-          "maxRSSKilobytes": 247040
+          "wallSeconds": 4.41,
+          "maxRSSKilobytes": 255360
         },
         {
           "run": 3,
           "exitCode": 0,
-          "wallSeconds": 1.58,
-          "maxRSSKilobytes": 242944
+          "wallSeconds": 4.59,
+          "maxRSSKilobytes": 256000
         }
       ]
     }
