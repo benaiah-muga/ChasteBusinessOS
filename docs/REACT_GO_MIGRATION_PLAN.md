@@ -1149,3 +1149,7 @@ new owners and the manifest shows zero legacy runtime paths.
 119. (Done) Prove Vite CRM customer deactivation confirmation, cancellation,
      inactive-directory discovery, profile and invoice-history access, and
      prevention of repeat deactivation.
+
+120. (Done) Prove Go inventory item history and lot listing through the
+     governed Executor, including permission denial, exact movement and lot
+     values, organization isolation, and human execution audit.
