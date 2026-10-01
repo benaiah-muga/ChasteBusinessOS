@@ -1125,3 +1125,11 @@ new owners and the manifest shows zero legacy runtime paths.
 113. (Done) Prove governed Go supplier bill-credit execution through approval,
      including permission denial, tenant isolation, bill balance updates,
      mirrored ledger posting, and approval/execution audit events.
+
+114. (Done) Prove the Go balance sheet report through the governed Executor,
+     including permission denial, exact ledger-derived totals, organization
+     isolation, and an execution audit event.
+
+115. (Done) Preserve CRM task assignment in Vite by loading team members when
+     either Customers or Tasks needs them, provide a retry after lookup errors,
+     and prove owner selection and task creation from a fresh Tasks tab.

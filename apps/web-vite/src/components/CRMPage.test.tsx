@@ -76,10 +76,153 @@ describe("Vite CRM page", () => {
     fireEvent.change(screen.getByLabelText("Lost reason"), { target: { value: "Customer chose another vendor" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm lost" }));
 
-    expect((await screen.findByRole("status")).textContent).toContain("Manager approval required");
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
     await waitFor(() => expect((screen.getByRole("combobox", { name: "Move Annual renewal" }) as HTMLSelectElement).value).toBe("proposal"));
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ action: "move", dealId, stage: "lost", lostReason: "Customer chose another vendor" });
+  });
+
+  it("keeps a follow-up draft intact when task creation is waiting for approval", async () => {
+    let taskReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") {
+        taskReads += 1;
+        return Response.json({ tasks: [] });
+      }
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/crm" && init?.method === "POST") {
+        return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    fireEvent.change(screen.getByLabelText("Task"), { target: { value: "Review renewal terms" } });
+    fireEvent.change(screen.getByLabelText("Due"), { target: { value: "2026-10-15" } });
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customerId } });
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Include the updated service schedule" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    expect((screen.getByLabelText("Task") as HTMLInputElement).value).toBe("Review renewal terms");
+    expect((screen.getByLabelText("Due") as HTMLInputElement).value).toBe("2026-10-15");
+    expect((screen.getByLabelText("Customer") as HTMLSelectElement).value).toBe(customerId);
+    expect((screen.getByLabelText("Note") as HTMLInputElement).value).toBe("Include the updated service schedule");
+    expect(taskReads).toBe(1);
+    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      action: "createTask",
+      title: "Review renewal terms",
+      dueAt: new Date("2026-10-15T12:00:00").toISOString(),
+      note: "Include the updated service schedule",
+      refType: "customer",
+      refId: customerId,
+    });
+  });
+
+  it("loads team members on a fresh Tasks tab and assigns a task after a recoverable team error", async () => {
+    const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
+    const taskId = "44444444-4444-4444-8444-444444444444";
+    let taskReads = 0;
+    let teamReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") {
+        taskReads += 1;
+        return Response.json({ tasks: taskReads === 1 ? [] : [{
+          id: taskId,
+          title: "Review renewal terms",
+          dueAt: null,
+          doneAt: null,
+          note: null,
+          refType: null,
+          refId: null,
+          assigneeUserId: ownerId,
+          assigneeName: "Avery",
+        }] });
+      }
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team" && init?.method !== "POST") {
+        teamReads += 1;
+        if (teamReads === 1) return new Response(null, { status: 503 });
+        return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
+      }
+      if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { taskId } });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    expect(await screen.findByRole("alert")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry team members" }));
+    await screen.findByRole("option", { name: "Avery" });
+    fireEvent.change(screen.getByLabelText("Task"), { target: { value: "Review renewal terms" } });
+    fireEvent.change(screen.getByLabelText("Assignee"), { target: { value: ownerId } });
+    fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+
+    const assignedTask = await screen.findByText("Review renewal terms");
+    expect(assignedTask.closest("li")?.textContent).toContain("Avery");
+    expect(teamReads).toBe(2);
+    expect(taskReads).toBe(2);
+    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      action: "createTask",
+      title: "Review renewal terms",
+      assigneeUserId: ownerId,
+    });
+  });
+
+  it("keeps an empty team loaded across tab switches and allows an unassigned task", async () => {
+    let taskReads = 0;
+    let teamReads = 0;
+    let resolveTeam!: (response: Response) => void;
+    const teamResponse = new Promise<Response>((resolve) => { resolveTeam = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") {
+        taskReads += 1;
+        return Response.json({ tasks: [] });
+      }
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team" && init?.method !== "POST") {
+        teamReads += 1;
+        return teamResponse;
+      }
+      if (path === "/api/crm" && init?.method === "POST") return Response.json({ ok: true, data: { taskId: "44444444-4444-4444-8444-444444444444" } });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    expect(await screen.findByText("Loading team members…")).not.toBeNull();
+    resolveTeam(Response.json({ members: [] }));
+    await waitFor(() => expect(screen.queryByText("Loading team members…")).toBeNull());
+    const assignee = screen.getByLabelText("Assignee") as HTMLSelectElement;
+    expect(within(assignee).getAllByRole("option").map((option) => option.textContent)).toEqual(["Unassigned"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Customers/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Tasks/ }));
+    expect(teamReads).toBe(1);
+    fireEvent.change(screen.getByLabelText("Task"), { target: { value: "Prepare renewal notes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+
+    expect(await screen.findByText("CRM changes saved.")).not.toBeNull();
+    expect(taskReads).toBe(2);
+    const post = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST");
+    const body = JSON.parse(String(post?.[1]?.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({ action: "createTask", title: "Prepare renewal notes" });
+    expect(body).not.toHaveProperty("assigneeUserId");
   });
 
   it("keeps customer profile editing and invoice/document timeline tabs available", async () => {

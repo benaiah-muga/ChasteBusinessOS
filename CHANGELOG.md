@@ -11,6 +11,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- **Vite CRM task assignments.** Load team members when opening Customers or Tasks so owners can be assigned from a fresh Tasks view; a failed team lookup can be retried.
 - **Migration build benchmarks.** README now summarizes measured Next.js, Vite, and Go build times and peak memory, with the existing scope and sample-size caveats.
 - **Preserved empty inventory location strings through Go.** The opt-in stock-location bridge now accepts the empty `code` or `name` strings allowed by the legacy output contract and database schema.
 - **Opt-in Go support inbox reads.** `GET /api/support` can dispatch customer-bound inbox lists through `support.listConversations` behind `GO_SUPPORT_CONVERSATION_READS=1`. The Go query filters customer-bound threads before the limit to preserve the legacy join and pagination behavior; strict response validation and missing actor context fail closed without TypeScript fallback.

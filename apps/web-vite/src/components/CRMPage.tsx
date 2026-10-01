@@ -131,6 +131,10 @@ export function CRMPage() {
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [tasks, setTasks] = useState<CrmTask[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [membersLoaded, setMembersLoaded] = useState(false);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [membersRetry, setMembersRetry] = useState(0);
   const [views, setViews] = useState<SavedCustomerView[]>([]);
   const [selected, setSelected] = useState<CrmCustomer | null>(null);
   const [timeline, setTimeline] = useState<CrmTimelineEntry[]>([]);
@@ -205,11 +209,25 @@ export function CRMPage() {
   }, [load]);
 
   useEffect(() => {
-    if (tab !== "customers" || members.length) return;
+    if ((tab !== "customers" && tab !== "tasks") || membersLoaded) return;
     const controller = new AbortController();
-    void fetchCrmTeamMembers(controller.signal).then(setMembers).catch(() => setMembers([]));
+    setMembersLoading(true);
+    setMembersError(null);
+    void fetchCrmTeamMembers(controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) {
+          setMembers(result);
+          setMembersLoaded(true);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) setMembersError(friendlyError(reason));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setMembersLoading(false);
+      });
     return () => controller.abort();
-  }, [tab, members.length]);
+  }, [tab, membersLoaded, membersRetry]);
 
   useEffect(() => {
     if (tab !== "tasks" || !focusedTaskId) return;
@@ -495,6 +513,8 @@ export function CRMPage() {
     <header className="crm-header"><div><p className="crm-eyebrow">Customer relationships</p><h1>CRM</h1><p>Keep customer history, deal progress, and follow-up work together.</p></div><button type="button" onClick={() => void load()}>Refresh</button></header>
     {notice && <div className={`crm-notice crm-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}><span>{notice.text}</span><button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}>×</button></div>}
     {error && <div className="crm-error" role="alert">{error}<button type="button" onClick={() => void load()}>Retry</button></div>}
+    {(tab === "customers" || tab === "tasks") && membersLoading && <p role="status">Loading team members…</p>}
+    {(tab === "customers" || tab === "tasks") && membersError && <div className="crm-error" role="alert">{membersError}<button type="button" onClick={() => setMembersRetry((count) => count + 1)}>Retry team members</button></div>}
     <nav className="crm-tabs" aria-label="CRM sections">{tabButton("overview", "Overview")}{tabButton("pipeline", "Pipeline", deals.length)}{tabButton("customers", "Customers", activeCustomers.length)}{tabButton("tasks", "Tasks", tasks.filter((task) => !task.doneAt).length)}</nav>
 
     {tab === "overview" && <section className="crm-overview" aria-label="CRM overview">
