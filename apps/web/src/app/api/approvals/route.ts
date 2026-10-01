@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { approvals, documents, getDb, users } from "@chaste/db";
-import { actorFromResolved, buildExecutor, buildRegistry, hasPermissionFor } from "@/server/kernel";
+import { actorFromResolved, buildExecutor, buildRegistry, composeRegistry, hasPermissionFor } from "@/server/kernel";
 import { decideApproval } from "@/server/approvals";
 import { executeGoApprovalInbox } from "@/server/approval-inbox-bridge";
 import { decideGoApproval } from "@/server/go-bridge";
@@ -168,7 +168,7 @@ export async function POST(req: Request) {
     approvalId,
     decision: body.data.decision,
     comment: body.data.comment,
-  });
+  }, (transactionDb) => buildExecutor(transactionDb, composeRegistry(transactionDb), { failOnAuditError: true }));
   if (!outcome.ok) {
     return NextResponse.json({ ok: false, error: outcome.error }, { status: outcome.code });
   }

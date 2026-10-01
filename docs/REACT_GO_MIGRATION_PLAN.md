@@ -94,9 +94,12 @@ legacy-owned until audit-failure rollback, approval recovery, the public
 adapters, and agent-tool dispatch pass their parity gates.
 Go and legacy TypeScript rejection now change approval status and append the
 ledger event in one transaction; database failure-injection tests confirm audit
-failure rolls the status change back. In both runtimes, successful human
-re-execution still commits its effect and event before the approval row is
-finalized. Add failure-injection fixtures and resolve recovery or atomicity
+failure rolls the status change back. The legacy TypeScript route now also
+executes the approved capability, audit append, and approval
+finalization in one organization-scoped transaction, with failure recovery
+returning the approval to pending. Go successful human re-execution still
+commits its effect and event before the approval row is finalized. Close that
+Go recovery window and finish the public adapter and agent-tool dispatch gates
 before moving the approval route.
 Policy parity uses golden vectors from the TypeScript `OrgPolicyEngine`. For
 the current CRM `write` capability, a matching `requires_approval_for: ['write']`

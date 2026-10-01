@@ -30,6 +30,7 @@ export async function decideApproval(
   registry: CapabilityRegistry,
   resolved: ResolvedUser,
   input: { approvalId: string; decision: "approve" | "reject"; comment?: string },
+  transactionExecutorFactory?: (transactionDb: Database["db"]) => KernelExecutor,
 ): Promise<DecisionResult> {
   const orgScope = resolved.orgId;
   if (!orgScope) return { ok: false, code: 428, error: "onboarding required" };
@@ -106,20 +107,59 @@ export async function decideApproval(
     .returning({ id: approvals.id });
   if (claimed.length === 0) return alreadyDecided(approval.status);
 
-  const result = await executor.execute(approval.capabilityId, humanCtx, approval.payload, {
-    approvedApprovalId: approval.id,
-  });
+  let result: CapabilityResult<unknown>;
+  let finalStatus: "executed" | "approved" | "failed" = "failed";
+  if (transactionExecutorFactory) {
+    try {
+      result = await withOrgContext(db, orgScope, async (tx) => {
+        const txAsDb = tx as unknown as Database["db"];
+        const transactionExecutor = transactionExecutorFactory(txAsDb);
+        const execution = await transactionExecutor.execute(approval.capabilityId, humanCtx, approval.payload, {
+          approvedApprovalId: approval.id,
+        });
+        finalStatus = execution.ok ? "executed" : execution.pendingApproval ? "approved" : "failed";
+        const finalized = await tx
+          .update(approvals)
+          .set({
+            status: finalStatus,
+            decidedByUserId: resolved.userId,
+            decisionComment: input.comment ?? null,
+            decidedAt,
+          })
+          .where(and(eq(approvals.id, approval.id), eq(approvals.status, "executing")))
+          .returning({ id: approvals.id });
+        if (finalized.length !== 1) throw new Error("approval execution claim was lost before finalization");
+        return execution;
+      });
+    } catch (executionError) {
+      try {
+        await withOrgContext(db, orgScope, async (tx) => {
+          await tx
+            .update(approvals)
+            .set({ status: "pending" })
+            .where(and(eq(approvals.id, approval.id), eq(approvals.status, "executing")));
+        });
+      } catch (recoveryError) {
+        throw new AggregateError([executionError, recoveryError], "approval execution failed and pending recovery failed");
+      }
+      throw executionError;
+    }
+  } else {
+    result = await executor.execute(approval.capabilityId, humanCtx, approval.payload, {
+      approvedApprovalId: approval.id,
+    });
 
-  const finalStatus = result.ok ? "executed" : result.pendingApproval ? "approved" : "failed";
-  await db
-    .update(approvals)
-    .set({
-      status: finalStatus,
-      decidedByUserId: resolved.userId,
-      decisionComment: input.comment ?? null,
-      decidedAt,
-    })
-    .where(eq(approvals.id, approval.id));
+    finalStatus = result.ok ? "executed" : result.pendingApproval ? "approved" : "failed";
+    await db
+      .update(approvals)
+      .set({
+        status: finalStatus,
+        decidedByUserId: resolved.userId,
+        decisionComment: input.comment ?? null,
+        decidedAt,
+      })
+      .where(eq(approvals.id, approval.id));
+  }
 
   if (!result.ok && !result.pendingApproval) {
     return { ok: false, code: 422, error: result.error ?? "execution failed" };

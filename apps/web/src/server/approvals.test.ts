@@ -12,6 +12,7 @@ import {
 import { createDb, type Database, purgeTenantFinancials } from "@chaste/db";
 import {
   approvals,
+  customers,
   memberships,
   organizations,
   rolePermissions,
@@ -20,7 +21,7 @@ import {
   users,
 } from "@chaste/db";
 import { decideApproval } from "./approvals";
-import { DbApprovalFlow, type ResolvedUser } from "./kernel";
+import { buildExecutor, DbApprovalFlow, type ResolvedUser } from "./kernel";
 
 /**
  * Regression tests for the approval decision pipeline. The original
@@ -45,7 +46,6 @@ let executions = 0;
 beforeAll(async () => {
   pg = createDb(url);
   db = pg.db;
-  registry = new CapabilityRegistry();
 
   await db.insert(organizations).values({
     id: orgId,
@@ -73,6 +73,11 @@ beforeAll(async () => {
     permissions: new Set(["*"]),
   };
 
+  registry = makeRegistry(db);
+});
+
+function makeRegistry(database: Database["db"]): CapabilityRegistry {
+  const testRegistry = new CapabilityRegistry();
   const gatedMoney = defineCapability<{ amountMinor: number }, { movedMinor: number }>({
     id: "test.payMoney",
     title: "Test gated payment",
@@ -88,16 +93,21 @@ beforeAll(async () => {
       // 666 passes validation and the gate, then fails in the outside world:
       // exercises the "execution failed after claim" finalization path.
       if (input.amountMinor === 666) throw new Error("bank declined the payment");
+      if (input.amountMinor === 777) {
+        await database.insert(customers).values({ orgId, name: "Transactional approval effect" });
+      }
       executions += 1;
       return { movedMinor: input.amountMinor };
     },
   });
-  registry.register(gatedMoney);
-});
+  testRegistry.register(gatedMoney);
+  return testRegistry;
+}
 
 afterEach(async () => {
   // Isolation: some tests intentionally leave pending gates behind.
   await db.delete(approvals).where(eq(approvals.orgId, orgId));
+  await db.delete(customers).where(eq(customers.orgId, orgId));
 });
 
 afterAll(async () => {
@@ -122,6 +132,10 @@ function makeExecutor(): KernelExecutor {
     }),
     ledger: new InMemoryLedger(),
   });
+}
+
+function makeTransactionExecutor(database: Database["db"]): KernelExecutor {
+  return buildExecutor(database, makeRegistry(database), { failOnAuditError: true });
 }
 
 /** Agent requests a gated action, producing a pending approval row. */
@@ -256,6 +270,41 @@ describe("decideApproval", () => {
     expect(result.ok).toBe(false);
     const [row] = await db.select().from(approvals).where(eq(approvals.id, approvalId));
     expect(row!.status).toBe("failed");
+  });
+
+  it("rolls back the approved effect and restores pending when finalization fails", async () => {
+    const approvalId = await createPendingApproval(777);
+    executions = 0;
+    const functionName = `approvals_finalize_${orgId.replaceAll("-", "").slice(0, 12)}`;
+    const triggerName = `${functionName}_trigger`;
+    await db.execute(sql.raw(`
+      CREATE FUNCTION public.${functionName}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'fixture approval finalization failure'; END
+      $$`));
+    try {
+      await db.execute(sql.raw(`
+        CREATE TRIGGER ${triggerName} BEFORE UPDATE ON approvals FOR EACH ROW
+        WHEN (NEW.org_id = '${orgId}'::uuid AND NEW.status = 'executed')
+        EXECUTE FUNCTION public.${functionName}()`));
+      await expect(
+        decideApproval(
+          db,
+          makeExecutor(),
+          registry,
+          resolved,
+          { approvalId, decision: "approve" },
+          (transactionDb) => makeTransactionExecutor(transactionDb),
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${triggerName} ON approvals`));
+      await db.execute(sql.raw(`DROP FUNCTION IF EXISTS public.${functionName}()`));
+    }
+    const [row] = await db.select().from(approvals).where(eq(approvals.id, approvalId));
+    const [effect] = await db.select({ id: customers.id }).from(customers).where(eq(customers.orgId, orgId)).limit(1);
+    expect(executions).toBe(1);
+    expect(row!.status).toBe("pending");
+    expect(effect).toBeUndefined();
   });
 
   it("submit stamps an expiry so gates cannot wait forever", async () => {
