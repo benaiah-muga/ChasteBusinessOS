@@ -350,6 +350,49 @@ describe("Vite CRM page", () => {
     await waitFor(() => expect(screen.getByText("0 selected")).not.toBeNull());
   });
 
+  it("filters follow-up tasks by due date and assignment, and can include completed work", async () => {
+    const assignedUserId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const tasks = [
+      { id: "55555555-5555-4555-8555-555555555555", title: "Today's call", dueAt: today.toISOString(), doneAt: null, assigneeUserId: assignedUserId, assigneeName: "Avery", refId: null },
+      { id: "66666666-6666-4666-8666-666666666666", title: "Past due quote", dueAt: yesterday.toISOString(), doneAt: null, assigneeUserId: assignedUserId, assigneeName: "Avery", refId: null },
+      { id: "77777777-7777-4777-8777-777777777777", title: "Unassigned follow-up", dueAt: null, doneAt: null, assigneeUserId: null, assigneeName: null, refId: null },
+      { id: "88888888-8888-4888-8888-888888888888", title: "Completed call", dueAt: yesterday.toISOString(), doneAt: today.toISOString(), assigneeUserId: assignedUserId, assigneeName: "Avery", refId: null },
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    expect(screen.getByText("Today's call")).not.toBeNull();
+    expect(screen.getByText("Past due quote")).not.toBeNull();
+    expect(screen.queryByText("Completed call")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Today/ }));
+    expect(screen.getByText("Today's call")).not.toBeNull();
+    expect(screen.queryByText("Past due quote")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Overdue/ }));
+    expect(screen.getByText("Past due quote")).not.toBeNull();
+    expect(screen.queryByText("Today's call")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Unassigned/ }));
+    expect(screen.getByText("Unassigned follow-up")).not.toBeNull();
+    expect(screen.queryByText("Past due quote")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show completed (1)" }));
+    expect(screen.getByText("Completed call")).not.toBeNull();
+  });
+
   it("downloads a CSV containing the selected customer rows", async () => {
     const exportedCustomer = { ...customer(), name: "=1+1" };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -520,7 +563,7 @@ describe("Vite CRM page", () => {
       const path = String(input);
       if (path === "/api/deals") return Response.json({ deals: [] });
       if (path === "/api/customers") return Response.json({ customers: [customer()] });
-      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [{ id: taskId, title: "Schedule Northwind review", doneAt: null }] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [{ id: taskId, title: "Schedule Northwind review", doneAt: "2026-09-19T12:00:00.000Z" }] });
       if (path === "/api/crm/views") return Response.json({ views: [] });
       if (path === "/api/crm?timeline=" + customerId) return Response.json({ entries: [] });
       if (path === "/api/crm" && init?.method === "POST") return Response.json({ draft: "Hello Northwind, can we review invoice 7?", sources: [{ kind: "invoice", date: "2026-09-20T12:00:00.000Z", refId: dealId, summary: "Invoice #7 is awaiting payment" }, { kind: "task", date: "2026-09-21T12:00:00.000Z", refId: taskId, summary: "Schedule Northwind review" }] });
@@ -537,6 +580,7 @@ describe("Vite CRM page", () => {
     expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")?.[1]?.body))).toMatchObject({ action: "draftFollowUp", customerId });
     fireEvent.click(within(dialog).getByRole("button", { name: /Schedule Northwind review/ }));
     expect(await screen.findByRole("heading", { name: "Follow-up tasks" })).not.toBeNull();
+    expect((screen.getByRole("checkbox", { name: "Show completed (1)" }) as HTMLInputElement).checked).toBe(true);
     const taskRow = screen.getByText("Schedule Northwind review").closest("li");
     expect(taskRow).toBe(document.activeElement);
   });

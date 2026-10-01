@@ -212,6 +212,32 @@ describe("Vite inventory page", () => {
     expect(screen.getByRole("button", { name: "Release" })).not.toBeNull();
   });
 
+  it("shows movement costs in organization currency when the display preference differs", async () => {
+    localStorage.setItem("chaste-prefs", JSON.stringify({ currency: "UGX" }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (String(input).startsWith("/api/inventory?sku=")) {
+        return Response.json({ movements: [{
+          id: "movement-1",
+          quantityDelta: 1_000,
+          reason: "adjustment",
+          note: null,
+          refType: null,
+          unitCostMinor: 1_000,
+          lotCode: null,
+          locationCode: null,
+          actorType: "human",
+          createdAt: "2026-09-30T10:15:00.000Z",
+        }] });
+      }
+      return Response.json(report);
+    }));
+    render(<InventoryPage baseCurrency="USD" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Load history" }));
+    expect(await screen.findByText("$10.00")).toBeTruthy();
+  });
+
   it("announces an empty lot list and keeps loading and failures accessible", async () => {
     let resolveReport: ((response: Response) => void) | undefined;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {

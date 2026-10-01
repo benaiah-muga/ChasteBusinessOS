@@ -77,6 +77,10 @@
 .crm-link { border: 0 !important; padding: 0 !important; background: transparent !important; color: #335744 !important; text-align: left; text-decoration: underline; }
 .crm-tag { display: inline-block; margin: 1px 3px 1px 0; border-radius: 99px; padding: 3px 6px; background: #f0efe7; color: #75776d; font-size: 8px; }
 .crm-empty { padding: 15px 5px; color: #92938a; font-size: 11px; text-align: center; }
+.crm-task-queue-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 9px; border-bottom: 1px solid #efede7; padding: 12px 0 8px; }
+.crm-task-queue-controls [role=group] { display: flex; flex-wrap: wrap; gap: 5px; }
+.crm-task-queue-controls [aria-pressed=true] { border-color: #809582; background: #edf2ec; color: #34513c; }
+.crm-task-queue-controls .crm-check { display: flex; align-items: center; gap: 5px; color: #72756c; font-size: 9px; }
 .crm-task-list { display: grid; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
 .crm-task-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border-top: 1px solid #efede7; padding: 9px 2px; color: #777970; font-size: 10px; }
 .crm-task-list li label { display: flex; flex: 1; align-items: center; gap: 7px; color: #444d44; }

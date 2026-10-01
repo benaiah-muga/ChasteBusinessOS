@@ -23,6 +23,7 @@ import { selectedCustomersCsv } from "./customer-export";
 
 type Tab = "overview" | "pipeline" | "customers" | "tasks";
 type ProfileTab = "overview" | "activity" | "invoices" | "documents";
+type TaskFilter = "today" | "overdue" | "unassigned" | "all";
 type Member = { userId: string; name: string | null; email: string };
 type Notice = { tone: "success" | "error" | "pending"; text: string };
 type ImportPreviewRow = { rowNumber: number; source: string[]; name: string; email: string; phone: string; allowDuplicate: boolean; include: boolean; includeExplicit?: boolean; error: string | null; duplicate: string | null };
@@ -159,6 +160,8 @@ export function CRMPage() {
   const [newDoNotContact, setNewDoNotContact] = useState(false);
   const [profileDraft, setProfileDraft] = useState({ name: "", phone: "", notes: "", tags: "", ownerUserId: "", doNotContact: false, preferredContactMethod: "email" as "email" | "phone" | "whatsapp" | "other" });
   const [taskDraft, setTaskDraft] = useState({ title: "", dueAt: "", note: "", customerId: "", assigneeUserId: "" });
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
+  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [moveTarget, setMoveTarget] = useState<{ deal: CrmDeal; stage: (typeof stages)[number] } | null>(null);
   const [lostReason, setLostReason] = useState("");
   const [mergeTarget, setMergeTarget] = useState<CrmCustomer | null>(null);
@@ -233,6 +236,10 @@ export function CRMPage() {
     if (tab !== "tasks" || !focusedTaskId) return;
     document.getElementById(`crm-task-${focusedTaskId}`)?.focus();
   }, [focusedTaskId, tab, tasks]);
+
+  useEffect(() => {
+    if (focusedTaskId) setTaskFilter("all");
+  }, [focusedTaskId]);
 
   function closeProfile() {
     timelineRequest.current += 1;
@@ -317,6 +324,21 @@ export function CRMPage() {
   }
 
   const activeCustomers = customers.filter((customer) => !customer.deactivatedAt);
+  const openTasks = tasks.filter((task) => !task.doneAt);
+  const completedTasks = tasks.filter((task) => Boolean(task.doneAt));
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(todayStart);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dueTodayTasks = openTasks.filter((task) => task.dueAt && new Date(task.dueAt) >= todayStart && new Date(task.dueAt) < tomorrow);
+  const overdueTasks = openTasks.filter((task) => task.dueAt && new Date(task.dueAt) < todayStart);
+  const unassignedTasks = openTasks.filter((task) => !task.assigneeUserId);
+  const visibleTasks = (showCompletedTasks ? tasks : openTasks).filter((task) => {
+    if (taskFilter === "today") return Boolean(task.dueAt && new Date(task.dueAt) >= todayStart && new Date(task.dueAt) < tomorrow);
+    if (taskFilter === "overdue") return Boolean(task.dueAt && new Date(task.dueAt) < todayStart);
+    if (taskFilter === "unassigned") return !task.assigneeUserId;
+    return true;
+  });
   const duplicates = useMemo(() => {
     const ids = new Set<string>();
     for (let i = 0; i < activeCustomers.length; i += 1) {
@@ -470,7 +492,7 @@ export function CRMPage() {
   }
 
   function openDraftSource(source: CrmTimelineEntry) {
-    if (source.kind === "task") { setFocusedTaskId(source.refId); navigateToTab("tasks"); return; }
+    if (source.kind === "task") { setShowCompletedTasks(true); setFocusedTaskId(source.refId); navigateToTab("tasks"); return; }
     const path = source.kind === "invoice" ? `/accounting?recordPayment=${encodeURIComponent(source.refId)}#receivables` : `/sales?tab=quotes&focusQuote=${encodeURIComponent(source.refId)}`;
     closeProfile();
     window.location.assign(path);
@@ -542,7 +564,35 @@ export function CRMPage() {
       <div className="crm-table-wrap"><table className="crm-table"><thead><tr><th><input type="checkbox" aria-label="Select all visible customers" checked={visibleCustomers.length > 0 && visibleCustomers.every((customer) => selectedCustomerIds.includes(customer.id))} onChange={(event) => setSelectedCustomerIds((current) => event.target.checked ? [...new Set([...current, ...visibleCustomers.map((customer) => customer.id)])] : current.filter((id) => !visibleCustomers.some((customer) => customer.id === id)))} /></th><th>Customer</th><th>Contact</th><th>Owner</th><th>Tags</th><th>Last activity</th><th>Next step</th><th>Actions</th></tr></thead><tbody>{visibleCustomers.map((customer) => <tr key={customer.id}><td><input type="checkbox" aria-label={`Select ${customer.name}`} checked={selectedCustomerIds.includes(customer.id)} onChange={(event) => setSelectedCustomerIds((current) => event.target.checked ? [...current, customer.id] : current.filter((id) => id !== customer.id))} /></td><td><button type="button" className="crm-link" onClick={() => void openProfile(customer)}>{customer.name}</button>{customer.deactivatedAt && <small>Inactive</small>}</td><td>{customer.email ?? ""}<small>{customer.phone ?? ""}</small></td><td>{customer.ownerName ?? "Unassigned"}</td><td>{(customer.tags ?? []).map((tag) => <span className="crm-tag" key={tag}>{tag}</span>)}</td><td>{customer.lastActivityAt ? new Date(customer.lastActivityAt).toLocaleDateString() : "No activity"}</td><td>{customer.nextStep?.summary ?? "-"}</td><td><button type="button" onClick={() => void openProfile(customer)}>Profile</button>{!customer.deactivatedAt && <button type="button" disabled={busy} onClick={() => setDeactivateTarget(customer)}>Deactivate</button>}<button type="button" onClick={() => { setMergeTarget(customer); setMergeSurvivorId(customer.id); }}>Merge</button></td></tr>)}</tbody></table>{visibleCustomers.length === 0 && <p className="crm-empty">No customers match these filters.</p>}</div>
     </section>}
 
-    {tab === "tasks" && <section className="crm-panel"><header><h2>Follow-up tasks</h2><p>Open work stays attached to the customer record and timeline.</p></header><form className="crm-inline-form" onSubmit={(event) => void createTask(event)}><label>Task<input required value={taskDraft.title} onChange={(event) => setTaskDraft({ ...taskDraft, title: event.target.value })} /></label><label>Due<input type="date" value={taskDraft.dueAt} onChange={(event) => setTaskDraft({ ...taskDraft, dueAt: event.target.value })} /></label><label>Customer<select value={taskDraft.customerId} onChange={(event) => setTaskDraft({ ...taskDraft, customerId: event.target.value })}><option value="">No customer</option>{activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><label>Assignee<select value={taskDraft.assigneeUserId} onChange={(event) => setTaskDraft({ ...taskDraft, assigneeUserId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label><label>Note<input value={taskDraft.note} onChange={(event) => setTaskDraft({ ...taskDraft, note: event.target.value })} /></label><button disabled={busy}>Add task</button></form><ul className="crm-task-list">{tasks.filter((task) => !task.doneAt).map((task) => <li id={`crm-task-${task.id}`} tabIndex={-1} className={focusedTaskId === task.id ? "crm-task-source-focused" : undefined} key={task.id}><label><input type="checkbox" disabled={busy} onChange={() => void mutate("/api/crm", { action: "completeTask", taskId: task.id })} /> <strong>{task.title}</strong></label><span>{task.dueAt ? new Date(task.dueAt).toLocaleDateString() : "No due date"}</span><span>{task.assigneeName ?? "Unassigned"}</span>{task.refId && <button type="button" onClick={() => { const customer = customers.find((entry) => entry.id === task.refId); if (customer) void openProfile(customer, "activity"); }}>Open customer</button>}</li>)}</ul><details><summary>Show completed tasks ({tasks.filter((task) => task.doneAt).length})</summary><ul className="crm-task-list">{tasks.filter((task) => task.doneAt).map((task) => <li key={task.id}><strong>{task.title}</strong><span>Completed {new Date(task.doneAt!).toLocaleDateString()}</span></li>)}</ul></details></section>}
+    {tab === "tasks" && <section className="crm-panel" aria-label="Follow-up tasks">
+      <header><h2>Follow-up tasks</h2><p>Open work stays attached to the customer record and timeline.</p></header>
+      <form className="crm-inline-form" onSubmit={(event) => void createTask(event)}>
+        <label>Task<input required value={taskDraft.title} onChange={(event) => setTaskDraft({ ...taskDraft, title: event.target.value })} /></label>
+        <label>Due<input type="date" value={taskDraft.dueAt} onChange={(event) => setTaskDraft({ ...taskDraft, dueAt: event.target.value })} /></label>
+        <label>Customer<select value={taskDraft.customerId} onChange={(event) => setTaskDraft({ ...taskDraft, customerId: event.target.value })}><option value="">No customer</option>{activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+        <label>Assignee<select value={taskDraft.assigneeUserId} onChange={(event) => setTaskDraft({ ...taskDraft, assigneeUserId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label>
+        <label>Note<input value={taskDraft.note} onChange={(event) => setTaskDraft({ ...taskDraft, note: event.target.value })} /></label>
+        <button disabled={busy}>Add task</button>
+      </form>
+      <div className="crm-task-queue-controls">
+        <div role="group" aria-label="Task view">
+          <button type="button" aria-pressed={taskFilter === "today"} onClick={() => setTaskFilter("today")}>Today ({dueTodayTasks.length})</button>
+          <button type="button" aria-pressed={taskFilter === "overdue"} onClick={() => setTaskFilter("overdue")}>Overdue ({overdueTasks.length})</button>
+          <button type="button" aria-pressed={taskFilter === "unassigned"} onClick={() => setTaskFilter("unassigned")}>Unassigned ({unassignedTasks.length})</button>
+          <button type="button" aria-pressed={taskFilter === "all"} onClick={() => setTaskFilter("all")}>All ({openTasks.length})</button>
+        </div>
+        <label className="crm-check"><input type="checkbox" checked={showCompletedTasks} onChange={(event) => setShowCompletedTasks(event.target.checked)} /> Show completed ({completedTasks.length})</label>
+      </div>
+      <ul className="crm-task-list">
+        {visibleTasks.map((task) => <li id={`crm-task-${task.id}`} tabIndex={-1} className={focusedTaskId === task.id ? "crm-task-source-focused" : undefined} key={task.id}>
+          {task.doneAt ? <strong>{task.title}</strong> : <label><input type="checkbox" disabled={busy} onChange={() => void mutate("/api/crm", { action: "completeTask", taskId: task.id })} /> <strong>{task.title}</strong></label>}
+          <span>{task.doneAt ? `Completed ${new Date(task.doneAt).toLocaleDateString()}` : task.dueAt ? new Date(task.dueAt).toLocaleDateString() : "No due date"}</span>
+          <span>{task.assigneeName ?? "Unassigned"}</span>
+          {!task.doneAt && task.refId && <button type="button" onClick={() => { const customer = customers.find((entry) => entry.id === task.refId); if (customer) void openProfile(customer, "activity"); }}>Open customer</button>}
+        </li>)}
+      </ul>
+      {visibleTasks.length === 0 && <p className="crm-empty">No tasks match this view.</p>}
+    </section>}
 
     {selected && <div className="crm-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeProfile(); }}><section className="crm-modal" role="dialog" aria-modal="true" aria-labelledby="crm-profile-title"><header><div><p className="crm-eyebrow">Customer profile</p><h2 id="crm-profile-title">{selected.name}</h2></div><button type="button" aria-label="Close customer profile" onClick={closeProfile}>×</button></header><nav className="crm-profile-tabs" aria-label="Customer profile tabs">{(["overview", "activity", "invoices", "documents"] as const).map((value) => <button type="button" key={value} aria-pressed={profileTab === value} onClick={() => setProfileTab(value)}>{value[0]!.toUpperCase()}{value.slice(1)}</button>)}</nav>
       {profileTab === "overview" ? <><div className="crm-profile-fields"><label>Name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })} /></label><label>Email<input value={selected.email ?? ""} readOnly /></label><label>Phone<input value={profileDraft.phone} onChange={(event) => setProfileDraft({ ...profileDraft, phone: event.target.value })} /></label><label>Owner<select value={profileDraft.ownerUserId} onChange={(event) => setProfileDraft({ ...profileDraft, ownerUserId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label><label>Preferred contact<select value={profileDraft.preferredContactMethod} onChange={(event) => setProfileDraft({ ...profileDraft, preferredContactMethod: event.target.value as typeof profileDraft.preferredContactMethod })}><option value="email">Email</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option></select></label><label>Tags, comma separated<input value={profileDraft.tags} onChange={(event) => setProfileDraft({ ...profileDraft, tags: event.target.value })} /></label><label className="crm-check"><input type="checkbox" checked={profileDraft.doNotContact} onChange={(event) => setProfileDraft({ ...profileDraft, doNotContact: event.target.checked })} /> Do not contact</label><label className="crm-span">Notes<textarea value={profileDraft.notes} onChange={(event) => setProfileDraft({ ...profileDraft, notes: event.target.value })} /></label></div><div className="crm-modal-actions"><button type="button" disabled={busy} onClick={() => void saveCustomerProfile()}>Save profile</button><button type="button" onClick={() => { setTaskDraft({ ...taskDraft, customerId: selected.id, title: `Follow up with ${selected.name}` }); navigateToTab("tasks"); }}>Create follow-up</button><button type="button" onClick={() => setProfileTab("activity")}>View history</button></div>{selected.nextStep && <p className="crm-next-step">Next step: {selected.nextStep.summary}</p>}<section className="crm-follow-up-draft" aria-label="AI follow-up draft"><header><div><h3>Follow-up draft</h3><p>Use recent CRM records as context, then review and edit before outreach.</p></div><button type="button" disabled={selected.doNotContact || draftState.status === "loading"} onClick={() => void generateFollowUpDraft()}>{draftState.status === "loading" ? "Drafting…" : draftState.status === "ready" ? "Regenerate draft" : "Draft with AI"}</button></header>{selected.doNotContact ? <p className="crm-draft-warning">This customer is marked do not contact. Drafting and outreach shortcuts are disabled.</p> : draftState.status === "loading" ? <p role="status">Reviewing recent invoices, quotes, and follow-ups…</p> : draftState.status === "failed" ? <p role="alert" className="crm-draft-warning">{draftState.message}</p> : draftState.status === "ready" ? <><label>Subject<input value={draftState.subject} maxLength={180} onChange={(event) => setDraftState({ ...draftState, subject: event.target.value })} /></label><label>Message<textarea value={draftState.body} maxLength={4000} onChange={(event) => setDraftState({ ...draftState, body: event.target.value })} /></label><p className="crm-source-heading">Records used</p><ul className="crm-draft-sources">{draftState.draft.sources.map((source) => <li key={`${source.kind}-${source.refId}`}><button type="button" onClick={() => openDraftSource(source)}><strong>{source.kind}</strong><span>{source.summary}</span><small>{new Date(source.date).toLocaleDateString()}, open related record</small></button></li>)}</ul><button type="button" onClick={() => void copyFollowUpDraft()}>{draftCopied ? "Copied" : "Copy draft"}</button></> : <p>Generate a draft from recent invoices, quotes, and follow-up tasks.</p>}</section></> : <div className="crm-timeline" aria-live="polite">{timeline.filter((entry) => profileTab === "activity" || (profileTab === "invoices" ? ["invoice", "payment", "quote"].includes(entry.kind) : entry.kind === "document")).map((entry) => <article key={`${entry.kind}-${entry.refId}`}><span>{new Date(entry.date).toLocaleString()}</span><strong>{entry.kind}</strong><p>{entry.summary}</p></article>)}{timeline.length === 0 && <p>No {profileTab === "invoices" ? "invoice or payment" : profileTab === "documents" ? "document" : "activity"} history is available.</p>}</div>}

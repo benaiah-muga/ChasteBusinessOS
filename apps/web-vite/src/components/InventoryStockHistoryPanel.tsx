@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { currencyMinorUnits } from "@chaste/erp-core";
 import { InventoryHistoryApiError, fetchInventoryHistory, type InventoryMovement } from "../api/inventory-history";
 import "./inventory-stock-history.css";
 
@@ -40,6 +41,7 @@ export function InventoryStockHistoryPanel({
   }
 
   const formatter = new Intl.NumberFormat(undefined, { style: "currency", currency });
+  const minorUnitScale = 10 ** (currencyMinorUnits(currency) ?? 2);
   return (
     <section className="inventory-history" aria-labelledby="inventory-history-title">
       <div className="inventory-history-heading">
@@ -80,7 +82,7 @@ export function InventoryStockHistoryPanel({
                     {movement.quantityDelta > 0 ? "+" : ""}{formatQuantity(movement.quantityDelta)} {selectedItem?.unitLabel ?? "units"}
                   </td>
                   <td><strong>{formatReason(movement.reason)}</strong>{movement.note && <span className="inventory-history-note">{movement.note}</span>}</td>
-                  <td>{movement.unitCostMinor === null ? "Not recorded" : formatter.format(movement.unitCostMinor / 100)}</td>
+                  <td>{movement.unitCostMinor === null ? "Not recorded" : formatter.format(movement.unitCostMinor / minorUnitScale)}</td>
                   <td className="inventory-history-detail">
                     {[movement.refType, movement.lotCode ? `Lot ${movement.lotCode}` : null, movement.locationCode ? `Location ${movement.locationCode}` : null, `By ${movement.actorType}`].filter(Boolean).join(" · ")}
                   </td>

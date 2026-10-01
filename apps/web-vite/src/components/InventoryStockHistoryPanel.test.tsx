@@ -35,6 +35,19 @@ describe("InventoryStockHistoryPanel", () => {
     expect(screen.getByRole("time").getAttribute("dateTime")).toBe(movement.createdAt);
   });
 
+  it.each([
+    { currency: "KWD", expected: "KWD 1.000" },
+    { currency: "JPY", expected: "¥1,000" },
+  ])("formats $currency unit costs using its minor-unit exponent", async ({ currency, expected }) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      movements: [{ ...movement, unitCostMinor: 1000 }],
+    }), { status: 200 })));
+    render(<InventoryStockHistoryPanel items={items} currency={currency} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load history" }));
+
+    expect(await screen.findByText((_text, element) => element?.textContent === expected)).toBeTruthy();
+  });
+
   it("shows empty history and pending approval as distinct states", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ movements: [] }), { status: 200 }))

@@ -562,10 +562,13 @@ new owners and the manifest shows zero legacy runtime paths.
     pipeline actions, lead conversion, AI follow-up drafting, customer profiles
     and merges, saved views, imports and undo, tasks, approvals, deal
     board/table/search, customer timelines, bulk customer owner/tag updates,
-    and selected-customer CSV export with the legacy columns and spreadsheet
-    formula protection. Focused API and component tests pass. Keep API and
-    page ownership on the existing defaults until runtime and parity proofs pass;
-    browser proof remains deferred by user direction.
+    selected-customer CSV export with the legacy columns and spreadsheet
+    formula protection, and task views for due today, overdue, unassigned, and
+    all tasks with an option to include completed work. Opening a task source
+    from an AI draft reveals completed tasks so the linked record receives focus.
+    Focused API and component tests pass. Keep API and page ownership on the
+    existing defaults until runtime and parity proofs pass; browser proof
+    remains deferred by user direction.
 26. (Done) Add an opt-in Go read for the approvals inbox and recent history
     behind `GO_APPROVALS_READ`. Bind the complete TypeScript capability
     permission map to the signed request, and recheck the verified session,
@@ -607,7 +610,9 @@ new owners and the manifest shows zero legacy runtime paths.
     proofs. Inventory valuation posting and reversal, the stock report, item
     history, and lot listing have governed executor proofs. Purchasing bill
     credit, purchase order closure, and receipt listing also have executor
-    proofs.
+    proofs. The receipt-history DB proof includes legacy stock movements in
+    order-line accepted and remaining totals without synthesizing receipt
+    records.
     Accounting report currency metadata now has a dedicated signed Go read.
     Its Go input parser now has a regression proof for Zod-compatible unknown
     key stripping. Broader inventory and purchasing parity proofs and route
@@ -1198,7 +1203,9 @@ new owners and the manifest shows zero legacy runtime paths.
      history. Keep writes on the same-origin inventory contract with intent
      IDs, approval handling, and cautious timeout recovery. Transfer line IDs
      now pass through both legacy and Go read projections for partial
-     confirmation. Focused component, API, and route tests cover the new paths.
+     confirmation. History costs display in the organization base currency and
+     respect its minor-unit exponent.
+     Focused component, API, and route tests cover the new paths.
      Browser verification remains deferred at the user's request, and the
      legacy inventory route remains available for advanced controls.
 

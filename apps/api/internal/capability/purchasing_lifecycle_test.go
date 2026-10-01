@@ -493,6 +493,20 @@ func TestPurchasingLifecycleListReceiptsShapesReceiptHistory(t *testing.T) {
 	} else if want := `{"receipts":[],"orderLines":[{"position":1,"description":"Setup","orderedThousandths":4000,"acceptedThousandths":0,"rejectedThousandths":0,"returnedThousandths":0,"remainingThousandths":4000}]}`; string(encoded) != want {
 		t.Fatalf("empty receipt history JSON = %s, want %s", encoded, want)
 	}
+
+	legacyItemID := seedSalesItem(t, fx, fx.orgID, "LIFECYCLE-LEGACY", "goods")
+	legacyPOID := seedLifecyclePO(t, fx, fx.orgID, vendorID, "partial", 4)
+	legacyLineID := seedLifecyclePOLine(t, fx, legacyPOID, "Legacy delivered stock", 1, 10_000, 300, &legacyItemID, nil)
+	seedLifecycleLegacyMovement(t, fx, fx.orgID, legacyItemID, 3_000, &legacyLineID)
+	legacy := lifecycleInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (ListReceiptsOutput, error) {
+		return listReceipts(fx.ctx, tx, fx.orgID, ListReceiptsInput{PONumber: 4})
+	})
+	if len(legacy.Receipts) != 0 || len(legacy.OrderLines) != 1 {
+		t.Fatalf("legacy receipt history = %+v, want no synthetic receipt and one order line", legacy)
+	}
+	if line := legacy.OrderLines[0]; line.AcceptedThousandths != 3_000 || line.RejectedThousandths != 0 || line.ReturnedThousandths != 0 || line.RemainingThousandths != 7_000 {
+		t.Fatalf("legacy order line = %+v, want 3000 accepted, no rejected or returned quantity, and 7000 remaining", line)
+	}
 }
 
 func lifecycleInt64(value int64) *int64 { return &value }

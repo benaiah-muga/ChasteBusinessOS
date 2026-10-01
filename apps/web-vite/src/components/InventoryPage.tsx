@@ -203,7 +203,7 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
       {state.status === "ready" && <InventoryLocationsReservationsPanel items={state.items} locations={state.locations} reservations={state.reservations} onChanged={refresh} />}
       {state.status === "ready" && <InventoryCycleCountPanel items={state.items} locations={state.locations} counts={state.cycleCounts} onChanged={refresh} />}
       {state.status === "ready" && <InventoryTransfersPanel items={state.items} locations={state.locations} transfers={state.transfers} onChanged={refresh} />}
-      {state.status === "ready" && <InventoryStockHistoryPanel items={state.items} currency={currency} />}
+      {state.status === "ready" && <InventoryStockHistoryPanel items={state.items} currency={baseCurrency ?? currency} />}
       {state.status === "ready" && (
         <section className="inventory-lots" aria-labelledby="inventory-lots-title">
           <div className="inventory-lots-heading">
