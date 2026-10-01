@@ -133,6 +133,9 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if capabilityID := byName["accounting_arAging"]; capabilityID != "accounting.arAging" {
 		t.Fatalf("accounts receivable aging routine dispatch maps to %q", capabilityID)
 	}
+	if capabilityID := byName["purchasing_apAging"]; capabilityID != "purchasing.apAging" {
+		t.Fatalf("accounts payable aging routine dispatch maps to %q", capabilityID)
+	}
 	var customers *routineTool
 	for index := range tools {
 		if tools[index].Capability == "crm.listCustomers" {

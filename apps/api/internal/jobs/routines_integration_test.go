@@ -313,6 +313,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-inventory", "type": "function", "function": map[string]any{"name": "inventory_stockReport", "arguments": `{"belowReorderOnly":false}`}},
 					map[string]any{"id": "call-routine-item-history", "type": "function", "function": map[string]any{"name": "inventory_itemHistory", "arguments": `{"sku":"ROUTINE-HISTORY","limit":10}`}},
 					map[string]any{"id": "call-routine-supplier-statement", "type": "function", "function": map[string]any{"name": "purchasing_supplierStatement", "arguments": string(statementArgs)}},
+					map[string]any{"id": "call-routine-ap-aging", "type": "function", "function": map[string]any{"name": "purchasing_apAging", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-documents", "type": "function", "function": map[string]any{"name": "documents_listDocs", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(localVersionArgs)}},
 					map[string]any{"id": "call-routine-foreign-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(foreignVersionArgs)}},
@@ -351,6 +352,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundQuoteResult := false
 		foundARAgingResult := false
 		foundSupplierStatementResult := false
+		foundAPAgingResult := false
 		foundTimelineResult := false
 		foundLocalVersionResult := false
 		foundForeignVersionResult := false
@@ -388,6 +390,20 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				row := result.Data.Rows[0]
 				if row.Date != "2026-09-30T09:10:11.123Z" || row.Kind != "bill" || row.Ref != "Bill #71" || row.AmountMinor != 12345 || row.BalanceMinor != 12345 {
 					t.Errorf("purchasing.supplierStatement row = %+v, want the seeded local bill", row)
+				}
+			case "call-routine-ap-aging":
+				foundAPAgingResult = true
+				var result struct {
+					OK   bool                     `json:"ok"`
+					Data capability.APAgingOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode purchasing.apAging tool result %s: %v", message.Content, err)
+					continue
+				}
+				buckets := result.Data.Buckets
+				if !result.OK || buckets.Current != 12345 || buckets.D30 != 0 || buckets.D60 != 0 || buckets.D90Plus != 0 || buckets.TotalOutstanding != 12345 {
+					t.Errorf("purchasing.apAging result = %+v, want only the local bill totaling 12345 in the current bucket", result)
 				}
 			case "call-routine-documents":
 				foundDocumentResult = true
@@ -786,6 +802,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		}
 		if !foundSupplierStatementResult {
 			t.Errorf("follow-up provider request omitted the purchasing.supplierStatement tool result")
+		}
+		if !foundAPAgingResult {
+			t.Errorf("follow-up provider request omitted the purchasing.apAging tool result")
 		}
 		if !foundTimelineResult {
 			t.Errorf("follow-up provider request omitted the crm.customerTimeline tool result")
