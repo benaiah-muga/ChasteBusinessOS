@@ -6,7 +6,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
-import { URL } from "node:url";
+import { fileURLToPath, URL } from "node:url";
 
 const ROOT = process.cwd();
 const TARGETS = [
@@ -74,13 +74,13 @@ function waitForListener(url, timeoutMilliseconds) {
   });
 }
 
-async function assertPortAvailable(target) {
+export async function assertPortAvailable(target) {
   try {
     await waitForListener(target.url, 500);
-    throw new Error(`${target.url} already accepts TCP connections`);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("already responds")) throw error;
+  } catch {
+    return;
   }
+  throw new Error(`${target.url} already accepts TCP connections`);
 }
 
 async function stopProcess(child) {
@@ -198,7 +198,9 @@ async function main() {
   if (failures > 0) process.exitCode = 1;
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.stack ?? error}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    process.stderr.write(`${error.stack ?? error}\n`);
+    process.exitCode = 1;
+  });
+}
