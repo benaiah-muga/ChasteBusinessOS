@@ -89,6 +89,50 @@ describe("Vite CRM page", () => {
     expect(timelineReads).toBeGreaterThan(1);
   });
 
+  it("persists contact preference and do-not-contact fields through profile update", async () => {
+    let currentCustomer = customer();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/customers" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as {
+          action: string;
+          doNotContact?: boolean;
+          preferredContactMethod?: "email" | "phone" | "whatsapp" | "other";
+        };
+        currentCustomer = {
+          ...currentCustomer,
+          doNotContact: body.doNotContact ?? currentCustomer.doNotContact,
+          preferredContactMethod: body.preferredContactMethod ?? currentCustomer.preferredContactMethod,
+        };
+        return Response.json({ ok: true, data: { updatedCount: 1, previous: [] } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Northwind" });
+    fireEvent.change(within(dialog).getByLabelText("Preferred contact"), { target: { value: "whatsapp" } });
+    fireEvent.click(within(dialog).getByLabelText("Do not contact"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save profile" }));
+
+    await waitFor(() => expect(currentCustomer.doNotContact).toBe(true));
+    expect(currentCustomer.preferredContactMethod).toBe("whatsapp");
+    const updatePost = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/customers" && init?.method === "POST");
+    expect(JSON.parse(String(updatePost?.[1]?.body))).toMatchObject({
+      action: "updateProfile",
+      customerIds: [customerId],
+      doNotContact: true,
+      preferredContactMethod: "whatsapp",
+    });
+  });
+
   it("bulk assigns selected customers and adds a tag through the governed profile action", async () => {
     const secondCustomerId = "3cebf482-832f-4bf2-b322-03ca9c123456";
     const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
@@ -316,6 +360,32 @@ describe("Vite CRM page", () => {
     expect(await screen.findByRole("heading", { name: "Follow-up tasks" })).not.toBeNull();
     const taskRow = screen.getByText("Schedule Northwind review").closest("li");
     expect(taskRow).toBe(document.activeElement);
+  });
+
+  it("does not request an AI follow-up draft for a do-not-contact customer", async () => {
+    const protectedCustomer = { ...customer(), doNotContact: true };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [protectedCustomer] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [] });
+      if (path === "/api/crm" && init?.method === "POST") return Response.json({ draft: "Unexpected draft", sources: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Northwind" });
+    expect(within(dialog).getByText("This customer is marked do not contact. Drafting and outreach shortcuts are disabled.")).not.toBeNull();
+    const draftButton = within(dialog).getByRole("button", { name: "Draft with AI" }) as HTMLButtonElement;
+    expect(draftButton.disabled).toBe(true);
+
+    fireEvent.click(draftButton);
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")).toBe(false);
   });
 
   it("downloads the template, maps CSV columns, paginates imports, and submits all selected rows", async () => {

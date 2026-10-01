@@ -1101,3 +1101,7 @@ new owners and the manifest shows zero legacy runtime paths.
 
 107. (Done) Add focused Vite CRM component coverage for customer import undo,
      verifying only created customer IDs are sent and the undo result is shown.
+
+108. (Done) Add Vite CRM component proofs that profile updates persist contact
+     preferences and do-not-contact state, and that an opted-out customer
+     cannot request an AI follow-up draft.
