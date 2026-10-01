@@ -1141,3 +1141,11 @@ new owners and the manifest shows zero legacy runtime paths.
 117. (Done) Prove Go purchase-order closure through the governed Executor with
      permission denial, pending approval without mutation, shortfall handling,
      tenant isolation, approval-requested audit, and execution audit.
+
+118. (Done) Prove Go AR aging through the governed Executor with exact legacy
+     buckets and invoice ages, status filtering, organization isolation,
+     permission denial, and audit coverage.
+
+119. (Done) Prove Vite CRM customer deactivation confirmation, cancellation,
+     inactive-directory discovery, profile and invoice-history access, and
+     prevention of repeat deactivation.

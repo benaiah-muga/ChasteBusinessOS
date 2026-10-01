@@ -741,4 +741,52 @@ describe("Vite CRM page", () => {
     expect(importPosts).toHaveLength(2);
     expect(JSON.parse(importPosts[1]!.body)).toEqual({ entity: "customers", action: "undo", importIds: createdIds });
   });
+
+  it("requires confirmation to deactivate a customer and keeps the record in inactive history", async () => {
+    let currentCustomer: Omit<ReturnType<typeof customer>, "deactivatedAt"> & { deactivatedAt: string | null } = customer();
+    const deactivationPosts: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [
+        { kind: "invoice", date: "2026-09-20T12:00:00.000Z", refId: "invoice-history-1", summary: "Invoice #42 (sent, UGX 120,000)" },
+      ] });
+      if (path === "/api/customers" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { action: string; customerId: string };
+        deactivationPosts.push(body);
+        expect(body).toMatchObject({ action: "deactivate", customerId });
+        currentCustomer = { ...currentCustomer, deactivatedAt: "2026-10-01T09:30:00.000Z" };
+        return Response.json({ ok: true, data: { deactivated: true } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    const row = await screen.findByRole("row", { name: /Northwind/ });
+    fireEvent.click(within(row).getByRole("button", { name: "Deactivate" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate Northwind?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(deactivationPosts).toHaveLength(0);
+
+    fireEvent.click(within(row).getByRole("button", { name: "Deactivate" }));
+    const confirmDialog = await screen.findByRole("dialog", { name: "Deactivate Northwind?" });
+    fireEvent.click(within(confirmDialog).getByRole("button", { name: "Deactivate customer" }));
+
+    expect(await screen.findByText("CRM changes saved.")).not.toBeNull();
+    await waitFor(() => expect(screen.queryByRole("row", { name: /Northwind/ })).toBeNull());
+    expect(deactivationPosts).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "inactive" } });
+    const inactiveRow = await screen.findByRole("row", { name: /Northwind/ });
+    expect(within(inactiveRow).getByText("Inactive")).not.toBeNull();
+    fireEvent.click(within(inactiveRow).getByRole("button", { name: "Profile" }));
+    const profile = await screen.findByRole("dialog", { name: "Northwind" });
+    fireEvent.click(within(profile).getByRole("button", { name: "Activity" }));
+    expect(await within(profile).findByText("Invoice #42 (sent, UGX 120,000)")).not.toBeNull();
+    expect(within(inactiveRow).queryByRole("button", { name: "Deactivate" })).toBeNull();
+  });
 });
