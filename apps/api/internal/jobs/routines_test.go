@@ -178,6 +178,25 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if got := byName[trialBalance.Name]; got != "accounting.trialBalance" {
 		t.Fatalf("accounting trial balance routine dispatch maps to %q", got)
 	}
+	var balanceSheet *routineTool
+	for index := range tools {
+		if tools[index].Capability == "accounting.balanceSheet" {
+			balanceSheet = &tools[index]
+			break
+		}
+	}
+	if balanceSheet == nil || balanceSheet.Name != "accounting_balanceSheet" || balanceSheet.Permission != "accounting.read" {
+		t.Fatalf("accounting balance sheet tool=%+v, want accounting_balanceSheet with accounting.read", balanceSheet)
+	}
+	if balanceSheet.Schema["type"] != "object" || balanceSheet.Schema["additionalProperties"] != false {
+		t.Fatalf("accounting balance sheet schema must be an input-free object: %#v", balanceSheet.Schema)
+	}
+	if properties, ok := balanceSheet.Schema["properties"].(map[string]any); !ok || len(properties) != 0 {
+		t.Fatalf("accounting balance sheet schema must not accept inputs: %#v", balanceSheet.Schema["properties"])
+	}
+	if got := byName[balanceSheet.Name]; got != "accounting.balanceSheet" {
+		t.Fatalf("accounting balance sheet routine dispatch maps to %q", got)
+	}
 	var locations *routineTool
 	for index := range tools {
 		if tools[index].Capability == "inventory.listLocations" {
