@@ -1153,3 +1153,7 @@ new owners and the manifest shows zero legacy runtime paths.
 120. (Done) Prove Go inventory item history and lot listing through the
      governed Executor, including permission denial, exact movement and lot
      values, organization isolation, and human execution audit.
+
+121. (Done) Prove Go inventory valuation posting, permission denial,
+     receipt replay, balanced journal lines, reversal, restored GL balance, and
+     human execution audit through the governed Executor.
