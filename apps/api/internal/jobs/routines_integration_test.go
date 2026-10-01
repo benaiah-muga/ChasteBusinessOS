@@ -281,6 +281,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-income-statement", "type": "function", "function": map[string]any{"name": "accounting_incomeStatement", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-trial-balance", "type": "function", "function": map[string]any{"name": "accounting_trialBalance", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-balance-sheet", "type": "function", "function": map[string]any{"name": "accounting_balanceSheet", "arguments": "{}"}},
+					map[string]any{"id": "call-routine-cash-flow", "type": "function", "function": map[string]any{"name": "accounting_cashFlow", "arguments": `{"cashAccountCodes":["RT1000"]}`}},
 					map[string]any{"id": "call-routine-inventory-locations", "type": "function", "function": map[string]any{"name": "inventory_listLocations", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-inventory", "type": "function", "function": map[string]any{"name": "inventory_stockReport", "arguments": `{"belowReorderOnly":false}`}},
 					map[string]any{"id": "call-routine-item-history", "type": "function", "function": map[string]any{"name": "inventory_itemHistory", "arguments": `{"sku":"ROUTINE-HISTORY","limit":10}`}},
@@ -318,6 +319,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundIncomeStatementResult := false
 		foundTrialBalanceResult := false
 		foundBalanceSheetResult := false
+		foundCashFlowResult := false
 		foundQuoteResult := false
 		foundSupplierStatementResult := false
 		foundTimelineResult := false
@@ -556,6 +558,22 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				if !result.OK || result.Data != want {
 					t.Errorf("accounting.balanceSheet result = %+v, want local balanced base-currency totals without foreign CAD entries", result)
 				}
+			case "call-routine-cash-flow":
+				foundCashFlowResult = true
+				var result struct {
+					OK   bool                      `json:"ok"`
+					Data capability.CashFlowOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode accounting.cashFlow tool result %s: %v", message.Content, err)
+					continue
+				}
+				wantOperating := capability.CashFlowCategoryTotal{InflowMinor: 50000, NetMinor: 50000, Entries: 1}
+				if !result.OK || result.Data.OpeningMinor != 0 || result.Data.ClosingMinor != 50000 || result.Data.NetMinor != 50000 ||
+					result.Data.CashBalanceMinor != 50000 || !result.Data.Ties || len(result.Data.UnsupportedCurrencies) != 0 || result.Data.Operating != wantOperating ||
+					result.Data.Investing != (capability.CashFlowCategoryTotal{}) || result.Data.Financing != (capability.CashFlowCategoryTotal{}) {
+					t.Errorf("accounting.cashFlow result = %+v, want the tenant's tied 50000 cash movement without the foreign CAD entry", result)
+				}
 			case "call-routine-document-versions", "call-routine-foreign-document-versions":
 				var result struct {
 					OK   bool `json:"ok"`
@@ -668,6 +686,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		}
 		if !foundBalanceSheetResult {
 			t.Errorf("follow-up provider request omitted the accounting.balanceSheet tool result")
+		}
+		if !foundCashFlowResult {
+			t.Errorf("follow-up provider request omitted the accounting.cashFlow tool result")
 		}
 		if !foundQuoteResult {
 			t.Errorf("follow-up provider request omitted the accounting.listQuotes tool result")

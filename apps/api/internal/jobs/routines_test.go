@@ -84,6 +84,34 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if got := byName[supplierStatement.Name]; got != "purchasing.supplierStatement" {
 		t.Fatalf("supplier statement routine dispatch maps to %q", got)
 	}
+	var cashFlow *routineTool
+	for index := range tools {
+		if tools[index].Capability == "accounting.cashFlow" {
+			cashFlow = &tools[index]
+			break
+		}
+	}
+	if cashFlow == nil || cashFlow.Name != "accounting_cashFlow" || cashFlow.Permission != "accounting.read" {
+		t.Fatalf("cash flow tool=%+v, want accounting_cashFlow with accounting.read", cashFlow)
+	}
+	cashFlowProperties, ok := cashFlow.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("cash flow schema has no properties: %#v", cashFlow.Schema)
+	}
+	cashCodes, ok := cashFlowProperties["cashAccountCodes"].(map[string]any)
+	if !ok || cashCodes["type"] != "array" {
+		t.Fatalf("cash flow cashAccountCodes schema=%#v, want optional string array", cashFlowProperties["cashAccountCodes"])
+	}
+	if _, required := cashFlow.Schema["required"]; required {
+		t.Fatalf("cash flow schema should keep its defaulted cashAccountCodes optional: %#v", cashFlow.Schema["required"])
+	}
+	items, ok := cashCodes["items"].(map[string]any)
+	if !ok || items["type"] != "string" {
+		t.Fatalf("cash flow cashAccountCodes items=%#v, want strings", cashCodes["items"])
+	}
+	if got := byName[cashFlow.Name]; got != "accounting.cashFlow" {
+		t.Fatalf("cash flow routine dispatch maps to %q", got)
+	}
 	var customers *routineTool
 	for index := range tools {
 		if tools[index].Capability == "crm.listCustomers" {
