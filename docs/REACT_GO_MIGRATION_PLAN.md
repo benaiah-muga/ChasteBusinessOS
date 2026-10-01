@@ -603,14 +603,16 @@ new owners and the manifest shows zero legacy runtime paths.
     organization-scoped executor paths, approval verification, and worker
     support are in place. System money jobs use configured amount thresholds
     and require an executing human approval for unknown or above-threshold
-    amounts. Report reads, receipt detail, purchase order closure, supplier
-    bill credit, and the inventory stock report are covered by items below.
+    amounts. Accounting report reads and FX revaluation have governed executor
+    proofs. Inventory valuation posting and reversal, the stock report, item
+    history, and lot listing have governed executor proofs. Purchasing bill
+    credit, purchase order closure, and receipt listing also have executor
+    proofs.
     Accounting report currency metadata now has a dedicated signed Go read.
     Its Go input parser now has a regression proof for Zod-compatible unknown
-    key stripping. Remaining accounting and FX parity proofs, inventory valuation and other
-    read models, broader purchasing parity proofs, and route ownership changes
-    remain open; route defaults stay on the existing owners until those gates
-    pass.
+    key stripping. Broader inventory and purchasing parity proofs and route
+    ownership changes remain open; route defaults stay on the existing owners
+    until those gates pass.
 
 31. (Done) Add Go parity for `crm.saveCustomerView` and its inverse,
     `crm.restoreCustomerView`, behind default-off `GO_CRM_VIEW_WRITES=1` on the
@@ -1157,3 +1159,7 @@ new owners and the manifest shows zero legacy runtime paths.
 121. (Done) Prove Go inventory valuation posting, permission denial,
      receipt replay, balanced journal lines, reversal, restored GL balance, and
      human execution audit through the governed Executor.
+
+122. (Done) Prove Go purchase receipt history through the governed Executor,
+     including permission denial, exact receipt and order-line quantities,
+     same-number cross-organization isolation, and human execution audit.
