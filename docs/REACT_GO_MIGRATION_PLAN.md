@@ -1098,3 +1098,6 @@ new owners and the manifest shows zero legacy runtime paths.
 106. (Done) Add focused Vite CRM component coverage for customer merge and
      undo, verifying the chosen survivor and duplicate IDs in the merge request
      and the full returned snapshot in the restore request.
+
+107. (Done) Add focused Vite CRM component coverage for customer import undo,
+     verifying only created customer IDs are sent and the undo result is shown.

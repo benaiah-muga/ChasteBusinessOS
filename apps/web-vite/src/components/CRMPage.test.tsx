@@ -445,4 +445,51 @@ describe("Vite CRM page", () => {
     const undoPost = fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")[1];
     expect(JSON.parse(String(undoPost?.[1]?.body))).toMatchObject({ action: "undoMerge", ...undoSnapshot });
   });
+
+  it("imports customers and sends the exact created IDs when Undo this import is used", async () => {
+    const createdIds = [
+      "8ea6ef66-d321-4be4-a4ee-32fa0b13e5f9",
+      "3736fc41-fbf2-4892-b290-ae17fbdbcc36",
+    ];
+    const importPosts: Array<{ body: string; response: Response }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/import" && init?.method === "POST") {
+        const body = String(init.body);
+        const requestBody = JSON.parse(body) as { action?: string };
+        const response = requestBody.action === "undo"
+          ? Response.json({ undone: 2, remaining: 0 })
+          : Response.json({ inserted: 2, skippedDuplicates: 0, createdIds });
+        importPosts.push({ body, response });
+        return response;
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Import CSV" }));
+    const file = new File([
+      "Company,Email,Phone\nNorthwind,hello@northwind.test,5550101\nContoso,hello@contoso.test,5550102",
+    ], "customers.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Choose CSV"), { target: { files: [file] } });
+    expect(await screen.findByLabelText("Map name")).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("Map name"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Map email"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Map phone"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Import 2 customers" }));
+
+    expect(await screen.findByText("2 customers imported, 0 duplicates skipped.")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo this import" }));
+
+    expect(await screen.findByText("Import undone.")).not.toBeNull();
+    expect(await screen.findByText("Undid this import. 2 imported customers were deactivated.")).not.toBeNull();
+    expect(importPosts).toHaveLength(2);
+    expect(JSON.parse(importPosts[1]!.body)).toEqual({ entity: "customers", action: "undo", importIds: createdIds });
+  });
 });
