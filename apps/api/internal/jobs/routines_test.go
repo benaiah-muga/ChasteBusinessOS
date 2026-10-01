@@ -159,6 +159,25 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if got := byName[itemHistory.Name]; got != "inventory.itemHistory" {
 		t.Fatalf("inventory item history routine dispatch maps to %q", got)
 	}
+	var trialBalance *routineTool
+	for index := range tools {
+		if tools[index].Capability == "accounting.trialBalance" {
+			trialBalance = &tools[index]
+			break
+		}
+	}
+	if trialBalance == nil || trialBalance.Name != "accounting_trialBalance" || trialBalance.Permission != "accounting.read" {
+		t.Fatalf("accounting trial balance tool=%+v, want accounting_trialBalance with accounting.read", trialBalance)
+	}
+	if trialBalance.Schema["type"] != "object" || trialBalance.Schema["additionalProperties"] != false {
+		t.Fatalf("accounting trial balance schema must be an input-free object: %#v", trialBalance.Schema)
+	}
+	if properties, ok := trialBalance.Schema["properties"].(map[string]any); !ok || len(properties) != 0 {
+		t.Fatalf("accounting trial balance schema must not accept inputs: %#v", trialBalance.Schema["properties"])
+	}
+	if got := byName[trialBalance.Name]; got != "accounting.trialBalance" {
+		t.Fatalf("accounting trial balance routine dispatch maps to %q", got)
+	}
 	var locations *routineTool
 	for index := range tools {
 		if tools[index].Capability == "inventory.listLocations" {

@@ -59,6 +59,35 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	defer cleanupJobsTestOrgs(t, owner, orgID)
 	otherOrgID := insertJobsTestOrg(t, ctx, owner, tag+"-other")
 	defer cleanupJobsTestOrgs(t, owner, otherOrgID)
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cleanupCancel()
+		tx, err := owner.Begin(cleanupCtx)
+		if err != nil {
+			t.Errorf("begin routine accounting fixture cleanup: %v", err)
+			return
+		}
+		defer func() { _ = tx.Rollback(cleanupCtx) }()
+		if _, err := tx.Exec(cleanupCtx, `SELECT set_config('app.ledger_maintenance', 'on', true)`); err != nil {
+			t.Errorf("enable routine accounting fixture cleanup: %v", err)
+			return
+		}
+		if _, err := tx.Exec(cleanupCtx, `DELETE FROM journal_lines WHERE entry_id IN (SELECT id FROM journal_entries WHERE org_id = ANY($1::uuid[]))`, []string{orgID, otherOrgID}); err != nil {
+			t.Errorf("delete routine accounting fixture lines: %v", err)
+			return
+		}
+		if _, err := tx.Exec(cleanupCtx, `DELETE FROM journal_entries WHERE org_id = ANY($1::uuid[])`, []string{orgID, otherOrgID}); err != nil {
+			t.Errorf("delete routine accounting fixture entries: %v", err)
+			return
+		}
+		if _, err := tx.Exec(cleanupCtx, `DELETE FROM accounts WHERE org_id = ANY($1::uuid[])`, []string{orgID, otherOrgID}); err != nil {
+			t.Errorf("delete routine accounting fixture accounts: %v", err)
+			return
+		}
+		if err := tx.Commit(cleanupCtx); err != nil {
+			t.Errorf("commit routine accounting fixture cleanup: %v", err)
+		}
+	}()
 	var localHistoryItemID, foreignHistoryItemID string
 	if err := owner.QueryRow(ctx, `INSERT INTO items (org_id, sku, name, kind) VALUES ($1::uuid, 'ROUTINE-HISTORY', 'Local routine history item', 'goods') RETURNING id::text`, orgID).Scan(&localHistoryItemID); err != nil {
 		t.Fatal(err)
@@ -73,6 +102,43 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	if _, err := owner.Exec(ctx, `INSERT INTO stock_movements (org_id, item_id, quantity_delta, reason, note, actor_type, created_at) VALUES ($1::uuid, $2::uuid, 99000, 'adjustment', 'Foreign tenant sentinel', 'human', $3)`, otherOrgID, foreignHistoryItemID, localHistoryAt.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	for _, account := range []struct {
+		orgID, code, name, kind string
+	}{
+		{orgID, "RT1000", "Routine cash", "asset"},
+		{orgID, "RT4000", "Routine sales", "income"},
+		{otherOrgID, "RT1000", "Foreign routine cash", "asset"},
+		{otherOrgID, "RT4000", "Foreign routine sales", "income"},
+	} {
+		if _, err := owner.Exec(ctx, `INSERT INTO accounts (org_id, code, name, type) VALUES ($1::uuid, $2, $3, $4)`, account.orgID, account.code, account.name, account.kind); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedRoutineJournalEntry := func(entryOrgID, currency string) {
+		t.Helper()
+		tx, err := owner.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		var entryID string
+		if err := tx.QueryRow(ctx, `INSERT INTO journal_entries (org_id, memo, currency, entry_kind, posted_at, posted_by_actor_type) VALUES ($1::uuid, 'routine trial balance proof', $2, 'operational', $3, 'system') RETURNING id::text`, entryOrgID, currency, localHistoryAt).Scan(&entryID); err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range []struct {
+			code          string
+			debit, credit int64
+		}{{"RT1000", 50000, 0}, {"RT4000", 0, 50000}} {
+			if _, err := tx.Exec(ctx, `INSERT INTO journal_lines (entry_id, account_id, debit_minor, credit_minor) SELECT $1::uuid, id, $2, $3 FROM accounts WHERE org_id = $4::uuid AND code = $5`, entryID, line.debit, line.credit, entryOrgID, line.code); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedRoutineJournalEntry(orgID, "EUR")
+	seedRoutineJournalEntry(otherOrgID, "CAD")
 	updatedAt := time.Date(2026, 9, 30, 10, 11, 12, 345000000, time.UTC)
 	seedDocument := func(documentOrgID, title string) string {
 		t.Helper()
@@ -208,6 +274,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-tasks", "type": "function", "function": map[string]any{"name": "crm_listTasks", "arguments": `{"openOnly":true}`}},
 					map[string]any{"id": "call-routine-crm-timeline", "type": "function", "function": map[string]any{"name": "crm_customerTimeline", "arguments": string(timelineArgs)}},
 					map[string]any{"id": "call-routine-accounting-quotes", "type": "function", "function": map[string]any{"name": "accounting_listQuotes", "arguments": quoteFilterArgs}},
+					map[string]any{"id": "call-routine-trial-balance", "type": "function", "function": map[string]any{"name": "accounting_trialBalance", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-inventory-locations", "type": "function", "function": map[string]any{"name": "inventory_listLocations", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-inventory", "type": "function", "function": map[string]any{"name": "inventory_stockReport", "arguments": `{"belowReorderOnly":false}`}},
 					map[string]any{"id": "call-routine-item-history", "type": "function", "function": map[string]any{"name": "inventory_itemHistory", "arguments": `{"sku":"ROUTINE-HISTORY","limit":10}`}},
@@ -242,6 +309,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundDocumentResult := false
 		foundLocationResult := false
 		foundInventoryHistoryResult := false
+		foundTrialBalanceResult := false
 		foundQuoteResult := false
 		foundSupplierStatementResult := false
 		foundTimelineResult := false
@@ -423,6 +491,35 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					movement.ActorType != "human" || movement.CreatedAt != "2026-09-30T09:01:02.345Z" {
 					t.Errorf("inventory.itemHistory movement = %+v, want local stock count details without foreign sentinel", movement)
 				}
+			case "call-routine-trial-balance":
+				foundTrialBalanceResult = true
+				var result struct {
+					OK   bool `json:"ok"`
+					Data struct {
+						Lines    []capability.TrialBalanceLine `json:"lines"`
+						Balanced bool                          `json:"balanced"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode accounting.trialBalance tool result %s: %v", message.Content, err)
+					continue
+				}
+				wantLines := []capability.TrialBalanceLine{
+					{Code: "RT1000", Name: "Routine cash", Currency: "EUR", DebitMinor: 50000},
+					{Code: "RT4000", Name: "Routine sales", Currency: "EUR", CreditMinor: 50000},
+				}
+				matchesExpectedLines := len(result.Data.Lines) == len(wantLines)
+				if matchesExpectedLines {
+					for index := range wantLines {
+						if result.Data.Lines[index] != wantLines[index] {
+							matchesExpectedLines = false
+							break
+						}
+					}
+				}
+				if !result.OK || !result.Data.Balanced || !matchesExpectedLines {
+					t.Errorf("accounting.trialBalance result = %+v, want balanced local EUR totals without foreign CAD entries", result)
+				}
 			case "call-routine-document-versions", "call-routine-foreign-document-versions":
 				var result struct {
 					OK   bool `json:"ok"`
@@ -527,6 +624,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundInventoryHistoryResult {
 			t.Errorf("follow-up provider request omitted the inventory.itemHistory tool result")
 		}
+		if !foundTrialBalanceResult {
+			t.Errorf("follow-up provider request omitted the accounting.trialBalance tool result")
+		}
 		if !foundQuoteResult {
 			t.Errorf("follow-up provider request omitted the accounting.listQuotes tool result")
 		}
@@ -542,7 +642,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundLocalVersionDetailResult || !foundLocalNullNoteVersionDetailResult || !foundForeignVersionDetailResult {
 			t.Errorf("follow-up provider request omitted document version detail tool results, local=%v null-note-local=%v foreign=%v", foundLocalVersionDetailResult, foundLocalNullNoteVersionDetailResult, foundForeignVersionDetailResult)
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customers, follow-up tasks, customer history, sent quotes, warehouse locations, stock movements, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customers, follow-up tasks, customer history, invoices, quotes, trial balance, warehouse locations, stock movements, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
 	}))
 	defer server.Close()
 	settings, err := json.Marshal(map[string]any{"ai": map[string]any{"provider": "custom", "baseUrl": server.URL + "/v1", "models": map[string]string{"primary": "routine-test-model", "fast": "routine-test-model", "reasoning": "routine-test-model", "embeddings": "routine-test-model"}, "encryptedApiKey": encryptRoutineKey(t, secret, "integration-provider-key"), "keyHint": "••••key", "updatedAt": time.Now().UTC().Format(time.RFC3339)}})
