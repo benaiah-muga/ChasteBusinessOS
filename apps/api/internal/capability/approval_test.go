@@ -3,6 +3,7 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,49 @@ func TestGoApprovalDecisionRejectNeedsMembershipButNotCapabilityPermission(t *te
 	}
 	if got := fx.count(`SELECT count(*) FROM customers WHERE org_id = $1::uuid`, fx.orgID); got != 0 {
 		t.Fatalf("rejection created %d customers, want none", got)
+	}
+}
+
+func TestGoApprovalRejectionRollsBackWhenAuditAppendFails(t *testing.T) {
+	fx := newExecutorFixture(t)
+	input := json.RawMessage(`{"name":"Rejected customer","preferredContactMethod":"email","doNotContact":false}`)
+	approvalID := createPendingCustomerApproval(t, fx, input)
+	functionName := "go_approval_reject_fail_" + strings.ReplaceAll(fx.orgID, "-", "")
+	triggerName := functionName + "_trigger"
+	if _, err := fx.owner.Exec(fx.ctx, fmt.Sprintf(`
+		CREATE FUNCTION public.%s() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'fixture approval audit failure'; END
+		$$`, functionName)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(context.Background(), fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON ledger_events`, triggerName)); err != nil {
+			t.Errorf("drop approval fixture trigger: %v", err)
+		}
+		if _, err := fx.owner.Exec(context.Background(), fmt.Sprintf(`DROP FUNCTION IF EXISTS public.%s()`, functionName)); err != nil {
+			t.Errorf("drop approval fixture function: %v", err)
+		}
+	})
+	if _, err := fx.owner.Exec(fx.ctx, fmt.Sprintf(`
+		CREATE TRIGGER %s BEFORE INSERT ON ledger_events FOR EACH ROW
+		WHEN (NEW.org_id = '%s'::uuid AND NEW.kind = 'approval.rejected')
+		EXECUTE FUNCTION public.%s()`, triggerName, fx.orgID, functionName)); err != nil {
+		t.Fatal(err)
+	}
+	comment := "reject while audit is unavailable"
+	result, err := NewApprovalDecider(fx.runtime, fx.executor).Decide(fx.ctx, fx.humanClaims(input, ""), ApprovalDecisionInput{
+		ApprovalID: approvalID,
+		Decision:   "reject",
+		Comment:    &comment,
+	})
+	if err == nil || result.HTTPStatus != 0 {
+		t.Fatalf("rejection result=%+v err=%v, want audit append failure", result, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM approvals WHERE id = $1::uuid AND status = 'pending'`, approvalID); got != 1 {
+		t.Fatalf("failed audited rejection left %d pending approval rows, want one", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id = $1::uuid AND kind = 'approval.rejected'`, fx.orgID); got != 0 {
+		t.Fatalf("failed rejection left %d audit events, want zero", got)
 	}
 }
 

@@ -130,6 +130,9 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 			if err != nil {
 				return approvalTransition{}, err
 			}
+			if err := appendApprovalDecisionEventTx(ctx, tx, claims, row, "approval.rejected", rejectionPayload{ApprovalID: row.ID, Comment: input.Comment}, now); err != nil {
+				return approvalTransition{}, err
+			}
 			return approvalTransition{
 				row:    row,
 				result: ApprovalDecisionResult{OK: true, Status: "rejected", HTTPStatus: 200},
@@ -172,9 +175,6 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 		return ApprovalDecisionResult{}, err
 	}
 	if transition.result.Status == "rejected" {
-		if err := appendApprovalDecisionEvent(ctx, d.pool, claims, transition.row, "approval.rejected", rejectionPayload{ApprovalID: transition.row.ID, Comment: input.Comment}, now); err != nil {
-			return ApprovalDecisionResult{}, err
-		}
 		return transition.result, nil
 	}
 	if transition.result.HTTPStatus != 0 {
@@ -643,24 +643,21 @@ func (d *ApprovalDecider) finish(ctx context.Context, claims authbridge.Capabili
 	return err
 }
 
-func appendApprovalDecisionEvent(ctx context.Context, pool dbx.Beginner, claims authbridge.CapabilityClaims, row approvalRecord, kind string, payload any, now time.Time) error {
+func appendApprovalDecisionEventTx(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, row approvalRecord, kind string, payload any, now time.Time) error {
 	encoded, err := marshalJS(payload)
 	if err != nil {
 		return err
 	}
 	capabilityID := row.CapabilityID
 	actorID := claims.Subject
-	_, err = dbx.WithOrgTx(ctx, pool, claims.OrganizationID, func(tx pgx.Tx) (struct{}, error) {
-		_, _, err := ledger.AppendTx(ctx, tx, ledger.AppendEvent{
-			OrgID:        claims.OrganizationID,
-			ActorType:    "human",
-			ActorID:      &actorID,
-			Kind:         kind,
-			CapabilityID: &capabilityID,
-			Payload:      encoded,
-			OccurredAt:   now,
-		})
-		return struct{}{}, err
+	_, _, err = ledger.AppendTx(ctx, tx, ledger.AppendEvent{
+		OrgID:        claims.OrganizationID,
+		ActorType:    "human",
+		ActorID:      &actorID,
+		Kind:         kind,
+		CapabilityID: &capabilityID,
+		Payload:      encoded,
+		OccurredAt:   now,
 	})
 	return err
 }
