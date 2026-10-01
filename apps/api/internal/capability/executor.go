@@ -543,6 +543,32 @@ func (e *Executor) execute(
 	system bool,
 	approvedApprovalID string,
 ) (Result, error) {
+	return e.executeWithFinalizer(ctx, claims, capabilityID, rawInput, system, approvedApprovalID, nil)
+}
+
+// ExecuteWithApprovalFinalizer runs an approved action and finalizes its gate in the effect transaction.
+func (e *Executor) ExecuteWithApprovalFinalizer(
+	ctx context.Context,
+	claims authbridge.CapabilityClaims,
+	capabilityID string,
+	rawInput json.RawMessage,
+	finalize func(context.Context, pgx.Tx) error,
+) (Result, error) {
+	if finalize == nil {
+		return Result{}, errors.New("approval finalizer is required")
+	}
+	return e.executeWithFinalizer(ctx, claims, capabilityID, rawInput, false, "", finalize)
+}
+
+func (e *Executor) executeWithFinalizer(
+	ctx context.Context,
+	claims authbridge.CapabilityClaims,
+	capabilityID string,
+	rawInput json.RawMessage,
+	system bool,
+	approvedApprovalID string,
+	finalize func(context.Context, pgx.Tx) error,
+) (Result, error) {
 	if e == nil || e.pool == nil {
 		return Result{}, errors.New("capability executor is unavailable")
 	}
@@ -2792,6 +2818,11 @@ func (e *Executor) execute(
 		result := Result{OK: true, Data: data}
 		if intentKey != "" {
 			if err := insertReceipt(ctx, tx, claims.OrganizationID, intentKey, capabilityID, inputHash, result); err != nil {
+				return Result{}, err
+			}
+		}
+		if finalize != nil {
+			if err := finalize(ctx, tx); err != nil {
 				return Result{}, err
 			}
 		}

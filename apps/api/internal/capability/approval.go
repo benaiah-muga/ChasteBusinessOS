@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 	"unicode/utf16"
 
@@ -17,6 +18,11 @@ const approvalVerificationError = "approval verification failed for the supplied
 
 type ApprovalCapabilityExecutor interface {
 	Execute(context.Context, authbridge.CapabilityClaims, string, json.RawMessage) (Result, error)
+}
+
+// ApprovalFinalizingExecutor commits successful approval execution and gate finalization together.
+type ApprovalFinalizingExecutor interface {
+	ExecuteWithApprovalFinalizer(context.Context, authbridge.CapabilityClaims, string, json.RawMessage, func(context.Context, pgx.Tx) error) (Result, error)
 }
 
 type ApprovalDecisionInput struct {
@@ -609,7 +615,22 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 	// so the executor records capability.executed without a second approval request.
 	executionClaims := claims
 	executionClaims.IntentID = ""
-	result, err := d.executor.Execute(ctx, executionClaims, transition.row.CapabilityID, transition.row.Payload)
+	var result Result
+	finalizedInExecution := false
+	if finalizingExecutor, ok := d.executor.(ApprovalFinalizingExecutor); ok {
+		result, err = finalizingExecutor.ExecuteWithApprovalFinalizer(ctx, executionClaims, transition.row.CapabilityID, transition.row.Payload, func(txCtx context.Context, tx pgx.Tx) error {
+			return d.finishTx(txCtx, tx, claims, transition.row.ID, "executed", input.Comment, now)
+		})
+		if err != nil {
+			if recoveryErr := d.restorePending(ctx, claims, transition.row.ID); recoveryErr != nil {
+				return ApprovalDecisionResult{}, errors.Join(err, fmt.Errorf("restore approval to pending after execution rollback: %w", recoveryErr))
+			}
+			return ApprovalDecisionResult{}, err
+		}
+		finalizedInExecution = result.OK
+	} else {
+		result, err = d.executor.Execute(ctx, executionClaims, transition.row.CapabilityID, transition.row.Payload)
+	}
 	if err != nil {
 		return ApprovalDecisionResult{}, err
 	}
@@ -619,8 +640,10 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 	} else if result.PendingApproval {
 		finalStatus = "approved"
 	}
-	if err := d.finish(ctx, claims, transition.row.ID, finalStatus, input.Comment, now); err != nil {
-		return ApprovalDecisionResult{}, err
+	if !finalizedInExecution {
+		if err := d.finish(ctx, claims, transition.row.ID, finalStatus, input.Comment, now); err != nil {
+			return ApprovalDecisionResult{}, err
+		}
 	}
 	if !result.OK && !result.PendingApproval {
 		message := result.Error
@@ -634,10 +657,31 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 
 func (d *ApprovalDecider) finish(ctx context.Context, claims authbridge.CapabilityClaims, approvalID, status string, comment *string, decidedAt time.Time) error {
 	_, err := dbx.WithOrgTx(ctx, d.pool, claims.OrganizationID, func(tx pgx.Tx) (struct{}, error) {
-		_, err := tx.Exec(ctx, `
+		return struct{}{}, d.finishTx(ctx, tx, claims, approvalID, status, comment, decidedAt)
+	})
+	return err
+}
+
+func (d *ApprovalDecider) finishTx(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, approvalID, status string, comment *string, decidedAt time.Time) error {
+	tag, err := tx.Exec(ctx, `
 			UPDATE approvals SET status = $2, decided_by_user_id = $3::uuid,
 				decision_comment = $4::text, decided_at = $5
-			WHERE id = $1::uuid`, approvalID, status, claims.Subject, comment, decidedAt)
+			WHERE id = $1::uuid AND org_id = $6::uuid AND status = 'executing'`, approvalID, status, claims.Subject, comment, decidedAt, claims.OrganizationID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("approval execution claim was lost before finalization")
+	}
+	return nil
+}
+
+func (d *ApprovalDecider) restorePending(ctx context.Context, claims authbridge.CapabilityClaims, approvalID string) error {
+	_, err := dbx.WithOrgTx(ctx, d.pool, claims.OrganizationID, func(tx pgx.Tx) (struct{}, error) {
+		_, err := tx.Exec(ctx, `
+			UPDATE approvals SET status = 'pending', decided_by_user_id = NULL,
+				decision_comment = NULL, decided_at = NULL
+			WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'executing'`, approvalID, claims.OrganizationID)
 		return struct{}{}, err
 	})
 	return err

@@ -72,6 +72,50 @@ func TestGoApprovalDecisionExecutesStoredPayloadAndAuditsHumanDecision(t *testin
 	}
 }
 
+func TestGoApprovalDecisionRollsBackWhenExecutionFinalizationFails(t *testing.T) {
+	fx := newExecutorFixture(t)
+	input := json.RawMessage(`{"name":"Rolled back approval customer","preferredContactMethod":"email","doNotContact":false}`)
+	approvalID := createPendingCustomerApproval(t, fx, input)
+	functionName := "go_approval_finalize_" + strings.ReplaceAll(fx.orgID, "-", "")[:12]
+	triggerName := functionName + "_trigger"
+	if _, err := fx.owner.Exec(fx.ctx, fmt.Sprintf(`
+		CREATE FUNCTION public.%s() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN RAISE EXCEPTION 'fixture approval finalization failure'; END
+		$$`, functionName)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(context.Background(), fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON approvals`, triggerName)); err != nil {
+			t.Errorf("drop approval finalization trigger: %v", err)
+		}
+		if _, err := fx.owner.Exec(context.Background(), fmt.Sprintf(`DROP FUNCTION IF EXISTS public.%s()`, functionName)); err != nil {
+			t.Errorf("drop approval finalization function: %v", err)
+		}
+	})
+	if _, err := fx.owner.Exec(fx.ctx, fmt.Sprintf(`
+		CREATE TRIGGER %s BEFORE UPDATE ON approvals FOR EACH ROW
+		WHEN (NEW.org_id = '%s'::uuid AND NEW.status = 'executed')
+		EXECUTE FUNCTION public.%s()`, triggerName, fx.orgID, functionName)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewApprovalDecider(fx.runtime, fx.executor).Decide(fx.ctx, fx.humanClaims(input, ""), ApprovalDecisionInput{
+		ApprovalID: approvalID,
+		Decision:   "approve",
+	})
+	if err == nil || result.HTTPStatus != 0 {
+		t.Fatalf("approval result=%+v err=%v, want finalization failure", result, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM approvals WHERE id = $1::uuid AND status = 'pending'`, approvalID); got != 1 {
+		t.Fatalf("failed finalization left %d pending approval rows, want one", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM customers WHERE org_id = $1::uuid AND name = 'Rolled back approval customer'`, fx.orgID); got != 0 {
+		t.Fatalf("failed finalization left %d customer effects, want none", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id = $1::uuid AND capability_id = $2 AND kind = 'capability.executed'`, fx.orgID, createCustomerCapabilityID); got != 0 {
+		t.Fatalf("failed finalization left %d execution audit events, want none", got)
+	}
+}
+
 func TestGoCustomerExecutionMatchesLegacyHumanWritePolicy(t *testing.T) {
 	fx := newExecutorFixture(t)
 	fx.addPolicy("crm.*", "read", []string{"money"})
