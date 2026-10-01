@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "measuredAt": "2026-10-01T14:49:05.072Z",
-  "gitRevision": "b2583b247f6917f6be82ee7270833934816673b5",
+  "measuredAt": "2026-10-01T15:27:47.711Z",
+  "gitRevision": "cedea09abf54834d8b75f36a1d204110eed4fe48",
   "machine": {
     "platform": "linux 6.8.0-138-generic",
     "architecture": "x64",
@@ -33,21 +33,21 @@
     "next": {
       "successfulRuns": 3,
       "failedRuns": 0,
-      "medianStartupMilliseconds": 4341,
+      "medianStartupMilliseconds": 3491,
       "samples": [
         {
           "run": 1,
-          "startupMilliseconds": 3381,
+          "startupMilliseconds": 7903,
           "port": 3001
         },
         {
           "run": 2,
-          "startupMilliseconds": 5809,
+          "startupMilliseconds": 3068,
           "port": 3001
         },
         {
           "run": 3,
-          "startupMilliseconds": 4341,
+          "startupMilliseconds": 3491,
           "port": 3001
         }
       ]
@@ -55,21 +55,21 @@
     "vite": {
       "successfulRuns": 3,
       "failedRuns": 0,
-      "medianStartupMilliseconds": 4459,
+      "medianStartupMilliseconds": 2767,
       "samples": [
         {
           "run": 1,
-          "startupMilliseconds": 4459,
+          "startupMilliseconds": 3927,
           "port": 3000
         },
         {
           "run": 2,
-          "startupMilliseconds": 5787,
+          "startupMilliseconds": 2242,
           "port": 3000
         },
         {
           "run": 3,
-          "startupMilliseconds": 2559,
+          "startupMilliseconds": 2767,
           "port": 3000
         }
       ]

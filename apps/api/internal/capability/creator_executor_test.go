@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -238,6 +239,43 @@ func TestGoCreatorMarketplaceReadMatchesLegacyRowsAndWireFields(t *testing.T) {
 	}
 	if !output.Listings[4].InstalledHere {
 		t.Fatalf("marketplace row with mixed-type installation array=%+v, want org membership preserved", output.Listings[4])
+	}
+}
+
+func TestGoCreatorRetractCannotChangeAnotherPublishersListing(t *testing.T) {
+	fx := newExecutorFixture(t)
+	listingID := executorUUID(t)
+	slug := "foreign-publisher-" + listingID[:8]
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(context.Background(), `DELETE FROM marketplace_listings WHERE id=$1::uuid`, listingID); err != nil {
+			t.Errorf("clean foreign marketplace listing: %v", err)
+		}
+	})
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO marketplace_listings
+			(id, slug, name, version, summary, manifest, signature, publisher_public_key,
+			 capability_ids, status, submitted_by_org_id, installed_by_org_ids)
+		VALUES ($1::uuid, $2, 'Foreign publisher listing', '1.0.0', 'Tenant boundary fixture',
+			 '{}'::jsonb, 'signature', 'public-key', '[]'::jsonb, 'verified', $3::uuid, '[]'::jsonb)`,
+		listingID, slug, fx.otherOrgID); err != nil {
+		t.Fatalf("seed foreign publisher listing: %v", err)
+	}
+
+	fx.setModuleList(`["creator"]`)
+	grantWavePermission(t, fx, "platform.creator")
+	input := json.RawMessage(`{"slug":"` + slug + `"}`)
+	claims := waveModuleClaims(fx, creatorRetractListingCapabilityID, "platform.creator", input, "human", "", "creator-foreign-retract")
+	result, err := fx.executor.Execute(fx.ctx, claims, creatorRetractListingCapabilityID, input)
+	if err == nil || result.OK || !strings.Contains(err.Error(), "no such listing published by your org") {
+		t.Fatalf("creator.retractListing against a foreign publisher result=%+v err=%v, want an ownership refusal", result, err)
+	}
+
+	var status string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT status FROM marketplace_listings WHERE id=$1::uuid`, listingID).Scan(&status); err != nil {
+		t.Fatalf("read foreign listing after refused retraction: %v", err)
+	}
+	if status != "verified" {
+		t.Fatalf("foreign listing status=%q after refused retraction, want verified", status)
 	}
 }
 

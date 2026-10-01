@@ -13,7 +13,7 @@
     "build": "turbo build",
     "lint": "eslint .",
     "typecheck": "turbo typecheck",
-    "test": "turbo test --concurrency=1 --output-logs=errors-only",
+    "test": "node --test scripts/migration/benchmark-startup.test.mjs && turbo test --concurrency=1 --output-logs=errors-only",
     "demo": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-agent.ts",
     "demo:slice": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-slice.ts",
     "format": "prettier --write .",

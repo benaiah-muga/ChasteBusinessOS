@@ -126,18 +126,21 @@ pnpm benchmark:migration:builds --runs 3 --output docs/migration/benchmarks/phas
 ```
 
 The separate development-server startup sample, measured 2026-10-01 on the
-same machine with three alternating runs and warm caches, is close between the
-two frontends:
+same machine with three alternating runs and warm caches, recorded a lower
+Vite median in this sample:
 
 | Dev server | Command | Median process-spawn to TCP-listener time |
 | --- | --- | ---: |
-| Next.js compatibility app | `pnpm dev:legacy` | 4.341 s |
-| React + Vite app | `pnpm dev:vite` | 4.459 s |
+| Next.js compatibility app | `pnpm dev:legacy` | 3.491 s |
+| React + Vite app | `pnpm dev:vite` | 2.767 s |
 
-This startup measurement does not show a Vite speed advantage. It records when
-each server first accepts a TCP connection, not when a route finishes rendering
-or becomes usable in a browser. The full samples and method are in the
-[startup benchmark report](docs/migration/benchmarks/phase-4-startup.json).
+That is about 21% lower for Vite in this three-run sample. The previous sample
+recorded 4.459 s for Vite and 4.341 s for Next, so startup results vary between
+runs. This measurement records when each server first accepts a TCP connection,
+not when a route finishes rendering or becomes usable in a browser. The full
+samples, method, and machine details are in the
+[startup benchmark report](docs/migration/benchmarks/phase-4-startup.json) for
+revision [`cedea09`](https://github.com/benaiah-muga/ChasteBusinessOS/commit/cedea09abf54834d8b75f36a1d204110eed4fe48).
 Refresh it with:
 
 ```sh

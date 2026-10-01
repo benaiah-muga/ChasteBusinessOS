@@ -11,8 +11,9 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
-- **Migration performance measurements.** README and benchmark reports now reflect the current branch. The three-run Vite build median is 25.77s versus 34.90s for Next; server startup medians are 4.459s for Vite and 4.341s for Next, measured to the first TCP listener connection.
+- **Migration performance measurements.** README and benchmark reports show a three-run Vite build median of 25.77s versus 34.90s for Next. A refreshed server startup sample measured 2.767s for Vite and 3.491s for Next to the first TCP listener connection; edit-to-ready and route readiness remain unmeasured.
 - **Go accounting and inventory parity proofs.** Database-backed executor tests cover concurrent invoice-payment overage prevention, approved stock-adjustment audit details, and cross-organization item isolation.
+- **Go Purchasing bill payment parity proof.** A database-backed governed executor test confirms simultaneous bill payments cannot exceed the outstanding balance or duplicate payment postings.
 - **Go Purchasing receipt-history parity proof.** The database-backed Go projection test now confirms legacy stock movements appear in accepted and remaining order-line totals without creating synthetic receipt records.
 - **HR interaction parity.** Preserve draft input when an action is waiting for approval, and add arrow, Home, and End keyboard navigation to People workspace tabs. Inventory history and marketplace reads now time out instead of remaining in loading states indefinitely.
 - **Vite People workspace.** The React app now exposes People, hiring, leave, time, and payroll draft/history surfaces through the existing governed HR endpoints. Payroll execution and voiding, plus Expense controls, continue to use the full legacy workspace.
