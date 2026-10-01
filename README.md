@@ -116,15 +116,35 @@ toolchain details are in the [benchmark report](docs/migration/benchmarks/phase-
 for revision [`e1f3567`](https://github.com/benaiah-muga/ChasteBusinessOS/commit/e1f3567fc44284a2b51f95bf5c7d6a04f7088600).
 
 This snapshot compares build commands while the Vite app still has less feature
-coverage than the existing app. It does not measure startup, edit-to-ready, or
-browser navigation, so it is a build-time baseline rather than an end-to-end
+coverage than the existing app. It does not measure edit-to-ready or browser
+navigation, so it is a build-time baseline rather than an end-to-end
 development-speed claim. Refresh the report with:
 
 ```sh
 pnpm benchmark:migration:builds --runs 3 --output docs/migration/benchmarks/phase-4-previews.json
 ```
 
-Update this summary after recording a new comparable run.
+The separate development-server startup sample, measured 2026-10-01 on the
+same machine with three alternating runs and warm caches, is close between the
+two frontends:
+
+| Dev server | Command | Median process-spawn to TCP-listener time |
+| --- | --- | ---: |
+| Next.js compatibility app | `pnpm dev:legacy` | 4.341 s |
+| React + Vite app | `pnpm dev:vite` | 4.459 s |
+
+This startup measurement does not show a Vite speed advantage. It records when
+each server first accepts a TCP connection, not when a route finishes rendering
+or becomes usable in a browser. The full samples and method are in the
+[startup benchmark report](docs/migration/benchmarks/phase-4-startup.json).
+Refresh it with:
+
+```sh
+pnpm benchmark:migration:startup --runs 3 --output docs/migration/benchmarks/phase-4-startup.json
+```
+
+Edit-to-ready, route navigation, and demo-fixture comparisons remain to be
+measured before claiming an end-to-end development-speed improvement.
 
 Generate a random `GO_INTERNAL_AUTH_SECRET` in `.env` (for example,
 `openssl rand -hex 32`). Set `GO_POLICY_SHADOW=1` to compare the Go policy read

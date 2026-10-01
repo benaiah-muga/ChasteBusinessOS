@@ -128,6 +128,90 @@ func TestGoPaymentAndReversalMatchLegacyAndBalance(t *testing.T) {
 	assertPaymentThresholdPolicy(t, fx)
 }
 
+func TestGoConcurrentPaymentsCannotOverpayInvoice(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupAccountingFixtureLedger(t, fx)
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(fx.ctx, `DELETE FROM payments WHERE org_id = $1::uuid`, fx.orgID); err != nil {
+			t.Errorf("delete payment fixture payments: %v", err)
+		}
+	})
+	const invoiceNumber = 7042
+	const invoiceTotal int64 = 10_000
+	const paymentAmount int64 = 7_000
+	invoiceID := seedPaymentInvoice(t, fx, invoiceNumber, invoiceTotal)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES
+		($1::uuid, 'accounting.post', $2::uuid),
+		($1::uuid, 'accounting.read', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(fmt.Sprintf(`{"invoiceNumber":%d,"amountMinor":%d,"method":"bank_transfer"}`, invoiceNumber, paymentAmount))
+	claims := [2]authbridge.CapabilityClaims{
+		paymentClaims(fx, recordPaymentCapabilityID, input, []string{"accounting.post"}),
+		paymentClaims(fx, recordPaymentCapabilityID, input, []string{"accounting.post"}),
+	}
+	if claims[0].IntentID != "" || claims[1].IntentID != "" {
+		t.Fatal("concurrent payment claims must keep empty intent IDs so both independent requests execute")
+	}
+
+	start := make(chan struct{})
+	ready := make(chan struct{}, len(claims))
+	type completion struct {
+		result Result
+		err    error
+	}
+	results := make(chan completion, len(claims))
+	for _, claim := range claims {
+		go func(claim authbridge.CapabilityClaims) {
+			ready <- struct{}{}
+			<-start
+			result, err := fx.executor.Execute(fx.ctx, claim, recordPaymentCapabilityID, input)
+			results <- completion{result: result, err: err}
+		}(claim)
+	}
+	for range claims {
+		<-ready
+	}
+	close(start)
+
+	succeeded, rejected := 0, 0
+	for range claims {
+		completion := <-results
+		if completion.err != nil {
+			if !strings.Contains(completion.err.Error(), "overpayment: outstanding is 3000 minor") {
+				t.Fatalf("concurrent recordPayment error = %v, want an overpayment refusal", completion.err)
+			}
+			rejected++
+			continue
+		}
+		if completion.result.OK {
+			succeeded++
+			continue
+		}
+		if !strings.Contains(completion.result.Error, "overpayment: outstanding is 3000 minor") {
+			t.Fatalf("rejected concurrent payment = %+v, want an overpayment refusal", completion.result)
+		}
+		rejected++
+	}
+	if succeeded != 1 || rejected != 1 {
+		t.Fatalf("concurrent payment outcomes: succeeded=%d rejected=%d, want one of each", succeeded, rejected)
+	}
+	if got := countPaymentsForInvoice(fx, invoiceID); got != 1 {
+		t.Fatalf("concurrent payment rows=%d, want one", got)
+	}
+	assertPaymentInvoice(t, fx, invoiceID, "sent", paymentAmount, invoiceTotal, "USD")
+	assertCapabilityAudit(t, fx, recordPaymentCapabilityID, 1)
+	if got := fx.count(`SELECT count(*) FROM journal_entries WHERE org_id = $1::uuid AND source_type = 'payment'`, fx.orgID); got != 1 {
+		t.Fatalf("payment journal entries=%d, want one", got)
+	}
+	assertPaymentTrialBalance(t, fx, map[string][2]int64{
+		"1000": {paymentAmount, 0},
+		"1100": {invoiceTotal, paymentAmount},
+		"4000": {0, invoiceTotal},
+	})
+}
+
 func TestGoFxInvoiceAndPaymentMatchLegacy(t *testing.T) {
 	fx := newExecutorFixture(t)
 	cleanupAccountingFixtureLedger(t, fx)

@@ -456,7 +456,7 @@ new owners and the manifest shows zero legacy runtime paths.
    capability, and database table manifests with CI drift detection; source-cite
    the worker, event, integration, auth/session, data, demo, and action
    continuity inventories.
-3. (In progress) Capture old-runtime fixtures and benchmark scripts on a migrated database. Repeatable frontend and Go build timings are recorded by `pnpm benchmark:migration:builds`. The three-run comparison on 2026-09-29 at `e1f3567` recorded median command times of 31.44s for Next, 10.76s for Vite including TypeScript, and 1.58s for the three Go binaries. The Next p95 was 352.31s because the first cold build took 352.31s; warm samples were 31.44s and 15.70s. Vite took 11.31s, 10.36s, and 10.76s; Go took 2.15s, 1.51s, and 1.58s. Full machine, toolchain, and RSS data are saved in `docs/migration/benchmarks/phase-4-previews.json`. The Vite app does not yet have equivalent feature coverage, and the first cold Next sample remains in p95; these build numbers do not prove faster end-to-end development. Request startup, edit-to-ready, browser, and demo fixtures remain to be measured.
+3. (In progress) Capture old-runtime fixtures and benchmark scripts on a migrated database. Repeatable frontend and Go build timings are recorded by `pnpm benchmark:migration:builds`. The three-run comparison on 2026-09-29 at `e1f3567` recorded median command times of 31.44s for Next, 10.76s for Vite including TypeScript, and 1.58s for the three Go binaries. The Next p95 was 352.31s because the first cold build took 352.31s; warm samples were 31.44s and 15.70s. Vite took 11.31s, 10.36s, and 10.76s; Go took 2.15s, 1.51s, and 1.58s. Full machine, toolchain, and RSS data are saved in `docs/migration/benchmarks/phase-4-previews.json`. A three-run development-server comparison on 2026-10-01 recorded median process-spawn to TCP-listener times of 4.341s for Next and 4.459s for Vite, documented in `docs/migration/benchmarks/phase-4-startup.json`; this does not show a Vite startup advantage or measure route readiness. The Vite app does not yet have equivalent feature coverage, and the first cold Next build sample remains in p95. Edit-to-ready, browser navigation, and demo fixtures remain to be measured before claiming faster end-to-end development.
 4. (Done) Define the versioned HTTP contract and auth bridge contract, and
   prove Go read-only policy and ledger endpoints under existing session,
   permission, and RLS policies. OpenAPI 3.1 covers `GET /__go/policy` and
@@ -607,12 +607,15 @@ new owners and the manifest shows zero legacy runtime paths.
     support are in place. System money jobs use configured amount thresholds
     and require an executing human approval for unknown or above-threshold
     amounts. Accounting report reads and FX revaluation have governed executor
-    proofs. Inventory valuation posting and reversal, the stock report, item
-    history, and lot listing have governed executor proofs. Purchasing bill
-    credit, purchase order closure, and receipt listing also have executor
-    proofs. The receipt-history DB proof includes legacy stock movements in
-    order-line accepted and remaining totals without synthesizing receipt
-    records.
+    proofs. A concurrent payment proof confirms two simultaneous partial
+    payments cannot exceed the invoice balance. Inventory valuation posting
+    and reversal, stock adjustment approval, the stock report, item history,
+    and lot listing have governed executor proofs. The stock-adjustment proof
+    verifies pending-state immutability, audit attribution, and same-SKU
+    cross-organization isolation. Purchasing bill credit, purchase order
+    closure, and receipt listing also have executor proofs. The receipt-history
+    DB proof includes legacy stock movements in order-line accepted and
+    remaining totals without synthesizing receipt records.
     Accounting report currency metadata now has a dedicated signed Go read.
     Its Go input parser now has a regression proof for Zod-compatible unknown
     key stripping. Broader inventory and purchasing parity proofs and route

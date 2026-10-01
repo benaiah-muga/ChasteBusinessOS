@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-01T14:49:05.072Z",
+  "gitRevision": "b2583b247f6917f6be82ee7270833934816673b5",
+  "machine": {
+    "platform": "linux 6.8.0-138-generic",
+    "architecture": "x64",
+    "cpuModel": "Intel(R) Core(TM) i7-4600U CPU @ 2.10GHz",
+    "logicalCpuCount": 4,
+    "totalMemoryBytes": 16663064576
+  },
+  "toolchain": {
+    "node": "v24.18.0",
+    "pnpm": "11.9.0"
+  },
+  "protocol": {
+    "runsPerServer": 3,
+    "order": "Next then Vite on odd runs, Vite then Next on even runs",
+    "cachePolicy": "shared working tree and compiler caches, left warm between samples",
+    "measurement": "process spawn to first TCP listener connection on the frontend port; no HTTP or browser check",
+    "commands": {
+      "next": {
+        "command": "pnpm dev:legacy",
+        "url": "http://localhost:3001"
+      },
+      "vite": {
+        "command": "pnpm dev:vite",
+        "url": "http://localhost:3000"
+      }
+    }
+  },
+  "summaries": {
+    "next": {
+      "successfulRuns": 3,
+      "failedRuns": 0,
+      "medianStartupMilliseconds": 4341,
+      "samples": [
+        {
+          "run": 1,
+          "startupMilliseconds": 3381,
+          "port": 3001
+        },
+        {
+          "run": 2,
+          "startupMilliseconds": 5809,
+          "port": 3001
+        },
+        {
+          "run": 3,
+          "startupMilliseconds": 4341,
+          "port": 3001
+        }
+      ]
+    },
+    "vite": {
+      "successfulRuns": 3,
+      "failedRuns": 0,
+      "medianStartupMilliseconds": 4459,
+      "samples": [
+        {
+          "run": 1,
+          "startupMilliseconds": 4459,
+          "port": 3000
+        },
+        {
+          "run": 2,
+          "startupMilliseconds": 5787,
+          "port": 3000
+        },
+        {
+          "run": 3,
+          "startupMilliseconds": 2559,
+          "port": 3000
+        }
+      ]
+    }
+  }
+}
