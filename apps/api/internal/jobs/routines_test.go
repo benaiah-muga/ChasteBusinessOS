@@ -130,6 +130,9 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if !ok || customerID["type"] != "string" || customerID["format"] != "uuid" || byName[customerStatement.Name] != "accounting.customerStatement" {
 		t.Fatalf("customer statement customerId schema=%#v dispatch=%q, want UUID and governed dispatch", customerStatementProperties["customerId"], byName[customerStatement.Name])
 	}
+	if capabilityID := byName["accounting_arAging"]; capabilityID != "accounting.arAging" {
+		t.Fatalf("accounts receivable aging routine dispatch maps to %q", capabilityID)
+	}
 	var customers *routineTool
 	for index := range tools {
 		if tools[index].Capability == "crm.listCustomers" {

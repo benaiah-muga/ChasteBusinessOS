@@ -303,6 +303,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-tasks", "type": "function", "function": map[string]any{"name": "crm_listTasks", "arguments": `{"openOnly":true}`}},
 					map[string]any{"id": "call-routine-crm-timeline", "type": "function", "function": map[string]any{"name": "crm_customerTimeline", "arguments": string(timelineArgs)}},
 					map[string]any{"id": "call-routine-accounting-quotes", "type": "function", "function": map[string]any{"name": "accounting_listQuotes", "arguments": quoteFilterArgs}},
+					map[string]any{"id": "call-routine-ar-aging", "type": "function", "function": map[string]any{"name": "accounting_arAging", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-income-statement", "type": "function", "function": map[string]any{"name": "accounting_incomeStatement", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-trial-balance", "type": "function", "function": map[string]any{"name": "accounting_trialBalance", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-balance-sheet", "type": "function", "function": map[string]any{"name": "accounting_balanceSheet", "arguments": "{}"}},
@@ -348,6 +349,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundCashFlowResult := false
 		foundCustomerStatementResult := false
 		foundQuoteResult := false
+		foundARAgingResult := false
 		foundSupplierStatementResult := false
 		foundTimelineResult := false
 		foundLocalVersionResult := false
@@ -450,6 +452,25 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				if quote.ID != localQuoteID || quote.Number != 81 || quote.Status != "sent" || quote.TotalMinor != 13500 || quote.CustomerID != localQuoteCustomerID ||
 					quote.CreatedAt == nil || *quote.CreatedAt != "2026-09-30T10:11:12.345Z" || quote.ExpiresAt == nil || *quote.ExpiresAt != "2026-12-31T00:00:00.000Z" || quote.InvoiceID != nil {
 					t.Errorf("accounting.listQuotes quote = %+v, want matching local quote and nullable invoice", quote)
+				}
+			case "call-routine-ar-aging":
+				foundARAgingResult = true
+				var result struct {
+					OK   bool                     `json:"ok"`
+					Data capability.ArAgingOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode accounting.arAging tool result %s: %v", message.Content, err)
+					continue
+				}
+				buckets := result.Data.Buckets
+				if !result.OK || buckets.TotalOutstanding != 310000 || buckets.Current+buckets.D30+buckets.D60+buckets.D90Plus != 310000 || len(result.Data.Invoices) != 2 {
+					t.Errorf("accounting.arAging result = %+v, want only the two local outstanding invoices totaling 310000", result)
+					continue
+				}
+				if result.Data.Invoices[0].Number != 91 || result.Data.Invoices[0].OutstandingMinor != 76000 ||
+					result.Data.Invoices[1].Number != 92 || result.Data.Invoices[1].OutstandingMinor != 234000 {
+					t.Errorf("accounting.arAging invoices = %+v, want local 91/92 without the foreign invoice", result.Data.Invoices)
 				}
 			case "call-routine-crm-timeline":
 				foundTimelineResult = true
@@ -756,6 +777,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		}
 		if !foundCustomerStatementResult {
 			t.Errorf("follow-up provider request omitted the accounting.customerStatement tool result")
+		}
+		if !foundARAgingResult {
+			t.Errorf("follow-up provider request omitted the accounting.arAging tool result")
 		}
 		if !foundQuoteResult {
 			t.Errorf("follow-up provider request omitted the accounting.listQuotes tool result")
