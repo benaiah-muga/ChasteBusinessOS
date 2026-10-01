@@ -78,3 +78,55 @@ func TestGoAccountingFxRevaluationUsesGovernedExecutorPath(t *testing.T) {
 		}
 	}
 }
+
+func TestGoAccountingFxRevaluationUsesJPYUnitsAndPeriodEndRate(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupAccountingFxLedger(t, fx)
+	grantWavePermission(t, fx, "accounting.post")
+	seedAccountingFxBase(t, fx, fx.orgID)
+
+	historicalNum, historicalDen := int64(67), int64(10_000)
+	issuedAt := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	seedAccountingFxInvoice(t, fx, fx.orgID, "JPY", "sent", 10_000, 0, 0, &issuedAt, nil, &historicalNum, &historicalDen)
+	periodEnd := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Add(-time.Millisecond)
+	seedAccountingFxRate(t, fx, fx.orgID, "USD", "JPY", 1, 100, periodEnd)
+	seedAccountingFxRate(t, fx, fx.orgID, "USD", "JPY", 2, 100, periodEnd.Add(time.Millisecond))
+
+	input := json.RawMessage(`{"year":2026,"month":8}`)
+	claims := waveModuleClaims(fx, revalueForeignReceivablesCapabilityID, "accounting.post", input, "human", "", "fx-jpy-period-end")
+	result, err := fx.executor.Execute(fx.ctx, claims, revalueForeignReceivablesCapabilityID, input)
+	if err != nil || !result.OK || result.PendingApproval {
+		t.Fatalf("JPY revaluation result=%+v err=%v, want governed execution", result, err)
+	}
+	var revalued RevalueForeignReceivablesOutput
+	if err := json.Unmarshal(result.Data, &revalued); err != nil {
+		t.Fatalf("decode JPY revaluation output %s: %v", result.Data, err)
+	}
+	wantLine := FxRevaluationCurrencyLine{
+		Currency: "JPY", ForeignMinor: 10_000, HistoricalBaseMinor: 6_700,
+		CloseBaseMinor: 10_000, AdjustmentMinor: 3_300, RateNum: 1, RateDen: 100,
+	}
+	if revalued.TotalAdjustmentMinor != wantLine.AdjustmentMinor || len(revalued.Currencies) != 1 || revalued.Currencies[0] != wantLine || revalued.EntryID == nil {
+		t.Fatalf("JPY revaluation output=%+v, want line %+v with a posted adjustment", revalued, wantLine)
+	}
+
+	var snapshotJSON string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT rate_snapshot::text FROM period_fx_revaluations WHERE id = $1::uuid`, revalued.RevaluationID).Scan(&snapshotJSON); err != nil {
+		t.Fatal(err)
+	}
+	var snapshot []FxRevaluationRateSnapshot
+	if err := json.Unmarshal([]byte(snapshotJSON), &snapshot); err != nil {
+		t.Fatalf("decode stored rate snapshot %s: %v", snapshotJSON, err)
+	}
+	if len(snapshot) != 1 || snapshot[0] != (FxRevaluationRateSnapshot{
+		Currency: "JPY", RateNum: 1, RateDen: 100, ForeignMinor: 10_000,
+		HistoricalBaseMinor: 6_700, CloseBaseMinor: 10_000,
+	}) {
+		t.Fatalf("stored JPY rate snapshot=%+v, want the exact period-end quote and zero-decimal conversion", snapshot)
+	}
+	if lines := accountingFxEntryLines(t, fx, *revalued.EntryID); len(lines) != 2 ||
+		lines[0] != (accountingFxLineSummary{code: "1100", debit: 3_300, credit: 0}) ||
+		lines[1] != (accountingFxLineSummary{code: "7910", debit: 0, credit: 3_300}) {
+		t.Fatalf("JPY revaluation lines=%+v, want a balanced USD 3,300 adjustment", lines)
+	}
+}

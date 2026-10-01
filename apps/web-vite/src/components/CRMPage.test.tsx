@@ -19,6 +19,42 @@ afterEach(() => {
 });
 
 describe("Vite CRM page", () => {
+  it("applies a pinned saved customer view to the directory filters", async () => {
+    const inactiveCustomer = {
+      ...customer("Dormant Company"),
+      id: "3cebf482-832f-4bf2-b322-03ca9c123456",
+      deactivatedAt: "2026-09-20T12:00:00.000Z",
+    };
+    const savedViews = [{
+      id: "8ea6ef66-d321-4be4-a4ee-32fa0b13e5f9",
+      name: "Inactive accounts",
+      filters: { status: "inactive", owner: "all", staleOnly: false, duplicateOnly: false, tag: "" },
+      isShared: true,
+      isPinned: true,
+      createdByUserId: "57329d3b-811c-4aad-ad33-9a5be2e96aaf",
+      updatedAt: "2026-09-30T12:00:00.000Z",
+    }];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [customer(), inactiveCustomer] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: savedViews });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    const views = await screen.findByRole("combobox", { name: "Saved customer views" });
+    expect(within(views).getByRole("option", { name: "★ Inactive accounts" })).not.toBeNull();
+    fireEvent.change(views, { target: { value: savedViews[0]!.id } });
+
+    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("inactive");
+    expect(await screen.findByRole("row", { name: /Dormant Company/ })).not.toBeNull();
+    expect(screen.queryByRole("row", { name: /Northwind/ })).toBeNull();
+  });
+
   it("requires a lost reason and restores a stage move that is waiting for approval", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);

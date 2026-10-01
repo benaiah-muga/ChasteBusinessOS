@@ -1105,3 +1105,15 @@ new owners and the manifest shows zero legacy runtime paths.
 108. (Done) Add Vite CRM component proofs that profile updates persist contact
      preferences and do-not-contact state, and that an opted-out customer
      cannot request an AI follow-up draft.
+
+109. (Done) Add a Vite CRM component proof that applying a pinned saved customer
+     view restores its saved filters and displays the matching customer set.
+
+110. (Done) Add a governed Go Executor proof for the cash flow report, including
+     statement parity, sorted unsupported currencies, permission denial,
+     organization isolation, and audit recording.
+
+111. (Done) Extend the governed Go FX revaluation proof to cover JPY's zero
+     decimal minor-unit conversion and select the rate effective at the final
+     millisecond of the accounting period, persisting that rate snapshot and
+     posting the matching balanced adjustment.
