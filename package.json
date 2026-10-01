@@ -34,6 +34,7 @@
     "go:vet": "go -C apps/api vet ./...",
     "go:verify": "pnpm go:test && pnpm go:vet",
     "benchmark:migration:builds": "node scripts/migration/benchmark-builds.mjs",
+    "benchmark:migration:startup": "node scripts/migration/benchmark-startup.mjs",
     "migration:routes:generate": "node scripts/migration/route-ownership.mjs",
     "migration:routes:check": "node scripts/migration/route-ownership.mjs --check",
     "migration:contracts:generate": "node scripts/migration/api-contracts.mjs",
