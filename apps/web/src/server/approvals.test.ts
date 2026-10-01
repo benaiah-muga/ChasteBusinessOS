@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   CapabilityRegistry,
   DefaultPolicyEngine,
@@ -192,6 +192,34 @@ describe("decideApproval", () => {
     const second = await decideApproval(db, executor, registry, resolved, { approvalId, decision: "reject" });
     expect(first).toEqual({ ok: true, status: "rejected" });
     expect(second).toMatchObject({ ok: false, code: 409 });
+  });
+
+  it("keeps the approval pending when its rejection audit append fails", async () => {
+    const approvalId = await createPendingApproval(104);
+    const functionName = `approvals_reject_fail_${orgId.replaceAll("-", "")}`;
+    const triggerName = `${functionName}_trigger`;
+    await db.execute(sql.raw(`
+      CREATE FUNCTION public.${functionName}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'fixture approval audit failure'; END
+      $$`));
+    try {
+      await db.execute(sql.raw(`
+        CREATE TRIGGER ${triggerName} BEFORE INSERT ON ledger_events FOR EACH ROW
+        WHEN (NEW.org_id = '${orgId}'::uuid AND NEW.kind = 'approval.rejected')
+        EXECUTE FUNCTION public.${functionName}()`));
+      await expect(
+        decideApproval(db, makeExecutor(), registry, resolved, {
+          approvalId,
+          decision: "reject",
+          comment: "reject while audit is unavailable",
+        }),
+      ).rejects.toThrow('Failed query: insert into "ledger_events"');
+    } finally {
+      await db.execute(sql.raw(`DROP TRIGGER IF EXISTS ${triggerName} ON ledger_events`));
+      await db.execute(sql.raw(`DROP FUNCTION IF EXISTS public.${functionName}()`));
+    }
+    const [row] = await db.select().from(approvals).where(eq(approvals.id, approvalId));
+    expect(row!.status).toBe("pending");
   });
 
   it("an approver without the capability's permission is refused and the gate stays pending", async () => {

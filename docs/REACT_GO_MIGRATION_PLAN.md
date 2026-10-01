@@ -92,12 +92,12 @@ realized gain or loss, and paired payment reversal. These capability proofs do
 not move the public customer, accounting, or approval routes. Keep those routes
 legacy-owned until audit-failure rollback, approval recovery, the public
 adapters, and agent-tool dispatch pass their parity gates.
-Go rejection now changes approval status and appends its ledger event in one
-transaction; a database failure-injection test confirms audit failure rolls the
-status change back. The legacy TypeScript rejection path still has this split
-transaction window. In both runtimes, successful human re-execution commits its
-effect and event before the approval row is finalized. Add failure-injection
-fixtures and resolve recovery or atomicity before moving the approval route.
+Go and legacy TypeScript rejection now change approval status and append the
+ledger event in one transaction; database failure-injection tests confirm audit
+failure rolls the status change back. In both runtimes, successful human
+re-execution still commits its effect and event before the approval row is
+finalized. Add failure-injection fixtures and resolve recovery or atomicity
+before moving the approval route.
 Policy parity uses golden vectors from the TypeScript `OrgPolicyEngine`. For
 the current CRM `write` capability, a matching `requires_approval_for: ['write']`
 rule does not gate an otherwise permitted human in the TypeScript runtime; keep

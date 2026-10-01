@@ -6,7 +6,7 @@ import {
   type CapabilityResult,
   type KernelExecutor,
 } from "@chaste/kernel";
-import { approvals, type Database } from "@chaste/db";
+import { approvals, type Database, withOrgContext } from "@chaste/db";
 import { actorFromResolved, PgLedgerStore, type ResolvedUser } from "./kernel";
 
 /**
@@ -64,24 +64,29 @@ export async function decideApproval(
   const decidedAt = new Date();
 
   if (input.decision === "reject") {
-    const rejected = await db
-      .update(approvals)
-      .set({
-        status: "rejected",
-        decidedByUserId: resolved.userId,
-        decisionComment: input.comment ?? null,
-        decidedAt,
-      })
-      // Conditional transition: only the first reject of a pending row wins.
-      .where(and(eq(approvals.id, approval.id), eq(approvals.status, "pending")))
-      .returning({ id: approvals.id });
-    if (rejected.length === 0) return alreadyDecided(approval.status);
-    await new PgLedgerStore(db).append(
-      ledgerEventFor(humanCtx, "approval.rejected", approval.capabilityId, {
-        approvalId: approval.id,
-        comment: input.comment ?? null,
-      }),
-    );
+    const rejected = await withOrgContext(db, orgScope, async (tx) => {
+      const rows = await tx
+        .update(approvals)
+        .set({
+          status: "rejected",
+          decidedByUserId: resolved.userId,
+          decisionComment: input.comment ?? null,
+          decidedAt,
+        })
+        // Conditional transition: only the first reject of a pending row wins.
+        .where(and(eq(approvals.id, approval.id), eq(approvals.status, "pending")))
+        .returning({ id: approvals.id });
+      if (rows.length === 0) return false;
+      const txAsDb = tx as unknown as Database["db"];
+      await new PgLedgerStore(txAsDb).append(
+        ledgerEventFor(humanCtx, "approval.rejected", approval.capabilityId, {
+          approvalId: approval.id,
+          comment: input.comment ?? null,
+        }),
+      );
+      return true;
+    });
+    if (!rejected) return alreadyDecided(approval.status);
     return { ok: true, status: "rejected" };
   }
 
