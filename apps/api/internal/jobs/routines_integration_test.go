@@ -176,12 +176,32 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		VALUES ($1::uuid, 'MAIN', 'Main warehouse'), ($2::uuid, 'MAIN', 'Foreign warehouse'), ($1::uuid, 'RETAIL', 'Retail floor')`, orgID, otherOrgID); err != nil {
 		t.Fatal(err)
 	}
-	var localQuoteCustomerID, foreignQuoteCustomerID string
+	var localQuoteCustomerID, foreignQuoteCustomerID, otherStatementCustomerID string
 	if err := owner.QueryRow(ctx, `INSERT INTO customers (org_id, name) VALUES ($1::uuid, 'Routine local quote customer') RETURNING id::text`, orgID).Scan(&localQuoteCustomerID); err != nil {
 		t.Fatal(err)
 	}
 	if err := owner.QueryRow(ctx, `INSERT INTO customers (org_id, name) VALUES ($1::uuid, 'Routine foreign quote customer') RETURNING id::text`, otherOrgID).Scan(&foreignQuoteCustomerID); err != nil {
 		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `INSERT INTO customers (org_id, name) VALUES ($1::uuid, 'Routine other statement customer') RETURNING id::text`, orgID).Scan(&otherStatementCustomerID); err != nil {
+		t.Fatal(err)
+	}
+	statementIssuedAt := time.Date(2026, 9, 29, 8, 7, 6, 123000000, time.UTC)
+	for _, invoice := range []struct {
+		orgID, customerID string
+		number            int
+		totalMinor        int64
+	}{
+		{orgID, localQuoteCustomerID, 91, 76000},
+		{orgID, otherStatementCustomerID, 92, 234000},
+		{otherOrgID, foreignQuoteCustomerID, 93, 987000},
+	} {
+		if _, err := owner.Exec(ctx, `
+			INSERT INTO invoices (org_id, customer_id, number, status, currency, subtotal_minor, tax_minor, total_minor, paid_minor, credited_minor, issued_at)
+			VALUES ($1::uuid, $2::uuid, $3, 'sent', $4, $5, 0, $5, 0, 0, $6)`,
+			invoice.orgID, invoice.customerID, invoice.number, baseCurrency, invoice.totalMinor, statementIssuedAt); err != nil {
+			t.Fatal(err)
+		}
 	}
 	quoteCreatedAt := time.Date(2026, 9, 30, 10, 11, 12, 345000000, time.UTC)
 	quoteExpiresAt := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
@@ -242,6 +262,11 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				t.Errorf("encode supplier statement arguments: %v", err)
 				return
 			}
+			customerStatementArgs, err := json.Marshal(map[string]string{"customerId": localQuoteCustomerID})
+			if err != nil {
+				t.Errorf("encode customer statement arguments: %v", err)
+				return
+			}
 			timelineArgs, err := json.Marshal(map[string]any{"customerId": localQuoteCustomerID, "limit": 20})
 			if err != nil {
 				t.Errorf("encode CRM customer timeline arguments: %v", err)
@@ -282,6 +307,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-trial-balance", "type": "function", "function": map[string]any{"name": "accounting_trialBalance", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-balance-sheet", "type": "function", "function": map[string]any{"name": "accounting_balanceSheet", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-cash-flow", "type": "function", "function": map[string]any{"name": "accounting_cashFlow", "arguments": `{"cashAccountCodes":["RT1000"]}`}},
+					map[string]any{"id": "call-routine-customer-statement", "type": "function", "function": map[string]any{"name": "accounting_customerStatement", "arguments": string(customerStatementArgs)}},
 					map[string]any{"id": "call-routine-inventory-locations", "type": "function", "function": map[string]any{"name": "inventory_listLocations", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-inventory", "type": "function", "function": map[string]any{"name": "inventory_stockReport", "arguments": `{"belowReorderOnly":false}`}},
 					map[string]any{"id": "call-routine-item-history", "type": "function", "function": map[string]any{"name": "inventory_itemHistory", "arguments": `{"sku":"ROUTINE-HISTORY","limit":10}`}},
@@ -320,6 +346,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundTrialBalanceResult := false
 		foundBalanceSheetResult := false
 		foundCashFlowResult := false
+		foundCustomerStatementResult := false
 		foundQuoteResult := false
 		foundSupplierStatementResult := false
 		foundTimelineResult := false
@@ -441,14 +468,15 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					t.Errorf("decode crm.customerTimeline tool result %s: %v", message.Content, err)
 					continue
 				}
-				if !result.OK || len(result.Data.Entries) != 2 {
-					t.Errorf("crm.customerTimeline result = %+v, want this customer's two quote timeline entries", result)
+				if !result.OK || len(result.Data.Entries) != 3 {
+					t.Errorf("crm.customerTimeline result = %+v, want this customer's invoice and two quote entries", result)
 					continue
 				}
-				newestEntry, oldestEntry := result.Data.Entries[0], result.Data.Entries[1]
+				newestEntry, middleEntry, oldestEntry := result.Data.Entries[0], result.Data.Entries[1], result.Data.Entries[2]
 				if newestEntry.Kind != "quote" || newestEntry.RefID != localAcceptedQuoteID || newestEntry.Summary != "Quote #82 (accepted, 200.00)" || newestEntry.Date != "2026-09-30T11:11:12.345Z" ||
-					oldestEntry.Kind != "quote" || oldestEntry.RefID != localQuoteID || oldestEntry.Summary != "Quote #81 (sent, 135.00)" || oldestEntry.Date != "2026-09-30T10:11:12.345Z" {
-					t.Errorf("crm.customerTimeline entries = %+v, want local quotes in reverse chronological order", result.Data.Entries)
+					middleEntry.Kind != "quote" || middleEntry.RefID != localQuoteID || middleEntry.Summary != "Quote #81 (sent, 135.00)" || middleEntry.Date != "2026-09-30T10:11:12.345Z" ||
+					oldestEntry.Kind != "invoice" || oldestEntry.Date != "2026-09-29T08:07:06.123Z" || oldestEntry.Summary != "Invoice #91 (sent, 760.00)" {
+					t.Errorf("crm.customerTimeline entries = %+v, want this customer's invoice and quotes in reverse chronological order", result.Data.Entries)
 				}
 			case "call-routine-inventory-locations":
 				foundLocationResult = true
@@ -574,6 +602,42 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					result.Data.Investing != (capability.CashFlowCategoryTotal{}) || result.Data.Financing != (capability.CashFlowCategoryTotal{}) {
 					t.Errorf("accounting.cashFlow result = %+v, want the tenant's tied 50000 cash movement without the foreign CAD entry", result)
 				}
+			case "call-routine-customer-statement":
+				foundCustomerStatementResult = true
+				var result struct {
+					OK   bool `json:"ok"`
+					Data struct {
+						Currencies []struct {
+							Currency            string `json:"currency"`
+							OpeningBalanceMinor int64  `json:"openingBalanceMinor"`
+							ClosingBalanceMinor int64  `json:"closingBalanceMinor"`
+							Rows                []struct {
+								Date         string `json:"date"`
+								Kind         string `json:"kind"`
+								Ref          string `json:"ref"`
+								AmountMinor  int64  `json:"amountMinor"`
+								BalanceMinor int64  `json:"balanceMinor"`
+							} `json:"rows"`
+						} `json:"currencies"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode accounting.customerStatement tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Currencies) != 1 {
+					t.Errorf("accounting.customerStatement result = %+v, want only the selected local customer's currency", result)
+					continue
+				}
+				statement := result.Data.Currencies[0]
+				if statement.Currency != baseCurrency || statement.OpeningBalanceMinor != 0 || statement.ClosingBalanceMinor != 76000 || len(statement.Rows) != 1 {
+					t.Errorf("accounting.customerStatement currency = %+v, want one local 76000 invoice", statement)
+					continue
+				}
+				row := statement.Rows[0]
+				if row.Date != "2026-09-29T08:07:06.123Z" || row.Kind != "invoice" || row.Ref != "Invoice #91" || row.AmountMinor != 76000 || row.BalanceMinor != 76000 {
+					t.Errorf("accounting.customerStatement row = %+v, want the selected customer's local invoice", row)
+				}
 			case "call-routine-document-versions", "call-routine-foreign-document-versions":
 				var result struct {
 					OK   bool `json:"ok"`
@@ -689,6 +753,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		}
 		if !foundCashFlowResult {
 			t.Errorf("follow-up provider request omitted the accounting.cashFlow tool result")
+		}
+		if !foundCustomerStatementResult {
+			t.Errorf("follow-up provider request omitted the accounting.customerStatement tool result")
 		}
 		if !foundQuoteResult {
 			t.Errorf("follow-up provider request omitted the accounting.listQuotes tool result")

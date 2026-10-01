@@ -145,13 +145,15 @@ resolves the stored workspace AI provider or the environment fallback only
 when the organization has no stored AI config, decrypts the shared AES-GCM
 credential format, creates routine sessions and events, runs a six-step
 OpenAI-compatible tool loop, and dispatches schema-described CRM customer,
-invoice, quotes, income statement, trial balance, balance sheet, cash flow,
+invoice, quotes, customer statement, income statement, trial balance,
+balance sheet, cash flow,
 inventory stock report, stock movement history, and support read tools through
 the Go system capability executor.
 These tools use the existing read-mostly routine permission bundle. A
 database-backed integration test covers scheduled and manual runs through a
 governed CRM read and inventory report, verifies stock-history tenant isolation,
-income-statement, trial-balance, balance-sheet, and cash-flow totals and tenant isolation,
+customer-statement, income-statement, trial-balance, balance-sheet, and cash-flow
+totals and tenant isolation,
 and session-linked audit history.
 Broader routine tool parity remains
 open because other legacy routine tools do not yet have Go model input schemas.

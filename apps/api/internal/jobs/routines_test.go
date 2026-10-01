@@ -43,7 +43,7 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge", "documents.listDocVersions", "purchasing.supplierStatement", "inventory.itemHistory"} {
+	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge", "documents.listDocVersions", "purchasing.supplierStatement", "inventory.itemHistory", "accounting.customerStatement"} {
 		var found *routineTool
 		for index := range tools {
 			if tools[index].Capability == capabilityID {
@@ -111,6 +111,24 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	}
 	if got := byName[cashFlow.Name]; got != "accounting.cashFlow" {
 		t.Fatalf("cash flow routine dispatch maps to %q", got)
+	}
+	var customerStatement *routineTool
+	for index := range tools {
+		if tools[index].Capability == "accounting.customerStatement" {
+			customerStatement = &tools[index]
+			break
+		}
+	}
+	if customerStatement == nil || customerStatement.Name != "accounting_customerStatement" || customerStatement.Permission != "accounting.read" {
+		t.Fatalf("customer statement tool=%+v, want accounting_customerStatement with accounting.read", customerStatement)
+	}
+	customerStatementProperties, ok := customerStatement.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("customer statement schema has no properties: %#v", customerStatement.Schema)
+	}
+	customerID, ok := customerStatementProperties["customerId"].(map[string]any)
+	if !ok || customerID["type"] != "string" || customerID["format"] != "uuid" || byName[customerStatement.Name] != "accounting.customerStatement" {
+		t.Fatalf("customer statement customerId schema=%#v dispatch=%q, want UUID and governed dispatch", customerStatementProperties["customerId"], byName[customerStatement.Name])
 	}
 	var customers *routineTool
 	for index := range tools {
