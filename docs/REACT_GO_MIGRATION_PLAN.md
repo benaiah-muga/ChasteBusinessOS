@@ -1133,3 +1133,11 @@ new owners and the manifest shows zero legacy runtime paths.
 115. (Done) Preserve CRM task assignment in Vite by loading team members when
      either Customers or Tasks needs them, provide a retry after lookup errors,
      and prove owner selection and task creation from a fresh Tasks tab.
+
+116. (Done) Prove the Go customer statement through the governed Executor with
+     exact wire output, customer and organization isolation, permission denial,
+     and successful audit recording.
+
+117. (Done) Prove Go purchase-order closure through the governed Executor with
+     permission denial, pending approval without mutation, shortfall handling,
+     tenant isolation, approval-requested audit, and execution audit.
