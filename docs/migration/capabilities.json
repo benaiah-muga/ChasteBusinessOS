@@ -12270,6 +12270,97 @@
       }
     },
     {
+      "id": "hr.report",
+      "title": "Read People workspace report",
+      "intent": "Read the complete People workspace report for team, leave, payroll, hiring, and active attendance",
+      "module": "hr",
+      "risk": "read",
+      "permission": "hr.read",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "employees": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "leave": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "openings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "applicants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "attendance": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "employees",
+          "leave",
+          "runs",
+          "openings",
+          "applicants",
+          "attendance"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "hr.requestLeave",
       "title": "Request leave",
       "intent": "File a leave request for an employee; approved unpaid leave reduces the next payroll run for the days taken",
@@ -14311,6 +14402,9 @@
                   "items": {
                     "type": "object",
                     "properties": {
+                      "lineId": {
+                        "type": "string"
+                      },
                       "sku": {
                         "type": "string"
                       },
@@ -14326,6 +14420,7 @@
                       }
                     },
                     "required": [
+                      "lineId",
                       "sku",
                       "quantityThousandths",
                       "confirmedThousandths"

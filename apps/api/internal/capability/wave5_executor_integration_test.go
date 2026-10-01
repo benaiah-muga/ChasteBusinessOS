@@ -191,6 +191,19 @@ func TestGoWave5PayrollApplicantsGovernedExecutorPath(t *testing.T) {
 	if err != nil || !applicant.OK {
 		t.Fatalf("addApplicant result=%+v err=%v", applicant, err)
 	}
+	reportInput := json.RawMessage(`{}`)
+	report, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, hrReportCapabilityID, "hr.read", reportInput, "human", "", "wave5-hr-report"), hrReportCapabilityID, reportInput)
+	if err != nil || !report.OK {
+		t.Fatalf("report result=%+v err=%v", report, err)
+	}
+	var reportOut HRReportOutput
+	if err := json.Unmarshal(report.Data, &reportOut); err != nil {
+		t.Fatal(err)
+	}
+	if len(reportOut.Employees) != 1 || reportOut.Employees[0].Name != "Wave5 Salaried" || len(reportOut.Openings) != 1 ||
+		len(reportOut.Applicants) != 1 || reportOut.Applicants[0].OpeningID != openingID {
+		t.Fatalf("report output=%+v, want seeded employee, opening and applicant", reportOut)
+	}
 	var added HRAddApplicantOutput
 	if err := json.Unmarshal(applicant.Data, &added); err != nil {
 		t.Fatal(err)

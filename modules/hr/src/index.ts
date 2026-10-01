@@ -550,6 +550,66 @@ const listEmployees = (deps: ModuleDeps) =>
     },
   });
 
+const hrReport = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "hr.report",
+    title: "Read People workspace report",
+    intent: "Read the complete People workspace report for team, leave, payroll, hiring, and active attendance",
+    module: "hr",
+    risk: "read",
+    permission: "hr.read",
+    input: z.object({}),
+    output: z.object({
+      employees: z.array(z.record(z.string(), z.unknown())),
+      leave: z.array(z.record(z.string(), z.unknown())),
+      runs: z.array(z.record(z.string(), z.unknown())),
+      openings: z.array(z.record(z.string(), z.unknown())),
+      applicants: z.array(z.record(z.string(), z.unknown())),
+      attendance: z.array(z.record(z.string(), z.unknown())),
+    }),
+    execute: async (ctx) => withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+      const staff = await tx.select().from(employees)
+        .where(eq(employees.orgId, ctx.actor.orgId)).orderBy(desc(employees.hiredAt)).limit(200);
+      const leave = await tx.select({
+        id: leaveRequests.id, employeeName: employees.name, kind: leaveRequests.kind,
+        startDate: leaveRequests.startDate, endDate: leaveRequests.endDate,
+        calendarDays: leaveRequests.calendarDays, status: leaveRequests.status,
+      }).from(leaveRequests).innerJoin(employees, eq(employees.id, leaveRequests.employeeId))
+        .where(eq(leaveRequests.orgId, ctx.actor.orgId)).orderBy(desc(leaveRequests.createdAt)).limit(50);
+      const runs = await tx.select().from(payrollRuns).where(eq(payrollRuns.orgId, ctx.actor.orgId))
+        .orderBy(desc(payrollRuns.year), desc(payrollRuns.month)).limit(24);
+      const openings = await tx.select().from(jobOpenings).where(eq(jobOpenings.orgId, ctx.actor.orgId))
+        .orderBy(desc(jobOpenings.createdAt)).limit(50);
+      const applicants: Array<{ id: string; openingId: string; name: string; stage: string; note: string | null }> = [];
+      for (const opening of openings.filter((item) => item.status === "open")) {
+        const rows = await tx.select({ id: jobApplicants.id, name: jobApplicants.name, stage: jobApplicants.stage, note: jobApplicants.note })
+          .from(jobApplicants).where(and(eq(jobApplicants.orgId, ctx.actor.orgId), eq(jobApplicants.openingId, opening.id)))
+          .orderBy(asc(jobApplicants.createdAt));
+        applicants.push(...rows.map((row) => ({ ...row, openingId: opening.id })));
+      }
+      const attendance = await tx.select({
+        employeeId: timeEntries.employeeId, clockedInAt: timeEntries.clockedInAt, late: timeEntries.late,
+      }).from(timeEntries).where(and(eq(timeEntries.orgId, ctx.actor.orgId), sql`${timeEntries.clockedOutAt} IS NULL`, sql`${timeEntries.clockedInAt} IS NOT NULL`))
+        .orderBy(desc(timeEntries.clockedInAt)).limit(200);
+      return {
+        employees: staff.map((employee) => ({
+          id: employee.id, name: employee.name, email: employee.email, title: employee.title,
+          department: employee.department, managerEmployeeId: employee.managerEmployeeId,
+          emergencyContactName: employee.emergencyContactName, emergencyContactPhone: employee.emergencyContactPhone,
+          monthlySalaryMinor: employee.monthlySalaryMinor, taxRateBps: employee.taxRateBps,
+          active: employee.deactivatedAt === null,
+        })),
+        leave, runs,
+        openings: openings.map((opening) => ({
+          id: opening.id, title: opening.title, department: opening.department, note: opening.note,
+          status: opening.status, createdAt: opening.createdAt,
+        })),
+        applicants,
+        attendance: attendance.map((entry) => ({ ...entry, clockedInAt: entry.clockedInAt!.toISOString() })),
+      };
+    }),
+  });
+
 
 // ── Timesheets ──────────────────────────────────────────────────────────
 
@@ -1140,6 +1200,7 @@ export function registerHrCapabilities(registry: CapabilityRegistry, deps: Modul
   registry.register(reversePayrollPosting(deps));
   registry.register(voidPayrollRun(deps));
   registry.register(listEmployees(deps));
+  registry.register(hrReport(deps));
   registry.register(updateEmployeeStructure(deps));
   registry.register(clockIn(deps));
   registry.register(clockOut(deps));

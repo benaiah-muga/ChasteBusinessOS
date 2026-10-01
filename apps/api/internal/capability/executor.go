@@ -64,6 +64,9 @@ type capabilitySpec struct {
 	permission          string
 	risk                string
 	moneyThresholdMinor int64
+	inverseCapabilityID string
+	inverseInputSource  string
+	inverseFields       []string
 }
 
 var capabilitySpecs = map[string]capabilitySpec{
@@ -83,6 +86,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	listCustomerViewsCapabilityID:                       {module: "crm", permission: "crm.read", risk: "read"},
 	listDealsCapabilityID:                               {module: "crm", permission: "crm.read", risk: "read"},
 	documentsListDocsCapabilityID:                       {module: "documents", permission: "documents.read", risk: "read"},
+	documentsListIngestedCapabilityID:                   {module: "documents", permission: "documents.read", risk: "read"},
 	documentsListDocVersionsCapabilityID:                {module: "documents", permission: "documents.read", risk: "read"},
 	documentsGetDocVersionCapabilityID:                  {module: "documents", permission: "documents.read", risk: "read"},
 	pipelineReportCapabilityID:                          {module: "crm", permission: "crm.read", risk: "read"},
@@ -107,6 +111,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	hrHireEmployeeCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write"},
 	hrDeactivateEmployeeCapabilityID:                    {module: "hr", permission: "hr.write", risk: "write"},
 	hrListEmployeesCapabilityID:                         {module: "hr", permission: "hr.read", risk: "read"},
+	hrReportCapabilityID:                                {module: "hr", permission: "hr.read", risk: "read"},
 	hrUpdateEmployeeStructureCapabilityID:               {module: "hr", permission: "hr.write", risk: "write"},
 	salesCreateOrderCapabilityID:                        {module: "sales", permission: "sales.write", risk: "write"},
 	salesConfirmOrderCapabilityID:                       {module: "sales", permission: "sales.write", risk: "write"},
@@ -297,6 +302,19 @@ var capabilitySpecs = map[string]capabilitySpec{
 	analyticsStockLevelsCapabilityID:                    {module: "inventory", permission: "inventory.read", risk: "read"},
 	analyticsExplainChangeCapabilityID:                  {module: "analytics", permission: "analytics.report", risk: "read"},
 	analyticsAskYourBusinessCapabilityID:                {module: "analytics", permission: "analytics.report", risk: "read"},
+	creatorSubmitProposalCapabilityID:                   {module: "creator", permission: "platform.creator", risk: "write"},
+	creatorListProposalsCapabilityID:                    {module: "creator", permission: "platform.creator", risk: "read"},
+	creatorScaffoldCapabilityID:                         {module: "creator", permission: "platform.creator", risk: "read"},
+	creatorVerifyPluginCapabilityID:                     {module: "creator", permission: "platform.creator", risk: "read"},
+	creatorPublishListingCapabilityID:                   {module: "creator", permission: "platform.creator", risk: "write", inverseCapabilityID: creatorRetractListingCapabilityID, inverseInputSource: "output", inverseFields: []string{"slug"}},
+	creatorRetractListingCapabilityID:                   {module: "creator", permission: "platform.creator", risk: "write"},
+	creatorInstallListingCapabilityID:                   {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorUninstallListingCapabilityID, inverseInputSource: "input", inverseFields: []string{"listingId"}},
+	creatorUninstallListingCapabilityID:                 {module: "creator", permission: "platform.creator", risk: "write"},
+	creatorListMarketplaceCapabilityID:                  {module: "creator", permission: "platform.browse", risk: "read"},
+	creatorStageCandidateCapabilityID:                   {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
+	creatorPromoteCandidateCapabilityID:                 {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
+	creatorRollbackCandidateCapabilityID:                {module: "creator", permission: "platform.creator", risk: "destructive"},
+	creatorRecordCanaryOutcomeCapabilityID:              {module: "creator", permission: "platform.creator.release", risk: "write"},
 	supportStartConversationCapabilityID:                {module: "support", permission: "support.write", risk: "write"},
 	supportPostMessageCapabilityID:                      {module: "support", permission: "support.write", risk: "write"},
 	supportListConversationsCapabilityID:                {module: "support", permission: "support.read", risk: "read"},
@@ -331,14 +349,14 @@ func supportedCapability(capabilityID string) bool {
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
 		undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID,
 		updateCustomerProfilesCapabilityID, restoreCustomerProfilesCapabilityID, reapplyCustomerProfilesCapabilityID,
-		listCustomersCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID,
+		listCustomersCapabilityID, listCustomerViewsCapabilityID, listDealsCapabilityID, documentsListDocsCapabilityID, documentsListIngestedCapabilityID,
 		documentsListDocVersionsCapabilityID, documentsGetDocVersionCapabilityID,
 		pipelineReportCapabilityID, listTasksCapabilityID, customerTimelineCapabilityID,
 		createDealCapabilityID, moveDealStageCapabilityID, convertLeadCapabilityID,
 		createTaskCapabilityID, completeTaskCapabilityID, updateTaskDetailsCapabilityID, restoreTaskDetailsCapabilityID,
 		createQuoteCapabilityID, acceptQuoteCapabilityID, declineQuoteCapabilityID, expireQuoteCapabilityID, listQuotesCapabilityID,
 		createRecurringTemplateCapabilityID, pauseRecurringTemplateCapabilityID, resumeRecurringTemplateCapabilityID, listRecurringTemplatesCapabilityID,
-		hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrUpdateEmployeeStructureCapabilityID,
+		hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrReportCapabilityID, hrUpdateEmployeeStructureCapabilityID,
 		salesCreateOrderCapabilityID, salesConfirmOrderCapabilityID, salesDeliverOrderCapabilityID, salesCancelOrderCapabilityID, salesListOrdersCapabilityID,
 		createInvoiceCapabilityID, recordFxRateCapabilityID, recordPaymentCapabilityID, reversePaymentCapabilityID, trialBalanceCapabilityID,
 		submitExpenseClaimCapabilityID, decideExpenseClaimCapabilityID, payExpenseClaimCapabilityID, listExpenseClaimsCapabilityID, listExpensePoliciesCapabilityID, setExpensePolicyCapabilityID,
@@ -408,6 +426,11 @@ func supportedCapability(capabilityID string) bool {
 		analyticsRevenueByMonthCapabilityID, analyticsInvoiceAgingCapabilityID,
 		analyticsSalesByCustomerCapabilityID, analyticsStockLevelsCapabilityID,
 		analyticsExplainChangeCapabilityID, analyticsAskYourBusinessCapabilityID,
+		creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorScaffoldCapabilityID,
+		creatorVerifyPluginCapabilityID, creatorPublishListingCapabilityID, creatorRetractListingCapabilityID,
+		creatorInstallListingCapabilityID, creatorUninstallListingCapabilityID, creatorListMarketplaceCapabilityID,
+		creatorStageCandidateCapabilityID, creatorPromoteCandidateCapabilityID, creatorRollbackCandidateCapabilityID,
+		creatorRecordCanaryOutcomeCapabilityID,
 		supportStartConversationCapabilityID, supportPostMessageCapabilityID,
 		supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 		supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
@@ -565,12 +588,19 @@ func (e *Executor) execute(
 			}
 		}
 
-		enabled, err := isModuleEnabled(ctx, tx, claims.OrganizationID, spec.module)
-		if err != nil {
-			return Result{}, err
-		}
-		if !enabled {
-			return Result{OK: false, Error: fmt.Sprintf("module %q is disabled for this organization", spec.module)}, nil
+		// The legacy Marketplace GET required an authenticated organization member,
+		// not the optional Creator module or platform.browse grant. verifyIdentity
+		// above preserves the signed session, verified email, and membership checks;
+		// agent claims and every other capability still use their declared gates.
+		legacyMarketplaceHumanRead := capabilityID == creatorListMarketplaceCapabilityID && !system && claims.ActorType == "human"
+		if !legacyMarketplaceHumanRead {
+			enabled, err := isModuleEnabled(ctx, tx, claims.OrganizationID, spec.module)
+			if err != nil {
+				return Result{}, err
+			}
+			if !enabled {
+				return Result{OK: false, Error: fmt.Sprintf("module %q is disabled for this organization", spec.module)}, nil
+			}
 		}
 
 		var input any
@@ -614,6 +644,12 @@ func (e *Executor) execute(
 			input = parsed
 		case documentsListDocsCapabilityID:
 			parsed, err := ParseListAuthoredDocsInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case documentsListIngestedCapabilityID:
+			parsed, err := ParseIngestedDocumentsInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -674,6 +710,12 @@ func (e *Executor) execute(
 			input = parsed
 		case hrHireEmployeeCapabilityID, hrDeactivateEmployeeCapabilityID, hrListEmployeesCapabilityID, hrUpdateEmployeeStructureCapabilityID:
 			parsed, err := parseHREmployeeInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case hrReportCapabilityID:
+			parsed, err := ParseHRReportInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -1043,6 +1085,16 @@ func (e *Executor) execute(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorScaffoldCapabilityID,
+			creatorVerifyPluginCapabilityID, creatorPublishListingCapabilityID, creatorRetractListingCapabilityID,
+			creatorInstallListingCapabilityID, creatorUninstallListingCapabilityID, creatorListMarketplaceCapabilityID,
+			creatorStageCandidateCapabilityID, creatorPromoteCandidateCapabilityID, creatorRollbackCandidateCapabilityID,
+			creatorRecordCanaryOutcomeCapabilityID:
+			parsed, err := parseCreatorInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
 		case supportStartConversationCapabilityID, supportPostMessageCapabilityID,
 			supportListConversationsCapabilityID, supportListLibraryCapabilityID, supportReadConversationCapabilityID,
 			supportLookupOrderStatusCapabilityID, supportSearchKnowledgeCapabilityID,
@@ -1076,7 +1128,7 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 		}
-		if !permissions["*"] && !permissions[spec.permission] {
+		if !legacyMarketplaceHumanRead && !permissions["*"] && !permissions[spec.permission] {
 			return Result{OK: false, Error: "forbidden: missing permission: " + spec.permission}, nil
 		}
 
@@ -1142,6 +1194,86 @@ func (e *Executor) execute(
 
 		var data json.RawMessage
 		switch parsed := input.(type) {
+		case CreatorSubmitProposalInput:
+			output, err := creatorSubmitProposal(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorListProposalsInput:
+			output, err := creatorListProposals(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorScaffoldInput:
+			output, err := creatorScaffoldCapability(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorVerifyPluginInput:
+			output, err := creatorVerifyPluginCapability(ctx, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorPublishListingInput:
+			output, err := creatorPublishListing(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorRetractListingInput:
+			output, err := creatorRetractListing(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorInstallListingInput:
+			if capabilityID == creatorUninstallListingCapabilityID {
+				output, err := creatorUninstallListing(ctx, tx, claims.OrganizationID, CreatorUninstallListingInput{ListingID: parsed.ListingID})
+				if err != nil {
+					return Result{}, err
+				}
+				data, err = marshalJS(output)
+			} else {
+				output, err := creatorInstallListing(ctx, tx, claims.OrganizationID, parsed)
+				if err != nil {
+					return Result{}, err
+				}
+				data, err = marshalJS(output)
+			}
+		case CreatorListMarketplaceInput:
+			output, err := creatorListMarketplace(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorStageCandidateInput:
+			output, err := creatorStageCandidate(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorPromoteCandidateInput:
+			output, err := creatorPromoteCandidate(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorRollbackCandidateInput:
+			output, err := creatorRollbackCandidate(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case CreatorRecordCanaryOutcomeInput:
+			output, err := creatorRecordCanaryOutcome(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case IAMListMembersInput:
 			output, err := iamListMembers(ctx, tx, claims.OrganizationID)
 			if err != nil {
@@ -1334,6 +1466,12 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
+		case HRReportInput:
+			output, err := hrReport(ctx, tx, claims.OrganizationID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
 		case HRUpdateEmployeeStructureInput:
 			output, err := hrUpdateEmployeeStructure(ctx, tx, claims.OrganizationID, parsed)
 			if err != nil {
@@ -1373,6 +1511,15 @@ func (e *Executor) execute(
 		case ListAuthoredDocsInput:
 			output, err := listAuthoredDocs(ctx, tx, claims.OrganizationID)
 			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case IngestedDocumentsInput:
+			output, err := readIngestedDocuments(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				if errors.Is(err, ErrIngestedDocumentNotFound) {
+					return Result{OK: false, Error: ErrIngestedDocumentNotFound.Error()}, nil
+				}
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
@@ -2670,13 +2817,18 @@ func canonicalInputHash(input any) (string, error) {
 		return parsed.CanonicalHash()
 	case CustomerProfileSnapshotsInput:
 		return parsed.CanonicalHash()
+	case CreatorSubmitProposalInput, CreatorListProposalsInput, CreatorScaffoldInput,
+		CreatorVerifyPluginInput, CreatorPublishListingInput, CreatorRetractListingInput,
+		CreatorInstallListingInput, CreatorListMarketplaceInput, CreatorStageCandidateInput,
+		CreatorPromoteCandidateInput, CreatorRollbackCandidateInput, CreatorRecordCanaryOutcomeInput:
+		return canonicalHash(parsed)
 	case ListCustomersInput, ListCustomerViewsInput, ListDealsInput, PipelineReportInput, ListTasksInput, CustomerTimelineInput,
-		ListAuthoredDocsInput, ListDocumentVersionsInput, DocumentVersionIDInput,
+		ListAuthoredDocsInput, IngestedDocumentsInput, ListDocumentVersionsInput, DocumentVersionIDInput,
 		CreateDealInput, MoveDealStageInput, ConvertLeadInput,
 		CreateTaskInput, CompleteTaskInput, UpdateTaskDetailsInput,
 		CreateQuoteInput, AcceptQuoteInput, DeclineQuoteInput, ExpireQuoteInput, ListQuotesInput,
 		CreateRecurringTemplateInput, PauseRecurringTemplateInput, ResumeRecurringTemplateInput, ListRecurringTemplatesInput,
-		HRHireEmployeeInput, HRDeactivateEmployeeInput, HRListEmployeesInput, HRUpdateEmployeeStructureInput,
+		HRHireEmployeeInput, HRDeactivateEmployeeInput, HRListEmployeesInput, HRReportInput, HRUpdateEmployeeStructureInput,
 		SalesCreateOrderInput, SalesConfirmOrderInput, SalesDeliverOrderInput, SalesCancelOrderInput, SalesListOrdersInput,
 		CreateInvoiceInput, RecordFxRateInput, RecordPaymentInput, ReversePaymentInput, TrialBalanceInput,
 		SubmitExpenseClaimInput, DecideExpenseClaimInput, PayExpenseClaimInput, ListExpenseClaimsInput, ListExpensePoliciesInput, SetExpensePolicyInput,

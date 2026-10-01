@@ -107,13 +107,13 @@ describe("Vite inventory page", () => {
     expect(screen.getByRole("columnheader", { name: "Location code" })).not.toBeNull();
     expect(screen.getByRole("columnheader", { name: "Location name" })).not.toBeNull();
     expect(screen.getByRole("rowheader", { name: "MAIN" })).not.toBeNull();
-    expect(screen.getByText("Main warehouse")).not.toBeNull();
+    expect(screen.getByRole("cell", { name: "Main warehouse" })).not.toBeNull();
     expect(screen.getByRole("rowheader", { name: "SHOP" })).not.toBeNull();
-    expect(screen.getByText("Retail shop")).not.toBeNull();
+    expect(screen.getByRole("cell", { name: "Retail shop" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
   });
 
-  it("shows read-only cycle count history and line variances", async () => {
+  it("shows cycle count history and governed count actions", async () => {
     const cycleCounts = [{
       id: "d2b53ec3-1b61-4f05-a56f-4a0f9d4d3571",
       status: "open",
@@ -132,24 +132,23 @@ describe("Vite inventory page", () => {
     }));
     render(<InventoryPage />);
 
-    expect(await screen.findByRole("heading", { name: "Cycle count history" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Set up a stock count" })).not.toBeNull();
     expect(screen.getByRole("heading", { name: /Count of/ })).not.toBeNull();
     expect(screen.getByText("open")).not.toBeNull();
-    expect(screen.getByText("MAIN · Aisle check")).not.toBeNull();
+    expect(screen.getByText("Aisle check")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: /MAIN$/ })).not.toBeNull();
     expect(screen.getByText("2 of 3 items counted")).not.toBeNull();
-    expect(screen.getByRole("columnheader", { name: "Expected" })).not.toBeNull();
-    expect(screen.getByRole("columnheader", { name: "Counted" })).not.toBeNull();
-    expect(screen.getByRole("columnheader", { name: "Variance" })).not.toBeNull();
-    expect(screen.getByText("3.75 units")).not.toBeNull();
-    expect(screen.getAllByText("-0.25 units")).toHaveLength(2);
-    expect(screen.getByText("Not counted")).not.toBeNull();
-    expect(screen.getByText("Not available")).not.toBeNull();
-    expect(screen.getByText("+0.25 units")).not.toBeNull();
-    expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
-    expect(screen.queryByRole("button", { name: /post|save|count/i })).toBeNull();
+    expect(screen.getByText("Expected: 4 units")).not.toBeNull();
+    expect(screen.getByText("Counted: 3.75 units")).not.toBeNull();
+    expect(screen.getByText("Difference: -0.25 units")).not.toBeNull();
+    expect(screen.getByText("Counted: -")).not.toBeNull();
+    expect(screen.getByText("Difference: -")).not.toBeNull();
+    expect(screen.getByText("Difference: +0.25 units")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Start count sheet" })).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(3);
   });
 
-  it("shows read-only transfer history in API order with requested and confirmed quantities", async () => {
+  it("shows transfer history in API order and exposes governed transfer actions", async () => {
     const transfers = [
       {
         id: "transfer-newest",
@@ -159,8 +158,8 @@ describe("Vite inventory page", () => {
         from: "MAIN",
         to: "SHOP",
         lines: [
-          { sku: "MUG-1", quantityThousandths: 2_500, confirmedThousandths: 1_000 },
-          { sku: "DESK-2", quantityThousandths: -500, confirmedThousandths: 0 },
+          { lineId: "line-42-1", sku: "MUG-1", quantityThousandths: 2_500, confirmedThousandths: 1_000 },
+          { lineId: "line-42-2", sku: "DESK-2", quantityThousandths: -500, confirmedThousandths: 0 },
         ],
       },
       {
@@ -170,7 +169,7 @@ describe("Vite inventory page", () => {
         note: null,
         from: "SHOP",
         to: "MAIN",
-        lines: [{ sku: "MUG-1", quantityThousandths: 1_000, confirmedThousandths: 1_000 }],
+        lines: [{ lineId: "line-41-1", sku: "MUG-1", quantityThousandths: 1_000, confirmedThousandths: 1_000 }],
       },
     ];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
@@ -179,20 +178,38 @@ describe("Vite inventory page", () => {
     }));
     render(<InventoryPage />);
 
-    expect(await screen.findByRole("heading", { name: "Transfer history" })).not.toBeNull();
-    expect(screen.getByText("Review requested and confirmed quantities. Create and confirm transfers in the full inventory workspace.")).not.toBeNull();
-    const headings = screen.getAllByRole("heading", { name: /Transfer #/ });
-    expect(headings.map((heading) => heading.textContent)).toEqual(["Transfer #42", "Transfer #41"]);
-    expect(screen.getByText("MAIN to SHOP · Urgent restock")).not.toBeNull();
-    expect(screen.getByText("SHOP to MAIN · No note recorded")).not.toBeNull();
-    expect(screen.getAllByRole("columnheader", { name: "Requested" })).toHaveLength(2);
-    expect(screen.getAllByRole("columnheader", { name: "Confirmed" })).toHaveLength(2);
-    expect(screen.getByText("2.5 units")).not.toBeNull();
-    expect(screen.getAllByText("1 unit")).toHaveLength(4);
-    expect(screen.getByText("-0.5 units")).not.toBeNull();
-    expect(screen.getAllByText("0 units")).toHaveLength(2);
-    expect(screen.getByRole("link", { name: "Open full inventory workspace" }).getAttribute("href")).toContain("/inventory");
-    expect(screen.queryByRole("button", { name: /transfer|confirm/i })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Stock transfers" })).not.toBeNull();
+    expect(screen.getByText("#42")).not.toBeNull();
+    expect(screen.getByText("#41")).not.toBeNull();
+    expect(screen.getByText("(partial)")).not.toBeNull();
+    expect(screen.getByText("(cancelled)")).not.toBeNull();
+    expect(screen.getByText((_, element) => element?.tagName === "P" && element.textContent?.includes("Urgent restock") === true)).not.toBeNull();
+    expect(screen.getByText((_, element) => element?.tagName === "P" && element.textContent?.includes("MUG-1 1/2.5") === true)).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Confirm remaining" })).not.toBeNull();
+    expect((screen.getByRole("button", { name: "Draft transfer" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("connects locations, reservations, and stock history to the inventory report", async () => {
+    const reservations = [{
+      id: "reservation-1",
+      sku: "MUG-1",
+      quantityThousandths: 500,
+      reason: "Hold for customer pickup",
+      status: "open",
+      createdAt: "2026-05-12T10:30:00.000Z",
+    }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      return Response.json({ ...report, locations: [{ id: "location-1", code: "MAIN", name: "Main warehouse" }], reservations });
+    }));
+    render(<InventoryPage />);
+
+    expect(await screen.findByRole("heading", { name: "Locations and reservations" })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Movement history" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Create location" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Reserve stock" })).not.toBeNull();
+    expect(screen.getByText((_, element) => element?.tagName === "SPAN" && element.textContent?.includes("Hold for customer pickup") === true)).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Release" })).not.toBeNull();
   });
 
   it("announces an empty lot list and keeps loading and failures accessible", async () => {
@@ -207,7 +224,7 @@ describe("Vite inventory page", () => {
     await waitFor(() => expect(resolveReport).toBeDefined());
     await act(async () => { resolveReport?.(Response.json(report)); });
     expect(await screen.findByText("No inventory lots recorded yet.")).not.toBeNull();
-    expect(screen.getByText("No inventory transfers recorded yet.")).not.toBeNull();
+    expect(screen.getByText("No transfers yet.")).not.toBeNull();
     expect(screen.getByText("No stock locations recorded yet.")).not.toBeNull();
   });
 

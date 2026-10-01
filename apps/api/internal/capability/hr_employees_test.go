@@ -12,6 +12,12 @@ import (
 )
 
 func TestGoHREmployeesParsersMatchHRContracts(t *testing.T) {
+	if _, err := ParseHRReportInput(json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("ParseHRReportInput empty object: %v", err)
+	}
+	if _, err := ParseHRReportInput(json.RawMessage(`{"unexpected":true}`)); err != nil {
+		t.Fatalf("ParseHRReportInput should strip unknown fields like the TypeScript contract: %v", err)
+	}
 	hired, err := ParseHRHireEmployeeInput(json.RawMessage(`{"name":"Grace Njeri","email":"grace@example.com","title":"Senior Technician","monthlySalaryMinor":450000,"taxRateBps":1250,"annualLeaveDays":24,"unknown":true}`))
 	if err != nil || hired.Name != "Grace Njeri" || *hired.Email != "grace@example.com" || *hired.Title != "Senior Technician" ||
 		hired.MonthlySalaryMinor != 450000 || hired.TaxRateBps != 1250 || hired.AnnualLeaveDays != 24 {

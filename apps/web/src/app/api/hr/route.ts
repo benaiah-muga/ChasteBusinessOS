@@ -16,6 +16,36 @@ const hrApplicantListSchema = z.object({
     note: z.string().nullable(),
   }).strict()),
 }).strict();
+const hrReportSchema = z.object({
+  employees: z.array(z.object({
+    id: z.string(), name: z.string(), email: z.string().nullable(), title: z.string().nullable(),
+    department: z.string().nullable(), managerEmployeeId: z.string().nullable(),
+    emergencyContactName: z.string().nullable(), emergencyContactPhone: z.string().nullable(),
+    monthlySalaryMinor: z.number().int(), taxRateBps: z.number().int(), active: z.boolean(),
+  }).strict()),
+  leave: z.array(z.object({
+    id: z.string(), employeeName: z.string(), kind: z.string(), startDate: z.string().datetime(),
+    endDate: z.string().datetime(), calendarDays: z.number().int(), status: z.string(),
+  }).strict()),
+  runs: z.array(z.object({
+    id: z.string(), orgId: z.string(), year: z.number().int(), month: z.number().int(), status: z.string(),
+    totalGrossMinor: z.number().int(), totalTaxMinor: z.number().int(), totalNetMinor: z.number().int(),
+    headcount: z.number().int(), entryId: z.string().nullable(), executedByActorType: z.string().nullable(),
+    executedByActorId: z.string().nullable(), executedAt: z.string().datetime().nullable(),
+    voidedAt: z.string().datetime().nullable(), reversedAt: z.string().datetime().nullable(),
+    createdAt: z.string().datetime(),
+  }).strict()),
+  openings: z.array(z.object({
+    id: z.string(), title: z.string(), department: z.string().nullable(), note: z.string().nullable(),
+    status: z.string(), createdAt: z.string().datetime(),
+  }).strict()),
+  applicants: z.array(z.object({
+    id: z.string(), openingId: z.string(), name: z.string(), stage: z.string(), note: z.string().nullable(),
+  }).strict()),
+  attendance: z.array(z.object({
+    employeeId: z.string(), clockedInAt: z.string().datetime(), late: z.boolean(),
+  }).strict()),
+}).strict();
 
 function hrEmployeeGoUnavailable() {
   return NextResponse.json(
@@ -106,15 +136,38 @@ async function hrEmployeeGoResponse(
 }
 
 export async function GET() {
+  const useGoReportRead = process.env.GO_HR_REPORT_READS === "1";
   const useGoApplicantReads = process.env.GO_HR_APPLICANT_READS === "1";
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json(
     { error: "unauthorized" },
-    { status: 401, ...(useGoApplicantReads ? { headers: noStore } : {}) },
+    { status: 401, ...(useGoReportRead || useGoApplicantReads ? { headers: noStore } : {}) },
   );
   const denied = missingPermission(resolved, "hr.read");
-  if (denied && useGoApplicantReads) denied.headers.set("Cache-Control", "no-store");
+  if (denied && (useGoReportRead || useGoApplicantReads)) denied.headers.set("Cache-Control", "no-store");
   if (denied) return denied;
+  if (useGoReportRead) {
+    const ctx = actorFromResolved(resolved, {});
+    if (!ctx) return hrUnavailable("HR service unavailable; check employee status before retrying");
+    let result: GoCapabilityBridgeResult;
+    try {
+      result = await executeGoCapability({
+        actionContext: ctx,
+        session: { userId: resolved.userId, orgId: resolved.orgId, authSessionId: resolved.authSessionId },
+        capabilityId: "hr.report",
+        input: {},
+      });
+    } catch {
+      return hrUnavailable("HR service unavailable; try again");
+    }
+    if (result.kind !== "response" || result.response.status !== 200) {
+      return hrUnavailable("HR service unavailable; try again");
+    }
+    const body: unknown = await result.response.json().catch(() => null);
+    const parsed = z.object({ ok: z.literal(true), data: hrReportSchema, replayed: z.boolean().optional() }).strict().safeParse(body);
+    if (!parsed.success) return hrUnavailable("HR service unavailable; try again");
+    return NextResponse.json(parsed.data.data, { headers: noStore });
+  }
   const db = getDb().db;
   const orgId = resolved.orgId;
 

@@ -102,6 +102,7 @@ type InventoryListTransferItem struct {
 }
 
 type InventoryListTransferLine struct {
+	LineID               string `json:"lineId"`
 	SKU                  string `json:"sku"`
 	QuantityThousandths  int64  `json:"quantityThousandths"`
 	ConfirmedThousandths int64  `json:"confirmedThousandths"`
@@ -922,7 +923,7 @@ func inventoryListTransfers(ctx context.Context, tx pgx.Tx, orgID string, input 
 		return InventoryListTransfersOutput{Transfers: transfers}, nil
 	}
 	lineRows, err := tx.Query(ctx, `
-		SELECT lines.transfer_id::text, COALESCE(item.sku, ''), lines.quantity_thousandths, lines.confirmed_thousandths
+		SELECT lines.transfer_id::text, lines.id::text, COALESCE(item.sku, ''), lines.quantity_thousandths, lines.confirmed_thousandths
 		FROM stock_transfer_lines lines
 		LEFT JOIN items item ON item.id = lines.item_id AND item.org_id = lines.org_id
 		WHERE lines.org_id = $1::uuid AND lines.transfer_id = ANY($2::uuid[])`, orgID, transferIDs)
@@ -937,7 +938,7 @@ func inventoryListTransfers(ctx context.Context, tx pgx.Tx, orgID string, input 
 	for lineRows.Next() {
 		var transferID string
 		var line InventoryListTransferLine
-		if err := lineRows.Scan(&transferID, &line.SKU, &line.QuantityThousandths, &line.ConfirmedThousandths); err != nil {
+		if err := lineRows.Scan(&transferID, &line.LineID, &line.SKU, &line.QuantityThousandths, &line.ConfirmedThousandths); err != nil {
 			return InventoryListTransfersOutput{}, err
 		}
 		if index, ok := indexByID[transferID]; ok {

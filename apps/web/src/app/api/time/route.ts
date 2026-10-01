@@ -2,8 +2,54 @@ import { NextResponse } from "next/server";
 import { and, desc, eq, gt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, employees, timeEntries } from "@chaste/db";
-import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
+import { actorFromResolved, buildExecutor, buildRegistry, createDbModuleGate } from "@/server/kernel";
 import { getResolvedUser } from "@/server/session";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+
+const noStore = { "Cache-Control": "no-store" };
+
+function timeReportGoUnavailable() {
+  return NextResponse.json({ error: "HR time report service unavailable" }, { status: 503, headers: noStore });
+}
+
+async function timeReportGoResponse(result: GoCapabilityBridgeResult) {
+  if (result.kind !== "response") return timeReportGoUnavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({
+        ok: z.literal(true),
+        data: z.object({
+          rows: z.array(z.object({
+            employeeId: z.string(),
+            approvedMinutes: z.number(),
+            pendingMinutes: z.number(),
+          }).strict()),
+        }).strict(),
+      }).strict().safeParse(body);
+      if (!parsed.success) return timeReportGoUnavailable();
+      return NextResponse.json(parsed.data.data, { headers: noStore });
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).strict().safeParse(body);
+      if (!parsed.success) return timeReportGoUnavailable();
+      return NextResponse.json({ error: parsed.data.error }, { status: 422, headers: noStore });
+    }
+    if (result.response.status === 401) {
+      const parsed = z.object({ error: z.string() }).strict().safeParse(body);
+      if (!parsed.success) return timeReportGoUnavailable();
+      return NextResponse.json(parsed.data, { status: 401, headers: noStore });
+    }
+    if (result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).strict().safeParse(body);
+      if (!parsed.success) return timeReportGoUnavailable();
+      return NextResponse.json(parsed.data, { status: 403, headers: noStore });
+    }
+  } catch {
+    return timeReportGoUnavailable();
+  }
+  return timeReportGoUnavailable();
+}
 
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -23,12 +69,16 @@ const actionSchema = z.discriminatedUnion("action", [
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const db = getDb().db;
+  if (!(await createDbModuleGate(db).isEnabled(resolved.orgId, "hr"))) {
+    return NextResponse.json({ error: "People module is disabled" }, { status: 403 });
+  }
   const url = new URL(req.url);
 
   // Entry-level approval queue: the report capability is aggregate-only, so
   // pending submitted entries (with ids to decide on) are a plain read.
   if (url.searchParams.get("pending")) {
-    const rows = await getDb().db
+    const rows = await db
       .select({
         id: timeEntries.id,
         employeeId: timeEntries.employeeId,
@@ -57,9 +107,25 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "invalid dates" }, { status: 400 });
   }
   const employeeId = url.searchParams.get("employeeId") ?? undefined;
-  const db = getDb().db;
   const ctx = actorFromResolved(resolved, {});
   if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+  if (process.env.GO_HR_TIME_REPORT_READS === "1") {
+    try {
+      const result = await executeGoCapability({
+        actionContext: ctx,
+        session: resolved,
+        capabilityId: "hr.timeReport",
+        input: {
+          from: fromDate.toISOString().slice(0, 10),
+          to: toDate.toISOString().slice(0, 10),
+          ...(employeeId ? { employeeId } : {}),
+        },
+      });
+      return await timeReportGoResponse(result);
+    } catch {
+      return timeReportGoUnavailable();
+    }
+  }
   const result = await buildExecutor(db, buildRegistry(db)).execute("hr.timeReport", ctx, {
     from: fromDate,
     to: toDate,

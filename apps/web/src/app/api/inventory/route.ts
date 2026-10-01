@@ -152,7 +152,19 @@ async function dispatchInventoryValuationReversalGo(
   entryId: string,
 ) {
   const response = await dispatchInventoryGo(ctx, session, "inventory.reverseValuationSummary", { entryId });
-  if (response.status === 202) return response;
+  if (response.status === 202) {
+    const approval = z.object({
+      ok: z.literal(false),
+      pendingApproval: z.literal(true),
+      reason: z.string(),
+      approvalId: z.string().optional(),
+    }).strict().safeParse(await response.clone().json().catch(() => null));
+    if (!approval.success) return goUnavailable();
+    return NextResponse.json(
+      { ok: false, pendingApproval: true, reason: approval.data.reason },
+      { status: 202, headers: noStore },
+    );
+  }
   if (response.status !== 200) return response;
   const parsed = z.object({ ok: z.literal(true), data: inventoryValuationReversalOutputSchema })
     .safeParse(await response.clone().json().catch(() => null));
@@ -355,6 +367,7 @@ function inventoryStockReportGoFailure(status: number, body: unknown): Response 
 }
 
 const inventoryTransferLineSchema = z.object({
+  lineId: z.string(),
   sku: z.string(),
   quantityThousandths: z.number().int(),
   confirmedThousandths: z.number().int(),
@@ -775,7 +788,7 @@ export async function GET(req: Request) {
     }));
   }
 
-  let transfers: { id: string; number: number; status: string; note: string | null; from: string; to: string; lines: { sku: string; quantityThousandths: number; confirmedThousandths: number }[] }[];
+  let transfers: { id: string; number: number; status: string; note: string | null; from: string; to: string; lines: { lineId: string; sku: string; quantityThousandths: number; confirmedThousandths: number }[] }[];
   if (process.env.GO_INVENTORY_TRANSFER_READS === "1") {
     const result = await dispatchInventoryTransfersGo(ctx, resolved);
     if (result instanceof Response) return result;
@@ -800,7 +813,7 @@ export async function GET(req: Request) {
       to: locationCodeById.get(t.toLocationId) ?? "?",
       lines: transferLineRows
         .filter((l) => l.transferId === t.id)
-        .map((l) => ({ sku: skuOf.get(l.itemId) ?? "", quantityThousandths: l.quantityThousandths, confirmedThousandths: l.confirmedThousandths })),
+        .map((l) => ({ lineId: l.id, sku: skuOf.get(l.itemId) ?? "", quantityThousandths: l.quantityThousandths, confirmedThousandths: l.confirmedThousandths })),
     }));
   }
   return NextResponse.json({

@@ -1,25 +1,121 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb, documentSuggestions, documents, vendors } from "@chaste/db";
 import { getResolvedUser } from "@/server/session";
-import { actorFromResolved, buildExecutor, buildRegistry } from "@/server/kernel";
+import { actorFromResolved, buildExecutor, buildRegistry, createDbModuleGate } from "@/server/kernel";
 import { enqueueCapabilityJob } from "@/server/jobs";
+import { executeGoCapability, type GoCapabilityBridgeResult } from "@/server/go-bridge";
+import { logger } from "@chaste/kernel";
+
+const noStore = { "Cache-Control": "no-store" };
+const ingestedDocumentSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  status: z.string(),
+  sourceType: z.string(),
+  createdAt: z.string().datetime(),
+  folder: z.string().nullable(),
+}).strict();
+const ingestedVendorSchema = z.object({ id: z.string().uuid(), name: z.string() }).strict();
+const ingestedSuggestionSchema = z.object({
+  id: z.string().uuid(),
+  orgId: z.string().uuid(),
+  documentId: z.string().uuid(),
+  description: z.string(),
+  quantityThousandths: z.number().int(),
+  unitPriceMinor: z.number().int(),
+  suggestedAccountCode: z.string(),
+  matchScore: z.number().int(),
+  matchedOn: z.unknown(),
+  status: z.string(),
+  createdAt: z.string().datetime(),
+}).strict();
+const ingestedDocumentDetailSchema = z.object({
+  ...ingestedDocumentSchema.shape,
+  mimeType: z.string().nullable(),
+  sizeBytes: z.number().int().nullable(),
+  parseError: z.string().nullable(),
+  parsedMarkdown: z.string().nullable(),
+  suggestions: z.array(ingestedSuggestionSchema).optional(),
+}).strict();
+const ingestedReadOutputSchema = z.union([
+  z.object({ documents: z.array(ingestedDocumentSchema), vendors: z.array(ingestedVendorSchema) }).strict(),
+  z.object({ document: ingestedDocumentDetailSchema }).strict(),
+]);
+
+async function ingestedDocumentsGoResponse(result: GoCapabilityBridgeResult, preview: boolean) {
+  const unavailable = () => NextResponse.json({ error: "Go documents service unavailable" }, { status: 503, headers: noStore });
+  if (result.kind !== "response") return unavailable();
+  try {
+    const body: unknown = await result.response.json();
+    if (result.response.status === 200) {
+      const parsed = z.object({ ok: z.literal(true), data: ingestedReadOutputSchema }).strict().safeParse(body);
+      if (!parsed.success) return unavailable();
+      const data = parsed.data.data;
+      if (preview && "document" in data && data.document.suggestions !== undefined) return unavailable();
+      return NextResponse.json(data, { headers: noStore });
+    }
+    if (result.response.status === 401 || result.response.status === 403) {
+      const parsed = z.object({ error: z.string() }).safeParse(body);
+      return parsed.success ? NextResponse.json(parsed.data, { status: result.response.status, headers: noStore }) : unavailable();
+    }
+    if (result.response.status === 422) {
+      const parsed = z.object({ ok: z.literal(false), error: z.string() }).safeParse(body);
+      if (!parsed.success) return unavailable();
+      if (parsed.data.error === "ingested document not found") return NextResponse.json({ error: "not found" }, { status: 404, headers: noStore });
+    }
+  } catch {
+    logger.warn("Go ingested documents read returned an invalid response");
+  }
+  return unavailable();
+}
 
 export async function GET(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const db = getDb().db;
   const orgId = resolved.orgId;
+  if (!(await createDbModuleGate(db).isEnabled(orgId, "documents"))) {
+    return NextResponse.json({ error: "documents module is disabled" }, { status: 403 });
+  }
 
-  const id = new URL(req.url).searchParams.get("id");
+  const searchParams = new URL(req.url).searchParams;
+  const id = searchParams.get("id");
+  const preview = searchParams.get("preview") === "1";
+  if (process.env.GO_DOCUMENT_INGESTED_READS === "1") {
+    const ctx = actorFromResolved(resolved, {});
+    if (!ctx) return NextResponse.json({ error: "onboarding required" }, { status: 428 });
+    if (ctx.actor.type !== "human" || ctx.actor.id !== resolved.userId || ctx.actor.orgId !== resolved.orgId || !resolved.authSessionId) {
+      return NextResponse.json({ error: "Go documents service unavailable" }, { status: 503, headers: noStore });
+    }
+    const result = await executeGoCapability({
+      actionContext: ctx,
+      session: resolved,
+      capabilityId: "documents.listIngestedDocuments",
+      input: { ...(id ? { id } : {}), ...(id && preview ? { preview: true } : {}) },
+    });
+    return ingestedDocumentsGoResponse(result, Boolean(id && preview));
+  }
   if (id) {
     const [doc] = await db
-      .select()
+      .select({
+        id: documents.id,
+        title: documents.title,
+        status: documents.status,
+        sourceType: documents.sourceType,
+        mimeType: documents.mimeType,
+        sizeBytes: documents.sizeBytes,
+        parseError: documents.parseError,
+        parsedMarkdown: documents.parsedMarkdown,
+        createdAt: documents.createdAt,
+        folder: documents.folder,
+      })
       .from(documents)
       .where(and(eq(documents.orgId, orgId), eq(documents.id, id)))
       .limit(1);
     if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
-    const suggestions = await db
+    const suggestions = preview ? undefined : await db
       .select()
       .from(documentSuggestions)
       .where(and(eq(documentSuggestions.orgId, orgId), eq(documentSuggestions.documentId, id)))
@@ -37,7 +133,7 @@ export async function GET(req: Request) {
         createdAt: doc.createdAt.toISOString(),
         folder: doc.folder,
       },
-      suggestions,
+      ...(suggestions ? { suggestions } : {}),
     });
   }
 

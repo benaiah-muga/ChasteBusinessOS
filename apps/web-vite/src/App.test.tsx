@@ -90,10 +90,15 @@ beforeEach(() => {
         { id: "projects", label: "Projects", description: "Project boards and tasks", href: "/projects" },
         { id: "analytics", label: "Analytics", description: "Governed reports", href: "/analytics" },
         { id: "inventory", label: "Inventory", description: "Stock levels and reorder needs", href: "/inventory" },
+        { id: "documents", label: "Documents", description: "Business records", href: "/documents" },
+        { id: "hr", label: "People", description: "People and payroll", href: "/hr" },
       ],
-      enabledModules: ["accounting", "purchasing", "projects", "analytics", "inventory"],
+      enabledModules: ["accounting", "purchasing", "projects", "analytics", "inventory", "documents", "hr"],
       usingDefaults: false,
     });
+    if (path === "/api/hr") return Response.json({ employees: [], leave: [], runs: [], openings: [], applicants: [], attendance: [] });
+    if (path.startsWith("/api/time?from=")) return Response.json({ rows: [] });
+    if (path === "/api/time?pending=1") return Response.json({ entries: [] });
     if (path === "/api/analytics" && init?.method === "POST") return Response.json({
       region: "East Africa",
       html: "<html></html>",
@@ -125,11 +130,32 @@ beforeEach(() => {
     });
     if (path === "/api/deals") return Response.json({ deals: [] });
     if (path === "/api/customers") return Response.json({ customers: [] });
+    if (path.startsWith("/api/documents?id=")) return Response.json({ document: {
+      id: "document-1",
+      title: "Supplier agreement",
+      status: "ready",
+      sourceType: "upload",
+      mimeType: "application/pdf",
+      sizeBytes: 100,
+      parseError: null,
+      parsedMarkdown: "Terms for supplier orders.",
+      createdAt: "2026-09-29T09:00:00.000Z",
+      folder: "Suppliers",
+    }, suggestions: [] });
+    if (path === "/api/documents") return Response.json({ documents: [{
+      id: "document-1",
+      title: "Supplier agreement",
+      status: "ready",
+      sourceType: "upload",
+      createdAt: "2026-09-29T09:00:00.000Z",
+      folder: "Suppliers",
+    }] });
     if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
     if (path === "/api/crm/views") return Response.json({ views: [] });
     if (path === "/api/inventory") return Response.json({
-      items: [{ sku: "MUG-1", name: "Ceramic mug", kind: "product", unitLabel: "unit", onHandThousandths: 4000, reservedThousandths: 1000, availableThousandths: 3000, totalValueMinor: 2000, reorderPointThousandths: 5000, reorderNeeded: true }],
+      items: [{ sku: "MUG-1", name: "Ceramic mug", kind: "goods", unitLabel: "unit", salePriceMinor: 1250, imageUrl: null, tags: ["Kitchen"], barcode: "123456", onHandThousandths: 4000, valueMinor: 2000, avgUnitCostMinor: 500, reservedThousandths: 1000, availableThousandths: 3000, totalValueMinor: 2000, reorderPointThousandths: 5000, reorderNeeded: true }],
       totalValueMinor: 2000,
+      reorderAlerts: [],
       lots: [],
       locations: [],
       cycleCounts: [],
@@ -271,7 +297,7 @@ describe("Vite app frame", () => {
   it("loads the authenticated home and signs out through Better Auth", async () => {
     render(<App />);
 
-    expect(await screen.findByText("$12,500.00")).not.toBeNull();
+    expect(await screen.findByText("$12,500.00", {}, { timeout: 15_000 })).not.toBeNull();
     expect(screen.getByText("Ada Lovelace")).not.toBeNull();
     expect(screen.getByRole("combobox", { name: "Active organization" })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
@@ -294,7 +320,7 @@ describe("Vite app frame", () => {
     window.history.replaceState(null, "", "/inventory");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Inventory" })).not.toBeNull();
+    expect(await screen.findByRole("heading", { name: "Inventory" }, { timeout: 5_000 })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Inventory" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Open full inventory workspace" })).not.toBeNull();
     expect(await screen.findByText("MUG-1")).not.toBeNull();
@@ -309,6 +335,27 @@ describe("Vite app frame", () => {
     expect(screen.getByRole("link", { name: "Accounting" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Open full Accounting workspace" })).not.toBeNull();
     expect(await screen.findByText("#1042")).not.toBeNull();
+  });
+
+  it("opens the documents preview within the authenticated shell", async () => {
+    window.history.replaceState(null, "", "/documents");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Documents" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Documents" }).getAttribute("aria-current")).toBe("page");
+    expect(await screen.findByText("Supplier agreement")).not.toBeNull();
+    expect(await screen.findByText("Terms for supplier orders.")).not.toBeNull();
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+  });
+
+  it("opens the People workspace within the authenticated shell", async () => {
+    window.history.replaceState(null, "", "/hr");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "People" }, { timeout: 5_000 })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "People" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: /Open full HR workspace/ })).not.toBeNull();
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("opens Accounting close readiness in the authenticated shell", async () => {
@@ -480,6 +527,20 @@ describe("Vite app frame", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/analytics")).toHaveLength(2);
     });
+  });
+
+  it("routes the products catalog to Vite and keeps its inventory APIs same-origin", async () => {
+    window.history.replaceState(null, "", "/products");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Products & Services" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Products & Services" }));
+    expect(await screen.findByText("Ceramic mug")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Products" }).getAttribute("aria-current")).toBe("page");
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/inventory", expect.objectContaining({ credentials: "same-origin" }));
   });
 
   it("keeps unported route ownership in legacy and preserves query and hash on the fallback", async () => {

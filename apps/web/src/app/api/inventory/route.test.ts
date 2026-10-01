@@ -991,7 +991,7 @@ describe("inventory Go transfer-list bridge", () => {
       createdAt: "2026-09-28T08:00:00.000Z",
       from: "MAIN",
       to: "SHOP",
-      lines: [{ sku: "MUG-1", quantityThousandths: 5000, confirmedThousandths: 2000 }],
+      lines: [{ lineId: "line-1", sku: "MUG-1", quantityThousandths: 5000, confirmedThousandths: 2000 }],
     }];
     mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: true, data: { transfers } }) });
 
@@ -1004,7 +1004,7 @@ describe("inventory Go transfer-list bridge", () => {
       note: "front counter",
       from: "MAIN",
       to: "SHOP",
-      lines: [{ sku: "MUG-1", quantityThousandths: 5000, confirmedThousandths: 2000 }],
+      lines: [{ lineId: "line-1", sku: "MUG-1", quantityThousandths: 5000, confirmedThousandths: 2000 }],
     }]);
     expect(mocks.executeGoCapability).toHaveBeenCalledWith({
       actionContext: ctx,
@@ -1229,7 +1229,12 @@ describe("inventory valuation reversal Go bridge", () => {
     vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
     mocks.executeGoCapability.mockResolvedValue({
       kind: "response",
-      response: Response.json({ ok: false, pendingApproval: true, reason: "Reversal requires a reviewer" }, { status: 202 }),
+      response: Response.json({
+        ok: false,
+        pendingApproval: true,
+        reason: "Reversal requires a reviewer",
+        approvalId: "private-approval-id",
+      }, { status: 202 }),
     });
 
     const approval = await POST(request({ action: "reverseValuationSummary", entryId: "f3c65071-356d-48e4-b5cb-cccd4fc06f6d" }));
@@ -1253,6 +1258,7 @@ describe("inventory valuation reversal Go bridge", () => {
     { kind: "malformed response", result: { kind: "response", response: Response.json({ ok: true, data: { reversed: true, reversalEntryId: 4 } }) } },
     { kind: "unsuccessful reversal as a success response", result: { kind: "response", response: Response.json({ ok: true, data: { reversed: false, reversalEntryId: "91e089da-19ab-4dc0-a82d-41a305a38f36" } }) } },
     { kind: "invalid reversal UUID", result: { kind: "response", response: Response.json({ ok: true, data: { reversed: true, reversalEntryId: "not-a-uuid" } }) } },
+    { kind: "malformed approval envelope", result: { kind: "response", response: Response.json({ ok: false, pendingApproval: true, approvalId: "private-approval-id" }, { status: 202 }) } },
     { kind: "unavailable Go", result: { kind: "not-dispatched" } },
   ])("fails closed on $kind without retrying through TypeScript", async ({ result }) => {
     vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");

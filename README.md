@@ -256,6 +256,12 @@ into the signed Go `documents.listDocs` capability. It requires `pnpm dev:api`;
 template reads remain on the legacy executor, and the combined response is
 preserved. Unavailable or invalid Go results fail closed. TypeScript remains
 the default; the flag defaults to `0`.
+`GO_DOCUMENT_INGESTED_READS=1` opts ingested document list and detail reads in
+`GET /api/documents` into the signed Go
+`documents.listIngestedDocuments` capability. It requires `pnpm dev:api`,
+preserves the list, vendors, detail, and `preview=1` projections, and excludes
+stored raw text and base64 content. Unavailable or invalid Go results fail
+closed. TypeScript remains the default; the flag defaults to `0`.
 `GO_DOCUMENTS_VERSION_READS=1` opts authored document version history and
 single-version reads on `GET /api/docs/:id` into the signed Go
 `documents.listDocVersions` and `documents.getDocVersion` capabilities. It

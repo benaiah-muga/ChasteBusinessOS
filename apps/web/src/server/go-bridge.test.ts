@@ -447,4 +447,14 @@ describe("Go capability BFF bridge", () => {
     fetchMock.mockRejectedValueOnce(new Error("upstream unavailable"));
     expect(await executeGoCapability(input, options)).toEqual({ kind: "outcome-unknown" });
   });
+
+  it("fails closed when Go returns an unexpected capability response field", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      ok: true,
+      data: { customerId: "c-1" },
+      unexpected: true,
+    })));
+
+    expect(await executeGoCapability(input, options)).toEqual({ kind: "outcome-unknown" });
+  });
 });

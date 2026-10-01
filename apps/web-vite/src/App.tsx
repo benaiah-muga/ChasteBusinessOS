@@ -7,6 +7,7 @@ import { ProjectsPage } from "./components/ProjectsPage";
 import { AnalyticsPage } from "./components/AnalyticsPage";
 import { TeamPage } from "./components/TeamPage";
 import { CRMPage } from "./components/CRMPage";
+import { MarketplacePage } from "./components/MarketplacePage";
 import { SalesPage } from "./components/SalesPage";
 import { PageErrorBoundary } from "./components/PageErrorBoundary";
 import { DashboardPage } from "./components/DashboardPage";
@@ -18,12 +19,15 @@ import { legacyUrl, redirectToLegacy } from "./legacy";
 import "./app-shell.css";
 
 const InventoryPage = lazy(() => import("./components/InventoryPage").then((module) => ({ default: module.InventoryPage })));
+const ProductsPage = lazy(() => import("./components/ProductsPage").then((module) => ({ default: module.ProductsPage })));
 const PosShiftSummaryPage = lazy(() => import("./components/PosShiftSummaryPage").then((module) => ({ default: module.PosShiftSummaryPage })));
 const AccountingInvoicesPage = lazy(() => import("./components/AccountingInvoicesPage").then((module) => ({ default: module.AccountingInvoicesPage })));
 const AccountingCloseReadinessPage = lazy(() => import("./components/AccountingCloseReadinessPage").then((module) => ({ default: module.AccountingCloseReadinessPage })));
 const PurchasingPaymentRunsPage = lazy(() => import("./components/PurchasingPaymentRunsPage").then((module) => ({ default: module.PurchasingPaymentRunsPage })));
 const PurchasingReceiptsPage = lazy(() => import("./components/PurchasingReceiptsPage").then((module) => ({ default: module.PurchasingReceiptsPage })));
 const PurchasingAgingPage = lazy(() => import("./components/PurchasingAgingPage").then((module) => ({ default: module.PurchasingAgingPage })));
+const DocumentsPage = lazy(() => import("./components/DocumentsPage").then((module) => ({ default: module.DocumentsPage })));
+const HrPage = lazy(() => import("./components/HrPage").then((module) => ({ default: module.HrPage })));
 
 const SessionUserSchema = z.object({
   id: z.string().min(1),
@@ -47,6 +51,7 @@ const navigationItems = [
   { label: "Payables aging", href: "/purchasing/ap-aging", icon: "◷" },
   { label: "Receipts", href: "/purchasing/receipts", icon: "⇢" },
   { label: "Inventory", href: "/inventory", icon: "▦" },
+  { label: "Products", href: "/products", icon: "□" },
   { label: "People", href: "/hr", icon: "◎" },
   { label: "Documents", href: "/documents", icon: "▧" },
   { label: "Ledger", href: "/ledger", icon: "≋" },
@@ -54,6 +59,7 @@ const navigationItems = [
   { label: "Projects", href: "/projects", icon: "▣" },
   { label: "Analytics", href: "/analytics", icon: "◷" },
   { label: "Team", href: "/team", icon: "♙" },
+  { label: "Marketplace", href: "/marketplace", icon: "◇" },
   { label: "CRM", href: "/crm", icon: "◎" },
 ];
 const viteAppPaths = new Set(["/", ...navigationItems.map((item) => item.href)]);
@@ -65,10 +71,14 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   const projectsPage = pathname === "/projects";
   const analyticsPage = pathname === "/analytics";
   const teamPage = pathname === "/team";
+  const marketplacePage = pathname === "/marketplace";
+  const documentsPage = pathname === "/documents";
+  const hrPage = pathname === "/hr";
   const crmPage = pathname === "/crm";
   const salesPage = pathname === "/sales";
   const posSummaryPage = pathname === "/pos/shift-summary";
   const inventoryPage = pathname === "/inventory";
+  const productsPage = pathname === "/products";
   const accountingInvoicesPage = pathname === "/accounting/invoices";
   const accountingClosePage = pathname === "/accounting/close";
   const purchasingPaymentRunsPage = pathname === "/purchasing/payment-runs";
@@ -155,7 +165,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
               <span aria-hidden="true">{item.icon}</span><span>{item.label}</span>
             </a>
           ))}
-          <p className="rail-note">{pathname === "/" ? "Approvals, the event ledger, agent sessions, projects, analytics, team roles, CRM, sales orders, accounting invoices and close readiness, purchasing payment runs, payables aging and receipts, POS shift summaries, and inventory stock levels are available in this Vite preview. Other pages still open in the current app." : "This Vite preview uses the existing workspace APIs. Other pages still open in the current app."}</p>
+          <p className="rail-note">{pathname === "/" ? "Approvals, the event ledger, agent sessions, projects, analytics, team roles, marketplace, CRM, sales orders, products, accounting invoices and close readiness, purchasing payment runs, payables aging and receipts, POS shift summaries, and inventory stock levels are available in this Vite preview. Other pages still open in the current app." : "This Vite preview uses the existing workspace APIs. Other pages still open in the current app."}</p>
         </nav>
         <div className="rail-account">
           <div className="account-initial" aria-hidden="true">{(auth.user.name || auth.user.email).slice(0, 1).toUpperCase()}</div>
@@ -197,25 +207,33 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                       ? <AnalyticsPage key={organizationRevision} />
                       : teamPage
                         ? <TeamPage key={organizationRevision} />
-                        : crmPage
-                          ? <CRMPage key={organizationRevision} />
-                          : salesPage
-                            ? <SalesPage key={organizationRevision} baseCurrency={baseCurrency} />
-                            : posSummaryPage
-                              ? <PosShiftSummaryPage key={organizationRevision} baseCurrency={baseCurrency} />
-                              : inventoryPage
-                                ? <InventoryPage key={organizationRevision} baseCurrency={baseCurrency} />
-                                : accountingInvoicesPage
-                                  ? <AccountingInvoicesPage key={organizationRevision} />
-                                  : accountingClosePage
-                                    ? <AccountingCloseReadinessPage key={organizationRevision} />
-                                    : purchasingPaymentRunsPage
-                                      ? <PurchasingPaymentRunsPage key={organizationRevision} />
-                                      : purchasingAgingPage
-                                        ? <PurchasingAgingPage key={organizationRevision} baseCurrency={baseCurrency} />
-                                        : purchasingReceiptsPage
-                                          ? <PurchasingReceiptsPage key={organizationRevision} />
-                                          : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
+                      : marketplacePage
+                          ? <MarketplacePage key={organizationRevision} />
+                          : documentsPage
+                            ? <DocumentsPage key={organizationRevision} />
+                            : hrPage
+                              ? <HrPage key={organizationRevision} baseCurrency={baseCurrency} />
+                              : crmPage
+                            ? <CRMPage key={organizationRevision} />
+                            : salesPage
+                              ? <SalesPage key={organizationRevision} baseCurrency={baseCurrency} />
+                              : posSummaryPage
+                                ? <PosShiftSummaryPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                : inventoryPage
+                                  ? <InventoryPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                  : accountingInvoicesPage
+                                    ? <AccountingInvoicesPage key={organizationRevision} />
+                                      : accountingClosePage
+                                        ? <AccountingCloseReadinessPage key={organizationRevision} />
+                                        : productsPage
+                                          ? <ProductsPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                        : purchasingPaymentRunsPage
+                                        ? <PurchasingPaymentRunsPage key={organizationRevision} />
+                                        : purchasingAgingPage
+                                          ? <PurchasingAgingPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                          : purchasingReceiptsPage
+                                            ? <PurchasingReceiptsPage key={organizationRevision} />
+                                            : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
           </Suspense>
         </PageErrorBoundary>
       </div>

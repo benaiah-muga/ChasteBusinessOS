@@ -1168,3 +1168,65 @@ new owners and the manifest shows zero legacy runtime paths.
 123. (Done) Bridge inventory valuation reversal through the default-off Go BFF
      flag while preserving TypeScript behavior, approval and error responses,
      strict response validation, and fail-closed handling without a retry.
+
+124. (Done) Migrate all 13 Creator proposal, scaffold, plugin marketplace, and
+     controlled release capabilities through the governed Go executor, with
+     tenant scoping, approval payload verification, audit events, receipts,
+     replay behavior, and TypeScript-compatible manifest signatures.
+
+125. (In progress) Add default-off Go BFF bridges for Creator evolution
+     mutations and marketplace verification, reads, and writes, and expose
+     the Marketplace page in Vite. The Go listing capability preserves all
+     listing statuses, all legacy fields, order, and the 100-row limit. The
+     HTTP read bridge is opt-in through `GO_CREATOR_MARKETPLACE_READS=1` and
+     fails closed on malformed or uncertain results. Human reads require the
+     signed, verified session and active-organization membership, then preserve
+     the legacy organization-only read contract without requiring
+     `platform.browse` or the optional Creator module. Agent reads continue to
+     require both capability permission and module enablement; Creator writes
+     retain their existing gates. Keep the bridge default-off until route and
+     database-backed parity checks pass.
+     Keep `GO_CREATOR_MARKETPLACE_VERIFY=1` off until the Go
+     `platform.creator` permission requirement matches the legacy verifier's
+     access policy; the bridge now preserves structured denial messages.
+     Verify route contracts and the Vite app before considering the
+     Marketplace flow migrated.
+
+126. (Done) Extend Vite inventory beyond reporting with governed item
+     creation and adjustments, locations, reservations and release, cycle
+     counts, transfer drafting, full and partial confirmation, and movement
+     history. Keep writes on the same-origin inventory contract with intent
+     IDs, approval handling, and cautious timeout recovery. Transfer line IDs
+     now pass through both legacy and Go read projections for partial
+     confirmation. Focused component, API, and route tests cover the new paths.
+     Browser verification remains deferred at the user's request, and the
+     legacy inventory route remains available for advanced controls.
+
+127. (Done) Add the Vite People workspace for employee records, hiring,
+     leave, time, and payroll draft creation/history through the current
+     same-origin HR and time APIs. Preserve `202` approval responses and module
+     availability. Payroll execution and voiding, plus Expense controls,
+     continue to use the existing workspace; no API ownership moved.
+
+128. (Done) Add an authenticated Vite Documents library and detail preview
+     with runtime-validated same-origin reads, search, processing status,
+     extracted text, and upload links. Check Documents module availability in
+     the client and both read endpoints, project detail columns to omit stored
+     base64 and raw text, and serve active or unknown file types as downloads
+     with sandbox CSP. The document APIs and production route ownership remain
+     legacy-owned; browser verification remains deferred at the user's request.
+
+129. (Done) Add the Vite Products & Services catalog at `/products`, preserving
+     inventory module gating, overview and reorder summaries, catalog search
+     and filters, product and service creation, metadata edits, archive, and
+     opening stock through governed inventory actions. CSV import preserves
+     field mapping, validation and preview, duplicate/error reporting, governed
+     batch import, and undo. The existing inventory and import APIs remain the
+     same-origin authority; browser verification remains deferred at the user's
+     request.
+
+130. (Next) Owner: React and Go migration implementation. Finish Marketplace
+     verifier permission parity by matching the legacy route's authorization
+     contract in the Go capability. Keep the verification bridge default-off
+     until the route and database-backed tests prove the parity. Browser
+     verification remains deferred by user direction.

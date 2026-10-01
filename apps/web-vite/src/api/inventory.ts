@@ -35,6 +35,7 @@ const CycleCountSchema = z.object({
 });
 
 const InventoryTransferLineSchema = z.object({
+  lineId: z.string(),
   sku: z.string(),
   quantityThousandths: z.number().int().safe(),
   confirmedThousandths: z.number().int().safe(),
@@ -48,6 +49,15 @@ const InventoryTransferSchema = z.object({
   from: z.string(),
   to: z.string(),
   lines: z.array(InventoryTransferLineSchema),
+});
+
+const InventoryReservationSchema = z.object({
+  id: z.string().min(1),
+  sku: z.string(),
+  quantityThousandths: z.number().int().safe(),
+  reason: z.string(),
+  status: z.string(),
+  createdAt: z.string().datetime({ offset: true }),
 });
 
 const InventoryReportSchema = z.object({
@@ -67,6 +77,7 @@ const InventoryReportSchema = z.object({
   })),
   cycleCounts: z.array(CycleCountSchema),
   transfers: z.array(InventoryTransferSchema),
+  reservations: z.array(InventoryReservationSchema).default([]),
 });
 
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
@@ -74,6 +85,7 @@ export type InventoryLocation = z.infer<typeof InventoryReportSchema>["locations
 export type InventoryLot = z.infer<typeof InventoryReportSchema>["lots"][number];
 export type InventoryCycleCount = z.infer<typeof CycleCountSchema>;
 export type InventoryTransfer = z.infer<typeof InventoryTransferSchema>;
+export type InventoryReservation = z.infer<typeof InventoryReservationSchema>;
 
 export class InventoryApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -94,7 +106,7 @@ export async function fetchInventoryEnabled(signal?: AbortSignal): Promise<boole
   return parsed.data.enabledModules.includes("inventory");
 }
 
-export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[]; transfers: InventoryTransfer[] }> {
+export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ items: InventoryItem[]; totalValueMinor: number; locations: InventoryLocation[]; lots: InventoryLot[]; cycleCounts: InventoryCycleCount[]; transfers: InventoryTransfer[]; reservations: InventoryReservation[] }> {
   const response = await fetchJson("/api/inventory", signal);
   if (!response.ok) {
     const error = z.object({ error: z.string() }).safeParse(response.body);

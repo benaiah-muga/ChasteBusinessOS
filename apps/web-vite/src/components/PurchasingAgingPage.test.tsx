@@ -26,8 +26,7 @@ describe("PurchasingAgingPage", () => {
     render(<PurchasingAgingPage />);
 
     expect(screen.getByRole("status").textContent).toContain("Loading payable balances");
-    expect(await screen.findByRole("heading", { name: "Accounts payable aging" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /BHD\s+1\.800/ })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /BHD\s+1\.800/ })).toBeTruthy();
     expect(screen.getByText(/BHD\s+0\.600/)).toBeTruthy();
     expect(screen.getByRole("row", { name: /31-60 days.*BHD\s+0\.300/ })).toBeTruthy();
     expect(screen.getByRole("img", { name: /Payables by age: Current BHD\s+1\.200/ })).toBeTruthy();

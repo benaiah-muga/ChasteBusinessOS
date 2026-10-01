@@ -1,0 +1,368 @@
+.inventory-cycle-count {
+  display: grid;
+  gap: 1rem;
+  color: #292524;
+}
+
+.inventory-cycle-count h2,
+.inventory-cycle-count h3,
+.inventory-cycle-count p {
+  margin: 0;
+}
+
+.inventory-cycle-count h2 {
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.inventory-cycle-count-setup,
+.inventory-cycle-count-picker {
+  display: grid;
+  gap: .75rem;
+}
+
+.inventory-cycle-count-setup > label,
+.inventory-cycle-count-picker > label,
+.inventory-cycle-count-entry label {
+  display: grid;
+  gap: .35rem;
+  font-size: .875rem;
+  font-weight: 600;
+}
+
+.inventory-cycle-count-setup input:not([type="checkbox"]),
+.inventory-cycle-count-setup select,
+.inventory-cycle-count-picker input,
+.inventory-cycle-count-entry input {
+  min-height: 2.75rem;
+  min-width: 0;
+  border: 1px solid #d6d3d1;
+  border-radius: .5rem;
+  background: white;
+  padding: .55rem .75rem;
+  color: #292524;
+  font: inherit;
+  font-size: .9rem;
+}
+
+.inventory-cycle-count-setup label > span:not(.inventory-cycle-count-scan) {
+  color: #78716c;
+  font-size: .75rem;
+  font-weight: 400;
+}
+
+.inventory-cycle-count-checkbox {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: .5rem;
+  border: 1px solid #e7e5e4;
+  border-radius: .5rem;
+  background: #fafaf9;
+  padding: .5rem .75rem;
+  font-size: .875rem;
+}
+
+.inventory-cycle-count-checkbox input {
+  accent-color: #a16207;
+}
+
+.inventory-cycle-count-picker {
+  border: 1px solid #e7e5e4;
+  border-radius: .6rem;
+  padding: .75rem;
+}
+
+.inventory-cycle-count-scan {
+  display: flex;
+  gap: .5rem;
+}
+
+.inventory-cycle-count-scan input,
+.inventory-cycle-count-picker > input {
+  flex: 1;
+  width: 100%;
+}
+
+.inventory-cycle-count button {
+  min-height: 2.5rem;
+  border: 1px solid #a16207;
+  border-radius: .5rem;
+  background: #a16207;
+  padding: .45rem .8rem;
+  color: white;
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inventory-cycle-count button:hover:not(:disabled) {
+  background: #854d0e;
+}
+
+.inventory-cycle-count button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.inventory-cycle-count-picker ul,
+.inventory-cycle-count-lines,
+.inventory-cycle-count-review-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inventory-cycle-count-picker ul {
+  max-height: 12rem;
+  overflow-y: auto;
+  border: 1px solid #e7e5e4;
+  border-radius: .45rem;
+}
+
+.inventory-cycle-count-picker li + li,
+.inventory-cycle-count-review-lines li + li {
+  border-top: 1px solid #e7e5e4;
+}
+
+.inventory-cycle-count-picker li > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: .55rem .7rem;
+  color: #292524;
+  text-align: left;
+}
+
+.inventory-cycle-count-picker li > button:hover:not(:disabled) {
+  background: #fafaf9;
+}
+
+.inventory-cycle-count-picker li > button span:first-child,
+.inventory-cycle-count-review-lines li span {
+  display: grid;
+  min-width: 0;
+  gap: .15rem;
+}
+
+.inventory-cycle-count-picker small,
+.inventory-cycle-count-review-lines small,
+.inventory-cycle-count-line-heading small {
+  color: #78716c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .72rem;
+}
+
+.inventory-cycle-count-selected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  color: #78716c;
+  font-size: .75rem;
+}
+
+.inventory-cycle-count-selected button {
+  min-height: 1.7rem;
+  border-color: #e7e5e4;
+  border-radius: 999px;
+  background: #fafaf9;
+  padding: .2rem .6rem;
+  color: #44403c;
+  font-size: .72rem;
+}
+
+.inventory-cycle-count-selected .inventory-cycle-count-clear {
+  border: 0;
+  background: transparent;
+  color: #78716c;
+  text-decoration: underline;
+}
+
+.inventory-cycle-count-start,
+.inventory-cycle-count-sheet footer,
+.inventory-cycle-count-dialog footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .65rem;
+  border-top: 1px solid #f5f5f4;
+  padding-top: .75rem;
+}
+
+.inventory-cycle-count-start p,
+.inventory-cycle-count-sheet footer p,
+.inventory-cycle-count-muted {
+  color: #78716c;
+  font-size: .78rem;
+}
+
+.inventory-cycle-count-notice {
+  border-radius: .5rem;
+  padding: .65rem .8rem;
+  font-size: .85rem;
+}
+
+.inventory-cycle-count-notice.is-success { background: #ecfdf5; color: #065f46; }
+.inventory-cycle-count-notice.is-pending { background: #fffbeb; color: #92400e; }
+.inventory-cycle-count-notice.is-error { background: #fef2f2; color: #991b1b; }
+
+.inventory-cycle-count-list {
+  display: grid;
+  gap: .8rem;
+}
+
+.inventory-cycle-count-sheet {
+  display: grid;
+  gap: .8rem;
+  border: 1px solid #e7e5e4;
+  border-radius: .65rem;
+  padding: .9rem;
+}
+
+.inventory-cycle-count-sheet > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.inventory-cycle-count-sheet h3 {
+  font-size: .95rem;
+  font-weight: 700;
+}
+
+.inventory-cycle-count-sheet > header > span {
+  border-radius: 999px;
+  background: #f5f5f4;
+  padding: .2rem .55rem;
+  font-size: .72rem;
+  text-transform: capitalize;
+}
+
+.inventory-cycle-count-progress {
+  display: grid;
+  gap: .35rem;
+  border-radius: .55rem;
+  background: #fafaf9;
+  padding: .65rem;
+  font-size: .75rem;
+}
+
+.inventory-cycle-count-progress > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .35rem;
+}
+
+.inventory-cycle-count-progress > div span { color: #78716c; }
+.inventory-cycle-count-progress progress { width: 100%; accent-color: #a16207; }
+
+.inventory-cycle-count-lines li {
+  display: grid;
+  gap: .45rem;
+  border-top: 1px solid #f5f5f4;
+  padding: .7rem 0;
+}
+
+.inventory-cycle-count-line-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .1rem .6rem;
+  font-size: .82rem;
+}
+
+.inventory-cycle-count-line-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inventory-cycle-count-line-heading small { grid-column: 1; }
+.inventory-cycle-count-line-heading > span { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: #57534e; text-align: right; }
+
+.inventory-cycle-count-entry {
+  display: flex;
+  align-items: end;
+  gap: .5rem;
+}
+
+.inventory-cycle-count-entry label { flex: 1; font-size: .75rem; }
+.inventory-cycle-count-entry input { text-align: right; }
+.inventory-cycle-count-entry button { min-width: 4.5rem; }
+
+.inventory-cycle-count-variance {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .35rem;
+  color: #78716c;
+  font-size: .72rem;
+}
+
+.inventory-cycle-count-sheet footer > div,
+.inventory-cycle-count-dialog footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.inventory-cycle-count .inventory-cycle-count-secondary {
+  border-color: #d6d3d1;
+  background: white;
+  color: #44403c;
+}
+
+.inventory-cycle-count .inventory-cycle-count-secondary:hover:not(:disabled) { background: #f5f5f4; }
+
+.inventory-cycle-count-backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: rgb(28 25 23 / 45%);
+  padding: 1rem;
+}
+
+.inventory-cycle-count-dialog {
+  display: grid;
+  width: min(100%, 40rem);
+  max-height: min(90vh, 48rem);
+  gap: .85rem;
+  overflow-y: auto;
+  border-radius: .8rem;
+  background: white;
+  padding: 1.1rem;
+  box-shadow: 0 20px 50px rgb(0 0 0 / 20%);
+}
+
+.inventory-cycle-count-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.inventory-cycle-count-dialog h3 { font-size: 1.05rem; font-weight: 700; }
+.inventory-cycle-count-dialog > p { color: #78716c; font-size: .85rem; }
+.inventory-cycle-count .inventory-cycle-count-dialog > header button { min-height: 2rem; border: 0; background: transparent; color: #57534e; font-size: 1.3rem; }
+.inventory-cycle-count-review-reason { border-radius: .5rem; background: #fafaf9; padding: .7rem; font-size: .82rem; }
+.inventory-cycle-count-no-adjustments { border: 1px solid #a7f3d0; border-radius: .5rem; background: #ecfdf5; padding: .7rem; color: #065f46; font-size: .82rem; }
+.inventory-cycle-count-review-lines { max-height: 16rem; overflow-y: auto; border: 1px solid #e7e5e4; border-radius: .5rem; }
+.inventory-cycle-count-review-lines li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .65rem; font-size: .82rem; }
+.inventory-cycle-count-review-lines b { flex: none; }
+
+@media (max-width: 36rem) {
+  .inventory-cycle-count-start,
+  .inventory-cycle-count-sheet footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inventory-cycle-count-start > button,
+  .inventory-cycle-count-sheet footer > div > button { flex: 1; }
+}

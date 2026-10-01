@@ -150,7 +150,7 @@ export function PurchasingPaymentRunsPage() {
                       <tr key={line.billId}>
                         <td>#{line.billNumber}</td>
                         <td>{line.vendorName}</td>
-                        <td>{line.vendorRef ?? "—"}</td>
+                        <td>{line.vendorRef ?? "Not provided"}</td>
                         <td>{money(line.amountMinor, run.currency)}</td>
                       </tr>
                     ))}

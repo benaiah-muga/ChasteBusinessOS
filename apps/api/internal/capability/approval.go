@@ -560,6 +560,16 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorScaffoldCapabilityID,
+			creatorVerifyPluginCapabilityID, creatorPublishListingCapabilityID, creatorRetractListingCapabilityID,
+			creatorInstallListingCapabilityID, creatorUninstallListingCapabilityID, creatorListMarketplaceCapabilityID,
+			creatorStageCandidateCapabilityID, creatorPromoteCandidateCapabilityID, creatorRollbackCandidateCapabilityID,
+			creatorRecordCanaryOutcomeCapabilityID:
+			parsed, parseErr := parseCreatorInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		case routinesCreateCapabilityID, routinesListCapabilityID, routinesUpdateCapabilityID,
 			routinesDeleteCapabilityID, routinesRunNowCapabilityID:
 			parsed, parseErr := parseRoutinesInput(transition.row.CapabilityID, transition.row.Payload)
@@ -800,6 +810,15 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "signals.read", true
 	case skillsFindCapabilityID, skillsLoadCapabilityID:
 		return "documents.read", true
+	case creatorSubmitProposalCapabilityID, creatorListProposalsCapabilityID, creatorScaffoldCapabilityID,
+		creatorVerifyPluginCapabilityID, creatorPublishListingCapabilityID, creatorRetractListingCapabilityID,
+		creatorInstallListingCapabilityID, creatorUninstallListingCapabilityID,
+		creatorStageCandidateCapabilityID, creatorPromoteCandidateCapabilityID, creatorRollbackCandidateCapabilityID:
+		return "platform.creator", true
+	case creatorListMarketplaceCapabilityID:
+		return "platform.browse", true
+	case creatorRecordCanaryOutcomeCapabilityID:
+		return "platform.creator.release", true
 	case routinesCreateCapabilityID, routinesUpdateCapabilityID, routinesDeleteCapabilityID, routinesRunNowCapabilityID:
 		return "routines.write", true
 	case routinesListCapabilityID:

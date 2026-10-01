@@ -16,6 +16,7 @@ const (
 	hrHireEmployeeCapabilityID            = "hr.hireEmployee"
 	hrDeactivateEmployeeCapabilityID      = "hr.deactivateEmployee"
 	hrListEmployeesCapabilityID           = "hr.listEmployees"
+	hrReportCapabilityID                  = "hr.report"
 	hrUpdateEmployeeStructureCapabilityID = "hr.updateEmployeeStructure"
 )
 

@@ -4,14 +4,14 @@ import { canonicalInputHash, type ActionContext } from "@chaste/kernel";
 import type { SessionUser } from "@/server/session";
 
 const goCapabilityResponseSchemas = new Map<number, z.ZodType>([
-  [200, z.object({ ok: z.literal(true), data: z.unknown(), replayed: z.boolean().optional() })],
-  [202, z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string(), approvalId: z.string().optional() })],
-  [400, z.object({ error: z.string() })],
-  [401, z.object({ error: z.string() })],
-  [403, z.object({ error: z.string() })],
-  [422, z.object({ ok: z.literal(false), error: z.string() })],
-  [500, z.object({ error: z.string() })],
-  [503, z.object({ error: z.string() })],
+  [200, z.object({ ok: z.literal(true), data: z.unknown(), replayed: z.boolean().optional() }).strict()],
+  [202, z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string(), approvalId: z.string().optional() }).strict()],
+  [400, z.object({ error: z.string() }).strict()],
+  [401, z.object({ error: z.string() }).strict()],
+  [403, z.object({ error: z.string() }).strict()],
+  [422, z.object({ ok: z.literal(false), error: z.string() }).strict()],
+  [500, z.object({ error: z.string() }).strict()],
+  [503, z.object({ error: z.string() }).strict()],
 ]);
 
 const goApprovalResponseSchema = z.object({

@@ -370,6 +370,7 @@ const listTransfers = (deps: ModuleDeps) =>
           from: z.string(),
           to: z.string(),
           lines: z.array(z.object({
+            lineId: z.string(),
             sku: z.string(),
             quantityThousandths: z.number().int(),
             confirmedThousandths: z.number().int(),
@@ -407,6 +408,7 @@ const listTransfers = (deps: ModuleDeps) =>
       const lines = transferIDs.length
         ? await deps.db
             .select({
+              lineId: stockTransferLines.id,
               transferId: stockTransferLines.transferId,
               sku: items.sku,
               quantityThousandths: stockTransferLines.quantityThousandths,
@@ -430,6 +432,7 @@ const listTransfers = (deps: ModuleDeps) =>
           lines: lines
             .filter((line) => line.transferId === transfer.id)
             .map((line) => ({
+              lineId: line.lineId,
               sku: line.sku ?? "",
               quantityThousandths: line.quantityThousandths,
               confirmedThousandths: line.confirmedThousandths,

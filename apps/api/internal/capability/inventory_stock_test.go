@@ -906,6 +906,10 @@ func TestInventoryStockTransferCancelListAndTenants(t *testing.T) {
 	itemID := seedInventoryItemID(t, fx, fx.orgID, "TRF-CHAIR")
 	movedID := seedInventoryTransferRow(t, fx, fx.orgID, 3, secondFromID, secondToID, "pending", now)
 	seedInventoryTransferLine(t, fx, fx.orgID, movedID, itemID, 10000, 5000, nil)
+	var movedLineID string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT id::text FROM stock_transfer_lines WHERE transfer_id=$1::uuid`, movedID).Scan(&movedLineID); err != nil {
+		t.Fatal(err)
+	}
 	err = inventoryErrInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) error {
 		_, err := inventoryCancelTransfer(fx.ctx, tx, fx.orgID, InventoryCancelTransferInput{TransferID: movedID}, now)
 		return err
@@ -958,7 +962,7 @@ func TestInventoryStockTransferCancelListAndTenants(t *testing.T) {
 	if row := byID[second.TransferID]; row.Number != 2 || row.Status != "pending" || row.Note != nil {
 		t.Fatalf("pending create row = %+v, want number 2 pending with null note", row)
 	}
-	if row := byID[movedID]; row.From != "WH-A" || row.To != "WH-B" || len(row.Lines) != 1 || row.Lines[0] != (InventoryListTransferLine{SKU: "TRF-CHAIR", QuantityThousandths: 10000, ConfirmedThousandths: 5000}) {
+	if row := byID[movedID]; row.From != "WH-A" || row.To != "WH-B" || len(row.Lines) != 1 || row.Lines[0] != (InventoryListTransferLine{LineID: movedLineID, SKU: "TRF-CHAIR", QuantityThousandths: 10000, ConfirmedThousandths: 5000}) {
 		t.Fatalf("transfer route and lines = %+v, want WH-A to WH-B and the seeded partial line", row)
 	}
 	newestEncoded, err := marshalJS(byID[pending])

@@ -189,13 +189,14 @@ describe("inventory transfers (M7.2)", () => {
       note: "parity check",
     });
     const list = await run("inventory.listTransfers", { openOnly: false });
+    const [createdLine] = await db.db.select().from(stockTransferLines).where(eq(stockTransferLines.transferId, created.transferId));
     expect(list.transfers.length).toBeGreaterThanOrEqual(3);
     expect(list.transfers.find((transfer: { id: string }) => transfer.id === created.transferId)).toMatchObject({
       id: created.transferId,
       note: "parity check",
       from: "WH-A",
       to: "WH-B",
-      lines: [{ sku: "TRF-1", quantityThousandths: 2_000, confirmedThousandths: 0 }],
+      lines: [{ lineId: createdLine!.id, sku: "TRF-1", quantityThousandths: 2_000, confirmedThousandths: 0 }],
     });
   });
 });
