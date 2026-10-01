@@ -1117,3 +1117,11 @@ new owners and the manifest shows zero legacy runtime paths.
      decimal minor-unit conversion and select the rate effective at the final
      millisecond of the accounting period, persisting that rate snapshot and
      posting the matching balanced adjustment.
+
+112. (Done) Prove the Go inventory stock report through the governed Executor
+     with ledger-replayed purchase, sale, and transfer movements, exact value
+     and availability, organization isolation, and an execution audit event.
+
+113. (Done) Prove governed Go supplier bill-credit execution through approval,
+     including permission denial, tenant isolation, bill balance updates,
+     mirrored ledger posting, and approval/execution audit events.
