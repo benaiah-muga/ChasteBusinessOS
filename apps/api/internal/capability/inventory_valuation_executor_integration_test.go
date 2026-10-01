@@ -14,9 +14,12 @@ func TestInventoryValuationSummaryGovernedExecutorPostsReplaysAndReverses(t *tes
 	cleanupInventoryValuationFixture(t, fx)
 	grantWavePermission(t, fx, "inventory.write")
 	seedInventoryValuationAccounts(t, fx, fx.orgID)
+	seedInventoryValuationAccounts(t, fx, fx.otherOrgID)
 	itemID := seedInventoryValuationItem(t, fx, fx.orgID, "SKU-VALUATION-EXEC", "goods", 0, 0, nil)
+	foreignItemID := seedInventoryValuationItem(t, fx, fx.otherOrgID, "SKU-VALUATION-FOREIGN", "goods", 0, 0, nil)
 	postedAt := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
 	seedInventoryValuationMovement(t, fx, fx.orgID, itemID, 10_000, "purchase", inventoryValuationIntPointer(1_500), nil, nil, "system", postedAt.Add(-time.Hour))
+	seedInventoryValuationMovement(t, fx, fx.otherOrgID, foreignItemID, 50_000, "purchase", inventoryValuationIntPointer(9_000), nil, nil, "system", postedAt.Add(-time.Hour))
 	inventoryInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
 		_, err := postJournalEntry(fx.ctx, tx, PostJournalEntryInput{
 			OrgID: fx.orgID, Memo: "Opening inventory control balance", SourceType: "manual",
@@ -24,6 +27,13 @@ func TestInventoryValuationSummaryGovernedExecutorPostsReplaysAndReverses(t *tes
 			Lines: []JournalEntryLineInput{{AccountCode: "1200", DebitMinor: 10_000}, {AccountCode: "5000", CreditMinor: 10_000}},
 		})
 		return struct{}{}, err
+	})
+	foreignEntryID := inventoryInOrgTx(t, fx, fx.otherOrgID, func(tx pgx.Tx) (string, error) {
+		return postJournalEntry(fx.ctx, tx, PostJournalEntryInput{
+			OrgID: fx.otherOrgID, Memo: "Foreign inventory valuation close", SourceType: inventoryValuationSourceType,
+			Currency: "USD", PostedAt: postedAt, ActorType: "human",
+			Lines: []JournalEntryLineInput{{AccountCode: "1200", DebitMinor: 6_000}, {AccountCode: "5000", CreditMinor: 6_000}},
+		})
 	})
 
 	input := json.RawMessage(`{"memo":"Executor valuation close"}`)
@@ -43,6 +53,20 @@ func TestInventoryValuationSummaryGovernedExecutorPostsReplaysAndReverses(t *tes
 		t.Fatalf("denied valuation execution audits=%d, want none", got)
 	}
 
+	foreignReverseInput := json.RawMessage(`{"entryId":"` + foreignEntryID + `"}`)
+	foreignReverse, err := fx.executor.Execute(
+		fx.ctx,
+		waveModuleClaims(fx, inventoryReverseValuationSummaryCapabilityID, "inventory.write", foreignReverseInput, "human", "", "valuation-foreign-reverse"),
+		inventoryReverseValuationSummaryCapabilityID,
+		foreignReverseInput,
+	)
+	if err == nil || foreignReverse.OK || !strings.Contains(err.Error(), "no journal entry "+foreignEntryID) {
+		t.Fatalf("foreign valuation reversal result=%+v err=%v, want tenant-scoped not-found refusal", foreignReverse, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM journal_entries WHERE org_id=$1::uuid AND reversal_of_id=$2::uuid`, fx.otherOrgID, foreignEntryID); got != 0 {
+		t.Fatalf("foreign valuation reversal entries=%d, want none", got)
+	}
+
 	claims := waveModuleClaims(fx, inventoryPostValuationSummaryCapabilityID, "inventory.write", input, "human", "", "valuation-executor-post")
 	result, err := fx.executor.Execute(fx.ctx, claims, inventoryPostValuationSummaryCapabilityID, input)
 	if err != nil || !result.OK {
@@ -60,6 +84,9 @@ func TestInventoryValuationSummaryGovernedExecutorPostsReplaysAndReverses(t *tes
 	}
 	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2 AND actor_type='human'`, fx.orgID, inventoryPostValuationSummaryCapabilityID); got != 1 {
 		t.Fatalf("valuation execution audits=%d, want one human execution", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM journal_entries WHERE org_id=$1::uuid AND source_type='inventory-valuation'`, fx.otherOrgID); got != 1 {
+		t.Fatalf("foreign valuation summary entries=%d, want one unchanged foreign entry", got)
 	}
 
 	replay, err := fx.executor.Execute(fx.ctx, claims, inventoryPostValuationSummaryCapabilityID, input)

@@ -1158,8 +1158,13 @@ new owners and the manifest shows zero legacy runtime paths.
 
 121. (Done) Prove Go inventory valuation posting, permission denial,
      receipt replay, balanced journal lines, reversal, restored GL balance, and
-     human execution audit through the governed Executor.
+     human execution audit and foreign-organization isolation through the
+     governed Executor.
 
 122. (Done) Prove Go purchase receipt history through the governed Executor,
      including permission denial, exact receipt and order-line quantities,
      same-number cross-organization isolation, and human execution audit.
+
+123. (Done) Bridge inventory valuation reversal through the default-off Go BFF
+     flag while preserving TypeScript behavior, approval and error responses,
+     strict response validation, and fail-closed handling without a retry.

@@ -1175,3 +1175,105 @@ describe("inventory valuation summary Go bridge", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
+
+describe("inventory valuation reversal Go bridge", () => {
+  const reversalOutput = { reversed: true, reversalEntryId: "91e089da-19ab-4dc0-a82d-41a305a38f36" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "0");
+    mocks.getResolvedUser.mockResolvedValue(user);
+    mocks.actorFromResolved.mockReturnValue(ctx);
+    mocks.getDb.mockReturnValue({ db: {} });
+    mocks.buildRegistry.mockReturnValue({});
+    mocks.buildExecutor.mockReturnValue({ execute: mocks.execute });
+    mocks.execute.mockResolvedValue({ ok: true, data: reversalOutput });
+    mocks.executeGoCapability.mockResolvedValue({ kind: "not-dispatched" });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps valuation reversal on TypeScript by default", async () => {
+    const entryId = "f3c65071-356d-48e4-b5cb-cccd4fc06f6d";
+    const response = await POST(request({ action: "reverseValuationSummary", entryId }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data: reversalOutput });
+    expect(mocks.execute).toHaveBeenCalledWith("inventory.reverseValuationSummary", ctx, { entryId });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the reversal through Go and validates the exact response shape", async () => {
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
+    const entryId = "f3c65071-356d-48e4-b5cb-cccd4fc06f6d";
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: true, data: reversalOutput, replayed: false }),
+    });
+
+    const response = await POST(request({ action: "reverseValuationSummary", entryId }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: true, data: reversalOutput });
+    expect(mocks.executeGoCapability).toHaveBeenCalledWith({
+      actionContext: ctx,
+      session: user,
+      capabilityId: "inventory.reverseValuationSummary",
+      input: { entryId },
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserves approval and capability errors without retrying through TypeScript", async () => {
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, pendingApproval: true, reason: "Reversal requires a reviewer" }, { status: 202 }),
+    });
+
+    const approval = await POST(request({ action: "reverseValuationSummary", entryId: "f3c65071-356d-48e4-b5cb-cccd4fc06f6d" }));
+
+    expect(approval.status).toBe(202);
+    expect(approval.headers.get("cache-control")).toBe("no-store");
+    expect(await approval.json()).toEqual({ ok: false, pendingApproval: true, reason: "Reversal requires a reviewer" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ ok: false, error: "entry was already reversed" }, { status: 422 }),
+    });
+    const failure = await POST(request({ action: "reverseValuationSummary", entryId: "f3c65071-356d-48e4-b5cb-cccd4fc06f6d" }));
+    expect(failure.status).toBe(422);
+    expect(await failure.json()).toEqual({ ok: false, error: "entry was already reversed" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { kind: "malformed response", result: { kind: "response", response: Response.json({ ok: true, data: { reversed: true, reversalEntryId: 4 } }) } },
+    { kind: "unsuccessful reversal as a success response", result: { kind: "response", response: Response.json({ ok: true, data: { reversed: false, reversalEntryId: "91e089da-19ab-4dc0-a82d-41a305a38f36" } }) } },
+    { kind: "invalid reversal UUID", result: { kind: "response", response: Response.json({ ok: true, data: { reversed: true, reversalEntryId: "not-a-uuid" } }) } },
+    { kind: "unavailable Go", result: { kind: "not-dispatched" } },
+  ])("fails closed on $kind without retrying through TypeScript", async ({ result }) => {
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
+    mocks.executeGoCapability.mockResolvedValue(result);
+
+    const response = await POST(request({ action: "reverseValuationSummary", entryId: "f3c65071-356d-48e4-b5cb-cccd4fc06f6d" }));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ ok: false, error: "inventory service unavailable; check stock status before retrying" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("validates the required entry ID before either executor is called", async () => {
+    vi.stubEnv("GO_INVENTORY_VALUATION_SUMMARY_WRITE", "1");
+
+    const response = await POST(request({ action: "reverseValuationSummary" }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "entryId required" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});

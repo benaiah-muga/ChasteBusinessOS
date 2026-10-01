@@ -34,6 +34,8 @@ func TestGoARAgingExecutorPreservesBucketsScopePermissionAndAudit(t *testing.T) 
 	seedReportsInvoice(t, fx, fx.otherOrgID, foreignCustomerID, 105, "sent", "USD", 99_000, 0, 99_000, 0, 0, &foreignIssuedAt, &foreignIssuedAt, nil)
 	closedIssuedAt := now.Add(-10 * day)
 	seedReportsInvoice(t, fx, fx.orgID, customerID, 106, "paid", "USD", 700, 0, 700, 700, 0, &closedIssuedAt, &closedIssuedAt, nil)
+	partialPaidIssuedAt := now.Add(-40 * day)
+	seedReportsInvoice(t, fx, fx.orgID, customerID, 109, "paid", "USD", 2_000, 0, 2_000, 1_000, 0, &partialPaidIssuedAt, &partialPaidIssuedAt, nil)
 	voidedAt := now
 	seedReportsInvoice(t, fx, fx.orgID, customerID, 107, "sent", "USD", 800, 0, 800, 0, 0, &closedIssuedAt, &closedIssuedAt, &voidedAt)
 	seedReportsInvoice(t, fx, fx.orgID, customerID, 108, "draft", "USD", 900, 0, 900, 0, 0, &closedIssuedAt, &closedIssuedAt, nil)
@@ -65,7 +67,7 @@ func TestGoARAgingExecutorPreservesBucketsScopePermissionAndAudit(t *testing.T) 
 	if err := json.Unmarshal(result.Data, &output); err != nil {
 		t.Fatalf("decode arAging output %s: %v", result.Data, err)
 	}
-	wantBuckets := ArAgingBucketTotals{Current: 850, D30: 1_500, D60: 2_000, D90Plus: 3_000, TotalOutstanding: 7_350}
+	wantBuckets := ArAgingBucketTotals{Current: 850, D30: 2_500, D60: 2_000, D90Plus: 3_000, TotalOutstanding: 8_350}
 	if output.Buckets != wantBuckets {
 		t.Fatalf("arAging buckets=%+v, want %+v", output.Buckets, wantBuckets)
 	}
@@ -74,6 +76,7 @@ func TestGoARAgingExecutorPreservesBucketsScopePermissionAndAudit(t *testing.T) 
 		{Number: 102, OutstandingMinor: 1_500, AgeDays: 31},
 		{Number: 103, OutstandingMinor: 2_000, AgeDays: 61},
 		{Number: 104, OutstandingMinor: 3_000, AgeDays: 91},
+		{Number: 109, OutstandingMinor: 1_000, AgeDays: 40},
 	}
 	if len(output.Invoices) != len(wantInvoices) {
 		t.Fatalf("arAging invoices=%+v, want exactly %+v", output.Invoices, wantInvoices)

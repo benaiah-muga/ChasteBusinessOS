@@ -25,6 +25,10 @@ const inventoryValuationSummaryOutputSchema = z.object({
   ledgerValueMinor: inventoryValuationInteger,
   glBalanceMinor: inventoryValuationInteger,
 });
+const inventoryValuationReversalOutputSchema = z.object({
+  reversed: z.literal(true),
+  reversalEntryId: z.string().uuid(),
+});
 const inventoryBarcodeLookupOutputSchema = z.object({
   item: z.object({
     id: z.string(),
@@ -137,6 +141,20 @@ async function dispatchInventoryValuationSummaryGo(
   }
   if (response.status !== 200) return response;
   const parsed = z.object({ ok: z.literal(true), data: inventoryValuationSummaryOutputSchema })
+    .safeParse(await response.clone().json().catch(() => null));
+  if (!parsed.success) return goUnavailable();
+  return NextResponse.json(parsed.data, { headers: noStore });
+}
+
+async function dispatchInventoryValuationReversalGo(
+  ctx: ReturnType<typeof actorFromResolved> & {},
+  session: NonNullable<Awaited<ReturnType<typeof getResolvedUser>>>,
+  entryId: string,
+) {
+  const response = await dispatchInventoryGo(ctx, session, "inventory.reverseValuationSummary", { entryId });
+  if (response.status === 202) return response;
+  if (response.status !== 200) return response;
+  const parsed = z.object({ ok: z.literal(true), data: inventoryValuationReversalOutputSchema })
     .safeParse(await response.clone().json().catch(() => null));
   if (!parsed.success) return goUnavailable();
   return NextResponse.json(parsed.data, { headers: noStore });
@@ -820,6 +838,10 @@ export async function POST(req: Request) {
   if (body.action === "postValuationSummary" && process.env.GO_INVENTORY_VALUATION_SUMMARY_WRITE === "1") {
     return await dispatchInventoryValuationSummaryGo(ctx, resolved, str("memo"));
   }
+  if (body.action === "reverseValuationSummary" && process.env.GO_INVENTORY_VALUATION_SUMMARY_WRITE === "1") {
+    if (!str("entryId")) return NextResponse.json({ error: "entryId required" }, { status: 400 });
+    return await dispatchInventoryValuationReversalGo(ctx, resolved, str("entryId")!);
+  }
 
   if (process.env.GO_INVENTORY_ITEM_WRITES === "1" && ["createItem", "updateItem", "archiveItem", "createLocation"].includes((body.action as string | undefined) ?? "")) {
     let capabilityId: string;
@@ -1025,6 +1047,9 @@ export async function POST(req: Request) {
       return respond(await executor.execute("inventory.reverseTransfer", ctx, { transferId: str("transferId")! }));
     case "postValuationSummary":
       return respond(await executor.execute("inventory.postValuationSummary", ctx, { memo: str("memo") }));
+    case "reverseValuationSummary":
+      if (!str("entryId")) return NextResponse.json({ error: "entryId required" }, { status: 400 });
+      return respond(await executor.execute("inventory.reverseValuationSummary", ctx, { entryId: str("entryId")! }));
     default:
       return NextResponse.json({ error: "invalid action" }, { status: 400 });
   }
