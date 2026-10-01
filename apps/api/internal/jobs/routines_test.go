@@ -43,7 +43,7 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge", "documents.listDocVersions", "purchasing.supplierStatement"} {
+	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge", "documents.listDocVersions", "purchasing.supplierStatement", "inventory.itemHistory"} {
 		var found *routineTool
 		for index := range tools {
 			if tools[index].Capability == capabilityID {
@@ -137,6 +137,27 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	}
 	if _, required := stockReport.Schema["required"]; required {
 		t.Fatalf("inventory stock report filter should remain optional: %#v", stockReport.Schema)
+	}
+	var itemHistory *routineTool
+	for index := range tools {
+		if tools[index].Capability == "inventory.itemHistory" {
+			itemHistory = &tools[index]
+			break
+		}
+	}
+	if itemHistory == nil || itemHistory.Name != "inventory_itemHistory" || itemHistory.Permission != "inventory.read" {
+		t.Fatalf("inventory item history tool=%+v, want inventory_itemHistory with inventory.read", itemHistory)
+	}
+	historyProperties, ok := itemHistory.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("inventory item history schema has no properties: %#v", itemHistory.Schema)
+	}
+	historyLimit, ok := historyProperties["limit"].(map[string]any)
+	if !ok || historyLimit["type"] != "integer" || historyLimit["minimum"] != 1 || historyLimit["maximum"] != 200 {
+		t.Fatalf("inventory item history limit schema=%#v, want optional integer from 1 to 200", historyProperties["limit"])
+	}
+	if got := byName[itemHistory.Name]; got != "inventory.itemHistory" {
+		t.Fatalf("inventory item history routine dispatch maps to %q", got)
 	}
 	var locations *routineTool
 	for index := range tools {

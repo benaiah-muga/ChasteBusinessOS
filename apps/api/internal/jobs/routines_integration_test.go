@@ -59,6 +59,20 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	defer cleanupJobsTestOrgs(t, owner, orgID)
 	otherOrgID := insertJobsTestOrg(t, ctx, owner, tag+"-other")
 	defer cleanupJobsTestOrgs(t, owner, otherOrgID)
+	var localHistoryItemID, foreignHistoryItemID string
+	if err := owner.QueryRow(ctx, `INSERT INTO items (org_id, sku, name, kind) VALUES ($1::uuid, 'ROUTINE-HISTORY', 'Local routine history item', 'goods') RETURNING id::text`, orgID).Scan(&localHistoryItemID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `INSERT INTO items (org_id, sku, name, kind) VALUES ($1::uuid, 'ROUTINE-HISTORY', 'Foreign routine history item', 'goods') RETURNING id::text`, otherOrgID).Scan(&foreignHistoryItemID); err != nil {
+		t.Fatal(err)
+	}
+	localHistoryAt := time.Date(2026, 9, 30, 9, 1, 2, 345000000, time.UTC)
+	if _, err := owner.Exec(ctx, `INSERT INTO stock_movements (org_id, item_id, quantity_delta, reason, note, actor_type, created_at) VALUES ($1::uuid, $2::uuid, 5000, 'adjustment', 'Routine local stock count', 'human', $3)`, orgID, localHistoryItemID, localHistoryAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, `INSERT INTO stock_movements (org_id, item_id, quantity_delta, reason, note, actor_type, created_at) VALUES ($1::uuid, $2::uuid, 99000, 'adjustment', 'Foreign tenant sentinel', 'human', $3)`, otherOrgID, foreignHistoryItemID, localHistoryAt.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	updatedAt := time.Date(2026, 9, 30, 10, 11, 12, 345000000, time.UTC)
 	seedDocument := func(documentOrgID, title string) string {
 		t.Helper()
@@ -196,6 +210,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-accounting-quotes", "type": "function", "function": map[string]any{"name": "accounting_listQuotes", "arguments": quoteFilterArgs}},
 					map[string]any{"id": "call-routine-inventory-locations", "type": "function", "function": map[string]any{"name": "inventory_listLocations", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-inventory", "type": "function", "function": map[string]any{"name": "inventory_stockReport", "arguments": `{"belowReorderOnly":false}`}},
+					map[string]any{"id": "call-routine-item-history", "type": "function", "function": map[string]any{"name": "inventory_itemHistory", "arguments": `{"sku":"ROUTINE-HISTORY","limit":10}`}},
 					map[string]any{"id": "call-routine-supplier-statement", "type": "function", "function": map[string]any{"name": "purchasing_supplierStatement", "arguments": string(statementArgs)}},
 					map[string]any{"id": "call-routine-documents", "type": "function", "function": map[string]any{"name": "documents_listDocs", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(localVersionArgs)}},
@@ -226,6 +241,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		}
 		foundDocumentResult := false
 		foundLocationResult := false
+		foundInventoryHistoryResult := false
 		foundQuoteResult := false
 		foundSupplierStatementResult := false
 		foundTimelineResult := false
@@ -380,6 +396,33 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					locations[1].Code != "RETAIL" || locations[1].Name != "Retail floor" {
 					t.Errorf("inventory.listLocations result = %+v, want ordered local locations without the foreign same-code row", locations)
 				}
+			case "call-routine-item-history":
+				foundInventoryHistoryResult = true
+				var result struct {
+					OK   bool `json:"ok"`
+					Data struct {
+						Movements []struct {
+							QuantityDelta int64  `json:"quantityDelta"`
+							Reason        string `json:"reason"`
+							Note          string `json:"note"`
+							ActorType     string `json:"actorType"`
+							CreatedAt     string `json:"createdAt"`
+						} `json:"movements"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode inventory.itemHistory tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Movements) != 1 {
+					t.Errorf("inventory.itemHistory result = %+v, want only this organization's one movement", result)
+					continue
+				}
+				movement := result.Data.Movements[0]
+				if movement.QuantityDelta != 5000 || movement.Reason != "adjustment" || movement.Note != "Routine local stock count" ||
+					movement.ActorType != "human" || movement.CreatedAt != "2026-09-30T09:01:02.345Z" {
+					t.Errorf("inventory.itemHistory movement = %+v, want local stock count details without foreign sentinel", movement)
+				}
 			case "call-routine-document-versions", "call-routine-foreign-document-versions":
 				var result struct {
 					OK   bool `json:"ok"`
@@ -481,6 +524,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundLocationResult {
 			t.Errorf("follow-up provider request omitted the inventory.listLocations tool result")
 		}
+		if !foundInventoryHistoryResult {
+			t.Errorf("follow-up provider request omitted the inventory.itemHistory tool result")
+		}
 		if !foundQuoteResult {
 			t.Errorf("follow-up provider request omitted the accounting.listQuotes tool result")
 		}
@@ -496,7 +542,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundLocalVersionDetailResult || !foundLocalNullNoteVersionDetailResult || !foundForeignVersionDetailResult {
 			t.Errorf("follow-up provider request omitted document version detail tool results, local=%v null-note-local=%v foreign=%v", foundLocalVersionDetailResult, foundLocalNullNoteVersionDetailResult, foundForeignVersionDetailResult)
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customers, follow-up tasks, customer history, sent quotes, warehouse locations, stock, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customers, follow-up tasks, customer history, sent quotes, warehouse locations, stock movements, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
 	}))
 	defer server.Close()
 	settings, err := json.Marshal(map[string]any{"ai": map[string]any{"provider": "custom", "baseUrl": server.URL + "/v1", "models": map[string]string{"primary": "routine-test-model", "fast": "routine-test-model", "reasoning": "routine-test-model", "embeddings": "routine-test-model"}, "encryptedApiKey": encryptRoutineKey(t, secret, "integration-provider-key"), "keyHint": "••••key", "updatedAt": time.Now().UTC().Format(time.RFC3339)}})
