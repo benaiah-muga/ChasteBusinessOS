@@ -1182,13 +1182,13 @@ new owners and the manifest shows zero legacy runtime paths.
      fails closed on malformed or uncertain results. Human reads require the
      signed, verified session and active-organization membership, then preserve
      the legacy organization-only read contract without requiring
-     `platform.browse` or the optional Creator module. Agent reads continue to
-     require both capability permission and module enablement; Creator writes
-     retain their existing gates. Keep the bridge default-off until route and
-     database-backed parity checks pass.
-     Keep `GO_CREATOR_MARKETPLACE_VERIFY=1` off until the Go
-     `platform.creator` permission requirement matches the legacy verifier's
-     access policy; the bridge now preserves structured denial messages.
+     `platform.browse` or the optional Creator module. Human verification also
+     preserves the legacy signed-session and organization-membership access
+     without requiring `platform.creator` or the optional Creator module.
+     Agent reads and verification continue to require capability permission
+     and module enablement; system execution retains its module gate. The Go
+     verification bridge preserves structured denial messages. Keep all
+     marketplace bridges default-off for controlled rollout.
      Verify route contracts and the Vite app before considering the
      Marketplace flow migrated.
 
@@ -1225,8 +1225,9 @@ new owners and the manifest shows zero legacy runtime paths.
      same-origin authority; browser verification remains deferred at the user's
      request.
 
-130. (Next) Owner: React and Go migration implementation. Finish Marketplace
-     verifier permission parity by matching the legacy route's authorization
-     contract in the Go capability. Keep the verification bridge default-off
-     until the route and database-backed tests prove the parity. Browser
-     verification remains deferred by user direction.
+130. (Done) Match Go Marketplace verification authorization to the legacy
+     route: authenticated humans retain verified-session and active-organization
+     membership checks without requiring the optional Creator module or
+     `platform.creator`, while agent permission/module gates and system module
+     gates remain enforced. Database-backed tests cover human, agent, and system
+     paths. Browser verification remains deferred by user direction.

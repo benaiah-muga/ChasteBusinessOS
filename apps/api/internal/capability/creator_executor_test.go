@@ -310,3 +310,74 @@ func TestGoCreatorMarketplaceHumanReadPreservesLegacyOrgAccess(t *testing.T) {
 		t.Fatalf("human Marketplace audit events=%d, want one for each of three authorized reads", got)
 	}
 }
+
+func TestGoCreatorMarketplaceVerifyPreservesLegacyHumanAccess(t *testing.T) {
+	fx := newExecutorFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO agent_sessions (id, org_id, user_id, title, mode, model_ref, status)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'Marketplace verify access test', 'assist', 'test-model', 'open')`,
+		fx.agentSession, fx.orgID, fx.userID); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(`{"manifest":{},"signatureBase64":"invalid-signature","publisherPublicKeyBase64":"invalid-public-key"}`)
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE organizations SET enabled_modules='[]'::jsonb WHERE id=$1::uuid`, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+
+	humanClaims := waveModuleClaims(fx, creatorVerifyPluginCapabilityID, "platform.creator", input, "human", "", "marketplace-human-verify")
+	humanClaims.Permissions = nil
+	result, err := fx.executor.Execute(fx.ctx, humanClaims, creatorVerifyPluginCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("human Marketplace verification without platform.creator and Creator module = %+v, %v; want legacy org-member access", result, err)
+	}
+	var output CreatorVerifyPluginOutput
+	if err := json.Unmarshal(result.Data, &output); err != nil || output.Valid || output.Reason == nil {
+		t.Fatalf("human Marketplace verification data=%s output=%+v err=%v, want invalid-signature verdict", result.Data, output, err)
+	}
+
+	systemResult, err := fx.executor.ExecuteSystem(fx.ctx, SystemClaims{
+		OrganizationID: fx.orgID,
+		CapabilityID:   creatorVerifyPluginCapabilityID,
+		Permission:     "platform.creator",
+		IntentID:       executorUUID(t),
+	}, input)
+	if err != nil || systemResult.OK || systemResult.Error != `module "creator" is disabled for this organization` {
+		t.Fatalf("system Marketplace verification with Creator disabled = %+v, %v; want module denial", systemResult, err)
+	}
+
+	agentClaims := waveModuleClaims(fx, creatorVerifyPluginCapabilityID, "platform.creator", input, "agent", fx.agentSession, "marketplace-agent-verify-module-disabled")
+	result, err = fx.executor.Execute(fx.ctx, agentClaims, creatorVerifyPluginCapabilityID, input)
+	if err != nil || result.OK || result.Error != `module "creator" is disabled for this organization` {
+		t.Fatalf("agent Marketplace verification with Creator disabled = %+v, %v; want module denial", result, err)
+	}
+
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE organizations SET enabled_modules='["creator"]'::jsonb WHERE id=$1::uuid`, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	agentClaims.IntentID = "marketplace-agent-verify-no-permission"
+	agentClaims.Permissions = nil
+	result, err = fx.executor.Execute(fx.ctx, agentClaims, creatorVerifyPluginCapabilityID, input)
+	if err != nil || result.OK || result.Error != "forbidden: missing permission: platform.creator" {
+		t.Fatalf("agent Marketplace verification without platform.creator = %+v, %v; want permission denial", result, err)
+	}
+
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'platform.creator', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	agentClaims.IntentID = "marketplace-agent-verify-with-permission"
+	agentClaims.Permissions = []string{"platform.creator"}
+	result, err = fx.executor.Execute(fx.ctx, agentClaims, creatorVerifyPluginCapabilityID, input)
+	if err != nil || !result.OK {
+		t.Fatalf("agent Marketplace verification with Creator and platform.creator enabled = %+v, %v; want capability access", result, err)
+	}
+
+	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2 AND actor_type='human'`, fx.orgID, creatorVerifyPluginCapabilityID); got != 1 {
+		t.Fatalf("human Marketplace verification audit events=%d, want one governed event", got)
+	}
+	otherOrgClaims := humanClaims
+	otherOrgClaims.OrganizationID = fx.otherOrgID
+	otherOrgClaims.IntentID = "marketplace-human-verify-foreign-org"
+	if _, err := fx.executor.Execute(fx.ctx, otherOrgClaims, creatorVerifyPluginCapabilityID, input); !errors.Is(err, ErrNotMember) {
+		t.Fatalf("human Marketplace verification through a non-member organization error=%v, want ErrNotMember", err)
+	}
+}

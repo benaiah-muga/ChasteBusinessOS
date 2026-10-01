@@ -588,12 +588,14 @@ func (e *Executor) execute(
 			}
 		}
 
-		// The legacy Marketplace GET required an authenticated organization member,
-		// not the optional Creator module or platform.browse grant. verifyIdentity
-		// above preserves the signed session, verified email, and membership checks;
-		// agent claims and every other capability still use their declared gates.
-		legacyMarketplaceHumanRead := capabilityID == creatorListMarketplaceCapabilityID && !system && claims.ActorType == "human"
-		if !legacyMarketplaceHumanRead {
+		// Legacy Marketplace listing and verification routes required an
+		// authenticated organization member, not the optional Creator module or
+		// capability permission. verifyIdentity above preserves the signed session,
+		// verified email, and membership checks; agent and system claims retain the
+		// declared capability gates.
+		legacyMarketplaceHumanAccess := !system && claims.ActorType == "human" &&
+			(capabilityID == creatorListMarketplaceCapabilityID || capabilityID == creatorVerifyPluginCapabilityID)
+		if !legacyMarketplaceHumanAccess {
 			enabled, err := isModuleEnabled(ctx, tx, claims.OrganizationID, spec.module)
 			if err != nil {
 				return Result{}, err
@@ -1128,7 +1130,7 @@ func (e *Executor) execute(
 				return Result{}, err
 			}
 		}
-		if !legacyMarketplaceHumanRead && !permissions["*"] && !permissions[spec.permission] {
+		if !legacyMarketplaceHumanAccess && !permissions["*"] && !permissions[spec.permission] {
 			return Result{OK: false, Error: "forbidden: missing permission: " + spec.permission}, nil
 		}
 
