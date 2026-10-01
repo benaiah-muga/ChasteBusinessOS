@@ -278,6 +278,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-tasks", "type": "function", "function": map[string]any{"name": "crm_listTasks", "arguments": `{"openOnly":true}`}},
 					map[string]any{"id": "call-routine-crm-timeline", "type": "function", "function": map[string]any{"name": "crm_customerTimeline", "arguments": string(timelineArgs)}},
 					map[string]any{"id": "call-routine-accounting-quotes", "type": "function", "function": map[string]any{"name": "accounting_listQuotes", "arguments": quoteFilterArgs}},
+					map[string]any{"id": "call-routine-income-statement", "type": "function", "function": map[string]any{"name": "accounting_incomeStatement", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-trial-balance", "type": "function", "function": map[string]any{"name": "accounting_trialBalance", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-balance-sheet", "type": "function", "function": map[string]any{"name": "accounting_balanceSheet", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-inventory-locations", "type": "function", "function": map[string]any{"name": "inventory_listLocations", "arguments": "{}"}},
@@ -314,6 +315,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundDocumentResult := false
 		foundLocationResult := false
 		foundInventoryHistoryResult := false
+		foundIncomeStatementResult := false
 		foundTrialBalanceResult := false
 		foundBalanceSheetResult := false
 		foundQuoteResult := false
@@ -526,6 +528,20 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				if !result.OK || !result.Data.Balanced || !matchesExpectedLines {
 					t.Errorf("accounting.trialBalance result = %+v, want balanced local base-currency totals without foreign CAD entries", result)
 				}
+			case "call-routine-income-statement":
+				foundIncomeStatementResult = true
+				var result struct {
+					OK   bool                             `json:"ok"`
+					Data capability.IncomeStatementOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode accounting.incomeStatement tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || result.Data.RevenueMinor != 50000 || result.Data.ExpenseMinor != 0 || result.Data.NetIncomeMinor != 50000 ||
+					len(result.Data.Lines) != 1 || result.Data.Lines[0].Code != "RT4000" || result.Data.Lines[0].AmountMinor != 50000 {
+					t.Errorf("accounting.incomeStatement result = %+v, want local 50000 revenue with no foreign entries", result)
+				}
 			case "call-routine-balance-sheet":
 				foundBalanceSheetResult = true
 				var result struct {
@@ -647,6 +663,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundTrialBalanceResult {
 			t.Errorf("follow-up provider request omitted the accounting.trialBalance tool result")
 		}
+		if !foundIncomeStatementResult {
+			t.Errorf("follow-up provider request omitted the accounting.incomeStatement tool result")
+		}
 		if !foundBalanceSheetResult {
 			t.Errorf("follow-up provider request omitted the accounting.balanceSheet tool result")
 		}
@@ -665,7 +684,7 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundLocalVersionDetailResult || !foundLocalNullNoteVersionDetailResult || !foundForeignVersionDetailResult {
 			t.Errorf("follow-up provider request omitted document version detail tool results, local=%v null-note-local=%v foreign=%v", foundLocalVersionDetailResult, foundLocalNullNoteVersionDetailResult, foundForeignVersionDetailResult)
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customers, follow-up tasks, customer history, invoices, quotes, trial balance, balance sheet, warehouse locations, stock movements, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Routine reviewed customers, follow-up tasks, customer history, invoices, quotes, income statement, trial balance, balance sheet, warehouse locations, stock movements, and authored document version history."}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`))
 	}))
 	defer server.Close()
 	settings, err := json.Marshal(map[string]any{"ai": map[string]any{"provider": "custom", "baseUrl": server.URL + "/v1", "models": map[string]string{"primary": "routine-test-model", "fast": "routine-test-model", "reasoning": "routine-test-model", "embeddings": "routine-test-model"}, "encryptedApiKey": encryptRoutineKey(t, secret, "integration-provider-key"), "keyHint": "••••key", "updatedAt": time.Now().UTC().Format(time.RFC3339)}})
