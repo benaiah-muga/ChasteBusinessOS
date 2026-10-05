@@ -27,6 +27,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 - Enable the Go support channel settings read by default in Vite while keeping POST settings updates on the legacy route.
+- Enable cycle-count create, record, post, and cancel through Go's session capability route. Inventory permission and module checks, approvals, and intent receipts apply; posted counts are corrected with a fresh count and only open counts can be cancelled.
 - Enable the tenant-scoped Go `GET /api/my-work` reader by default. PostgreSQL-backed coverage verifies approval and receipt-remainder cards remain isolated by organization.
 - Enable the session-authenticated, capability-backed Go `GET /api/signals` feed by default. Unsupported methods and suffix paths continue through legacy.
 - Enable Go's session-authenticated `GET` and governed `POST /api/branding` by default in Vite and the Go API. Branding approval responses remain compatible with Settings.
