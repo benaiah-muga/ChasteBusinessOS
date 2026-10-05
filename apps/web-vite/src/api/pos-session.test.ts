@@ -646,6 +646,7 @@ describe("POS register session API client", () => {
       return writes === 1 ? Response.json({ ok: true, data: { itemId: "item-1" } }) : Response.json({ ok: true, data: { onHandThousandths: 5000 } });
     });
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
 
     await expect(createPosQuickProduct({
       action: "createItem",
@@ -662,6 +663,87 @@ describe("POS register session API client", () => {
       note: "Opening stock from POS quick add",
     })).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 5000 } });
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(["/api/inventory", "/api/inventory"]);
+  });
+
+  it("routes POS quick add and opening stock through Go inventory capabilities when enabled", async () => {
+    let writes = 0;
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
+      writes += 1;
+      return writes === 1
+        ? Response.json({ ok: true, data: { itemId: "item-1" } })
+        : Response.json({ ok: true, data: { onHandThousandths: 5000 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+
+    await expect(createPosQuickProduct({
+      action: "createItem",
+      sku: "BRD-001",
+      name: "Boda bread",
+      kind: "goods",
+      unitLabel: "loaf",
+      salePriceMinor: 2500,
+    })).resolves.toEqual({ kind: "completed", data: { itemId: "item-1" } });
+    await expect(adjustPosItemStock({
+      action: "adjustStock",
+      sku: "BRD-001",
+      quantityDelta: 5000,
+      note: "Opening stock from POS quick add",
+    })).resolves.toEqual({ kind: "completed", data: { onHandThousandths: 5000 } });
+
+    const requests = fetchMock.mock.calls.map(([url, init]) => ({
+      url,
+      body: JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string },
+    }));
+    expect(requests.map((request) => request.url)).toEqual([
+      "/api/capabilities/execute",
+      "/api/capabilities/execute",
+    ]);
+    expect(requests.map((request) => request.body.capabilityId)).toEqual([
+      "inventory.createItem",
+      "inventory.adjustStock",
+    ]);
+    expect(requests[0]?.body.input).toEqual({
+      sku: "BRD-001",
+      name: "Boda bread",
+      kind: "goods",
+      unitLabel: "loaf",
+      salePriceMinor: 2500,
+      reorderPointThousandths: 0,
+      tags: [],
+    });
+    expect(requests[1]?.body.input).toEqual({
+      sku: "BRD-001",
+      quantityDelta: 5000,
+      note: "Opening stock from POS quick add",
+    });
+    expect(requests[0]?.body.intentId).not.toBe(requests[1]?.body.intentId);
+  });
+
+  it("keeps approval outcomes visible for Go inventory item actions", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({
+      ok: false,
+      pendingApproval: true,
+      reason: "Manager approval is required.",
+    }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+
+    await expect(createPosQuickProduct({
+      action: "createItem",
+      sku: "BRD-001",
+      name: "Boda bread",
+      kind: "goods",
+      unitLabel: "loaf",
+      salePriceMinor: 2500,
+    })).resolves.toEqual({ kind: "pending", reason: "Manager approval is required." });
+    await expect(adjustPosItemStock({
+      action: "adjustStock",
+      sku: "BRD-001",
+      quantityDelta: 5000,
+      note: "Opening stock from POS quick add",
+    })).resolves.toEqual({ kind: "pending", reason: "Manager approval is required." });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("turns an unreachable service and a malformed success body into readable errors", async () => {

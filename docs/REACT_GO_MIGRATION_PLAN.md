@@ -1535,3 +1535,11 @@ new owners and the manifest shows zero legacy runtime paths.
      only a missing Go route falls back automatically. Set
      `GO_POS_CUSTOMERS_ROUTE=0` to unmount the endpoint. CRM and Support callers
      remain unchanged. Focused Go/Vite tests pass; browser proof remains open.
+157. Route Vite POS quick product creation and opening stock adjustment through
+     the existing Go `inventory.createItem` and `inventory.adjustStock`
+     capabilities when `CHASTE_GO_INVENTORY_ITEM_SLICE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the inventory item selector to
+     `0` to restore both actions to `/api/inventory`. Keep their POS output
+     payloads, approval reasons, and separate fresh intent IDs unchanged.
+     Other POS actions and page ownership remain unchanged. Focused Vite API
+     tests pass; browser proof remains open.

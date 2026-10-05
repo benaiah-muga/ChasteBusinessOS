@@ -149,6 +149,9 @@ describe("Vite POS register page", () => {
     expect(screen.getByText("Watch list")).not.toBeNull();
     expect(screen.getByText(/Front register · closed/)).not.toBeNull();
     expect(screen.getByText("−$2.00")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "POS shift summary" }).getAttribute("href")).toBe("/pos/shift-summary");
+    fireEvent.click(screen.getByRole("tab", { name: "Sell · register open" }));
+    expect(screen.getByRole("link", { name: "Full shift summary" }).getAttribute("href")).toBe("/pos/shift-summary");
   });
 
   it("keeps the module gate visible instead of rendering a register that is switched off", async () => {

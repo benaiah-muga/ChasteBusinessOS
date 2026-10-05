@@ -1269,7 +1269,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
         <p>Sales post instantly to the ledger as one balanced entry. Closing counts the drawer, variances are recorded, never smoothed over.</p>
       </div>
       <div className="pos-header-actions">
-        <a className="pos-shift-link" href={legacyUrl("/pos/shift-summary")}>POS shift summary</a>
+        <a className="pos-shift-link" href="/pos/shift-summary">POS shift summary</a>
       </div>
     </header>
   );
@@ -2305,7 +2305,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
             <div className="pos-shift-strip">
               <span className={`pos-pill ${summary.status === "open" ? "pos-pill-green" : "pos-pill-neutral"}`}>{summary.register} · {formatStatus(summary.status)}</span>
               <span><strong>{summary.salesCount}</strong> sale{summary.salesCount === 1 ? "" : "s"} · <strong>{money(summary.takingsMinor)}</strong> total takings</span>
-              <a className="pos-shift-link" href={legacyUrl("/pos/shift-summary")}>Full shift summary</a>
+              <a className="pos-shift-link" href="/pos/shift-summary">Full shift summary</a>
             </div>
           ) : null}
 

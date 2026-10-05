@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PosApiError } from "./pos";
+import { inventoryItemActionRequest, type AdjustInventoryStock, type CreateInventoryItem } from "./inventory-items";
 
 const uuid = z.string().uuid();
 const SALE_INTENT_STORAGE_PREFIX = "chaste.pos.sale-intent.v1:";
@@ -292,6 +293,14 @@ async function postPosAction(
   signal: AbortSignal | undefined,
   path = "/api/pos",
 ): Promise<{ status: number; body: unknown }> {
+  return postPosRequest(path, { ...action, intentId }, signal);
+}
+
+async function postPosRequest(
+  path: string,
+  body: Record<string, unknown>,
+  signal: AbortSignal | undefined,
+): Promise<{ status: number; body: unknown }> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -300,13 +309,32 @@ async function postPosAction(
       headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
       signal: requestSignal(signal, 20_000),
-      body: JSON.stringify({ ...action, intentId }),
+      body: JSON.stringify(body),
     });
   } catch (error) {
     if (signal?.aborted) throw error;
     throw unreachable(error, "The POS service took too long to respond. Check the register before trying again.");
   }
   return { status: response.status, body: await response.json().catch(() => null) };
+}
+
+function postPosInventoryAction(
+  payload: PosCreateItemAction | PosAdjustStockAction,
+  signal?: AbortSignal,
+): Promise<{ status: number; body: unknown }> {
+  const intentId = crypto.randomUUID();
+  const useGo = typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
+  if (!useGo) return postPosAction(payload, intentId, signal, "/api/inventory");
+
+  const inventoryAction: CreateInventoryItem | AdjustInventoryStock = payload.action === "createItem"
+    ? {
+      ...payload,
+      reorderPointThousandths: 0,
+      tags: [],
+    }
+    : payload;
+  const request = inventoryItemActionRequest(inventoryAction, intentId, true);
+  return postPosRequest(request.url, request.body, signal);
 }
 
 async function postGoPosCapability(
@@ -641,10 +669,10 @@ export async function requestPosReturn(
 
 export async function createPosQuickProduct(action: PosCreateItemAction, signal?: AbortSignal): Promise<PosActionOutcome<z.infer<typeof CreateItemOutputSchema>>> {
   const payload = parseOrThrow(PosCreateItemActionSchema, action, "Check the product name, SKU, and price before saving.");
-  return interpret(await postPosAction(payload, crypto.randomUUID(), signal, "/api/inventory"), CreateItemOutputSchema, "Could not add the product.");
+  return interpret(await postPosInventoryAction(payload, signal), CreateItemOutputSchema, "Could not add the product.");
 }
 
 export async function adjustPosItemStock(action: PosAdjustStockAction, signal?: AbortSignal): Promise<PosActionOutcome<z.infer<typeof AdjustStockOutputSchema>>> {
   const payload = parseOrThrow(PosAdjustStockActionSchema, action, "Check the opening stock quantity before recording it.");
-  return interpret(await postPosAction(payload, crypto.randomUUID(), signal, "/api/inventory"), AdjustStockOutputSchema, "Could not record the opening stock.");
+  return interpret(await postPosInventoryAction(payload, signal), AdjustStockOutputSchema, "Could not record the opening stock.");
 }
