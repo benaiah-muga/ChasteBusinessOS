@@ -604,13 +604,14 @@ The Vite development proxy sends Go's implemented `/api/auth` methods and paths
 to Go. Other auth paths and methods continue through the legacy Better Auth
 catch-all. Set `CHASTE_GO_AUTH_OIDC_ROUTE=1` or
 `CHASTE_GO_AUTH_SAML_ROUTE=1` alongside the matching Go auth feature flag to
-route those optional federation paths to Go. Other Go route flags are opt-in
+route those optional federation paths to Go. Most other Go route flags are opt-in
 and evaluated against the request method and exact path before the legacy
 `/api` catch-all; unmatched requests continue to the legacy server. Request and
 response streams, headers, query strings, and bodies pass through unchanged.
 Pair `GO_MY_WORK_ROUTE=1` with `CHASTE_GO_MY_WORK_ROUTE=1` to send only
-`GET /api/my-work` to Go. The local `.env.example` enables the verified Go
-`GET` and `POST /api/analytics` routes through their paired selectors. Set both
+`GET /api/my-work` to Go. The local `.env.example` enables the session-authenticated Go
+`GET /api/analytics` discovery and preview route; report `POST /api/analytics`
+remains on legacy. Set both
 `GO_ANALYTICS_ROUTE=0` and `CHASTE_GO_ANALYTICS_ROUTE=0` to use the legacy
 handler during local rollback. Vite's selectors apply only to its development
 server; production reverse-proxy ownership is configured separately. Go also

@@ -217,7 +217,6 @@ func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportC
 	}
 	if analyticsRoute != nil {
 		mux.Handle("GET /api/analytics", analyticsRoute)
-		mux.Handle("POST /api/analytics", analyticsRoute)
 	}
 	if dashboardRoute != nil {
 		mux.Handle("GET /api/dashboard", dashboardRoute)

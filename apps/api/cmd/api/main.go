@@ -35,6 +35,14 @@ func goAuthRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goMyWorkRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
+func goAnalyticsRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("GO_DATABASE_URL")
 	if databaseURL == "" {
@@ -200,7 +208,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go branding route mounted", "path", "/api/branding")
 	}
 	var analyticsRoute http.Handler
-	if os.Getenv("GO_ANALYTICS_ROUTE") == "1" {
+	if goAnalyticsRouteEnabledFromEnv(os.Getenv("GO_ANALYTICS_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -236,7 +244,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go dashboard setup route mounted", "path", "/api/setup")
 	}
 	var myWorkRoute http.Handler
-	if os.Getenv("GO_MY_WORK_ROUTE") == "1" {
+	if goMyWorkRouteEnabledFromEnv(os.Getenv("GO_MY_WORK_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

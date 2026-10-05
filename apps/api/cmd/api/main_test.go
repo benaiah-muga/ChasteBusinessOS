@@ -16,3 +16,33 @@ func TestGoAuthRouteEnabledFromEnvMatchesViteProxyDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestGoMyWorkRouteEnabledFromEnvMatchesViteProxyDefault(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: true},
+		{value: "1", want: true},
+		{value: "0", want: false},
+	} {
+		if got := goMyWorkRouteEnabledFromEnv(test.value); got != test.want {
+			t.Errorf("goMyWorkRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)
+		}
+	}
+}
+
+func TestGoAnalyticsRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: true},
+		{value: "1", want: true},
+		{value: "0", want: false},
+	} {
+		if got := goAnalyticsRouteEnabledFromEnv(test.value); got != test.want {
+			t.Errorf("goAnalyticsRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)
+		}
+	}
+}

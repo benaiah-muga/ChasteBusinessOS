@@ -218,8 +218,8 @@
       "kind": "api",
       "path": "/api/analytics",
       "method": "POST",
-      "owner": "go",
-      "parity": "verified"
+      "owner": "legacy",
+      "parity": "pending"
     },
     {
       "kind": "api",

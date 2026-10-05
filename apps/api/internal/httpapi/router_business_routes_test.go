@@ -48,16 +48,22 @@ func TestMountGoBusinessRoutesMountsDashboardLedgerAndMetrics(t *testing.T) {
 	}
 }
 
-func TestMountGoBusinessRoutesMountsAnalyticsReportPostOnlyWhenHandlerProvided(t *testing.T) {
+func TestMountGoBusinessRoutesMountsAnalyticsGetOnlyWhenHandlerProvided(t *testing.T) {
 	legacy := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte("legacy"))
 	})
 	analytics := MountGoBusinessRoutes(legacy, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, routeMarker("analytics"), nil, nil, nil)
 	response := httptest.NewRecorder()
-	analytics.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/analytics", nil))
+	analytics.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/analytics", nil))
 	if response.Code != http.StatusOK || response.Body.String() != "analytics" {
-		t.Fatalf("mounted analytics POST response = %d %q", response.Code, response.Body.String())
+		t.Fatalf("mounted analytics GET response = %d %q", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	analytics.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/analytics", nil))
+	if response.Code != http.StatusNotFound || response.Body.String() != "legacy" {
+		t.Fatalf("unmounted analytics POST response = %d %q, want legacy fallback", response.Code, response.Body.String())
 	}
 
 	response = httptest.NewRecorder()
@@ -68,9 +74,9 @@ func TestMountGoBusinessRoutesMountsAnalyticsReportPostOnlyWhenHandlerProvided(t
 
 	disabled := MountGoBusinessRoutes(legacy, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	response = httptest.NewRecorder()
-	disabled.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/analytics", nil))
+	disabled.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/analytics", nil))
 	if response.Code != http.StatusNotFound || response.Body.String() != "legacy" {
-		t.Fatalf("disabled analytics POST response = %d %q, want legacy fallback", response.Code, response.Body.String())
+		t.Fatalf("disabled analytics GET response = %d %q, want legacy fallback", response.Code, response.Body.String())
 	}
 }
 

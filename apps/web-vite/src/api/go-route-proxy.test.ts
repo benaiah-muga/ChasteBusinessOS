@@ -67,8 +67,6 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_TEAM_READ_ROUTE", flag: "teamRead", method: "GET", url: "/api/team" },
   { env: "CHASTE_GO_TEAM_WRITE_ROUTE", flag: "teamWrite", method: "POST", url: "/api/team" },
   { env: "CHASTE_GO_BRANDING_ROUTE", flag: "branding", method: "POST", url: "/api/branding" },
-  { env: "CHASTE_GO_ANALYTICS_ROUTE", flag: "analytics", method: "GET", url: "/api/analytics" },
-  { env: "CHASTE_GO_ANALYTICS_ROUTE", flag: "analytics", method: "POST", url: "/api/analytics" },
   { env: "CHASTE_GO_MY_WORK_ROUTE", flag: "myWork", method: "GET", url: "/api/my-work?status=open" },
   { env: "CHASTE_GO_DASHBOARD_ROUTE", flag: "dashboard", method: "GET", url: "/api/dashboard" },
   { env: "CHASTE_GO_SETUP_ROUTE", flag: "setup", method: "GET", url: "/api/setup?source=dashboard" },
@@ -112,10 +110,12 @@ describe("Vite Go route proxy selection", () => {
     },
   );
 
-  it("routes only implemented Go auth endpoints by default and leaves other Go routes disabled", () => {
+  it("routes implemented Go auth, work queue, and analytics reads by default", () => {
     const flags = goRouteProxyFlagsFromEnv({});
     expect(flags.auth).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => key !== "auth").every(([, enabled]) => !enabled)).toBe(true);
+    expect(flags.analytics).toBe(true);
+    expect(flags.myWork).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -136,6 +136,19 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/sessions")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/durable-runs")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/notifications")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/analytics?dataset=analytics.invoiceAging")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/analytics")).toBe(false);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/analytics")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/analytics/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work?status=open")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
+  });
+
+  it("allows the analytics read proxy to be disabled for rollback", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ANALYTICS_ROUTE: "0" });
+    expect(flags.analytics).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(false);
   });
 
   it("routes optional federated auth only when its matching Go selector is enabled", () => {
@@ -202,13 +215,16 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/signals/")).toBe(false);
   });
 
-  it("keeps the My Work selector GET-only and exact", () => {
-    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_ROUTE: "1" });
+  it("routes My Work through Go by default, GET-only and exact, with a legacy opt-out", () => {
+    const flags = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(flags, "GET", "/api/my-work?status=open")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/my-work/summarize")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/my-work/extra")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/my-work/")).toBe(false);
+
+    const legacyFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_ROUTE: "0" });
+    expect(isGoRouteRequest(legacyFlags, "GET", "/api/my-work")).toBe(false);
   });
 
   it("keeps unsupported routine methods and subpaths on the legacy route", () => {
@@ -430,7 +446,7 @@ describe("Vite Go route proxy selection", () => {
       body: JSON.stringify({ title: "Quarterly report", sections: [] }),
     });
     expect(await analyticsReport.json()).toMatchObject({
-      target: "go",
+      target: "legacy",
       method: "POST",
       url: "/api/analytics",
       body: JSON.stringify({ title: "Quarterly report", sections: [] }),

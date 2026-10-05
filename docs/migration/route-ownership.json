@@ -118,8 +118,8 @@
       "path": "/api/analytics",
       "method": "POST",
       "source": "apps/web/src/app/api/analytics/route.ts",
-      "owner": "go",
-      "parity": "verified"
+      "owner": "legacy",
+      "parity": "pending"
     },
     {
       "kind": "api",
