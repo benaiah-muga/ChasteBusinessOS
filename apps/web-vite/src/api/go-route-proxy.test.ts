@@ -4,12 +4,21 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 import {
   createGoRouteProxyPlugin,
+  goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
   isGoRouteRequest,
   type GoRouteProxyFlags,
 } from "./go-route-proxy";
 
 const runningServers: Array<{ close: () => Promise<void> }> = [];
+
+describe("POS register opening Go selector", () => {
+  it("enables the existing Go capability with the session route and supports rollback", () => {
+    expect(goPosOpenSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goPosOpenSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_POS_OPEN_SESSION_SLICE: "0" })).toBe(false);
+    expect(goPosOpenSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
+  });
+});
 
 afterEach(async () => {
   await Promise.all(runningServers.splice(0).map((server) => server.close()));

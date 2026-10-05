@@ -1511,3 +1511,10 @@ new owners and the manifest shows zero legacy runtime paths.
      typecheck, lint, route ownership checks, and contract checks pass.
      Authenticated browser proof remains open because the local environment
      does not provide `BETTER_AUTH_SECRET`.
+154. Route Vite POS register opening through the existing Go
+     `pos.openSession` capability by default whenever
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
+     `CHASTE_GO_POS_OPEN_SESSION_SLICE=0` to roll back this individual action;
+     only a missing Go route falls back to legacy, reusing the same intent.
+     Other POS actions and `/pos` page ownership remain unchanged. Focused
+     selector and client tests pass; authenticated browser proof remains open.
