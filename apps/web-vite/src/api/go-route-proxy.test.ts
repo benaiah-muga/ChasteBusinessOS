@@ -245,6 +245,11 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(readOnly, "GET", userPath)).toBe(true);
     expect(isGoRouteRequest(readOnly, "POST", "/api/scim/v2/Users")).toBe(false);
     expect(isGoRouteRequest(readOnly, "DELETE", userPath)).toBe(false);
+    expect(isGoRouteRequest(readOnly, "GET", `${userPath}/extra`)).toBe(false);
+    expect(isGoRouteRequest(readOnly, "GET", `${userPath}/`)).toBe(false);
+    expect(isGoRouteRequest(readOnly, "GET", "/api/scim/v2/Users/not-a-uuid")).toBe(false);
+    expect(isGoRouteRequest(readOnly, "PATCH", userPath)).toBe(false);
+    expect(isGoRouteRequest(readOnly, "HEAD", "/api/scim/v2/Users")).toBe(false);
 
     const writeOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SCIM_WRITE_ROUTE: "1" });
     expect(isGoRouteRequest(writeOnly, "GET", "/api/scim/v2/Users")).toBe(false);

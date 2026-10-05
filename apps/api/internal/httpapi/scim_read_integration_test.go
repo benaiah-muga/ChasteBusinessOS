@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -219,8 +218,14 @@ func TestGoSCIMReadRouteUsesTokenScopeAndExpiry(t *testing.T) {
 		t.Fatalf("quoted filter operand whitespace was trimmed: response=%+v", list)
 	}
 	response = request("/api/scim/v2/Users/"+userID, rawToken)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "local-scim@example.test") {
+	var member scimUserResource
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &member) != nil {
 		t.Fatalf("member resource status=%d body=%s", response.Code, response.Body.String())
+	}
+	if member.ID != userID || member.UserName != "local-scim@example.test" || member.Name.GivenName != "Local SCIM" ||
+		!member.Active || len(member.Schemas) != 1 || member.Schemas[0] != "urn:ietf:params:scim:schemas:core:2.0:User" ||
+		len(member.Emails) != 1 || member.Emails[0] != (scimUserEmail{Value: "local-scim@example.test", Primary: true}) {
+		t.Fatalf("member resource did not match the legacy SCIM shape: %+v", member)
 	}
 	response = request("/api/scim/v2/Users/"+otherUserID, rawToken)
 	if response.Code != http.StatusNotFound {

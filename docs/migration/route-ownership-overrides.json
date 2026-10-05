@@ -283,6 +283,20 @@
       "method": "GET",
       "owner": "go",
       "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
     }
   ]
 }
