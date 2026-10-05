@@ -44,6 +44,10 @@ export function goPosOpenSessionSliceFromEnv(env: Record<string, string | undefi
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_POS_OPEN_SESSION_SLICE !== "0";
 }
 
+export function goPosCloseSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_POS_CLOSE_SESSION_SLICE !== "0";
+}
+
 export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>): GoRouteProxyFlags {
   return {
     supportPublic: env.CHASTE_GO_SUPPORT_PUBLIC_ROUTE === "1",

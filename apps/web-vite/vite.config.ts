@@ -1,6 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goPosOpenSessionSliceFromEnv, goRouteProxyFlagsFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goPosCloseSessionSliceFromEnv, goPosOpenSessionSliceFromEnv, goRouteProxyFlagsFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "CHASTE_");
@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
   const goManufacturingDefineBomSlice = env.CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goMessagingSendSlice = env.CHASTE_GO_MESSAGING_SEND_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goPosOpenSessionSlice = goPosOpenSessionSliceFromEnv(env);
-  const goPosCloseSessionSlice = env.CHASTE_GO_POS_CLOSE_SESSION_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
+  const goPosCloseSessionSlice = goPosCloseSessionSliceFromEnv(env);
   const goPosCompleteSaleSlice = env.CHASTE_GO_POS_COMPLETE_SALE_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goPosReturnSaleSlice = env.CHASTE_GO_POS_RETURN_SALE_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goPosShiftSummaryRoute = env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0";

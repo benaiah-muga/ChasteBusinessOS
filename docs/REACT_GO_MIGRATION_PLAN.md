@@ -1518,3 +1518,10 @@ new owners and the manifest shows zero legacy runtime paths.
      only a missing Go route falls back to legacy, reusing the same intent.
      Other POS actions and `/pos` page ownership remain unchanged. Focused
      selector and client tests pass; authenticated browser proof remains open.
+155. Route Vite POS register closing through the existing Go
+     `pos.closeSession` capability by default whenever
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
+     `CHASTE_GO_POS_CLOSE_SESSION_SLICE=0` to roll back this individual action;
+     only a missing Go route falls back to legacy, reusing the same intent.
+     Other POS actions and `/pos` page ownership remain unchanged. Focused
+     selector and client tests pass; authenticated browser proof remains open.
