@@ -115,7 +115,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "sessions", "durableRuns"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "sessions", "durableRuns"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -332,12 +332,15 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(disabled, "GET", "/api/durable-runs")).toBe(false);
   });
 
-  it("keeps the metrics selector GET-only and exact", () => {
-    const metrics = goRouteProxyFlagsFromEnv({ CHASTE_GO_METRICS_ROUTE: "1" });
+  it("routes metrics reads by default and allows rollback", () => {
+    const metrics = goRouteProxyFlagsFromEnv({});
     expect(isGoRouteRequest(metrics, "GET", "/api/metrics")).toBe(true);
     expect(isGoRouteRequest(metrics, "POST", "/api/metrics")).toBe(false);
     expect(isGoRouteRequest(metrics, "HEAD", "/api/metrics")).toBe(false);
     expect(isGoRouteRequest(metrics, "GET", "/api/metrics/extra")).toBe(false);
+
+    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_METRICS_ROUTE: "0" });
+    expect(isGoRouteRequest(disabled, "GET", "/api/metrics")).toBe(false);
   });
 
   it("preserves auth fallback, setup, method-specific, path-prefix, body, cookie, and streaming behavior", async () => {

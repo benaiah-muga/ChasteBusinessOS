@@ -61,7 +61,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     dashboard: env.CHASTE_GO_DASHBOARD_ROUTE === "1",
     setup: env.CHASTE_GO_SETUP_ROUTE === "1",
     ledger: env.CHASTE_GO_LEDGER_ROUTE === "1",
-    metrics: env.CHASTE_GO_METRICS_ROUTE === "1",
+    metrics: env.CHASTE_GO_METRICS_ROUTE !== "0",
     myWorkSummary: env.CHASTE_GO_MY_WORK_SUMMARY_ROUTE === "1",
     signals: env.CHASTE_GO_SIGNALS_ROUTE === "1",
     scimTokens: env.CHASTE_GO_SCIM_TOKENS_ROUTE === "1",

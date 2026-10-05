@@ -226,7 +226,17 @@ func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportC
 		mux.Handle("GET /api/ledger", ledgerRoute)
 	}
 	if directMetricsRoute != nil {
-		mux.Handle("GET /api/metrics", directMetricsRoute)
+		mux.HandleFunc("/api/metrics", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				directMetricsRoute.ServeHTTP(w, r)
+				return
+			}
+			if base != nil {
+				base.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+		})
 	}
 	if base != nil {
 		mux.Handle("/", base)

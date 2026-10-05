@@ -43,6 +43,10 @@ func goAnalyticsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goMetricsRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goSessionsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -316,7 +320,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go ledger route mounted", "path", "/api/ledger")
 	}
 	var directMetricsRoute http.Handler
-	if os.Getenv("GO_METRICS_ROUTE") == "1" {
+	if goMetricsRouteEnabledFromEnv(os.Getenv("GO_METRICS_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

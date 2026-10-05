@@ -1419,11 +1419,12 @@ new owners and the manifest shows zero legacy runtime paths.
      legacy organization-member guard and timestamp precision. Provider-backed
      runtime proof remains open.
 145. (Implemented; Go route ownership verified) Add Go session list,
-     detail, replay, and durable-run list/detail reads behind
-     `GO_SESSIONS_ROUTE=1` and `GO_DURABLE_RUNS_ROUTE=1`, paired with the
-     matching Vite selectors, which default on unless explicitly set to `0`.
-     Both the Go mounts and Vite selectors can be rolled back by setting both
-     paired flags to `0`. Session and run reads use verified
+     detail, replay, durable-run list/detail, and session metrics reads behind
+     `GO_SESSIONS_ROUTE=1`, `GO_DURABLE_RUNS_ROUTE=1`, and
+     `GO_METRICS_ROUTE=1`, paired with the matching Vite selectors, which
+     default on unless explicitly set to `0`.
+     Each Go mount and paired Vite selector can be rolled back by setting
+     their flags to `0`. Session and run reads use verified
      identity, active-organization transactions, and initiator/session-owner
      visibility with admin access. Legacy timestamp and response shapes are
      preserved. Both runtimes return 413 for details exceeding the shared
@@ -1433,8 +1434,9 @@ new owners and the manifest shows zero legacy runtime paths.
      router dispatches only exact GET collection paths and UUID detail/replay
      paths; invalid IDs, HEAD, other methods, and suffixes retain legacy
      fallback.
-     Handler, router, and selector
-     tests pass. Runtime proof remains open.
+     The metrics selector and Go mount dispatch only exact GET `/api/metrics`;
+     HEAD, other methods, and suffixes retain legacy fallback. Handler, router,
+     and selector tests pass. Runtime proof remains open.
 146. (Implemented; Go owns the routes in the manifest) Add the Go notification feed
      at `GET /api/notifications` behind `GO_NOTIFICATIONS_ROUTE=1` and its
      paired Vite selector. Preserve organization and user visibility,

@@ -26,6 +26,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Session trajectory and durable-run detail reads now enforce matching response limits in the Go API and legacy API: 10,000 session events, 256 KiB per event, an 8 MiB session response, and 200 durable-run steps with a 2 MiB logical JSON response cap. Both APIs check visibility before revealing an oversized durable run.
 
 ### Changed
+- Enable the Vite Sessions page metrics read through Go by default. Set `CHASTE_GO_METRICS_ROUTE=0` to restore the legacy proxy, or `GO_METRICS_ROUTE=0` to unmount the Go handler; unsupported methods and extra paths retain legacy fallback.
 - Route exact session-authenticated `GET /api/analytics` requests through Go by default for dataset discovery and previews. Go report `POST /api/analytics` remains on the legacy handler; setting both analytics route flags to `0` rolls back the GET route.
 - Enable eligible Vite conversation sends through Go's governed `messaging.sendMessage` capability by default. Mentions, replies, attachments, stable retry intents, inverse metadata, and pending approvals are preserved; agent-enabled conversations and @agent messages remain on the legacy route.
 - Enable the Go support channel settings read by default in Vite while keeping POST settings updates on the legacy route.

@@ -46,6 +46,21 @@ func TestMountGoBusinessRoutesMountsDashboardLedgerAndMetrics(t *testing.T) {
 	if response.Code != http.StatusNotFound || response.Body.String() != "legacy" {
 		t.Fatalf("unmounted method response = %d %q, want legacy fallback", response.Code, response.Body.String())
 	}
+
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodHead, path: "/api/metrics"},
+		{method: http.MethodPost, path: "/api/metrics"},
+		{method: http.MethodGet, path: "/api/metrics/extra"},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
+		if response.Code != http.StatusNotFound || response.Body.String() != "legacy" {
+			t.Errorf("%s %s response = %d %q, want legacy fallback", test.method, test.path, response.Code, response.Body.String())
+		}
+	}
 }
 
 func TestMountGoBusinessRoutesMountsAnalyticsGetOnlyWhenHandlerProvided(t *testing.T) {
