@@ -5,6 +5,7 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import {
   createGoRouteProxyPlugin,
   goPosCloseSessionSliceFromEnv,
+  goInventoryTransferWritesFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -27,6 +28,14 @@ describe("POS register closing Go selector", () => {
     expect(goPosCloseSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goPosCloseSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_POS_CLOSE_SESSION_SLICE: "0" })).toBe(false);
     expect(goPosCloseSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
+  });
+});
+
+describe("inventory transfer Go selector", () => {
+  it("enables transfer capabilities with the session route and supports rollback", () => {
+    expect(goInventoryTransferWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
+    expect(goInventoryTransferWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_INVENTORY_TRANSFER_WRITES: "0" })).toBe(false);
+    expect(goInventoryTransferWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
   });
 });
 

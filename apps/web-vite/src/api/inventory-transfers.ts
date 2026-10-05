@@ -34,6 +34,16 @@ export interface PartialTransferLine {
   quantityThousandths: number;
 }
 
+type InventoryTransferAction =
+  | {
+    action: "createTransfer";
+    fromLocationCode: string;
+    toLocationCode: string;
+    lines: Array<{ sku: string; quantityThousandths: number }>;
+    note?: string;
+  }
+  | { action: "confirmTransfer"; transferId: string; lines?: PartialTransferLine[] };
+
 export async function createInventoryTransfer(input: CreateInventoryTransferInput): Promise<InventoryTransferActionResult> {
   return submit({
     action: "createTransfer",
@@ -65,15 +75,29 @@ export type InventoryTransferWithLineIds = Omit<InventoryTransfer, "lines"> & {
   lines: Array<InventoryTransfer["lines"][number] & { lineId?: string }>;
 };
 
-async function submit(payload: Record<string, unknown>, fallback: string): Promise<InventoryTransferActionResult> {
+async function submit(payload: InventoryTransferAction, fallback: string): Promise<InventoryTransferActionResult> {
+  const intentId = crypto.randomUUID();
+  const useGo = typeof __GO_INVENTORY_TRANSFER_WRITES__ !== "undefined" && __GO_INVENTORY_TRANSFER_WRITES__;
+  const { action, ...input } = payload;
+  const request = !useGo
+    ? { url: "/api/inventory", body: { ...payload, intentId } }
+    : {
+      url: "/api/capabilities/execute",
+      body: {
+        capabilityId: action === "createTransfer" ? "inventory.createTransfer" : "inventory.confirmTransfer",
+        input,
+        intentId,
+      },
+    };
+
   let response: Response;
   try {
-    response = await fetch("/api/inventory", {
+    response = await fetch(request.url, {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({ ...payload, intentId: crypto.randomUUID() }),
+      body: JSON.stringify(request.body),
       signal: AbortSignal.timeout(20_000),
     });
   } catch (error) {

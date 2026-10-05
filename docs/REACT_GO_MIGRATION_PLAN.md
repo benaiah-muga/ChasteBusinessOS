@@ -1543,3 +1543,11 @@ new owners and the manifest shows zero legacy runtime paths.
      payloads, approval reasons, and separate fresh intent IDs unchanged.
      Other POS actions and page ownership remain unchanged. Focused Vite API
      tests pass; browser proof remains open.
+158. Route Vite inventory transfer creation and confirmation through the Go
+     `inventory.createTransfer` and `inventory.confirmTransfer` capabilities
+     when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
+     `CHASTE_GO_INVENTORY_TRANSFER_WRITES=0` to restore both actions to
+     `/api/inventory`. Preserve transfer inputs, pending approval reasons, and
+     fresh intent IDs per action. Other inventory actions and page ownership
+     remain unchanged. Focused Vite API and capability proxy tests pass;
+     browser proof remains open.
