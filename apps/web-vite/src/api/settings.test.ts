@@ -105,7 +105,7 @@ describe("Vite settings API", () => {
   });
 
   it("accepts the Go module switchboard success envelope", async () => {
-    const fetchMock = vi.fn(async () => Response.json({
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => Response.json({
       ok: true,
       data: { enabledModules: ["iam", "crm", "routines", "signals"] },
     }));
