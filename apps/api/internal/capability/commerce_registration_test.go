@@ -82,3 +82,14 @@ func TestCommerceMoneyAmountUsesExactOrFailClosedValues(t *testing.T) {
 		t.Fatalf("POS sale amount = %v, known=%t, want 5000", amount, known)
 	}
 }
+
+func TestPOSCompleteSaleDeclaresReturnCompensation(t *testing.T) {
+	sale, ok := capabilitySpecs[posCompleteSaleCapabilityID]
+	if !ok || sale.inverseCapabilityID != posReturnSaleCapabilityID {
+		t.Fatalf("complete-sale inverse = %q, want %q", sale.inverseCapabilityID, posReturnSaleCapabilityID)
+	}
+	returnSale, ok := capabilitySpecs[posReturnSaleCapabilityID]
+	if !ok || returnSale.inverseCapabilityID != "" {
+		t.Fatalf("return-sale inverse = %q, want no mechanical inverse", returnSale.inverseCapabilityID)
+	}
+}
