@@ -33,6 +33,12 @@
     },
     {
       "kind": "page",
+      "path": "/widget/[token]",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
       "path": "/",
       "owner": "vite",
       "parity": "verified"
@@ -86,6 +92,13 @@
       "kind": "api",
       "path": "/api/sales/[orderId]",
       "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/public",
+      "method": "POST",
       "owner": "go",
       "parity": "verified"
     },

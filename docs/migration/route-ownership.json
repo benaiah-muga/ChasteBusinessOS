@@ -1206,8 +1206,8 @@
       "path": "/api/support/public",
       "method": "POST",
       "source": "apps/web/src/app/api/support/public/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1472,8 +1472,8 @@
       "kind": "page",
       "path": "/widget/[token]",
       "source": "apps/web/src/app/widget/[token]/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     }
   ]
 }

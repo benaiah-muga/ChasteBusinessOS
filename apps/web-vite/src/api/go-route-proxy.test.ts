@@ -540,5 +540,12 @@ describe("Vite Go route proxy selection", () => {
 
     const unsupportedSupportMethod = await fetch(`${origin}/api/support/public?widget=abc`, { method: "PATCH" });
     expect((await unsupportedSupportMethod.json()).target).toBe("legacy");
+
+    const supportSuffixFallback = await fetch(`${origin}/api/support/public/extra`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "start", token: "test-token" }),
+    });
+    expect((await supportSuffixFallback.json()).target).toBe("legacy");
   }, 15_000);
 });

@@ -352,7 +352,7 @@ export function App() {
   // authenticated shell.
   if (pathname === "/onboarding") return <OnboardingPage />;
   if (/^\/portal\/[^/]+$/.test(pathname)) return <PortalInvoicePage pathname={pathname} />;
-  if (pathname.startsWith("/widget/")) return <WidgetPage pathname={pathname} />;
+  if (/^\/widget\/[^/]+$/.test(pathname)) return <WidgetPage pathname={pathname} />;
   // The print sheet renders outside the shell: it is chrome-less on purpose so
   // the printed page carries only the invoice.
   if (/^\/print\/invoice\/[^/]+$/.test(pathname)) return <InvoicePrintPage pathname={pathname} />;

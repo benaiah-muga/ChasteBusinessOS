@@ -347,6 +347,42 @@ describe("Vite app frame", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/portal/invoice/"))).toBe(false);
   });
 
+  it("serves the standalone support widget in Vite without auth or cookie forwarding", async () => {
+    const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    window.history.replaceState(null, "", `/widget/${token}`);
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(screen.getByText("Chat with us")).not.toBeNull();
+    expect(authMocks.getSession).not.toHaveBeenCalled();
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Your email"), { target: { value: "visitor@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start chatting" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/support/public", expect.objectContaining({
+      method: "POST",
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ action: "start", token, email: "visitor@example.test" }),
+    })));
+  });
+
+  it.each([
+    "/widget/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/extra",
+    "/widget/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/",
+  ])("keeps non-exact widget path %s on the legacy fallback", (path) => {
+    window.history.replaceState(null, "", path);
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Opening this page in the current app." })).not.toBeNull();
+    expect(legacyMocks.redirectToLegacy).toHaveBeenCalledWith(path);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("serves an exact invoice print path in Vite with the active session", async () => {
     const orderId = "aaaaaaaa-0000-4000-8000-000000000001";
     window.history.replaceState(null, "", `/print/invoice/${orderId}`);
