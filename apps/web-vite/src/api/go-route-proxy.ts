@@ -57,6 +57,10 @@ export function goInventoryLocationReservationWritesFromEnv(env: Record<string, 
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_INVENTORY_LOCATION_RESERVATION_WRITES !== "0";
 }
 
+export function goInventoryBarcodeLookupFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_INVENTORY_BARCODE_LOOKUP === "1";
+}
+
 export function goPosCustomersSliceFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_POS_CUSTOMERS_SLICE !== "0";
 }

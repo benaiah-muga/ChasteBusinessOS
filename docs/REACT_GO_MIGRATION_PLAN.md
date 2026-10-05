@@ -1563,3 +1563,10 @@ new owners and the manifest shows zero legacy runtime paths.
      by trimming and uppercasing before Go validates their length. Other
      inventory actions and page ownership remain unchanged. Focused Vite and
      Go tests pass; browser proof remains open.
+160. Route Vite cycle-count barcode lookup through Go's session-authenticated
+     `inventory.lookupByBarcode` capability when
+     `CHASTE_GO_INVENTORY_BARCODE_LOOKUP=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the barcode selector to `0`
+     to use the legacy `/api/inventory` action; a missing Go capability route
+     falls back automatically. Preserve the `{ sku, name } | null` result and
+     existing error behavior. Other cycle-count actions remain unchanged.

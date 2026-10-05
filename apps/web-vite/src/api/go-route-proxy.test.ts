@@ -7,6 +7,7 @@ import {
   goPosCloseSessionSliceFromEnv,
   goInventoryTransferWritesFromEnv,
   goInventoryLocationReservationWritesFromEnv,
+  goInventoryBarcodeLookupFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -45,6 +46,14 @@ describe("inventory location and reservation Go selector", () => {
     expect(goInventoryLocationReservationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goInventoryLocationReservationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_INVENTORY_LOCATION_RESERVATION_WRITES: "0" })).toBe(false);
     expect(goInventoryLocationReservationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
+  });
+});
+
+describe("inventory barcode lookup Go selector", () => {
+  it("requires both the barcode selector and session capability route", () => {
+    expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_INVENTORY_BARCODE_LOOKUP: "1" })).toBe(true);
+    expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_INVENTORY_BARCODE_LOOKUP: "1" })).toBe(false);
   });
 });
 

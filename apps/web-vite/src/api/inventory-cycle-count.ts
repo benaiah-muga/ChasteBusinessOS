@@ -165,8 +165,16 @@ async function clearStableCycleCountIntent(input: InventoryCycleCountAction): Pr
 export async function lookupInventoryBarcode(
   barcode: string,
   signal?: AbortSignal,
+  useGoOverride?: boolean,
 ): Promise<{ sku: string; name: string } | null> {
-  const body = await postInventory("/api/inventory", { action: "lookupByBarcode", barcode }, signal);
+  const useGo = useGoOverride ?? (typeof __GO_INVENTORY_BARCODE_LOOKUP__ !== "undefined" && __GO_INVENTORY_BARCODE_LOOKUP__);
+  const request = useGo
+    ? { path: "/api/capabilities/execute", input: { capabilityId: "inventory.lookupByBarcode", input: { barcode } } }
+    : { path: "/api/inventory", input: { action: "lookupByBarcode", barcode } };
+  let body = await postInventory(request.path, request.input, signal);
+  if (useGo && body.response.status === 404) {
+    body = await postInventory("/api/inventory", { action: "lookupByBarcode", barcode }, signal);
+  }
   if (!body.response.ok || body.response.status !== 200) {
     throw new InventoryCycleCountApiError(body.response.status, errorMessage(body.data));
   }
