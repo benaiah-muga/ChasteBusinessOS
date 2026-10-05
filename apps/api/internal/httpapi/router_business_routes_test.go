@@ -95,6 +95,31 @@ func TestMountGoBusinessRoutesMountsAnalyticsGetOnlyWhenHandlerProvided(t *testi
 	}
 }
 
+func TestMountGoSalesOrdersRouteMatchesOnlyCollectionGet(t *testing.T) {
+	base := routeMarker("legacy")
+	handler := MountGoSalesOrdersRoute(base, routeMarker("go-orders"))
+	for _, test := range []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{method: http.MethodGet, path: "/api/sales", want: "go-orders"},
+		{method: http.MethodGet, path: "/api/sales?status=draft", want: "go-orders"},
+		{method: http.MethodHead, path: "/api/sales", want: "legacy"},
+		{method: http.MethodPost, path: "/api/sales", want: "legacy"},
+		{method: http.MethodGet, path: "/api/sales/extra", want: "legacy"},
+		{method: http.MethodGet, path: "/api/sales/", want: "legacy"},
+	} {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
+			if response.Code != http.StatusOK || response.Body.String() != test.want {
+				t.Fatalf("response=%d %q want 200 %q", response.Code, response.Body.String(), test.want)
+			}
+		})
+	}
+}
+
 func TestMountGoBusinessRoutesDispatchesTeamMethodsExactly(t *testing.T) {
 	legacy := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("legacy")) })
 	handler := MountGoBusinessRoutes(

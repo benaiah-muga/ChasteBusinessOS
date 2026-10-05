@@ -13,6 +13,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 - Public invoice links now load through the Vite portal page and Go token-scoped invoice read. The page omits browser credentials, suppresses referrers, and only admits the exact token path.
 - Invoice print pages now load in Vite through Go's verified-session and organization-scoped sales invoice read. Unsupported methods and non-exact route paths keep their legacy fallback.
+- Route the Vite Sales orders collection read through Go's verified-session `sales.listOrders` capability by default. The `{ orders }` response and known status filters match the legacy API; only exact GET `/api/sales` moves, while writes and unrelated paths remain on legacy.
 - The standalone support widget now loads in Vite and posts public start, poll, message, and escalation actions to Go. Configure `GO_SUPPORT_TRUSTED_PROXY_CIDRS` with the exact proxy peers in production so Go can safely rate-limit by visitor IP.
 - The `/sessions` page is now Vite-owned, with session trajectories, canonical replay, durable-run details, and context metrics read through Go's authenticated GET routes. Go returns oversized details with the same bounded error behavior as legacy.
 - The `/ledger` page is now Vite-owned and its session-authenticated `GET /api/ledger` read is Go-owned. Unsupported API methods and unknown paths keep their legacy fallback.

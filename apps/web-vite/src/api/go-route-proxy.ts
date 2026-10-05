@@ -13,6 +13,7 @@ export type GoRouteProxyFlags = {
   scimWrite: boolean;
   portalInvoice: boolean;
   salesInvoice: boolean;
+  salesOrders: boolean;
   modulesRead: boolean;
   modulesWrite: boolean;
   projects: boolean;
@@ -49,6 +50,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     scimWrite: env.CHASTE_GO_SCIM_WRITE_ROUTE === "1",
     portalInvoice: env.CHASTE_GO_PORTAL_INVOICE_ROUTE === "1",
     salesInvoice: env.CHASTE_GO_SALES_INVOICE_ROUTE === "1",
+    salesOrders: env.CHASTE_GO_SALES_ORDERS_ROUTE !== "0",
     modulesRead: env.CHASTE_GO_MODULES_ROUTE !== "0",
     modulesWrite: env.CHASTE_GO_MODULES_WRITE_ROUTE === "1",
     projects: env.CHASTE_GO_PROJECTS_ROUTE !== "0",
@@ -84,6 +86,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.scimWrite && method === "POST" && scimUserPath.test(path)) return true;
   if (flags.scimWrite && method === "DELETE" && scimUserItemPath.test(path)) return true;
   if (flags.portalInvoice && method === "GET" && /^\/api\/portal\/invoice\/[^/?]+(?:\?.*)?$/.test(path)) return true;
+  if (flags.salesOrders && method === "GET" && /^\/api\/sales(?:\?.*)?$/.test(path)) return true;
   if (flags.salesInvoice && method === "GET" && /^\/api\/sales\/[^/?]+(?:\?.*)?$/.test(path)) return true;
   if (flags.modulesRead && method === "GET" && /^\/api\/modules(?:\?.*)?$/.test(path)) return true;
   if (flags.modulesWrite && method === "POST" && /^\/api\/modules(?:\?.*)?$/.test(path)) return true;

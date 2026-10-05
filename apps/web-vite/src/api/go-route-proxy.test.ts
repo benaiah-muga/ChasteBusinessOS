@@ -57,6 +57,7 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_SCIM_WRITE_ROUTE", flag: "scimWrite", method: "POST", url: "/api/scim/v2/Users" },
   { env: "CHASTE_GO_SCIM_WRITE_ROUTE", flag: "scimWrite", method: "DELETE", url: "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001" },
   { env: "CHASTE_GO_PORTAL_INVOICE_ROUTE", flag: "portalInvoice", method: "GET", url: "/api/portal/invoice/token?view=1" },
+  { env: "CHASTE_GO_SALES_ORDERS_ROUTE", flag: "salesOrders", method: "GET", url: "/api/sales?status=draft" },
   { env: "CHASTE_GO_SALES_INVOICE_ROUTE", flag: "salesInvoice", method: "GET", url: "/api/sales/order-id" },
   { env: "CHASTE_GO_MODULES_ROUTE", flag: "modulesRead", method: "GET", url: "/api/modules" },
   { env: "CHASTE_GO_MODULES_WRITE_ROUTE", flag: "modulesWrite", method: "POST", url: "/api/modules" },
@@ -115,7 +116,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -293,6 +294,21 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(disabled, "GET", "/api/projects")).toBe(false);
     expect(isGoRouteRequest(disabled, "POST", "/api/projects")).toBe(false);
     expect(isGoRouteRequest(disabled, "GET", "/api/modules")).toBe(false);
+  });
+
+  it("routes only the sales order collection GET to Go by default", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(defaults.salesOrders).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales?status=draft")).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/sales")).toBe(false);
+    expect(isGoRouteRequest(defaults, "HEAD", "/api/sales")).toBe(false);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales/")).toBe(false);
+    expect(isGoRouteRequest(defaults, "GET", "/api/sales/extra/parts")).toBe(false);
+
+    const rolledBack = goRouteProxyFlagsFromEnv({ CHASTE_GO_SALES_ORDERS_ROUTE: "0" });
+    expect(isGoRouteRequest(rolledBack, "GET", "/api/sales")).toBe(false);
+    expect(isGoRouteRequest(rolledBack, "GET", "/api/sales/aaaaaaaa-0000-4000-8000-000000000001")).toBe(false);
   });
 
   it("keeps team read and write selectors independent and exact", () => {
@@ -565,6 +581,17 @@ describe("Vite Go route proxy selection", () => {
 
     const portalSuffixFallback = await fetch(`${origin}/api/portal/invoice/token/extra`);
     expect((await portalSuffixFallback.json()).target).toBe("legacy");
+
+    const salesOrders = await fetch(`${origin}/api/sales?status=draft`);
+    expect((await salesOrders.json())).toMatchObject({ target: "go", method: "GET", url: "/api/sales?status=draft" });
+
+    const salesOrdersUnsupportedMethod = await fetch(`${origin}/api/sales`, { method: "POST" });
+    expect((await salesOrdersUnsupportedMethod.json()).target).toBe("legacy");
+
+    for (const path of ["/api/sales/", "/api/sales/extra/parts"]) {
+      const fallback = await fetch(`${origin}${path}`);
+      expect((await fallback.json()).target).toBe("legacy");
+    }
 
     const salesInvoice = await fetch(`${origin}/api/sales/aaaaaaaa-0000-4000-8000-000000000001?print=1`);
     expect((await salesInvoice.json()).target).toBe("go");

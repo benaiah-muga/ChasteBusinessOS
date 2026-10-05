@@ -1472,3 +1472,11 @@ new owners and the manifest shows zero legacy runtime paths.
      still controlled separately. HEAD, unsupported methods, and suffix paths
      retain legacy fallback. Handler, selector, and full Go verification pass.
      Browser proof remains open.
+150. (Implemented; Go route ownership verified) Route only the Vite Sales
+     orders collection `GET /api/sales` through Go's verified-session
+     `sales.listOrders` capability by default. Preserve the legacy `{ orders }`
+     response and known status filters. The direct Go mount and Vite selector
+     dispatch only the exact collection GET; POST, HEAD, and suffix paths keep
+     their legacy fallback. Pair `GO_SALES_ORDERS_ROUTE` with
+     `CHASTE_GO_SALES_ORDERS_ROUTE` for rollback. Handler, router, and selector
+     tests pass; browser proof remains open.

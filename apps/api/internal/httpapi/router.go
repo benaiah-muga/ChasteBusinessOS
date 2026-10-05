@@ -180,6 +180,30 @@ func MountGoInventoryReadRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoSalesOrdersRoute sends only the orders collection GET to Go. The
+// invoice detail route and all other sales methods remain with the base owner.
+func MountGoSalesOrdersRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/sales", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			route.ServeHTTP(w, r)
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoBusinessRoutes mounts API handlers only when their Go route is opted in.
 // Unprovided handlers continue to fall through to the existing API owner.
 func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute http.Handler) http.Handler {
