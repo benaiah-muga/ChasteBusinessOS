@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
@@ -19,6 +21,12 @@ import (
 )
 
 const sessionCapabilityBodyLimit = 64 << 10
+
+const (
+	inventoryImportRateLimit      = 40
+	inventoryImportRateWindow     = time.Hour
+	inventoryImportRateMaxBuckets = 50_000
+)
 
 type DirectCapabilitySessionResolver interface {
 	Resolve(context.Context, string, string) (*session.ResolvedUser, error)
@@ -31,6 +39,64 @@ type SessionCapabilityHandler struct {
 	logger               *slog.Logger
 	trustedProxyCIDRs    []*net.IPNet
 	disabledCapabilities map[string]struct{}
+	inventoryImportLimit *inventoryImportRateLimiter
+}
+
+// The legacy import route also keeps its quota in process memory. This limiter
+// intentionally resets when this API process restarts and counts independently
+// on each replica.
+type inventoryImportRateLimiter struct {
+	mu      sync.Mutex
+	buckets map[string]inventoryImportRateWindowState
+	now     func() time.Time
+}
+
+type inventoryImportRateWindowState struct {
+	start time.Time
+	count int
+}
+
+func newInventoryImportRateLimiter(now func() time.Time) *inventoryImportRateLimiter {
+	if now == nil {
+		now = time.Now
+	}
+	return &inventoryImportRateLimiter{buckets: make(map[string]inventoryImportRateWindowState), now: now}
+}
+
+func (limiter *inventoryImportRateLimiter) allow(orgID string) (bool, time.Duration) {
+	if limiter == nil || orgID == "" {
+		return false, inventoryImportRateWindow
+	}
+	now := limiter.now()
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+
+	if len(limiter.buckets) > inventoryImportRateMaxBuckets {
+		for key, bucket := range limiter.buckets {
+			if !now.Before(bucket.start.Add(inventoryImportRateWindow)) {
+				delete(limiter.buckets, key)
+			}
+			if len(limiter.buckets) <= inventoryImportRateMaxBuckets/2 {
+				break
+			}
+		}
+	}
+
+	bucket, exists := limiter.buckets[orgID]
+	if !exists || !now.Before(bucket.start.Add(inventoryImportRateWindow)) {
+		limiter.buckets[orgID] = inventoryImportRateWindowState{start: now, count: 1}
+		return true, 0
+	}
+	if bucket.count >= inventoryImportRateLimit {
+		return false, bucket.start.Add(inventoryImportRateWindow).Sub(now)
+	}
+	bucket.count++
+	limiter.buckets[orgID] = bucket
+	return true, 0
+}
+
+func isInventoryImportCapability(capabilityID string) bool {
+	return capabilityID == "inventory.importItems" || capabilityID == "inventory.undoItemImport"
 }
 
 type sessionCapabilityInput struct {
@@ -51,7 +117,10 @@ func NewSessionCapabilityHandlerWithDisabledCapabilities(resolver DirectCapabili
 	if len(trustedProxyCIDRs) > 0 {
 		trusted = trustedProxyCIDRs[0]
 	}
-	return &SessionCapabilityHandler{resolver: resolver, executor: executor, logger: logger, trustedProxyCIDRs: trusted, disabledCapabilities: disabledCapabilities}
+	return &SessionCapabilityHandler{
+		resolver: resolver, executor: executor, logger: logger, trustedProxyCIDRs: trusted,
+		disabledCapabilities: disabledCapabilities, inventoryImportLimit: newInventoryImportRateLimiter(nil),
+	}
 }
 
 func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +162,33 @@ func (h *SessionCapabilityHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	if _, disabled := h.disabledCapabilities[body.CapabilityID]; disabled {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "capability is disabled on this Go route"})
 		return
+	}
+	if isInventoryImportCapability(body.CapabilityID) {
+		if !resolved.HasPermission("inventory.write") && !resolved.HasPermission("*") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+			return
+		}
+		var parseErr error
+		switch body.CapabilityID {
+		case "inventory.importItems":
+			_, parseErr = capability.ParseInventoryImportItemsInput(body.Input)
+		case "inventory.undoItemImport":
+			_, parseErr = capability.ParseInventoryUndoItemImportInput(body.Input)
+		}
+		if parseErr != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, capability.Result{OK: false, Error: parseErr.Error()})
+			return
+		}
+		allowed, retryAfter := h.inventoryImportLimit.allow(*resolved.OrgID)
+		if !allowed {
+			retryAfterSeconds := int64((retryAfter + time.Second - 1) / time.Second)
+			if retryAfterSeconds < 1 {
+				retryAfterSeconds = 1
+			}
+			w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "import limit reached; try again later"})
+			return
+		}
 	}
 	inputHash, err := capability.InputHash(body.Input)
 	if err != nil {

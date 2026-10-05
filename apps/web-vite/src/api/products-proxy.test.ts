@@ -53,7 +53,9 @@ describe("Products capability route proxy", () => {
     vi.stubEnv("CHASTE_GO_API_ORIGIN", goOrigin);
     vi.stubEnv("CHASTE_LEGACY_WEB_ORIGIN", legacyOrigin);
     vi.stubEnv("CHASTE_GO_SESSION_CAPABILITY_ROUTE", "1");
+    vi.stubEnv("CHASTE_GO_INVENTORY_IMPORT_SLICE", "1");
     const goProxy = await startViteProxy();
+    expect(goProxy.server.config.define?.__GO_INVENTORY_IMPORT_SLICE__).toBe("true");
     const goResponse = await fetch(`${goProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await goResponse.json()).toEqual({ target: "go", path: "/api/capabilities/execute" });
     await goProxy.server.close();
@@ -61,6 +63,7 @@ describe("Products capability route proxy", () => {
 
     vi.stubEnv("CHASTE_GO_SESSION_CAPABILITY_ROUTE", "0");
     const legacyProxy = await startViteProxy();
+    expect(legacyProxy.server.config.define?.__GO_INVENTORY_IMPORT_SLICE__).toBe("false");
     const legacyResponse = await fetch(`${legacyProxy.origin}/api/capabilities/execute`, { method: "POST" });
     expect(await legacyResponse.json()).toEqual({ target: "legacy", path: "/api/capabilities/execute" });
   });

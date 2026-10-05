@@ -479,7 +479,70 @@ func inventoryImportItems(ctx context.Context, tx pgx.Tx, claims authbridge.Capa
 		output.CreatedIDs = append(output.CreatedIDs, created...)
 	}
 	output.Imported = int64(len(output.CreatedIDs))
+	if output.Imported > 0 {
+		if err := inventoryMarkProductsImportComplete(ctx, tx, orgID); err != nil {
+			return InventoryImportItemsOutput{}, err
+		}
+	}
 	return output, nil
+}
+
+func inventoryMarkProductsImportComplete(ctx context.Context, tx pgx.Tx, orgID string) error {
+	var rawSettings []byte
+	if err := tx.QueryRow(ctx, `SELECT settings FROM organizations WHERE id=$1::uuid FOR UPDATE`, orgID).Scan(&rawSettings); err != nil {
+		return err
+	}
+	settings := map[string]json.RawMessage{}
+	if len(rawSettings) > 0 && !bytes.Equal(bytes.TrimSpace(rawSettings), []byte("null")) {
+		if err := json.Unmarshal(rawSettings, &settings); err != nil || settings == nil {
+			settings = map[string]json.RawMessage{}
+		}
+	}
+	onboarding := map[string]json.RawMessage{}
+	if raw := settings["onboarding"]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &onboarding)
+	}
+	if onboarding == nil {
+		onboarding = map[string]json.RawMessage{}
+	}
+	var path string
+	if raw := onboarding["path"]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &path)
+	}
+	if path != "import" && path != "connect" {
+		path = "fresh"
+	}
+	var startedAt string
+	if raw := onboarding["startedAt"]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &startedAt)
+	}
+	if startedAt == "" {
+		startedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	steps := map[string]json.RawMessage{}
+	if raw := onboarding["steps"]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &steps)
+	}
+	if steps == nil {
+		steps = map[string]json.RawMessage{}
+	}
+	steps["import_products"] = json.RawMessage(`"done"`)
+	encodedSteps, err := json.Marshal(steps)
+	if err != nil {
+		return err
+	}
+	onboarding["path"], _ = json.Marshal(path)
+	onboarding["startedAt"], _ = json.Marshal(startedAt)
+	onboarding["steps"] = encodedSteps
+	encodedOnboarding, err := json.Marshal(onboarding)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		UPDATE organizations
+		SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{onboarding}', $2::jsonb, true)
+		WHERE id = $1::uuid`, orgID, string(encodedOnboarding))
+	return err
 }
 
 func inventoryUndoItemImport(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input InventoryUndoItemImportInput, now time.Time) (InventoryUndoItemImportOutput, error) {

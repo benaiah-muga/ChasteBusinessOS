@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchProductDefaults, fetchProducts, fetchProductsEnabled, importProducts, productActionRequest, ProductsApiError, submitProductAction, undoProductImport, type ProductAction } from "./products";
+import { fetchProductDefaults, fetchProducts, fetchProductsEnabled, importProducts, productActionRequest, productImportRequest, productUndoImportRequest, ProductsApiError, submitProductAction, undoProductImport, type ProductAction } from "./products";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  sessionStorage.clear();
+});
 
 describe("products API", () => {
   it("validates and returns the catalog response", async () => {
@@ -74,6 +77,7 @@ describe("products API", () => {
 
   it("keeps inventory defaults and batch imports on their legacy routes", async () => {
     vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", false);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ module: "inventory", settings: { defaultUnitLabel: "box" } }))
       .mockResolvedValueOnce(Response.json({ inserted: 0, skippedDuplicates: 0, errors: [] }));
@@ -81,6 +85,81 @@ describe("products API", () => {
     await fetchProductDefaults();
     await importProducts([{ rowNumber: 2, name: "Tea", type: "goods", salePrice: "3.25", tags: [] }]);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/module-settings?module=inventory", "/api/import"]);
+  });
+
+  it("maps a Go product import contract while preserving row numbers, duplicate rows, and created IDs", async () => {
+    const createdID = "10000000-0000-4000-8000-000000000001";
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: {
+      createdIds: [createdID], imported: 1, skippedDuplicateRows: [5],
+    } }));
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(importProducts([{ rowNumber: 4, name: " Tea ", sku: " TEA-1 ", type: "goods", unit: " box ", salePrice: "3.25", barcode: "4000000000006", tags: [" Pantry "] }])).resolves.toEqual({
+      inserted: 1, skippedDuplicates: 1, skippedDuplicateRows: [5], errors: [], createdIds: [createdID],
+    });
+    const [path, options] = fetchMock.mock.calls[0]!;
+    expect(path).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(options?.body))).toMatchObject({
+      capabilityId: "inventory.importItems",
+      input: { rows: [{ rowNumber: 4, name: "Tea", sku: "TEA-1", kind: "goods", unitLabel: "box", salePriceMinor: 325, barcode: "4000000000006", tags: ["Pantry"] }] },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("reuses a product import intent and generated service SKU after a network failure", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("network lost"))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { createdIds: [], imported: 0, skippedDuplicateRows: [] } }));
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", fetchMock);
+    const rows = [{ rowNumber: 2, name: "Install", type: "service" as const, salePrice: "12.00", tags: [] }];
+
+    await expect(importProducts(rows)).rejects.toBeInstanceOf(ProductsApiError);
+    await importProducts(rows);
+    const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string; input: { rows: Array<{ sku: string }> } };
+    const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string; input: { rows: Array<{ sku: string }> } };
+    expect(second.intentId).toBe(first.intentId);
+    expect(second.input.rows[0]?.sku).toBe(first.input.rows[0]?.sku);
+  });
+
+  it("keeps Go import approval responses visible to the caller", async () => {
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true, reason: "Owner review", approvalId: "approval-123" }, { status: 202 })));
+    await expect(importProducts([{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods", salePrice: "3.25", tags: [] }]))
+      .rejects.toMatchObject({ status: 202, message: "Owner review" });
+  });
+
+  it("keeps Go import requests that exceed its body and tag limits on the legacy route", () => {
+    const id = "intent-12345678901234567890";
+    const tooManyTags = [{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods" as const, salePrice: "3.25", tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`) }];
+    expect(productImportRequest(tooManyTags, id, true).url).toBe("/api/import");
+    const oversized = [{ rowNumber: 2, name: "Tea", sku: "TEA-1", type: "goods" as const, salePrice: "3.25", tags: [], unit: "x".repeat(70_000) }];
+    expect(productImportRequest(oversized, id, true).url).toBe("/api/import");
+  });
+
+  it("uses the Go undo capability and maps archived counts and approval responses", async () => {
+    const ids = ["10000000-0000-4000-8000-000000000001", "10000000-0000-4000-8000-000000000002"];
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { archived: 1 } }));
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(undoProductImport(ids)).resolves.toEqual({ kind: "completed", undone: 1, remaining: 1 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      body: expect.stringContaining('"capabilityId":"inventory.undoItemImport"'),
+    }));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ input: { itemIds: ids }, intentId: expect.any(String) });
+  });
+
+  it("returns the Go undo approval reason without losing the pending state", async () => {
+    vi.stubGlobal("__GO_INVENTORY_IMPORT_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true, reason: "Owner review", approvalId: "approval-456" }, { status: 202 })));
+    await expect(undoProductImport(["10000000-0000-4000-8000-000000000001"]))
+      .resolves.toEqual({ kind: "pending", reason: "Owner review" });
+  });
+
+  it("keeps product undo batches beyond the legacy 5,000 ID cap on the legacy route", () => {
+    const ids = Array.from({ length: 5001 }, (_, index) => `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`);
+    expect(productUndoImportRequest(ids, "intent-12345678901234567890", true).url).toBe("/api/import");
   });
 
   it("rejects malformed successful payloads and invalid action inputs", async () => {

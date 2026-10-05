@@ -341,6 +341,10 @@ func TestInventoryImportsBatchLifecycle(t *testing.T) {
 	claims := inventoryTestClaims(fx)
 	foreignClaims := authbridge.CapabilityClaims{OrganizationID: fx.otherOrgID, ActorType: "human", ActorID: claims.ActorID}
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	if _, err := fx.owner.Exec(fx.ctx, `UPDATE organizations SET settings = $2::jsonb WHERE id = $1::uuid`, fx.orgID,
+		`{"kept":"value","onboarding":{"path":"import","startedAt":"2026-09-28T09:00:00.000Z","steps":{"profile":"done","import_products":"pending"}}}`); err != nil {
+		t.Fatal(err)
+	}
 
 	existing := inventoryInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (InventoryCreateItemOutput, error) {
 		return inventoryCreateItem(fx.ctx, tx, claims, InventoryCreateItemInput{
@@ -371,6 +375,78 @@ func TestInventoryImportsBatchLifecycle(t *testing.T) {
 	}
 	if fmt.Sprint(imported.SkippedDuplicateRows) != "[2 3 6]" {
 		t.Fatalf("skipped rows = %v, want [2 3 6]", imported.SkippedDuplicateRows)
+	}
+	var preserved, onboardingPath, startedAt, profileStep, importStep string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		SELECT settings->>'kept', settings->'onboarding'->>'path', settings->'onboarding'->>'startedAt',
+			settings->'onboarding'->'steps'->>'profile', settings->'onboarding'->'steps'->>'import_products'
+		FROM organizations WHERE id=$1::uuid`, fx.orgID).
+		Scan(&preserved, &onboardingPath, &startedAt, &profileStep, &importStep); err != nil {
+		t.Fatal(err)
+	}
+	if preserved != "value" || onboardingPath != "import" || startedAt != "2026-09-28T09:00:00.000Z" || profileStep != "done" || importStep != "done" {
+		t.Fatalf("onboarding after import = preserved %q, path %q, startedAt %q, profile %q, products %q", preserved, onboardingPath, startedAt, profileStep, importStep)
+	}
+	assertOnboardingCompletion := func(settingsJSON string) map[string]json.RawMessage {
+		t.Helper()
+		if _, err := fx.owner.Exec(fx.ctx, `UPDATE organizations SET settings = $2::jsonb WHERE id = $1::uuid`, fx.orgID, settingsJSON); err != nil {
+			t.Fatal(err)
+		}
+		inventoryInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (struct{}, error) {
+			return struct{}{}, inventoryMarkProductsImportComplete(fx.ctx, tx, fx.orgID)
+		})
+		var raw []byte
+		if err := fx.owner.QueryRow(fx.ctx, `SELECT settings FROM organizations WHERE id=$1::uuid`, fx.orgID).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var settings map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			t.Fatal(err)
+		}
+		return settings
+	}
+	malformedOnboarding := assertOnboardingCompletion(`{"kept":"outside","onboarding":null}`)
+	var malformedOnboardingValue map[string]json.RawMessage
+	if err := json.Unmarshal(malformedOnboarding["onboarding"], &malformedOnboardingValue); err != nil {
+		t.Fatal(err)
+	}
+	var malformedSteps map[string]json.RawMessage
+	if err := json.Unmarshal(malformedOnboardingValue["steps"], &malformedSteps); err != nil {
+		t.Fatal(err)
+	}
+	var keptOutside string
+	if err := json.Unmarshal(malformedOnboarding["kept"], &keptOutside); err != nil {
+		t.Fatal(err)
+	}
+	var malformedStep string
+	if keptOutside != "outside" || malformedOnboardingValue["path"] == nil || malformedOnboardingValue["startedAt"] == nil ||
+		json.Unmarshal(malformedSteps["import_products"], &malformedStep) != nil || malformedStep != "done" {
+		t.Fatalf("malformed onboarding repair = settings %s, onboarding %s, steps %s", malformedOnboarding["kept"], malformedOnboarding["onboarding"], malformedOnboardingValue["steps"])
+	}
+	existingOnboarding := assertOnboardingCompletion(`{"kept":"root","onboarding":{"path":"connect","startedAt":"preserve-this","custom":"keep-me","steps":"malformed"}}`)
+	var existingOnboardingValue map[string]json.RawMessage
+	if err := json.Unmarshal(existingOnboarding["onboarding"], &existingOnboardingValue); err != nil {
+		t.Fatal(err)
+	}
+	var custom, existingPath, existingStartedAt, existingProductStep string
+	if err := json.Unmarshal(existingOnboardingValue["custom"], &custom); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(existingOnboardingValue["path"], &existingPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(existingOnboardingValue["startedAt"], &existingStartedAt); err != nil {
+		t.Fatal(err)
+	}
+	var existingSteps map[string]json.RawMessage
+	if err := json.Unmarshal(existingOnboardingValue["steps"], &existingSteps); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(existingSteps["import_products"], &existingProductStep); err != nil {
+		t.Fatal(err)
+	}
+	if custom != "keep-me" || existingPath != "connect" || existingStartedAt != "preserve-this" || existingProductStep != "done" {
+		t.Fatalf("existing onboarding settings changed unexpectedly: %s", existingOnboarding["onboarding"])
 	}
 	sortedCreated := append([]string(nil), imported.CreatedIDs...)
 	sort.Strings(sortedCreated)

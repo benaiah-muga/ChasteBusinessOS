@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
@@ -99,6 +100,102 @@ func TestSessionCapabilityHandlerBuildsClaimsFromResolvedSession(t *testing.T) {
 	}
 	if response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("cache policy=%q", response.Header().Get("Cache-Control"))
+	}
+}
+
+func TestSessionCapabilityHandlerRateLimitsInventoryImportsPerOrganization(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	limiter := newInventoryImportRateLimiter(func() time.Time { return now })
+	identity := directTestIdentity()
+	identity.Permissions["inventory.write"] = true
+	executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+	handler := NewSessionCapabilityHandler(&fakeDirectSessionResolver{resolved: identity}, executor, nil).(*SessionCapabilityHandler)
+	handler.inventoryImportLimit = limiter
+
+	unauthorizedExecutor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+	unauthorizedHandler := NewSessionCapabilityHandler(&fakeDirectSessionResolver{resolved: directTestIdentity()}, unauthorizedExecutor, nil).(*SessionCapabilityHandler)
+	unauthorizedHandler.inventoryImportLimit = limiter
+	for _, capabilityID := range []string{"inventory.importItems", "inventory.undoItemImport"} {
+		input := `{"rows":[{"rowNumber":1,"sku":"RATE-1","name":"Rate test","salePriceMinor":100}]}`
+		if capabilityID == "inventory.undoItemImport" {
+			input = `{"itemIds":["10000000-0000-4000-8000-000000000001"]}`
+		}
+		response := httptest.NewRecorder()
+		unauthorizedHandler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"`+capabilityID+`","input":`+input+`,"intentId":"import-intent-123456789"}`))
+		if response.Code != http.StatusForbidden || strings.TrimSpace(response.Body.String()) != `{"error":"forbidden"}` || unauthorizedExecutor.calls != 0 {
+			t.Fatalf("unauthorized %s status=%d body=%s executor calls=%d, want forbidden without dispatch", capabilityID, response.Code, response.Body.String(), unauthorizedExecutor.calls)
+		}
+	}
+	for _, malformed := range []struct {
+		capabilityID string
+		input        string
+	}{
+		{capabilityID: "inventory.importItems", input: `{"rows":[]}`},
+		{capabilityID: "inventory.undoItemImport", input: `{"itemIds":[]}`},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"`+malformed.capabilityID+`","input":`+malformed.input+`,"intentId":"import-intent-123456789"}`))
+		if response.Code != http.StatusUnprocessableEntity || executor.calls != 0 {
+			t.Fatalf("malformed %s status=%d body=%s executor calls=%d, want parser rejection before quota dispatch", malformed.capabilityID, response.Code, response.Body.String(), executor.calls)
+		}
+	}
+	disabledExecutor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{}`)}}
+	disabledHandler := NewSessionCapabilityHandlerWithDisabledCapabilities(
+		&fakeDirectSessionResolver{resolved: identity}, disabledExecutor, nil,
+		map[string]struct{}{"inventory.importItems": {}},
+	).(*SessionCapabilityHandler)
+	disabledHandler.inventoryImportLimit = limiter
+	disabled := httptest.NewRecorder()
+	disabledHandler.ServeHTTP(disabled, directCapabilityRequest(http.MethodPost, `{"capabilityId":"inventory.importItems","input":{"rows":[{"rowNumber":1,"sku":"RATE-1","name":"Rate test","salePriceMinor":100}]},"intentId":"import-intent-123456789"}`))
+	if disabled.Code != http.StatusServiceUnavailable || disabledExecutor.calls != 0 {
+		t.Fatalf("disabled import status=%d body=%s executor calls=%d, want disabled before quota dispatch", disabled.Code, disabled.Body.String(), disabledExecutor.calls)
+	}
+
+	for i := 0; i < inventoryImportRateLimit; i++ {
+		capabilityID := "inventory.importItems"
+		input := `{"rows":[{"rowNumber":1,"sku":"RATE-1","name":"Rate test","salePriceMinor":100}]}`
+		if i%2 == 1 {
+			capabilityID = "inventory.undoItemImport"
+			input = `{"itemIds":["10000000-0000-4000-8000-000000000001"]}`
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, `{"capabilityId":"`+capabilityID+`","input":`+input+`,"intentId":"import-intent-123456789"}`))
+		if response.Code != http.StatusOK {
+			t.Fatalf("request %d status=%d body=%s, want allowed", i+1, response.Code, response.Body.String())
+		}
+	}
+
+	limited := httptest.NewRecorder()
+	handler.ServeHTTP(limited, directCapabilityRequest(http.MethodPost, `{"capabilityId":"inventory.importItems","input":{"rows":[{"rowNumber":1,"sku":"RATE-1","name":"Rate test","salePriceMinor":100}]},"intentId":"import-intent-123456789"}`))
+	if limited.Code != http.StatusTooManyRequests || limited.Header().Get("Retry-After") != "3600" || executor.calls != inventoryImportRateLimit {
+		t.Fatalf("status=%d Retry-After=%q executor calls=%d body=%s, want 429, 3600 seconds, and no extra dispatch", limited.Code, limited.Header().Get("Retry-After"), executor.calls, limited.Body.String())
+	}
+
+	unrelated := httptest.NewRecorder()
+	handler.ServeHTTP(unrelated, directCapabilityRequest(http.MethodPost, `{"capabilityId":"crm.listCustomers","input":{},"intentId":"import-intent-123456789"}`))
+	if unrelated.Code != http.StatusOK {
+		t.Fatalf("unrelated capability status=%d body=%s, want unaffected by import budget", unrelated.Code, unrelated.Body.String())
+	}
+
+	otherOrg := "44444444-4444-4444-8444-444444444444"
+	otherIdentity := *identity
+	otherIdentity.OrgID = &otherOrg
+	otherIdentity.Permissions = map[string]bool{"*": true}
+	otherHandler := NewSessionCapabilityHandler(&fakeDirectSessionResolver{resolved: &otherIdentity}, executor, nil).(*SessionCapabilityHandler)
+	otherHandler.inventoryImportLimit = limiter
+	otherResponse := httptest.NewRecorder()
+	otherRequest := directCapabilityRequest(http.MethodPost, `{"capabilityId":"inventory.importItems","input":{"rows":[{"rowNumber":1,"sku":"RATE-1","name":"Rate test","salePriceMinor":100}]},"intentId":"import-intent-123456789"}`)
+	otherRequest.Header.Set("Cookie", session.SessionCookieName+"=session-cookie; "+session.ActiveOrgCookieName+"="+otherOrg)
+	otherHandler.ServeHTTP(otherResponse, otherRequest)
+	if otherResponse.Code != http.StatusOK {
+		t.Fatalf("different organization status=%d body=%s, want independent budget", otherResponse.Code, otherResponse.Body.String())
+	}
+
+	now = now.Add(inventoryImportRateWindow)
+	reset := httptest.NewRecorder()
+	handler.ServeHTTP(reset, directCapabilityRequest(http.MethodPost, `{"capabilityId":"inventory.undoItemImport","input":{"itemIds":["10000000-0000-4000-8000-000000000001"]},"intentId":"import-intent-123456789"}`))
+	if reset.Code != http.StatusOK {
+		t.Fatalf("request after window reset status=%d body=%s, want allowed", reset.Code, reset.Body.String())
 	}
 }
 
