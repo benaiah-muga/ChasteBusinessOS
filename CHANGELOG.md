@@ -23,6 +23,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Session trajectory and durable-run detail reads now enforce matching response limits in the Go API and legacy API: 10,000 session events, 256 KiB per event, an 8 MiB session response, and 200 durable-run steps with a 2 MiB logical JSON response cap. Both APIs check visibility before revealing an oversized durable run.
 
 ### Changed
+- Enable the session-authenticated, capability-backed Go `GET /api/signals` feed by default. Unsupported methods and suffix paths continue through legacy.
 - Enable Go's session-authenticated `GET` and governed `POST /api/branding` by default in Vite and the Go API. Branding approval responses remain compatible with Settings.
 - Enable session-authenticated Go `GET` and governed `POST /api/modules` by default in Vite and the Go API. POST approval-pending and success envelopes remain compatible with Settings.
 - Mount Go auth routes by default to match the Vite proxy; set `GO_AUTH_ROUTE=0` only to keep auth on the legacy handler.

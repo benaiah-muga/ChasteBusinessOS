@@ -1166,8 +1166,8 @@
       "path": "/api/signals",
       "method": "GET",
       "source": "apps/web/src/app/api/signals/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
