@@ -115,7 +115,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "sessions", "durableRuns"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "teamRead", "teamWrite", "sessions", "durableRuns"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -281,13 +281,17 @@ describe("Vite Go route proxy selection", () => {
   });
 
   it("keeps team read and write selectors independent and exact", () => {
-    const readOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_TEAM_READ_ROUTE: "1" });
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(isGoRouteRequest(defaults, "GET", "/api/team")).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/team")).toBe(true);
+
+    const readOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_TEAM_READ_ROUTE: "1", CHASTE_GO_TEAM_WRITE_ROUTE: "0" });
     expect(isGoRouteRequest(readOnly, "GET", "/api/team")).toBe(true);
     expect(isGoRouteRequest(readOnly, "GET", "/api/team?view=members")).toBe(true);
     expect(isGoRouteRequest(readOnly, "POST", "/api/team")).toBe(false);
     expect(isGoRouteRequest(readOnly, "GET", "/api/team/invite")).toBe(false);
 
-    const writeOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_TEAM_WRITE_ROUTE: "1" });
+    const writeOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_TEAM_READ_ROUTE: "0", CHASTE_GO_TEAM_WRITE_ROUTE: "1" });
     expect(isGoRouteRequest(writeOnly, "POST", "/api/team")).toBe(true);
     expect(isGoRouteRequest(writeOnly, "GET", "/api/team")).toBe(false);
     expect(isGoRouteRequest(writeOnly, "PATCH", "/api/team")).toBe(false);

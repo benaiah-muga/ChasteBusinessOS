@@ -62,6 +62,31 @@ func TestGoMetricsRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) {
 	}
 }
 
+func TestGoTeamRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		enabled func(string) bool
+	}{
+		{name: "read", enabled: goTeamReadRouteEnabledFromEnv},
+		{name: "write", enabled: goTeamWriteRouteEnabledFromEnv},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, value := range []struct {
+				value string
+				want  bool
+			}{
+				{value: "", want: true},
+				{value: "1", want: true},
+				{value: "0", want: false},
+			} {
+				if got := test.enabled(value.value); got != value.want {
+					t.Errorf("routeEnabled(%q) = %t, want %t", value.value, got, value.want)
+				}
+			}
+		})
+	}
+}
+
 func TestGoSessionsRouteEnabledFromEnvDefaultsOnAndAllowsRollback(t *testing.T) {
 	for _, test := range []struct {
 		value string

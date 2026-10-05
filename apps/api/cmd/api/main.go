@@ -47,6 +47,14 @@ func goMetricsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goTeamReadRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
+func goTeamWriteRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goSessionsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -193,7 +201,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go routines route mounted", "paths", []string{"GET /api/routines", "POST /api/routines"})
 	}
 	var teamReadRoute http.Handler
-	if os.Getenv("GO_TEAM_READ_ROUTE") == "1" {
+	if goTeamReadRouteEnabledFromEnv(os.Getenv("GO_TEAM_READ_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -202,7 +210,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go team read route mounted", "path", "/api/team")
 	}
 	var teamWriteRoute http.Handler
-	if os.Getenv("GO_TEAM_WRITE_ROUTE") == "1" {
+	if goTeamWriteRouteEnabledFromEnv(os.Getenv("GO_TEAM_WRITE_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

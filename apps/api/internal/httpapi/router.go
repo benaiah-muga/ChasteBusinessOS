@@ -206,11 +206,26 @@ func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportC
 		mux.Handle("GET /api/projects", projectsRoute)
 		mux.Handle("POST /api/projects", projectsRoute)
 	}
-	if teamReadRoute != nil {
-		mux.Handle("GET /api/team", teamReadRoute)
-	}
-	if teamWriteRoute != nil {
-		mux.Handle("POST /api/team", teamWriteRoute)
+	if teamReadRoute != nil || teamWriteRoute != nil {
+		mux.HandleFunc("/api/team", func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				if teamReadRoute != nil {
+					teamReadRoute.ServeHTTP(w, r)
+					return
+				}
+			case http.MethodPost:
+				if teamWriteRoute != nil {
+					teamWriteRoute.ServeHTTP(w, r)
+					return
+				}
+			}
+			if base != nil {
+				base.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+		})
 	}
 	if brandingRoute != nil {
 		mux.Handle("GET /api/branding", brandingRoute)

@@ -1457,3 +1457,10 @@ new owners and the manifest shows zero legacy runtime paths.
      Vite flag is enabled by default and remains paired with the Go session
      capability route. Focused Vite API and Messages page tests plus Go
      capability tests pass; authenticated browser proof remains open.
+148. (Implemented; Go route ownership verified) Enable the Vite `/team` page's
+     session-authenticated `GET` and governed `POST /api/team` routes by
+     default in both runtimes. Roll back either method independently by
+     setting its Go and Vite selector flags to `0`. Direct Go routing dispatches
+     only exact GET and POST requests; HEAD, unsupported methods, and suffix
+     paths retain legacy fallback. Handler and selector tests pass. Browser
+     proof remains open.
