@@ -9,6 +9,7 @@ const PendingEnvelope = z.object({
   ok: z.literal(false),
   pendingApproval: z.literal(true),
   reason: z.string().min(1),
+  approvalId: z.string().uuid().optional(),
 }).strict();
 
 const ErrorEnvelope = z.object({ ok: z.literal(false), error: z.string().min(1) }).strict();
@@ -30,8 +31,30 @@ export class InventoryLocationActionError extends Error {
   }
 }
 
-export async function createInventoryLocation(input: { code: string; name: string }): Promise<InventoryLocationActionResult> {
-  const result = await postAction({ action: "createLocation", code: input.code, name: input.name }, LocationCreated);
+type InventoryLocationAction =
+  | { action: "createLocation"; code: string; name: string }
+  | { action: "reserveStock"; sku: string; quantityThousandths: number; reason: string }
+  | { action: "releaseReservation"; reservationId: string };
+
+export interface InventoryLocationRetryScope {
+  actorId: string;
+  organizationId: string;
+}
+
+const capabilityByAction = {
+  createLocation: "inventory.createLocation",
+  reserveStock: "inventory.reserveStock",
+  releaseReservation: "inventory.releaseReservation",
+} as const;
+
+const retryIntentPrefix = "chaste.inventory-location-reservation.intent.v1:";
+const retryIntents = new Map<string, string>();
+
+export async function createInventoryLocation(
+  input: { code: string; name: string },
+  retryScope?: InventoryLocationRetryScope,
+): Promise<InventoryLocationActionResult> {
+  const result = await postAction({ action: "createLocation", code: input.code, name: input.name }, LocationCreated, retryScope);
   return result;
 }
 
@@ -39,31 +62,43 @@ export async function reserveInventoryStock(input: {
   sku: string;
   quantityThousandths: number;
   reason: string;
-}): Promise<InventoryLocationActionResult> {
+}, retryScope?: InventoryLocationRetryScope): Promise<InventoryLocationActionResult> {
   return postAction({
     action: "reserveStock",
     sku: input.sku,
     quantityThousandths: input.quantityThousandths,
     reason: input.reason,
-  }, ReservationCreated);
+  }, ReservationCreated, retryScope);
 }
 
-export async function releaseInventoryReservation(input: { reservationId: string }): Promise<InventoryLocationActionResult> {
-  return postAction({ action: "releaseReservation", reservationId: input.reservationId }, ReservationReleased);
+export async function releaseInventoryReservation(
+  input: { reservationId: string },
+  retryScope?: InventoryLocationRetryScope,
+): Promise<InventoryLocationActionResult> {
+  return postAction({ action: "releaseReservation", reservationId: input.reservationId }, ReservationReleased, retryScope);
 }
 
 async function postAction<T extends z.ZodType>(
-  input: Record<string, unknown>,
+  input: InventoryLocationAction,
   successSchema: T,
+  retryScope?: InventoryLocationRetryScope,
 ): Promise<InventoryLocationActionResult> {
+  const goEnabled = typeof __GO_INVENTORY_LOCATION_RESERVATION_WRITES__ !== "undefined"
+    && __GO_INVENTORY_LOCATION_RESERVATION_WRITES__;
+  const intentId = goEnabled ? await stableIntentId(input, retryScope) : crypto.randomUUID();
+  const { action, ...capabilityInput } = input;
+  const url = goEnabled ? "/api/capabilities/execute" : "/api/inventory";
+  const requestBody = goEnabled
+    ? { capabilityId: capabilityByAction[action], input: capabilityInput, intentId }
+    : { ...input, intentId };
   let response: Response;
   try {
-    response = await fetch("/api/inventory", {
+    response = await fetch(url, {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({ ...input, intentId: crypto.randomUUID() }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(20_000),
     });
   } catch (error) {
@@ -88,11 +123,13 @@ async function postAction<T extends z.ZodType>(
   if (response.ok) {
     const parsed = successSchema.safeParse(body);
     if (!parsed.success || response.status !== 200) throw unexpectedResponse(response.status);
+    if (goEnabled) await clearStableIntent(input, intentId, retryScope);
     return { kind: "completed" };
   }
 
   const error = ErrorEnvelope.safeParse(body);
   if (error.success && [400, 401, 403, 422].includes(response.status)) {
+    if (goEnabled) await clearStableIntent(input, intentId, retryScope);
     const message = response.status === 401
       ? "Your session has ended. Sign in again to continue."
       : response.status === 403
@@ -101,6 +138,72 @@ async function postAction<T extends z.ZodType>(
     throw new InventoryLocationActionError(response.status, message);
   }
   throw unexpectedResponse(response.status);
+}
+
+async function stableIntentId(input: InventoryLocationAction, scope?: InventoryLocationRetryScope): Promise<string> {
+  const { memoryKey, storageKey } = await retryIntentKeys(input, scope);
+  if (storageKey) {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (stored && isIntentId(stored)) {
+        retryIntents.set(memoryKey, stored);
+        return stored;
+      }
+    } catch {
+      // Keep using the in-memory retry identity when browser storage is unavailable.
+    }
+  }
+  const intentId = retryIntents.get(memoryKey) ?? crypto.randomUUID();
+  retryIntents.set(memoryKey, intentId);
+  if (storageKey) {
+    try {
+      localStorage.setItem(storageKey, intentId);
+    } catch {
+      // The in-memory copy protects retries in this page when storage is unavailable.
+    }
+  }
+  return intentId;
+}
+
+async function clearStableIntent(
+  input: InventoryLocationAction,
+  intentId: string,
+  scope?: InventoryLocationRetryScope,
+): Promise<void> {
+  const { memoryKey, storageKey } = await retryIntentKeys(input, scope);
+  if (retryIntents.get(memoryKey) === intentId) retryIntents.delete(memoryKey);
+  if (storageKey) {
+    try {
+      if (localStorage.getItem(storageKey) === intentId) localStorage.removeItem(storageKey);
+    } catch {
+      // A completed attempt no longer needs its saved identity in this page.
+    }
+  }
+}
+
+async function retryIntentKeys(
+  input: InventoryLocationAction,
+  scope?: InventoryLocationRetryScope,
+): Promise<{ memoryKey: string; storageKey: string | null }> {
+  const scoped = Boolean(scope?.actorId.trim() && scope.organizationId.trim());
+  const serialized = JSON.stringify({
+    input,
+    ...(scoped ? { actorId: scope!.actorId, organizationId: scope!.organizationId } : {}),
+  });
+  const memoryKey = `${retryIntentPrefix}${serialized}`;
+  if (!scoped) return { memoryKey, storageKey: null };
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(serialized));
+    const hash = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+    return { memoryKey, storageKey: `${retryIntentPrefix}${hash}` };
+  } catch {
+    // Without WebCrypto, retry identity remains in memory and no scoped value is persisted.
+  }
+  return { memoryKey, storageKey: null };
+}
+
+function isIntentId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function unexpectedResponse(status: number): InventoryLocationActionError {

@@ -480,8 +480,12 @@ func ParseInventoryCreateLocationInput(raw json.RawMessage) (InventoryCreateLoca
 		return InventoryCreateLocationInput{}, err
 	}
 	var input InventoryCreateLocationInput
-	if input.Code, err = requiredCRMDealString(fields, "code", 1, 20); err != nil {
+	if input.Code, err = requiredCRMDealString(fields, "code", 0, 0); err != nil {
 		return InventoryCreateLocationInput{}, err
+	}
+	input.Code = strings.ToUpper(strings.TrimSpace(input.Code))
+	if utf16Length(input.Code) < 1 || utf16Length(input.Code) > 20 {
+		return InventoryCreateLocationInput{}, errors.New("code must contain between 1 and 20 characters after trimming and normalization")
 	}
 	if input.Name, err = requiredCRMDealString(fields, "name", 1, 80); err != nil {
 		return InventoryCreateLocationInput{}, err

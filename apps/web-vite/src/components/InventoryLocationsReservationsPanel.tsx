@@ -3,6 +3,7 @@ import type { InventoryItem, InventoryLocation } from "../api/inventory";
 import {
   createInventoryLocation,
   InventoryLocationActionError,
+  type InventoryLocationRetryScope,
   releaseInventoryReservation,
   reserveInventoryStock,
 } from "../api/inventory-locations-reservations";
@@ -22,6 +23,7 @@ interface InventoryLocationsReservationsPanelProps {
   locations: InventoryLocation[];
   reservations: InventoryReservation[];
   onChanged: () => Promise<void>;
+  retryScope?: InventoryLocationRetryScope;
 }
 
 type Notice = { tone: "success" | "pending" | "error"; message: string };
@@ -31,6 +33,7 @@ export function InventoryLocationsReservationsPanel({
   locations,
   reservations,
   onChanged,
+  retryScope,
 }: InventoryLocationsReservationsPanelProps) {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
@@ -79,7 +82,7 @@ export function InventoryLocationsReservationsPanel({
     const normalizedCode = code.trim().toUpperCase();
     const normalizedName = name.trim();
     if (!normalizedCode || !normalizedName || normalizedCode.length > 20 || normalizedName.length > 80) return;
-    const created = await runAction(() => createInventoryLocation({ code: normalizedCode, name: normalizedName }), "Stock location created.");
+    const created = await runAction(() => createInventoryLocation({ code: normalizedCode, name: normalizedName }, retryScope), "Stock location created.");
     if (created) {
       setCode("");
       setName("");
@@ -91,7 +94,7 @@ export function InventoryLocationsReservationsPanel({
     const amount = parseThousandths(quantity);
     const normalizedReason = reason.trim();
     if (!sku || amount === null || !normalizedReason || normalizedReason.length < 3 || normalizedReason.length > 200) return;
-    const reserved = await runAction(() => reserveInventoryStock({ sku, quantityThousandths: amount, reason: normalizedReason }), "Stock reserved.");
+    const reserved = await runAction(() => reserveInventoryStock({ sku, quantityThousandths: amount, reason: normalizedReason }, retryScope), "Stock reserved.");
     if (reserved) {
       setSku("");
       setQuantity("");
@@ -101,7 +104,7 @@ export function InventoryLocationsReservationsPanel({
 
   async function releaseReservation(reservation: InventoryReservation) {
     await runAction(
-      () => releaseInventoryReservation({ reservationId: reservation.id }),
+      () => releaseInventoryReservation({ reservationId: reservation.id }, retryScope),
       `Reservation for ${reservation.sku} released.`,
     );
   }

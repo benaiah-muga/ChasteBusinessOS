@@ -274,7 +274,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                               : posSummaryPage
                                 ? <PosShiftSummaryPage key={organizationRevision} baseCurrency={baseCurrency} />
                                 : inventoryPage
-                                  ? <InventoryPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                  ? <InventoryPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                   : accountingInvoicesPage
                                     ? <AccountingInvoicesPage key={organizationRevision} />
                                       : accountingClosePage

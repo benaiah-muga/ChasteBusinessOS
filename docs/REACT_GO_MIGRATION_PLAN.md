@@ -1551,3 +1551,15 @@ new owners and the manifest shows zero legacy runtime paths.
      fresh intent IDs per action. Other inventory actions and page ownership
      remain unchanged. Focused Vite API and capability proxy tests pass;
      browser proof remains open.
+159. Route Vite stock location creation and reservation/release through Go's
+     `inventory.createLocation`, `inventory.reserveStock`, and
+     `inventory.releaseReservation` capabilities when
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
+     `CHASTE_GO_INVENTORY_LOCATION_RESERVATION_WRITES=0` to restore these
+     actions to `/api/inventory`. Preserve the response and pending envelope,
+     scope persisted retry intents to the active actor and organization, retain
+     an intent after approval-pending responses, and use in-memory retry
+     identity when scope or WebCrypto is unavailable. Normalize location codes
+     by trimming and uppercasing before Go validates their length. Other
+     inventory actions and page ownership remain unchanged. Focused Vite and
+     Go tests pass; browser proof remains open.

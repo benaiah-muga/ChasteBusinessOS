@@ -59,7 +59,11 @@ function formatLotExpiry(expiresAt: string | null): string {
   return Number.isNaN(timestamp) ? "Expiry date unavailable" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(timestamp);
 }
 
-export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
+export function InventoryPage({
+  baseCurrency = null,
+  actorId = null,
+  organizationId = null,
+}: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ItemFilter>("all");
@@ -67,6 +71,8 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
   const reportRequestId = useRef(0);
   const mountedRef = useRef(false);
   const currency = useMemo(() => displayCurrency(baseCurrency), [baseCurrency]);
+  const locationReservationGoWritesEnabled = typeof __GO_INVENTORY_LOCATION_RESERVATION_WRITES__ !== "undefined"
+    && __GO_INVENTORY_LOCATION_RESERVATION_WRITES__;
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const requestId = ++reportRequestId.current;
@@ -214,7 +220,9 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
         </>
       )}
       {state.status === "ready" && <InventoryItemActions items={state.items} currency={currency} onChanged={refresh} />}
-      {state.status === "ready" && <InventoryLocationsReservationsPanel items={state.items} locations={state.locations} reservations={state.reservations} onChanged={refresh} />}
+      {state.status === "ready" && locationReservationGoWritesEnabled && (!actorId || !organizationId)
+        ? <p className="inventory-empty" role="status">Loading the active workspace before location and reservation actions are available.</p>
+        : state.status === "ready" && <InventoryLocationsReservationsPanel items={state.items} locations={state.locations} reservations={state.reservations} onChanged={refresh} retryScope={actorId && organizationId ? { actorId, organizationId } : undefined} />}
       {state.status === "ready" && <InventoryCycleCountPanel items={state.items} locations={state.locations} counts={state.cycleCounts} onChanged={refresh} />}
       {state.status === "ready" && <InventoryTransfersPanel items={state.items} locations={state.locations} transfers={state.transfers} onChanged={refresh} />}
       {state.status === "ready" && <InventoryStockHistoryPanel items={state.items} currency={baseCurrency ?? currency} />}

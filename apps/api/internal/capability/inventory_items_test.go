@@ -73,7 +73,7 @@ func TestInventoryItemsParsersMirrorZodContracts(t *testing.T) {
 		{
 			name:     "createLocation",
 			parse:    func(raw json.RawMessage) (any, error) { return ParseInventoryCreateLocationInput(raw) },
-			raw:      `{"code":"WH-A","name":"Main warehouse","unknown":4}`,
+			raw:      `{"code":"                  wh-a          ","name":"Main warehouse","unknown":4}`,
 			wantJSON: `{"code":"WH-A","name":"Main warehouse"}`,
 			output:   InventoryCreateLocationOutput{LocationID: "11111111-1111-4111-8111-111111111111"},
 			outputJS: `{"locationId":"11111111-1111-4111-8111-111111111111"}`,
@@ -240,6 +240,7 @@ func TestInventoryItemsParsersMirrorZodContracts(t *testing.T) {
 		`{}`,
 		`{"code":null,"name":"x"}`,
 		`{"code":"","name":"x"}`,
+		`{"code":"   ","name":"x"}`,
 		`{"code":"` + longCode + `","name":"x"}`,
 		`{"code":"A"}`,
 		`{"code":"A","name":null}`,

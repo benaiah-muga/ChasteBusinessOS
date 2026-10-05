@@ -45,6 +45,16 @@ afterEach(() => {
 });
 
 describe("Vite inventory page", () => {
+  it("waits for actor and organization scope before showing Go location and reservation writes", async () => {
+    vi.stubGlobal("__GO_INVENTORY_LOCATION_RESERVATION_WRITES__", true);
+    vi.stubGlobal("fetch", inventoryFetch());
+    render(<InventoryPage />);
+
+    expect(await screen.findByText("Loading the active workspace before location and reservation actions are available.")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Create location" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reserve stock" })).toBeNull();
+  });
+
   it("shows stock availability and reorder filters with item search", async () => {
     const fetchMock = inventoryFetch();
     vi.stubGlobal("fetch", fetchMock);
