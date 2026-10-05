@@ -1356,14 +1356,14 @@ new owners and the manifest shows zero legacy runtime paths.
      selected routes, body/cookie/query forwarding, response streaming, and
      fallback behavior. Every selector remains paired and default-off. Runtime
      proofs and route-owner changes remain separate gates.
-139. (Implemented; route ownership remains legacy) Add Go parity for the
+139. (Implemented; Go owns the route by default) Add Go parity for the
      Dashboard work queue read on `GET /api/my-work`. The verified Go session
      determines the active user and organization; work queue reads use
      `dbx.WithOrgTx`, capability permissions filter approvals, and unsupported
-     capability IDs are hidden even for wildcard users. The API mounts only
-     behind `GO_MY_WORK_ROUTE=1`, with a paired default-off Vite selector and
-     focused handler, reader, and proxy tests. Database-backed and browser
-     behavior proofs remain cutover gates.
+     capability IDs are hidden even for wildcard users. The Go API and paired
+     Vite selector enable this exact GET route by default, with `=0` opt-outs;
+     other methods and paths retain legacy fallback. Focused handler, reader,
+     and proxy tests cover the behavior and organization scope.
 140. (Implemented; Go API ownership verified) Add Go report generation
      on `POST /api/analytics` alongside the existing discovery and preview
      handler. Each selected dataset and report rendering runs through the
@@ -1441,3 +1441,14 @@ new owners and the manifest shows zero legacy runtime paths.
      `GO_NOTIFICATIONS_WRITE_ROUTE=1`, paired with its Vite selector. Handler,
      selector, component, and database coverage are in place. Browser proof
      remains open.
+147. (Implemented; Vite sends use Go by default) Promote eligible conversation
+     sends through the existing session-authenticated `/api/capabilities/execute`
+     route to `messaging.sendMessage`. Go rechecks conversation membership and
+     attachment ownership under organization RLS, records mentions in the same
+     transaction, and returns the message ID used by the declared
+     `messaging.deleteMessage` inverse. Stable retry intents and pending
+     approvals remain supported. Agent-enabled conversations and @agent
+     messages stay on legacy until Go workmate replies are supported. The
+     Vite flag is enabled by default and remains paired with the Go session
+     capability route. Focused Vite API and Messages page tests plus Go
+     capability tests pass; authenticated browser proof remains open.
