@@ -75,6 +75,10 @@ func goDurableRunsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goPosReadRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("GO_DATABASE_URL")
 	if databaseURL == "" {
@@ -265,6 +269,15 @@ func run(logger *slog.Logger) error {
 		}
 		inventoryReadRoute = httpapi.NewInventoryReadSessionHandler(resolver, capabilityExecutor, logger)
 		logger.Info("Go inventory read route mounted", "path", "GET /api/inventory")
+	}
+	var posReadRoute http.Handler
+	if goPosReadRouteEnabledFromEnv(os.Getenv("GO_POS_READ_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		posReadRoute = httpapi.NewPosReadSessionHandler(pool, resolver, logger)
+		logger.Info("Go POS read route mounted", "path", "GET /api/pos")
 	}
 	var dashboardRoute http.Handler
 	if os.Getenv("GO_DASHBOARD_ROUTE") == "1" {
@@ -481,7 +494,7 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr: addr,
-		Handler: httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
+		Handler: httpapi.MountGoPOSReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
 			pool,
 			logger,
 			os.Getenv("GO_INTERNAL_AUTH_SECRET"),
@@ -494,7 +507,7 @@ func run(logger *slog.Logger) error {
 			orgRoute,
 			authRoute,
 			approvalDecider,
-		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute),
+		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), posReadRoute),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

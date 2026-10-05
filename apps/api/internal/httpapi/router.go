@@ -180,6 +180,30 @@ func MountGoInventoryReadRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoPOSReadRoute mounts only the POS collection GET. Actions remain with
+// the existing owner until their write routes pass their own migration gate.
+func MountGoPOSReadRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/pos", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			route.ServeHTTP(w, r)
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoSalesOrdersRoute sends only the orders collection GET to Go. The
 // invoice detail route and all other sales methods remain with the base owner.
 func MountGoSalesOrdersRoute(base, route http.Handler) http.Handler {

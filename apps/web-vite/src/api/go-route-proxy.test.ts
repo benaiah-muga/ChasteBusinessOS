@@ -86,6 +86,7 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_DURABLE_RUNS_ROUTE", flag: "durableRuns", method: "GET", url: "/api/durable-runs/aaaaaaaa-0000-4000-8000-000000000001?include=steps" },
   { env: "CHASTE_GO_NOTIFICATIONS_ROUTE", flag: "notifications", method: "GET", url: "/api/notifications?limit=10&cursor=next" },
   { env: "CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE", flag: "notificationsWrite", method: "POST", url: "/api/notifications" },
+  { env: "CHASTE_GO_POS_READ_ROUTE", flag: "posRead", method: "GET", url: "/api/pos?status=open" },
 ];
 
 const supportedGoAuthRoutes: Array<{ method: string; url: string }> = [
@@ -117,7 +118,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "posRead"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -264,6 +265,29 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "HEAD", "/api/inventory")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/inventory/history")).toBe(false);
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "GET", "/api/inventory")).toBe(false);
+  });
+
+  it("routes only exact GET /api/pos requests when the POS read selector is enabled", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_READ_ROUTE: "1" });
+    expect(isGoRouteRequest(flags, "GET", "/api/pos")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/pos?status=open")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/pos")).toBe(false);
+    expect(isGoRouteRequest(flags, "PUT", "/api/pos")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/pos/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/pos/")).toBe(false);
+
+    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_READ_ROUTE: "0" });
+    expect(isGoRouteRequest(disabled, "GET", "/api/pos")).toBe(false);
+  });
+
+  it("routes POS reads by default and allows explicit rollback", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(defaults.posRead).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/pos")).toBe(true);
+
+    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_READ_ROUTE: "0" });
+    expect(disabled.posRead).toBe(false);
+    expect(isGoRouteRequest(disabled, "GET", "/api/pos")).toBe(false);
   });
 
   it("keeps SCIM read and write selectors independent", () => {
@@ -421,6 +445,7 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_DURABLE_RUNS_ROUTE: "1",
       CHASTE_GO_NOTIFICATIONS_ROUTE: "1",
       CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE: "1",
+      CHASTE_GO_POS_READ_ROUTE: "1",
     });
     const vite: ViteDevServer = await createViteServer({
       configFile: false,
@@ -618,6 +643,15 @@ describe("Vite Go route proxy selection", () => {
 
     const salesInvoiceUnsupportedMethod = await fetch(`${origin}/api/sales/aaaaaaaa-0000-4000-8000-000000000001`, { method: "POST" });
     expect((await salesInvoiceUnsupportedMethod.json()).target).toBe("legacy");
+
+    const posRead = await fetch(`${origin}/api/pos?status=open`, { headers: { cookie: "auth-session=browser" } });
+    expect((await posRead.json())).toMatchObject({ target: "go", method: "GET", url: "/api/pos?status=open", cookie: "auth-session=browser" });
+
+    const posUnsupportedMethod = await fetch(`${origin}/api/pos`, { method: "POST" });
+    expect((await posUnsupportedMethod.json())).toMatchObject({ target: "legacy", method: "POST" });
+
+    const posSuffixFallback = await fetch(`${origin}/api/pos/extra`);
+    expect((await posSuffixFallback.json())).toMatchObject({ target: "legacy", method: "GET" });
 
     const modulesRead = await fetch(`${origin}/api/modules`);
     expect((await modulesRead.json()).target).toBe("go");

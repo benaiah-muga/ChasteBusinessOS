@@ -1490,3 +1490,13 @@ new owners and the manifest shows zero legacy runtime paths.
      selector to `0` for rollback. Focused proxy tests pass; the existing Go
      handler tests use a fake store, so runtime-role database upsert proof is
      not part of this route-only tranche. Browser proof remains open.
+152. (Implemented; verified) Route only the Vite POS collection
+     `GET /api/pos` through Go's verified-session, organization-scoped reader
+     and preserve the legacy `{ sessions, sales }` response.
+     `GO_POS_READ_ROUTE` and `CHASTE_GO_POS_READ_ROUTE` default on. Set
+     `CHASTE_GO_POS_READ_ROUTE=0` to send Vite traffic to legacy; also set
+     `GO_POS_READ_ROUTE=0` to unmount the Go endpoint. Unsupported methods
+     and suffix paths remain on legacy. Focused handler, router, and selector
+     tests plus runtime database integration pass. The `/pos` page remains
+     legacy-owned; this milestone moved the Vite API read only. Browser proof
+     remains open.
