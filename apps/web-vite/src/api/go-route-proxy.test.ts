@@ -240,6 +240,14 @@ describe("Vite Go route proxy selection", () => {
     }
   });
 
+  it("keeps the metrics selector GET-only and exact", () => {
+    const metrics = goRouteProxyFlagsFromEnv({ CHASTE_GO_METRICS_ROUTE: "1" });
+    expect(isGoRouteRequest(metrics, "GET", "/api/metrics")).toBe(true);
+    expect(isGoRouteRequest(metrics, "POST", "/api/metrics")).toBe(false);
+    expect(isGoRouteRequest(metrics, "HEAD", "/api/metrics")).toBe(false);
+    expect(isGoRouteRequest(metrics, "GET", "/api/metrics/extra")).toBe(false);
+  });
+
   it("preserves auth fallback, setup, method-specific, path-prefix, body, cookie, and streaming behavior", async () => {
     const go = requestRecorder("go", true);
     const goOrigin = await listen(go);

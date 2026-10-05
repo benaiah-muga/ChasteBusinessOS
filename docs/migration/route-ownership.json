@@ -502,16 +502,16 @@
       "path": "/api/durable-runs",
       "method": "GET",
       "source": "apps/web/src/app/api/durable-runs/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/durable-runs/[id]",
       "method": "GET",
       "source": "apps/web/src/app/api/durable-runs/[id]/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -742,8 +742,8 @@
       "path": "/api/metrics",
       "method": "GET",
       "source": "apps/web/src/app/api/metrics/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1134,24 +1134,24 @@
       "path": "/api/sessions",
       "method": "GET",
       "source": "apps/web/src/app/api/sessions/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/sessions/[id]",
       "method": "GET",
       "source": "apps/web/src/app/api/sessions/[id]/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/sessions/[id]/replay",
       "method": "GET",
       "source": "apps/web/src/app/api/sessions/[id]/replay/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1444,8 +1444,8 @@
       "kind": "page",
       "path": "/sessions",
       "source": "apps/web/src/app/(app)/sessions/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",

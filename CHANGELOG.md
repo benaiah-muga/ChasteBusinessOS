@@ -11,6 +11,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- The `/sessions` page is now Vite-owned, with session trajectories, canonical replay, durable-run details, and context metrics read through Go's authenticated GET routes. Go returns oversized details with the same bounded error behavior as legacy.
 - The `/ledger` page is now Vite-owned and its session-authenticated `GET /api/ledger` read is Go-owned. Unsupported API methods and unknown paths keep their legacy fallback.
 - The `/login` page is now Vite-owned. Sign-in, sign-up, verification, and password recovery continue to use the Go-backed auth endpoints.
 - The `/` Dashboard page and its `GET /api/dashboard` and `GET /api/setup` reads are now Vite/Go-owned. Mirror `SMTP_HOST` and coding-agent CLI `PATH` between Go and Next so the setup checklist agrees across runtimes; unknown paths and unsupported API methods keep their legacy fallback.

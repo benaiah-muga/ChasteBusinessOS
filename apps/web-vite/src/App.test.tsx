@@ -79,6 +79,12 @@ beforeEach(() => {
         occurredAt: "2026-09-27T10:15:00.000Z",
       }] });
     }
+    if (path === "/api/sessions") return Response.json({ sessions: [] });
+    if (path === "/api/durable-runs") return Response.json({ runs: [] });
+    if (path === "/api/metrics") return Response.json({
+      totals: { sessionsTracked: 0, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheHitRatePct: null },
+      note: "No usage.",
+    });
     if (path === "/api/dashboard") {
       return Response.json(activeOrgId === firstOrgId ? dashboardFixture : {
         ...dashboardFixture,
@@ -286,6 +292,7 @@ describe("Vite app frame", () => {
     expect(isViteAppPath("/analytics")).toBe(true);
     expect(isViteAppPath("/projects")).toBe(true);
     expect(isViteAppPath("/ledger")).toBe(true);
+    expect(isViteAppPath("/sessions")).toBe(true);
     expect(isViteAppPath("/team")).toBe(true);
     expect(isViteAppPath("/products")).toBe(true);
     expect(isViteAppPath("/documents/editor/doc-123")).toBe(true);
@@ -503,6 +510,19 @@ describe("Vite app frame", () => {
     expect(await screen.findByText("payment.recorded")).not.toBeNull();
     expect(screen.queryByText("invoice.created")).toBeNull();
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/ledger?limit=100")).toHaveLength(2);
+  });
+
+  it("routes Sessions to Vite and loads its Go-owned read APIs", async () => {
+    window.history.replaceState(null, "", "/sessions");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Agent sessions" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Sessions" }).getAttribute("aria-current")).toBe("page");
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("/api/sessions", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/durable-runs", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/metrics", expect.objectContaining({ credentials: "same-origin" }));
   });
 
   it("routes the team page to Vite and reloads its Go-owned data after an organization switch", async () => {

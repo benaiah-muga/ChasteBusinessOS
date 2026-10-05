@@ -15,6 +15,12 @@
     },
     {
       "kind": "page",
+      "path": "/sessions",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
       "path": "/",
       "owner": "vite",
       "parity": "verified"
@@ -60,6 +66,48 @@
     {
       "kind": "api",
       "path": "/api/ledger",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sessions",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sessions/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/sessions/[id]/replay",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/durable-runs/[id]",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/metrics",
       "method": "GET",
       "owner": "go",
       "parity": "verified"
