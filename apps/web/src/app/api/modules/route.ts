@@ -22,6 +22,39 @@ const bodySchema = z.object({
   modules: z.array(z.enum(ALL_MODULE_IDS as [string, ...string[]])).min(1),
 });
 
+const MODULES_WRITE_BODY_LIMIT = 64 * 1024;
+
+async function readModulesWriteBody(req: Request): Promise<unknown> {
+  const contentLength = req.headers.get("content-length");
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > MODULES_WRITE_BODY_LIMIT) return null;
+  if (!req.body) return null;
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MODULES_WRITE_BODY_LIMIT) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    const body = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Change the module switchboard. Goes through the governed iam.setModules
  * capability: a permitted human admin applies it directly under their own
@@ -36,10 +69,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "forbidden: missing permission: iam.admin" }, { status: 403 });
   }
 
-  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-  const intentId = typeof raw?.intentId === "string" ? raw.intentId : undefined;
+  const raw = await readModulesWriteBody(req);
+  const rawRecord = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+  const intentId = typeof rawRecord?.intentId === "string" ? rawRecord.intentId : undefined;
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  if (intentId && (intentId.length > 200 || /[\r\n\0]/.test(intentId))) {
+    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  }
 
   const db = getDb().db;
   const ctx = actorFromResolved(resolved, { intentId });

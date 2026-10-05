@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InventoryPage } from "./InventoryPage";
 
@@ -210,6 +210,87 @@ describe("Vite inventory page", () => {
     expect(screen.getByRole("button", { name: "Reserve stock" })).not.toBeNull();
     expect(screen.getByText((_, element) => element?.tagName === "SPAN" && element.textContent?.includes("Hold for customer pickup") === true)).not.toBeNull();
     expect(screen.getByRole("button", { name: "Release" })).not.toBeNull();
+  });
+
+  it("keeps the newest inventory refresh when separate actions finish out of order", async () => {
+    let reportReads = 0;
+    const postActions: string[] = [];
+    let resolveOlderReport: ((response: Response) => void) | undefined;
+    let resolveNewerReport: ((response: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json(switchboard);
+      if ((init?.method ?? "GET") === "POST") {
+        const body = JSON.parse(String(init?.body)) as { action: string };
+        postActions.push(body.action);
+        return body.action === "createLocation"
+          ? Response.json({ ok: true, data: { locationId: "location-2" } })
+          : Response.json({ ok: true, data: { countId: "count-1", lineCount: 2 } });
+      }
+      reportReads += 1;
+      if (reportReads === 1) return Response.json({ ...report, reservations: [] });
+      if (reportReads === 2) return new Promise<Response>((resolve) => { resolveOlderReport = resolve; });
+      return new Promise<Response>((resolve) => { resolveNewerReport = resolve; });
+    }));
+    render(<InventoryPage />);
+    expect(await screen.findByRole("heading", { name: "Inventory" })).not.toBeNull();
+
+    const locationForm = screen.getByRole("heading", { name: "Create a stock location" }).closest("form");
+    if (!locationForm) throw new Error("Expected stock location form");
+    fireEvent.change(within(locationForm).getByLabelText("Location code"), { target: { value: "SHOP" } });
+    fireEvent.change(within(locationForm).getByLabelText("Location name"), { target: { value: "Retail shop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create location" }));
+    await waitFor(() => expect(reportReads).toBe(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start count sheet" }));
+    await waitFor(() => expect(postActions).toContain("createCycleCount"));
+    await waitFor(() => expect(reportReads).toBe(3));
+
+    const newerCycleCount = {
+      id: "d2b53ec3-1b61-4f05-a56f-4a0f9d4d3571",
+      status: "open",
+      note: "Scheduled cycle count",
+      locationCode: null,
+      createdAt: "2026-05-12T10:30:00.000Z",
+      lines: [],
+    };
+    await act(async () => { resolveNewerReport?.(Response.json({ ...report, cycleCounts: [newerCycleCount] })); });
+    expect(await screen.findByText("Scheduled cycle count")).not.toBeNull();
+
+    await act(async () => { resolveOlderReport?.(Response.json({ ...report, cycleCounts: [] })); });
+    expect(screen.getByText("Scheduled cycle count")).not.toBeNull();
+  });
+
+  it("does not start a refresh when an action finishes after the page unmounts", async () => {
+    let resolveLocationAction: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") return Response.json(switchboard);
+      if (init?.method === "POST") {
+        return new Promise<Response>((resolve) => { resolveLocationAction = resolve; });
+      }
+      return Response.json(report);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const page = render(<InventoryPage />);
+    expect(await screen.findByRole("heading", { name: "Create a stock location" })).not.toBeNull();
+
+    const locationForm = screen.getByRole("heading", { name: "Create a stock location" }).closest("form");
+    if (!locationForm) throw new Error("Expected stock location form");
+    fireEvent.change(within(locationForm).getByLabelText("Location code"), { target: { value: "SHOP" } });
+    fireEvent.change(within(locationForm).getByLabelText("Location name"), { target: { value: "Retail shop" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create location" }));
+    await waitFor(() => expect(resolveLocationAction).toBeTypeOf("function"));
+
+    const reportReadsBeforeUnmount = fetchMock.mock.calls.filter(([input, init]) =>
+      String(input) === "/api/inventory" && (init?.method ?? "GET") !== "POST",
+    ).length;
+    page.unmount();
+    await act(async () => { resolveLocationAction?.(Response.json({ ok: true, data: { locationId: "location-2" } })); });
+
+    const reportReadsAfterUnmount = fetchMock.mock.calls.filter(([input, init]) =>
+      String(input) === "/api/inventory" && (init?.method ?? "GET") !== "POST",
+    ).length;
+    expect(reportReadsAfterUnmount).toBe(reportReadsBeforeUnmount);
   });
 
   it("shows movement costs in organization currency when the display preference differs", async () => {

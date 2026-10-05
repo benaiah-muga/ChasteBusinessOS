@@ -110,16 +110,16 @@
       "path": "/api/analytics",
       "method": "GET",
       "source": "apps/web/src/app/api/analytics/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/analytics",
       "method": "POST",
       "source": "apps/web/src/app/api/analytics/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -134,6 +134,22 @@
       "path": "/api/approvals",
       "method": "POST",
       "source": "apps/web/src/app/api/approvals/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/auth/[...all]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/auth/[...all]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
+      "path": "/api/auth/[...all]",
+      "method": "POST",
+      "source": "apps/web/src/app/api/auth/[...all]/route.ts",
       "owner": "legacy",
       "parity": "pending"
     },
@@ -782,16 +798,16 @@
       "path": "/api/notifications",
       "method": "GET",
       "source": "apps/web/src/app/api/notifications/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/notifications",
       "method": "POST",
       "source": "apps/web/src/app/api/notifications/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1043,27 +1059,35 @@
     },
     {
       "kind": "api",
+      "path": "/api/sales/[orderId]",
+      "method": "GET",
+      "source": "apps/web/src/app/api/sales/[orderId]/route.ts",
+      "owner": "legacy",
+      "parity": "pending"
+    },
+    {
+      "kind": "api",
       "path": "/api/scim/tokens",
       "method": "GET",
       "source": "apps/web/src/app/api/scim/tokens/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/scim/tokens",
       "method": "POST",
       "source": "apps/web/src/app/api/scim/tokens/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/scim/tokens",
       "method": "DELETE",
       "source": "apps/web/src/app/api/scim/tokens/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1180,14 +1204,6 @@
     {
       "kind": "api",
       "path": "/api/support/public",
-      "method": "GET",
-      "source": "apps/web/src/app/api/support/public/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
-    },
-    {
-      "kind": "api",
-      "path": "/api/support/public",
       "method": "POST",
       "source": "apps/web/src/app/api/support/public/route.ts",
       "owner": "legacy",
@@ -1267,8 +1283,8 @@
       "kind": "page",
       "path": "/analytics",
       "source": "apps/web/src/app/(app)/analytics/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",
@@ -1386,15 +1402,15 @@
       "kind": "page",
       "path": "/products",
       "source": "apps/web/src/app/(app)/products/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",
       "path": "/projects",
       "source": "apps/web/src/app/(app)/projects/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",

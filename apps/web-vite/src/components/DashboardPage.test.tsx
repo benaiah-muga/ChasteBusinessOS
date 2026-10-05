@@ -131,9 +131,17 @@ describe("Vite home dashboard", () => {
       body: JSON.stringify({ cards: myWorkFixture.map(({ kind, title, detail }) => ({ kind, title, detail })) }),
     }));
 
-    const promptLink = screen.getByRole("link", { name: "Draft an invoice" }) as HTMLAnchorElement;
-    expect(new URL(promptLink.href).origin).toBe("http://localhost:3001");
-    expect(new URL(promptLink.href).searchParams.get("workmatePrompt"))
-      .toBe("Draft an invoice for a customer. Ask me for the details you need.");
+    const prompts = [
+      ["Draft an invoice", "Draft an invoice for a customer. Ask me for the details you need."],
+      ["Record a bill", "Help me record a vendor bill we received."],
+      ["Where is my cash?", "Give me the cash position: cash balance in, out, and net this month."],
+    ] as const;
+    for (const [label, prompt] of prompts) {
+      const promptLink = screen.getByRole("link", { name: label }) as HTMLAnchorElement;
+      const destination = new URL(promptLink.href);
+      expect(destination.origin).toBe("http://localhost:3001");
+      expect(destination.pathname).toBe("/");
+      expect(destination.searchParams.get("workmatePrompt")).toBe(prompt);
+    }
   });
 });

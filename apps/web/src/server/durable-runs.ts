@@ -1,7 +1,8 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq, sql } from "drizzle-orm";
 import {
   agentRunSteps,
   agentRuns,
+  agentSessions,
   withOrgContext,
   type Database,
 } from "@chaste/db";
@@ -196,6 +197,7 @@ export async function getDurableRun(
   db: Database["db"],
   orgId: string,
   runId: string,
+  access?: { userId: string; admin: boolean },
 ): Promise<{ run: typeof agentRuns.$inferSelect; steps: (typeof agentRunSteps.$inferSelect)[] } | null> {
   return withOrgContext(db, orgId, async (tx) => {
     const [run] = await tx
@@ -204,6 +206,28 @@ export async function getDurableRun(
       .where(and(eq(agentRuns.id, runId), eq(agentRuns.orgId, orgId)))
       .limit(1);
     if (!run) return null;
+    if (access && !access.admin && run.initiatedByActorId !== access.userId) {
+      if (!run.sessionId) return null;
+      const [session] = await tx
+        .select({ userId: agentSessions.userId })
+        .from(agentSessions)
+        .where(and(eq(agentSessions.id, run.sessionId), eq(agentSessions.orgId, orgId)))
+        .limit(1);
+      if (session?.userId !== access.userId) return null;
+    }
+    const [limits] = await tx
+      .select({
+        stepCount: count(),
+        storedJsonBytes: sql<number>`COALESCE(sum(
+          COALESCE(octet_length(${agentRunSteps.input}::text), 0)::bigint
+          + COALESCE(octet_length(${agentRunSteps.output}::text), 0)::bigint
+        ), 0)`,
+      })
+      .from(agentRunSteps)
+      .where(and(eq(agentRunSteps.runId, runId), eq(agentRunSteps.orgId, orgId)));
+    if (Number(limits?.stepCount ?? 0) > 200 || Number(limits?.storedJsonBytes ?? 0) > 2 * 1024 * 1024) {
+      throw new DurableRunResponseLimitError();
+    }
     const steps = await tx
       .select()
       .from(agentRunSteps)
@@ -211,4 +235,11 @@ export async function getDurableRun(
       .orderBy(asc(agentRunSteps.stepIndex));
     return { run, steps };
   });
+}
+
+export class DurableRunResponseLimitError extends Error {
+  constructor() {
+    super("durable run detail exceeds response limits");
+    this.name = "DurableRunResponseLimitError";
+  }
 }

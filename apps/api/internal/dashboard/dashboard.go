@@ -128,7 +128,7 @@ func (r *PostgresReader) ForOrg(ctx context.Context, orgID string, now time.Time
 		if err := readOperations(ctx, tx, orgID, &payload.Ops); err != nil {
 			return Payload{}, fmt.Errorf("read dashboard operations: %w", err)
 		}
-		trendRows, err := readTrend(ctx, tx, orgID)
+		trendRows, err := readTrend(ctx, tx, orgID, now)
 		if err != nil {
 			return Payload{}, fmt.Errorf("read dashboard trend: %w", err)
 		}
@@ -452,7 +452,10 @@ type trendRow struct {
 	amount   int64
 }
 
-func readTrend(ctx context.Context, tx pgx.Tx, orgID string) ([]trendRow, error) {
+func readTrend(ctx context.Context, tx pgx.Tx, orgID string, now time.Time) ([]trendRow, error) {
+	monthStart := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	firstMonth := monthStart.AddDate(0, -5, 0)
+	nextMonth := monthStart.AddDate(0, 1, 0)
 	rows, err := tx.Query(ctx, `
 		SELECT to_char(date_trunc('month', je.posted_at), 'YYYY-MM'), a.type,
 		       COALESCE(SUM(jl.credit_minor::bigint - jl.debit_minor::bigint), 0)::bigint
@@ -460,8 +463,9 @@ func readTrend(ctx context.Context, tx pgx.Tx, orgID string) ([]trendRow, error)
 		JOIN journal_entries je ON je.id = jl.entry_id
 		JOIN accounts a ON a.id = jl.account_id
 		WHERE je.org_id = $1::uuid AND a.type IN ('income', 'expense')
+		  AND je.posted_at >= $2 AND je.posted_at < $3
 		GROUP BY date_trunc('month', je.posted_at), a.type
-		ORDER BY date_trunc('month', je.posted_at), a.type`, orgID)
+		ORDER BY date_trunc('month', je.posted_at), a.type`, orgID, firstMonth, nextMonth)
 	if err != nil {
 		return nil, err
 	}

@@ -439,15 +439,18 @@ func reportDocumentOutstandingMinor(totalMinor, paidMinor, creditedMinor int64) 
 		value int64
 		field string
 	}{{totalMinor, "totalMinor"}, {paidMinor, "paidMinor"}, {creditedMinor, "creditedMinor"}} {
-		if check.value < 0 {
-			return 0, fmt.Errorf("%s must be a non-negative integer minor amount", check.field)
+		if check.value < 0 || !reportSafeInteger(check.value) {
+			return 0, fmt.Errorf("%s must be a non-negative safe integer minor amount", check.field)
 		}
 	}
-	outstanding := totalMinor - paidMinor - creditedMinor
-	if outstanding < 0 {
+	if paidMinor >= totalMinor {
 		return 0, nil
 	}
-	return outstanding, nil
+	remaining := totalMinor - paidMinor
+	if creditedMinor >= remaining {
+		return 0, nil
+	}
+	return remaining - creditedMinor, nil
 }
 
 func reportBaseCurrency(ctx context.Context, tx pgx.Tx, orgID string) (string, error) {

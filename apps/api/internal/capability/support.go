@@ -141,6 +141,7 @@ type SupportKnowledgeArticle struct {
 	Title    string  `json:"title"`
 	Body     string  `json:"body"`
 	Category *string `json:"category"`
+	IsPublic bool    `json:"isPublic"`
 }
 
 type SupportLibraryOutput struct {
@@ -280,6 +281,7 @@ type SupportCreateKbArticleInput struct {
 	Title    string  `json:"title"`
 	Body     string  `json:"body"`
 	Category *string `json:"category,omitempty"`
+	IsPublic bool    `json:"isPublic"`
 }
 
 type SupportCreateKbArticleOutput struct {
@@ -612,6 +614,14 @@ func ParseSupportCreateKbArticleInput(raw json.RawMessage) (SupportCreateKbArtic
 		}
 		input.Category = &category
 	}
+	if rawIsPublic, ok := fields["isPublic"]; ok {
+		if string(rawIsPublic) == "null" {
+			return SupportCreateKbArticleInput{}, errors.New("isPublic must be a boolean")
+		}
+		if err := json.Unmarshal(rawIsPublic, &input.IsPublic); err != nil {
+			return SupportCreateKbArticleInput{}, errors.New("isPublic must be a boolean")
+		}
+	}
 	return input, nil
 }
 
@@ -793,7 +803,7 @@ func supportListLibrary(ctx context.Context, tx pgx.Tx, orgID string) (SupportLi
 	cannedRows.Close()
 
 	articleRows, err := tx.Query(ctx, `
-		SELECT id::text, title, body, category
+		SELECT id::text, title, body, category, is_public
 		FROM support_kb_articles
 		WHERE org_id=$1::uuid
 		ORDER BY title
@@ -804,7 +814,7 @@ func supportListLibrary(ctx context.Context, tx pgx.Tx, orgID string) (SupportLi
 	articles := make([]SupportKnowledgeArticle, 0)
 	for articleRows.Next() {
 		var row SupportKnowledgeArticle
-		if err := articleRows.Scan(&row.ID, &row.Title, &row.Body, &row.Category); err != nil {
+		if err := articleRows.Scan(&row.ID, &row.Title, &row.Body, &row.Category, &row.IsPublic); err != nil {
 			articleRows.Close()
 			return SupportLibraryOutput{}, err
 		}
@@ -1081,9 +1091,9 @@ func supportCreateCannedResponse(ctx context.Context, tx pgx.Tx, orgID string, i
 func supportCreateKbArticle(ctx context.Context, tx pgx.Tx, orgID string, input SupportCreateKbArticleInput) (SupportCreateKbArticleOutput, error) {
 	var articleID string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO support_kb_articles (org_id, title, body, category)
-		VALUES ($1::uuid, $2, $3, $4)
-		RETURNING id::text`, orgID, input.Title, input.Body, input.Category).Scan(&articleID); err != nil {
+		INSERT INTO support_kb_articles (org_id, title, body, category, is_public)
+		VALUES ($1::uuid, $2, $3, $4, $5)
+		RETURNING id::text`, orgID, input.Title, input.Body, input.Category, input.IsPublic).Scan(&articleID); err != nil {
 		return SupportCreateKbArticleOutput{}, err
 	}
 	return SupportCreateKbArticleOutput{ArticleID: articleID}, nil

@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { agentSessions, getDb } from "@chaste/db";
 import { hasPermission } from "@chaste/kernel";
-import { replaySession } from "@/server/replay";
+import { replaySession, SessionResponseLimitError } from "@/server/replay";
+import type { ReplayTrace } from "@chaste/kernel";
 import { getResolvedUser } from "@/server/session";
 
 type Params = { params: Promise<{ id: string }> };
@@ -20,7 +21,15 @@ export async function GET(_req: Request, { params }: Params) {
 
   const isAdmin = hasPermission({ permissions: resolved.permissions }, "iam.admin");
   if (!isAdmin && session.userId !== resolved.userId) return NextResponse.json({ error: "not found" }, { status: 404 });
-  const trace = await replaySession(getDb().db, resolved.orgId, id);
+  let trace: ReplayTrace | null;
+  try {
+    trace = await replaySession(getDb().db, resolved.orgId, id);
+  } catch (error) {
+    if (error instanceof SessionResponseLimitError) {
+      return NextResponse.json({ error: error.message }, { status: 413 });
+    }
+    throw error;
+  }
   if (!trace) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ trace });
 }

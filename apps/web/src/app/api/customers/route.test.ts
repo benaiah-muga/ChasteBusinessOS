@@ -119,6 +119,24 @@ describe("customer Go write adapter", () => {
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
   });
 
+  it("returns the legacy create success envelope consumed by postApi", async () => {
+    const data = { customerId, duplicateWarning: null };
+    mocks.execute.mockResolvedValue({ ok: true, data });
+
+    const response = await POST(request({ action: "create", name: "Ada Customer" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, data });
+    expect(mocks.execute).toHaveBeenCalledWith("crm.createCustomer", ctx, {
+      name: "Ada Customer",
+      email: undefined,
+      phone: undefined,
+      preferredContactMethod: undefined,
+      doNotContact: undefined,
+    });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
   it("preserves approval-pending responses from Go", async () => {
     vi.stubEnv("GO_CRM_CUSTOMER_WRITES", "1");
     mocks.executeGoCapability.mockResolvedValue({ kind: "response", response: Response.json({ ok: false, pendingApproval: true, reason: "Approval required" }, { status: 202 }) });

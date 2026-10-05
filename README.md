@@ -71,7 +71,7 @@ git clone https://github.com/benaiah-muga/ChasteBusinessOS.git
 cd ChasteBusinessOS
 pnpm install
 
-cp .env.example .env        # add NVIDIA_API_KEY and BETTER_AUTH_SECRET
+cp .env.example .env        # add NVIDIA_API_KEY, BETTER_AUTH_SECRET, and SMTP settings
 
 docker run -d --name chaste-pgvector \
   -e POSTGRES_PASSWORD=chaste_dev -e POSTGRES_USER=chaste \
@@ -83,7 +83,16 @@ pnpm dev                    # Vite app on :3000, legacy compatibility server on 
 # To opt into legacy boot migration locally: AUTO_MIGRATE_ON_BOOT=1 pnpm dev
 # In another terminal, run the Go API on :8080:
 pnpm dev:api
+# In another terminal, run the Go capability/routine and outbox workers:
+pnpm worker
 ```
+
+`pnpm worker` loads the repository `.env`, builds both Go workers, and runs them
+with signal forwarding for graceful shutdown. Routine scheduling and the Go
+routine agent runner default on for local work; set either
+`GO_ROUTINE_SCHEDULER=0` or `GO_ROUTINE_AGENT_RUNNER=0` to disable it. The jobs
+worker uses `JOBS_WORKER_DATABASE_URL` and `GO_DATABASE_URL`, while the outbox
+worker uses `OUTBOX_WORKER_DATABASE_URL`.
 
 ## Why React and Go: measured build benefits
 
@@ -524,6 +533,107 @@ accounting remains on its existing handlers. The flag defaults to `0`.
 Manufacturing and marketing capabilities run on the Go executor and worker
 without route flags: no public route serves them today, so they are reachable
 only through governed agent and worker dispatch.
+
+The local `.env.example` mounts Go authentication. Vite sends only the auth
+methods and paths implemented by Go to it; other auth requests continue to the
+legacy Better Auth catch-all. Go auth mounts by default and requires
+`BETTER_AUTH_SECRET` plus `GO_AUTH_MODE` set to `development` or `production`.
+Set `GO_AUTH_ROUTE=0` to disable the Go mount; Vite then keeps auth on the legacy
+bridge. `CHASTE_GO_AUTH_ROUTE=0` also explicitly selects the legacy bridge.
+Auth mode is independent of `NODE_ENV`. Production
+mode requires `GO_AUTH_PUBLIC_ORIGIN` to
+be an HTTPS origin and `GO_AUTH_SECURE_COOKIE=true`. Development mode may use
+the local app URL fallback. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`,
+`SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` for verification and recovery email.
+Auth links are stored in a PostgreSQL outbox and retried with bounded backoff;
+delivery jobs expire with their links. Production deployments should enable
+the Go route only after the auth continuity and security gates pass.
+
+An optional provider-neutral OIDC authorization-code flow is available when
+`GO_OIDC_ENABLED=1` is paired with `GO_AUTH_ROUTE=1`. Configure the exact HTTPS
+issuer, client credentials, and registered Go callback URI
+`https://<api-host>/api/auth/callback/oidc`. The callback validates issuer,
+signature, audience, nonce, state, and PKCE before creating a Go-owned session;
+it never stores or returns provider tokens. Set
+`GO_OIDC_ALLOWED_ENDPOINT_HOSTS` to exact comma-separated `host[:port]`
+authorities only when discovery uses endpoints on a different host than the
+configured issuer. Every discovered endpoint, including JWKS, must use HTTPS
+and an allowed authority; requests have bounded timeouts and do not follow
+redirects. Multi-audience ID tokens require `azp` to equal the configured
+client ID. The configured issuer authority and explicit endpoint authorities
+are trusted operator configuration. The transport constrains host and port but
+does not pin DNS-resolved IPs, so a configured authority can resolve to a
+private destination. Only configure authorities you trust, including their DNS
+control and network routing.
+`GO_OIDC_TRUST_VERIFIED_EMAIL=true` only when the issuer is trusted to attest
+`email_verified`, which is required before attaching an OIDC subject to an
+existing email account. Browser clients finish with the existing Go session
+cookie. Native clients can opt in by setting `GO_OIDC_NATIVE_REDIRECT_URI` to
+their exact custom-scheme callback URI. They start `/api/auth/sign-in/oidc`
+with `native_code_challenge` and `native_state`, receive a short-lived code at
+that callback, then exchange it at `POST /api/auth/native/exchange` with the
+PKCE verifier. The reusable bearer token is returned only in that no-store
+JSON response, never in the redirect URL. Leaving the native redirect unset
+disables the handoff. The local Vite development stack routes authentication
+to Go; production ownership still follows the auth continuity and security
+gates.
+
+An optional Go SAML sign-in flow is enabled with `GO_SAML_ENABLED=1` and
+`GO_AUTH_ROUTE=1`. Pin the IdP issuer, HTTPS SSO endpoint, and one signing
+certificate. Configure the SP entity ID, exact HTTPS ACS URL, HTTPS success
+URL, and attribute names. The IdP must sign the SAML response. Verified-email
+trust is explicit through `GO_SAML_TRUST_VERIFIED_EMAIL=true`; the handler
+rejects untrusted email linking. Go mounts `/api/auth/sign-in/saml` and
+`/api/auth/callback/saml` only when both flags are enabled.
+
+`GO_SUPPORT_PUBLIC_ROUTE=1` opts the Go API into the public
+`/api/support/public` widget endpoint. It uses NVIDIA embeddings for published
+knowledge search, so `NVIDIA_API_KEY` and `GO_SUPPORT_EMBEDDING_MODEL` must be
+configured. Run the jobs worker with `GO_SUPPORT_EMBEDDING_WORKER=1` to index
+published articles. Tenant candidates are discovered through a bounded,
+least-privilege worker function; article reads and writes run inside
+`dbx.WithOrgTx`. To exercise this route from the Vite widget, pair it with
+`CHASTE_GO_SUPPORT_PUBLIC_ROUTE=1`; the proxy selects only the exact widget
+endpoint and preserves request methods, bodies, cookies, query parameters, and
+streamed responses. Both route flags and the embedding worker default to off,
+so production route ownership stays unchanged unless both route flags are
+deliberately enabled. Set `GO_SUPPORT_TRUSTED_PROXY_CIDRS` only to trusted
+reverse proxy networks; forwarded addresses from other peers are ignored.
+
+The Vite development proxy sends Go's implemented `/api/auth` methods and paths
+to Go. Other auth paths and methods continue through the legacy Better Auth
+catch-all. Set `CHASTE_GO_AUTH_OIDC_ROUTE=1` or
+`CHASTE_GO_AUTH_SAML_ROUTE=1` alongside the matching Go auth feature flag to
+route those optional federation paths to Go. Other Go route flags are opt-in
+and evaluated against the request method and exact path before the legacy
+`/api` catch-all; unmatched requests continue to the legacy server. Request and
+response streams, headers, query strings, and bodies pass through unchanged.
+Pair `GO_MY_WORK_ROUTE=1` with `CHASTE_GO_MY_WORK_ROUTE=1` to send only
+`GET /api/my-work` to Go. The local `.env.example` enables the verified Go
+`GET` and `POST /api/analytics` routes through their paired selectors. Set both
+`GO_ANALYTICS_ROUTE=0` and `CHASTE_GO_ANALYTICS_ROUTE=0` to use the legacy
+handler during local rollback. Vite's selectors apply only to its development
+server; production reverse-proxy ownership is configured separately. Go also
+implements the work brief at
+`POST /api/my-work/summarize` behind `GO_MY_WORK_SUMMARY_ROUTE=1`. Its paired
+Vite method/path selector is pending; leave `CHASTE_GO_MY_WORK_SUMMARY_ROUTE=0`
+until that selector is wired. The handler uses the authenticated user's own
+default OpenCode connection with tools disabled, or the same user's isolated
+Codex home and read-only CLI mode. Codex requires a persistent home shared with
+the connection setup runtime. Missing runtimes, unsupported providers, and
+provider failures return an error without substituting workspace credentials.
+
+`GO_SCIM_READ_ROUTE=1` opts the Go API into SCIM 2.0 collection and single-user
+reads at `/api/scim/v2/Users`. It resolves hashed, unexpired bearer tokens
+through a narrowly granted database function and runs user reads in an
+organization-scoped transaction. `GO_SCIM_WRITE_ROUTE=1` separately enables
+provisioning and deactivation through governed external-IdP capabilities.
+Standard SCIM clients can omit `Idempotency-Key`; the backend deduplicates
+retries within each membership generation. Clients may send a UUID key to
+define an explicit operation. Go mounts SAML sign-in and assertion-consumer
+routes when the SAML provider configuration is present; Vite forwards those
+routes when `CHASTE_GO_AUTH_SAML_ROUTE=1`. OIDC sign-in can be enabled with
+the provider configuration above.
 
 For a production-shaped local Docker run, use the full Compose stack instead:
 

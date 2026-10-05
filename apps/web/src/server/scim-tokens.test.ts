@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb, organizations, purgeTenantFinancials, scimTokens, type Database } from "@chaste/db";
+import { NextRequest } from "next/server";
 
 /**
  * SCIM token expiry/rotation policy (0054): new tokens live 90 days by
@@ -27,6 +28,7 @@ vi.mock("@/server/session", () => ({
 
 const { GET: tokensGET, POST: tokensPOST } = await import("@/app/api/scim/tokens/route");
 const { GET: usersGET } = await import("@/app/api/scim/v2/Users/route");
+const { GET: userGET, DELETE: userDELETE } = await import("@/app/api/scim/v2/Users/[id]/route");
 
 let db: Database;
 const orgId = crypto.randomUUID();
@@ -37,6 +39,13 @@ function bearer(raw: string): Request {
   return new Request("http://localhost/api/scim/v2/Users", { headers: { authorization: `Bearer ${raw}` } });
 }
 
+function userRequest(raw: string, method = "GET"): NextRequest {
+  return new NextRequest("http://localhost/api/scim/v2/Users/user-id", {
+    method,
+    headers: { authorization: `Bearer ${raw}`, "x-forwarded-for": "192.0.2.17" },
+  });
+}
+
 beforeAll(async () => {
   db = createDb(url);
   const orgs = await db.db.select({ id: organizations.id }).from(organizations).where(eq(organizations.name, "Scim Expiry Probe"));
@@ -45,9 +54,10 @@ beforeAll(async () => {
     await db.db.delete(organizations).where(eq(organizations.id, o.id));
   }
   await db.db.insert(organizations).values({ id: orgId, name: "Scim Expiry Probe", slug: `sx-${orgId.slice(0, 8)}` });
-  const { users } = await import("@chaste/db");
+  const { memberships, users } = await import("@chaste/db");
   const [user] = await db.db.insert(users).values({ email: `scim-${orgId.slice(0, 8)}@probe.test`, name: "Scim Admin" }).returning({ id: users.id });
   adminUserId = user!.id;
+  await db.db.insert(memberships).values({ orgId, userId: adminUserId });
   state.current = { userId: adminUserId, email: `scim-${orgId.slice(0, 8)}@probe.test`, name: "Scim Admin", orgId, permissions: new Set(["iam.admin"]) };
 });
 
@@ -107,6 +117,8 @@ describe("SCIM token expiry and rotation", () => {
       expiresAt: new Date(Date.now() - 3_600_000),
     });
     expect((await usersGET(bearer(raw))).status).toBe(401);
+    expect((await userGET(userRequest(raw), { params: Promise.resolve({ id: adminUserId }) })).status).toBe(401);
+    expect((await userDELETE(userRequest(raw, "DELETE"), { params: Promise.resolve({ id: adminUserId }) })).status).toBe(401);
 
     // Pre-policy tokens (null expiry) keep working until deactivated.
     const legacyRaw = `scim_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -118,6 +130,11 @@ describe("SCIM token expiry and rotation", () => {
       expiresAt: null,
     });
     expect((await usersGET(bearer(legacyRaw))).status).toBe(200);
+    expect((await userGET(userRequest(legacyRaw), { params: Promise.resolve({ id: adminUserId }) })).status).toBe(200);
+    for (let i = 0; i < 59; i += 1) {
+      await userGET(userRequest(legacyRaw), { params: Promise.resolve({ id: adminUserId }) });
+    }
+    expect((await userGET(userRequest(legacyRaw), { params: Promise.resolve({ id: adminUserId }) })).status).toBe(401);
     const listed = (await (await tokensGET()).json()) as { tokens: Array<{ id: string; expiresAt: string | null }> };
     for (const id of createdTokenIds) {
       expect(listed.tokens.find((t) => t.id === id)?.expiresAt).toBeTruthy();

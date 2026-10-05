@@ -5,6 +5,43 @@ import { runtimeAiConfig } from "@/server/ai-settings";
 import { getResolvedUser } from "@/server/session";
 import { generateWithCodingPlanText } from "@/server/coding-agent-adapter";
 
+const MAX_BODY_BYTES = 1 << 20;
+const MAX_CARD_FIELD_UNITS = 4096;
+const MAX_PROMPT_UNITS = 32000;
+
+type SummaryCard = { kind: string; title: string; detail: string };
+
+async function readSummaryBody(req: Request): Promise<{ value: unknown } | { tooLarge: true } | null> {
+  const contentLength = req.headers.get("content-length");
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > MAX_BODY_BYTES) return { tooLarge: true };
+  if (!req.body) return null;
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_BODY_BYTES) {
+        await reader.cancel();
+        return { tooLarge: true };
+      }
+      chunks.push(value);
+    }
+    const body = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { value: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) as unknown };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * P01: deterministic ranking decides the list; the model only writes the
  * one-paragraph brief over the already-authorized card bundle it is given.
@@ -46,13 +83,43 @@ export async function POST(req: Request) {
   const resolved = await getResolvedUser();
   if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const body = (await req.json().catch(() => null)) as { cards?: unknown[] } | null;
-  if (!body?.cards || !Array.isArray(body.cards) || body.cards.length === 0) {
+  const parsedBody = await readSummaryBody(req);
+  if (parsedBody && "tooLarge" in parsedBody) {
+    return NextResponse.json({ error: "request body too large" }, { status: 413 });
+  }
+  const body = parsedBody?.value;
+  if (!body || typeof body !== "object" || Array.isArray(body) || !("cards" in body) || !Array.isArray(body.cards) || body.cards.length === 0) {
     return NextResponse.json({ error: "cards are required" }, { status: 400 });
   }
   if (body.cards.length > 30) {
     return NextResponse.json({ error: "too many cards" }, { status: 400 });
   }
+
+  const cards: SummaryCard[] = [];
+  for (const value of body.cards) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return NextResponse.json({ error: "invalid card" }, { status: 400 });
+    }
+    const fields = value as Record<string, unknown>;
+    if (typeof fields.kind !== "string" || fields.kind.length === 0 || typeof fields.title !== "string" || fields.title.length === 0 || typeof fields.detail !== "string") {
+      return NextResponse.json({ error: "invalid card" }, { status: 400 });
+    }
+    cards.push({ kind: fields.kind, title: fields.title, detail: fields.detail });
+  }
+
+  const lines: string[] = [];
+  for (const card of cards) {
+    if (card.kind.length > MAX_CARD_FIELD_UNITS || card.title.length > MAX_CARD_FIELD_UNITS || card.detail.length > MAX_CARD_FIELD_UNITS) {
+      return NextResponse.json({ error: "card text is too long" }, { status: 400 });
+    }
+    const line = `- [${card.kind}] ${card.title}: ${card.detail}`;
+    lines.push(line);
+  }
+  const prompt = `Pending work:\n${lines.join("\n")}`;
+  if (prompt.length > MAX_PROMPT_UNITS) {
+    return NextResponse.json({ error: "card text is too long" }, { status: 400 });
+  }
+
   const db = getDb().db;
   const ai = await runtimeAiConfig(db, resolved.orgId, resolved.userId);
   if (!ai.runtime.apiKey && !ai.codingAgentConnection) {
@@ -62,20 +129,13 @@ export async function POST(req: Request) {
     );
   }
 
-  const lines = (body.cards as Array<Record<string, unknown>>).map((c) => {
-    const detail = typeof c.detail === "string" ? c.detail : "";
-    const title = typeof c.title === "string" ? c.title : "";
-    const kind = typeof c.kind === "string" ? c.kind : "item";
-    return `- [${kind}] ${title}: ${detail}`;
-  });
-
   if (ai.codingAgentConnection) {
     try {
       const result = await generateWithCodingPlanText({
         db,
         connection: ai.codingAgentConnection,
         system: "You write a two-sentence brief of a business team's pending work for its home page. Group what belongs together, name concrete counts, never invent items that are not in the list, never give advice.",
-        prompt: `Pending work:\n${lines.join("\n")}`,
+        prompt,
       });
       if (!result.text) return NextResponse.json({ error: "summary unavailable" }, { status: 502 });
       return NextResponse.json({

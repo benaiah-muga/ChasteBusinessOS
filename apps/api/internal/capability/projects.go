@@ -412,6 +412,13 @@ func (e *Executor) ReadProjectCollection(ctx context.Context, claims authbridge.
 		if err := verifyIdentity(ctx, tx, claims, now); err != nil {
 			return Result{}, err
 		}
+		enabled, err := isModuleEnabled(ctx, tx, claims.OrganizationID, "projects")
+		if err != nil {
+			return Result{}, err
+		}
+		if !enabled {
+			return Result{OK: false, Error: `module "projects" is disabled for this organization`}, nil
+		}
 		permissions, err := effectivePermissions(ctx, tx, claims)
 		if err != nil {
 			return Result{}, err
@@ -505,7 +512,7 @@ func archiveProject(ctx context.Context, tx pgx.Tx, orgID string, input ArchiveP
 func createProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input CreateProjectTaskInput) (CreateProjectTaskOutput, error) {
 	var projectStatus string
 	err := tx.QueryRow(ctx, `
-		SELECT status FROM projects WHERE id = $1::uuid AND org_id = $2::uuid`, input.ProjectID, orgID).Scan(&projectStatus)
+		SELECT status FROM projects WHERE id = $1::uuid AND org_id = $2::uuid FOR UPDATE`, input.ProjectID, orgID).Scan(&projectStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CreateProjectTaskOutput{}, errors.New("project not found")
 	}
@@ -552,6 +559,9 @@ func createProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input Creat
 }
 
 func moveProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input MoveProjectTaskInput) (MoveProjectTaskOutput, error) {
+	if err := lockActiveProjectForTask(ctx, tx, orgID, input.TaskID); err != nil {
+		return MoveProjectTaskOutput{}, err
+	}
 	var id string
 	var err error
 	if input.Position == nil {
@@ -575,6 +585,9 @@ func moveProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input MovePro
 }
 
 func assignProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input AssignProjectTaskInput) (AssignProjectTaskOutput, error) {
+	if err := lockActiveProjectForTask(ctx, tx, orgID, input.TaskID); err != nil {
+		return AssignProjectTaskOutput{}, err
+	}
 	var id string
 	err := tx.QueryRow(ctx, `
 		UPDATE project_tasks SET assignee_user_id = $1::uuid
@@ -587,4 +600,24 @@ func assignProjectTask(ctx context.Context, tx pgx.Tx, orgID string, input Assig
 		return AssignProjectTaskOutput{}, err
 	}
 	return AssignProjectTaskOutput{Assigned: true}, nil
+}
+
+func lockActiveProjectForTask(ctx context.Context, tx pgx.Tx, orgID, taskID string) error {
+	var status string
+	err := tx.QueryRow(ctx, `
+		SELECT p.status
+		FROM project_tasks t
+		JOIN projects p ON p.id = t.project_id AND p.org_id = t.org_id
+		WHERE t.id = $1::uuid AND t.org_id = $2::uuid AND p.org_id = $2::uuid
+		FOR UPDATE OF p`, taskID, orgID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errors.New("task not found")
+	}
+	if err != nil {
+		return err
+	}
+	if status != "active" {
+		return errors.New("project is not active")
+	}
+	return nil
 }

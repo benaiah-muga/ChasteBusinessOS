@@ -5,11 +5,13 @@
  * Run: pnpm demo:m7 [reconciliation|transfers|products|all]
  */
 import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { approvals, getDb, items, stockLocations, stockMovements, stockTransferLines, users } from "@chaste/db";
 import { glAccountBalanceMinor, inventoryLedgerValueMinor } from "../modules/inventory/src/valuation";
 import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
 import { runOnboarding } from "../apps/web/src/server/onboarding";
 
+const runId = randomUUID().slice(0, 8);
 let passed = 0;
 function ok(label: string, condition?: boolean) {
   if (condition === false) throw new Error(`FAILED: ${label}`);
@@ -30,7 +32,7 @@ async function reconciliationScenario(): Promise<string> {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName: "M7 Warehouse Co",
+    orgName: `M7 Warehouse Co ${runId}`,
     businessDescription:
       "Hardware store tracking cement and steel stock across two locations, selling over the counter and on account.",
   });
@@ -135,7 +137,7 @@ async function transfersScenario(): Promise<string> {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName: "M7 Transfer Co",
+    orgName: `M7 Transfer Co ${runId}`,
     businessDescription: "Distributor moving stock between a main warehouse and a shop counter every week.",
   });
   const ownerCtx = {
@@ -241,7 +243,7 @@ async function productsScenario(): Promise<string> {
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName: "M7 Catalog Co",
+    orgName: `M7 Catalog Co ${runId}`,
     businessDescription: "Retail shop scanning barcodes at the counter and tracking tags for promotions.",
   });
   const ownerCtx = {
@@ -324,4 +326,3 @@ main()
     console.error(e);
     process.exit(1);
   });
-

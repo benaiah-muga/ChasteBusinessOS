@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchInventoryEnabled, fetchInventoryReport, InventoryApiError, type InventoryCycleCount, type InventoryItem, type InventoryLocation, type InventoryLot, type InventoryReservation, type InventoryTransfer } from "../api/inventory";
 import { legacyUrl } from "../legacy";
@@ -64,21 +64,24 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ItemFilter>("all");
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const reportRequestId = useRef(0);
+  const mountedRef = useRef(false);
   const currency = useMemo(() => displayCurrency(baseCurrency), [baseCurrency]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const requestId = ++reportRequestId.current;
     setState({ status: "loading" });
     try {
       const enabled = await fetchInventoryEnabled(signal);
-      if (signal?.aborted) return;
+      if (signal?.aborted || reportRequestId.current !== requestId) return;
       if (!enabled) {
         setState({ status: "disabled" });
         return;
       }
       const report = await fetchInventoryReport(signal);
-      if (!signal?.aborted) setState({ status: "ready", ...report });
+      if (!signal?.aborted && reportRequestId.current === requestId) setState({ status: "ready", ...report });
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || reportRequestId.current !== requestId) return;
       setState({
         status: "failed",
         error: error instanceof InventoryApiError
@@ -89,24 +92,35 @@ export function InventoryPage({ baseCurrency = null }: { baseCurrency?: string |
   }, []);
 
   const refresh = useCallback(async () => {
+    if (!mountedRef.current) return;
+    const requestId = ++reportRequestId.current;
     setRefreshError(null);
     try {
       const enabled = await fetchInventoryEnabled();
+      if (reportRequestId.current !== requestId) return;
       if (!enabled) {
         setState({ status: "disabled" });
         return;
       }
       const report = await fetchInventoryReport();
+      if (reportRequestId.current !== requestId) return;
       setState({ status: "ready", ...report });
     } catch (error) {
-      setRefreshError(error instanceof InventoryApiError ? error.message : "The action completed, but inventory could not refresh. Reload the page to see the latest status.");
+      if (reportRequestId.current === requestId) {
+        setRefreshError(error instanceof InventoryApiError ? error.message : "The action completed, but inventory could not refresh. Reload the page to see the latest status.");
+      }
     }
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     const controller = new AbortController();
     void load(controller.signal);
-    return () => controller.abort();
+    return () => {
+      mountedRef.current = false;
+      controller.abort();
+      reportRequestId.current += 1;
+    };
   }, [load]);
 
   const filteredItems = useMemo(() => {

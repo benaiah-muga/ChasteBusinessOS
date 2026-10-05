@@ -1,0 +1,378 @@
+import { z } from "zod";
+
+const uuid = z.string().uuid();
+
+export class SupportApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = "SupportApiError";
+  }
+}
+
+const requestSignal = (signal?: AbortSignal, timeoutMs = 15_000): AbortSignal => {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+};
+
+async function readJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new SupportApiError(response.status, "The support service returned an unreadable response.");
+  }
+}
+
+/**
+ * Capability failures arrive as terse server prose ("conversation is resolved;
+ * reopen it first"). That is safe to show once the status-specific copy has had
+ * its chance, so the domain message survives but the raw wire text never does.
+ */
+function messageFor(status: number, body: unknown): string {
+  if (status === 401) return "Your session has expired. Sign in again to continue.";
+  if (status === 403) return "Your account does not have access to customer care. Ask an organization admin for the support permission.";
+  if (status === 404) return "Customer care is switched off for this workspace, or that record is gone.";
+  if (status === 429) return "Too many drafts in a row. Wait a moment, then try again.";
+  if (status >= 500) return "The support service is unavailable. Try again.";
+  const serverMessage = body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : "";
+  if (serverMessage && serverMessage.length <= 240 && !/[{}<>]/.test(serverMessage)) {
+    return serverMessage.charAt(0).toUpperCase() + serverMessage.slice(1);
+  }
+  return "The support request could not be completed. Check the details and try again.";
+}
+
+async function request(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<{ response: Response; body: unknown }> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: "same-origin",
+      headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
+      signal: requestSignal(signal, init.method === "POST" ? 20_000 : 15_000),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error instanceof DOMException && error.name === "TimeoutError") throw new SupportApiError(0, "The support service took too long to respond. Check the thread before trying again.");
+    throw new SupportApiError(0, "Could not reach the support service. Check your connection and try again.");
+  }
+  return { response, body: await readJson(response) };
+}
+
+async function get<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
+  const { response, body } = await request(path, {}, signal);
+  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new SupportApiError(response.status, "The support service returned data in an unexpected format.");
+  return parsed.data;
+}
+
+/* ── reads ──────────────────────────────────────────────────────────────── */
+
+const ModuleSwitchboardSchema = z.object({
+  catalog: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string(),
+    description: z.string(),
+    href: z.string().nullable(),
+    protected: z.boolean().optional(),
+  }).strict()),
+  enabledModules: z.array(z.string().min(1)),
+  usingDefaults: z.boolean(),
+}).strict();
+
+/** Mirrors the module-context guard the legacy page gets from the app shell. */
+export async function fetchSupportEnabled(signal?: AbortSignal): Promise<boolean> {
+  const { response, body } = await request("/api/modules", {}, signal);
+  if (!response.ok) throw new SupportApiError(response.status, "Could not check whether customer care is enabled.");
+  const parsed = ModuleSwitchboardSchema.safeParse(body);
+  if (!parsed.success) throw new SupportApiError(response.status, "The module switchboard returned data in an unexpected format.");
+  const catalogIds = new Set(parsed.data.catalog.map((module) => module.id));
+  if (!catalogIds.has("support")) throw new SupportApiError(response.status, "The module switchboard omitted the customer care module.");
+  if (parsed.data.enabledModules.some((id) => !catalogIds.has(id))) throw new SupportApiError(response.status, "The module switchboard returned an unknown module.");
+  return parsed.data.enabledModules.includes("support");
+}
+
+export const SupportConversationSchema = z.object({
+  id: uuid,
+  customerId: z.string(),
+  customerName: z.string(),
+  subject: z.string(),
+  status: z.string(),
+  lastMessageAt: z.string().nullable().optional(),
+  // Only the list read carries a preview; the detail read carries ticket fields instead.
+  lastMessagePreview: z.string().optional(),
+  priority: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
+  assignedUserId: uuid.nullable().optional(),
+  slaDueAt: z.string().nullable().optional(),
+}).strict();
+export type SupportConversation = z.infer<typeof SupportConversationSchema>;
+
+const ConversationListSchema = z.object({ conversations: z.array(SupportConversationSchema) }).strict();
+
+export async function fetchSupportConversations(signal?: AbortSignal): Promise<SupportConversation[]> {
+  const parsed = await get("/api/support", ConversationListSchema, signal);
+  return parsed.conversations;
+}
+
+export const SupportMessageSchema = z.object({
+  id: uuid,
+  orgId: uuid,
+  conversationId: uuid,
+  senderType: z.string(),
+  senderUserId: uuid.nullable(),
+  body: z.string(),
+  createdAt: z.string(),
+}).strict();
+export type SupportMessage = z.infer<typeof SupportMessageSchema>;
+
+const SupportThreadSchema = z.object({
+  conversation: SupportConversationSchema,
+  messages: z.array(SupportMessageSchema),
+}).strict();
+export type SupportThread = z.infer<typeof SupportThreadSchema>;
+
+export async function fetchSupportThread(conversationId: string, signal?: AbortSignal): Promise<SupportThread> {
+  if (!uuid.safeParse(conversationId).success) throw new SupportApiError(0, "Choose a conversation to read its thread.");
+  const query = new URLSearchParams({ id: conversationId });
+  return get(`/api/support?${query.toString()}`, SupportThreadSchema, signal);
+}
+
+const SupportLibrarySchema = z.object({
+  canned: z.array(z.object({ id: uuid, shortcut: z.string(), title: z.string(), body: z.string() }).strict()),
+  articles: z.array(z.object({ id: uuid, title: z.string(), body: z.string(), category: z.string().nullable(), isPublic: z.boolean() }).strict()),
+}).strict();
+export type SupportLibrary = z.infer<typeof SupportLibrarySchema>;
+
+export async function fetchSupportLibrary(signal?: AbortSignal): Promise<SupportLibrary> {
+  return get("/api/support?library=1", SupportLibrarySchema, signal);
+}
+
+const SupportChannelsSchema = z.object({
+  autoReplyEnabled: z.boolean(),
+  greeting: z.string(),
+  embedToken: z.string().nullable(),
+  canManage: z.boolean(),
+}).strict();
+export type SupportChannels = z.infer<typeof SupportChannelsSchema>;
+
+export async function fetchSupportChannels(signal?: AbortSignal): Promise<SupportChannels> {
+  return get("/api/support/channels", SupportChannelsSchema, signal);
+}
+
+const ChannelsPatchSchema = z
+  .object({
+    autoReplyEnabled: z.boolean().optional(),
+    greeting: z.string().min(1).max(300).optional(),
+    regenerateToken: z.boolean().optional(),
+  })
+  .strict()
+  .refine((patch) => patch.autoReplyEnabled !== undefined || patch.greeting !== undefined || patch.regenerateToken === true, {
+    message: "A channel change must say what it changes.",
+  });
+
+export async function updateSupportChannels(
+  patch: { autoReplyEnabled?: boolean; greeting?: string; regenerateToken?: true },
+  signal?: AbortSignal,
+): Promise<SupportChannels> {
+  const parsedPatch = ChannelsPatchSchema.safeParse(patch);
+  if (!parsedPatch.success) throw new SupportApiError(0, "The channel change is missing what it should update.");
+  const { response, body } = await request("/api/support/channels", { method: "POST", body: JSON.stringify(parsedPatch.data) }, signal);
+  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
+  const parsed = SupportChannelsSchema.safeParse(body);
+  if (!parsed.success) throw new SupportApiError(response.status, "The support service returned unexpected channel settings.");
+  return parsed.data;
+}
+
+/** Shared team read. The envelope carries roles and a catalog alongside members. */
+const TeamMemberSchema = z.object({ userId: z.string().min(1), name: z.string().nullable(), email: z.string() }).passthrough();
+export type SupportTeamMember = z.infer<typeof TeamMemberSchema>;
+
+export async function fetchSupportTeamMembers(signal?: AbortSignal): Promise<SupportTeamMember[]> {
+  const result = await get("/api/team", z.object({ members: z.array(TeamMemberSchema) }), signal);
+  return result.members;
+}
+
+/** Shared customer read. Rows carry CRM fields beyond the three the desk needs. */
+const CustomerOptionSchema = z.object({ id: uuid, name: z.string(), email: z.string().nullable().optional() }).passthrough();
+export type SupportCustomerOption = z.infer<typeof CustomerOptionSchema>;
+
+export async function fetchSupportCustomerOptions(signal?: AbortSignal): Promise<SupportCustomerOption[]> {
+  const result = await get("/api/customers", z.object({ customers: z.array(CustomerOptionSchema) }), signal);
+  return result.customers;
+}
+
+/* ── governed writes ────────────────────────────────────────────────────── */
+
+const CreateConversationInputSchema = z.object({ action: z.literal("create"), customerId: uuid, subject: z.string().min(1).max(200) }).strict();
+const PostMessageInputSchema = z.object({
+  action: z.literal("message"),
+  conversationId: uuid,
+  body: z.string().min(1).max(4000),
+  from: z.enum(["customer", "staff"]).default("staff"),
+}).strict();
+const SendDraftInputSchema = z.object({ action: z.literal("send"), conversationId: uuid, body: z.string().min(1).max(4000) }).strict();
+const EscalateInputSchema = z.object({ action: z.literal("escalate"), conversationId: uuid, reason: z.string().min(3).max(4000) }).strict();
+const ResolveInputSchema = z.object({ action: z.literal("resolve"), conversationId: uuid }).strict();
+const ReopenInputSchema = z.object({ action: z.literal("reopen"), conversationId: uuid }).strict();
+const UpdateTicketInputSchema = z.object({
+  action: z.literal("updateTicket"),
+  conversationId: uuid,
+  priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+  category: z.string().max(40).optional(),
+  assigneeUserId: uuid.optional(),
+  slaDueAt: z.string().datetime().optional(),
+}).strict();
+const SuggestCategoryInputSchema = z.object({ action: z.literal("suggestCategory"), text: z.string().min(1).max(2000) }).strict();
+const CreateCannedResponseInputSchema = z.object({
+  action: z.literal("createCannedResponse"),
+  shortcut: z.string().min(1).max(40),
+  title: z.string().min(1).max(120),
+  body: z.string().min(1).max(4000),
+}).strict();
+const CreateKbArticleInputSchema = z.object({
+  action: z.literal("createKbArticle"),
+  title: z.string().min(1).max(200),
+  body: z.string().min(1).max(20000),
+  category: z.string().max(40).optional(),
+  isPublic: z.boolean().optional(),
+}).strict();
+
+export const SupportWriteActionSchema = z.discriminatedUnion("action", [
+  CreateConversationInputSchema,
+  PostMessageInputSchema,
+  SendDraftInputSchema,
+  EscalateInputSchema,
+  ResolveInputSchema,
+  ReopenInputSchema,
+  UpdateTicketInputSchema,
+  SuggestCategoryInputSchema,
+  CreateCannedResponseInputSchema,
+  CreateKbArticleInputSchema,
+]);
+export type SupportWriteAction = z.infer<typeof SupportWriteActionSchema>;
+
+const SupportActionOutputSchemas = {
+  create: z.object({ conversationId: z.string().min(1) }).strict(),
+  message: z.object({ messageId: z.string().min(1), senderType: z.string() }).strict(),
+  send: z.object({ messageId: z.string().min(1), senderType: z.string() }).strict(),
+  escalate: z.object({ status: z.literal("escalated") }).strict(),
+  resolve: z.object({ status: z.literal("resolved") }).strict(),
+  reopen: z.object({ status: z.literal("open") }).strict(),
+  updateTicket: z.object({ updated: z.literal(true) }).strict(),
+  suggestCategory: z.object({ category: z.string(), draft: z.literal(true) }).strict(),
+  createCannedResponse: z.object({ cannedResponseId: z.string().min(1) }).strict(),
+  createKbArticle: z.object({ articleId: z.string().min(1) }).strict(),
+} as const;
+
+export type SupportActionOutput<Action extends SupportWriteAction> = z.infer<typeof SupportActionOutputSchemas[Action["action"]]>;
+
+export type SupportActionOutcome<Output> =
+  | { kind: "completed"; data: Output }
+  | { kind: "pending"; reason: string };
+
+const SuccessEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+// The gated-write envelope, in both shapes the legacy routes emit:
+// { ok: false, pendingApproval: true, reason } and { error, pendingApproval: true }.
+// One of the three copy fields is required so a bare flag cannot masquerade as a gate.
+const PendingEnvelopeSchema = z
+  .object({
+    ok: z.literal(false).optional(),
+    pendingApproval: z.literal(true),
+    reason: z.string().optional(),
+    error: z.string().optional(),
+    hint: z.string().optional(),
+  })
+  .strict()
+  .refine((pending) => Boolean(pending.reason ?? pending.error ?? pending.hint), {
+    message: "An approval-pending answer must say why it is waiting.",
+  });
+
+const DEFAULT_PENDING_REASON = "This action is waiting for approval in the Approvals inbox.";
+
+function pendingOutcome(body: unknown, fallback: string): SupportActionOutcome<never> {
+  const pending = PendingEnvelopeSchema.safeParse(body);
+  if (!pending.success) throw new SupportApiError(202, "The support service returned an unexpected approval response.");
+  return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? pending.data.hint ?? fallback };
+}
+
+/**
+ * `intentId` is passed only where the legacy page sent one (the library
+ * writers and the quick customer create). Thread actions are submitted
+ * without one so a retried message stays a distinct intent, matching the
+ * oracle rather than silently reconciling two different replies.
+ */
+export async function submitSupportAction<Action extends SupportWriteAction>(
+  action: Action,
+  intentId?: string,
+  signal?: AbortSignal,
+): Promise<SupportActionOutcome<SupportActionOutput<Action>>> {
+  const parsedAction = SupportWriteActionSchema.safeParse(action);
+  if (!parsedAction.success) throw new SupportApiError(0, "The support action contains invalid details.");
+  if (intentId !== undefined && !intentId.trim()) throw new SupportApiError(0, "The support action needs an intent identity. Try again.");
+
+  const { response, body } = await request(
+    "/api/support",
+    { method: "POST", body: JSON.stringify(intentId ? { ...parsedAction.data, intentId } : parsedAction.data) },
+    signal,
+  );
+  if (response.status === 202) return pendingOutcome(body, DEFAULT_PENDING_REASON);
+  // A route that flags the gate without the 202 status is still a gate, not a failure.
+  if (PendingEnvelopeSchema.safeParse(body).success) return pendingOutcome(body, DEFAULT_PENDING_REASON);
+  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
+
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new SupportApiError(response.status, "The support service returned an unexpected action response.");
+  const output = SupportActionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
+  if (!output.success) throw new SupportApiError(response.status, "The support service returned an unexpected action result.");
+  return { kind: "completed", data: output.data as SupportActionOutput<Action> };
+}
+
+const CustomerCreateSchema = z.object({
+  action: z.literal("create"),
+  name: z.string().min(1).max(120),
+  email: z.string().email().optional(),
+}).strict();
+const CustomerCreateOutputSchema = z.object({ customerId: uuid, duplicateWarning: z.string().nullable() }).strict();
+
+export type SupportCustomerCreated = z.infer<typeof CustomerCreateOutputSchema>;
+
+export async function createSupportCustomer(
+  input: { name: string; email?: string },
+  intentId: string = crypto.randomUUID(),
+  signal?: AbortSignal,
+): Promise<SupportActionOutcome<SupportCustomerCreated>> {
+  const parsedInput = CustomerCreateSchema.safeParse({ action: "create", ...input });
+  if (!parsedInput.success) throw new SupportApiError(0, "A customer name is required.");
+
+  const { response, body } = await request("/api/customers", { method: "POST", body: JSON.stringify({ ...parsedInput.data, intentId }) }, signal);
+  if (response.status === 202) return pendingOutcome(body, "Creating this customer is waiting for approval in the Approvals inbox.");
+  if (PendingEnvelopeSchema.safeParse(body).success) return pendingOutcome(body, "Creating this customer is waiting for approval in the Approvals inbox.");
+  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  const output = CustomerCreateOutputSchema.safeParse(envelope.success ? envelope.data.data : body);
+  if (!output.success) throw new SupportApiError(response.status, "The customer service returned an unexpected creation result.");
+  return { kind: "completed", data: output.data };
+}
+
+/**
+ * Drafting is read-class: the model reads the thread, and the reply only
+ * reaches the customer when a human releases it through the send action.
+ */
+const SupportDraftSchema = z.object({
+  draft: z.string(),
+  sessionId: z.string().optional(),
+  steps: z.number().int().optional(),
+}).strict();
+export type SupportDraft = z.infer<typeof SupportDraftSchema>;
+
+export async function fetchSupportDraft(conversationId: string, signal?: AbortSignal): Promise<SupportDraft> {
+  if (!uuid.safeParse(conversationId).success) throw new SupportApiError(0, "Choose a conversation before drafting a reply.");
+  const { response, body } = await request("/api/support", { method: "POST", body: JSON.stringify({ action: "draft", conversationId }) }, signal);
+  if (response.status === 202 || PendingEnvelopeSchema.safeParse(body).success) {
+    throw new SupportApiError(response.status, "Drafting is waiting for approval in the Approvals inbox.");
+  }
+  if (!response.ok) throw new SupportApiError(response.status, messageFor(response.status, body));
+  const parsed = SupportDraftSchema.safeParse(body);
+  if (!parsed.success) throw new SupportApiError(response.status, "The support service returned an unexpected draft.");
+  return parsed.data;
+}

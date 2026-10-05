@@ -56,6 +56,9 @@ type approvalRecord struct {
 	CapabilityID string
 	Payload      json.RawMessage
 	Status       string
+	IntentID     string
+	InputHash    string
+	Rationale    string
 	ExpiresAt    *time.Time
 }
 
@@ -94,9 +97,10 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 		var row approvalRecord
 		var expiresAt *time.Time
 		err := tx.QueryRow(ctx, `
-			SELECT id::text, org_id::text, capability_id, payload, status, expires_at
+			SELECT id::text, org_id::text, capability_id, payload, status, expires_at,
+			       COALESCE(intent_id, ''), COALESCE(input_hash, ''), COALESCE(rationale, '')
 			FROM approvals WHERE id = $1::uuid AND org_id = $2::uuid`, input.ApprovalID, claims.OrganizationID).
-			Scan(&row.ID, &row.OrgID, &row.CapabilityID, &row.Payload, &row.Status, &expiresAt)
+			Scan(&row.ID, &row.OrgID, &row.CapabilityID, &row.Payload, &row.Status, &expiresAt, &row.IntentID, &row.InputHash, &row.Rationale)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return approvalTransition{result: decisionFailure(404, "not found")}, nil
 		}
@@ -599,6 +603,18 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := canonicalInputHash(parsed)
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
+		case settingsConfigureAiProviderCapabilityID, settingsRestoreAiProviderCapabilityID:
+			parsed, parseErr := parseSettingsInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case harnessApproveCompositionCapabilityID:
+			parsed, parseErr := parseHarnessInput(transition.row.CapabilityID, transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := canonicalInputHash(parsed)
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
 		default:
 			verifiedPayload = false
 		}
@@ -614,7 +630,7 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 	// Go-owned writes execute directly under the approver's human authority,
 	// so the executor records capability.executed without a second approval request.
 	executionClaims := claims
-	executionClaims.IntentID = ""
+	executionClaims.IntentID = transition.row.IntentID
 	var result Result
 	finalizedInExecution := false
 	if finalizingExecutor, ok := d.executor.(ApprovalFinalizingExecutor); ok {
@@ -900,10 +916,18 @@ func permissionForCapability(capabilityID string) (string, bool) {
 		return "iam.read", true
 	case documentsListDocsCapabilityID, documentsListDocVersionsCapabilityID, documentsGetDocVersionCapabilityID:
 		return "documents.read", true
-	case iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
+	case iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID,
+		SCIMTokenCreateCapabilityID, SCIMTokenRevokeCapabilityID:
 		return "iam.admin", true
+	case settingsConfigureAiProviderCapabilityID, settingsRestoreAiProviderCapabilityID:
+		return "iam.admin", true
+	case harnessApproveCompositionCapabilityID:
+		return "harness.approve", true
 	default:
-		return "", false
+		if spec, ok := messagingCapabilitySpecs[capabilityID]; ok {
+			return spec.Permission, true
+		}
+		return documentsPermissionFor(capabilityID)
 	}
 }
 

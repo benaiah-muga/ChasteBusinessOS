@@ -259,7 +259,7 @@ async function main() {
   const { orgId } = await runOnboarding(db, {
     userId: domainUser.id,
     userEmail: email,
-    orgName: "Glow Works Demo",
+    orgName: `Glow Works Demo ${runId.slice(0, 8)}`,
     businessDescription:
       "We design and sell handmade lighting fixtures online and to interior designers. Most orders are 10-50 units. Returning wholesale buyers get a 2% discount.",
   });

@@ -80,7 +80,14 @@ describe("projects module (M11.5)", () => {
   it("move rejects unknown tasks; archive stops new work", async () => {
     await expect(run("projects.moveTask", { taskId: crypto.randomUUID(), status: "done" })).rejects.toThrow(/not found/);
     const project = await run("projects.createProject", { name: "Short-lived" });
+    const task = await run("projects.createTask", { projectId: project.projectId, title: "Keep final state" });
     await run("projects.archiveProject", { projectId: project.projectId });
     await expect(run("projects.createTask", { projectId: project.projectId, title: "Too late" })).rejects.toThrow(/not active/);
+    await expect(run("projects.moveTask", { taskId: task.taskId, status: "done" })).rejects.toThrow(/not active/);
+    await expect(run("projects.assignTask", { taskId: task.taskId, assigneeUserId: userId })).rejects.toThrow(/not active/);
+
+    const board = await run("projects.listBoard", { projectId: project.projectId });
+    const todo = board.columns.find((column: { status: string }) => column.status === "todo");
+    expect(todo?.tasks).toMatchObject([{ id: task.taskId, assigneeUserId: null }]);
   });
 });

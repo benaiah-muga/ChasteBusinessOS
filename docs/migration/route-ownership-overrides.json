@@ -1,4 +1,72 @@
 {
   "schemaVersion": 1,
-  "overrides": []
+  "overrides": [
+    {
+      "kind": "page",
+      "path": "/projects",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/products",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
+      "path": "/analytics",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/analytics",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/analytics",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/tokens",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/tokens",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/tokens",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/notifications",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/notifications",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    }
+  ]
 }

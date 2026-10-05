@@ -6,6 +6,8 @@
   background: #111416;
 }
 
+.login-recovery-page { grid-template-columns: 1fr; }
+
 .login-story {
   position: relative;
   display: flex;

@@ -3,6 +3,7 @@
  * Run: pnpm demo:m13 [shifts|marketing|all]
  */
 import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { approvals, customers, getDb, invoices, stockMovements, users } from "@chaste/db";
 import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
 import { runOnboarding } from "../apps/web/src/server/onboarding";
@@ -23,7 +24,8 @@ function data(run: any) {
 async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string) {
   const [owner] = await db.insert(users).values({ email: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`, name: "Owner" }).returning();
   if (!owner) throw new Error("owner insert failed");
-  const { orgId } = await runOnboarding(db, { userId: owner.id, userEmail: owner.email, orgName, businessDescription: "A register-front business that takes returns gracefully and markets honestly." });
+  const runName = `${orgName} ${randomUUID().slice(0, 8)}`;
+  const { orgId } = await runOnboarding(db, { userId: owner.id, userEmail: owner.email, orgName: runName, businessDescription: "A register-front business that takes returns gracefully and markets honestly." });
   return {
     orgId,
     ownerCtx: { actor: { type: "human" as const, id: owner.id, orgId, permissions: new Set(["*"]) }, now: new Date(), services: {} },

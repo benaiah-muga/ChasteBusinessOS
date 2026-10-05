@@ -1,9 +1,10 @@
 /**
- * M2-completion verification: vendor bill → AP posting → gated payment →
+ * M4 verification: vendor bill → AP posting → gated payment →
  * approval → P&L and balance sheet prove out.
  *
- * Run: pnpm demo:m3
+ * Run: pnpm demo:m4
  */
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { approvals, getDb, users } from "@chaste/db";
 import { formatMinor } from "@chaste/erp-core";
@@ -15,12 +16,13 @@ async function main() {
   const registry = buildRegistry(db);
   const executor = buildExecutor(db, registry);
 
-  const [user] = await db.insert(users).values({ email: `m3-${Date.now()}@demo.test`, name: "M3 Founder" }).returning();
+  const runId = randomUUID();
+  const [user] = await db.insert(users).values({ email: `m4-${runId}@demo.test`, name: "M4 Founder" }).returning();
   if (!user) throw new Error("user insert failed");
   const { orgId } = await runOnboarding(db, {
     userId: user.id,
     userEmail: user.email,
-    orgName: "M3 Demo Co",
+    orgName: `M4 Demo Co ${runId.slice(0, 8)}`,
     businessDescription: "Coffee roastery selling beans online.",
   });
 

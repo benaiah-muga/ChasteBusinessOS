@@ -162,7 +162,7 @@ export default function ProjectsPage() {
   }
 
   async function moveTask(task: BoardTask, fromStatus: string, status: string): Promise<void> {
-    if (status === fromStatus || !selectedId) return;
+    if (selected?.status !== "active" || status === fromStatus || !selectedId) return;
     const target = columns.find((c) => c.status === status);
     const position = target && target.tasks.length > 0 ? Math.max(...target.tasks.map((t) => t.position)) + 1 : 0;
     const ok = await post({ action: "moveTask", taskId: task.id, status, position }, `Move “${task.title}” to ${status}`);
@@ -175,7 +175,7 @@ export default function ProjectsPage() {
   }
 
   function dropTask(status: string): void {
-    if (!draggingTaskId || busy) return;
+    if (selected?.status !== "active" || !draggingTaskId || busy) return;
     const source = columns.flatMap((column) => column.tasks).find((task) => task.id === draggingTaskId);
     const fromStatus = columns.find((column) => column.tasks.some((task) => task.id === draggingTaskId))?.status;
     if (source && fromStatus) void moveTask(source, fromStatus, status);
@@ -183,7 +183,7 @@ export default function ProjectsPage() {
   }
 
   async function assignTask(task: BoardTask, assigneeUserId: string): Promise<void> {
-    if (!selectedId) return;
+    if (selected?.status !== "active" || !selectedId) return;
     const who = members.find((m) => m.userId === assigneeUserId)?.name ?? (assigneeUserId ? "a member" : "nobody");
     const ok = await post(
       { action: "assignTask", taskId: task.id, assigneeUserId: assigneeUserId || undefined },
@@ -393,7 +393,7 @@ export default function ProjectsPage() {
                       aria-label={`${col.status} task column`}
                       onDragOver={(e) => {
                         e.preventDefault();
-                        if (!busy) setOverStatus(col.status);
+                        if (!busy && selected.status === "active") setOverStatus(col.status);
                       }}
                       onDragLeave={(e) => {
                         if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -416,7 +416,7 @@ export default function ProjectsPage() {
                         {col.tasks.map((t) => (
                           <li
                             key={t.id}
-                            draggable={!busy}
+                            draggable={!busy && selected.status === "active"}
                             onDragStart={(e) => {
                               e.dataTransfer.effectAllowed = "move";
                               e.dataTransfer.setData("text/plain", t.id);
@@ -435,7 +435,7 @@ export default function ProjectsPage() {
                               </p>
                               <button
                                 type="button"
-                                draggable={!busy}
+                                draggable={!busy && selected.status === "active"}
                                 aria-label={`Drag ${t.title} to another status`}
                                 className="shrink-0 cursor-grab text-[10px] font-semibold tracking-wide text-stone-400 uppercase hover:text-gold-700 active:cursor-grabbing"
                                 title="Drag to another status"
@@ -463,7 +463,7 @@ export default function ProjectsPage() {
                                 id={`move-${t.id}`}
                                 className="select flex-1 text-xs"
                                 value={col.status}
-                                disabled={busy}
+                                disabled={busy || selected.status !== "active"}
                                 onChange={(e) => void moveTask(t, col.status, e.target.value)}
                               >
                                 <option value="todo">todo</option>
@@ -477,7 +477,7 @@ export default function ProjectsPage() {
                                 id={`assign-${t.id}`}
                                 className="select flex-1 text-xs"
                                 value={t.assigneeUserId ?? ""}
-                                disabled={busy}
+                                disabled={busy || selected.status !== "active"}
                                 onChange={(e) => void assignTask(t, e.target.value)}
                               >
                                 <option value="">Unassigned</option>

@@ -16,6 +16,19 @@ const ModuleSwitchboardSchema = z.object({
   enabledModules: z.array(z.string().min(1)),
 });
 const ErrorSchema = z.object({ error: z.string().max(240) });
+const ConfirmOrderResponseSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({
+    confirmed: z.literal(true),
+    backordered: z.boolean(),
+    reservedThousandths: z.number().int().safe(),
+  }).strict(),
+}).strict();
+const PendingConfirmOrderSchema = z.object({
+  ok: z.literal(false),
+  pendingApproval: z.literal(true),
+  reason: z.string().max(240).optional(),
+}).strict();
 
 export type SalesOrder = z.infer<typeof OrderSchema>;
 
@@ -82,4 +95,54 @@ export async function fetchSalesOrders(signal?: AbortSignal): Promise<SalesOrder
   const parsed = SalesOrdersSchema.safeParse(body);
   if (!parsed.success) throw new SalesApiError(response.status, "The sales service returned data in an unexpected format.");
   return parsed.data.orders;
+}
+
+export type ConfirmSalesOrderResult =
+  | { kind: "confirmed"; backordered: boolean }
+  | { kind: "pending"; reason: string };
+
+export async function confirmSalesOrder(orderId: string, intentId: string, allowBackorder = false): Promise<ConfirmSalesOrderResult> {
+  const parsedOrderId = z.string().uuid().safeParse(orderId);
+  const parsedIntentId = z.string().uuid().safeParse(intentId);
+  if (!parsedOrderId.success || !parsedIntentId.success) {
+    throw new SalesApiError(0, "The order confirmation request is invalid. Reload and try again.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch("/api/capabilities/execute", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        capabilityId: "sales.confirmOrder",
+        input: { orderId: parsedOrderId.data, ...(allowBackorder ? { allowBackorder: true } : {}) },
+        intentId: parsedIntentId.data,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    throw new SalesApiError(0, "The confirmation result is unknown. Check the order status before trying again.");
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+  const pending = PendingConfirmOrderSchema.safeParse(body);
+  if (response.status === 202 && pending.success) {
+    return { kind: "pending", reason: pending.data.reason ?? "Order confirmation is waiting for approval." };
+  }
+  if (response.ok) {
+    const confirmed = ConfirmOrderResponseSchema.safeParse(body);
+    if (!confirmed.success) throw new SalesApiError(response.status, "The sales service returned an unexpected confirmation response.");
+    return { kind: "confirmed", backordered: confirmed.data.data.backordered };
+  }
+
+  const error = z.object({ error: z.string().max(240) }).safeParse(body);
+  if (response.status === 401) throw new SalesApiError(401, "Your session has ended. Sign in again to continue.");
+  if (response.status === 403 || response.status === 422) {
+    throw new SalesApiError(response.status, error.success ? error.data.error : "You do not have permission to confirm this order.");
+  }
+  throw new SalesApiError(response.status, response.status >= 500
+    ? "The sales service is unavailable. Check the order status before trying again."
+    : error.success ? error.data.error : "The order confirmation could not be completed.");
 }

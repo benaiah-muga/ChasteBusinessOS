@@ -15,6 +15,7 @@ type ViewState =
 
 type ActiveOrganizationProps = {
   onChanged?: (orgId: string) => void;
+  onActiveOrgIdChange?: (orgId: string | null) => void;
   onCurrencyChanged?: (currencyCode: string | null) => void;
   onNoOrganizations?: () => void;
 };
@@ -27,7 +28,7 @@ function messageFor(error: unknown): string {
   return "Could not reach the organization service. Try again.";
 }
 
-export function ActiveOrganization({ onChanged, onCurrencyChanged, onNoOrganizations }: ActiveOrganizationProps) {
+export function ActiveOrganization({ onChanged, onActiveOrgIdChange, onCurrencyChanged, onNoOrganizations }: ActiveOrganizationProps) {
   const [state, setState] = useState<ViewState>({ status: "loading" });
   const [pending, setPending] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
@@ -38,6 +39,7 @@ export function ActiveOrganization({ onChanged, onCurrencyChanged, onNoOrganizat
       const data = await fetchOrganizations(signal);
       if (signal?.aborted) return;
       if (data.orgs.length === 0) onNoOrganizations?.();
+      onActiveOrgIdChange?.(data.activeOrgId);
       onCurrencyChanged?.(data.orgs.find((org) => org.id === data.activeOrgId)?.baseCurrency ?? null);
       setState(data.orgs.length === 0 ? { status: "empty" } : { status: "ready", data });
     } catch (error) {
@@ -48,7 +50,7 @@ export function ActiveOrganization({ onChanged, onCurrencyChanged, onNoOrganizat
       }
       setState({ status: "failed", message: messageFor(error) });
     }
-  }, [onCurrencyChanged, onNoOrganizations]);
+  }, [onActiveOrgIdChange, onCurrencyChanged, onNoOrganizations]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,6 +68,7 @@ export function ActiveOrganization({ onChanged, onCurrencyChanged, onNoOrganizat
         setState({ status: "ready", data: { ...state.data, activeOrgId: orgId } });
       }
       onCurrencyChanged?.(selectedOrg?.baseCurrency ?? null);
+      onActiveOrgIdChange?.(orgId);
       if (onChanged) onChanged(orgId);
       else window.location.assign("/");
     } catch (error) {

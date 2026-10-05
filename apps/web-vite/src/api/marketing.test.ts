@@ -1,0 +1,233 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  fetchMarketingEnabled,
+  fetchMarketingSnapshot,
+  MarketingApiError,
+  submitMarketingAction,
+} from "./marketing";
+
+const segmentId = "0f3d0f52-4a51-4c6a-9a52-6f7a2e5c9b11";
+const campaignId = "b6f4b0e2-2f2c-4a55-9d2e-8a2a2b7c4f10";
+
+const campaign = {
+  id: campaignId,
+  segmentId,
+  name: "Spring renewal",
+  subject: "Your renewal",
+  body: "Here is what changed.",
+  queuedAt: "2026-09-20T09:30:00.000Z",
+  createdAt: "2026-09-19T09:30:00.000Z",
+};
+
+function modules(enabled = true) {
+  return Response.json({
+    catalog: [{ id: "marketing", label: "Marketing", description: "Segments and campaigns", href: "/marketing" }],
+    enabledModules: enabled ? ["marketing"] : [],
+    usingDefaults: false,
+  });
+}
+
+function snapshot() {
+  return {
+    segments: [{ id: segmentId, name: "Big spenders", minSpendMinor: 250_000, createdAt: "2026-09-18T08:00:00.000Z" }],
+    campaigns: [campaign],
+    sendCounts: [{ campaignId, count: 1 }],
+    recentSends: [{
+      id: "5c3f7c5c-9a2a-4d3e-8c0b-1f2a3b4c5d6e",
+      campaignId,
+      customerName: "Northwind",
+      customerEmail: "contact@northwind.test",
+      queuedAt: "2026-09-20T09:30:00.000Z",
+      status: "sent",
+      sentAt: "2026-09-20T09:31:00.000Z",
+    }],
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe("marketing reads", () => {
+  it("turns a stalled snapshot read into a recoverable API error", async () => {
+    const timeoutController = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutController.signal);
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Request timed out", "TimeoutError")), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = fetchMarketingSnapshot();
+    expect(fetchMock).toHaveBeenCalledWith("/api/marketing", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    timeoutController.abort();
+    await expect(request).rejects.toBeInstanceOf(MarketingApiError);
+    await expect(request).rejects.toMatchObject({ status: 0, message: expect.stringContaining("marketing service") });
+  });
+
+  it("refuses a snapshot that is missing the honest send log", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const body = snapshot() as Record<string, unknown>;
+      delete body.recentSends;
+      return Response.json(body);
+    }));
+
+    await expect(fetchMarketingSnapshot()).rejects.toMatchObject({
+      name: "MarketingApiError",
+      message: "The marketing service returned data in an unexpected format.",
+    });
+  });
+
+  it("keeps money in integer minor units and reports the module state", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (String(input) === "/api/modules" ? modules() : Response.json(snapshot())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMarketingEnabled()).resolves.toBe(true);
+    const loaded = await fetchMarketingSnapshot();
+    expect(loaded.segments[0]?.minSpendMinor).toBe(250_000);
+    expect(Number.isInteger(loaded.segments[0]?.minSpendMinor)).toBe(true);
+  });
+
+  it("does not read campaign data while marketing is disabled", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => (String(input) === "/api/modules" ? modules(false) : Response.json(snapshot())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMarketingEnabled()).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("marketing governed writes", () => {
+  it("sends an idempotent intent and returns the completed output", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(payload).toMatchObject({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 });
+      expect(payload.intentId).toEqual(expect.any(String));
+      return Response.json({ ok: true, data: { segmentId } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 });
+
+    expect(outcome).toEqual({ kind: "completed", data: { segmentId } });
+    expect(fetchMock).toHaveBeenCalledWith("/api/marketing", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
+  });
+
+  it("creates a segment through the authenticated Go capability route when opted in", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(payload).toMatchObject({
+        capabilityId: "marketing.createSegment",
+        input: { name: "Big spenders", minSpendMinor: 250_000 },
+        intentId: expect.any(String),
+      });
+      return Response.json({ ok: true, data: { segmentId } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
+
+    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }))
+      .resolves.toEqual({ kind: "completed", data: { segmentId } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    }));
+  });
+
+  it("preserves Go approval-pending behavior for segment creation", async () => {
+    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(
+      {
+        ok: false,
+        pendingApproval: true,
+        reason: "Marketing writes need approval.",
+        approvalId: "dcfdc40d-b2bd-4a2d-b0c0-ae5401a792e1",
+      },
+      { status: 202 },
+    )));
+
+    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }))
+      .resolves.toEqual({ kind: "pending", reason: "Marketing writes need approval." });
+  });
+
+  it("falls back to the legacy marketing action only when the Go route is absent", async () => {
+    const intentId = "marketing-segment-intent";
+    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { segmentId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }, intentId))
+      .resolves.toEqual({ kind: "completed", data: { segmentId } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/marketing");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ intentId });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      action: "createSegment",
+      name: "Big spenders",
+      minSpendMinor: 250_000,
+      intentId,
+    });
+  });
+
+  it("keeps legacy marketing actions as the default when the Go slice flag is off", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { segmentId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "createSegment", name: "Big spenders", minSpendMinor: 250_000 }))
+      .resolves.toEqual({ kind: "completed", data: { segmentId } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/marketing", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("reports an approval-pending write as pending, never as a completed send", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "marketing.write needs approval" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const outcome = await submitMarketingAction({ action: "sendCampaign", campaignId });
+
+    expect(outcome).toEqual({ kind: "pending", reason: "marketing.write needs approval" });
+  });
+
+  it("refuses to read an approval response that is missing its envelope", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
+
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId })).rejects.toMatchObject({
+      name: "MarketingApiError",
+      status: 202,
+      message: "The marketing service returned an unexpected approval response.",
+    });
+  });
+
+  it("surfaces the capability refusal instead of claiming the campaign went out", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, error: "campaign already sent" }, { status: 422 })));
+
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId })).rejects.toMatchObject({
+      status: 422,
+      message: "campaign already sent",
+    });
+  });
+
+  it("does not report success when the action result violates its contract", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { recipients: "three" } })));
+
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId })).rejects.toMatchObject({
+      message: "The marketing service returned an unexpected action result.",
+    });
+  });
+
+  it("refuses an action that does not validate before reaching the network", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId: "not-a-uuid" })).rejects.toMatchObject({
+      name: "MarketingApiError",
+      message: "The marketing action contains invalid details.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

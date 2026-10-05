@@ -284,6 +284,36 @@ describe("Projects route migration adapter", () => {
     expect(mocks.readGoProjects).not.toHaveBeenCalled();
   });
 
+  it("uses the first projectId and ignores unrelated query params like URLSearchParams.get", async () => {
+    const board = { columns: [{ status: "todo", tasks: [] }, { status: "doing", tasks: [] }, { status: "done", tasks: [] }] };
+    mocks.execute.mockResolvedValue({ ok: true, data: board });
+
+    const response = await GET(new Request(`http://localhost/api/projects?source=page&projectId=${projectId}&projectId=${taskId}`));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(board);
+    expect(mocks.execute).toHaveBeenCalledWith("projects.listBoard", { ...actionContext, intentId: undefined }, { projectId });
+  });
+
+  it("rejects offset due dates at the legacy route validation boundary", async () => {
+    const response = await POST(request({ action: "createProject", name: "Offset date", dueAt: "2026-10-05T12:30:00+00:00" }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "invalid body" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+  });
+
+  it("accepts the legacy minute-precision UTC due date", async () => {
+    const response = await POST(request({ action: "createProject", name: "Minute date", dueAt: "2026-10-05T12:30Z" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.execute).toHaveBeenCalledWith("projects.createProject", { ...actionContext, intentId: undefined }, {
+      name: "Minute date",
+      dueAt: "2026-10-05T12:30Z",
+    });
+  });
+
   it("uses the signed Go reader for collection and board GETs when enabled", async () => {
     vi.stubEnv("GO_PROJECTS_READ", "1");
     const projects = { projects: [{ id: projectId, name: "Warehouse refresh", status: "active", dueAt: "2026-10-01T00:00:00.000Z", createdAt: "2026-09-27T10:00:00.000Z" }] };

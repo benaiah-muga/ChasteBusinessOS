@@ -6,6 +6,20 @@ It is a migration baseline, not a change in route or runtime ownership. The
 repository's `graft` CLI was unavailable (`graft: command not found`), so these
 entries use targeted source reads and cite the exact source spans.
 
+## Public support coding-agent delegation
+
+The public widget uses the organization workspace provider unless an organization
+admin enables the personal OpenCode delegation in AI settings. The governed
+setting stores `organizations.settings.ai.codingAgentUserId` as the admin's own
+user ID, after verifying that their connected OpenCode account is the default.
+That value selects the owner of a personal connected OpenCode account for anonymous widget
+replies. Go resolves the connected default by both organization and user. A
+missing or unusable connection fails the reply and does not fall back to the
+workspace key. The Go server runs only the scoped order-status and published
+knowledge reads itself, supplies their JSON results as quoted data, and keeps
+OpenCode native tools disabled. This explicit delegation is recorded in
+[ADR 0081](../adr/0081-public-support-coding-agent-delegation.md).
+
 ## AI model providers and workspace credentials
 
 **Current lifecycle.** With no `MODEL_PROVIDER`, the process-level default is

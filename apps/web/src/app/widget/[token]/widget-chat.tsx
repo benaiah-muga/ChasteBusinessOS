@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, use, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
 interface Msg {
   id: string;
@@ -20,16 +20,24 @@ const SENDER_STYLE: Record<string, CSSProperties> = {
  * Standalone visitor chat for the embeddable widget. State lives in
  * localStorage so a page navigation on the host site keeps the thread.
  */
-export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
-  const { token } = use(params);
-  const [conversationId, setId] = useState<string | null>(null);
-  const [secret, setSecret] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Msg[]>([]);
+export function WidgetChat({ token }: { token: string }) {
+  const [thread, setThread] = useState<{ token: string; conversationId: string; secret: string } | null>(null);
+  const activeThread = thread?.token === token ? thread : null;
+  const conversationId = activeThread?.conversationId ?? null;
+  const secret = activeThread?.secret ?? null;
+  const [threadView, setThreadView] = useState<{
+    token: string;
+    conversationId: string;
+    status: string;
+    messages: Msg[];
+  } | null>(null);
+  const activeView = threadView?.token === token && threadView.conversationId === conversationId ? threadView : null;
+  const messages = activeView?.messages ?? [];
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("open");
+  const status = activeView?.status ?? "open";
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,8 +46,7 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
       if (saved) {
         const s = JSON.parse(saved) as { conversationId?: string; secret?: string };
         if (s.conversationId && s.secret) {
-          setId(s.conversationId);
-          setSecret(s.secret);
+          setThread({ token, conversationId: s.conversationId, secret: s.secret });
         }
       }
     } catch {
@@ -52,13 +59,17 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
     let stop = false;
     const poll = async () => {
       try {
-        const res = await fetch(
-          `/api/support/public?token=${encodeURIComponent(token)}&conversationId=${conversationId}&secret=${secret}`,
-        );
-        if (res.ok && !stop) {
+        const res = await fetch("/api/support/public", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
+          body: JSON.stringify({ action: "poll", token, conversationId, secret }),
+        });
+        if (res.ok) {
           const data = (await res.json()) as { status: string; messages: Msg[] };
-          setStatus(data.status);
-          setMessages(data.messages);
+          if (!stop) setThreadView({ token, conversationId, status: data.status, messages: data.messages });
         }
       } catch {
         /* transient network hiccup; next tick retries */
@@ -73,7 +84,9 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
   }, [conversationId, secret, token]);
 
   useEffect(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+    if (typeof scroller.current?.scrollTo === "function") {
+      scroller.current.scrollTo({ top: scroller.current.scrollHeight });
+    }
   }, [messages.length]);
 
   const start = useCallback(async () => {
@@ -86,8 +99,8 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
       });
       if (res.ok) {
         const data = (await res.json()) as { conversationId: string; secret: string };
-        setId(data.conversationId);
-        setSecret(data.secret);
+        setThread({ token, conversationId: data.conversationId, secret: data.secret });
+        setThreadView({ token, conversationId: data.conversationId, status: "open", messages: [] });
         // The thread secret lives only in this browser; the server keeps its
         // hash. Losing it means starting a new conversation, never reading
         // someone else's.
@@ -111,13 +124,17 @@ export function WidgetChat({ params }: { params: Promise<{ token: string }> }) {
         body: JSON.stringify({ action: "message", token, conversationId, secret, body: text.trim() }),
       });
       setText("");
-      const res = await fetch(
-        `/api/support/public?token=${encodeURIComponent(token)}&conversationId=${conversationId}&secret=${secret}`,
-      );
+      const res = await fetch("/api/support/public", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        body: JSON.stringify({ action: "poll", token, conversationId, secret }),
+      });
       if (res.ok) {
         const data = (await res.json()) as { status: string; messages: Msg[] };
-        setStatus(data.status);
-        setMessages(data.messages);
+        setThreadView({ token, conversationId, status: data.status, messages: data.messages });
       }
     } finally {
       setBusy(false);

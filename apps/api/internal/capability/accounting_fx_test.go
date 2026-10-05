@@ -2,6 +2,7 @@ package capability
 
 import (
 	"encoding/json"
+	"math/big"
 	"sort"
 	"strings"
 	"testing"
@@ -253,6 +254,7 @@ func TestAccountingFxUnrealizedExposureNetsCreditsAndScopesByOrg(t *testing.T) {
 	seedAccountingFxInvoice(t, fx, fx.orgID, "EUR", "sent", 200_000, 0, 50_000, &issued, nil, nil, nil)
 	overpaid := int64(300_000)
 	seedAccountingFxInvoice(t, fx, fx.orgID, "EUR", "sent", 100_000, overpaid, 0, &issued, nil, nil, nil)
+	seedAccountingFxInvoice(t, fx, fx.orgID, "GBP", "sent", 100_000, overpaid, 0, &issued, nil, nil, nil)
 	seedAccountingFxInvoice(t, fx, fx.orgID, "EUR", "void", 90_000, 0, 0, &issued, &issued, nil, nil)
 	seedAccountingFxInvoice(t, fx, fx.orgID, "USD", "sent", 70_000, 0, 0, &issued, nil, nil, nil)
 	jpyTotal := int64(10_000)
@@ -275,6 +277,7 @@ func TestAccountingFxUnrealizedExposureNetsCreditsAndScopesByOrg(t *testing.T) {
 	jpyBase := int64(6_667)
 	want := UnrealizedFxExposureOutput{Exposures: []UnrealizedFxExposureRow{
 		{Currency: "EUR", OutstandingForeignMinor: 150_000, LatestRateNum: &eurNum, LatestRateDen: &eurDen, OutstandingBaseMinor: &eurBase},
+		{Currency: "GBP", OutstandingForeignMinor: 0},
 		{Currency: "JPY", OutstandingForeignMinor: 10_000, LatestRateNum: &jpyNum, LatestRateDen: &jpyDen, OutstandingBaseMinor: &jpyBase},
 	}}
 	encoded, err := marshalJS(exposure)
@@ -298,6 +301,16 @@ func TestAccountingFxUnrealizedExposureNetsCreditsAndScopesByOrg(t *testing.T) {
 	if len(foreign.Exposures) != 1 || foreign.Exposures[0].Currency != "EUR" || foreign.Exposures[0].OutstandingForeignMinor != 60_000 ||
 		foreign.Exposures[0].LatestRateNum != nil || foreign.Exposures[0].LatestRateDen != nil || foreign.Exposures[0].OutstandingBaseMinor != nil {
 		t.Fatalf("foreign exposure = %+v, want EUR 60000 with no leaked rates", foreign.Exposures)
+	}
+}
+
+func TestAccountingFxExposureRejectsUnsafeAggregates(t *testing.T) {
+	totals := make(map[string]*big.Int)
+	if err := addFxExposureOutstanding(totals, "EUR", maxSafeInteger); err != nil {
+		t.Fatalf("add first safe exposure: %v", err)
+	}
+	if err := addFxExposureOutstanding(totals, "EUR", 1); err == nil {
+		t.Fatal("FX exposure accepted a currency aggregate above JavaScript's safe-integer range")
 	}
 }
 

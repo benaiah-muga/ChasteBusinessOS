@@ -142,6 +142,7 @@ export default function SalesPage() {
     lines: [{ ...emptyLine }],
   });
   const [quickCustomer, setQuickCustomer] = useState({ open: false, name: "", email: "" });
+  const quickCustomerIntent = useRef({ signature: "", id: crypto.randomUUID() });
   const [acceptTarget, setAcceptTarget] = useState<Quote | null>(null);
 
   const load = useCallback(async () => {
@@ -225,22 +226,67 @@ export default function SalesPage() {
   async function createQuickCustomer(): Promise<void> {
     const name = quickCustomer.name.trim();
     if (!name) return;
+    const email = quickCustomer.email.trim();
+    const signature = JSON.stringify([name, email]);
+    if (quickCustomerIntent.current.signature !== signature) {
+      quickCustomerIntent.current = { signature, id: crypto.randomUUID() };
+    }
     setBusy(true);
     try {
-      const res = await postApi<{ customerId?: string }>("/api/customers", {
+      const res = await postApi<unknown>("/api/customers", {
         action: "create",
         name,
-        email: quickCustomer.email.trim() || undefined,
+        email: email || undefined,
+        intentId: quickCustomerIntent.current.id,
       });
-      if (!res.ok && res.error) {
-        setNotice({ tone: "error", error: res.error });
-      } else {
-        await load();
-        const created = res.data?.customerId;
-        if (created) setQuoteForm((f) => ({ ...f, customerId: created }));
-        setQuickCustomer({ open: false, name: "", email: "" });
-        setNotice({ tone: "success", text: `Customer ${name} added.` });
+      if (!res.ok) {
+        setNotice({ tone: "error", error: res.error ?? { title: "Could not add customer", hint: "Try again in a moment." } });
+        return;
       }
+
+      if (res.status === 202) {
+        const body = res.data;
+        const pendingBody = body && typeof body === "object" ? body as Record<string, unknown> : null;
+        const message = pendingBody
+          ? [pendingBody.reason, pendingBody.error, pendingBody.hint].find((value) => typeof value === "string" && value.trim())
+          : null;
+        const validPending = body && typeof body === "object" && "ok" in body && body.ok === false && "pendingApproval" in body && body.pendingApproval === true && typeof message === "string";
+        if (validPending && typeof message === "string") {
+          setNotice({ tone: "pending", text: message });
+        } else {
+          setNotice({ tone: "error", error: { title: "Customer response was incomplete", hint: "The request returned an unexpected approval response. Retry with the same details." } });
+        }
+        return;
+      }
+
+      const envelope = res.data;
+      const payload = envelope && typeof envelope === "object" && "ok" in envelope && envelope.ok === true && "data" in envelope
+        ? envelope.data
+        : null;
+      const created = payload && typeof payload === "object" && "customerId" in payload
+        ? payload.customerId
+        : null;
+      if (typeof created !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(created)) {
+        await load();
+        setQuickCustomer({ open: false, name: "", email: "" });
+        setNotice({
+          tone: "error",
+          error: {
+            title: "Customer response was incomplete",
+            hint: "The request returned success without a valid customer ID. Refresh the customer list before creating a quote.",
+          },
+        });
+        return;
+      }
+
+      await load();
+      setQuoteForm((f) => ({ ...f, customerId: created }));
+      const duplicateWarning = payload && typeof payload === "object" && "duplicateWarning" in payload && typeof payload.duplicateWarning === "string"
+        ? payload.duplicateWarning
+        : null;
+      setQuickCustomer({ open: false, name: "", email: "" });
+      quickCustomerIntent.current = { signature: "", id: crypto.randomUUID() };
+      setNotice({ tone: "success", text: duplicateWarning ? `Customer ${name} added. ${duplicateWarning}` : `Customer ${name} added.` });
     } finally {
       setBusy(false);
     }

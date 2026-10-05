@@ -10,6 +10,7 @@
  * Run: pnpm demo:m3
  */
 import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { approvals, getDb, users } from "@chaste/db";
 import { formatMinor } from "@chaste/erp-core";
 import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
@@ -30,12 +31,13 @@ async function main() {
   const registry = buildRegistry(db);
   const executor = buildExecutor(db, registry);
 
-  const [user] = await db.insert(users).values({ email: `m3-doc-${Date.now()}@demo.test`, name: "M3 Founder" }).returning();
+  const runId = randomUUID();
+  const [user] = await db.insert(users).values({ email: `m3-doc-${runId}@demo.test`, name: "M3 Founder" }).returning();
   if (!user) throw new Error("user insert failed");
   const { orgId } = await runOnboarding(db, {
     userId: user.id,
     userEmail: user.email,
-    orgName: "M3 Demo Co",
+    orgName: `M3 Demo Co ${runId.slice(0, 8)}`,
     businessDescription: "Coffee roastery selling beans online.",
   });
 

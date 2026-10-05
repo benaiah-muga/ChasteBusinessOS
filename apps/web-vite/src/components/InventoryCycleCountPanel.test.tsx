@@ -25,7 +25,7 @@ afterEach(() => {
 describe("InventoryCycleCountPanel", () => {
   it("creates a location snapshot for selected items and refreshes after success", async () => {
     const onChanged = vi.fn();
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { countId: openCount.id } }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { countId: openCount.id, lineCount: 1 } }));
     vi.stubGlobal("fetch", fetchMock);
     render(<InventoryCycleCountPanel items={items} locations={locations} counts={[]} onChanged={onChanged} />);
 

@@ -145,14 +145,21 @@ resolves the stored workspace AI provider or the environment fallback only
 when the organization has no stored AI config, decrypts the shared AES-GCM
 credential format, creates routine sessions and events, runs a six-step
 OpenAI-compatible tool loop, and dispatches schema-described CRM customer,
+saved customer views, employee roster, leave balance,
 invoice, receivables aging, quotes, customer statement, income statement, trial balance,
-balance sheet, cash flow,
-inventory stock report, stock movement history, supplier statement, AP aging,
+balance sheet, cash flow, budget scenarios,
+inventory stock report, stock movement history, lots, reservations, supplier statement,
+AP aging, purchase-order receipts,
 and support read tools through the Go system capability executor.
-These tools use the existing read-mostly routine permission bundle. A
+These tools use the existing read-mostly routine permission bundle, so a
+routine cannot reach a capability whose permission the legacy bundle withholds
+(for example `sales.read` or `pos.read`). A
 database-backed integration test covers scheduled and manual runs through a
 governed CRM read and inventory report, verifies stock-history tenant isolation,
-receivables-aging, customer-statement, AP-aging, income-statement,
+shared-view-only access for a system actor, refusal rather than an empty answer
+for a cross-tenant employee leave balance,
+receivables-aging, customer-statement, AP-aging, budget-scenario, lot,
+reservation, and purchase-order receipt totals, income-statement,
 trial-balance, balance-sheet, and cash-flow totals and tenant isolation,
 and session-linked audit history.
 Broader routine tool parity remains
@@ -177,6 +184,8 @@ composer posts to the existing `/api/analytics` handler through a same-origin
 development proxy. The Vite preview also proxies `/api/team` for project
 assignee lookup. Analytics component and API tests pass; its browser runtime
 proof remains open while the in-app browser is unavailable in this IDE session.
+Direct `/analytics` visits render the Vite `AnalyticsPage`, and the ownership
+manifest records that page as Vite-owned alongside its verified Go API routes.
 
 Sessions
 preserve the existing selection, event sequence, replay, durable-run, and
@@ -206,8 +215,10 @@ explicit signed opt-in; CRM writes and unported read modes remain on the
 legacy route. The Go metrics reader matches the newest-200-session aggregate,
 null-rate, rounding, and organization-scope behavior. Its short-lived signed
 HTTP adapter is opt-in through `GO_METRICS_READ=1`; the public route remains
-legacy-owned by default. The route census remains at 93 API route files, 156
-methods, and 30 pages, with no ownership override.
+legacy-owned by default. The current route census has 94 API route files, 158
+methods, and 30 pages. Seven API methods are Go-owned, 151 remain legacy-owned,
+and `/analytics` is the only Vite-owned page; the other 29 pages remain
+legacy-owned.
 
 The key seams are `apps/web/src/lib/api.ts` (HTTP and 202 approval semantics),
 `apps/web/src/server/auth.ts` and `session.ts` (identity and active org),
@@ -221,8 +232,16 @@ backup behavior. Phase 0 records exact manifests from these sources.
 Method-level owner and parity changes belong in
 `route-ownership-overrides.json`; the generator rejects duplicate or stale
 keys and prevents a route from moving to Go or Vite before parity is verified.
-The override list is empty today, so the legacy runtime still owns all 156 API
-methods and 30 pages.
+The current manifest records seven Go-owned API methods and the Vite-owned
+`/analytics` page, with the remaining API methods and pages assigned to legacy.
+
+Local verification on 2026-10-04 passed `pnpm typecheck`, `pnpm lint`,
+`pnpm test`, and `pnpm go:verify` with `GO_DATABASE_URL` set to the
+least-privilege runtime role. The verified local demo set includes the Go
+slice, M2-M13, M4b, and support. The Dashboard, Projects, and Analytics
+in-app-browser gates remain open. The `/analytics` page and its verified Go API
+methods are Vite- and Go-owned; remaining routes retain their recorded owners
+until their parity and cutover gates pass.
 
 The Phase 0 behavior census is recorded in
 [`continuity-inventory.md`](migration/continuity-inventory.md) for data,
@@ -1252,3 +1271,174 @@ new owners and the manifest shows zero legacy runtime paths.
      `platform.creator`, while agent permission/module gates and system module
      gates remain enforced. Database-backed tests cover human, agent, and system
      paths. Browser verification remains deferred by user direction.
+
+131. (Done) Widen Go routine tool parity with `hr_listEmployees`,
+     `hr_leaveBalance`, `crm_listCustomerViews`, `accounting_listBudgetScenarios`,
+     `inventory_listLots`, `inventory_listReservations`, and
+     `purchasing_listReceipts`. Every new tool declares a model input schema and
+     stays inside the legacy read-mostly routine permission bundle, so no
+     capability whose permission that bundle withholds becomes reachable from a
+     routine. The database-backed routine proof covers each tool's tenant
+     isolation, the system actor's shared-view-only customer-view projection,
+     refusal rather than an empty result for a cross-tenant leave balance, and
+     accepted and remaining purchase-order line totals that exclude foreign
+     receipts.
+132. (Done) Close the capability coverage gap against the live registry. All
+     315 registry ids now have a Go implementation: the 22 `documents`
+     capabilities, the 22 `messaging` capabilities, `settings.configureAiProvider`,
+     `settings.restoreAiProvider`, and `harness.approveComposition`. Each keeps
+     its manifest schema, Zod parser behavior, organization scoping, approval
+     payload, audit and receipt contract, and fails closed on malformed input.
+     Database-backed proofs cover document tenant isolation, folder ancestors,
+     version restore, conversation membership, and attachment handling. Two
+     pre-existing Go divergences surfaced and were fixed: `isModuleEnabled` now
+     honors the always-enabled `settings` and protected `iam`, `signals`, and
+     `routines` modules, and the shared `requiredSafeInteger` parser now rejects
+     quoted integers that `z.number()` refuses. Route ownership is unchanged;
+     these capabilities are registered in the executor but no path moved owner.
+133. (Done) Make the opt-in Go organization route work under the production
+     `chaste_app` RLS role. A narrowly granted security-definer function
+     validates the Better Auth session token before mapping it to the domain
+     identity and membership ids. Go loads permissions and organization fields
+     through `dbx.WithOrgTx`, and the organization repository rechecks each
+     membership inside its organization transaction. A runtime-role integration
+     proof exercises session resolution, organization listing, and the agent
+     persona read/write path.
+134. (Done) Add a bounded Go inventory slice to the Vite page. With
+     `CHASTE_GO_INVENTORY_ITEM_SLICE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`, the stock table uses
+     `inventory.stockReport` and item creation/opening stock/adjustments use
+     `inventory.createItem` and `inventory.adjustStock` through the existing
+     authenticated Go capability endpoint. The Go executor rechecks identity,
+     active organization, module state, and permissions under tenant RLS, then
+     records writes through the governed pipeline. Other inventory operations
+     and `/api/inventory` route ownership remain unchanged.
+135. (Implemented; PostgreSQL and authenticated Vite browser proofs pass) With
+     `GO_SESSION_CAPABILITY_ROUTE=1`,
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`, and
+     `CHASTE_GO_PURCHASING_VENDOR_SLICE=1`, call `purchasing.createVendor`
+     through the existing session-authenticated `/api/capabilities/execute`
+     Go route. Go
+     derives identity, active organization, email verification, and permissions
+     from the authenticated session and executes the write through the governed
+     capability pipeline. Vite preserves pending approvals and falls back to
+     the existing Purchasing POST only when the Go route is absent. The other
+     Purchasing actions still share that legacy POST endpoint, so route-level
+     ownership remains legacy. Focused Vite API tests cover Go success, pending
+     approval, absent-route fallback, and no retry after an uncertain result.
+     The database-backed capability integration test passes. In the local
+     authenticated Vite browser, vendor creation returned HTTP 200 from
+     `/api/capabilities/execute` and the refreshed Vite vendor list showed the
+     new record with no browser page errors.
+136. (Implemented; runtime proof pending for Vite order confirmation) Add one
+     Sales action to the Vite page: confirm draft orders through the existing
+     session-authenticated `sales.confirmOrder` capability. The API validates
+     the order id and response, preserves pending approval, and reuses an intent
+     id after uncertain transport outcomes. Other Sales actions and route
+     ownership remain unchanged. Focused Vite API and page tests cover the
+     capability request, approval response, and visible confirmed state. The
+     authenticated browser and database-backed confirmation proofs remain open.
+(Implemented; focused Vite and configured PostgreSQL proofs pass) Make Go approval requests idempotent by organization and action intent.
+     Persist the intent and canonical input digest on approval rows; serialize
+     requests with the executor's existing tenant+intent lock, replay a matching
+     pending approval, and reject reuse with a different capability or payload.
+     Approved execution reuses the original intent and records its action receipt.
+     Vite Sales retains that intent while approval is pending and lets the user
+     check the same request until it resolves. Focused client coverage and
+     database-backed proofs pass with the configured Go integration database.
+138. (Implemented; route ownership remains legacy) Replace the Vite 8.3.1 Go
+     API proxy selectors with a middleware plugin. The installed Vite proxy
+     path does not invoke the `router` callback previously used by the selectors,
+     so Go-enabled requests silently continued to the legacy API. The middleware
+     now selects exact method/path pairs before the legacy catch-all, streams
+     the original request and response, and preserves legacy fallback for
+     unsupported methods and paths. Real Vite middleware tests cover the
+     selected routes, body/cookie/query forwarding, response streaming, and
+     fallback behavior. Every selector remains paired and default-off. Runtime
+     proofs and route-owner changes remain separate gates.
+139. (Implemented; route ownership remains legacy) Add Go parity for the
+     Dashboard work queue read on `GET /api/my-work`. The verified Go session
+     determines the active user and organization; work queue reads use
+     `dbx.WithOrgTx`, capability permissions filter approvals, and unsupported
+     capability IDs are hidden even for wildcard users. The API mounts only
+     behind `GO_MY_WORK_ROUTE=1`, with a paired default-off Vite selector and
+     focused handler, reader, and proxy tests. Database-backed and browser
+     behavior proofs remain cutover gates.
+140. (Implemented; Go API ownership verified) Add Go report generation
+     on `POST /api/analytics` alongside the existing discovery and preview
+     handler. Each selected dataset and report rendering runs through the
+     governed capability executor under the resolved session and organization;
+     request, dataset, and response sizes are bounded. Explicit null values for
+     optional `narrative`, `ops`, and `chart` fields are rejected to match the
+     legacy schema. Paired default-off Go and Vite flags select exact methods
+     and paths. Focused handler and real Vite middleware tests pass; the
+     GET and POST ownership is recorded as Go in the route manifest. The
+     Analytics in-app browser proof remains open as a separate runtime gate.
+141. (Implemented; route ownership remains legacy) Add separate default-off
+     Vite selectors for Go SCIM reads and writes. Reads cover the user
+     collection and UUID items; writes cover collection provisioning and UUID
+     item deactivation. Unsupported methods, invalid IDs, and unmatched paths
+     continue to the legacy API. Focused real Vite middleware tests verify the
+     selectors and fallbacks. SCIM provider-backed proof and route ownership
+     remain open.
+142. (Implemented; route ownership remains legacy) Add Go `POST
+     /api/my-work/summarize` with verified-session and organization checks,
+     bounded work-card input, server-side workspace credential decryption, and
+     the legacy fast-model to primary-model fallback. Workspace provider URLs
+     require public HTTPS endpoints resolved and pinned by the Go transport;
+     loopback HTTP is allowed only in explicit development mode. The
+     authenticated user's own default OpenCode connection is loaded under that
+     session's organization and user, its credential is decrypted on the Go
+     server, and OpenCode tools are disabled. Codex uses only that user's
+     hashed, persisted `CODEX_HOME`, an isolated temporary working directory,
+     and read-only CLI mode with no MCP tools. Unsupported providers and missing
+     Codex runtime resources fail closed. The API and paired Vite selectors are
+     opt-in at `GO_MY_WORK_SUMMARY_ROUTE=1` and
+     `CHASTE_GO_MY_WORK_SUMMARY_ROUTE=1`; Vite selects only exact POST path
+     matches. Provider, handler, CLI, route-mount, and selector tests pass. The
+     Go runtime must share the configured persistent Codex home and CLI binary
+     with the connection setup runtime. Runtime proof and route ownership
+     remain open.
+143. (Implemented; route ownership remains legacy) Add Go `GET /api/signals`
+     behind `GO_SIGNALS_ROUTE=1` and paired `CHASTE_GO_SIGNALS_ROUTE=1`.
+     Verified session identity and active organization feed the governed
+     `signals.list` capability. Severity and module filters, the `{signals}`
+     response envelope, and no-store headers match the legacy route. The Vite
+     selector is limited to GET `/api/signals`; unmatched methods and paths
+     continue to the legacy API. Handler, capability, and middleware selector
+     tests pass. Runtime proof and route ownership remain open.
+144. (Implemented; Go owns the routes in the manifest) Add Go session-admin
+     `GET`, `POST`, and `DELETE /api/scim/tokens` behind
+     `GO_SCIM_TOKENS_ROUTE=1` and paired `CHASTE_GO_SCIM_TOKENS_ROUTE=1`.
+     Listing requires verified organization membership; mint and revoke use
+     governed IAM capabilities, verified session identity, and org-scoped transactions.
+     Writes require a UUID `Idempotency-Key`; replayed mint never returns raw
+     token material, and revocation preserves the standard 202 approval
+     response. Only a token hash reaches the capability, receipt, or ledger;
+     the raw token is returned once after a non-replayed successful mint.
+     Revoke is destructive and has no inverse because the stored hash cannot
+     recover the bearer. DB-backed tests cover organization isolation, token
+     secrecy, idempotency, and rollback for both writes. Listing preserves the
+     legacy organization-member guard and timestamp precision. Provider-backed
+     runtime proof remains open.
+145. (Implemented; route ownership remains legacy) Add Go session list,
+     detail, replay, and durable-run list/detail reads behind
+     `GO_SESSIONS_ROUTE=1` and `GO_DURABLE_RUNS_ROUTE=1`, paired with the
+     matching default-off Vite selectors. Session and run reads use verified
+     identity, active-organization transactions, and initiator/session-owner
+     visibility with admin access. Legacy timestamp and response shapes are
+     preserved. Both runtimes return 413 for details exceeding the shared
+     event, step, or encoded-response limits, and both check owner/admin
+     visibility before reporting an oversized durable run. Event and durable
+     JSONB logical sizes are checked before their payloads are loaded.
+     Handler, router, and selector
+     tests pass. Runtime proof remains open.
+146. (Implemented; Go owns the routes in the manifest) Add the Go notification feed
+     at `GET /api/notifications` behind `GO_NOTIFICATIONS_ROUTE=1` and its
+     paired Vite selector. Preserve organization and user visibility,
+     per-user read receipts, unread totals, and legacy timestamp formatting.
+     The React authenticated shell includes the notifications bell. Governed
+     per-user read receipts are served through `POST /api/notifications` at
+     `GO_NOTIFICATIONS_WRITE_ROUTE=1`, paired with its Vite selector. Handler,
+     selector, component, and database coverage are in place. Browser proof
+     remains open.

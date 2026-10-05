@@ -82,6 +82,10 @@ func routinesParseScheduleText(raw string) (RoutineSchedule, bool) {
 	if text == "" {
 		return RoutineSchedule{}, false
 	}
+	switch text {
+	case "twice a day", "twice daily", "two times a day":
+		text = "every 12 hours"
+	}
 	minutes := int64(-1)
 	intervalPattern := regexp.MustCompile(`^every\s+(\d+)\s*(min(?:ute)?s?|hours?|h)$`)
 	if match := intervalPattern.FindStringSubmatch(text); match != nil {
@@ -104,6 +108,14 @@ func routinesParseScheduleText(raw string) (RoutineSchedule, bool) {
 		}
 		value := minutes
 		return RoutineSchedule{Kind: "interval", EveryMinutes: &value}, true
+	}
+
+	if match := regexp.MustCompile(`^(?:each|every) morning\s+(?:at\s+)?(.+)$`).FindStringSubmatch(text); match != nil {
+		atTime, ok := routinesParseTime(match[1])
+		if !ok {
+			return RoutineSchedule{}, false
+		}
+		return RoutineSchedule{Kind: "daily", AtTime: &atTime}, true
 	}
 
 	if match := regexp.MustCompile(`^weekdays?\s+(?:at\s+)?(.+)$`).FindStringSubmatch(text); match != nil {
@@ -521,7 +533,7 @@ func routinesResolveSchedule(scheduleText *string, structured *RoutineSchedule) 
 	if scheduleText != nil {
 		parsed, ok := routinesParseScheduleText(*scheduleText)
 		if !ok {
-			return RoutineSchedule{}, nil, errors.New("could not parse the schedule: try shapes like 'every 30 minutes', 'daily at 08:00', 'weekdays at 9am' or 'weekly on monday at 09:00'")
+			return RoutineSchedule{}, nil, errors.New("could not parse the schedule: try 'twice a day', 'each morning at 8', 'every 30 minutes', 'daily at 08:00', 'weekdays at 9am' or 'weekly on monday at 09:00'")
 		}
 		return parsed, scheduleText, nil
 	}
@@ -639,7 +651,7 @@ func routinesUpdate(ctx context.Context, tx pgx.Tx, orgID string, input Routines
 	} else if input.ScheduleText != nil {
 		parsed, ok := routinesParseScheduleText(*input.ScheduleText)
 		if !ok {
-			return RoutinesUpdateOutput{}, errors.New("could not parse the new schedule")
+			return RoutinesUpdateOutput{}, errors.New("could not parse the new schedule: try 'twice a day', 'each morning at 8', 'every 30 minutes', 'daily at 08:00', 'weekdays at 9am' or 'weekly on monday at 09:00'")
 		}
 		schedule = &parsed
 		encoded, err := json.Marshal(parsed)

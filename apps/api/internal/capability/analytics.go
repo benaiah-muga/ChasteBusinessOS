@@ -25,6 +25,8 @@ const (
 	analyticsMaxReportSections = 8
 )
 
+const AnalyticsRenderReportCapabilityID = analyticsRenderReportCapabilityID
+
 // ── Frame engine: declarative dataframe ops over plain JSON rows ──
 
 type analyticsFrame struct {
@@ -950,6 +952,20 @@ func parseAnalyticsInput(capabilityID string, raw json.RawMessage) (any, error) 
 		return ParseAnalyticsAskYourBusinessInput(raw)
 	default:
 		return nil, errors.New("unsupported analytics capability")
+	}
+}
+
+// ValidateAnalyticsDatasetInput validates request parameters for the dataset
+// capabilities exposed by the authenticated analytics report endpoint.
+func ValidateAnalyticsDatasetInput(capabilityID string, raw json.RawMessage) error {
+	switch capabilityID {
+	case analyticsPipelineByStageCapabilityID, analyticsRevenueByMonthCapabilityID,
+		analyticsInvoiceAgingCapabilityID, analyticsSalesByCustomerCapabilityID,
+		analyticsStockLevelsCapabilityID:
+		_, err := parseAnalyticsInput(capabilityID, raw)
+		return err
+	default:
+		return errors.New("unsupported analytics dataset")
 	}
 }
 

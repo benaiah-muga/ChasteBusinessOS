@@ -337,12 +337,7 @@ func TestInventoryCycleCountWorkerSystemExecution(t *testing.T) {
 	seedSalesItem(t, fx, fx.orgID, "COUNT-WORKER", "goods")
 	input := json.RawMessage(`{"skus":["COUNT-WORKER"]}`)
 	intentID := executorUUID(t)
-	result, err := fx.executor.ExecuteSystem(fx.ctx, SystemClaims{
-		OrganizationID: fx.orgID,
-		CapabilityID:   inventoryCreateCycleCountCapabilityID,
-		Permission:     "inventory.write",
-		IntentID:       intentID,
-	}, input)
+	result, err := fx.executor.ExecuteSystem(fx.ctx, fx.systemClaims(t, inventoryCreateCycleCountCapabilityID, "inventory.write", intentID, "", ""), input)
 	if err != nil || !result.OK {
 		t.Fatalf("system cycle-count result=%+v err=%v", result, err)
 	}

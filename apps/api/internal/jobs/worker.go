@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,9 +20,12 @@ const (
 	DefaultLeaseDuration = 60 * time.Second
 	DefaultPollInterval  = 2 * time.Second
 	maxBackoff           = 5 * time.Minute
+	minimumInFlightLease = 3 * time.Minute
+	leaseStateTxTimeout  = 15 * time.Second
 )
 
 var ErrUnsafeJobsWorkerRole = errors.New("unsafe Go capability jobs worker role")
+var ErrJobLeaseLost = errors.New("capability job lease is no longer owned")
 
 type QueryRower interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -32,22 +36,23 @@ type SystemCapabilityExecutor interface {
 }
 
 type RoutineJobRunner interface {
-	Run(context.Context, string, string, json.RawMessage) error
+	Run(context.Context, *ClaimedJob) error
 }
 
 type ClaimedJob struct {
-	ID                 string
-	OrgID              string
-	Type               string
-	Attempts           int
-	MaxAttempts        int
-	WorkerID           string
-	FencingToken       int
-	LeaseExpiresAt     time.Time
-	RunID              *string
-	RunStepIndex       *int
-	ApprovedApprovalID *string
-	Payload            json.RawMessage
+	ID                   string
+	OrgID                string
+	Type                 string
+	Attempts             int
+	MaxAttempts          int
+	WorkerID             string
+	FencingToken         int
+	LeaseExtensionMillis int
+	LeaseExpiresAt       time.Time
+	RunID                *string
+	RunStepIndex         *int
+	ApprovedApprovalID   *string
+	Payload              json.RawMessage
 }
 
 type Options struct {
@@ -427,6 +432,7 @@ func (w *Worker) ClaimOne(ctx context.Context) (*ClaimedJob, error) {
 		return nil, fmt.Errorf("claim function returned unsupported Go job type %q", job.Type)
 	}
 	job.RunID = runID
+	job.LeaseExtensionMillis = int(maxDuration(w.lease, minimumInFlightLease) / time.Millisecond)
 	job.RunStepIndex = runStepIndex
 	job.ApprovedApprovalID = approvalID
 	if err := tx.Commit(ctx); err != nil {
@@ -461,7 +467,6 @@ func (w *Worker) loadPayload(ctx context.Context, job *ClaimedJob) error {
 }
 
 func (w *Worker) renewLease(ctx context.Context, job *ClaimedJob) (bool, error) {
-	now := w.now().UTC()
 	var updated string
 	_, err := dbx.WithOrgTx(ctx, w.queueDB, job.OrgID, func(tx pgx.Tx) (struct{}, error) {
 		if err := w.setRoutineRunnerGate(ctx, tx, job); err != nil {
@@ -469,11 +474,12 @@ func (w *Worker) renewLease(ctx context.Context, job *ClaimedJob) (bool, error) 
 		}
 		return struct{}{}, tx.QueryRow(ctx, `
 			UPDATE public.jobs
-			SET lease_expires_at = $5::timestamptz, updated_at = $5::timestamptz
+			SET lease_expires_at = clock_timestamp() + ($5::bigint * interval '1 millisecond'), updated_at = clock_timestamp()
 			WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'processing'
 			  AND lease_owner = $3 AND fencing_token = $4
+			  AND lease_expires_at > clock_timestamp()
 			RETURNING id::text`, job.ID, job.OrgID, job.WorkerID, job.FencingToken,
-			now.Add(w.lease)).Scan(&updated)
+			w.lease.Milliseconds()).Scan(&updated)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -488,7 +494,6 @@ func (w *Worker) finalize(ctx context.Context, job *ClaimedJob, status, lastErro
 	if status != "done" && status != "failed" && status != "pending" {
 		return false, errors.New("invalid capability job final status")
 	}
-	now := w.now().UTC()
 	var updated string
 	_, err := dbx.WithOrgTx(ctx, w.queueDB, job.OrgID, func(tx pgx.Tx) (struct{}, error) {
 		if err := w.setRoutineRunnerGate(ctx, tx, job); err != nil {
@@ -501,11 +506,12 @@ func (w *Worker) finalize(ctx context.Context, job *ClaimedJob, status, lastErro
 			    available_at = COALESCE($7::timestamptz, available_at),
 			    lease_owner = NULL,
 			    lease_expires_at = NULL,
-			    updated_at = $8::timestamptz
+			    updated_at = clock_timestamp()
 			WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'processing'
 			  AND lease_owner = $3 AND fencing_token = $4
+			  AND lease_expires_at > clock_timestamp()
 			RETURNING id::text`, job.ID, job.OrgID, job.WorkerID, job.FencingToken,
-			status, nullableError(lastError), availableAt, now).Scan(&updated)
+			status, nullableError(lastError), availableAt).Scan(&updated)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -538,52 +544,41 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 	}
 	log := w.logger.With("job_id", job.ID, "capability_id", job.Type, "org_id", job.OrgID)
 	var leaseLost atomic.Bool
-	stopHeartbeat := make(chan struct{})
-	var heartbeatDone = make(chan struct{})
+	processCtx, cancelProcess := context.WithCancel(ctx)
+	defer cancelProcess()
+	effectHeartbeat := &effectHeartbeatGate{}
+	processCtx = withEffectHeartbeatGate(processCtx, effectHeartbeat)
 	heartbeatInterval := w.lease / 3
 	if heartbeatInterval < 100*time.Millisecond {
 		heartbeatInterval = 100 * time.Millisecond
 	}
-	go func() {
-		defer close(heartbeatDone)
-		ticker := time.NewTicker(heartbeatInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stopHeartbeat:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				owned, renewErr := w.renewLease(ctx, job)
-				if renewErr == nil && !owned {
-					leaseLost.Store(true)
-				}
-			}
-		}
-	}()
-	defer func() {
-		close(stopHeartbeat)
-		<-heartbeatDone
-	}()
+	stopHeartbeat := startLeaseHeartbeat(ctx, heartbeatInterval,
+		func(renewCtx context.Context) (bool, error) {
+			return effectHeartbeat.renew(renewCtx, func(ctx context.Context) (bool, error) { return w.renewLease(ctx, job) })
+		},
+		func() {
+			leaseLost.Store(true)
+			cancelProcess()
+		})
+	defer stopHeartbeat()
 
 	stepIndex, durable := durableStep(job)
 	if durable {
-		if err := w.transitionRun(ctx, job, "running", stepIndex, ""); err != nil {
+		if err := w.transitionRun(processCtx, job, "running", stepIndex, ""); err != nil {
 			return true, err
 		}
-		if err := w.transitionStep(ctx, job, stepIndex, "running", nil, "", nil, job.ApprovedApprovalID); err != nil {
+		if err := w.transitionStep(processCtx, job, stepIndex, "running", nil, "", nil, job.ApprovedApprovalID); err != nil {
 			return true, err
 		}
 	}
 
-	processErr := w.loadPayload(ctx, job)
+	processErr := w.loadPayload(processCtx, job)
 	if processErr == nil {
 		if job.Type == routineJobType {
 			if w.routines == nil {
 				processErr = errors.New("Go routine agent runner is unavailable")
 			} else {
-				processErr = w.routines.Run(ctx, job.OrgID, job.ID, job.Payload)
+				processErr = w.routines.Run(processCtx, job)
 				if processErr == nil {
 					if !leaseLost.Load() {
 						finalized, err := w.finalize(ctx, job, "done", "", nil)
@@ -601,9 +596,11 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 		} else if permission, ok := GoCapabilityPermissions[job.Type]; !ok {
 			processErr = fmt.Errorf("unknown job capability: %s", job.Type)
 		} else {
-			result, executeErr := w.executor.ExecuteSystem(ctx, capability.SystemClaims{
+			result, executeErr := executeSystemWithLeaseGate(processCtx, w.executor, capability.SystemClaims{
 				OrganizationID: job.OrgID, CapabilityID: job.Type, Permission: permission,
 				IntentID: job.ID, ApprovedApprovalID: optionalValue(job.ApprovedApprovalID),
+				JobID: job.ID, LeaseOwner: job.WorkerID, FencingToken: job.FencingToken,
+				LeaseExtensionMillis: job.LeaseExtensionMillis,
 			}, job.Payload)
 			if executeErr != nil {
 				processErr = executeErr
@@ -614,17 +611,21 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 				}
 				processErr = errors.New(message)
 			} else {
+				if leaseLost.Load() {
+					log.Warn("job execution completed after lease renewal failed; leaving acknowledgement to the current owner")
+					return true, nil
+				}
 				if job.ApprovedApprovalID != nil {
-					if err := w.finishApproval(ctx, job.OrgID, *job.ApprovedApprovalID); err != nil {
+					if err := w.finishApproval(processCtx, job); err != nil {
 						return true, err
 					}
 				}
 				if durable {
-					receiptID, err := w.findReceiptID(ctx, job.OrgID, job.ID)
+					receiptID, err := w.findReceiptID(processCtx, job.OrgID, job.ID)
 					if err != nil {
 						return true, err
 					}
-					if err := w.transitionStep(ctx, job, stepIndex, "committed", result.Data, "", receiptID, job.ApprovedApprovalID); err != nil {
+					if err := w.transitionStep(processCtx, job, stepIndex, "committed", result.Data, "", receiptID, job.ApprovedApprovalID); err != nil {
 						return true, err
 					}
 				}
@@ -643,13 +644,18 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 		}
 	}
 
+	if leaseLost.Load() {
+		log.Warn("job processing stopped after lease renewal failed")
+		return true, nil
+	}
+
 	message := processErr.Error()
 	exhausted := job.Attempts >= job.MaxAttempts || strings.HasPrefix(message, "unknown job capability:")
 	if durable && exhausted {
-		if err := w.transitionStep(ctx, job, stepIndex, "failed", nil, message, nil, job.ApprovedApprovalID); err != nil {
+		if err := w.transitionStep(processCtx, job, stepIndex, "failed", nil, message, nil, job.ApprovedApprovalID); err != nil {
 			return true, err
 		}
-		if err := w.transitionRun(ctx, job, "failed", stepIndex, message); err != nil {
+		if err := w.transitionRun(processCtx, job, "failed", stepIndex, message); err != nil {
 			return true, err
 		}
 	}
@@ -696,8 +702,8 @@ func (w *Worker) Run(ctx context.Context) error {
 
 func (w *Worker) transitionRun(ctx context.Context, job *ClaimedJob, status string, currentStep int, message string) error {
 	terminal := status == "failed" || status == "cancelled" || status == "completed"
-	_, err := dbx.WithOrgTx(ctx, w.effectDB, job.OrgID, func(tx pgx.Tx) (struct{}, error) {
-		_, err := tx.Exec(ctx, `
+	return withCurrentJobLeaseTx(ctx, w.effectDB, job, job.OrgID, func(txCtx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(txCtx, `
 			UPDATE public.agent_runs
 			SET status = $3, current_step = $4, last_error = $5,
 			    started_at = CASE WHEN $3 = 'running' THEN clock_timestamp() ELSE started_at END,
@@ -705,9 +711,8 @@ func (w *Worker) transitionRun(ctx context.Context, job *ClaimedJob, status stri
 			    updated_at = clock_timestamp()
 			WHERE id = $1::uuid AND org_id = $2::uuid`,
 			*job.RunID, job.OrgID, status, currentStep, nullableError(message), terminal)
-		return struct{}{}, err
+		return err
 	})
-	return err
 }
 
 func (w *Worker) transitionStep(ctx context.Context, job *ClaimedJob, index int, status string, output json.RawMessage, message string, receiptID *string, approvalID *string) error {
@@ -724,8 +729,8 @@ func (w *Worker) transitionStep(ctx context.Context, job *ClaimedJob, index int,
 	if approvalID != nil {
 		approvalValue = *approvalID
 	}
-	_, err := dbx.WithOrgTx(ctx, w.effectDB, job.OrgID, func(tx pgx.Tx) (struct{}, error) {
-		_, err := tx.Exec(ctx, `
+	return withCurrentJobLeaseTx(ctx, w.effectDB, job, job.OrgID, func(txCtx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(txCtx, `
 			UPDATE public.agent_run_steps
 			SET status = $4, output = COALESCE($5::jsonb, output), error = $6,
 			    receipt_id = CASE WHEN $4 = 'committed' THEN $7::uuid ELSE receipt_id END,
@@ -734,9 +739,8 @@ func (w *Worker) transitionStep(ctx context.Context, job *ClaimedJob, index int,
 			    finished_at = CASE WHEN $9 THEN clock_timestamp() ELSE finished_at END
 			WHERE org_id = $1::uuid AND run_id = $2::uuid AND step_index = $3`,
 			job.OrgID, *job.RunID, index, status, outputValue, nullableError(message), receiptValue, approvalValue, terminal)
-		return struct{}{}, err
+		return err
 	})
-	return err
 }
 
 func (w *Worker) findReceiptID(ctx context.Context, orgID, intentID string) (*string, error) {
@@ -758,14 +762,108 @@ func (w *Worker) findReceiptID(ctx context.Context, orgID, intentID string) (*st
 	return receiptID, err
 }
 
-func (w *Worker) finishApproval(ctx context.Context, orgID, approvalID string) error {
-	_, err := dbx.WithOrgTx(ctx, w.effectDB, orgID, func(tx pgx.Tx) (struct{}, error) {
-		_, err := tx.Exec(ctx, `
+func (w *Worker) finishApproval(ctx context.Context, job *ClaimedJob) error {
+	if job == nil || job.ApprovedApprovalID == nil {
+		return errors.New("capability job has no approval to finish")
+	}
+	return withCurrentJobLeaseTx(ctx, w.effectDB, job, job.OrgID, func(txCtx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(txCtx, `
 			UPDATE public.approvals SET status = 'executed', decided_at = clock_timestamp()
-			WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'executing'`, approvalID, orgID)
-		return struct{}{}, err
+			WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'executing'`, *job.ApprovedApprovalID, job.OrgID)
+		return err
+	})
+}
+
+func requireCurrentJobLease(ctx context.Context, tx pgx.Tx, job *ClaimedJob) error {
+	if job == nil || job.ID == "" || job.OrgID == "" || job.WorkerID == "" || job.FencingToken < 1 || job.LeaseExtensionMillis < int(minimumInFlightLease/time.Millisecond) || job.LeaseExtensionMillis > int((5*time.Minute)/time.Millisecond) {
+		return ErrJobLeaseLost
+	}
+	var id string
+	err := tx.QueryRow(ctx, `
+		UPDATE public.jobs
+		SET lease_expires_at = GREATEST(lease_expires_at, clock_timestamp() + ($5::bigint * interval '1 millisecond'))
+		WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'processing'
+		  AND lease_owner = $3 AND fencing_token = $4
+		  AND lease_expires_at > clock_timestamp()
+		RETURNING id::text`, job.ID, job.OrgID, job.WorkerID, job.FencingToken, job.LeaseExtensionMillis).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrJobLeaseLost
+	}
+	return err
+}
+
+type jobLeaseContextKey struct{}
+
+type effectHeartbeatGate struct {
+	mu     sync.Mutex
+	active bool
+}
+
+func (g *effectHeartbeatGate) renew(ctx context.Context, renew func(context.Context) (bool, error)) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.active {
+		return true, nil
+	}
+	return renew(ctx)
+}
+
+func (g *effectHeartbeatGate) beginEffect() func() {
+	g.mu.Lock()
+	g.active = true
+	g.mu.Unlock()
+	return func() {
+		g.mu.Lock()
+		g.active = false
+		g.mu.Unlock()
+	}
+}
+
+type effectHeartbeatGateContextKey struct{}
+
+func withEffectHeartbeatGate(ctx context.Context, gate *effectHeartbeatGate) context.Context {
+	return context.WithValue(ctx, effectHeartbeatGateContextKey{}, gate)
+}
+
+func executeSystemWithLeaseGate(ctx context.Context, executor SystemCapabilityExecutor, claims capability.SystemClaims, input json.RawMessage) (capability.Result, error) {
+	endEffect := beginEffectForContext(ctx)
+	defer endEffect()
+	return executor.ExecuteSystem(ctx, claims, input)
+}
+
+func beginEffectForContext(ctx context.Context) func() {
+	if gate, ok := ctx.Value(effectHeartbeatGateContextKey{}).(*effectHeartbeatGate); ok {
+		return gate.beginEffect()
+	}
+	return func() {}
+}
+
+func withCurrentJobLeaseTx(ctx context.Context, db dbx.Beginner, job *ClaimedJob, orgID string, fn func(context.Context, pgx.Tx) error) error {
+	if job == nil || job.OrgID != orgID {
+		return ErrJobLeaseLost
+	}
+	txCtx, cancel := context.WithTimeout(ctx, leaseStateTxTimeout)
+	defer cancel()
+	endEffect := beginEffectForContext(ctx)
+	defer endEffect()
+	_, err := dbx.WithOrgTx(txCtx, db, orgID, func(tx pgx.Tx) (struct{}, error) {
+		if err := requireCurrentJobLease(txCtx, tx, job); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, fn(txCtx, tx)
 	})
 	return err
+}
+
+func maxDuration(first, second time.Duration) time.Duration {
+	if first > second {
+		return first
+	}
+	return second
+}
+
+func withJobLeaseContext(ctx context.Context, job *ClaimedJob) context.Context {
+	return context.WithValue(ctx, jobLeaseContextKey{}, job)
 }
 
 func durableStep(job *ClaimedJob) (int, bool) {
@@ -802,6 +900,41 @@ func optionalValue(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func startLeaseHeartbeat(
+	ctx context.Context,
+	interval time.Duration,
+	renew func(context.Context) (bool, error),
+	onLost func(),
+) func() {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				renewCtx, cancel := context.WithTimeout(ctx, interval)
+				owned, err := renew(renewCtx)
+				cancel()
+				if err != nil || !owned {
+					onLost()
+					return
+				}
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+		<-done
+	}
 }
 
 func sleepContext(ctx context.Context, delay time.Duration) bool {

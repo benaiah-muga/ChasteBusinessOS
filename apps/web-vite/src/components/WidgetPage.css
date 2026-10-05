@@ -1,0 +1,192 @@
+/* Standalone visitor chat for the embeddable widget. Fixed-height and
+   chrome-less: it renders inside an iframe with no surrounding app. */
+
+.widget-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #fffefa;
+}
+
+.widget-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #111416;
+  color: #fffefa;
+}
+
+.widget-header-title {
+  font-weight: 650;
+  font-size: 13px;
+}
+
+.widget-header-note {
+  margin-left: auto;
+  color: rgb(255 254 250 / 60%);
+  font-size: 11px;
+}
+
+.widget-intro {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 1.5rem;
+}
+
+.widget-intro-copy {
+  margin: 0;
+  color: #71746b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.widget-field {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.widget-label {
+  color: #71746b;
+  font-weight: 650;
+  font-size: 10px;
+}
+
+.widget-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 0.6rem;
+  border: 1px solid #dfddd4;
+  border-radius: 6px;
+  background: #fffefa;
+  color: #41483f;
+  font: inherit;
+  font-size: 13px;
+}
+
+.widget-field input::placeholder {
+  color: #a0a197;
+}
+
+.widget-field input:focus-visible {
+  outline: 2px solid #927b4d;
+  outline-offset: 2px;
+}
+
+.widget-intro button,
+.widget-composer button {
+  min-height: 38px;
+  padding: 0 1rem;
+  border: 1px solid #111416;
+  border-radius: 6px;
+  background: #111416;
+  color: #fffefa;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  font-size: 13px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.widget-intro button:hover:not(:disabled),
+.widget-composer button:hover:not(:disabled) {
+  border-color: #2b2e2e;
+  background: #2b2e2e;
+}
+
+.widget-intro button:disabled,
+.widget-composer button:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.widget-scroll {
+  display: grid;
+  align-content: start;
+  flex: 1;
+  gap: 0.5rem;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.widget-bubble-row {
+  display: flex;
+}
+
+.widget-bubble-row.widget-bubble-customer {
+  justify-content: flex-end;
+}
+
+.widget-bubble-row.widget-bubble-system {
+  justify-content: center;
+}
+
+.widget-bubble-customer,
+.widget-bubble-agent,
+.widget-bubble-system {
+  max-width: 85%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.widget-bubble-customer {
+  background: #111416;
+  color: #fffefa;
+}
+
+.widget-bubble-agent {
+  background: #f1efe8;
+  color: #1c1917;
+}
+
+.widget-bubble-system {
+  max-width: 100%;
+  padding: 0.25rem 0;
+  background: none;
+  color: #92938b;
+  text-align: center;
+  font-size: 11px;
+}
+
+.widget-composer {
+  padding: 0.75rem;
+  border-top: 1px solid #efede7;
+}
+
+.widget-escalate {
+  display: block;
+  min-height: 0 !important;
+  margin-bottom: 0.5rem;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  color: #71746b !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.widget-escalate:hover:not(:disabled) {
+  background: none !important;
+  color: #374238 !important;
+}
+
+.widget-composer-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.widget-field-inline {
+  flex: 1;
+}

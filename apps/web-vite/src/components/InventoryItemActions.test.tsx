@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { inventoryItemActionRequest } from "../api/inventory-items";
 import type { InventoryItem } from "../api/inventory";
 import { InventoryItemActions } from "./InventoryItemActions";
 
@@ -22,6 +23,38 @@ afterEach(() => {
 });
 
 describe("InventoryItemActions", () => {
+  it("maps item writes to Go capabilities without forwarding the UI action discriminator", () => {
+    const request = inventoryItemActionRequest({
+      action: "adjustStock",
+      sku: "BEANS-1KG",
+      quantityDelta: 1250,
+      note: "Opening stock",
+    }, "intent-1", true);
+
+    expect(request.url).toBe("/api/capabilities/execute");
+    expect(request.body).toEqual({
+      capabilityId: "inventory.adjustStock",
+      input: { sku: "BEANS-1KG", quantityDelta: 1250, note: "Opening stock" },
+      intentId: "intent-1",
+    });
+  });
+
+  it("keeps the legacy inventory contract selected when the Go slice is disabled", () => {
+    const request = inventoryItemActionRequest({
+      action: "createItem",
+      sku: "BEANS-1KG",
+      name: "Coffee beans",
+      kind: "goods",
+      unitLabel: "bag",
+      salePriceMinor: 0,
+      reorderPointThousandths: 0,
+      tags: [],
+    }, "intent-2", false);
+
+    expect(request.url).toBe("/api/inventory");
+    expect(request.body).toMatchObject({ action: "createItem", sku: "BEANS-1KG", intentId: "intent-2" });
+  });
+
   it("creates an item and reports an opening-stock approval separately", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ ok: true, data: { itemId: "6e5f92bb-83f1-45ed-a0b2-e04f2b1e3d43" } }))

@@ -6,7 +6,7 @@
     "dev": "turbo dev",
     "dev:vite": "pnpm --filter @chaste/web-vite dev",
     "dev:legacy": "pnpm --filter web dev",
-    "dev:api": "node --env-file-if-exists=.env --run api:serve",
+    "dev:api": "node --env-file-if-exists=.env scripts/dev-api.mjs",
     "api:serve": "go -C apps/api run ./cmd/api",
     "db:provision-runtime": "node --env-file-if-exists=.env --run db:provision-runtime:cmd",
     "db:provision-runtime:cmd": "pnpm --filter @chaste/db db:provision-runtime",
@@ -29,7 +29,7 @@
     "nl:test": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/nl-tasks.ts",
     "test:groq": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/test-groq.ts",
     "bench:agents": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/test-groq-agents.ts",
-    "worker": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/worker.ts",
+    "worker": "node --env-file-if-exists=.env scripts/worker-go.mjs",
     "go:test": "go -C apps/api test ./...",
     "go:vet": "go -C apps/api vet ./...",
     "go:verify": "pnpm go:test && pnpm go:vet",
@@ -51,7 +51,10 @@
     "demo:m11": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m11.ts",
     "demo:m11:isolated": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m11-isolated.ts",
     "demo:m12": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m12.ts",
-    "demo:m13": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m13.ts"
+    "demo:m13": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/demo-m13.ts",
+    "routines:e2e": "tsx --tsconfig apps/web/tsconfig.json --env-file-if-exists=.env scripts/gates/routines-e2e.ts",
+    "migration:session-parity": "bash scripts/probe/session-parity.sh",
+    "migration:permission-parity": "bash scripts/probe/permission-parity.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
@@ -61,7 +64,8 @@
     "prettier": "^3.6.2",
     "tsx": "^4.20.6",
     "turbo": "^2.5.8",
-    "typescript": "^5.9.3",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.43.0",
     "vitest": "^3.2.4"
   },

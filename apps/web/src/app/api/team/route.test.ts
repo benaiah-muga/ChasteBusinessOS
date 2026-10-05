@@ -102,6 +102,19 @@ describe("/api/team Go bridge", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
+  it("maps Go list authorization failures to the legacy 422 error response", async () => {
+    vi.stubEnv("GO_IAM_TEAM", "1");
+    mocks.executeGoCapability.mockResolvedValue({
+      kind: "response",
+      response: Response.json({ error: "forbidden: missing permission: iam.read" }, { status: 403 }),
+    });
+
+    const response = await GET();
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: "forbidden: missing permission: iam.read" });
+  });
+
   it.each([
     {
       action: "createRole",
@@ -113,7 +126,7 @@ describe("/api/team Go bridge", () => {
     },
     {
       action: "setPermissions",
-      body: { action: "setPermissions", roleId: "role-bookkeeper", permissions: ["accounting.read", "iam.read"] },
+      body: { action: "setPermissions", roleId: "role-bookkeeper", permissions: ["accounting.read", "iam.read"], intentId: "set-permissions-intent" },
       capabilityId: "iam.updateRolePermissions",
       input: { roleId: "role-bookkeeper", permissions: ["accounting.read", "iam.read"] },
       output: { permissionCount: 2 },
@@ -121,7 +134,7 @@ describe("/api/team Go bridge", () => {
     },
     {
       action: "assignRole",
-      body: { action: "assignRole", userId: "member-1", roleId: "role-bookkeeper" },
+      body: { action: "assignRole", userId: "member-1", roleId: "role-bookkeeper", intentId: "assign-role-intent" },
       capabilityId: "iam.assignRole",
       input: { userId: "member-1", roleId: "role-bookkeeper" },
       output: { assigned: true },
@@ -129,7 +142,7 @@ describe("/api/team Go bridge", () => {
     },
     {
       action: "invite",
-      body: { action: "invite", email: "new@example.test", roleId: "role-bookkeeper" },
+      body: { action: "invite", email: "new@example.test", roleId: "role-bookkeeper", intentId: "invite-intent" },
       capabilityId: "iam.inviteMember",
       input: { email: "new@example.test", roleId: "role-bookkeeper" },
       output: { invitationId: "inv-1", token: "invite-token", expiresAt: "2026-10-04T12:00:00.000Z" },
@@ -178,7 +191,7 @@ describe("/api/team Go bridge", () => {
       .mockResolvedValueOnce({ kind: "response", response: Response.json({ error: "unauthorized" }, { status: 401 }) })
       .mockResolvedValueOnce({ kind: "response", response: Response.json({ error: "forbidden: missing permission: iam.admin" }, { status: 403 }) })
       .mockResolvedValueOnce({ kind: "response", response: Response.json({ ok: false, error: "role not found" }, { status: 422 }) });
-    const post = () => POST(request({ action: "assignRole", userId: "member-1", roleId: "role-1" }));
+    const post = () => POST(request({ action: "assignRole", userId: "member-1", roleId: "role-1", intentId: "error-mapping-intent" }));
 
     const pending = await post();
     const unauthorized = await post();
@@ -220,7 +233,7 @@ describe("/api/team Go bridge", () => {
     vi.stubEnv("GO_IAM_TEAM", "1");
     mocks.executeGoCapability.mockResolvedValue(result);
 
-    const response = await POST(request({ action: "assignRole", userId: "member-1", roleId: "role-1" }));
+    const response = await POST(request({ action: "assignRole", userId: "member-1", roleId: "role-1", intentId: "unknown-outcome-intent" }));
 
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -236,13 +249,32 @@ describe("/api/team Go bridge", () => {
 
     mocks.getResolvedUser.mockResolvedValue(resolved);
     mocks.actorFromResolved.mockReturnValue(null);
-    const onboarding = await POST(request({ action: "invite", email: "new@example.test", roleId: "role-1" }));
+    const onboarding = await POST(request({ action: "invite", email: "new@example.test", roleId: "role-1", intentId: "onboarding-intent" }));
     expect(onboarding.status).toBe(401);
 
     mocks.actorFromResolved.mockReturnValue(actionContext);
-    const invalid = await POST(request({ action: "createRole", key: "Bad Key", name: "Bad" }));
+    const invalid = await POST(request({ action: "createRole", key: "Bad Key", name: "Bad", intentId: "invalid-action-intent" }));
     expect(invalid.status).toBe(400);
     expect(await invalid.json()).toEqual({ error: "invalid body" });
+
+    const invalidEmail = await POST(request({ action: "invite", email: "person@localhost", roleId: "role-1", intentId: "invalid-email-intent" }));
+    expect(invalidEmail.status).toBe(400);
+    expect(await invalidEmail.json()).toEqual({ error: "invalid body" });
+    expect(mocks.executeGoCapability).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "missing", body: { action: "assignRole", userId: "member-1", roleId: "role-1" } },
+    { name: "blank", body: { action: "assignRole", userId: "member-1", roleId: "role-1", intentId: " \t " } },
+    { name: "overlong", body: { action: "assignRole", userId: "member-1", roleId: "role-1", intentId: "i".repeat(201) } },
+    { name: "control-containing", body: { action: "assignRole", userId: "member-1", roleId: "role-1", intentId: "bad\nkey" } },
+  ])("rejects $name intent IDs before either Team executor", async ({ body }) => {
+    vi.stubEnv("GO_IAM_TEAM", "1");
+    const response = await POST(request(body));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid body" });
     expect(mocks.executeGoCapability).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
   });

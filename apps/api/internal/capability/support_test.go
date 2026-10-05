@@ -52,6 +52,32 @@ func TestParseSupportLibraryInput(t *testing.T) {
 	}
 }
 
+func TestParseSupportCreateKbArticlePublicationDefaultsPrivate(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    bool
+		wantErr bool
+	}{
+		{name: "omitted defaults private", input: `{"title":"Returns","body":"Policy"}`},
+		{name: "explicit private", input: `{"title":"Returns","body":"Policy","isPublic":false}`},
+		{name: "explicit public", input: `{"title":"Returns","body":"Policy","isPublic":true}`, want: true},
+		{name: "rejects null", input: `{"title":"Returns","body":"Policy","isPublic":null}`, wantErr: true},
+		{name: "rejects string", input: `{"title":"Returns","body":"Policy","isPublic":"true"}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := ParseSupportCreateKbArticleInput(json.RawMessage(tt.input))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseSupportCreateKbArticleInput(%s) error=%v, wantErr=%t", tt.input, err, tt.wantErr)
+			}
+			if err == nil && parsed.IsPublic != tt.want {
+				t.Fatalf("isPublic=%t, want %t", parsed.IsPublic, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseSupportConversationIDInputLimit(t *testing.T) {
 	tests := []struct {
 		name    string

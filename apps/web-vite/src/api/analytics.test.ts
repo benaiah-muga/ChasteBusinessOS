@@ -113,6 +113,22 @@ describe("analytics API client", () => {
     await expect(fetchAnalyticsDatasets()).rejects.toEqual(new AnalyticsApiError(403, "You do not have permission to access this analytics data."));
   });
 
+  it("rejects reports with more than the server-supported eight sections before sending them", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const sections = Array.from({ length: 9 }, (_, index) => ({
+      heading: `Section ${index + 1}`,
+      datasetId: "analytics.pipelineByStage",
+      params: {},
+      ops: [],
+    }));
+
+    await expect(generateAnalyticsReport({ title: "Too many sections", sections })).rejects.toEqual(
+      new AnalyticsApiError(0, "The report needs a title and at least one valid section."),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("uses the existing sanitized report filename rules", () => {
     expect(analyticsReportFilename("  Q3 Sales / FY26! ")).toBe("q3-sales-fy26-.html");
     expect(analyticsReportFilename("   ")).toBe("report.html");

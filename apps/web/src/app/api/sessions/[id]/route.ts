@@ -3,6 +3,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { agentSessions, getDb, sessionEvents } from "@chaste/db";
 import { hasPermission } from "@chaste/kernel";
 import { getResolvedUser } from "@/server/session";
+import { sessionEventPayloadExceedsBounds } from "@/server/replay";
+import { sessionResponseExceedsBounds } from "@/server/response-limits";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -32,14 +34,27 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
+  if (await sessionEventPayloadExceedsBounds(db, id)) {
+    return NextResponse.json({ error: "session trajectory exceeds the response limit" }, { status: 413 });
+  }
   const events = await db
-    .select()
+    .select({
+      seq: sessionEvents.seq,
+      role: sessionEvents.role,
+      content: sessionEvents.content,
+      createdAt: sessionEvents.createdAt,
+    })
     .from(sessionEvents)
     .where(eq(sessionEvents.sessionId, id))
-    .orderBy(asc(sessionEvents.seq));
+    .orderBy(asc(sessionEvents.seq))
+    .limit(10_001);
 
-  return NextResponse.json({
+  const response = {
     session: { ...session, createdAt: session.createdAt.toISOString(), updatedAt: session.updatedAt.toISOString() },
     events: events.map((e) => ({ seq: e.seq, role: e.role, content: e.content, at: e.createdAt.toISOString() })),
-  });
+  };
+  if (sessionResponseExceedsBounds(response)) {
+    return NextResponse.json({ error: "session trajectory exceeds the response limit" }, { status: 413 });
+  }
+  return NextResponse.json(response);
 }

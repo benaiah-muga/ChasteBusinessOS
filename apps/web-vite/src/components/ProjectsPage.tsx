@@ -67,6 +67,8 @@ export function ProjectsPage() {
   const [archiveTarget, setArchiveTarget] = useState<Project | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [overStatus, setOverStatus] = useState<string | null>(null);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
   const archiveDialogRef = useRef<HTMLElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
@@ -111,12 +113,13 @@ export function ProjectsPage() {
   }, [loadProjects]);
 
   const loadBoard = useCallback(async (projectId: string, signal?: AbortSignal) => {
+    if (selectedIdRef.current !== projectId) return;
     if (!signal) setBoardState({ status: "loading" });
     try {
       const columns = await fetchProjectBoard(projectId, signal);
-      if (!signal?.aborted) setBoardState({ status: "ready", columns });
+      if (!signal?.aborted && selectedIdRef.current === projectId) setBoardState({ status: "ready", columns });
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || selectedIdRef.current !== projectId) return;
       setBoardState({ status: "failed", message: errorMessage(error) });
     }
   }, []);
@@ -213,7 +216,7 @@ export function ProjectsPage() {
   }
 
   async function moveTask(task: BoardTask, fromStatus: string, status: string): Promise<void> {
-    if (status === fromStatus || !selectedId || boardState.status !== "ready") return;
+    if (selected?.status !== "active" || status === fromStatus || !selectedId || boardState.status !== "ready") return;
     const target = boardState.columns.find((column) => column.status === status);
     const position = target && target.tasks.length > 0
       ? Math.max(...target.tasks.map((entry) => entry.position)) + 1
@@ -228,7 +231,7 @@ export function ProjectsPage() {
   }
 
   function dropTask(status: string): void {
-    if (!draggingTaskId || busy || boardState.status !== "ready") return;
+    if (selected?.status !== "active" || !draggingTaskId || busy || boardState.status !== "ready") return;
     const source = boardState.columns.flatMap((column) => column.tasks).find((task) => task.id === draggingTaskId);
     const fromStatus = boardState.columns.find((column) => column.tasks.some((task) => task.id === draggingTaskId))?.status;
     if (source && fromStatus) void moveTask(source, fromStatus, status);
@@ -236,7 +239,7 @@ export function ProjectsPage() {
   }
 
   async function assignTask(task: BoardTask, assigneeUserId: string): Promise<void> {
-    if (!selectedId) return;
+    if (selected?.status !== "active" || !selectedId) return;
     const who = members.find((member) => member.userId === assigneeUserId)?.name ?? (assigneeUserId ? "a member" : "nobody");
     const result = await postAction({ action: "assignTask", taskId: task.id, assigneeUserId: assigneeUserId || undefined }, `Assign “${task.title}” to ${who}`);
     if (result?.kind === "completed") await loadBoard(selectedId);
@@ -425,7 +428,7 @@ export function ProjectsPage() {
                         className={`projects-column${overStatus === column.status && draggingTaskId ? " projects-column-drop-target" : ""}`}
                         role="region"
                         aria-label={`${column.status} task column`}
-                        onDragOver={(event) => { event.preventDefault(); if (!busy) setOverStatus(column.status); }}
+                        onDragOver={(event) => { event.preventDefault(); if (!busy && selected.status === "active") setOverStatus(column.status); }}
                         onDragLeave={(event) => {
                           if (!event.currentTarget.contains(event.relatedTarget as Node)) setOverStatus((current) => current === column.status ? null : current);
                         }}
@@ -437,13 +440,13 @@ export function ProjectsPage() {
                             <li
                               key={task.id}
                               className={`projects-task-card${draggingTaskId === task.id ? " projects-task-card-dragging" : ""}`}
-                              draggable={!busy}
+                              draggable={!busy && selected.status === "active"}
                               onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", task.id); setDraggingTaskId(task.id); }}
                               onDragEnd={clearDragState}
                             >
                               <div className="projects-task-heading">
                                 <p>{task.parentTaskId && <span className="projects-subtask-marker" aria-label="Subtask">↳ </span>}{task.title}</p>
-                                <button className="projects-drag-handle" type="button" draggable={!busy} aria-label={`Drag ${task.title} to another status`} title="Drag to another status">Move</button>
+                                <button className="projects-drag-handle" type="button" draggable={!busy && selected.status === "active"} aria-label={`Drag ${task.title} to another status`} title="Drag to another status">Move</button>
                               </div>
                               <p className="projects-task-meta">
                                 <span className={`projects-priority projects-priority-${task.priority}`}>{task.priority}</span>
@@ -452,11 +455,11 @@ export function ProjectsPage() {
                               </p>
                               <div className="projects-task-controls">
                                 <label className="sr-only" htmlFor={`move-${task.id}`}>Move {task.title}</label>
-                                <select id={`move-${task.id}`} aria-label={`Move ${task.title}`} value={column.status} disabled={busy} onChange={(event) => void moveTask(task, column.status, event.currentTarget.value)}>
+                                <select id={`move-${task.id}`} aria-label={`Move ${task.title}`} value={column.status} disabled={busy || selected.status !== "active"} onChange={(event) => void moveTask(task, column.status, event.currentTarget.value)}>
                                   <option value="todo">todo</option><option value="doing">doing</option><option value="done">done</option>
                                 </select>
                                 <label className="sr-only" htmlFor={`assign-${task.id}`}>Assign {task.title}</label>
-                                <select id={`assign-${task.id}`} aria-label={`Assign ${task.title}`} value={task.assigneeUserId ?? ""} disabled={busy} onChange={(event) => void assignTask(task, event.currentTarget.value)}>
+                                <select id={`assign-${task.id}`} aria-label={`Assign ${task.title}`} value={task.assigneeUserId ?? ""} disabled={busy || selected.status !== "active"} onChange={(event) => void assignTask(task, event.currentTarget.value)}>
                                   <option value="">Unassigned</option>
                                   {members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}
                                 </select>

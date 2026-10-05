@@ -4,6 +4,7 @@ import { agentRunSteps, agentRuns, createDb, harnessCompositions, organizations,
 import { BUILTIN_PROFILES } from "@chaste/harness";
 import {
   createDurableRun,
+  DurableRunResponseLimitError,
   getDurableRun,
   recordDurableStep,
   transitionDurableRun,
@@ -34,6 +35,29 @@ afterAll(async () => {
 });
 
 describe("durable agent runs", () => {
+  it("checks owner visibility before reporting an oversized detail", async () => {
+    const ownerId = crypto.randomUUID();
+    const otherUserId = crypto.randomUUID();
+    const runId = await createDurableRun(db, {
+      orgId,
+      goal: "Keep oversized detail private",
+      actor: { type: "human", id: ownerId },
+    });
+    await recordDurableStep(db, {
+      orgId,
+      runId,
+      stepIndex: 0,
+      capabilityId: "signals.list",
+      input: {},
+      output: { payload: "x".repeat(2 * 1024 * 1024 + 1) },
+      status: "committed",
+    });
+
+    await expect(getDurableRun(db, orgId, runId, { userId: otherUserId, admin: false })).resolves.toBeNull();
+    await expect(getDurableRun(db, orgId, runId, { userId: ownerId, admin: false })).rejects.toBeInstanceOf(DurableRunResponseLimitError);
+    await expect(getDurableRun(db, orgId, runId, { userId: otherUserId, admin: true })).rejects.toBeInstanceOf(DurableRunResponseLimitError);
+  });
+
   it("persists the run lifecycle and idempotent version-pinned steps", async () => {
     const composition = await persistHarnessComposition(db, {
       orgId,

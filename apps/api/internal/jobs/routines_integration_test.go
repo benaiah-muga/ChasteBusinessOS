@@ -244,6 +244,135 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		VALUES ($1::uuid, $2::uuid, 71, 'open', 'USD', 98765, $3, $3)`, otherOrgID, foreignVendorID, statementAt); err != nil {
 		t.Fatal(err)
 	}
+	var localEmployeeID, foreignEmployeeID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO employees (org_id, name, title, monthly_salary_minor, annual_leave_days, tax_rate_bps, hired_at)
+		VALUES ($1::uuid, 'Routine local employee', 'Accountant', 500000, 21, 1000, $2)
+		RETURNING id::text`, orgID, localHistoryAt).Scan(&localEmployeeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO employees (org_id, name, monthly_salary_minor, annual_leave_days, hired_at)
+		VALUES ($1::uuid, 'Routine foreign employee', 900000, 30, $2)
+		RETURNING id::text`, otherOrgID, localHistoryAt).Scan(&foreignEmployeeID); err != nil {
+		t.Fatal(err)
+	}
+	leaveYearStart := time.Date(time.Now().UTC().Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO leave_requests (org_id, employee_id, kind, start_date, end_date, calendar_days, status, requested_by_actor_type)
+		VALUES ($1::uuid, $2::uuid, 'annual', $5, $6, 3, 'approved', 'human'),
+		       ($3::uuid, $4::uuid, 'annual', $5, $6, 3, 'approved', 'human'),
+		       ($1::uuid, $2::uuid, 'sick', $5, $5, 1, 'approved', 'human')`,
+		orgID, localEmployeeID, otherOrgID, foreignEmployeeID, leaveYearStart, leaveYearStart.AddDate(0, 0, 2)); err != nil {
+		t.Fatal(err)
+	}
+	var localLotItemID, foreignLotItemID string
+	if err := owner.QueryRow(ctx, `INSERT INTO items (org_id, sku, name, kind) VALUES ($1::uuid, 'ROUTINE-LOT', 'Local routine lot item', 'goods') RETURNING id::text`, orgID).Scan(&localLotItemID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `INSERT INTO items (org_id, sku, name, kind) VALUES ($1::uuid, 'ROUTINE-LOT', 'Foreign routine lot item', 'goods') RETURNING id::text`, otherOrgID).Scan(&foreignLotItemID); err != nil {
+		t.Fatal(err)
+	}
+	var localLotID, foreignLotID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO lots (org_id, item_id, lot_code, expires_at, created_at)
+		VALUES ($1::uuid, $2::uuid, 'LOT-LOCAL', '2027-01-31T00:00:00Z', $3)
+		RETURNING id::text`, orgID, localLotItemID, localHistoryAt).Scan(&localLotID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO lots (org_id, item_id, lot_code, created_at)
+		VALUES ($1::uuid, $2::uuid, 'LOT-FOREIGN', $3)
+		RETURNING id::text`, otherOrgID, foreignLotItemID, localHistoryAt).Scan(&foreignLotID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO stock_movements (org_id, item_id, lot_id, quantity_delta, reason, actor_type, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 4000, 'adjustment', 'human', $4),
+		       ($5::uuid, $6::uuid, $7::uuid, 99000, 'adjustment', 'human', $4)`,
+		orgID, localLotItemID, localLotID, localHistoryAt, otherOrgID, foreignLotItemID, foreignLotID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO stock_reservations (org_id, item_id, quantity_thousandths, reason, ref_type, status, created_by_actor_type, created_at)
+		VALUES ($1::uuid, $2::uuid, 1200, 'Routine local hold', 'sales_order', 'open', 'human', $4),
+		       ($1::uuid, $2::uuid, 800, 'Routine local released hold', 'sales_order', 'released', 'human', $4),
+		       ($3::uuid, $5::uuid, 99000, 'Foreign tenant hold', 'sales_order', 'open', 'human', $4)`,
+		orgID, localHistoryItemID, otherOrgID, localHistoryAt, foreignHistoryItemID); err != nil {
+		t.Fatal(err)
+	}
+	var localScenarioID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO budget_scenarios (org_id, scenario_key, name, fiscal_year, version, currency, assumptions, is_current, created_by_actor_type, created_at)
+		VALUES ($1::uuid, 'base', 'Routine local base plan', 2026, 2, $2, '{"growthBps":500}'::jsonb, true, 'human', $3)
+		RETURNING id::text`, orgID, baseCurrency, localHistoryAt).Scan(&localScenarioID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO budget_scenarios (org_id, scenario_key, name, fiscal_year, version, currency, is_current, created_by_actor_type, created_at)
+		VALUES ($1::uuid, 'base', 'Foreign tenant plan', 2026, 9, 'CAD', true, 'human', $2),
+		       ($1::uuid, 'expansion', 'Routine local expansion plan', 2025, 1, $3, false, 'human', $2)`,
+		otherOrgID, localHistoryAt, baseCurrency); err != nil {
+		t.Fatal(err)
+	}
+	seedPurchaseOrder := func(poOrgID, vendorID string) {
+		t.Helper()
+		var poID string
+		if err := owner.QueryRow(ctx, `
+			INSERT INTO purchase_orders (org_id, vendor_id, number, status, ordered_at, created_at)
+			VALUES ($1::uuid, $2::uuid, 55, 'ordered', $3, $3) RETURNING id::text`, poOrgID, vendorID, localHistoryAt).Scan(&poID); err != nil {
+			t.Fatal(err)
+		}
+		var poLineID string
+		if err := owner.QueryRow(ctx, `
+			INSERT INTO po_lines (po_id, description, quantity, unit_price_minor, position)
+			VALUES ($1::uuid, 'Routine ordered widget', 10000, 250, 1) RETURNING id::text`, poID).Scan(&poLineID); err != nil {
+			t.Fatal(err)
+		}
+		var receiptID string
+		if err := owner.QueryRow(ctx, `
+			INSERT INTO goods_receipts (org_id, po_id, number, received_at, received_by_actor_type, note)
+			VALUES ($1::uuid, $2::uuid, 1, $3, 'human', 'Routine first delivery') RETURNING id::text`, poOrgID, poID, localHistoryAt).Scan(&receiptID); err != nil {
+			t.Fatal(err)
+		}
+		accepted, rejected := int64(7000), int64(0)
+		if poOrgID == otherOrgID {
+			accepted, rejected = 99000, 500
+		}
+		if _, err := owner.Exec(ctx, `
+			INSERT INTO goods_receipt_lines (org_id, receipt_id, po_line_id, position, accepted_thousandths, rejected_thousandths, rejection_note)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, 1, $4, $5, NULL)`, poOrgID, receiptID, poLineID, accepted, rejected); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedPurchaseOrder(orgID, localVendorID)
+	seedPurchaseOrder(otherOrgID, foreignVendorID)
+	var localViewUserID string
+	// The users table is not organization-scoped, so a leftover row from an
+	// interrupted run would collide; a per-run address keeps the fixture
+	// re-runnable without deleting rows outside the test's organizations.
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO users (email, name) VALUES ($1, 'Routine views owner') RETURNING id::text`, tag+"-views@example.com").Scan(&localViewUserID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := owner.Exec(context.Background(), `DELETE FROM users WHERE id=$1::uuid`, localViewUserID); err != nil {
+			t.Errorf("delete routine customer-view user fixture: %v", err)
+		}
+	}()
+	seedCustomerView := func(viewOrgID, userID, name string, shared, pinned bool) {
+		t.Helper()
+		if _, err := owner.Exec(ctx, `
+			INSERT INTO crm_customer_views (org_id, name, filters, is_shared, is_pinned, created_by_user_id, updated_by_user_id, updated_at)
+			VALUES ($1::uuid, $2, '{"status":"active","owner":"me","staleOnly":true,"duplicateOnly":false,"tag":"vip"}'::jsonb, $3, $4, $5::uuid, $5::uuid, $6)`,
+			viewOrgID, name, shared, pinned, userID, updatedAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedCustomerView(orgID, localViewUserID, "Routine shared view", true, false)
+	seedCustomerView(orgID, localViewUserID, "Routine pinned shared view", true, true)
+	seedCustomerView(orgID, localViewUserID, "Routine private view", false, false)
+	seedCustomerView(otherOrgID, localViewUserID, "Foreign tenant view", true, true)
 	secret := "routine-test-encryption-secret"
 	t.Setenv("AI_CONFIG_ENCRYPTION_KEY", secret)
 	serverCalls := atomic.Int32{}
@@ -297,11 +426,25 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				t.Errorf("encode foreign document version detail arguments: %v", err)
 				return
 			}
+			leaveBalanceArgs, err := json.Marshal(map[string]string{"employeeId": localEmployeeID})
+			if err != nil {
+				t.Errorf("encode HR leave balance arguments: %v", err)
+				return
+			}
+			foreignLeaveBalanceArgs, err := json.Marshal(map[string]string{"employeeId": foreignEmployeeID})
+			if err != nil {
+				t.Errorf("encode foreign HR leave balance arguments: %v", err)
+				return
+			}
 			providerResponse, err := json.Marshal(map[string]any{
 				"choices": []any{map[string]any{"message": map[string]any{"content": nil, "tool_calls": []any{
 					map[string]any{"id": "call-routine-1", "type": "function", "function": map[string]any{"name": "crm_listCustomers", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-tasks", "type": "function", "function": map[string]any{"name": "crm_listTasks", "arguments": `{"openOnly":true}`}},
 					map[string]any{"id": "call-routine-crm-timeline", "type": "function", "function": map[string]any{"name": "crm_customerTimeline", "arguments": string(timelineArgs)}},
+					map[string]any{"id": "call-routine-customer-views", "type": "function", "function": map[string]any{"name": "crm_listCustomerViews", "arguments": "{}"}},
+					map[string]any{"id": "call-routine-employees", "type": "function", "function": map[string]any{"name": "hr_listEmployees", "arguments": "{}"}},
+					map[string]any{"id": "call-routine-leave-balance", "type": "function", "function": map[string]any{"name": "hr_leaveBalance", "arguments": string(leaveBalanceArgs)}},
+					map[string]any{"id": "call-routine-foreign-leave-balance", "type": "function", "function": map[string]any{"name": "hr_leaveBalance", "arguments": string(foreignLeaveBalanceArgs)}},
 					map[string]any{"id": "call-routine-accounting-quotes", "type": "function", "function": map[string]any{"name": "accounting_listQuotes", "arguments": quoteFilterArgs}},
 					map[string]any{"id": "call-routine-ar-aging", "type": "function", "function": map[string]any{"name": "accounting_arAging", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-income-statement", "type": "function", "function": map[string]any{"name": "accounting_incomeStatement", "arguments": "{}"}},
@@ -314,6 +457,11 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 					map[string]any{"id": "call-routine-item-history", "type": "function", "function": map[string]any{"name": "inventory_itemHistory", "arguments": `{"sku":"ROUTINE-HISTORY","limit":10}`}},
 					map[string]any{"id": "call-routine-supplier-statement", "type": "function", "function": map[string]any{"name": "purchasing_supplierStatement", "arguments": string(statementArgs)}},
 					map[string]any{"id": "call-routine-ap-aging", "type": "function", "function": map[string]any{"name": "purchasing_apAging", "arguments": "{}"}},
+					map[string]any{"id": "call-routine-receipts", "type": "function", "function": map[string]any{"name": "purchasing_listReceipts", "arguments": `{"poNumber":55}`}},
+					map[string]any{"id": "call-routine-budget-scenarios", "type": "function", "function": map[string]any{"name": "accounting_listBudgetScenarios", "arguments": `{"fiscalYear":2026}`}},
+					map[string]any{"id": "call-routine-lots", "type": "function", "function": map[string]any{"name": "inventory_listLots", "arguments": "{}"}},
+					map[string]any{"id": "call-routine-reservations", "type": "function", "function": map[string]any{"name": "inventory_listReservations", "arguments": "{}"}},
+					map[string]any{"id": "call-routine-list", "type": "function", "function": map[string]any{"name": "routines_list", "arguments": `{"limit":100}`}},
 					map[string]any{"id": "call-routine-documents", "type": "function", "function": map[string]any{"name": "documents_listDocs", "arguments": "{}"}},
 					map[string]any{"id": "call-routine-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(localVersionArgs)}},
 					map[string]any{"id": "call-routine-foreign-document-versions", "type": "function", "function": map[string]any{"name": "documents_listDocVersions", "arguments": string(foreignVersionArgs)}},
@@ -354,6 +502,15 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		foundSupplierStatementResult := false
 		foundAPAgingResult := false
 		foundTimelineResult := false
+		foundCustomerViewsResult := false
+		foundEmployeesResult := false
+		foundLeaveBalanceResult := false
+		foundForeignLeaveBalanceResult := false
+		foundReceiptsResult := false
+		foundBudgetScenariosResult := false
+		foundLotsResult := false
+		foundReservationsResult := false
+		foundRoutineListResult := false
 		foundLocalVersionResult := false
 		foundForeignVersionResult := false
 		foundLocalVersionDetailResult := false
@@ -404,6 +561,172 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 				buckets := result.Data.Buckets
 				if !result.OK || buckets.Current != 12345 || buckets.D30 != 0 || buckets.D60 != 0 || buckets.D90Plus != 0 || buckets.TotalOutstanding != 12345 {
 					t.Errorf("purchasing.apAging result = %+v, want only the local bill totaling 12345 in the current bucket", result)
+				}
+			case "call-routine-receipts":
+				foundReceiptsResult = true
+				var result struct {
+					OK   bool                          `json:"ok"`
+					Data capability.ListReceiptsOutput `json:"data"`
+					Err  string                        `json:"error"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode purchasing.listReceipts tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.OrderLines) != 1 || len(result.Data.Receipts) != 1 {
+					t.Errorf("purchasing.listReceipts result = %+v, want one local purchase order line and receipt", result)
+					continue
+				}
+				orderLine := result.Data.OrderLines[0]
+				if orderLine.Position != 1 || orderLine.Description != "Routine ordered widget" || orderLine.OrderedThousandths != 10000 ||
+					orderLine.AcceptedThousandths != 7000 || orderLine.RejectedThousandths != 0 || orderLine.ReturnedThousandths != 0 || orderLine.RemainingThousandths != 3000 {
+					t.Errorf("purchasing.listReceipts order line = %+v, want 7000 accepted of 10000 ordered and 3000 remaining", orderLine)
+				}
+				receipt := result.Data.Receipts[0]
+				if receipt.Number != 1 || receipt.Note == nil || *receipt.Note != "Routine first delivery" || len(receipt.Lines) != 1 ||
+					receipt.Lines[0].AcceptedThousandths != 7000 || receipt.Lines[0].Description != "Routine ordered widget" {
+					t.Errorf("purchasing.listReceipts receipt = %+v, want the seeded local receipt and accepted line", receipt)
+				}
+			case "call-routine-budget-scenarios":
+				foundBudgetScenariosResult = true
+				var result struct {
+					OK   bool                                 `json:"ok"`
+					Data capability.ListBudgetScenariosOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode accounting.listBudgetScenarios tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Scenarios) != 1 {
+					t.Errorf("accounting.listBudgetScenarios result = %+v, want only the local 2026 scenario", result)
+					continue
+				}
+				scenario := result.Data.Scenarios[0]
+				if scenario.ID != localScenarioID || scenario.Key != "base" || scenario.Name != "Routine local base plan" || scenario.FiscalYear != 2026 ||
+					scenario.Version != 2 || scenario.Currency != baseCurrency || !scenario.IsCurrent || scenario.CreatedAt != "2026-09-30T09:01:02.345Z" {
+					t.Errorf("accounting.listBudgetScenarios scenario = %+v, want the seeded local plan without foreign tenants", scenario)
+				}
+			case "call-routine-customer-views":
+				foundCustomerViewsResult = true
+				var result struct {
+					OK   bool                               `json:"ok"`
+					Data capability.ListCustomerViewsOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode crm.listCustomerViews tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Views) != 2 {
+					t.Errorf("crm.listCustomerViews result = %+v, want only the two shared local views", result)
+					continue
+				}
+				first, second := result.Data.Views[0], result.Data.Views[1]
+				if !first.IsPinned || first.Name != "Routine pinned shared view" || second.IsPinned || second.Name != "Routine shared view" {
+					t.Errorf("crm.listCustomerViews order = %+v, want the pinned shared view first and no private or foreign view", result.Data.Views)
+				}
+				if first.CreatedByUserID != localViewUserID || first.UpdatedAt != "2026-09-30T10:11:12.345Z" ||
+					first.Filters.Status != "active" || first.Filters.Owner != "me" || !first.Filters.StaleOnly || first.Filters.DuplicateOnly || first.Filters.Tag != "vip" {
+					t.Errorf("crm.listCustomerViews view = %+v, want the seeded owner, filter, and timestamp", first)
+				}
+			case "call-routine-employees":
+				foundEmployeesResult = true
+				var result struct {
+					OK   bool                             `json:"ok"`
+					Data capability.HRListEmployeesOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode hr.listEmployees tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Employees) != 1 {
+					t.Errorf("hr.listEmployees result = %+v, want only this organization's employee", result)
+					continue
+				}
+				employee := result.Data.Employees[0]
+				if employee.ID != localEmployeeID || employee.Name != "Routine local employee" || employee.Title == nil || *employee.Title != "Accountant" ||
+					employee.MonthlySalaryMinor != 500000 || employee.TaxRateBps != 1000 || !employee.Active {
+					t.Errorf("hr.listEmployees employee = %+v, want the seeded local employee", employee)
+				}
+			case "call-routine-leave-balance":
+				foundLeaveBalanceResult = true
+				var result struct {
+					OK   bool                            `json:"ok"`
+					Data capability.HRLeaveBalanceOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode hr.leaveBalance tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || result.Data.EntitlementDays != 21 || result.Data.TakenDays != 3 || result.Data.RemainingDays != 18 {
+					t.Errorf("hr.leaveBalance result = %+v, want 21 entitlement, 3 annual days taken, 18 remaining", result)
+				}
+			case "call-routine-foreign-leave-balance":
+				foundForeignLeaveBalanceResult = true
+				var result struct {
+					OK   bool                            `json:"ok"`
+					Data capability.HRLeaveBalanceOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode foreign hr.leaveBalance tool result %s: %v", message.Content, err)
+					continue
+				}
+				if result.OK || result.Data.EntitlementDays != 0 {
+					t.Errorf("foreign hr.leaveBalance result = %+v, want the cross-tenant employee refused", result)
+				}
+			case "call-routine-lots":
+				foundLotsResult = true
+				var result struct {
+					OK   bool                               `json:"ok"`
+					Data capability.InventoryListLotsOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode inventory.listLots tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Lots) != 1 {
+					t.Errorf("inventory.listLots result = %+v, want only this organization's lot", result)
+					continue
+				}
+				lot := result.Data.Lots[0]
+				if lot.ID != localLotID || lot.SKU != "ROUTINE-LOT" || lot.LotCode != "LOT-LOCAL" || lot.BalanceThousandths != 4000 {
+					t.Errorf("inventory.listLots lot = %+v, want the seeded local lot and its balance", lot)
+				}
+			case "call-routine-reservations":
+				foundReservationsResult = true
+				var result struct {
+					OK   bool                                       `json:"ok"`
+					Data capability.InventoryListReservationsOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode inventory.listReservations tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Reservations) != 1 {
+					t.Errorf("inventory.listReservations result = %+v, want only the open local reservation", result)
+					continue
+				}
+				reservation := result.Data.Reservations[0]
+				if reservation.SKU != "ROUTINE-HISTORY" || reservation.QuantityThousandths != 1200 || reservation.Status != "open" ||
+					reservation.Reason != "Routine local hold" || reservation.ReleasedAt != nil {
+					t.Errorf("inventory.listReservations reservation = %+v, want the seeded open local hold", reservation)
+				}
+			case "call-routine-list":
+				foundRoutineListResult = true
+				var result struct {
+					OK   bool                          `json:"ok"`
+					Data capability.RoutinesListOutput `json:"data"`
+				}
+				if err := json.Unmarshal(message.Content, &result); err != nil {
+					t.Errorf("decode routines.list tool result %s: %v", message.Content, err)
+					continue
+				}
+				if !result.OK || len(result.Data.Routines) != 1 {
+					t.Errorf("routines.list result = %+v, want only this organization's routine", result)
+					continue
+				}
+				routine := result.Data.Routines[0]
+				if routine.Name != "Test digest" || routine.ScheduleLabel != "Daily at 08:00" || routine.TriggerType != "schedule" || !routine.Enabled {
+					t.Errorf("routines.list item = %+v, want the seeded local schedule", routine)
 				}
 			case "call-routine-documents":
 				foundDocumentResult = true
@@ -806,6 +1129,33 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 		if !foundAPAgingResult {
 			t.Errorf("follow-up provider request omitted the purchasing.apAging tool result")
 		}
+		if !foundReceiptsResult {
+			t.Errorf("follow-up provider request omitted the purchasing.listReceipts tool result")
+		}
+		if !foundBudgetScenariosResult {
+			t.Errorf("follow-up provider request omitted the accounting.listBudgetScenarios tool result")
+		}
+		if !foundCustomerViewsResult {
+			t.Errorf("follow-up provider request omitted the crm.listCustomerViews tool result")
+		}
+		if !foundEmployeesResult {
+			t.Errorf("follow-up provider request omitted the hr.listEmployees tool result")
+		}
+		if !foundLeaveBalanceResult {
+			t.Errorf("follow-up provider request omitted the hr.leaveBalance tool result")
+		}
+		if !foundForeignLeaveBalanceResult {
+			t.Errorf("follow-up provider request omitted the cross-tenant hr.leaveBalance tool result")
+		}
+		if !foundLotsResult {
+			t.Errorf("follow-up provider request omitted the inventory.listLots tool result")
+		}
+		if !foundReservationsResult {
+			t.Errorf("follow-up provider request omitted the inventory.listReservations tool result")
+		}
+		if !foundRoutineListResult {
+			t.Errorf("follow-up provider request omitted the routines.list tool result")
+		}
 		if !foundTimelineResult {
 			t.Errorf("follow-up provider request omitted the crm.customerTimeline tool result")
 		}
@@ -827,6 +1177,9 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	}
 	var routineID, occurrenceID string
 	if err := owner.QueryRow(ctx, `INSERT INTO routines(org_id,name,prompt,schedule,enabled,trigger_type) VALUES($1::uuid,'Test digest','Count customers', '{"kind":"daily","atTime":"08:00"}', true, 'schedule') RETURNING id::text`, orgID).Scan(&routineID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(ctx, `INSERT INTO routines(org_id,name,prompt,schedule,enabled,trigger_type) VALUES($1::uuid,'Foreign routine sentinel','Must stay private', '{"kind":"daily","atTime":"08:00"}', true, 'schedule')`, otherOrgID); err != nil {
 		t.Fatal(err)
 	}
 	if err := owner.QueryRow(ctx, `INSERT INTO routine_occurrences(org_id,routine_id,scheduled_at,status) VALUES($1::uuid,$2::uuid,clock_timestamp(),'queued') RETURNING id::text`, orgID, routineID).Scan(&occurrenceID); err != nil {
@@ -899,6 +1252,20 @@ func TestRoutineJobRunsGovernedAgentAndFinalizesOccurrence(t *testing.T) {
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='documents.getDocVersion' AND session_id=$2::uuid AND actor_type='system'`, orgID, sessionID); got != 2 {
 		t.Fatalf("session-linked document-version detail system capability audit events=%d, want both successful local reads", got)
+	}
+	for capabilityID, want := range map[string]int{
+		"crm.listCustomerViews":          1,
+		"hr.listEmployees":               1,
+		"hr.leaveBalance":                1,
+		"inventory.listLots":             1,
+		"inventory.listReservations":     1,
+		"accounting.listBudgetScenarios": 1,
+		"purchasing.listReceipts":        1,
+		"routines.list":                  1,
+	} {
+		if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id=$2 AND session_id=$3::uuid AND actor_type='system'`, orgID, capabilityID, sessionID); got != want {
+			t.Errorf("session-linked %s system capability audit events=%d, want %d", capabilityID, got, want)
+		}
 	}
 	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM notifications WHERE org_id=$1::uuid AND kind='routine.run' AND href='/sessions'`, orgID); got != 1 {
 		t.Fatalf("routine finding notifications=%d", got)

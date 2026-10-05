@@ -337,7 +337,7 @@ export async function POST(req: Request, { params }: Params) {
           maxSteps: ai.codingAgentConnection ? 1 : 5,
           noCapabilityNote: ai.codingAgentConnection ? null : undefined,
           onEvent: (event) => {
-            void appendSessionEvent(db, agentSession!.id, event.role, event.content as object);
+            void appendSessionEvent(db, resolved.orgId!, agentSession!.id, event.role, event.content as object);
           },
         },
         {
@@ -355,8 +355,8 @@ export async function POST(req: Request, { params }: Params) {
           },
         },
       );
-      await appendSessionEvent(db, agentSession!.id, "assistant", { text: result.finalMessage });
-      await addTokenUsage(db, agentSession!.id, result.usage);
+      await appendSessionEvent(db, resolved.orgId!, agentSession!.id, "assistant", { text: result.finalMessage });
+      await addTokenUsage(db, resolved.orgId!, agentSession!.id, result.usage);
       agentReply = result.finalMessage || null;
     }
   }

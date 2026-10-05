@@ -14,12 +14,16 @@ type Beginner interface {
 }
 
 func WithOrgTx[T any](ctx context.Context, pool Beginner, orgID string, action func(pgx.Tx) (T, error)) (T, error) {
+	return WithOrgTxOptions(ctx, pool, orgID, pgx.TxOptions{}, action)
+}
+
+func WithOrgTxOptions[T any](ctx context.Context, pool Beginner, orgID string, options pgx.TxOptions, action func(pgx.Tx) (T, error)) (T, error) {
 	var zero T
 	if orgID == "" {
 		return zero, ErrMissingOrgID
 	}
 
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := pool.BeginTx(ctx, options)
 	if err != nil {
 		return zero, err
 	}

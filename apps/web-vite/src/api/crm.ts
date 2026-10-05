@@ -172,6 +172,7 @@ export type CrmActionOutcome<T = Record<string, unknown>> =
 
 const SuccessSchema = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) });
 const PendingSchema = z.object({ ok: z.literal(false).optional(), pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() });
+const ImportPendingSchema = z.object({ pendingApproval: z.literal(true), error: z.string() });
 
 export async function submitCrmAction<T extends Record<string, unknown> = Record<string, unknown>>(
   path: "/api/deals" | "/api/customers" | "/api/crm" | "/api/crm/views",
@@ -186,10 +187,7 @@ export async function submitCrmAction<T extends Record<string, unknown> = Record
   }
   if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
   const parsed = SuccessSchema.safeParse(body);
-  if (!parsed.success) {
-    if (body && typeof body === "object" && "viewId" in body) return { kind: "completed", data: body as T };
-    throw new CrmApiError(response.status, "The CRM service returned an unexpected action response.");
-  }
+  if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected action response.");
   return { kind: "completed", data: parsed.data.data as T };
 }
 
@@ -203,7 +201,11 @@ export type CrmImportResult = z.infer<typeof ImportResponseSchema>;
 
 export async function importCrmCustomers(rows: Array<{ rowNumber: number; name: string; email?: string; phone?: string; allowDuplicate: boolean }>, signal?: AbortSignal): Promise<CrmActionOutcome<CrmImportResult>> {
   const { response, body } = await request("/api/import", { method: "POST", body: JSON.stringify({ entity: "customers", rows }) }, signal);
-  if (response.status === 202) return { kind: "pending", reason: "The import is waiting for approval. Check Approvals before trying again." };
+  if (response.status === 202) {
+    const parsed = ImportPendingSchema.safeParse(body);
+    if (!parsed.success) throw new CrmApiError(202, "The import service returned an unexpected approval response.");
+    return { kind: "pending", reason: parsed.data.error };
+  }
   if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
   const parsed = ImportResponseSchema.safeParse(body);
   if (!parsed.success) throw new CrmApiError(response.status, "The import service returned an unexpected result.");
@@ -212,7 +214,11 @@ export async function importCrmCustomers(rows: Array<{ rowNumber: number; name: 
 
 export async function undoCrmImport(importIds: string[], signal?: AbortSignal): Promise<CrmActionOutcome<{ undone: number; remaining: number }>> {
   const { response, body } = await request("/api/import", { method: "POST", body: JSON.stringify({ entity: "customers", action: "undo", importIds }) }, signal);
-  if (response.status === 202) return { kind: "pending", reason: "Undoing this import is waiting for approval." };
+  if (response.status === 202) {
+    const parsed = ImportPendingSchema.safeParse(body);
+    if (!parsed.success) throw new CrmApiError(202, "The import service returned an unexpected undo approval response.");
+    return { kind: "pending", reason: parsed.data.error };
+  }
   if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
   const parsed = z.object({ undone: z.number().int().nonnegative(), remaining: z.number().int().nonnegative() }).safeParse(body);
   if (!parsed.success) throw new CrmApiError(response.status, "The import service returned an unexpected undo result.");

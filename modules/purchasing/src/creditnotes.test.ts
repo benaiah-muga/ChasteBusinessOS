@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   accounts,
   createDb,
@@ -41,18 +41,14 @@ async function run<I>(id: string, input: I): Promise<any> {
   return cap.execute(ctx, input);
 }
 
-async function purgeProbeOrgs(): Promise<void> {
-  const orgs = await db.db.select({ id: organizations.id }).from(organizations).where(eq(organizations.name, "AP Credit Probe"));
-  for (const o of orgs) {
-    await purgeTenantFinancials(db.db, o.id);
-    await db.db.delete(organizations).where(eq(organizations.id, o.id));
-  }
+async function purgeProbeOrg(): Promise<void> {
+  await purgeTenantFinancials(db.db, orgId);
+  await db.db.delete(organizations).where(eq(organizations.id, orgId));
 }
 
 beforeAll(async () => {
   db = createDb(url);
   deps = { db: db.db };
-  await purgeProbeOrgs();
   await db.db.insert(organizations).values({ id: orgId, name: "AP Credit Probe", slug: `ap-${orgId.slice(0, 8)}` });
   await db.db.insert(accounts).values([
     { orgId, code: "1000", name: "Cash", type: "asset" },
@@ -69,7 +65,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await purgeProbeOrgs();
+  await purgeProbeOrg();
 });
 
 describe("AP credit notes (M10.1)", () => {
@@ -98,14 +94,16 @@ describe("AP credit notes (M10.1)", () => {
       .from(journalLines)
       .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
       .innerJoin(accounts, eq(journalLines.accountId, accounts.id))
-      .where(eq(journalEntries.sourceType, "vendor_credit_note"));
+      .where(and(eq(journalEntries.sourceType, "vendor_credit_note"), eq(journalEntries.orgId, orgId)));
     const byCode = new Map(mirror.map((l) => [l.code, l]));
     expect(byCode.get("2000")).toMatchObject({ debit: 100_00, credit: 0 });
     expect(byCode.get("6000")).toMatchObject({ debit: 0, credit: 100_00 });
 
     const [row] = await db.db
       .select({ drift: sql<number>`coalesce(sum(${journalLines.debitMinor} - ${journalLines.creditMinor}), 0)` })
-      .from(journalLines);
+      .from(journalLines)
+      .innerJoin(journalEntries, eq(journalLines.entryId, journalEntries.id))
+      .where(eq(journalEntries.orgId, orgId));
     expect(Number(row!.drift)).toBe(0);
   });
 

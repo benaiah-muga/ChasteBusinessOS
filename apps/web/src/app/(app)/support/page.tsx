@@ -245,18 +245,22 @@ export default function SupportPage() {
   async function createCustomerHere() {
     if (!quickCustomer.name.trim()) return;
     setBusy(true);
-    const res = await postApi<{ customerId?: string }>("/api/customers", {
+    const res = await postApi<{
+      customerId?: string;
+      data?: { customerId?: string };
+    }>("/api/customers", {
       action: "create",
       name: quickCustomer.name.trim(),
       email: quickCustomer.email.trim() || undefined,
     });
     setBusy(false);
-    if (!res.ok || !res.data?.customerId) {
+    const customerId = res.data?.data?.customerId ?? res.data?.customerId;
+    if (!res.ok || !customerId) {
       setError(res.error?.title ?? "Couldn't create the customer");
       return;
     }
     const created: CustomerOption = {
-      id: res.data.customerId,
+      id: customerId,
       name: quickCustomer.name.trim(),
       email: quickCustomer.email.trim() || null,
     };

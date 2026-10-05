@@ -235,7 +235,7 @@ export async function executeRoutine(
     };
 
     const systemPrompt = `You are the scheduled business runner for "${org?.name ?? "the organization"}", executing a recurring routine. You operate through governed capabilities; the same rules as interactive runs apply: never invent numbers or capabilities, amounts are minor units.`;
-    await appendSessionEvent(db, session.id, "user", { text: routine.prompt, routine: routine.name });
+    await appendSessionEvent(db, routine.orgId, session.id, "user", { text: routine.prompt, routine: routine.name });
     const result = await runAgentLoop(model, registry, executor, ctx, {
       sessionId: session.id,
       systemPrompt,
@@ -245,8 +245,8 @@ export async function executeRoutine(
       noCapabilityNote:
         "No registered capability can do this. State honestly what you are missing, then reply NO_ACTION if it blocks the whole routine.",
     }, ticketSink);
-    await appendSessionEvent(db, session.id, "assistant", { text: result.finalMessage });
-    await addTokenUsage(db, session.id, result.usage);
+    await appendSessionEvent(db, routine.orgId, session.id, "assistant", { text: result.finalMessage });
+    await addTokenUsage(db, routine.orgId, session.id, result.usage);
     await finish("ok");
 
     const saidSomething =

@@ -180,12 +180,7 @@ func TestGoWave6SystemMoneyExecutionRequiresVerifiedHumanApproval(t *testing.T) 
 		t.Fatalf("agent valuation result=%+v err=%v, want pending approval", pending, err)
 	}
 
-	systemClaims := SystemClaims{
-		OrganizationID: fx.orgID,
-		CapabilityID:   inventoryPostValuationSummaryCapabilityID,
-		Permission:     "inventory.write",
-		IntentID:       executorUUID(t),
-	}
+	systemClaims := fx.systemClaims(t, inventoryPostValuationSummaryCapabilityID, "inventory.write", executorUUID(t), "", "")
 	withoutApproval, err := fx.executor.ExecuteSystem(fx.ctx, systemClaims, input)
 	if err != nil || withoutApproval.OK || withoutApproval.Error != "system money actions require a verified human approval" {
 		t.Fatalf("system valuation without approval=%+v err=%v", withoutApproval, err)

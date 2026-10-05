@@ -313,6 +313,7 @@ describe("support library Go bridge", () => {
     title: "Delivery times",
     body: "Delivery usually takes two days.",
     category: null,
+    isPublic: true,
   }];
 
   beforeEach(() => {

@@ -159,7 +159,7 @@ export async function POST(req: Request) {
     },
   };
 
-  await appendSessionEvent(db, sessionId, "user", { text: body.data.message });
+  await appendSessionEvent(db, ctx.actor.orgId, sessionId, "user", { text: body.data.message });
 
   const maxSteps = 8;
   const encoder = new TextEncoder();
@@ -180,7 +180,7 @@ export async function POST(req: Request) {
       const getSteering = async (): Promise<Array<{ text: string }>> => {
         const queued = drainSteering(sessionId!);
         for (const text of queued) {
-          await appendSessionEvent(db, sessionId!, "user", { text, steering: true });
+          await appendSessionEvent(db, ctx.actor.orgId, sessionId!, "user", { text, steering: true });
         }
         return queued.map((text) => ({ text }));
       };
@@ -240,21 +240,21 @@ export async function POST(req: Request) {
               if (event.role === "ask") {
                 // Persisted so replays show the question; delivery to the UI
                 // already happened through the ask channel.
-                void appendSessionEvent(db, sessionId!, "ask", event.content as object);
+                void appendSessionEvent(db, ctx.actor.orgId, sessionId!, "ask", event.content as object);
               }
               if (event.role === "tool_call" || event.role === "tool_result") {
                 // Fire-and-forget persistence, but failures are logged:
                 // silent trajectory gaps made replay/audit untrustworthy.
-                void appendSessionEvent(db, sessionId!, event.role, event.content as object);
+                void appendSessionEvent(db, ctx.actor.orgId, sessionId!, event.role, event.content as object);
               }
             },
           },
           codingPlan ? undefined : ticketSink,
         );
-        await appendSessionEvent(db, sessionId, "assistant", { text: result.finalMessage });
+        await appendSessionEvent(db, ctx.actor.orgId, sessionId, "assistant", { text: result.finalMessage });
         // Token accounting incl. cached prompt tokens (KV-cache hit rate);
         // accumulated atomically server-side (no lost updates).
-        await addTokenUsage(db, sessionId, result.usage);
+        await addTokenUsage(db, ctx.actor.orgId, sessionId, result.usage);
         const [fresh] = await db
           .select({ usage: agentSessions.tokenUsage })
           .from(agentSessions)
@@ -272,7 +272,7 @@ export async function POST(req: Request) {
       } catch (err) {
         const aborted = err instanceof Error && err.name === "AbortError";
         if (aborted) {
-          await appendSessionEvent(db, sessionId, "assistant", { text: "", stopped: true }).catch(() => {});
+          await appendSessionEvent(db, ctx.actor.orgId, sessionId, "assistant", { text: "", stopped: true }).catch(() => {});
           send({ type: "stopped", sessionId });
         } else {
           logger.error("agent loop failed", {

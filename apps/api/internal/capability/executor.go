@@ -52,6 +52,7 @@ const (
 	moveProjectTaskCapabilityID          = "projects.moveTask"
 	assignProjectTaskCapabilityID        = "projects.assignTask"
 	iamListMembersCapabilityID           = "iam.listMembers"
+	scimProvisionUserCapabilityID        = "iam.scimProvisionUser"
 	iamCreateRoleCapabilityID            = "iam.createRole"
 	iamUpdateRolePermissionsCapabilityID = "iam.updateRolePermissions"
 	iamAssignRoleCapabilityID            = "iam.assignRole"
@@ -67,21 +68,22 @@ type capabilitySpec struct {
 	inverseCapabilityID string
 	inverseInputSource  string
 	inverseFields       []string
+	oneTimeOutput       bool
 }
 
 var capabilitySpecs = map[string]capabilitySpec{
-	createCustomerCapabilityID:                          {module: "crm", permission: "crm.write", risk: "write"},
-	saveCustomerViewCapabilityID:                        {module: "crm", permission: "crm.write", risk: "write"},
+	createCustomerCapabilityID:                          {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.deactivateCustomer"},
+	saveCustomerViewCapabilityID:                        {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerView"},
 	restoreCustomerViewCapabilityID:                     {module: "crm", permission: "crm.write", risk: "write"},
 	deactivateCustomerCapabilityID:                      {module: "crm", permission: "crm.write", risk: "write"},
-	mergeCustomersCapabilityID:                          {module: "crm", permission: "crm.write", risk: "write"},
-	restoreCustomerMergeCapabilityID:                    {module: "crm", permission: "crm.write", risk: "write"},
-	importCustomersCapabilityID:                         {module: "crm", permission: "crm.write", risk: "write"},
-	undoCustomerImportCapabilityID:                      {module: "crm", permission: "crm.write", risk: "write"},
-	restoreImportedCustomersCapabilityID:                {module: "crm", permission: "crm.write", risk: "write"},
-	updateCustomerProfilesCapabilityID:                  {module: "crm", permission: "crm.write", risk: "write"},
-	restoreCustomerProfilesCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write"},
-	reapplyCustomerProfilesCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write"},
+	mergeCustomersCapabilityID:                          {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerMerge"},
+	restoreCustomerMergeCapabilityID:                    {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.mergeCustomers"},
+	importCustomersCapabilityID:                         {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
+	undoCustomerImportCapabilityID:                      {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreImportedCustomers"},
+	restoreImportedCustomersCapabilityID:                {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.undoCustomerImport"},
+	updateCustomerProfilesCapabilityID:                  {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
+	restoreCustomerProfilesCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.reapplyCustomerProfiles"},
+	reapplyCustomerProfilesCapabilityID:                 {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreCustomerProfiles"},
 	listCustomersCapabilityID:                           {module: "crm", permission: "crm.read", risk: "read"},
 	listCustomerViewsCapabilityID:                       {module: "crm", permission: "crm.read", risk: "read"},
 	listDealsCapabilityID:                               {module: "crm", permission: "crm.read", risk: "read"},
@@ -97,33 +99,33 @@ var capabilitySpecs = map[string]capabilitySpec{
 	convertLeadCapabilityID:                             {module: "crm", permission: "crm.write", risk: "write"},
 	createTaskCapabilityID:                              {module: "crm", permission: "crm.write", risk: "write"},
 	completeTaskCapabilityID:                            {module: "crm", permission: "crm.write", risk: "write"},
-	updateTaskDetailsCapabilityID:                       {module: "crm", permission: "crm.write", risk: "write"},
-	restoreTaskDetailsCapabilityID:                      {module: "crm", permission: "crm.write", risk: "write"},
-	createQuoteCapabilityID:                             {module: "accounting", permission: "accounting.write", risk: "write"},
+	updateTaskDetailsCapabilityID:                       {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.restoreTaskDetails"},
+	restoreTaskDetailsCapabilityID:                      {module: "crm", permission: "crm.write", risk: "write", inverseCapabilityID: "crm.updateTaskDetails"},
+	createQuoteCapabilityID:                             {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.declineQuote"},
 	acceptQuoteCapabilityID:                             {module: "accounting", permission: "accounting.write", risk: "write"},
 	declineQuoteCapabilityID:                            {module: "accounting", permission: "accounting.write", risk: "write"},
 	expireQuoteCapabilityID:                             {module: "accounting", permission: "accounting.write", risk: "write"},
 	listQuotesCapabilityID:                              {module: "accounting", permission: "accounting.read", risk: "read"},
-	createRecurringTemplateCapabilityID:                 {module: "accounting", permission: "accounting.write", risk: "write"},
-	pauseRecurringTemplateCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write"},
+	createRecurringTemplateCapabilityID:                 {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.pauseRecurringTemplate"},
+	pauseRecurringTemplateCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.resumeRecurringTemplate"},
 	resumeRecurringTemplateCapabilityID:                 {module: "accounting", permission: "accounting.write", risk: "write"},
 	listRecurringTemplatesCapabilityID:                  {module: "accounting", permission: "accounting.read", risk: "read"},
-	hrHireEmployeeCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write"},
+	hrHireEmployeeCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.deactivateEmployee"},
 	hrDeactivateEmployeeCapabilityID:                    {module: "hr", permission: "hr.write", risk: "write"},
 	hrListEmployeesCapabilityID:                         {module: "hr", permission: "hr.read", risk: "read"},
 	hrReportCapabilityID:                                {module: "hr", permission: "hr.read", risk: "read"},
 	hrUpdateEmployeeStructureCapabilityID:               {module: "hr", permission: "hr.write", risk: "write"},
-	salesCreateOrderCapabilityID:                        {module: "sales", permission: "sales.write", risk: "write"},
-	salesConfirmOrderCapabilityID:                       {module: "sales", permission: "sales.write", risk: "write"},
+	salesCreateOrderCapabilityID:                        {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
+	salesConfirmOrderCapabilityID:                       {module: "sales", permission: "sales.write", risk: "write", inverseCapabilityID: "sales.cancelOrder"},
 	salesDeliverOrderCapabilityID:                       {module: "sales", permission: "sales.write", risk: "write"},
 	salesCancelOrderCapabilityID:                        {module: "sales", permission: "sales.write", risk: "write"},
 	salesListOrdersCapabilityID:                         {module: "sales", permission: "sales.read", risk: "read"},
 	createInvoiceCapabilityID:                           {module: "accounting", permission: "accounting.write", risk: "write"},
 	recordFxRateCapabilityID:                            {module: "accounting", permission: "accounting.post", risk: "write"},
-	recordPaymentCapabilityID:                           {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
+	recordPaymentCapabilityID:                           {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000, inverseCapabilityID: "accounting.reversePayment"},
 	reversePaymentCapabilityID:                          {module: "accounting", permission: "accounting.post", risk: "money"},
 	trialBalanceCapabilityID:                            {module: "accounting", permission: "accounting.read", risk: "read"},
-	submitExpenseClaimCapabilityID:                      {module: "accounting", permission: "expenses.submit", risk: "write"},
+	submitExpenseClaimCapabilityID:                      {module: "accounting", permission: "expenses.submit", risk: "write", inverseCapabilityID: "accounting.decideExpenseClaim"},
 	decideExpenseClaimCapabilityID:                      {module: "accounting", permission: "expenses.decide", risk: "write"},
 	payExpenseClaimCapabilityID:                         {module: "accounting", permission: "accounting.post", risk: "money", moneyThresholdMinor: 50_000},
 	listExpenseClaimsCapabilityID:                       {module: "accounting", permission: "expenses.decide", risk: "read"},
@@ -133,22 +135,22 @@ var capabilitySpecs = map[string]capabilitySpec{
 	createPurchaseOrderCapabilityID:                     {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	receiveGoodsCapabilityID:                            {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	returnGoodsCapabilityID:                             {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	createBillCapabilityID:                              {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	payBillCapabilityID:                                 {module: "purchasing", permission: "purchasing.post", risk: "money", moneyThresholdMinor: 50_000},
+	createBillCapabilityID:                              {module: "purchasing", permission: "purchasing.write", risk: "write", inverseCapabilityID: "accounting.reverseEntry"},
+	payBillCapabilityID:                                 {module: "purchasing", permission: "purchasing.post", risk: "money", moneyThresholdMinor: 50_000, inverseCapabilityID: "purchasing.reverseVendorPayment"},
 	reverseVendorPaymentCapabilityID:                    {module: "purchasing", permission: "purchasing.post", risk: "money"},
 	inventoryAdjustStockCapabilityID:                    {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryCreateCycleCountCapabilityID:               {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCreateCycleCountCapabilityID:               {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.cancelCycleCount"},
 	inventoryRecordCycleCountsCapabilityID:              {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryPostCycleCountCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryCancelCycleCountCapabilityID:               {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryListCycleCountsCapabilityID:                {module: "inventory", permission: "inventory.read", risk: "read"},
-	inventoryCreateTransferCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryConfirmTransferCapabilityID:                {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryCreateTransferCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.cancelTransfer"},
+	inventoryConfirmTransferCapabilityID:                {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.reverseTransfer"},
 	inventoryCancelTransferCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryReverseTransferCapabilityID:                {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryListTransfersCapabilityID:                  {module: "inventory", permission: "inventory.read", risk: "read"},
 	posOpenSessionCapabilityID:                          {module: "pos", permission: "pos.write", risk: "write"},
-	posCompleteSaleCapabilityID:                         {module: "pos", permission: "pos.sell", risk: "money", moneyThresholdMinor: 100_000},
+	posCompleteSaleCapabilityID:                         {module: "pos", permission: "pos.sell", risk: "money", moneyThresholdMinor: 100_000, inverseCapabilityID: "pos.returnSale"},
 	posCloseSessionCapabilityID:                         {module: "pos", permission: "pos.write", risk: "write"},
 	posReturnSaleCapabilityID:                           {module: "pos", permission: "pos.sell", risk: "money"},
 	posShiftSummaryCapabilityID:                         {module: "pos", permission: "pos.read", risk: "read"},
@@ -159,10 +161,10 @@ var capabilitySpecs = map[string]capabilitySpec{
 	addBankAccountCapabilityID:                          {module: "accounting", permission: "accounting.write", risk: "write"},
 	importBankFeedCapabilityID:                          {module: "accounting", permission: "accounting.write", risk: "write"},
 	deleteBankTransactionCapabilityID:                   {module: "accounting", permission: "accounting.write", risk: "write"},
-	matchBankTransactionCapabilityID:                    {module: "accounting", permission: "accounting.write", risk: "write"},
+	matchBankTransactionCapabilityID:                    {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.unmatchBankTransaction"},
 	unmatchBankTransactionCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write"},
 	bankReconciliationCapabilityID:                      {module: "accounting", permission: "accounting.read", risk: "read"},
-	excludeBankTransactionCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write"},
+	excludeBankTransactionCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.unexcludeBankTransaction"},
 	unexcludeBankTransactionCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
 	bankSummaryCapabilityID:                             {module: "accounting", permission: "accounting.read", risk: "read"},
 	createPurchaseRequestCapabilityID:                   {module: "purchasing", permission: "purchasing.write", risk: "write"},
@@ -172,7 +174,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	selectWinningQuoteCapabilityID:                      {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	listPurchaseWorkflowCapabilityID:                    {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	inventoryCreateItemCapabilityID:                     {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryUpdateItemCapabilityID:                     {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryUpdateItemCapabilityID:                     {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.restoreItem"},
 	inventoryRestoreItemCapabilityID:                    {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryArchiveItemCapabilityID:                    {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryCreateLocationCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
@@ -180,43 +182,43 @@ var capabilitySpecs = map[string]capabilitySpec{
 	inventoryListLocationRecordsCapabilityID:            {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryListItemMetadataCapabilityID:               {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryLookupByBarcodeCapabilityID:                {module: "inventory", permission: "inventory.read", risk: "read"},
-	inventoryImportItemsCapabilityID:                    {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryUndoItemImportCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryRestoreItemImportCapabilityID:              {module: "inventory", permission: "inventory.write", risk: "write"},
-	inventoryReserveStockCapabilityID:                   {module: "inventory", permission: "inventory.write", risk: "write"},
+	inventoryImportItemsCapabilityID:                    {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.undoItemImport"},
+	inventoryUndoItemImportCapabilityID:                 {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.restoreItemImport"},
+	inventoryRestoreItemImportCapabilityID:              {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.undoItemImport"},
+	inventoryReserveStockCapabilityID:                   {module: "inventory", permission: "inventory.write", risk: "write", inverseCapabilityID: "inventory.releaseReservation"},
 	inventoryReleaseReservationCapabilityID:             {module: "inventory", permission: "inventory.write", risk: "write"},
 	inventoryListReservationsCapabilityID:               {module: "inventory", permission: "inventory.read", risk: "read"},
-	createPaymentRunCapabilityID:                        {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	cancelPaymentRunDraftCapabilityID:                   {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	restorePaymentRunDraftCapabilityID:                  {module: "purchasing", permission: "purchasing.write", risk: "write"},
-	instructPaymentRunCapabilityID:                      {module: "purchasing", permission: "purchasing.post", risk: "money"},
+	createPaymentRunCapabilityID:                        {module: "purchasing", permission: "purchasing.write", risk: "write", inverseCapabilityID: "purchasing.cancelPaymentRunDraft"},
+	cancelPaymentRunDraftCapabilityID:                   {module: "purchasing", permission: "purchasing.write", risk: "write", inverseCapabilityID: "purchasing.restorePaymentRunDraft"},
+	restorePaymentRunDraftCapabilityID:                  {module: "purchasing", permission: "purchasing.write", risk: "write", inverseCapabilityID: "purchasing.cancelPaymentRunDraft"},
+	instructPaymentRunCapabilityID:                      {module: "purchasing", permission: "purchasing.post", risk: "money", inverseCapabilityID: "purchasing.reversePaymentRun"},
 	reversePaymentRunCapabilityID:                       {module: "purchasing", permission: "purchasing.post", risk: "money"},
 	listPaymentRunsCapabilityID:                         {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	apAgingCapabilityID:                                 {module: "purchasing", permission: "purchasing.read", risk: "read"},
 	periodCloseWorkbenchCapabilityID:                    {module: "accounting", permission: "accounting.read", risk: "read"},
-	updatePeriodCloseCheckCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write"},
-	restorePeriodCloseCheckCapabilityID:                 {module: "accounting", permission: "accounting.write", risk: "write"},
-	closePeriodCapabilityID:                             {module: "accounting", permission: "accounting.admin", risk: "destructive"},
+	updatePeriodCloseCheckCapabilityID:                  {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.restorePeriodCloseCheck"},
+	restorePeriodCloseCheckCapabilityID:                 {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.updatePeriodCloseCheck"},
+	closePeriodCapabilityID:                             {module: "accounting", permission: "accounting.admin", risk: "destructive", inverseCapabilityID: "accounting.reopenPeriod"},
 	reopenPeriodCapabilityID:                            {module: "accounting", permission: "accounting.admin", risk: "destructive"},
-	closeYearCapabilityID:                               {module: "accounting", permission: "accounting.admin", risk: "destructive"},
-	saveBudgetScenarioCapabilityID:                      {module: "accounting", permission: "accounting.write", risk: "write"},
-	undoBudgetScenarioVersionCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write"},
-	restoreBudgetScenarioVersionCapabilityID:            {module: "accounting", permission: "accounting.write", risk: "write"},
+	closeYearCapabilityID:                               {module: "accounting", permission: "accounting.admin", risk: "destructive", inverseCapabilityID: "accounting.reverseEntry"},
+	saveBudgetScenarioCapabilityID:                      {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.undoBudgetScenarioVersion"},
+	undoBudgetScenarioVersionCapabilityID:               {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.restoreBudgetScenarioVersion"},
+	restoreBudgetScenarioVersionCapabilityID:            {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.undoBudgetScenarioVersion"},
 	listBudgetScenariosCapabilityID:                     {module: "accounting", permission: "accounting.read", risk: "read"},
 	budgetActualVsPlanCapabilityID:                      {module: "accounting", permission: "accounting.read", risk: "read"},
-	createTaxProfileCapabilityID:                        {module: "accounting", permission: "accounting.admin", risk: "write"},
-	removeTaxProfileCapabilityID:                        {module: "accounting", permission: "accounting.admin", risk: "write"},
-	createTaxCodeCapabilityID:                           {module: "accounting", permission: "accounting.admin", risk: "write"},
-	archiveTaxCodeCapabilityID:                          {module: "accounting", permission: "accounting.admin", risk: "write"},
-	activateTaxCodeCapabilityID:                         {module: "accounting", permission: "accounting.admin", risk: "write"},
-	createTaxReturnCapabilityID:                         {module: "accounting", permission: "accounting.write", risk: "write"},
-	cancelTaxReturnDraftCapabilityID:                    {module: "accounting", permission: "accounting.write", risk: "write"},
-	restoreTaxReturnDraftCapabilityID:                   {module: "accounting", permission: "accounting.write", risk: "write"},
+	createTaxProfileCapabilityID:                        {module: "accounting", permission: "accounting.admin", risk: "write", inverseCapabilityID: "accounting.removeTaxProfile"},
+	removeTaxProfileCapabilityID:                        {module: "accounting", permission: "accounting.admin", risk: "write", inverseCapabilityID: "accounting.createTaxProfile"},
+	createTaxCodeCapabilityID:                           {module: "accounting", permission: "accounting.admin", risk: "write", inverseCapabilityID: "accounting.archiveTaxCode"},
+	archiveTaxCodeCapabilityID:                          {module: "accounting", permission: "accounting.admin", risk: "write", inverseCapabilityID: "accounting.activateTaxCode"},
+	activateTaxCodeCapabilityID:                         {module: "accounting", permission: "accounting.admin", risk: "write", inverseCapabilityID: "accounting.archiveTaxCode"},
+	createTaxReturnCapabilityID:                         {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.cancelTaxReturnDraft"},
+	cancelTaxReturnDraftCapabilityID:                    {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.restoreTaxReturnDraft"},
+	restoreTaxReturnDraftCapabilityID:                   {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.cancelTaxReturnDraft"},
 	recordTaxReturnSubmissionCapabilityID:               {module: "accounting", permission: "accounting.post", risk: "money"},
-	createTaxReturnAmendmentCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write"},
+	createTaxReturnAmendmentCapabilityID:                {module: "accounting", permission: "accounting.write", risk: "write", inverseCapabilityID: "accounting.cancelTaxReturnDraft"},
 	recordTaxReturnAcknowledgmentCapabilityID:           {module: "accounting", permission: "accounting.admin", risk: "write"},
-	fileSalesTaxReturnCapabilityID:                      {module: "accounting", permission: "accounting.post", risk: "money"},
-	hrRequestLeaveCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write"},
+	fileSalesTaxReturnCapabilityID:                      {module: "accounting", permission: "accounting.post", risk: "money", inverseCapabilityID: "accounting.reverseEntry"},
+	hrRequestLeaveCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.cancelLeave"},
 	hrCancelLeaveCapabilityID:                           {module: "hr", permission: "hr.write", risk: "write"},
 	hrDecideLeaveCapabilityID:                           {module: "hr", permission: "hr.write", risk: "write"},
 	hrLogTimeCapabilityID:                               {module: "hr", permission: "hr.write", risk: "write"},
@@ -226,8 +228,8 @@ var capabilitySpecs = map[string]capabilitySpec{
 	hrLeaveBalanceCapabilityID:                          {module: "hr", permission: "hr.read", risk: "read"},
 	hrLeaveCalendarCapabilityID:                         {module: "hr", permission: "hr.read", risk: "read"},
 	hrTimeReportCapabilityID:                            {module: "hr", permission: "hr.read", risk: "read"},
-	hrCreatePayrollRunCapabilityID:                      {module: "hr", permission: "hr.write", risk: "write"},
-	hrExecutePayrollRunCapabilityID:                     {module: "hr", permission: "hr.write", risk: "money", moneyThresholdMinor: 0},
+	hrCreatePayrollRunCapabilityID:                      {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.voidPayrollRun"},
+	hrExecutePayrollRunCapabilityID:                     {module: "hr", permission: "hr.write", risk: "money", moneyThresholdMinor: 0, inverseCapabilityID: "hr.reversePayrollPosting"},
 	hrVoidPayrollRunCapabilityID:                        {module: "hr", permission: "hr.write", risk: "destructive"},
 	hrReversePayrollPostingCapabilityID:                 {module: "hr", permission: "hr.write", risk: "destructive"},
 	hrAddApplicantCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write"},
@@ -237,7 +239,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	billCreditNoteCapabilityID:                          {module: "purchasing", permission: "purchasing.write", risk: "money"},
 	closePurchaseOrderCapabilityID:                      {module: "purchasing", permission: "purchasing.write", risk: "write"},
 	listReceiptsCapabilityID:                            {module: "purchasing", permission: "purchasing.read", risk: "read"},
-	inventoryPostValuationSummaryCapabilityID:           {module: "inventory", permission: "inventory.write", risk: "money"},
+	inventoryPostValuationSummaryCapabilityID:           {module: "inventory", permission: "inventory.write", risk: "money", inverseCapabilityID: "inventory.reverseValuationSummary"},
 	inventoryReverseValuationSummaryCapabilityID:        {module: "inventory", permission: "inventory.write", risk: "money"},
 	inventoryStockReportCapabilityID:                    {module: "inventory", permission: "inventory.read", risk: "read"},
 	inventoryItemHistoryCapabilityID:                    {module: "inventory", permission: "inventory.read", risk: "read"},
@@ -254,17 +256,17 @@ var capabilitySpecs = map[string]capabilitySpec{
 	cashFlowCapabilityID:                                {module: "accounting", permission: "accounting.read", risk: "read"},
 	cashForecastCapabilityID:                            {module: "accounting", permission: "accounting.read", risk: "read"},
 	unrealizedFxExposureCapabilityID:                    {module: "accounting", permission: "accounting.read", risk: "read"},
-	revalueForeignReceivablesCapabilityID:               {module: "accounting", permission: "accounting.post", risk: "money"},
-	reversePeriodFxRevaluationCapabilityID:              {module: "accounting", permission: "accounting.post", risk: "money"},
+	revalueForeignReceivablesCapabilityID:               {module: "accounting", permission: "accounting.post", risk: "money", inverseCapabilityID: "accounting.reversePeriodFxRevaluation"},
+	reversePeriodFxRevaluationCapabilityID:              {module: "accounting", permission: "accounting.post", risk: "money", inverseCapabilityID: "accounting.revalueForeignReceivables"},
 	buildRemindersCapabilityID:                          {module: "accounting", permission: "accounting.read", risk: "read"},
-	manufacturingCreateWorkOrderCapabilityID:            {module: "manufacturing", permission: "manufacturing.write", risk: "write"},
-	manufacturingReleaseWorkOrderCapabilityID:           {module: "manufacturing", permission: "manufacturing.write", risk: "write"},
-	manufacturingCompleteWorkOrderCapabilityID:          {module: "manufacturing", permission: "manufacturing.write", risk: "write"},
+	manufacturingCreateWorkOrderCapabilityID:            {module: "manufacturing", permission: "manufacturing.write", risk: "write", inverseCapabilityID: "manufacturing.cancelWorkOrder"},
+	manufacturingReleaseWorkOrderCapabilityID:           {module: "manufacturing", permission: "manufacturing.write", risk: "write", inverseCapabilityID: "manufacturing.cancelWorkOrder"},
+	manufacturingCompleteWorkOrderCapabilityID:          {module: "manufacturing", permission: "manufacturing.write", risk: "write", inverseCapabilityID: "manufacturing.reverseProductionRun"},
 	manufacturingCancelWorkOrderCapabilityID:            {module: "manufacturing", permission: "manufacturing.write", risk: "write"},
 	manufacturingReverseProductionRunCapabilityID:       {module: "manufacturing", permission: "manufacturing.write", risk: "destructive"},
 	manufacturingCheckProductionFeasibilityCapabilityID: {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
 	manufacturingWorkOrdersListCapabilityID:             {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
-	manufacturingProduceFromBomCapabilityID:             {module: "manufacturing", permission: "manufacturing.write", risk: "write"},
+	manufacturingProduceFromBomCapabilityID:             {module: "manufacturing", permission: "manufacturing.write", risk: "write", inverseCapabilityID: "manufacturing.reverseProductionRun"},
 	manufacturingDefineBomCapabilityID:                  {module: "manufacturing", permission: "manufacturing.write", risk: "write"},
 	manufacturingDeleteBomCapabilityID:                  {module: "manufacturing", permission: "manufacturing.write", risk: "destructive"},
 	manufacturingBomTreeCapabilityID:                    {module: "manufacturing", permission: "manufacturing.read", risk: "read"},
@@ -276,9 +278,9 @@ var capabilitySpecs = map[string]capabilitySpec{
 	marketingCreateCampaignCapabilityID:                 {module: "marketing", permission: "marketing.write", risk: "write"},
 	marketingSendCampaignCapabilityID:                   {module: "marketing", permission: "marketing.write", risk: "write"},
 	marketingCampaignAnalyticsCapabilityID:              {module: "marketing", permission: "marketing.read", risk: "read"},
-	hrCreateOpeningCapabilityID:                         {module: "hr", permission: "hr.write", risk: "write"},
+	hrCreateOpeningCapabilityID:                         {module: "hr", permission: "hr.write", risk: "write", inverseCapabilityID: "hr.closeOpening"},
 	hrCloseOpeningCapabilityID:                          {module: "hr", permission: "hr.write", risk: "write"},
-	iamSetModulesCapabilityID:                           {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamSetModulesCapabilityID:                           {module: "iam", permission: "iam.admin", risk: "identity", inverseCapabilityID: "iam.restoreModules"},
 	iamRestoreModulesCapabilityID:                       {module: "iam", permission: "iam.admin", risk: "identity"},
 	iamSetModuleConfigCapabilityID:                      {module: "iam", permission: "iam.admin", risk: "write"},
 	iamSetOrgPolicyCapabilityID:                         {module: "iam", permission: "iam.admin", risk: "identity"},
@@ -289,17 +291,17 @@ var capabilitySpecs = map[string]capabilitySpec{
 	signalsListCapabilityID:                             {module: "signals", permission: "signals.read", risk: "read"},
 	skillsFindCapabilityID:                              {module: "skills", permission: "documents.read", risk: "read"},
 	skillsLoadCapabilityID:                              {module: "skills", permission: "documents.read", risk: "read"},
-	routinesCreateCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write"},
+	routinesCreateCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write", inverseCapabilityID: "routines.delete"},
 	routinesListCapabilityID:                            {module: "routines", permission: "routines.read", risk: "read"},
 	routinesUpdateCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write"},
-	routinesDeleteCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write"},
+	routinesDeleteCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write", inverseCapabilityID: "routines.create"},
 	routinesRunNowCapabilityID:                          {module: "routines", permission: "routines.write", risk: "write"},
 	analyticsRenderReportCapabilityID:                   {module: "analytics", permission: "analytics.report", risk: "read"},
 	analyticsPipelineByStageCapabilityID:                {module: "analytics", permission: "crm.read", risk: "read"},
-	analyticsRevenueByMonthCapabilityID:                 {module: "accounting", permission: "accounting.read", risk: "read"},
-	analyticsInvoiceAgingCapabilityID:                   {module: "accounting", permission: "accounting.read", risk: "read"},
-	analyticsSalesByCustomerCapabilityID:                {module: "accounting", permission: "accounting.read", risk: "read"},
-	analyticsStockLevelsCapabilityID:                    {module: "inventory", permission: "inventory.read", risk: "read"},
+	analyticsRevenueByMonthCapabilityID:                 {module: "analytics", permission: "accounting.read", risk: "read"},
+	analyticsInvoiceAgingCapabilityID:                   {module: "analytics", permission: "accounting.read", risk: "read"},
+	analyticsSalesByCustomerCapabilityID:                {module: "analytics", permission: "accounting.read", risk: "read"},
+	analyticsStockLevelsCapabilityID:                    {module: "analytics", permission: "inventory.read", risk: "read"},
 	analyticsExplainChangeCapabilityID:                  {module: "analytics", permission: "analytics.report", risk: "read"},
 	analyticsAskYourBusinessCapabilityID:                {module: "analytics", permission: "analytics.report", risk: "read"},
 	creatorSubmitProposalCapabilityID:                   {module: "creator", permission: "platform.creator", risk: "write"},
@@ -315,35 +317,91 @@ var capabilitySpecs = map[string]capabilitySpec{
 	creatorPromoteCandidateCapabilityID:                 {module: "creator", permission: "platform.creator", risk: "identity", inverseCapabilityID: creatorRollbackCandidateCapabilityID, inverseInputSource: "output", inverseFields: []string{"releaseId", "candidateDigest"}},
 	creatorRollbackCandidateCapabilityID:                {module: "creator", permission: "platform.creator", risk: "destructive"},
 	creatorRecordCanaryOutcomeCapabilityID:              {module: "creator", permission: "platform.creator.release", risk: "write"},
-	supportStartConversationCapabilityID:                {module: "support", permission: "support.write", risk: "write"},
+	supportStartConversationCapabilityID:                {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.resolveConversation"},
 	supportPostMessageCapabilityID:                      {module: "support", permission: "support.write", risk: "write"},
 	supportListConversationsCapabilityID:                {module: "support", permission: "support.read", risk: "read"},
 	supportListLibraryCapabilityID:                      {module: "support", permission: "support.read", risk: "read"},
 	supportReadConversationCapabilityID:                 {module: "support", permission: "support.read", risk: "read"},
 	supportLookupOrderStatusCapabilityID:                {module: "support", permission: "support.read", risk: "read"},
 	supportSearchKnowledgeCapabilityID:                  {module: "support", permission: "support.read", risk: "read"},
-	supportEscalateConversationCapabilityID:             {module: "support", permission: "support.write", risk: "write"},
-	supportResolveConversationCapabilityID:              {module: "support", permission: "support.write", risk: "write"},
+	supportEscalateConversationCapabilityID:             {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.reopenConversation"},
+	supportResolveConversationCapabilityID:              {module: "support", permission: "support.write", risk: "write", inverseCapabilityID: "support.reopenConversation"},
 	supportReopenConversationCapabilityID:               {module: "support", permission: "support.write", risk: "write"},
 	supportCreateTicketCapabilityID:                     {module: "support", permission: "support.write", risk: "write"},
 	supportUpdateTicketCapabilityID:                     {module: "support", permission: "support.write", risk: "write"},
 	supportSuggestCategoryCapabilityID:                  {module: "support", permission: "support.read", risk: "read"},
 	supportCreateCannedResponseCapabilityID:             {module: "support", permission: "support.write", risk: "write"},
 	supportCreateKbArticleCapabilityID:                  {module: "support", permission: "support.write", risk: "write"},
-	createProjectCapabilityID:                           {module: "projects", permission: "projects.write", risk: "write"},
+	createProjectCapabilityID:                           {module: "projects", permission: "projects.write", risk: "write", inverseCapabilityID: "projects.archiveProject"},
 	ProjectBoardReadCapabilityID:                        {module: "projects", permission: "projects.read", risk: "read"},
 	archiveProjectCapabilityID:                          {module: "projects", permission: "projects.write", risk: "write"},
 	createProjectTaskCapabilityID:                       {module: "projects", permission: "projects.write", risk: "write"},
 	moveProjectTaskCapabilityID:                         {module: "projects", permission: "projects.write", risk: "write"},
 	assignProjectTaskCapabilityID:                       {module: "projects", permission: "projects.write", risk: "write"},
 	iamListMembersCapabilityID:                          {module: "iam", permission: "iam.read", risk: "read"},
-	iamCreateRoleCapabilityID:                           {module: "iam", permission: "iam.admin", risk: "identity"},
-	iamUpdateRolePermissionsCapabilityID:                {module: "iam", permission: "iam.admin", risk: "identity"},
-	iamAssignRoleCapabilityID:                           {module: "iam", permission: "iam.admin", risk: "identity"},
-	iamInviteMemberCapabilityID:                         {module: "iam", permission: "iam.admin", risk: "write"},
+	// SCIM deprovisioning removes role grants and revokes pending invitations.
+	// It deliberately has no inverse because an IdP re-provision must not
+	// silently restore authorization that an administrator needs to review.
+	scimProvisionUserCapabilityID: {module: "iam", permission: "iam.scim.provision", risk: "identity"},
+	// The management handler alone returns the generated bearer. Receipts and
+	// ledger events store only the token id and nonsecret metadata.
+	SCIMTokenCreateCapabilityID: {module: "iam", permission: "iam.admin", risk: "secret", inverseCapabilityID: SCIMTokenRevokeCapabilityID, inverseInputSource: "output", inverseFields: []string{"tokenId"}, oneTimeOutput: true},
+	// Revocation is destructive because hash-only storage makes the bearer
+	// material unrecoverable, so there is no safe inverse capability.
+	SCIMTokenRevokeCapabilityID:             {module: "iam", permission: "iam.admin", risk: "destructive"},
+	iamCreateRoleCapabilityID:               {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamUpdateRolePermissionsCapabilityID:    {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamAssignRoleCapabilityID:               {module: "iam", permission: "iam.admin", risk: "identity"},
+	iamInviteMemberCapabilityID:             {module: "iam", permission: "iam.admin", risk: "write"},
+	settingsConfigureAiProviderCapabilityID: {module: "settings", permission: "iam.admin", risk: "secret", inverseCapabilityID: settingsRestoreAiProviderCapabilityID, inverseInputSource: "output", inverseFields: []string{"config"}},
+	settingsRestoreAiProviderCapabilityID:   {module: "settings", permission: "iam.admin", risk: "secret", inverseCapabilityID: settingsConfigureAiProviderCapabilityID, inverseInputSource: "output", inverseFields: []string{"config"}},
+	harnessApproveCompositionCapabilityID:   {module: "harness", permission: "harness.approve", risk: "identity"},
+}
+
+// The documents and messaging modules register their own spec tables so the
+// ids, permissions, risks, and inverses stay next to their parsers and
+// handlers instead of growing a second copy in this file.
+func init() {
+	for id, spec := range DocumentsCapabilitySpecs() {
+		capabilitySpecs[id] = spec
+	}
+	for id, spec := range MessagingCapabilitySpecs() {
+		capabilitySpecs[id] = capabilitySpec{
+			module:              spec.Module,
+			permission:          spec.Permission,
+			risk:                spec.Risk,
+			moneyThresholdMinor: spec.MoneyThresholdMinor,
+			inverseCapabilityID: spec.InverseCapabilityID,
+			inverseInputSource:  spec.InverseInputSource,
+			inverseFields:       spec.InverseFields,
+		}
+	}
+	for id, spec := range NotificationReceiptCapabilitySpecs() {
+		capabilitySpecs[id] = capabilitySpec{
+			module: spec.Module, permission: spec.Permission, risk: spec.Risk,
+			inverseCapabilityID: spec.InverseCapabilityID,
+			inverseInputSource:  spec.InverseInputSource,
+			inverseFields:       spec.InverseFields,
+		}
+	}
 }
 
 func supportedCapability(capabilityID string) bool {
+	for _, id := range DocumentsCapabilityIDs() {
+		if id == capabilityID {
+			return true
+		}
+	}
+	for id := range MessagingCapabilitySpecs() {
+		if id == capabilityID {
+			return true
+		}
+	}
+	for id := range NotificationReceiptCapabilitySpecs() {
+		if id == capabilityID {
+			return true
+		}
+	}
 	switch capabilityID {
 	case createCustomerCapabilityID, deactivateCustomerCapabilityID, saveCustomerViewCapabilityID, restoreCustomerViewCapabilityID,
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
@@ -439,7 +497,9 @@ func supportedCapability(capabilityID string) bool {
 		supportUpdateTicketCapabilityID, supportSuggestCategoryCapabilityID,
 		supportCreateCannedResponseCapabilityID, supportCreateKbArticleCapabilityID,
 		createProjectCapabilityID, ProjectBoardReadCapabilityID, archiveProjectCapabilityID, createProjectTaskCapabilityID, moveProjectTaskCapabilityID, assignProjectTaskCapabilityID,
-		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID:
+		iamListMembersCapabilityID, iamCreateRoleCapabilityID, iamUpdateRolePermissionsCapabilityID, iamAssignRoleCapabilityID, iamInviteMemberCapabilityID,
+		scimProvisionUserCapabilityID, SCIMTokenCreateCapabilityID, SCIMTokenRevokeCapabilityID,
+		settingsConfigureAiProviderCapabilityID, settingsRestoreAiProviderCapabilityID, harnessApproveCompositionCapabilityID:
 		return true
 	default:
 		return false
@@ -465,23 +525,41 @@ type Result struct {
 // SystemClaims are accepted only by ExecuteSystem, which is an internal
 // worker entrypoint and is not represented by an auth-bridge assertion.
 type SystemClaims struct {
-	OrganizationID     string
-	CapabilityID       string
-	Permission         string
-	IntentID           string
-	ApprovedApprovalID string
-	AgentSessionID     string
+	OrganizationID       string
+	CapabilityID         string
+	Permission           string
+	IntentID             string
+	ApprovedApprovalID   string
+	AgentSessionID       string
+	JobID                string
+	LeaseOwner           string
+	FencingToken         int
+	LeaseExtensionMillis int
 }
 
+type systemJobLease struct {
+	jobID        string
+	orgID        string
+	leaseOwner   string
+	fencingToken int
+	extensionMS  int
+}
+
+const (
+	maxSystemEffectDuration       = 2 * time.Minute
+	minSystemLeaseExtensionMillis = int((maxSystemEffectDuration + 30*time.Second) / time.Millisecond)
+)
+
 type Executor struct {
-	pool       dbx.Beginner
-	webhookURL string
-	smtpHost   string
-	smtpTo     string
+	pool         dbx.Beginner
+	webhookURL   string
+	smtpHost     string
+	smtpTo       string
+	documentsOCR documentsImageParser
 }
 
 func NewExecutor(pool dbx.Beginner, webhookURL, smtpHost, smtpTo string) *Executor {
-	return &Executor{pool: pool, webhookURL: webhookURL, smtpHost: smtpHost, smtpTo: smtpTo}
+	return &Executor{pool: pool, webhookURL: webhookURL, smtpHost: smtpHost, smtpTo: smtpTo, documentsOCR: newDocumentsImageParserFromEnvironment()}
 }
 
 func (e *Executor) Execute(
@@ -490,7 +568,7 @@ func (e *Executor) Execute(
 	capabilityID string,
 	rawInput json.RawMessage,
 ) (Result, error) {
-	return e.execute(ctx, claims, capabilityID, rawInput, false, "")
+	return e.execute(ctx, claims, capabilityID, rawInput, false, "", nil)
 }
 
 // ExecuteSystem runs a queued capability as the same least-privilege system
@@ -504,7 +582,7 @@ func (e *Executor) ExecuteSystem(ctx context.Context, request SystemClaims, rawI
 	if !supportedCapability(request.CapabilityID) || !supported {
 		return Result{OK: false, Error: "unknown capability: " + request.CapabilityID}, nil
 	}
-	if !isUUID(request.OrganizationID) || !isUUID(request.IntentID) {
+	if !isUUID(request.OrganizationID) || !isUUID(request.IntentID) || !isUUID(request.JobID) || request.LeaseOwner == "" || len(request.LeaseOwner) > 200 || request.FencingToken < 1 || request.LeaseExtensionMillis < minSystemLeaseExtensionMillis || request.LeaseExtensionMillis > int((5*time.Minute)/time.Millisecond) {
 		return Result{}, ErrScopeMismatch
 	}
 	if request.Permission != spec.permission {
@@ -516,6 +594,8 @@ func (e *Executor) ExecuteSystem(ctx context.Context, request SystemClaims, rawI
 	if request.AgentSessionID != "" && !isUUID(request.AgentSessionID) {
 		return Result{}, ErrScopeMismatch
 	}
+	ctx, cancel := context.WithTimeout(ctx, maxSystemEffectDuration)
+	defer cancel()
 	digest, err := InputHash(rawInput)
 	if err != nil {
 		return Result{}, err
@@ -530,10 +610,30 @@ func (e *Executor) ExecuteSystem(ctx context.Context, request SystemClaims, rawI
 		IntentID:       request.IntentID,
 		AgentSessionID: request.AgentSessionID,
 	}
-	return e.execute(ctx, claims, request.CapabilityID, rawInput, true, request.ApprovedApprovalID)
+	lease := &systemJobLease{jobID: request.JobID, orgID: request.OrganizationID, leaseOwner: request.LeaseOwner, fencingToken: request.FencingToken, extensionMS: request.LeaseExtensionMillis}
+	return e.execute(ctx, claims, request.CapabilityID, rawInput, true, request.ApprovedApprovalID, lease)
 }
 
 var ErrSystemPermissionMismatch = errors.New("system capability permission does not match its declaration")
+var ErrSystemJobLeaseLost = errors.New("system capability job lease is no longer owned")
+
+func requireSystemJobLease(ctx context.Context, tx pgx.Tx, lease *systemJobLease) error {
+	if lease == nil || !isUUID(lease.jobID) || !isUUID(lease.orgID) || lease.leaseOwner == "" || len(lease.leaseOwner) > 200 || lease.fencingToken < 1 || lease.extensionMS < minSystemLeaseExtensionMillis || lease.extensionMS > int((5*time.Minute)/time.Millisecond) {
+		return ErrScopeMismatch
+	}
+	var id string
+	err := tx.QueryRow(ctx, `
+		UPDATE public.jobs
+		SET lease_expires_at = GREATEST(lease_expires_at, clock_timestamp() + ($5::bigint * interval '1 millisecond'))
+		WHERE id = $1::uuid AND org_id = $2::uuid AND status = 'processing'
+		  AND lease_owner = $3 AND fencing_token = $4
+		  AND lease_expires_at > clock_timestamp()
+		RETURNING id::text`, lease.jobID, lease.orgID, lease.leaseOwner, lease.fencingToken, lease.extensionMS).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrSystemJobLeaseLost
+	}
+	return err
+}
 
 func (e *Executor) execute(
 	ctx context.Context,
@@ -542,8 +642,9 @@ func (e *Executor) execute(
 	rawInput json.RawMessage,
 	system bool,
 	approvedApprovalID string,
+	lease *systemJobLease,
 ) (Result, error) {
-	return e.executeWithFinalizer(ctx, claims, capabilityID, rawInput, system, approvedApprovalID, nil)
+	return e.executeWithFinalizer(ctx, claims, capabilityID, rawInput, system, approvedApprovalID, nil, lease, false)
 }
 
 // ExecuteWithApprovalFinalizer runs an approved action and finalizes its gate in the effect transaction.
@@ -557,7 +658,7 @@ func (e *Executor) ExecuteWithApprovalFinalizer(
 	if finalize == nil {
 		return Result{}, errors.New("approval finalizer is required")
 	}
-	return e.executeWithFinalizer(ctx, claims, capabilityID, rawInput, false, "", finalize)
+	return e.executeWithFinalizer(ctx, claims, capabilityID, rawInput, false, "", finalize, nil, false)
 }
 
 func (e *Executor) executeWithFinalizer(
@@ -568,6 +669,8 @@ func (e *Executor) executeWithFinalizer(
 	system bool,
 	approvedApprovalID string,
 	finalize func(context.Context, pgx.Tx) error,
+	lease *systemJobLease,
+	externalSCIM bool,
 ) (Result, error) {
 	if e == nil || e.pool == nil {
 		return Result{}, errors.New("capability executor is unavailable")
@@ -580,8 +683,14 @@ func (e *Executor) executeWithFinalizer(
 	if err != nil || inputDigest != claims.InputSHA256 {
 		return Result{}, ErrScopeMismatch
 	}
-	if system {
-		if claims.ActorType != "system" || claims.Subject != "" || claims.ActorID != nil || claims.AuthSessionID != "" || (claims.AgentSessionID != "" && !isUUID(claims.AgentSessionID)) {
+	if externalSCIM {
+		if system || capabilityID != scimProvisionUserCapabilityID || claims.ActorType != "external" || claims.Subject != "" ||
+			claims.ActorID == nil || !isUUID(*claims.ActorID) || claims.AuthSessionID != "" || claims.AgentSessionID != "" ||
+			claims.IntentID == "" || claims.IntentID != strings.TrimSpace(claims.IntentID) || len(claims.IntentID) > 160 {
+			return Result{}, ErrSessionInvalid
+		}
+	} else if system {
+		if claims.ActorType != "system" || claims.Subject != "" || claims.ActorID != nil || claims.AuthSessionID != "" || (claims.AgentSessionID != "" && !isUUID(claims.AgentSessionID)) || lease == nil || !isUUID(lease.jobID) || lease.orgID != claims.OrganizationID || lease.leaseOwner == "" || len(lease.leaseOwner) > 200 || lease.fencingToken < 1 {
 			return Result{}, ErrSessionInvalid
 		}
 	} else if !isUUID(claims.Subject) || !isUUID(claims.OrganizationID) || claims.ActorID == nil || !isUUID(*claims.ActorID) || *claims.ActorID != claims.Subject {
@@ -592,8 +701,17 @@ func (e *Executor) executeWithFinalizer(
 		return Result{}, ErrSessionInvalid
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	return dbx.WithOrgTx(ctx, e.pool, claims.OrganizationID, func(tx pgx.Tx) (Result, error) {
-		if !system {
+	result, executionErr := dbx.WithOrgTx(ctx, e.pool, claims.OrganizationID, func(tx pgx.Tx) (Result, error) {
+		if system {
+			if err := requireSystemJobLease(ctx, tx, lease); err != nil {
+				return Result{}, err
+			}
+		}
+		if externalSCIM {
+			if err := verifySCIMActor(ctx, tx, claims, now); err != nil {
+				return Result{}, err
+			}
+		} else if !system {
 			if err := verifyIdentity(ctx, tx, claims, now); err != nil {
 				return Result{}, err
 			}
@@ -621,7 +739,9 @@ func (e *Executor) executeWithFinalizer(
 		// declared capability gates.
 		legacyMarketplaceHumanAccess := !system && claims.ActorType == "human" &&
 			(capabilityID == creatorListMarketplaceCapabilityID || capabilityID == creatorVerifyPluginCapabilityID)
-		if !legacyMarketplaceHumanAccess {
+		legacyNotificationHumanAccess := !system && claims.ActorType == "human" &&
+			(capabilityID == notificationMarkReadCapabilityID || capabilityID == notificationRestoreReadCapabilityID)
+		if !legacyMarketplaceHumanAccess && !legacyNotificationHumanAccess {
 			enabled, err := isModuleEnabled(ctx, tx, claims.OrganizationID, spec.module)
 			if err != nil {
 				return Result{}, err
@@ -1142,13 +1262,66 @@ func (e *Executor) executeWithFinalizer(
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
+		case scimProvisionUserCapabilityID:
+			parsed, err := ParseSCIMProvisionUserInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case SCIMTokenCreateCapabilityID:
+			parsed, err := ParseSCIMTokenCreateInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case SCIMTokenRevokeCapabilityID:
+			parsed, err := ParseSCIMTokenRevokeInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case settingsConfigureAiProviderCapabilityID, settingsRestoreAiProviderCapabilityID:
+			parsed, err := parseSettingsInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case notificationMarkReadCapabilityID, notificationRestoreReadCapabilityID:
+			parsed, err := parseNotificationReceiptInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case harnessApproveCompositionCapabilityID:
+			parsed, err := parseHarnessInput(capabilityID, rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		default:
+			if _, isDocuments := documentsPermissionFor(capabilityID); isDocuments {
+				parsed, err := ParseDocumentsInput(capabilityID, rawInput)
+				if err != nil {
+					if message, rejected := DocumentsRejectionMessage(err); rejected {
+						return Result{OK: false, Error: message}, nil
+					}
+					return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+				}
+				input = parsed
+			} else if _, isMessaging := messagingCapabilitySpecs[capabilityID]; isMessaging {
+				parsed, err := parseMessagingInput(capabilityID, rawInput)
+				if err != nil {
+					return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+				}
+				input = parsed
+			}
 		}
 		inputHash, err := canonicalInputHash(input)
 		if err != nil {
 			return Result{}, err
 		}
 		permissions := map[string]bool{}
-		if system {
+		if system || externalSCIM {
 			permissions[spec.permission] = true
 		} else {
 			permissions, err = effectivePermissions(ctx, tx, claims)
@@ -1156,50 +1329,19 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 		}
-		if !legacyMarketplaceHumanAccess && !permissions["*"] && !permissions[spec.permission] {
+		if !legacyMarketplaceHumanAccess && !legacyNotificationHumanAccess && !permissions["*"] && !permissions[spec.permission] {
 			return Result{OK: false, Error: "forbidden: missing permission: " + spec.permission}, nil
 		}
 
-		requiresApproval, rationale, err := requiresApproval(ctx, tx, claims, capabilityID, spec, input)
-		if err != nil {
-			return Result{}, err
-		}
-		if system && requiresApproval && approvedApprovalID == "" && spec.risk == "money" {
-			return Result{OK: false, Error: "system money actions require a verified human approval"}, nil
-		}
-		if system && requiresApproval && approvedApprovalID != "" {
-			valid, err := verifySystemApproval(ctx, tx, claims.OrganizationID, capabilityID, approvedApprovalID, inputHash, now)
-			if err != nil {
-				return Result{}, err
-			}
-			if !valid {
-				return Result{OK: false, Error: approvalVerificationError}, nil
-			}
-		}
-		if requiresApproval {
-			if approvedApprovalID == "" {
-				approvalID, err := e.requestApproval(ctx, tx, claims, capabilityID, spec.risk, input, rationale, now)
-				if err != nil {
-					return Result{}, err
-				}
-				return Result{OK: false, PendingApproval: true, ApprovalID: approvalID, ApprovalRationale: rationale, Error: "pending human approval"}, nil
-			}
-			payload, err := marshalJS(struct {
-				CapabilityID string `json:"capabilityId"`
-				ApprovalID   string `json:"approvalId"`
-			}{CapabilityID: capabilityID, ApprovalID: approvedApprovalID})
-			if err != nil {
-				return Result{}, err
-			}
-			capID := capabilityID
-			if _, _, err := ledger.AppendTx(ctx, tx, ledger.AppendEvent{
-				OrgID: claims.OrganizationID, ActorType: claims.ActorType, ActorID: claims.ActorID,
-				Kind: "approval.granted", CapabilityID: &capID, Payload: payload, OccurredAt: now,
-			}); err != nil {
-				return Result{}, err
-			}
-		}
 		intentKey := ""
+		automaticSCIMIntent := externalSCIM && isSCIMAutomaticIntent(claims.IntentID, *claims.ActorID)
+		if automaticSCIMIntent {
+			resolvedIntentID, err := resolveSCIMAutomaticIntentID(ctx, tx, claims, rawInput)
+			if err != nil {
+				return Result{}, err
+			}
+			claims.IntentID = resolvedIntentID
+		}
 		if claims.IntentID != "" {
 			intentKey = claims.OrganizationID + ":" + claims.IntentID
 			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, claims.OrganizationID, claims.IntentID); err != nil {
@@ -1218,9 +1360,90 @@ func (e *Executor) executeWithFinalizer(
 				}
 				return Result{OK: prior.OK, Data: prior.Data, Error: prior.Error, Replayed: true}, nil
 			}
+			approval, found, err := loadApprovalByIntent(ctx, tx, claims.OrganizationID, claims.IntentID)
+			if err != nil {
+				return Result{}, err
+			}
+			if found {
+				if approval.CapabilityID != capabilityID {
+					return Result{OK: false, Error: "action intent conflict: key already used for " + approval.CapabilityID}, nil
+				}
+				if approval.InputHash != inputHash {
+					return Result{OK: false, Error: "action intent conflict: same action key used with a different payload"}, nil
+				}
+				if approvedApprovalID != "" {
+					if approval.ID != approvedApprovalID || approval.Status != "approved" && approval.Status != "executing" {
+						return Result{OK: false, Error: approvalVerificationError}, nil
+					}
+				} else if finalize != nil && approval.Status == "executing" {
+					// The approver has claimed this exact approval in this transaction.
+				} else {
+					switch approval.Status {
+					case "pending", "executing", "approved":
+						return Result{OK: false, PendingApproval: true, ApprovalID: approval.ID, ApprovalRationale: approval.Rationale, Error: "pending human approval"}, nil
+					case "executed":
+						return Result{OK: false, Error: "action intent already completed; reload the current record"}, nil
+					case "rejected", "expired", "failed":
+						return Result{OK: false, Error: "approval " + approval.Status + "; use a new action intent to try again"}, nil
+					default:
+						return Result{OK: false, Error: "approval state is unavailable; reload the current record"}, nil
+					}
+				}
+			}
 		}
 
+		approvalRequired := false
+		rationale := "within policy"
+		// The legacy mark-read endpoint has no approval handshake, so preserve its immediate response.
+		if !legacyNotificationHumanAccess {
+			approvalRequired, rationale, err = requiresApproval(ctx, tx, claims, capabilityID, spec, input)
+			if err != nil {
+				return Result{}, err
+			}
+		}
+		if system && approvalRequired && approvedApprovalID == "" && spec.risk == "money" {
+			return Result{OK: false, Error: "system money actions require a verified human approval"}, nil
+		}
+		if system && approvalRequired && approvedApprovalID != "" {
+			valid, err := verifySystemApproval(ctx, tx, claims.OrganizationID, capabilityID, approvedApprovalID, inputHash, now)
+			if err != nil {
+				return Result{}, err
+			}
+			if !valid {
+				return Result{OK: false, Error: approvalVerificationError}, nil
+			}
+		}
+		if approvalRequired {
+			if spec.oneTimeOutput {
+				return Result{OK: false, Error: "one-time secret output cannot be deferred for approval"}, nil
+			}
+			if approvedApprovalID == "" {
+				if finalize == nil {
+					approvalID, err := e.requestApproval(ctx, tx, claims, capabilityID, spec.risk, input, inputHash, rationale, now)
+					if err != nil {
+						return Result{}, err
+					}
+					return Result{OK: false, PendingApproval: true, ApprovalID: approvalID, ApprovalRationale: rationale, Error: "pending human approval"}, nil
+				}
+			} else {
+				payload, err := marshalJS(struct {
+					CapabilityID string `json:"capabilityId"`
+					ApprovalID   string `json:"approvalId"`
+				}{CapabilityID: capabilityID, ApprovalID: approvedApprovalID})
+				if err != nil {
+					return Result{}, err
+				}
+				capID := capabilityID
+				if _, _, err := ledger.AppendTx(ctx, tx, ledger.AppendEvent{
+					OrgID: claims.OrganizationID, ActorType: claims.ActorType, ActorID: claims.ActorID,
+					Kind: "approval.granted", CapabilityID: &capID, Payload: payload, OccurredAt: now,
+				}); err != nil {
+					return Result{}, err
+				}
+			}
+		}
 		var data json.RawMessage
+		var committedParseFailure *documentsCommittedParseFailure
 		switch parsed := input.(type) {
 		case CreatorSubmitProposalInput:
 			output, err := creatorSubmitProposal(ctx, tx, claims, parsed)
@@ -1328,6 +1551,208 @@ func (e *Executor) executeWithFinalizer(
 			data, err = marshalJS(output)
 		case IAMInviteMemberInput:
 			output, err := iamInviteMember(ctx, tx, claims, now, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SCIMProvisionUserInput:
+			output, err := scimProvisionUser(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SCIMTokenCreateInput:
+			output, err := createSCIMToken(ctx, tx, claims, parsed, now)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SCIMTokenRevokeInput:
+			output, err := revokeSCIMToken(ctx, tx, claims, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SettingsConfigureAiProviderInput:
+			output, err := settingsConfigureAiProvider(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case SettingsRestoreAiProviderInput:
+			output, err := settingsRestoreAiProvider(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case HarnessApproveCompositionInput:
+			output, err := harnessApproveComposition(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case DocumentsInput:
+			documentsCtx := withDocumentsImageParser(ctx, e.documentsOCR)
+			executed, err := executeDocumentsCapability(documentsCtx, tx, claims, capabilityID, parsed, now)
+			if err != nil {
+				if failure, isCommittedParseFailure := err.(*documentsCommittedParseFailure); isCommittedParseFailure {
+					committedParseFailure = failure
+					data = failure.data
+				} else if message, rejected := DocumentsRejectionMessage(err); rejected {
+					return Result{OK: false, Error: message}, nil
+				} else {
+					return Result{}, err
+				}
+			} else {
+				data = executed
+			}
+		case MessagingSendMessageInput:
+			output, err := messagingSendMessage(ctx, tx, claims.OrganizationID, claims.ActorType, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingListConversationsInput:
+			output, err := messagingListConversations(ctx, tx, claims.OrganizationID, claims.ActorID)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingReadMessagesInput:
+			output, err := messagingReadMessages(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case notificationReceiptInput:
+			output, err := markNotificationRead(ctx, tx, claims.OrganizationID, claims.Subject, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case notificationRestoreReceiptInput:
+			output, err := restoreNotificationRead(ctx, tx, claims.OrganizationID, claims.Subject, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingListPeopleInput:
+			output, err := messagingListPeople(ctx, tx, claims.OrganizationID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingCreateConversationInput:
+			output, err := messagingCreateConversation(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingUpdateConversationInput:
+			output, err := messagingUpdateConversation(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingArchiveConversationInput:
+			output, err := messagingArchiveConversation(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingConversationIDInput:
+			// delete and leave share one parsed shape, so branch on the id.
+			if capabilityID == messagingDeleteConversationCapabilityID {
+				output, err := messagingDeleteConversation(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+				if err != nil {
+					return Result{}, err
+				}
+				data, err = marshalJS(output)
+				break
+			}
+			output, err := messagingLeaveConversation(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingAddMemberInput:
+			output, err := messagingAddMember(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingEditMessageInput:
+			output, err := messagingEditMessage(ctx, tx, claims.OrganizationID, claims.ActorType, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingDeleteMessageInput:
+			output, err := messagingDeleteMessage(ctx, tx, claims.OrganizationID, claims.ActorType, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingAdvanceReadCursorInput:
+			output, err := messagingAdvanceReadCursor(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingRestoreReadCursorInput:
+			output, err := messagingRestoreReadCursor(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingMessageReactionInput:
+			if capabilityID == messagingSetMessageReactionCapabilityID {
+				output, err := messagingSetMessageReaction(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+				if err != nil {
+					return Result{}, err
+				}
+				data, err = marshalJS(output)
+				break
+			}
+			output, err := messagingRestoreMessageReaction(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingMessagePinInput:
+			if capabilityID == messagingSetMessagePinCapabilityID {
+				output, err := messagingSetMessagePin(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+				if err != nil {
+					return Result{}, err
+				}
+				data, err = marshalJS(output)
+				break
+			}
+			output, err := messagingRestoreMessagePin(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingUpdateConversationPresenceInput:
+			output, err := messagingUpdateConversationPresence(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingRestoreConversationPresenceInput:
+			output, err := messagingRestoreConversationPresence(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingUploadMessageAttachmentInput:
+			output, err := messagingUploadMessageAttachment(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
+			if err != nil {
+				return Result{}, err
+			}
+			data, err = marshalJS(output)
+		case MessagingDeletePendingAttachmentInput:
+			output, err := messagingDeletePendingAttachment(ctx, tx, claims.OrganizationID, claims.ActorID, parsed)
 			if err != nil {
 				return Result{}, err
 			}
@@ -2791,9 +3216,28 @@ func (e *Executor) executeWithFinalizer(
 		if err != nil {
 			return Result{}, err
 		}
-		payload, err := marshalJS(struct {
-			Input any `json:"input"`
-		}{Input: input})
+		var auditInput any = input
+		if parsed, ok := input.(SCIMProvisionUserInput); ok {
+			if parsed.Email != "" {
+				var provisioned SCIMProvisionUserOutput
+				if err := json.Unmarshal(data, &provisioned); err != nil {
+					return Result{}, err
+				}
+				auditInput = map[string]any{"operation": parsed.Operation, "userId": provisioned.ID}
+			} else {
+				auditInput = map[string]any{"operation": parsed.Operation, "userId": parsed.UserID}
+			}
+		} else if parsed, ok := input.(SCIMTokenCreateInput); ok {
+			auditInput = map[string]any{"label": parsed.Label, "expiresInDays": parsed.ExpiresInDays}
+		} else if parsed, ok := input.(SCIMTokenRevokeInput); ok {
+			auditInput = map[string]any{"tokenId": parsed.TokenID}
+		}
+		auditPayload := map[string]any{"input": auditInput}
+		if committedParseFailure != nil {
+			auditPayload["status"] = "failed"
+			auditPayload["error"] = committedParseFailure.message
+		}
+		payload, err := marshalJS(auditPayload)
 		if err != nil {
 			return Result{}, err
 		}
@@ -2816,9 +3260,15 @@ func (e *Executor) executeWithFinalizer(
 			return Result{}, err
 		}
 		result := Result{OK: true, Data: data}
+		if committedParseFailure != nil {
+			result.OK = false
+			result.Error = committedParseFailure.message
+		}
 		if intentKey != "" {
-			if err := insertReceipt(ctx, tx, claims.OrganizationID, intentKey, capabilityID, inputHash, result); err != nil {
-				return Result{}, err
+			if !automaticSCIMIntent || scimAutomaticReceiptCacheable(input, data) {
+				if err := insertReceipt(ctx, tx, claims.OrganizationID, intentKey, capabilityID, inputHash, result); err != nil {
+					return Result{}, err
+				}
 			}
 		}
 		if finalize != nil {
@@ -2828,6 +3278,23 @@ func (e *Executor) executeWithFinalizer(
 		}
 		return result, nil
 	})
+	if executionErr != nil {
+		var request *documentsOCRRequest
+		if errors.As(executionErr, &request) {
+			parser := e.documentsOCR
+			if parser == nil {
+				return Result{}, errors.New("document OCR request has no configured parser")
+			}
+			markdown, parseErr := parser.ParseDocumentImage(ctx, request.mimeType, request.image)
+			preparedCtx := withDocumentsOCRPrepared(ctx, documentsOCRPrepared{
+				source:   request.source,
+				markdown: markdown,
+				err:      parseErr,
+			})
+			return e.executeWithFinalizer(preparedCtx, claims, capabilityID, rawInput, system, approvedApprovalID, finalize, lease, externalSCIM)
+		}
+	}
+	return result, executionErr
 }
 
 func canonicalInputHash(input any) (string, error) {
@@ -2838,6 +3305,10 @@ func canonicalInputHash(input any) (string, error) {
 		return canonicalHash(parsed)
 	case DeactivateCustomerInput:
 		return CanonicalDeactivateCustomerInputHash(parsed)
+	case SCIMProvisionUserInput:
+		return canonicalHash(parsed)
+	case SCIMTokenCreateInput, SCIMTokenRevokeInput:
+		return canonicalHash(parsed)
 	case CustomerMergeInput:
 		return parsed.CanonicalHash()
 	case CustomerMergeSnapshotInput:
@@ -2916,7 +3387,17 @@ func canonicalInputHash(input any) (string, error) {
 		SupportUpdateTicketInput, SupportSuggestCategoryInput, SupportCreateCannedResponseInput,
 		SupportCreateKbArticleInput,
 		CreateProjectInput, ProjectBoardInput, ArchiveProjectInput, CreateProjectTaskInput, MoveProjectTaskInput, AssignProjectTaskInput,
-		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput:
+		IAMListMembersInput, IAMCreateRoleInput, IAMUpdateRolePermissionsInput, IAMAssignRoleInput, IAMInviteMemberInput,
+		SettingsConfigureAiProviderInput, SettingsRestoreAiProviderInput, HarnessApproveCompositionInput,
+		DocumentsInput,
+		MessagingSendMessageInput, MessagingListConversationsInput, MessagingReadMessagesInput,
+		notificationReceiptInput, notificationRestoreReceiptInput,
+		MessagingListPeopleInput, MessagingCreateConversationInput, MessagingUpdateConversationInput,
+		MessagingArchiveConversationInput, MessagingConversationIDInput, MessagingAddMemberInput,
+		MessagingEditMessageInput, MessagingDeleteMessageInput, MessagingAdvanceReadCursorInput,
+		MessagingRestoreReadCursorInput, MessagingMessageReactionInput, MessagingMessagePinInput,
+		MessagingUpdateConversationPresenceInput, MessagingRestoreConversationPresenceInput,
+		MessagingUploadMessageAttachmentInput, MessagingDeletePendingAttachmentInput:
 		return canonicalHash(parsed)
 	default:
 		return "", errors.New("unsupported capability input")
@@ -3056,7 +3537,24 @@ func effectivePermissions(ctx context.Context, tx pgx.Tx, claims authbridge.Capa
 	return effective, nil
 }
 
+// Settings is a platform surface, not an optional business module, and the
+// spine modules below can never be switched off. Mirrors createDbModuleGate in
+// apps/web/src/server/kernel.ts: without these a saved enabled_modules list
+// silently disabled IAM governance in Go while TypeScript still allowed it.
+var alwaysEnabledModuleIDs = map[string]bool{
+	"settings": true,
+	"iam":      true,
+	"signals":  true,
+	"routines": true,
+}
+
 func isModuleEnabled(ctx context.Context, tx pgx.Tx, orgID, moduleID string) (bool, error) {
+	if alwaysEnabledModuleIDs[moduleID] {
+		return true, nil
+	}
+	if orgID == "" {
+		return true, nil
+	}
 	var enabledModules []byte
 	err := tx.QueryRow(ctx, `SELECT enabled_modules FROM organizations WHERE id = $1::uuid`, orgID).Scan(&enabledModules)
 	if err != nil {
@@ -3225,7 +3723,7 @@ func riskRank(risk string) int {
 	}
 }
 
-func (e *Executor) requestApproval(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, capabilityID, risk string, input any, rationale string, now time.Time) (string, error) {
+func (e *Executor) requestApproval(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, capabilityID, risk string, input any, inputHash, rationale string, now time.Time) (string, error) {
 	payload, err := marshalJS(input)
 	if err != nil {
 		return "", err
@@ -3239,10 +3737,15 @@ func (e *Executor) requestApproval(ctx context.Context, tx pgx.Tx, claims authbr
 		requestedByUserID = claims.Subject
 	}
 	var approvalID string
+	var intentID, inputDigest any
+	if claims.IntentID != "" {
+		intentID = claims.IntentID
+		inputDigest = inputHash
+	}
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO approvals (org_id, session_id, requested_by_user_id, capability_id, risk_class, payload, rationale, status, expires_at)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7, 'pending', $8)
-		RETURNING id::text`, claims.OrganizationID, agentSessionID, requestedByUserID, capabilityID, risk, payload, rationale, now.Add(approvalTTL)).Scan(&approvalID); err != nil {
+		INSERT INTO approvals (org_id, session_id, requested_by_user_id, capability_id, risk_class, payload, rationale, status, expires_at, intent_id, input_hash)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7, 'pending', $8, $9, $10)
+		RETURNING id::text`, claims.OrganizationID, agentSessionID, requestedByUserID, capabilityID, risk, payload, rationale, now.Add(approvalTTL), intentID, inputDigest).Scan(&approvalID); err != nil {
 		return "", err
 	}
 	request := struct {
@@ -3409,10 +3912,26 @@ func loadReceipt(ctx context.Context, tx pgx.Tx, orgID, intentKey string) (actio
 	return receipt, true, nil
 }
 
+func loadApprovalByIntent(ctx context.Context, tx pgx.Tx, orgID, intentID string) (approvalRecord, bool, error) {
+	var approval approvalRecord
+	err := tx.QueryRow(ctx, `
+		SELECT id::text, org_id::text, capability_id, status, COALESCE(rationale, ''), input_hash
+		FROM approvals WHERE org_id = $1::uuid AND intent_id = $2`, orgID, intentID).
+		Scan(&approval.ID, &approval.OrgID, &approval.CapabilityID, &approval.Status, &approval.Rationale, &approval.InputHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return approvalRecord{}, false, nil
+	}
+	if err != nil {
+		return approvalRecord{}, false, err
+	}
+	return approval, true, nil
+}
+
 func insertReceipt(ctx context.Context, tx pgx.Tx, orgID, intentKey, capabilityID, inputHash string, result Result) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO action_receipts (org_id, intent_key, capability_id, input_hash, ok, outcome, data, error)
-		VALUES ($1::uuid, $2, $3, $4, $5, 'known', $6::jsonb, NULL)`, orgID, intentKey, capabilityID, inputHash, result.OK, result.Data)
+		VALUES ($1::uuid, $2, $3, $4, $5, 'known', $6::jsonb, NULLIF($7, ''))`,
+		orgID, intentKey, capabilityID, inputHash, result.OK, result.Data, result.Error)
 	return err
 }
 

@@ -180,7 +180,7 @@ describe("Vite People page", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Expense explanation" }), { target: { value: "Client travel" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit claim" }));
 
-    expect((await screen.findByRole("status")).textContent).toContain("is above the payment threshold");
+    expect(await screen.findByText(/is above the payment threshold/)).not.toBeNull();
     expect(screen.getByRole("link", { name: "Open approvals" })).not.toBeNull();
     expect((screen.getByRole("spinbutton", { name: "Expense amount" }) as HTMLInputElement).value).toBe("42.50");
     expect((screen.getByRole("textbox", { name: "Expense explanation" }) as HTMLInputElement).value).toBe("Client travel");

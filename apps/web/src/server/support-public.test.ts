@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createDb, customers, organizations, supportConversations, supportSettings, type Database } from "@chaste/db";
 import { purgeTenantFinancials } from "@chaste/db";
-import { GET, POST } from "@/app/api/support/public/route";
+import { POST } from "@/app/api/support/public/route";
 
 /**
  * I1 (N04) widget containment: a visitor-supplied email never binds a
@@ -24,11 +24,7 @@ function post(body: unknown): Promise<Response> {
 }
 
 function poll(conversationId: string, secret: string): Promise<Response> {
-  return GET(
-    new Request(
-      `http://test/api/support/public?token=${embedToken}&conversationId=${conversationId}&secret=${secret}`,
-    ),
-  );
+  return post({ action: "poll", token: embedToken, conversationId, secret });
 }
 
 beforeAll(async () => {
@@ -81,12 +77,8 @@ describe("public widget identity containment (N04)", () => {
       await post({ action: "start", token: embedToken, email: "holder@widget.test" })
     ).json()) as { conversationId: string; secret: string };
 
-    const noSecret = await GET(
-      new Request(
-        `http://test/api/support/public?token=${embedToken}&conversationId=${start.conversationId}`,
-      ),
-    );
-    expect(noSecret.status).toBe(404);
+    const noSecret = await post({ action: "poll", token: embedToken, conversationId: start.conversationId });
+    expect(noSecret.status).toBe(400);
 
     const wrongSecret = await poll(start.conversationId, "0".repeat(48));
     expect(wrongSecret.status).toBe(404);

@@ -19,14 +19,20 @@ const jobsWorkerPassword =
   process.env.CHASTE_JOBS_WORKER_DB_PASSWORD ?? "chaste_jobs_worker_dev_only";
 
 let admin: ReturnType<typeof postgres>;
+let jobsWorker: ReturnType<typeof postgres>;
 
 beforeAll(async () => {
   admin = postgres(databaseUrl, { max: 1 });
   await ensureOutboxWorkerRole({ databaseUrl, password: workerPassword });
-  await ensureJobsWorkerRole({ databaseUrl, password: jobsWorkerPassword });
+  const jobsRole = await ensureJobsWorkerRole({
+    databaseUrl,
+    password: jobsWorkerPassword,
+  });
+  jobsWorker = postgres(jobsRole.workerUrl, { max: 1 });
 });
 
 afterAll(async () => {
+  await jobsWorker?.end();
   await admin?.end();
 });
 
@@ -265,7 +271,8 @@ describe("capability jobs worker role provisioning", () => {
                   AND relation.oid NOT IN (
                     'public.jobs'::regclass,
                     'public.organizations'::regclass,
-                    'public.routines'::regclass
+                    'public.routines'::regclass,
+                    'public.support_kb_article_embedding_jobs'::regclass
                   )
               ) AS claim_other_table_access
        FROM pg_proc procedure
@@ -334,6 +341,60 @@ describe("capability jobs worker role provisioning", () => {
       owner_routine_prompt_select: false,
       owner_org_id_select: true,
     });
+  });
+
+  it("limits support embedding discovery to tenant metadata", async () => {
+    const result = await admin.unsafe<{
+      owner: string;
+      security_definer: boolean;
+      worker_execute: boolean;
+      public_execute: boolean;
+      worker_table_select: boolean;
+      owner_org_id_select: boolean;
+      owner_article_id_select: boolean;
+      owner_queued_at_select: boolean;
+      owner_available_at_select: boolean;
+      owner_content_digest_select: boolean;
+    }[]>(
+      `SELECT owner.rolname AS owner,
+              procedure.prosecdef AS security_definer,
+              has_function_privilege('${JOBS_WORKER_ROLE_NAME}', procedure.oid, 'EXECUTE') AS worker_execute,
+              EXISTS (
+                SELECT 1 FROM aclexplode(COALESCE(procedure.proacl, acldefault('f', procedure.proowner))) acl
+                WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+              ) AS public_execute,
+              has_table_privilege('${JOBS_WORKER_ROLE_NAME}', 'public.support_kb_article_embedding_jobs', 'SELECT') AS worker_table_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.support_kb_article_embedding_jobs', 'org_id', 'SELECT') AS owner_org_id_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.support_kb_article_embedding_jobs', 'article_id', 'SELECT') AS owner_article_id_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.support_kb_article_embedding_jobs', 'queued_at', 'SELECT') AS owner_queued_at_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.support_kb_article_embedding_jobs', 'available_at', 'SELECT') AS owner_available_at_select,
+              has_column_privilege('${JOBS_CLAIM_OWNER_ROLE_NAME}', 'public.support_kb_article_embedding_jobs', 'content_md5', 'SELECT') AS owner_content_digest_select
+       FROM pg_proc procedure
+       JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
+       JOIN pg_roles owner ON owner.oid = procedure.proowner
+       WHERE namespace.nspname = 'jobs_worker' AND procedure.proname = 'list_public_support_embedding_orgs'`,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      owner: JOBS_CLAIM_OWNER_ROLE_NAME,
+      security_definer: true,
+      worker_execute: true,
+      public_execute: false,
+      worker_table_select: false,
+      owner_org_id_select: true,
+      owner_article_id_select: true,
+      owner_queued_at_select: true,
+      owner_available_at_select: true,
+      owner_content_digest_select: false,
+    });
+  });
+
+  it("allows the dedicated worker to call bounded support embedding discovery", async () => {
+    const result = await jobsWorker<{ count: number }[]>`
+      SELECT count(*)::int AS count
+      FROM jobs_worker.list_public_support_embedding_orgs(10, NULL)
+    `;
+    expect(result[0]?.count).toBeGreaterThanOrEqual(0);
   });
 
   it("makes repeat provisioning idempotent", async () => {

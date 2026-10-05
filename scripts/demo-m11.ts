@@ -5,6 +5,7 @@
  * Run: pnpm demo:m11 [hr|projects|flow|all]
  */
 import { getDb, timeEntries, users } from "@chaste/db";
+import { randomUUID } from "node:crypto";
 import { CapabilityRegistry } from "@chaste/kernel";
 import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
 import { runOnboarding } from "../apps/web/src/server/onboarding";
@@ -30,10 +31,11 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string, enab
     .values({ email: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`, name: "Owner" })
     .returning();
   if (!owner) throw new Error("owner insert failed");
+  const runName = `${orgName} ${randomUUID().slice(0, 8)}`;
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName,
+    orgName: runName,
     businessDescription: "A services crew that hires, plans production, and keeps projects moving.",
     ...(enabledModules ? { enabledModules } : {}),
   });

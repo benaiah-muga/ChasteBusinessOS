@@ -120,14 +120,14 @@ export async function POST(req: Request) {
     });
   }
   if (claims.sessionId) {
-    await appendSessionEvent(db, claims.sessionId, "tool_call", { name: capabilityId, args });
+    await appendSessionEvent(db, claims.orgId, claims.sessionId, "tool_call", { name: capabilityId, args });
   }
   const result = await buildExecutor(db, registry).execute(capabilityId, ctx, args);
   const output = result.ok
     ? result.data
     : { ok: false, error: result.error, pendingApproval: Boolean(result.pendingApproval) };
   if (claims.sessionId) {
-    await appendSessionEvent(db, claims.sessionId, "tool_result", {
+    await appendSessionEvent(db, claims.orgId, claims.sessionId, "tool_result", {
       name: capabilityId,
       ok: result.ok,
       pendingApproval: Boolean(result.pendingApproval),

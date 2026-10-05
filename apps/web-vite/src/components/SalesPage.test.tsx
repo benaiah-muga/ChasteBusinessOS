@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SalesPage } from "./SalesPage";
 
@@ -50,6 +50,8 @@ function salesFetch() {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  sessionStorage.clear();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -99,6 +101,109 @@ describe("Vite sales page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "No sales orders yet" })).not.toBeNull();
     expect(attempt).toBe(2);
+  });
+
+  it("confirms a draft through the governed Go capability endpoint", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { confirmed: true, backordered: true, reservedThousandths: 0 } });
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(<SalesPage />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Allow backorder" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
+
+    expect(await screen.findByRole("status")).not.toBeNull();
+    expect(screen.getByText("Order #43 confirmed.")).not.toBeNull();
+    expect(within(screen.getByRole("row", { name: /#43/ })).getByRole("cell", { name: "Confirmed" })).not.toBeNull();
+    const request = fetchMock.mock.calls.find(([input]) => input === "/api/capabilities/execute");
+    expect(request?.[1]).toMatchObject({ method: "POST", credentials: "same-origin" });
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+      capabilityId: "sales.confirmOrder",
+      input: { orderId: orders[2]!.id, allowBackorder: true },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("keeps the approval intent across remounts and clears it after resolution", async () => {
+    let capabilityAttempt = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      capabilityAttempt += 1;
+      return capabilityAttempt === 1
+        ? Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 })
+        : Response.json({ ok: true, data: { confirmed: true, backordered: true, reservedThousandths: 0 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const firstMount = render(<SalesPage />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Allow backorder" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delivered" }));
+    expect(screen.getByText("Manager approval required")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    const capabilityCalls = () => fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const intentFrom = (call: ReturnType<typeof capabilityCalls>[number]) =>
+      (JSON.parse(String(call[1]?.body)) as { intentId: string }).intentId;
+    const backorderInputFrom = (call: ReturnType<typeof capabilityCalls>[number]) =>
+      (JSON.parse(String(call[1]?.body)) as { input: { allowBackorder?: boolean } }).input.allowBackorder;
+    const originalIntent = intentFrom(capabilityCalls()[0]!);
+    expect(sessionStorage.getItem(`chaste:sales-confirm-intent:${orders[2]!.id}`)).toBe(originalIntent);
+    expect(sessionStorage.getItem(`chaste:sales-confirm-backorder:${orders[2]!.id}`)).toBe("1");
+
+    firstMount.unmount();
+    render(<SalesPage />);
+    const resumedBackorderChoice = await screen.findByRole("checkbox", { name: "Allow backorder" });
+    expect((resumedBackorderChoice as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Check approval #43" }));
+
+    expect(await screen.findByText("Order #43 confirmed.")).not.toBeNull();
+    expect(within(screen.getByRole("row", { name: /#43/ })).getByText("Backordered")).not.toBeNull();
+    expect(capabilityCalls()).toHaveLength(2);
+    expect(intentFrom(capabilityCalls()[1]!)).toBe(originalIntent);
+    expect(backorderInputFrom(capabilityCalls()[1]!)).toBe(true);
+    expect(sessionStorage.getItem(`chaste:sales-confirm-intent:${orders[2]!.id}`)).toBeNull();
+    expect(sessionStorage.getItem(`chaste:sales-confirm-pending:${orders[2]!.id}`)).toBeNull();
+    expect(sessionStorage.getItem(`chaste:sales-confirm-backorder:${orders[2]!.id}`)).toBeNull();
+
+    cleanup();
+    render(<SalesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
+    expect(await screen.findByText("Order #43 confirmed.")).not.toBeNull();
+    expect(capabilityCalls()).toHaveLength(3);
+    expect(intentFrom(capabilityCalls()[2]!)).not.toBe(originalIntent);
+    expect(vi.mocked(window.confirm)).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps confirmation errors visible when the order is filtered out", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage is blocked"); });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      return Response.json({ error: "The sales service is unavailable. Check the order status before trying again." }, { status: 503 });
+    }));
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(<SalesPage />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Allow backorder" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm #43" }));
+    expect(await screen.findByRole("alert")).not.toBeNull();
+    expect((screen.getByRole("checkbox", { name: "Allow backorder" }) as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Delivered" }));
+
+    expect(screen.getByRole("alert").textContent).toContain("Check the order status before trying again.");
   });
 
   it("shows route-level Go permission failures as access denied", async () => {

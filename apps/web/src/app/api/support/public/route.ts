@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import {
   getDb,
   memberships,
@@ -32,6 +32,12 @@ const bodySchema = z.discriminatedUnion("action", [
     name: z.string().min(1).max(80).optional(),
     email: z.string().email(),
     subject: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    action: z.literal("poll"),
+    token: z.string().min(16).max(512),
+    conversationId: z.string().uuid(),
+    secret: z.string().min(16).max(512),
   }),
   z.object({
     action: z.literal("message"),
@@ -71,54 +77,46 @@ function ipOf(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
 }
 
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const token = url.searchParams.get("token") ?? "";
-  const conversationId = url.searchParams.get("conversationId") ?? "";
-  const secret = url.searchParams.get("secret") ?? "";
-  const after = url.searchParams.get("after") ?? "";
-  const org = await loadOrgByToken(token);
-  if (!org) return NextResponse.json({ error: "unknown widget" }, { status: 404 });
-  const limit = checkRateLimit(`widget-poll:${ipOf(req)}:${org.orgId}`, { max: 120, windowMs: 60_000 });
-  if (!limit.allowed) return NextResponse.json({ error: "slow down" }, { status: 429 });
-  const db = getDb().db;
-  const [conv] = await db
-    .select({ status: supportConversations.status, visitorSecretHash: supportConversations.visitorSecretHash })
-    .from(supportConversations)
-    .where(and(eq(supportConversations.id, conversationId), eq(supportConversations.orgId, org.orgId)))
-    .limit(1);
-  // The thread address is guessable (a uuid in client hands); the secret is
-  // what makes the thread the visitor's. No match, no messages.
-  if (!conv || !secretMatches(conv.visitorSecretHash, secret))
-    return NextResponse.json({ error: "conversation not found" }, { status: 404 });
-  const rows = await db
-    .select({
-      id: supportMessages.id,
-      senderType: supportMessages.senderType,
-      body: supportMessages.body,
-      createdAt: supportMessages.createdAt,
-    })
-    .from(supportMessages)
-    .where(
-      and(
-        eq(supportMessages.conversationId, conversationId),
-        after ? gt(supportMessages.createdAt, new Date(after)) : undefined,
-      ),
-    )
-    .orderBy(asc(supportMessages.createdAt))
-    .limit(100);
-  return NextResponse.json({ status: conv.status, messages: rows });
-}
-
 export async function POST(req: Request) {
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
   const data = parsed.data;
   const org = await loadOrgByToken(data.token);
   if (!org) return NextResponse.json({ error: "unknown widget" }, { status: 404 });
-  const limit = checkRateLimit(`widget-post:${ipOf(req)}:${org.orgId}`, { max: 12, windowMs: 60_000 });
-  if (!limit.allowed) return NextResponse.json({ error: "too many messages; try again shortly" }, { status: 429 });
+  const isPoll = data.action === "poll";
+  const limit = isPoll
+    ? checkRateLimit(`widget-poll:${ipOf(req)}:${org.orgId}`, { max: 120, windowMs: 60_000 })
+    : checkRateLimit(`widget-post:${ipOf(req)}:${org.orgId}`, { max: 12, windowMs: 60_000 });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: isPoll ? "slow down" : "too many messages; try again shortly" },
+      { status: 429 },
+    );
+  }
   const db = getDb().db;
+
+  if (data.action === "poll") {
+    const [conv] = await db
+      .select({ status: supportConversations.status, visitorSecretHash: supportConversations.visitorSecretHash })
+      .from(supportConversations)
+      .where(and(eq(supportConversations.id, data.conversationId), eq(supportConversations.orgId, org.orgId)))
+      .limit(1);
+    if (!conv || !secretMatches(conv.visitorSecretHash, data.secret)) {
+      return NextResponse.json({ error: "conversation not found" }, { status: 404 });
+    }
+    const rows = await db
+      .select({
+        id: supportMessages.id,
+        senderType: supportMessages.senderType,
+        body: supportMessages.body,
+        createdAt: supportMessages.createdAt,
+      })
+      .from(supportMessages)
+      .where(eq(supportMessages.conversationId, data.conversationId))
+      .orderBy(asc(supportMessages.createdAt))
+      .limit(100);
+    return NextResponse.json({ status: conv.status, messages: rows });
+  }
 
   if (data.action === "start") {
     // N04 containment: the conversation starts UNBOUND. The email is contact

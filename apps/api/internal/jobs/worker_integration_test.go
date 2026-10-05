@@ -1,10 +1,13 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -17,6 +20,589 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type systemCapabilityExecutorFunc func(context.Context, capability.SystemClaims, json.RawMessage) (capability.Result, error)
+
+func (f systemCapabilityExecutorFunc) ExecuteSystem(ctx context.Context, claims capability.SystemClaims, input json.RawMessage) (capability.Result, error) {
+	return f(ctx, claims, input)
+}
+
+func TestStaleWorkerCannotAdvanceDurableRunAfterReclaim(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the stale worker fencing proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	appPassword := envOr("CHASTE_APP_DB_PASSWORD", "chaste_app_dev_only")
+	workerPassword := envOr("CHASTE_JOBS_WORKER_DB_PASSWORD", "chaste_jobs_worker_dev_only")
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_app", appPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", workerPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatalf("verify app runtime role: %v", err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatalf("verify jobs worker role: %v", err)
+	}
+
+	tag := fmt.Sprintf("stale-worker-fence-%d", time.Now().UnixNano())
+	orgID := insertJobsTestOrg(t, ctx, owner, tag)
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	payload := json.RawMessage(`{"name":"Stale worker candidate"}`)
+	var approvalID, runID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO approvals (org_id, capability_id, risk_class, payload, rationale, status, expires_at)
+		VALUES ($1::uuid, 'crm.createCustomer', 'write', $2::jsonb, 'stale worker fencing proof', 'executing', clock_timestamp() + interval '1 hour')
+		RETURNING id::text`, orgID, payload).Scan(&approvalID); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO agent_runs (org_id, goal, status, registry_version, initiated_by_actor_type)
+		VALUES ($1::uuid, 'Stale worker fencing proof', 'waiting_approval', '1', 'agent')
+		RETURNING id::text`, orgID).Scan(&runID); err != nil {
+		t.Fatal(err)
+	}
+	const stepIndex = 1
+	if _, err := owner.Exec(ctx, `
+		INSERT INTO agent_run_steps (org_id, run_id, step_index, status, capability_id, capability_version, input_hash, input, approval_id)
+		VALUES ($1::uuid, $2::uuid, $3, 'waiting_approval', 'crm.createCustomer', '1', 'fixture-input-hash', $4::jsonb, $5::uuid)`, orgID, runID, stepIndex, payload, approvalID); err != nil {
+		t.Fatal(err)
+	}
+	jobID := insertJobsTestJobWithLinks(t, ctx, owner, orgID, "crm.createCustomer", payload, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), runID, stepIndex, approvalID)
+
+	const staleWorkerID = "stale-durable-worker"
+	var staleClaim *ClaimedJob
+	var reclaimed *ClaimedJob
+	var executor SystemCapabilityExecutor
+	executor = systemCapabilityExecutorFunc(func(callCtx context.Context, _ capability.SystemClaims, _ json.RawMessage) (capability.Result, error) {
+		var ownerID string
+		var fencingToken int
+		if err := owner.QueryRow(callCtx, `SELECT lease_owner, fencing_token FROM jobs WHERE id=$1::uuid`, jobID).Scan(&ownerID, &fencingToken); err != nil {
+			return capability.Result{}, err
+		}
+		claimedStepIndex := stepIndex
+		staleClaim = &ClaimedJob{
+			ID: jobID, OrgID: orgID, Type: "crm.createCustomer", WorkerID: ownerID,
+			FencingToken: fencingToken, RunID: &runID, RunStepIndex: &claimedStepIndex, ApprovedApprovalID: &approvalID,
+		}
+		if _, err := owner.Exec(callCtx, `UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1::uuid`, jobID); err != nil {
+			return capability.Result{}, err
+		}
+		reclaimer, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "fresh-durable-worker", LeaseDuration: 30 * time.Second})
+		if err != nil {
+			return capability.Result{}, err
+		}
+		reclaimed, err = reclaimer.ClaimOne(callCtx)
+		if err != nil {
+			return capability.Result{}, err
+		}
+		if reclaimed == nil || reclaimed.FencingToken <= fencingToken || reclaimed.WorkerID == ownerID {
+			return capability.Result{}, errors.New("job was not reclaimed with a newer lease fence")
+		}
+		return capability.Result{OK: true, Data: json.RawMessage(`{"customerId":"00000000-0000-4000-8000-000000000001"}`)}, nil
+	})
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: staleWorkerID, LeaseDuration: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worked, err := worker.ProcessOne(ctx)
+	if !worked || !errors.Is(err, ErrJobLeaseLost) {
+		t.Fatalf("stale worker process worked=%v err=%v, want a fenced lease-loss error", worked, err)
+	}
+	if staleClaim == nil || reclaimed == nil {
+		t.Fatal("stale and replacement claims were not captured")
+	}
+
+	for _, update := range []struct {
+		name string
+		run  func() error
+	}{
+		{name: "run", run: func() error { return worker.transitionRun(ctx, staleClaim, "failed", stepIndex, "stale worker") }},
+		{name: "step", run: func() error {
+			return worker.transitionStep(ctx, staleClaim, stepIndex, "failed", nil, "stale worker", nil, nil)
+		}},
+		{name: "approval", run: func() error { return worker.finishApproval(ctx, staleClaim) }},
+	} {
+		if err := update.run(); !errors.Is(err, ErrJobLeaseLost) {
+			t.Errorf("stale %s update error=%v, want ErrJobLeaseLost", update.name, err)
+		}
+	}
+	var jobStatus, leaseOwner, runStatus, stepStatus, approvalStatus string
+	var fencingToken int
+	if err := owner.QueryRow(ctx, `SELECT status, lease_owner, fencing_token FROM jobs WHERE id=$1::uuid`, jobID).Scan(&jobStatus, &leaseOwner, &fencingToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `SELECT status FROM agent_runs WHERE id=$1::uuid AND org_id=$2::uuid`, runID, orgID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `SELECT status FROM agent_run_steps WHERE run_id=$1::uuid AND org_id=$2::uuid AND step_index=$3`, runID, orgID, stepIndex).Scan(&stepStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `SELECT status FROM approvals WHERE id=$1::uuid AND org_id=$2::uuid`, approvalID, orgID).Scan(&approvalStatus); err != nil {
+		t.Fatal(err)
+	}
+	if jobStatus != "processing" || leaseOwner != reclaimed.WorkerID || fencingToken != reclaimed.FencingToken || runStatus != "running" || stepStatus != "running" || approvalStatus != "executing" {
+		t.Fatalf("stale state mutation: job=%s/%s/%d run=%s step=%s approval=%s", jobStatus, leaseOwner, fencingToken, runStatus, stepStatus, approvalStatus)
+	}
+
+	var routineID string
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO routines (org_id, name, prompt, schedule, enabled, trigger_type)
+		VALUES ($1::uuid, 'Stale routine', 'No action', '{"kind":"daily"}', true, 'schedule')
+		RETURNING id::text`, orgID).Scan(&routineID); err != nil {
+		t.Fatal(err)
+	}
+	routineJSON, err := json.Marshal(routinePayload{RoutineID: routineID, Trigger: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routineJobID := insertJobsTestJob(t, ctx, owner, orgID, routineJobType, routineJSON, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	routineClaimer, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "stale-routine-worker", LeaseDuration: 30 * time.Second, RoutineAgentRunner: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routineClaim, err := routineClaimer.ClaimOne(ctx)
+	if err != nil || routineClaim == nil || routineClaim.ID != routineJobID {
+		t.Fatalf("claim routine job=%+v err=%v", routineClaim, err)
+	}
+	routineReclaimer, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "fresh-routine-worker", LeaseDuration: 30 * time.Second, RoutineAgentRunner: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fake model reclaims the lease in the response that asks for a tool call.
+	// The routine then reaches ExecuteSystem with its stale claim.
+	actualExecutor := capability.NewExecutor(appPool, "", "", "")
+	var routineReclaimed *ClaimedJob
+	var handlerErr error
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			handlerErr = fmt.Errorf("unexpected model request %s %s", r.Method, r.URL.Path)
+			http.Error(w, handlerErr.Error(), http.StatusBadRequest)
+			return
+		}
+		if requests == 1 {
+			if _, err := owner.Exec(r.Context(), `UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1::uuid`, routineJobID); err != nil {
+				handlerErr = err
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			routineReclaimed, handlerErr = routineReclaimer.ClaimOne(r.Context())
+			if handlerErr != nil || routineReclaimed == nil || routineReclaimed.ID != routineJobID {
+				if handlerErr == nil {
+					handlerErr = errors.New("fake routine model could not reclaim the job")
+				}
+				http.Error(w, handlerErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"stale-routine-tool-call","type":"function","function":{"name":"crm_listCustomers","arguments":"{}"}}]}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+			return
+		}
+		var body struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			handlerErr = err
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		foundFencedTool := false
+		for _, message := range body.Messages {
+			if message.Role == "tool" && bytes.Contains(message.Content, []byte(capability.ErrSystemJobLeaseLost.Error())) {
+				foundFencedTool = true
+			}
+		}
+		if !foundFencedTool {
+			handlerErr = errors.New("routine model did not receive the fenced tool result")
+			http.Error(w, handlerErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"routine finished"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer server.Close()
+	routineRunner := newRoutineAgent(appPool, actualExecutor)
+	routineRunner.client = server.Client()
+	apiKey := "fake-routine-model-key"
+	config := routineConfig{BaseURL: server.URL + "/v1", APIKey: &apiKey}
+	config.Models.Primary = "fake-routine-model"
+	if _, _, err := routineRunner.agentLoop(ctx, routineClaim, "", routineRow{ID: routineID, Name: "Stale routine", Prompt: "List customers", OrgName: tag}, config); err != nil {
+		t.Fatalf("fake routine tool turn error=%v", err)
+	}
+	if handlerErr != nil || requests != 2 || routineReclaimed == nil {
+		t.Fatalf("fake model requests=%d reclaimer=%+v handler error=%v", requests, routineReclaimed, handlerErr)
+	}
+	toolIntent := routineIntent(routineJobID, 0, 0, "stale-routine-tool-call")
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+toolIntent); got != 0 {
+		t.Fatalf("stale routine tool created %d receipts, want none", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.listCustomers' AND kind='capability.executed' AND actor_type='system'`, orgID); got != 0 {
+		t.Fatalf("stale routine tool created %d capability audit events, want none", got)
+	}
+	freshToolClaims := capability.SystemClaims{
+		OrganizationID: orgID, CapabilityID: "crm.listCustomers", Permission: GoCapabilityPermissions["crm.listCustomers"],
+		IntentID: toolIntent, LeaseExtensionMillis: 180_000,
+	}
+	freshToolClaims.JobID = routineReclaimed.ID
+	freshToolClaims.LeaseOwner = routineReclaimed.WorkerID
+	freshToolClaims.FencingToken = routineReclaimed.FencingToken
+	freshResult, err := actualExecutor.ExecuteSystem(ctx, freshToolClaims, json.RawMessage(`{}`))
+	if err != nil || !freshResult.OK {
+		t.Fatalf("fresh routine tool execution result=%+v err=%v, want success", freshResult, err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+toolIntent); got != 1 {
+		t.Fatalf("fresh routine tool created %d receipts, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.listCustomers' AND kind='capability.executed' AND actor_type='system'`, orgID); got != 1 {
+		t.Fatalf("fresh routine tool created %d capability audit events, want one", got)
+	}
+
+	staleRoutineCtx := withJobLeaseContext(ctx, routineClaim)
+	routineAgent := newRoutineAgent(appPool, executor)
+	var staleRoutinePayload routinePayload
+	if err := json.Unmarshal(routineJSON, &staleRoutinePayload); err != nil {
+		t.Fatal(err)
+	}
+	if err := routineAgent.finish(staleRoutineCtx, orgID, staleRoutinePayload, routineID, "failed", "stale owner"); !errors.Is(err, ErrJobLeaseLost) {
+		t.Fatalf("stale routine state update error=%v, want ErrJobLeaseLost", err)
+	}
+	var routineLastStatus string
+	if err := owner.QueryRow(ctx, `SELECT COALESCE(last_status, '<null>') FROM routines WHERE id=$1::uuid AND org_id=$2::uuid`, routineID, orgID).Scan(&routineLastStatus); err != nil {
+		t.Fatal(err)
+	}
+	if routineLastStatus != "<null>" {
+		t.Fatalf("stale routine owner changed last_status to %q", routineLastStatus)
+	}
+}
+
+func TestSystemCapabilityLongEffectCoordinatesLeaseHeartbeatAndRollback(t *testing.T) {
+	ownerURL := os.Getenv("DATABASE_URL")
+	if ownerURL == "" {
+		if os.Getenv("GO_RUNTIME_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal("DATABASE_URL is required for the long capability lease proof")
+		}
+		t.Skip("DATABASE_URL is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	owner, err := pgxpool.New(ctx, ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	appName := fmt.Sprintf("go-effect-lease-%d", time.Now().UnixNano())
+	appURL, err := url.Parse(workerRoleURL(t, ownerURL, "chaste_app", envOr("CHASTE_APP_DB_PASSWORD", "chaste_app_dev_only")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appQuery := appURL.Query()
+	appQuery.Set("application_name", appName)
+	appURL.RawQuery = appQuery.Encode()
+	appPool, err := pgxpool.New(ctx, appURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer appPool.Close()
+	workerPool, err := pgxpool.New(ctx, workerRoleURL(t, ownerURL, "chaste_jobs_worker", envOr("CHASTE_JOBS_WORKER_DB_PASSWORD", "chaste_jobs_worker_dev_only")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerPool.Close()
+	if err := dbx.VerifyAppRuntimeRole(ctx, appPool); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyRole(ctx, workerPool); err != nil {
+		t.Fatal(err)
+	}
+	orgID := insertJobsTestOrg(t, ctx, owner, fmt.Sprintf("effect-lease-%d", time.Now().UnixNano()))
+	defer cleanupJobsTestOrgs(t, owner, orgID)
+	executor := capability.NewExecutor(appPool, "", "", "")
+	worker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "long-effect-worker", LeaseDuration: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An unrelated table lock holds the governed capability transaction after
+	// it has acquired and extended its own job lease row.
+	longPayload := json.RawMessage(`{"name":"Lease protected long effect"}`)
+	longJobID := insertJobsTestJob(t, ctx, owner, orgID, "crm.createCustomer", longPayload, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	blocker, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback(context.Background()) }()
+	if _, err := blocker.Exec(ctx, `LOCK TABLE public.customers IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	processDone := make(chan struct {
+		worked bool
+		err    error
+	}, 1)
+	go func() {
+		worked, err := worker.ProcessOne(ctx)
+		processDone <- struct {
+			worked bool
+			err    error
+		}{worked: worked, err: err}
+	}()
+	if err := waitForCapabilityTableLock(ctx, owner, appName); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-processDone:
+		t.Fatalf("long capability returned before lock release: worked=%v err=%v", result.worked, result.err)
+	case <-time.After(1200 * time.Millisecond):
+	}
+	competitor, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "long-effect-competitor", LeaseDuration: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := competitor.ClaimOne(ctx); err != nil || claimed != nil {
+		t.Fatalf("competitor reclaimed row locked by live effect: claim=%+v err=%v", claimed, err)
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-processDone:
+		if !result.worked || result.err != nil {
+			t.Fatalf("long capability worker result worked=%v err=%v", result.worked, result.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("long capability worker did not finish after table lock release")
+	}
+	assertJobsTestState(t, ctx, owner, longJobID, "done", 1)
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM customers WHERE org_id=$1::uuid AND name=$2`, orgID, "Lease protected long effect"); got != 1 {
+		t.Fatalf("long capability created %d customers, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+longJobID); got != 1 {
+		t.Fatalf("long capability created %d receipts, want one", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.createCustomer' AND kind='capability.executed' AND actor_type='system'`, orgID); got != 1 {
+		t.Fatalf("long capability created %d audit events, want one", got)
+	}
+
+	// routineTx takes the same job row lock as capability effects. A delayed
+	// routine read must extend the lease atomically, pause heartbeats while it
+	// owns the row, and leave enough time for the original owner to acknowledge.
+	var routineID string
+	if err := owner.QueryRow(ctx, `INSERT INTO routines (org_id,name,prompt,schedule,enabled,trigger_type) VALUES ($1::uuid,'Lease proof routine','Read only','{"kind":"daily"}',true,'schedule') RETURNING id::text`, orgID).Scan(&routineID); err != nil {
+		t.Fatal(err)
+	}
+	routinePayloadBytes, err := json.Marshal(routinePayload{RoutineID: routineID, Trigger: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routineJobID := insertJobsTestJob(t, ctx, owner, orgID, routineJobType, routinePayloadBytes, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	routineWorker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "routine-tx-owner", LeaseDuration: time.Second, RoutineAgentRunner: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routineClaim, err := routineWorker.ClaimOne(ctx)
+	if err != nil || routineClaim == nil || routineClaim.ID != routineJobID {
+		t.Fatalf("routine tx proof claim=%+v err=%v", routineClaim, err)
+	}
+	routineBlocker, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = routineBlocker.Rollback(context.Background()) }()
+	if _, err := routineBlocker.Exec(ctx, `LOCK TABLE public.routines IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	routineCtx := withEffectHeartbeatGate(withJobLeaseContext(ctx, routineClaim), &effectHeartbeatGate{})
+	routineAgent := newRoutineAgent(appPool, executor)
+	routineLoaded := make(chan error, 1)
+	go func() {
+		_, _, loadErr := routineAgent.loadRoutine(routineCtx, orgID, routineID)
+		routineLoaded <- loadErr
+	}()
+	if err := waitForApplicationTableLock(ctx, owner, appName, "routines"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-routineLoaded:
+		t.Fatalf("routine transaction returned before lock release: %v", err)
+	case <-time.After(1200 * time.Millisecond):
+	}
+	routineGate := routineCtx.Value(effectHeartbeatGateContextKey{}).(*effectHeartbeatGate)
+	if renewed, err := routineGate.renew(ctx, func(ctx context.Context) (bool, error) { return routineWorker.renewLease(ctx, routineClaim) }); err != nil || !renewed {
+		t.Fatalf("heartbeat coordination while routineTx is in flight renewed=%v err=%v", renewed, err)
+	}
+	competitor, err = NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "routine-tx-competitor", LeaseDuration: time.Second, RoutineAgentRunner: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := competitor.ClaimOne(ctx); err != nil || claimed != nil {
+		t.Fatalf("competitor reclaimed row locked by routineTx: claim=%+v err=%v", claimed, err)
+	}
+	if err := routineBlocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-routineLoaded:
+		if err != nil {
+			t.Fatalf("routineTx load failed after unblock: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("routineTx did not finish after table lock release")
+	}
+	var routineLeaseExpiry time.Time
+	if err := owner.QueryRow(ctx, `SELECT lease_expires_at FROM jobs WHERE id=$1::uuid`, routineJobID).Scan(&routineLeaseExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if !routineLeaseExpiry.After(time.Now().UTC().Add(2 * time.Minute)) {
+		t.Fatalf("routineTx did not commit the safety extension: expiry=%s", routineLeaseExpiry)
+	}
+	if renewed, err := routineGate.renew(ctx, func(ctx context.Context) (bool, error) { return routineWorker.renewLease(ctx, routineClaim) }); err != nil || !renewed {
+		t.Fatalf("heartbeat did not resume after routineTx committed: renewed=%v err=%v", renewed, err)
+	}
+	if claimed, err := competitor.ClaimOne(ctx); err != nil || claimed != nil {
+		t.Fatalf("competitor reclaimed after extension commit before acknowledgement: claim=%+v err=%v", claimed, err)
+	}
+	if finalized, err := routineWorker.finalize(ctx, routineClaim, "done", "", nil); err != nil || !finalized {
+		t.Fatalf("original routine owner could not acknowledge after routineTx: finalized=%v err=%v", finalized, err)
+	}
+	assertJobsTestState(t, ctx, owner, routineJobID, "done", 1)
+
+	// Cancel a second effect after its lease extension is staged but before its
+	// capability write can pass the table lock. The transaction rollback must
+	// discard both the extension and every governed effect, leaving it reclaimable.
+	rollbackPayload := json.RawMessage(`{"name":"Rolled back lease effect"}`)
+	rollbackJobID := insertJobsTestJob(t, ctx, owner, orgID, "crm.createCustomer", rollbackPayload, 3, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	rollbackClaimer, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "rollback-owner", LeaseDuration: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollbackClaim, err := rollbackClaimer.ClaimOne(ctx)
+	if err != nil || rollbackClaim == nil || rollbackClaim.ID != rollbackJobID {
+		t.Fatalf("rollback proof claim=%+v err=%v", rollbackClaim, err)
+	}
+	rollbackBlocker, err := owner.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rollbackBlocker.Exec(ctx, `LOCK TABLE public.customers IN ACCESS EXCLUSIVE MODE`); err != nil {
+		_ = rollbackBlocker.Rollback(ctx)
+		t.Fatal(err)
+	}
+	callCtx, cancelCall := context.WithCancel(ctx)
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := executor.ExecuteSystem(callCtx, capability.SystemClaims{
+			OrganizationID: orgID, CapabilityID: rollbackClaim.Type, Permission: GoCapabilityPermissions[rollbackClaim.Type],
+			IntentID: rollbackClaim.ID, JobID: rollbackClaim.ID, LeaseOwner: rollbackClaim.WorkerID,
+			FencingToken: rollbackClaim.FencingToken, LeaseExtensionMillis: rollbackClaim.LeaseExtensionMillis,
+		}, rollbackPayload)
+		callDone <- err
+	}()
+	if err := waitForCapabilityTableLock(ctx, owner, appName); err != nil {
+		cancelCall()
+		_ = rollbackBlocker.Rollback(ctx)
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	cancelCall()
+	_ = rollbackBlocker.Rollback(ctx)
+	select {
+	case err := <-callDone:
+		if err == nil {
+			t.Fatal("cancelled capability transaction unexpectedly committed")
+		}
+	case <-ctx.Done():
+		t.Fatal("cancelled capability transaction did not roll back")
+	}
+	var expiry time.Time
+	if err := owner.QueryRow(ctx, `SELECT lease_expires_at FROM jobs WHERE id=$1::uuid`, rollbackJobID).Scan(&expiry); err != nil {
+		t.Fatal(err)
+	}
+	if !expiry.Equal(rollbackClaim.LeaseExpiresAt) || expiry.After(time.Now().UTC()) {
+		t.Fatalf("rolled back effect changed lease expiry from %s to %s", rollbackClaim.LeaseExpiresAt, expiry)
+	}
+	if _, err := owner.Exec(ctx, `UPDATE jobs SET lease_expires_at=clock_timestamp()-interval '1 millisecond' WHERE id=$1::uuid AND status='processing' AND lease_owner=$2 AND fencing_token=$3`, rollbackJobID, rollbackClaim.WorkerID, rollbackClaim.FencingToken); err != nil {
+		t.Fatal(err)
+	}
+	var expired bool
+	if err := owner.QueryRow(ctx, `SELECT lease_expires_at < clock_timestamp() FROM jobs WHERE id=$1::uuid`, rollbackJobID).Scan(&expired); err != nil {
+		t.Fatal(err)
+	}
+	if !expired {
+		t.Fatal("rollback fixture lease did not expire before reclaim")
+	}
+	if renewed, err := rollbackClaimer.renewLease(ctx, rollbackClaim); err != nil || renewed {
+		t.Fatalf("expired same-owner heartbeat renewed=%v err=%v, want false without error", renewed, err)
+	}
+	if finalized, err := rollbackClaimer.finalize(ctx, rollbackClaim, "done", "expired owner", nil); err != nil || finalized {
+		t.Fatalf("expired same-owner finalization finalized=%v err=%v, want false without error", finalized, err)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM customers WHERE org_id=$1::uuid AND name=$2`, orgID, "Rolled back lease effect"); got != 0 {
+		t.Fatalf("rolled back capability created %d customers, want none", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, orgID, orgID+":"+rollbackJobID); got != 0 {
+		t.Fatalf("rolled back capability created %d receipts, want none", got)
+	}
+	if got := countJobsTestRows(t, ctx, owner, `SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND capability_id='crm.createCustomer' AND kind='capability.executed' AND actor_type='system'`, orgID); got != 1 {
+		t.Fatalf("rolled back capability changed audit count to %d, want only the successful long effect", got)
+	}
+	recoveryWorker, err := NewWorker(workerPool, workerPool, appPool, executor, Options{WorkerID: "rollback-recovery-owner", LeaseDuration: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := recoveryWorker.ClaimOne(ctx)
+	if err != nil || recovered == nil || recovered.ID != rollbackJobID || recovered.FencingToken <= rollbackClaim.FencingToken {
+		t.Fatalf("rolled back job was not safely reclaimable: claim=%+v err=%v", recovered, err)
+	}
+	result, err := executor.ExecuteSystem(ctx, capability.SystemClaims{
+		OrganizationID: orgID, CapabilityID: recovered.Type, Permission: GoCapabilityPermissions[recovered.Type],
+		IntentID: recovered.ID, JobID: recovered.ID, LeaseOwner: recovered.WorkerID,
+		FencingToken: recovered.FencingToken, LeaseExtensionMillis: recovered.LeaseExtensionMillis,
+	}, rollbackPayload)
+	if err != nil || !result.OK {
+		t.Fatalf("recovered capability result=%+v err=%v", result, err)
+	}
+}
+
+func waitForCapabilityTableLock(ctx context.Context, owner *pgxpool.Pool, appName string) error {
+	return waitForApplicationTableLock(ctx, owner, appName, "customers")
+}
+
+func waitForApplicationTableLock(ctx context.Context, owner *pgxpool.Pool, appName, table string) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var blocked bool
+		if err := owner.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE application_name=$1 AND wait_event_type='Lock' AND query ILIKE '%' || $2 || '%'
+			)`, appName, table).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return errors.New("capability executor did not reach the controlled customers table lock")
+}
 
 func TestGoCapabilityJobWorkerMatchesLegacy(t *testing.T) {
 	ownerURL := os.Getenv("DATABASE_URL")
@@ -160,6 +746,8 @@ func TestGoCapabilityJobWorkerMatchesLegacy(t *testing.T) {
 	firstResult, err := executor.ExecuteSystem(ctx, capability.SystemClaims{
 		OrganizationID: orgA, CapabilityID: firstClaim.Type,
 		Permission: GoCapabilityPermissions[firstClaim.Type], IntentID: firstClaim.ID,
+		JobID: firstClaim.ID, LeaseOwner: firstClaim.WorkerID, FencingToken: firstClaim.FencingToken,
+		LeaseExtensionMillis: firstClaim.LeaseExtensionMillis,
 	}, firstClaim.Payload)
 	if err != nil || !firstResult.OK || firstResult.Replayed {
 		t.Fatalf("first effect result=%+v err=%v", firstResult, err)

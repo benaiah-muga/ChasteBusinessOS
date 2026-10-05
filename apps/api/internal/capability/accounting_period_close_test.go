@@ -188,13 +188,17 @@ func TestAccountingPeriodCloseParsersMirrorZodContracts(t *testing.T) {
 		`{"year":2026,"month":13}`,
 		`{"year":2026,"month":1.5}`,
 		`{"year":2026,"month":null}`,
+		// Zod z.number() refuses every quoted spelling, so a numeric string is
+		// not an acceptable substitute for a number.
+		`{"year":"2026","month":8}`,
+		`{"year":"2026","month":"8"}`,
 	} {
 		if _, err := ParseClosePeriodInput(json.RawMessage(raw)); err == nil {
 			t.Errorf("ParseClosePeriodInput accepted %s", raw)
 		}
 	}
-	if stringYear, err := ParseClosePeriodInput(json.RawMessage(`{"year":"2026","month":"8"}`)); err != nil || stringYear.Year != 2026 || stringYear.Month != 8 {
-		t.Fatalf("ParseClosePeriodInput(numeric strings) = %+v, %v, want accepted like every shared safe-integer parser", stringYear, err)
+	if stringYear, err := ParseClosePeriodInput(json.RawMessage(`{"year":2026,"month":8}`)); err != nil || stringYear.Year != 2026 || stringYear.Month != 8 {
+		t.Fatalf("ParseClosePeriodInput(numbers) = %+v, %v, want accepted", stringYear, err)
 	}
 	for _, raw := range []string{
 		`{}`,
@@ -202,6 +206,7 @@ func TestAccountingPeriodCloseParsersMirrorZodContracts(t *testing.T) {
 		`{"year":2101}`,
 		`{"year":null}`,
 		`[]`,
+		`{"year":"2026"}`,
 	} {
 		if _, err := ParseCloseYearInput(json.RawMessage(raw)); err == nil {
 			t.Errorf("ParseCloseYearInput accepted %s", raw)
@@ -209,9 +214,6 @@ func TestAccountingPeriodCloseParsersMirrorZodContracts(t *testing.T) {
 	}
 	if yearEnd, err := ParseCloseYearInput(json.RawMessage(`{"year":2026}`)); err != nil || yearEnd != (CloseYearInput{Year: 2026}) {
 		t.Fatalf("ParseCloseYearInput() = %+v, %v", yearEnd, err)
-	}
-	if stringYear, err := ParseCloseYearInput(json.RawMessage(`{"year":"2026"}`)); err != nil || stringYear.Year != 2026 {
-		t.Fatalf("ParseCloseYearInput(numeric string) = %+v, %v, want accepted like every shared safe-integer parser", stringYear, err)
 	}
 
 	fullCheck := `{"year":2026,"month":8,"taskKey":"review_tax","completed":true,"note":" taxes reviewed ","unknown":true}`

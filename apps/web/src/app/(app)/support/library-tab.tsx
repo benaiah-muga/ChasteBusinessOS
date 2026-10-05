@@ -16,10 +16,11 @@ interface ArticleRow {
   title: string;
   body: string;
   category: string | null;
+  isPublic: boolean;
 }
 
 const emptyCanned = { shortcut: "", title: "", body: "" };
-const emptyArticle = { title: "", body: "", category: "" };
+const emptyArticle = { title: "", body: "", category: "", isPublic: false };
 
 /** Canned responses and knowledge-base articles - the support library. */
 export function LibraryTab() {
@@ -70,6 +71,7 @@ export function LibraryTab() {
       title: articleForm.title.trim(),
       body: articleForm.body.trim(),
       category: articleForm.category.trim() || undefined,
+      isPublic: articleForm.isPublic,
     });
     setBusy(false);
     if (!res.ok && res.error) {
@@ -208,9 +210,17 @@ export function LibraryTab() {
               onChange={(e) => setArticleForm({ ...articleForm, body: e.target.value })}
             />
           </div>
+          <label className="flex items-center gap-2 text-sm text-stone-700">
+            <input
+              type="checkbox"
+              checked={articleForm.isPublic}
+              onChange={(e) => setArticleForm({ ...articleForm, isPublic: e.target.checked })}
+            />
+            Make this article available to public support replies
+          </label>
           <div className="flex justify-end">
             <Button type="submit" loading={busy} disabled={!articleForm.title.trim() || !articleForm.body.trim()}>
-              Publish article
+              {articleForm.isPublic ? "Publish article" : "Save internal article"}
             </Button>
           </div>
         </form>
@@ -228,6 +238,7 @@ export function LibraryTab() {
               <li key={a.id} className="py-2.5">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-stone-800">{a.title}</span>
+                  <Badge tone={a.isPublic ? "gold" : "neutral"}>{a.isPublic ? "Public" : "Internal"}</Badge>
                   {a.category && <Badge>{a.category}</Badge>}
                 </div>
                 <p className="mt-1 line-clamp-2 text-xs text-stone-500">{a.body}</p>
@@ -235,7 +246,7 @@ export function LibraryTab() {
             ))}
           </ul>
         )}
-        <p className="mt-2 text-xs text-stone-400">Articles are live immediately - the website widget&apos;s AI answers are grounded in these.</p>
+        <p className="mt-2 text-xs text-stone-400">Only articles explicitly marked public are available to the website widget&apos;s AI answers.</p>
       </Card>
     </div>
   );

@@ -38,12 +38,60 @@ func TestRoutineToolsMatchLegacyReadOnlyPermissionBundle(t *testing.T) {
 	}
 }
 
+func TestRoutineListToolIsAvailableAndValidatesItsFilter(t *testing.T) {
+	tools, byName, err := routineToolSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *routineTool
+	for index := range tools {
+		if tools[index].Capability == "routines.list" {
+			found = &tools[index]
+			break
+		}
+	}
+	if found == nil || found.Name != "routines_list" || found.Permission != "routines.read" || byName["routines_list"] != "routines.list" {
+		t.Fatalf("routine list tool=%+v dispatch=%q, want routines_list with routines.read", found, byName["routines_list"])
+	}
+	properties, ok := found.Schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("routine list schema has no properties: %#v", found.Schema)
+	}
+	limit, ok := properties["limit"].(map[string]any)
+	if !ok || limit["type"] != "integer" || limit["minimum"] != 1 || limit["maximum"] != 100 || limit["default"] != 50 {
+		t.Fatalf("routine list limit schema=%#v, want integer 1..100 default 50", properties["limit"])
+	}
+
+	for _, test := range []struct {
+		input string
+		valid bool
+	}{
+		{input: `{}`, valid: true},
+		{input: `{"limit":1}`, valid: true},
+		{input: `{"limit":100}`, valid: true},
+		{input: `{"limit":0}`},
+		{input: `{"limit":101}`},
+		{input: `{"limit":1.5}`},
+		{input: `{"limit":"10"}`},
+		{input: `{"unexpected":true}`},
+		{input: `null`},
+		{input: `{} {}`},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			err := validateRoutineListToolInput(json.RawMessage(test.input))
+			if (err == nil) != test.valid {
+				t.Fatalf("validateRoutineListToolInput(%s) error=%v, want valid=%v", test.input, err, test.valid)
+			}
+		})
+	}
+}
+
 func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	tools, byName, err := routineToolSet()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge", "documents.listDocVersions", "purchasing.supplierStatement", "inventory.itemHistory", "accounting.customerStatement"} {
+	for _, capabilityID := range []string{"support.readConversation", "support.searchKnowledge", "documents.listDocVersions", "purchasing.supplierStatement", "inventory.itemHistory", "accounting.customerStatement", "hr.leaveBalance", "purchasing.listReceipts"} {
 		var found *routineTool
 		for index := range tools {
 			if tools[index].Capability == capabilityID {
@@ -135,6 +183,29 @@ func TestRoutineToolSchemasDescribeRequiredInputs(t *testing.T) {
 	}
 	if capabilityID := byName["purchasing_apAging"]; capabilityID != "purchasing.apAging" {
 		t.Fatalf("accounts payable aging routine dispatch maps to %q", capabilityID)
+	}
+	for toolName, capabilityID := range map[string]string{
+		"crm_listCustomerViews":          "crm.listCustomerViews",
+		"hr_listEmployees":               "hr.listEmployees",
+		"hr_leaveBalance":                "hr.leaveBalance",
+		"accounting_listBudgetScenarios": "accounting.listBudgetScenarios",
+		"inventory_listLots":             "inventory.listLots",
+		"inventory_listReservations":     "inventory.listReservations",
+		"purchasing_listReceipts":        "purchasing.listReceipts",
+	} {
+		if got := byName[toolName]; got != capabilityID {
+			t.Fatalf("routine dispatch for %s maps to %q, want %q", toolName, got, capabilityID)
+		}
+	}
+	for _, optional := range []string{"accounting_listBudgetScenarios", "inventory_listReservations"} {
+		for index := range tools {
+			if tools[index].Name != optional {
+				continue
+			}
+			if _, required := tools[index].Schema["required"]; required {
+				t.Fatalf("routine tool %s should keep its optional filter optional: %#v", optional, tools[index].Schema["required"])
+			}
+		}
 	}
 	var customers *routineTool
 	for index := range tools {

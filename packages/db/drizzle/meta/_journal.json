@@ -765,6 +765,125 @@
       "when": 1790784494552,
       "tag": "0108_jobs_claim_owner_org_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1791060667331,
+      "tag": "0109_go_session_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1791062343240,
+      "tag": "0110_go_session_identity_rls_fix",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1791072735886,
+      "tag": "0111_auth_email_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1791075297901,
+      "tag": "0112_go_support_public_widget",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1791078732349,
+      "tag": "0113_go_invoice_share_token",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1791086959432,
+      "tag": "0114_go_support_auto_reply_budget",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1791087862058,
+      "tag": "0115_go_support_auto_reply_org_budget",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1791089000000,
+      "tag": "0116_support_kb_publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1791090000000,
+      "tag": "0117_go_scim_token_resolver",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1791093600000,
+      "tag": "0118_approval_action_intents",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1791097200000,
+      "tag": "0119_oidc_subject_uniqueness",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1791100800000,
+      "tag": "0120_public_support_article_embeddings",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1791100800001,
+      "tag": "0121_go_scim_provisioning",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1791100800002,
+      "tag": "0122_public_support_embedding_worker",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1791100800003,
+      "tag": "0123_public_support_embedding_retry_backoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1791100800004,
+      "tag": "0124_fair_public_support_embedding_candidates",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1791100800005,
+      "tag": "0125_rotate_public_support_embedding_candidates",
+      "breakpoints": true
     }
   ]
 }

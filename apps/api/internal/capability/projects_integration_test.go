@@ -184,6 +184,20 @@ func TestGoProjectsLifecyclePreservesDefaultsAttributionAuditAndReceiptReplay(t 
 	if err == nil || err.Error() != "project is not active" {
 		t.Fatalf("create task after archive error=%v, want project is not active", err)
 	}
+	_, err = executeProjectCapability(fx, moveProjectTaskCapabilityID, `{"taskId":"`+firstTask.TaskID+`","status":"done"}`, "projects-move-task-after-archive")
+	if err == nil || err.Error() != "project is not active" {
+		t.Fatalf("move task after archive error=%v, want project is not active", err)
+	}
+	_, err = executeProjectCapability(fx, assignProjectTaskCapabilityID, `{"taskId":"`+secondTask.TaskID+`","assigneeUserId":"`+fx.userID+`"}`, "projects-assign-task-after-archive")
+	if err == nil || err.Error() != "project is not active" {
+		t.Fatalf("assign task after archive error=%v, want project is not active", err)
+	}
+	if got := fx.count(`SELECT count(*) FROM project_tasks WHERE id=$1::uuid AND org_id=$2::uuid AND status='doing' AND assignee_user_id=$3::uuid`, firstTask.TaskID, fx.orgID, fx.userID); got != 1 {
+		t.Fatalf("archived move changed task state, matching rows=%d", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM project_tasks WHERE id=$1::uuid AND org_id=$2::uuid AND status='done' AND assignee_user_id IS NULL`, secondTask.TaskID, fx.orgID); got != 1 {
+		t.Fatalf("archived assignment changed task state, matching rows=%d", got)
+	}
 	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid`, fx.orgID); got != 8 {
 		t.Fatalf("receipt count=%d, want one per successful action and no replay receipt", got)
 	}
@@ -273,12 +287,7 @@ func TestGoProjectsRequiresExactStoredApprovalPayload(t *testing.T) {
 	fx := newProjectsFixture(t)
 	fx.addPolicy("projects.*", "read", nil)
 	raw := json.RawMessage(`{"name":"Approved project","unknown":"stripped by TypeScript object schema"}`)
-	request := SystemClaims{
-		OrganizationID: fx.orgID,
-		CapabilityID:   createProjectCapabilityID,
-		Permission:     "projects.write",
-		IntentID:       executorUUID(t),
-	}
+	request := fx.systemClaims(t, createProjectCapabilityID, "projects.write", executorUUID(t), "", "")
 	pending, err := fx.executor.ExecuteSystem(fx.ctx, request, raw)
 	if err != nil || pending.OK || !pending.PendingApproval || pending.ApprovalID == "" {
 		t.Fatalf("approval request result=%+v err=%v", pending, err)
@@ -476,9 +485,14 @@ func TestGoProjectsReadCollectionPreservesLegacyOrderingLimitDatesAndNoAudit(t *
 		t.Fatal(err)
 	}
 	fx.setModuleList(`[]`)
+	input := json.RawMessage(`{}`)
+	disabled, err := fx.executor.ReadProjectCollection(fx.ctx, projectReadClaims(fx, ProjectCollectionReadOperationID, input), input)
+	if err != nil || disabled.OK || disabled.Error != `module "projects" is disabled for this organization` {
+		t.Fatalf("disabled Projects collection result=%+v err=%v, want module gate", disabled, err)
+	}
+	fx.setModuleList(`null`)
 
 	before := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid`, fx.orgID)
-	input := json.RawMessage(`{}`)
 	result, err := fx.executor.ReadProjectCollection(fx.ctx, projectReadClaims(fx, ProjectCollectionReadOperationID, input), input)
 	if err != nil || !result.OK {
 		t.Fatalf("collection result=%+v err=%v", result, err)

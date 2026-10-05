@@ -171,6 +171,29 @@ func (fx *executorFixture) humanClaims(rawInput json.RawMessage, intent string) 
 	return fx.claims(rawInput, "human", "", intent)
 }
 
+func (fx *executorFixture) systemClaims(t *testing.T, capabilityID, permission, intentID, approvedApprovalID, agentSessionID string) SystemClaims {
+	t.Helper()
+	var jobID string
+	if err := fx.owner.QueryRow(fx.ctx, `
+		INSERT INTO jobs (org_id, type, payload, max_attempts)
+		VALUES ($1::uuid, $2, '{}'::jsonb, 3)
+		RETURNING id::text`, fx.orgID, capabilityID).Scan(&jobID); err != nil {
+		t.Fatalf("insert system executor lease job: %v", err)
+	}
+	const leaseOwner = "capability-system-test-owner"
+	if _, err := fx.owner.Exec(fx.ctx, `
+		UPDATE jobs SET status='processing', lease_owner=$2, fencing_token=1,
+			lease_expires_at=clock_timestamp() + interval '1 hour'
+		WHERE id=$1::uuid AND org_id=$3::uuid`, jobID, leaseOwner, fx.orgID); err != nil {
+		t.Fatalf("claim system executor test job: %v", err)
+	}
+	return SystemClaims{
+		OrganizationID: fx.orgID, CapabilityID: capabilityID, Permission: permission,
+		IntentID: intentID, ApprovedApprovalID: approvedApprovalID, AgentSessionID: agentSessionID,
+		JobID: jobID, LeaseOwner: leaseOwner, FencingToken: 1, LeaseExtensionMillis: 180_000,
+	}
+}
+
 func (fx *executorFixture) claims(rawInput json.RawMessage, actorType, agentSession, intent string) authbridge.CapabilityClaims {
 	digest, err := InputHash(rawInput)
 	if err != nil {
@@ -317,6 +340,56 @@ func TestGoCustomerExecutionCreatesApprovalWithoutEffectWhenPolicyGates(t *testi
 	}
 	if got := fx.count(`SELECT count(*) FROM notifications WHERE org_id = $1::uuid AND kind = 'approval.requested'`, fx.orgID); got != 1 {
 		t.Fatalf("approval inbox notifications = %d, want 1", got)
+	}
+}
+
+func TestGoApprovalIntentRetryReusesPendingRowAndRejectsPayloadConflict(t *testing.T) {
+	fx := newExecutorFixture(t)
+	fx.addAgentSession()
+	fx.addPolicy("crm.*", "read", nil)
+	input := json.RawMessage(`{"name":"One pending customer","preferredContactMethod":"email","doNotContact":false}`)
+	claims := fx.claims(input, "agent", fx.agentSession, "approval-intent-retry")
+	first, err := fx.executor.Execute(fx.ctx, claims, createCustomerCapabilityID, input)
+	if err != nil || first.OK || !first.PendingApproval || first.ApprovalID == "" {
+		t.Fatalf("initial execution=%+v err=%v, want pending approval", first, err)
+	}
+	second, err := fx.executor.Execute(fx.ctx, claims, createCustomerCapabilityID, input)
+	if err != nil || second.OK || !second.PendingApproval || second.ApprovalID != first.ApprovalID {
+		t.Fatalf("same-intent retry=%+v err=%v, want same pending approval", second, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM approvals WHERE org_id=$1::uuid AND intent_id=$2`, fx.orgID, claims.IntentID); got != 1 {
+		t.Fatalf("same-intent retries created %d approval rows, want one", got)
+	}
+
+	changedInput := json.RawMessage(`{"name":"Different payload","preferredContactMethod":"email","doNotContact":false}`)
+	conflictingClaims := fx.claims(changedInput, "agent", fx.agentSession, claims.IntentID)
+	conflicting, err := fx.executor.Execute(fx.ctx, conflictingClaims, createCustomerCapabilityID, changedInput)
+	if err != nil || conflicting.OK || conflicting.PendingApproval || !strings.Contains(conflicting.Error, "action intent conflict") {
+		t.Fatalf("conflicting same-intent execution=%+v err=%v, want intent conflict", conflicting, err)
+	}
+}
+
+func TestGoApprovalIntentReceiptReplaysAfterDecision(t *testing.T) {
+	fx := newExecutorFixture(t)
+	fx.addAgentSession()
+	fx.addPolicy("crm.*", "read", nil)
+	input := json.RawMessage(`{"name":"Approval receipt customer","email":"approval-receipt@fixture.test","preferredContactMethod":"email","doNotContact":false}`)
+	claims := fx.claims(input, "agent", fx.agentSession, "approval-intent-receipt")
+	pending, err := fx.executor.Execute(fx.ctx, claims, createCustomerCapabilityID, input)
+	if err != nil || !pending.PendingApproval {
+		t.Fatalf("initial execution=%+v err=%v, want pending approval", pending, err)
+	}
+	decider := NewApprovalDecider(fx.runtime, fx.executor)
+	decision, err := decider.Decide(fx.ctx, fx.humanClaims(input, ""), ApprovalDecisionInput{ApprovalID: pending.ApprovalID, Decision: "approve"})
+	if err != nil || !decision.OK || decision.Status != "executed" || decision.Result == nil || !decision.Result.OK {
+		t.Fatalf("approval decision=%+v err=%v, want successful execution", decision, err)
+	}
+	replayed, err := fx.executor.Execute(fx.ctx, claims, createCustomerCapabilityID, input)
+	if err != nil || !replayed.OK || !replayed.Replayed || len(replayed.Data) == 0 {
+		t.Fatalf("same-intent post-approval retry=%+v err=%v, want successful receipt replay", replayed, err)
+	}
+	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, fx.orgID, fx.orgID+":"+claims.IntentID); got != 1 {
+		t.Fatalf("approved action wrote %d intent receipts, want one", got)
 	}
 }
 

@@ -171,6 +171,20 @@ type fxRevaluationCurrencyTotals struct {
 	historical big.Int
 }
 
+func addFxExposureOutstanding(totals map[string]*big.Int, currency string, outstanding int64) error {
+	if outstanding < 0 || !reportSafeInteger(outstanding) {
+		return errors.New("FX exposure exceeds the supported amount range")
+	}
+	if totals[currency] == nil {
+		totals[currency] = &big.Int{}
+	}
+	totals[currency].Add(totals[currency], big.NewInt(outstanding))
+	if _, err := fxRevaluationSafeAmount(totals[currency], "foreign outstanding"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func executeUnrealizedFxExposure(ctx context.Context, tx pgx.Tx, orgID string, input UnrealizedFxExposureInput, now time.Time) (UnrealizedFxExposureOutput, error) {
 	_ = input
 	var output UnrealizedFxExposureOutput
@@ -185,26 +199,30 @@ func executeUnrealizedFxExposure(ctx context.Context, tx pgx.Tx, orgID string, i
 		return output, err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT currency, coalesce(sum(greatest(total_minor - credited_minor - paid_minor, 0)), 0)::bigint
+		SELECT currency, total_minor, paid_minor, credited_minor
 		FROM invoices
 		WHERE org_id = $1::uuid AND currency <> $2 AND status <> 'void'
-		GROUP BY currency
 		ORDER BY currency`, orgID, base)
 	if err != nil {
 		return output, err
 	}
-	type exposureRow struct {
-		currency    string
-		outstanding int64
-	}
-	aggregated := make([]exposureRow, 0)
+	byCurrency := make(map[string]*big.Int)
 	for rows.Next() {
-		var row exposureRow
-		if err := rows.Scan(&row.currency, &row.outstanding); err != nil {
+		var currency string
+		var totalMinor, paidMinor, creditedMinor int64
+		if err := rows.Scan(&currency, &totalMinor, &paidMinor, &creditedMinor); err != nil {
 			rows.Close()
 			return output, err
 		}
-		aggregated = append(aggregated, row)
+		outstanding, err := reportDocumentOutstandingMinor(totalMinor, paidMinor, creditedMinor)
+		if err != nil {
+			rows.Close()
+			return output, err
+		}
+		if err := addFxExposureOutstanding(byCurrency, currency, outstanding); err != nil {
+			rows.Close()
+			return output, err
+		}
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -212,20 +230,29 @@ func executeUnrealizedFxExposure(ctx context.Context, tx pgx.Tx, orgID string, i
 	}
 	rows.Close()
 	at := now.Truncate(time.Millisecond)
-	output.Exposures = make([]UnrealizedFxExposureRow, 0, len(aggregated))
-	for _, row := range aggregated {
-		rate, err := latestFXRate(ctx, tx, orgID, base, row.currency, at)
+	currencies := make([]string, 0, len(byCurrency))
+	for currency := range byCurrency {
+		currencies = append(currencies, currency)
+	}
+	sort.Strings(currencies)
+	output.Exposures = make([]UnrealizedFxExposureRow, 0, len(currencies))
+	for _, currency := range currencies {
+		outstanding, err := fxRevaluationSafeAmount(byCurrency[currency], "foreign outstanding")
+		if err != nil {
+			return output, err
+		}
+		rate, err := latestFXRate(ctx, tx, orgID, base, currency, at)
 		if err != nil {
 			return output, err
 		}
 		exposure := UnrealizedFxExposureRow{
-			Currency:                row.currency,
-			OutstandingForeignMinor: row.outstanding,
+			Currency:                currency,
+			OutstandingForeignMinor: outstanding,
 		}
 		if rate != nil {
 			rateNum := rate.Num
 			rateDen := rate.Den
-			baseMinor, err := toBaseMinorExact(row.outstanding, *rate, row.currency, base)
+			baseMinor, err := toBaseMinorExact(outstanding, *rate, currency, base)
 			if err != nil {
 				return output, err
 			}
@@ -274,9 +301,10 @@ func executeRevalueForeignReceivables(ctx context.Context, tx pgx.Tx, claims aut
 			rows.Close()
 			return output, err
 		}
-		outstanding := totalMinor - paidMinor - creditedMinor
-		if outstanding < 0 {
-			outstanding = 0
+		outstanding, err := reportDocumentOutstandingMinor(totalMinor, paidMinor, creditedMinor)
+		if err != nil {
+			rows.Close()
+			return output, err
 		}
 		if outstanding <= 0 {
 			continue

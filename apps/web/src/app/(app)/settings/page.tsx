@@ -540,6 +540,9 @@ interface AiConfig {
   models: { primary: string; fast: string; reasoning: string; embeddings: string };
   keyHint?: string | null;
   source: string;
+  codingAgentAvailable: boolean;
+  codingAgentSelected: boolean;
+  codingAgentDelegationConfigured: boolean;
 }
 
 type AiProviderId = "nvidia" | "openrouter" | "groq" | "mistral" | "zai" | "openai" | "custom";
@@ -568,6 +571,8 @@ function AiTab() {
   const [baseUrl, setBaseUrl] = useState(AI_PROVIDER_OPTIONS[0]!.baseUrl);
   const [models, setModels] = useState(DEFAULT_AI_MODELS);
   const [apiKey, setApiKey] = useState("");
+  const [usePersonalCodingAgentForPublicSupport, setUsePersonalCodingAgentForPublicSupport] = useState(false);
+  const [codingAgentSettingTouched, setCodingAgentSettingTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
@@ -578,6 +583,8 @@ function AiTab() {
     setBaseUrl(next.baseUrl);
     setModels(next.models);
     setApiKey("");
+    setUsePersonalCodingAgentForPublicSupport(next.codingAgentSelected);
+    setCodingAgentSettingTouched(false);
   }
 
   useEffect(() => {
@@ -602,6 +609,7 @@ function AiTab() {
       baseUrl,
       models,
       ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+      ...(codingAgentSettingTouched ? { usePersonalCodingAgentForPublicSupport } : {}),
     });
     setBusy(false);
     if (res.status === 202) {
@@ -623,6 +631,7 @@ function AiTab() {
       baseUrl,
       models,
       clearApiKey: true,
+      ...(codingAgentSettingTouched ? { usePersonalCodingAgentForPublicSupport } : {}),
     });
     setBusy(false);
     if (res.status === 202) setNote("Key removal submitted for administrator approval.");
@@ -698,6 +707,37 @@ function AiTab() {
                   <span className="mt-1 block text-[11px] text-stone-400">{hint}</span>
                 </label>
               ))}
+            </div>
+            <div className="mt-5 rounded-lg border border-stone-200 p-3">
+              <label className="flex items-start gap-2 text-sm text-stone-700">
+                <input
+                  type="checkbox"
+                  checked={usePersonalCodingAgentForPublicSupport}
+                  disabled={!config.codingAgentAvailable && !config.codingAgentSelected}
+                  onChange={(event) => {
+                    setUsePersonalCodingAgentForPublicSupport(event.target.checked);
+                    setCodingAgentSettingTouched(true);
+                  }}
+                />
+                <span>
+                  Use my personal OpenCode connection for public support replies
+                  <span className="mt-1 block text-xs text-stone-500">
+                    This authorizes your connected account to process anonymous widget conversations. Go runs the order and published-knowledge reads itself, and does not give OpenCode tools.
+                  </span>
+                </span>
+              </label>
+              {!config.codingAgentAvailable && !config.codingAgentSelected && (
+                <p className="mt-2 text-xs text-stone-500">Connect OpenCode in Coding plans and make it your default to enable this option.</p>
+              )}
+              {config.codingAgentDelegationConfigured && !config.codingAgentSelected && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-amber-700">
+                  <span>A different member's connection is currently authorized.</span>
+                  <Button size="sm" tone="secondary" onClick={() => {
+                    setUsePersonalCodingAgentForPublicSupport(false);
+                    setCodingAgentSettingTouched(true);
+                  }}>Clear delegation</Button>
+                </div>
+              )}
             </div>
             <div className="mt-5 flex flex-wrap items-center gap-2">
               <Button size="sm" loading={busy} onClick={() => void save()}>Save model configuration</Button>

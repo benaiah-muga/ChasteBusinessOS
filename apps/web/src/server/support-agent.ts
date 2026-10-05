@@ -249,7 +249,7 @@ export async function draftSupportReply(input: {
     // Full trajectory on record like every other agent turn; replay shows
     // exactly which scoped tools informed each draft.
     onEvent: (e) => {
-      void appendSessionEvent(db, session!.id, e.role, e.content as object);
+      void appendSessionEvent(db, resolved.orgId, session!.id, e.role, e.content as object);
     },
   });
 

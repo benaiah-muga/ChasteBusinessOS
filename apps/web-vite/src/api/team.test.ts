@@ -69,4 +69,18 @@ describe("Vite team API", () => {
     await expect(submitTeamAction({ action: "setPermissions", roleId: "role-1", permissions: ["accounting.read"] }, "intent-5"))
       .rejects.toMatchObject({ status: 422, message: "Role is protected" });
   });
+
+  it.each([" \t ", "i".repeat(201), "bad\nkey", "bad\rkey", "bad\0key"])(
+    "rejects invalid intent IDs before making a request",
+    async (intentId) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(submitTeamAction(
+        { action: "assignRole", userId: "user-1", roleId: "role-1" },
+        intentId,
+      )).rejects.toMatchObject({ status: 0 });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });

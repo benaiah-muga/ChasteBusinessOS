@@ -15,7 +15,7 @@ const preview = {
 
 const report = {
   region: "africa-east",
-  html: "<!doctype html><html><body><h1>Q3 Sales</h1></body></html>",
+  html: "<!doctype html><html><body><h1>Q3 Sales!</h1></body></html>",
   sections: [{
     heading: "Revenue by month",
     svg: '<svg role="img" aria-label="Revenue chart"><text>1250</text></svg>',
@@ -96,6 +96,29 @@ describe("Vite analytics page", () => {
     expect(attempts).toBe(2);
   });
 
+  it("cancels a retried dataset discovery request on unmount", async () => {
+    let attempts = 0;
+    let retrySignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/modules") {
+        attempts += 1;
+        if (attempts === 1) return Promise.resolve(Response.json({ error: "unavailable" }, { status: 503 }));
+        retrySignal = init?.signal as AbortSignal;
+        return new Promise<Response>(() => undefined);
+      }
+      return Promise.resolve(responseFor(input, init));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<AnalyticsPage />);
+    await screen.findByRole("heading", { name: "Could not load analytics" });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(retrySignal).toBeDefined());
+
+    expect(retrySignal?.aborted).toBe(false);
+    view.unmount();
+    expect(retrySignal?.aborted).toBe(true);
+  });
+
   it("previews with default chart fields, supports all chart modes and removes sections", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => responseFor(input, init));
     vi.stubGlobal("fetch", fetchMock);
@@ -119,6 +142,27 @@ describe("Vite analytics page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove Revenue by month section" }));
     expect(screen.queryByRole("button", { name: "Generate report" })).toBeNull();
     expect(await screen.findByRole("heading", { name: "Build your report" })).not.toBeNull();
+  });
+
+  it("coalesces repeated dataset selection and cancels a pending preview on unmount", async () => {
+    let previewSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/analytics?dataset=analytics.revenueByMonth") {
+        previewSignal = init?.signal as AbortSignal;
+        return new Promise<Response>(() => undefined);
+      }
+      return Promise.resolve(responseFor(input, init));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<AnalyticsPage />);
+    const selector = await screen.findByRole("combobox", { name: "Add a dataset" });
+    fireEvent.change(selector, { target: { value: "analytics.revenueByMonth" } });
+    fireEvent.change(selector, { target: { value: "analytics.revenueByMonth" } });
+
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("?dataset=")).length).toBe(1);
+    expect(previewSignal?.aborted).toBe(false);
+    view.unmount();
+    expect(previewSignal?.aborted).toBe(true);
   });
 
   it("posts the report to the existing API, shows busy state and exact returned output, and downloads sanitized HTML", async () => {
@@ -159,8 +203,14 @@ describe("Vite analytics page", () => {
     expect(await screen.findByText("africa-east")).not.toBeNull();
     expect(screen.getByRole("img", { name: "Revenue chart" })).not.toBeNull();
     expect(screen.getByRole("cell", { name: "1250" })).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("Report title"), { target: { value: "A different draft" } });
+    expect(screen.getByRole("heading", { name: "Q3 Sales!" })).not.toBeNull();
 
-    const createObjectURL = vi.fn(() => "blob:analytics-report");
+    let downloadedBlob: Blob | undefined;
+    const createObjectURL = vi.fn((blob: Blob) => {
+      downloadedBlob = blob;
+      return "blob:analytics-report";
+    });
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
     let downloadedFilename = "";
@@ -170,6 +220,7 @@ describe("Vite analytics page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download HTML" }));
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     expect(downloadedFilename).toBe("q3-sales-.html");
+    expect(await downloadedBlob?.text()).toContain("<h1>Q3 Sales!</h1>");
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:analytics-report");
   });
 
@@ -186,5 +237,26 @@ describe("Vite analytics page", () => {
     expect(await screen.findByRole("alert")).not.toBeNull();
     expect(screen.getByText("You do not have permission to access this analytics data.")).not.toBeNull();
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate report" }).hasAttribute("disabled")).toBe(false));
+  });
+
+  it("cancels a pending report request when leaving the page", async () => {
+    let reportSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/analytics" && init?.method === "POST") {
+        reportSignal = init?.signal as AbortSignal;
+        return new Promise<Response>(() => undefined);
+      }
+      return Promise.resolve(responseFor(input, init));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<AnalyticsPage />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Add a dataset" }), { target: { value: "analytics.revenueByMonth" } });
+    await screen.findByText("Preview loaded: 1 row · month, valueMinor, invoiceCount");
+    fireEvent.click(screen.getByRole("button", { name: "Generate report" }));
+
+    await waitFor(() => expect(reportSignal).toBeDefined());
+    expect(reportSignal?.aborted).toBe(false);
+    view.unmount();
+    expect(reportSignal?.aborted).toBe(true);
   });
 });

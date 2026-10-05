@@ -10,7 +10,7 @@ export const DashboardResponseSchema = z.object({
     module: z.string().min(1),
     subject: z.string(),
     detail: z.string(),
-  })).optional(),
+  })),
   money: z.object({
     revenueMinor: MinorUnitsSchema,
     expenseMinor: MinorUnitsSchema,

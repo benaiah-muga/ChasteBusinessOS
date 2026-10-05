@@ -27,6 +27,17 @@ describe("dashboard API client", () => {
     }));
   });
 
+  it("requires the signals array returned by both dashboard backends", async () => {
+    const { signals: _signals, ...responseWithoutSignals } = dashboardFixture;
+    void _signals;
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(responseWithoutSignals)));
+
+    await expect(fetchDashboard()).rejects.toMatchObject({
+      status: 200,
+      message: "The dashboard service returned data in an unexpected format.",
+    });
+  });
+
   it("validates setup records and refuses paths that could leave the legacy origin", async () => {
     const safeResponse = vi.fn(async () => Response.json({ items: setupFixture, remaining: 1 }));
     vi.stubGlobal("fetch", safeResponse);

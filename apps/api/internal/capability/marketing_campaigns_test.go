@@ -11,9 +11,13 @@ import (
 )
 
 func TestMarketingCampaignsParsersMirrorZodContracts(t *testing.T) {
-	segment, err := ParseMarketingCreateSegmentInput(json.RawMessage(`{"name":"Loyal","minSpendMinor":"500000"}`))
+	segment, err := ParseMarketingCreateSegmentInput(json.RawMessage(`{"name":"Loyal","minSpendMinor":500000}`))
 	if err != nil || segment.Name != "Loyal" || segment.MinSpendMinor != 500000 {
 		t.Fatalf("segment parse=%+v err=%v", segment, err)
+	}
+	// Zod z.number() rejects a quoted amount, so the Go parser must refuse it too.
+	if _, err := ParseMarketingCreateSegmentInput(json.RawMessage(`{"name":"Loyal","minSpendMinor":"500000"}`)); err == nil {
+		t.Fatal("quoted minSpendMinor accepted, but z.number() rejects it")
 	}
 	defaultSegment, err := ParseMarketingCreateSegmentInput(json.RawMessage(`{"name":"Everyone"}`))
 	if err != nil || defaultSegment.MinSpendMinor != 0 {

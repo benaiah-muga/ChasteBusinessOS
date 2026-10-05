@@ -1,0 +1,154 @@
+/* Print invoice sheet. Deliberately chrome-less: the printed page must carry
+   only the invoice, so no navigation and no shell chrome is styled here. */
+
+.print-message {
+  margin: 0;
+  padding: 2rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: #44403c;
+}
+
+.print-sheet {
+  margin: 0 auto;
+  max-width: 48rem;
+  padding: 2.5rem;
+  color: #1c1917;
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+}
+
+.print-hint {
+  margin: 0 0 1rem;
+  color: #78716c;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.8rem;
+}
+
+.print-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 1rem;
+}
+
+.print-brand {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.print-logo {
+  max-width: 180px;
+  max-height: 64px;
+  object-fit: contain;
+}
+
+.print-org {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.print-org-sub {
+  margin: 0.2rem 0 0;
+  color: #57534e;
+  font-size: 0.85rem;
+}
+
+.print-meta {
+  color: #44403c;
+  font-size: 0.85rem;
+  border-collapse: collapse;
+}
+
+.print-meta td {
+  padding: 0.1rem 0 0.1rem 0.6rem;
+}
+
+.print-meta td:first-child {
+  padding-left: 0;
+  padding-right: 12px;
+  color: #78716c;
+}
+
+.print-billed-to {
+  margin-top: 1.5rem;
+}
+
+.print-label {
+  margin: 0;
+  color: #78716c;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.print-customer {
+  margin: 0.2rem 0 0;
+  font-weight: 600;
+}
+
+.print-customer-email {
+  margin: 0.1rem 0 0;
+  color: #57534e;
+  font-size: 0.85rem;
+}
+
+.print-lines {
+  width: 100%;
+  margin-top: 1.5rem;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.print-lines th,
+.print-lines td {
+  padding: 0.5rem 0.6rem;
+}
+
+.print-cell-left {
+  text-align: left;
+}
+
+.print-cell-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.print-lines tbody tr {
+  border-bottom: 1px solid #e7e5e4;
+}
+
+.print-total-label {
+  padding: 0.4rem 0.6rem;
+  color: #57534e;
+  text-align: right;
+}
+
+.print-total-strong {
+  padding: 0.5rem 0.6rem;
+  font-weight: 700;
+}
+
+.print-lines tfoot tr:last-child .print-total-strong {
+  font-size: 1.05rem;
+}
+
+.print-note {
+  margin-top: 1rem;
+  color: #44403c;
+  font-size: 0.85rem;
+}
+
+.print-footer {
+  margin-top: 2rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid #e7e5e4;
+  color: #78716c;
+  font-size: 0.75rem;
+}
+
+@media print {
+  .print-sheet {
+    padding: 0;
+  }
+}

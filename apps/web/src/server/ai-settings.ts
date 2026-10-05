@@ -25,6 +25,7 @@ export const storedAiProviderConfigSchema = z.object({
   encryptedApiKey: z.string().min(1).max(2000).nullable(),
   keyHint: z.string().max(12).nullable(),
   updatedAt: z.string().datetime(),
+  codingAgentUserId: z.string().uuid().nullable().optional(),
 });
 
 export type StoredAiProviderConfig = z.infer<typeof storedAiProviderConfigSchema>;
@@ -38,6 +39,21 @@ export type ConfigureAiProviderInput = z.infer<typeof configureAiProviderInputSc
 
 const AI_CONFIG_CAPABILITY = "settings.configureAiProvider";
 const AI_CONFIG_RESTORE_CAPABILITY = "settings.restoreAiProvider";
+
+async function verifySupportCodingAgentDelegation(
+  db: Database["db"],
+  orgId: string,
+  userId: string | null,
+  config: StoredAiProviderConfig | null,
+  previous: StoredAiProviderConfig | null,
+): Promise<void> {
+  const selectedUserId = config?.codingAgentUserId;
+  if (!selectedUserId) return;
+  if (selectedUserId === previous?.codingAgentUserId) return;
+  if (!userId || selectedUserId !== userId) throw new Error("Only your own coding-agent connection can be delegated to public support.");
+  const connection = await getDefaultCodingAgentConnection(db, orgId, userId);
+  if (connection?.provider !== "opencode") throw new Error("A connected default OpenCode account is required for public support delegation.");
+}
 
 const defaultModels = {
   primary: process.env.MODEL_PRIMARY ?? "moonshotai/kimi-k2.6",
@@ -98,9 +114,19 @@ export function envAiConfig() {
   };
 }
 
-export async function publicAiConfig(db: Database["db"], orgId: string) {
+export async function publicAiConfig(db: Database["db"], orgId: string, userId?: string) {
   const stored = await storedAiConfigForOrg(db, orgId);
-  if (!stored) return { ...envAiConfig(), keyHint: envKey(envProvider()) ? `••••${envKey(envProvider())!.slice(-4)}` : null };
+  const connection = userId ? await getDefaultCodingAgentConnection(db, orgId, userId) : null;
+  const codingAgentAvailable = connection?.provider === "opencode";
+  const codingAgentSelected = Boolean(userId && stored?.codingAgentUserId === userId);
+  const codingAgentDelegationConfigured = Boolean(stored?.codingAgentUserId);
+  if (!stored) return {
+    ...envAiConfig(),
+    keyHint: envKey(envProvider()) ? `••••${envKey(envProvider())!.slice(-4)}` : null,
+    codingAgentAvailable,
+    codingAgentSelected,
+    codingAgentDelegationConfigured,
+  };
   let configured = false;
   try {
     configured = Boolean(stored.encryptedApiKey && decryptProviderKey(stored.encryptedApiKey));
@@ -114,6 +140,9 @@ export async function publicAiConfig(db: Database["db"], orgId: string) {
     configured,
     keyHint: stored.keyHint,
     source: "workspace" as const,
+    codingAgentAvailable,
+    codingAgentSelected,
+    codingAgentDelegationConfigured,
   };
 }
 
@@ -169,6 +198,8 @@ export function registerAiSettingsCapabilities(registry: CapabilityRegistry, dep
         buildInput: (_input, output) => ({ config: output.previous }),
       },
       execute: async (ctx, input) => {
+        const previousConfig = await storedAiConfigForOrg(deps.db, ctx.actor.orgId);
+        await verifySupportCodingAgentDelegation(deps.db, ctx.actor.orgId, ctx.actor.id, input.config, previousConfig);
         const previous = await saveConfig(deps.db, ctx.actor.orgId, input.config);
         return { previous, current: input.config };
       },
@@ -190,6 +221,7 @@ export function registerAiSettingsCapabilities(registry: CapabilityRegistry, dep
       },
       execute: async (ctx, input) => {
         const previous = await storedAiConfigForOrg(deps.db, ctx.actor.orgId);
+        await verifySupportCodingAgentDelegation(deps.db, ctx.actor.orgId, ctx.actor.id, input.config, previous);
         if (input.config) await saveConfig(deps.db, ctx.actor.orgId, input.config);
         else await saveConfig(deps.db, ctx.actor.orgId, null);
         return { previous, current: input.config };

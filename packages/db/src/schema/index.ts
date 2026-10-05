@@ -3,6 +3,7 @@ import { type AnyPgColumn,
   bigserial,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -239,6 +240,8 @@ export const approvals = pgTable(
     capabilityId: text("capability_id").notNull(),
     riskClass: text("risk_class").notNull(),
     payload: jsonb("payload").notNull(),
+    intentId: text("intent_id"),
+    inputHash: text("input_hash"),
     rationale: text("rationale"),
     status: text("status").notNull().default("pending"), // pending | approved | rejected | expired | executed
     decidedByUserId: uuid("decided_by_user_id").references(() => users.id),
@@ -247,7 +250,11 @@ export const approvals = pgTable(
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [index("approval_org_status_idx").on(t.orgId, t.status)],
+  (t) => [
+    index("approval_org_status_idx").on(t.orgId, t.status),
+    uniqueIndex("approval_org_intent_idx").on(t.orgId, t.intentId).where(sql`${t.intentId} IS NOT NULL`),
+    check("approval_intent_digest_pair_check", sql`(${t.intentId} IS NULL) = (${t.inputHash} IS NULL)`),
+  ],
 );
 
 /**
@@ -2614,6 +2621,24 @@ export const notifications = pgTable(
 
 // ── better-auth managed tables ──────────────────────────────────────────
 
+export const authEmailOutbox = pgTable(
+  "auth_email_outbox",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(),
+    recipient: text("recipient").notNull(),
+    link: text("link").notNull(),
+    tokenIdentifier: text("token_identifier"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("auth_email_outbox_ready_idx").on(t.availableAt, t.leaseExpiresAt, t.expiresAt)],
+);
+
 export const authUser = pgTable("auth_user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -2656,7 +2681,11 @@ export const authAccount = pgTable("auth_account", {
   issuer: text("issuer"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("auth_account_oidc_subject_unique")
+    .on(table.issuer, table.accountId)
+    .where(sql`${table.providerId} = 'oidc' AND ${table.issuer} IS NOT NULL`),
+]);
 
 export const authVerification = pgTable("auth_verification", {
   id: text("id").primaryKey(),
@@ -3054,10 +3083,67 @@ export const supportKbArticles = pgTable(
     title: text("title").notNull(),
     body: text("body").notNull(),
     category: text("category"),
+    isPublic: boolean("is_public").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("support_kb_org_idx").on(t.orgId)],
+  (t) => [
+    index("support_kb_org_idx").on(t.orgId),
+    uniqueIndex("support_kb_org_article_unique_idx").on(t.orgId, t.id),
+  ],
+);
+
+export const supportKbArticleEmbeddings = pgTable(
+  "support_kb_article_embeddings",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id").notNull(),
+    embeddingModel: text("embedding_model").notNull(),
+    contentMd5: text("content_md5").notNull(),
+    embedding: vector("embedding", { dimensions: 1024 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.articleId] }),
+    foreignKey({
+      columns: [t.orgId, t.articleId],
+      foreignColumns: [supportKbArticles.orgId, supportKbArticles.id],
+      name: "support_kb_article_embeddings_article_fk",
+    }).onDelete("cascade"),
+    index("support_kb_article_embeddings_cosine_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+    check("support_kb_article_embeddings_model_check", sql`length(${t.embeddingModel}) BETWEEN 1 AND 200`),
+    check("support_kb_article_embeddings_hash_check", sql`${t.contentMd5} ~ '^[0-9a-f]{32}$'`),
+  ],
+);
+
+export const supportKbArticleEmbeddingJobs = pgTable(
+  "support_kb_article_embedding_jobs",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id").notNull(),
+    contentMd5: text("content_md5").notNull(),
+    requestedModel: text("requested_model").notNull().default(""),
+    queuedAt: timestamp("queued_at", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.articleId] }),
+    foreignKey({
+      columns: [t.orgId, t.articleId],
+      foreignColumns: [supportKbArticles.orgId, supportKbArticles.id],
+      name: "support_kb_article_embedding_jobs_article_fk",
+    }).onDelete("cascade"),
+    index("support_kb_article_embedding_jobs_queue_idx").on(t.orgId, t.availableAt, t.queuedAt, t.articleId),
+    check("support_kb_article_embedding_jobs_attempts_check", sql`${t.attempts} >= 0`),
+    check("support_kb_article_embedding_jobs_model_check", sql`length(${t.requestedModel}) <= 200`),
+    check("support_kb_article_embedding_jobs_hash_check", sql`${t.contentMd5} ~ '^[0-9a-f]{32}$'`),
+  ],
 );
 
 // ── Marketing-lite (M13): saved filters, campaigns, honest send log ─────

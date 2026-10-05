@@ -626,12 +626,12 @@ const createKbArticle = (deps: ModuleDeps) =>
     module: "support",
     risk: "write",
     permission: "support.write",
-    input: z.object({ title: z.string().min(1).max(200), body: z.string().min(1).max(20000), category: z.string().max(40).optional() }),
+    input: z.object({ title: z.string().min(1).max(200), body: z.string().min(1).max(20000), category: z.string().max(40).optional(), isPublic: z.boolean().optional().default(false) }),
     output: z.object({ articleId: z.string() }),
     execute: async (ctx, input) => {
       const [row] = await deps.db
         .insert(supportKbArticles)
-        .values({ orgId: ctx.actor.orgId, title: input.title, body: input.body, category: input.category ?? null })
+        .values({ orgId: ctx.actor.orgId, title: input.title, body: input.body, category: input.category ?? null, isPublic: input.isPublic })
         .returning({ id: supportKbArticles.id });
       return { articleId: row!.id };
     },

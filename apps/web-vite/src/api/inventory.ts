@@ -80,6 +80,23 @@ const InventoryReportSchema = z.object({
   reservations: z.array(InventoryReservationSchema).default([]),
 });
 
+const GoStockReportSchema = z.object({
+  items: z.array(z.object({
+    sku: z.string(),
+    name: z.string(),
+    kind: z.string(),
+    unitLabel: z.string(),
+    onHandThousandths: z.number().int().safe(),
+    reservedThousandths: z.number().int().safe(),
+    availableThousandths: z.number().int().safe(),
+    valueMinor: z.number().int().safe(),
+    reorderPointThousandths: z.number().int().safe(),
+    reorderNeeded: z.boolean(),
+  })),
+  totalValueMinor: z.number().int().safe(),
+}).strict();
+const CapabilityResponseSchema = z.object({ ok: z.literal(true), data: GoStockReportSchema }).strict();
+
 export type InventoryItem = z.infer<typeof InventoryItemSchema>;
 export type InventoryLocation = z.infer<typeof InventoryReportSchema>["locations"][number];
 export type InventoryLot = z.infer<typeof InventoryReportSchema>["lots"][number];
@@ -118,7 +135,44 @@ export async function fetchInventoryReport(signal?: AbortSignal): Promise<{ item
   }
   const parsed = InventoryReportSchema.safeParse(response.body);
   if (!parsed.success) throw new InventoryApiError(response.status, "The inventory service returned data in an unexpected format.");
-  return parsed.data;
+  if (typeof __GO_INVENTORY_ITEM_SLICE__ === "undefined" || !__GO_INVENTORY_ITEM_SLICE__) return parsed.data;
+  const stock = await fetchGoStockReport(signal);
+  return {
+    ...parsed.data,
+    totalValueMinor: stock.totalValueMinor,
+    items: stock.items.map((item) => ({
+      ...item,
+      totalValueMinor: item.valueMinor,
+    })),
+  };
+}
+
+export async function fetchGoStockReport(signal?: AbortSignal): Promise<z.infer<typeof GoStockReportSchema>> {
+  let response: Response;
+  try {
+    response = await fetch("/api/capabilities/execute", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ capabilityId: "inventory.stockReport", input: {}, intentId: crypto.randomUUID() }),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    throw new InventoryApiError(0, timedOut
+      ? "The Go inventory service took too long to respond. Try again."
+      : "Could not reach the Go inventory service. Check your connection and try again.");
+  }
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = z.object({ error: z.string() }).safeParse(body);
+    throw new InventoryApiError(response.status, error.success ? error.data.error : "Could not load Go stock levels.");
+  }
+  const parsed = CapabilityResponseSchema.safeParse(body);
+  if (!parsed.success) throw new InventoryApiError(response.status, "The Go inventory service returned data in an unexpected format.");
+  return parsed.data.data;
 }
 
 async function fetchJson(path: string, signal?: AbortSignal): Promise<{ ok: boolean; status: number; body: unknown }> {

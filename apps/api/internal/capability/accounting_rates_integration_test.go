@@ -87,8 +87,8 @@ func TestGoRecordFxRateMatchesLegacy(t *testing.T) {
 	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2 AND actor_type='human' AND actor_id=$3::uuid`, fx.orgID, recordFxRateCapabilityID, fx.userID); got != 1 {
 		t.Fatalf("human approval execution audit events=%d, want exactly one", got)
 	}
-	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid`, fx.orgID); got != 0 {
-		t.Fatalf("approval execution wrote %d action receipts, want none", got)
+	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, fx.orgID, fx.orgID+":agent-rate-policy"); got != 1 {
+		t.Fatalf("approval execution wrote %d action receipts for its intent, want one replay receipt", got)
 	}
 	if _, err := fx.owner.Exec(fx.ctx, `DELETE FROM policies WHERE org_id=$1::uuid AND capability_pattern=$2`, fx.orgID, recordFxRateCapabilityID); err != nil {
 		t.Fatal(err)
@@ -172,8 +172,11 @@ func TestGoRecordFxRateMatchesLegacy(t *testing.T) {
 	if got := fx.count(`SELECT count(*) FROM fx_rates WHERE org_id=$1::uuid`, fx.orgID); got != 3 {
 		t.Fatalf("invalid rate left %d FX rate rows, want only the three valid rows", got)
 	}
-	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid`, fx.orgID); got != 2 {
-		t.Fatalf("invalid rate left %d receipts, want only the two successful direct intents", got)
+	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid`, fx.orgID); got != 3 {
+		t.Fatalf("invalid rate left %d receipts, want two successful direct intents plus the approved action receipt", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id=$1::uuid AND intent_key=$2`, fx.orgID, fx.orgID+":invalid-rate-no-effects"); got != 0 {
+		t.Fatalf("invalid rate wrote %d intent receipts, want none", got)
 	}
 	if got := fx.count(`SELECT count(*) FROM ledger_events WHERE org_id=$1::uuid AND kind='capability.executed' AND capability_id=$2`, fx.orgID, recordFxRateCapabilityID); got != 3 {
 		t.Fatalf("invalid rate emitted %d execution audit events, want only the three successful executions", got)

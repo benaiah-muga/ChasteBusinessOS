@@ -36,6 +36,23 @@ export type AdjustInventoryStock = z.infer<typeof AdjustStockSchema>;
 export type InventoryItemAction = CreateInventoryItem | AdjustInventoryStock;
 export type InventoryItemActionResult = { kind: "completed" } | { kind: "pending"; reason: string };
 
+export function inventoryItemActionRequest(
+  action: InventoryItemAction,
+  intentId: string,
+  useGo: boolean,
+): { url: string; body: Record<string, unknown> } {
+  if (!useGo) return { url: "/api/inventory", body: { ...action, intentId } };
+  const { action: operation, ...input } = action;
+  return {
+    url: "/api/capabilities/execute",
+    body: {
+      capabilityId: operation === "createItem" ? "inventory.createItem" : "inventory.adjustStock",
+      input,
+      intentId,
+    },
+  };
+}
+
 export async function submitInventoryItemAction(
   action: InventoryItemAction,
   signal?: AbortSignal,
@@ -45,14 +62,18 @@ export async function submitInventoryItemAction(
     : AdjustStockSchema.safeParse(action);
   if (!parsedAction.success) throw new InventoryItemActionError(0, "Check the item details and try again.");
 
+  const intentId = crypto.randomUUID();
+  const useGo = typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
+  const request = inventoryItemActionRequest(parsedAction.data, intentId, useGo);
+
   let response: Response;
   try {
-    response = await fetch("/api/inventory", {
+    response = await fetch(request.url, {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({ ...parsedAction.data, intentId: crypto.randomUUID() }),
+      body: JSON.stringify(request.body),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
     });
   } catch (error) {

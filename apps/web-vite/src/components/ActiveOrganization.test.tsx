@@ -28,7 +28,8 @@ describe("active organization selector", () => {
       ],
     }));
 
-    render(<ActiveOrganization />);
+    const onActiveOrgIdChange = vi.fn();
+    render(<ActiveOrganization onActiveOrgIdChange={onActiveOrgIdChange} />);
 
     const selector = await screen.findByRole("combobox", { name: "Active organization" });
     expect((selector as HTMLSelectElement).value).toBe(firstOrgId);
@@ -36,6 +37,7 @@ describe("active organization selector", () => {
       "First workspace",
       "Second workspace",
     ]);
+    await waitFor(() => expect(onActiveOrgIdChange).toHaveBeenCalledWith(firstOrgId));
   });
 
   it("keeps existing sign-in as the session authority", async () => {

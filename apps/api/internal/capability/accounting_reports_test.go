@@ -252,6 +252,18 @@ func TestAccountingReportsDomainMathMirrorsErpCore(t *testing.T) {
 	if _, err = reportDocumentOutstandingMinor(-1, 0, 0); err == nil {
 		t.Fatal("negative total must be refused")
 	}
+	if outstanding, err = reportDocumentOutstandingMinor(1, maxSafeInteger, maxSafeInteger); err != nil || outstanding != 0 {
+		t.Fatalf("over-allocated safe-integer balance = %d, %v, want floored zero", outstanding, err)
+	}
+	if _, err = reportDocumentOutstandingMinor(maxSafeInteger+1, 0, 0); err == nil {
+		t.Fatal("minor amounts beyond JavaScript's safe-integer range must be refused")
+	}
+	if _, err = reportDocumentOutstandingMinor(100, maxSafeInteger+1, 0); err == nil {
+		t.Fatal("unsafe paid amounts must be refused before subtraction")
+	}
+	if _, err = reportDocumentOutstandingMinor(0, int64(1<<63-1), 2); err == nil {
+		t.Fatal("database-sized over-allocation must not wrap into a positive outstanding balance")
+	}
 
 	if got := reportFloorDays(0); got != 0 {
 		t.Fatalf("reportFloorDays(0) = %d", got)

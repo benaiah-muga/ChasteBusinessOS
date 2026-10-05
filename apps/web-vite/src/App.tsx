@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ApprovalsPage } from "./components/ApprovalsPage";
 import { LedgerPage } from "./components/LedgerPage";
 import { SessionsPage } from "./components/SessionsPage";
+import { NotificationsBell } from "./components/NotificationsBell";
 import { ProjectsPage } from "./components/ProjectsPage";
 import { AnalyticsPage } from "./components/AnalyticsPage";
 import { TeamPage } from "./components/TeamPage";
@@ -13,6 +14,10 @@ import { PageErrorBoundary } from "./components/PageErrorBoundary";
 import { DashboardPage } from "./components/DashboardPage";
 import { ActiveOrganization } from "./components/ActiveOrganization";
 import { LoginPage } from "./components/LoginPage";
+import { PasswordResetPage } from "./components/PasswordResetPage";
+import { PortalInvoicePage } from "./components/PortalInvoicePage";
+import { WidgetPage } from "./components/WidgetPage";
+import { InvoicePrintPage } from "./components/InvoicePrintPage";
 import { authClient } from "./api/auth";
 import { navigate } from "./navigation";
 import { legacyUrl, redirectToLegacy } from "./legacy";
@@ -28,6 +33,18 @@ const PurchasingReceiptsPage = lazy(() => import("./components/PurchasingReceipt
 const PurchasingAgingPage = lazy(() => import("./components/PurchasingAgingPage").then((module) => ({ default: module.PurchasingAgingPage })));
 const DocumentsPage = lazy(() => import("./components/DocumentsPage").then((module) => ({ default: module.DocumentsPage })));
 const HrPage = lazy(() => import("./components/HrPage").then((module) => ({ default: module.HrPage })));
+const AccountingPage = lazy(() => import("./components/AccountingPage").then((module) => ({ default: module.AccountingPage })));
+const MessagesPage = lazy(() => import("./components/MessagesPage").then((module) => ({ default: module.MessagesPage })));
+const SettingsPage = lazy(() => import("./components/SettingsPage").then((module) => ({ default: module.SettingsPage })));
+const PurchasingPage = lazy(() => import("./components/PurchasingPage").then((module) => ({ default: module.PurchasingPage })));
+const PurchasingReceivingPage = lazy(() => import("./components/PurchasingReceivingPage").then((module) => ({ default: module.PurchasingReceivingPage })));
+const SupportPage = lazy(() => import("./components/SupportPage").then((module) => ({ default: module.SupportPage })));
+const ManufacturingPage = lazy(() => import("./components/ManufacturingPage").then((module) => ({ default: module.ManufacturingPage })));
+const MarketingPage = lazy(() => import("./components/MarketingPage").then((module) => ({ default: module.MarketingPage })));
+const ProposalsPage = lazy(() => import("./components/ProposalsPage").then((module) => ({ default: module.ProposalsPage })));
+const OnboardingPage = lazy(() => import("./components/OnboardingPage").then((module) => ({ default: module.OnboardingPage })));
+const DocumentsEditorPage = lazy(() => import("./components/DocumentsEditorPage").then((module) => ({ default: module.DocumentsEditorPage })));
+const PosPage = lazy(() => import("./components/PosPage").then((module) => ({ default: module.PosPage })));
 
 const SessionUserSchema = z.object({
   id: z.string().min(1),
@@ -47,6 +64,7 @@ const navigationItems = [
   { label: "Close readiness", href: "/accounting/close", icon: "◷" },
   { label: "Sales", href: "/sales", icon: "↗" },
   { label: "POS summary", href: "/pos/shift-summary", icon: "$" },
+  { label: "Register", href: "/pos", icon: "$" },
   { label: "Purchasing", href: "/purchasing/payment-runs", icon: "⇣" },
   { label: "Payables aging", href: "/purchasing/ap-aging", icon: "◷" },
   { label: "Receipts", href: "/purchasing/receipts", icon: "⇢" },
@@ -61,8 +79,24 @@ const navigationItems = [
   { label: "Team", href: "/team", icon: "♙" },
   { label: "Marketplace", href: "/marketplace", icon: "◇" },
   { label: "CRM", href: "/crm", icon: "◎" },
+  { label: "Messages", href: "/messages", icon: "✉" },
+  { label: "Support", href: "/support", icon: "?" },
+  { label: "Manufacturing", href: "/manufacturing", icon: "⚙" },
+  { label: "Marketing", href: "/marketing", icon: "◈" },
+  { label: "Proposals", href: "/proposals", icon: "✦" },
+  { label: "Receiving", href: "/purchasing/receiving", icon: "⇥" },
+  { label: "Settings", href: "/settings", icon: "⚙" },
 ];
-const viteAppPaths = new Set(["/", ...navigationItems.map((item) => item.href)]);
+// Paths the Vite app serves that deliberately have no rail item of their own,
+// because an existing rail item already points at a sibling view in the same
+// workspace. They must stay in the routing set or they fall back to legacy.
+const additionalVitePaths = ["/accounting", "/purchasing"];
+
+const viteAppPaths = new Set(["/", ...navigationItems.map((item) => item.href), ...additionalVitePaths]);
+
+export function isViteAppPath(pathname: string): boolean {
+  return viteAppPaths.has(pathname) || /^\/documents\/editor\/[^/]+$/.test(pathname);
+}
 
 function AuthenticatedApp({ pathname }: { pathname: string }) {
   const approvalsPage = pathname === "/approvals";
@@ -84,11 +118,29 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
   const purchasingPaymentRunsPage = pathname === "/purchasing/payment-runs";
   const purchasingAgingPage = pathname === "/purchasing/ap-aging";
   const purchasingReceiptsPage = pathname === "/purchasing/receipts";
+  const accountingPage = pathname === "/accounting";
+  const messagesPage = pathname === "/messages";
+  const settingsPage = pathname === "/settings";
+  const purchasingPage = pathname === "/purchasing";
+  const purchasingReceivingPage = pathname === "/purchasing/receiving";
+  const supportPage = pathname === "/support";
+  const manufacturingPage = pathname === "/manufacturing";
+  const marketingPage = pathname === "/marketing";
+  const proposalsPage = pathname === "/proposals";
+  // The editor is a dynamic segment, so it matches by prefix rather than equality.
+  const documentsEditorPage = pathname.startsWith("/documents/editor/");
+  const posPage = pathname === "/pos";
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   const [organizationRevision, setOrganizationRevision] = useState(0);
+  const [activeOrganization, setActiveOrganization] = useState<{ userId: string; orgId: string | null } | null>(null);
   const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const currentUserId = auth.status === "signed-in" ? auth.user.id : null;
+  const activeOrgId = currentUserId && activeOrganization?.userId === currentUserId ? activeOrganization.orgId : null;
+  const rememberActiveOrgId = useCallback((orgId: string | null) => {
+    if (currentUserId) setActiveOrganization({ userId: currentUserId, orgId });
+  }, [currentUserId]);
 
   const refreshSession = useCallback(async () => {
     setAuth({ status: "loading" });
@@ -186,11 +238,13 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
           <div className="topbar-org">
             <ActiveOrganization
               key={organizationRevision}
+              onActiveOrgIdChange={rememberActiveOrgId}
               onChanged={() => setOrganizationRevision((revision) => revision + 1)}
               onCurrencyChanged={setBaseCurrency}
               onNoOrganizations={sendNewWorkspaceToSetup}
             />
           </div>
+          <NotificationsBell align="right" />
         </header>
         {signOutError && <p className="shell-error" role="alert">{signOutError}</p>}
         <PageErrorBoundary key={pathname}>
@@ -233,7 +287,31 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                           ? <PurchasingAgingPage key={organizationRevision} baseCurrency={baseCurrency} />
                                           : purchasingReceiptsPage
                                             ? <PurchasingReceiptsPage key={organizationRevision} />
-                                            : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
+                                            : purchasingPage
+                                              ? <PurchasingPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                              : purchasingReceivingPage
+                                                ? <PurchasingReceivingPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                                : accountingPage
+                                                  ? <AccountingPage key={organizationRevision} />
+                                                  : messagesPage
+                                                    ? <MessagesPage key={organizationRevision} />
+                                                    : settingsPage
+                                                      ? <SettingsPage key={organizationRevision} />
+                                                      : supportPage
+                                                        ? <SupportPage key={organizationRevision} />
+                                                        : manufacturingPage
+                                                          ? <ManufacturingPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                                          : marketingPage
+                                                            ? <MarketingPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                                            : proposalsPage
+                                                              ? <ProposalsPage key={organizationRevision} />
+                                                              : documentsEditorPage
+                                                                ? <DocumentsEditorPage key={organizationRevision} documentId={pathname.split("/").pop()} />
+                                                                : posPage
+                                                                ? activeOrgId
+                                                                  ? <PosPage key={`${organizationRevision}:${auth.user.id}:${activeOrgId}`} baseCurrency={baseCurrency} actorId={auth.user.id} organizationId={activeOrgId} />
+                                                                  : <main className="auth-wait" role="status">Checking the active organization before loading POS data…</main>
+                                                                  : <DashboardPage key={organizationRevision} baseCurrency={baseCurrency} />}
           </Suspense>
         </PageErrorBoundary>
       </div>
@@ -268,6 +346,16 @@ export function App() {
   }, []);
 
   if (pathname === "/login") return <LoginPage />;
-  if (!viteAppPaths.has(pathname) && pathname !== "/login") return <LegacyRoute pathname={pathname} />;
+  if (pathname === "/reset-password") return <PasswordResetPage />;
+  // Onboarding resolves the session itself: it redirects to /login when signed
+  // out and to / when a workspace already exists, so it must render outside the
+  // authenticated shell.
+  if (pathname === "/onboarding") return <OnboardingPage />;
+  if (pathname.startsWith("/portal/")) return <PortalInvoicePage pathname={pathname} />;
+  if (pathname.startsWith("/widget/")) return <WidgetPage pathname={pathname} />;
+  // The print sheet renders outside the shell: it is chrome-less on purpose so
+  // the printed page carries only the invoice.
+  if (pathname.startsWith("/print/invoice/")) return <InvoicePrintPage pathname={pathname} />;
+  if (!isViteAppPath(pathname) && pathname !== "/login") return <LegacyRoute pathname={pathname} />;
   return <AuthenticatedApp pathname={pathname} />;
 }

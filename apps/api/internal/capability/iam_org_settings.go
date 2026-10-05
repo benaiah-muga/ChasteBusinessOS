@@ -246,7 +246,7 @@ func ParseIAMSetOrgBrandingInput(raw json.RawMessage) (IAMSetOrgBrandingInput, e
 		if err := json.Unmarshal(rawFooter, &footer); err != nil {
 			return IAMSetOrgBrandingInput{}, errors.New("invoiceFooter must be a string")
 		}
-		if len(footer) > 300 {
+		if utf16Length(footer) > 300 {
 			return IAMSetOrgBrandingInput{}, errors.New("invoiceFooter must be at most 300 characters")
 		}
 		input.InvoiceFooter = &footer

@@ -5,6 +5,7 @@
  * Run: pnpm demo:m8 [signals|reorder-approve|reorder-decline|all]
  */
 import { and, desc, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import {
   approvals,
   deals,
@@ -34,10 +35,11 @@ async function seedOrg(db: ReturnType<typeof getDb>["db"], orgName: string) {
     .values({ email: `own-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@demo.test`, name: "Owner" })
     .returning();
   if (!owner) throw new Error("owner insert failed");
+  const runName = `${orgName} ${randomUUID().slice(0, 8)}`;
   const { orgId } = await runOnboarding(db, {
     userId: owner.id,
     userEmail: owner.email,
-    orgName,
+    orgName: runName,
     businessDescription: "Trading company keeping shelves stocked and receivables collected on time.",
   });
   return {
@@ -254,13 +256,19 @@ async function reorderDeclineScenario(): Promise<string> {
     .from(approvals)
     .where(and(eq(approvals.orgId, orgId), eq(approvals.status, "pending")))
     .limit(1);
-  await db.update(approvals).set({ status: "rejected" }).where(eq(approvals.id, pending!.id));
+  if (!pending) throw new Error("the gated reorder did not persist a pending approval");
+  const [rejected] = await db
+    .update(approvals)
+    .set({ status: "rejected" })
+    .where(and(eq(approvals.id, pending.id), eq(approvals.status, "pending")))
+    .returning({ id: approvals.id });
+  if (!rejected) throw new Error("the pending approval could not be rejected");
 
   const blocked = await executor.execute(
     "purchasing.createPurchaseOrder",
-    ownerCtx,
-    pending!.payload as Record<string, unknown>,
-    { approvedApprovalId: pending!.id },
+    agentCtx,
+    pending.payload as Record<string, unknown>,
+    { approvedApprovalId: pending.id },
   );
   if (blocked.ok) throw new Error("a rejected approval authorized execution!");
   ok(`rejected approval refuses execution ("${(blocked.error ?? "").slice(0, 48)}…")`);

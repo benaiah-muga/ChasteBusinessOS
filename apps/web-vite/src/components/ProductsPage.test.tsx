@@ -54,6 +54,14 @@ describe("ProductsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Products & Services" }));
     expect(await screen.findByText("Ceramic mug")).toBeTruthy();
     expect(screen.getByText("Consulting")).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by category" }), { target: { value: "Kitchen" } });
+    expect(screen.getByText("Ceramic mug")).toBeTruthy();
+    expect(screen.queryByText("Consulting")).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by category" }), { target: { value: "all" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by stock status" }), { target: { value: "reorder" } });
+    expect(screen.getByText("Consulting")).toBeTruthy();
+    expect(screen.queryByText("Ceramic mug")).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter by stock status" }), { target: { value: "all" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Filter by item type" }), { target: { value: "service" } });
     expect(screen.queryByText("Ceramic mug")).toBeNull();
     expect(screen.getByText("Consulting")).toBeTruthy();

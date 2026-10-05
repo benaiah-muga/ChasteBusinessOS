@@ -133,7 +133,9 @@ export async function submitTeamAction(
 ): Promise<TeamActionOutcome> {
   const parsedAction = TeamActionSchema.safeParse(action);
   if (!parsedAction.success) throw new TeamApiError(0, "The team action contains invalid details.");
-  if (!intentId.trim()) throw new TeamApiError(0, "The team action needs an intent identity. Try again.");
+  if (intentId.trim().length === 0 || intentId.length > 200 || /[\r\n\0]/.test(intentId)) {
+    throw new TeamApiError(0, "The team action needs a valid intent identity. Try again.");
+  }
 
   let response: Response;
   try {

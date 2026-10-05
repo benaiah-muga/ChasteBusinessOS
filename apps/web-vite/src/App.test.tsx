@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
+import { App, isViteAppPath } from "./App";
 import { dashboardFixture, myWorkFixture, setupFixture } from "./test/dashboard-fixture";
 
 const authMocks = vi.hoisted(() => ({
@@ -79,7 +79,12 @@ beforeEach(() => {
         occurredAt: "2026-09-27T10:15:00.000Z",
       }] });
     }
-    if (path === "/api/dashboard") return Response.json(dashboardFixture);
+    if (path === "/api/dashboard") {
+      return Response.json(activeOrgId === firstOrgId ? dashboardFixture : {
+        ...dashboardFixture,
+        money: { ...dashboardFixture.money, netIncomeMinor: 700_000 },
+      });
+    }
     if (path === "/api/setup") return Response.json({ items: setupFixture, remaining: 1 });
     if (path === "/api/my-work") return Response.json({ cards: myWorkFixture, generatedAt: "2026-09-27T10:15:00.000Z" });
     if (path === "/api/my-work/summarize") return Response.json({ brief: "The ranked work is ready." });
@@ -275,6 +280,15 @@ afterEach(() => {
 });
 
 describe("Vite app frame", () => {
+  it("admits migrated routes and document editor URLs with a document id", () => {
+    expect(isViteAppPath("/analytics")).toBe(true);
+    expect(isViteAppPath("/projects")).toBe(true);
+    expect(isViteAppPath("/products")).toBe(true);
+    expect(isViteAppPath("/documents/editor/doc-123")).toBe(true);
+    expect(isViteAppPath("/documents/editor/")).toBe(false);
+    expect(isViteAppPath("/documents/editor/doc-123/extra")).toBe(false);
+  });
+
   it("sends an unauthenticated visitor to the existing Better Auth login", async () => {
     authMocks.getSession.mockResolvedValue({ data: { user: null } });
     render(<App />);
@@ -421,13 +435,25 @@ describe("Vite app frame", () => {
   });
 
   it("refreshes dashboard context and currency after switching organizations", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
     const selector = await screen.findByRole("combobox", { name: "Active organization" });
     expect(await screen.findByText("$12,500.00")).not.toBeNull();
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/dashboard")).toHaveLength(1);
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/setup")).toHaveLength(1);
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/my-work")).toHaveLength(1);
+    });
 
     fireEvent.change(selector, { target: { value: secondOrgId } });
     expect(await screen.findByText("USh1,250,000")).not.toBeNull();
+    expect(await screen.findByText("USh700,000")).not.toBeNull();
     expect((screen.getByRole("combobox", { name: "Active organization" }) as HTMLSelectElement).value).toBe(secondOrgId);
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/dashboard")).toHaveLength(2);
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/setup")).toHaveLength(2);
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/my-work")).toHaveLength(2);
+    });
   });
 
   it("renders the approvals preview and reloads its queue after an organization switch", async () => {
@@ -519,6 +545,7 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "Analytics" })).not.toBeNull();
     expect(screen.getByRole("link", { name: "Analytics" }).getAttribute("aria-current")).toBe("page");
     expect(await screen.findByRole("combobox", { name: /Add a dataset/ })).not.toBeNull();
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith("/api/analytics", expect.objectContaining({ credentials: "same-origin" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: "Active organization" }), { target: { value: secondOrgId } });
@@ -544,12 +571,15 @@ describe("Vite app frame", () => {
   });
 
   it("keeps unported route ownership in legacy and preserves query and hash on the fallback", async () => {
-    window.history.replaceState(null, "", "/onboarding?step=profile#business");
+    // Every route-manifest page is ported now, so this covers a path the Vite
+    // app does not serve: unknown routes must still fall back to legacy with
+    // their query and hash intact rather than rendering a broken shell.
+    window.history.replaceState(null, "", "/not-a-workspace-route?step=profile#business");
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "Opening this page in the current app." })).not.toBeNull();
-    expect(legacyMocks.redirectToLegacy).toHaveBeenCalledWith("/onboarding?step=profile#business");
+    expect(legacyMocks.redirectToLegacy).toHaveBeenCalledWith("/not-a-workspace-route?step=profile#business");
     expect(screen.getByRole("link", { name: "Continue to the existing app" }).getAttribute("href"))
-      .toBe("http://localhost:3001/onboarding?step=profile#business");
+      .toBe("http://localhost:3001/not-a-workspace-route?step=profile#business");
   });
 });

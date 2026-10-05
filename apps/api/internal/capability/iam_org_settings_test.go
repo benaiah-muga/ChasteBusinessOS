@@ -3,6 +3,7 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,6 +62,12 @@ func TestIAMOrgSettingsParsersMirrorZodContracts(t *testing.T) {
 	branding, err := ParseIAMSetOrgBrandingInput(json.RawMessage(`{"accentColor":"#33AAFF","layout":"modern"}`))
 	if err != nil || branding.Layout == nil || *branding.Layout != "modern" {
 		t.Fatalf("branding parse=%+v err=%v", branding, err)
+	}
+	if _, err := ParseIAMSetOrgBrandingInput(json.RawMessage(`{"invoiceFooter":"` + strings.Repeat("😀", 150) + `"}`)); err != nil {
+		t.Fatalf("300 UTF-16 code-unit footer should be accepted: %v", err)
+	}
+	if _, err := ParseIAMSetOrgBrandingInput(json.RawMessage(`{"invoiceFooter":"` + strings.Repeat("😀", 151) + `"}`)); err == nil {
+		t.Fatal("301 UTF-16 code-unit footer should be rejected")
 	}
 	if _, err := ParseIAMSetOrgBrandingInput(json.RawMessage(`{"logoDataUrl":"data:text/plain;base64,AAA"}`)); err == nil {
 		t.Fatal("non-image logo refused")

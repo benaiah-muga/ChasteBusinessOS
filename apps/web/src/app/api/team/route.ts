@@ -153,38 +153,46 @@ export async function GET() {
   });
 }
 
+const teamIntentIdSchema = z.string().refine((value) =>
+  value.trim().length > 0 && value.length <= 200 && !/[\r\n\0]/.test(value),
+);
+
 const actionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("createRole"),
     key: z.string().regex(/^[a-z][a-z0-9-]*$/),
     name: z.string().min(1).max(60),
+    intentId: teamIntentIdSchema,
   }),
   z.object({
     action: z.literal("setPermissions"),
     roleId: z.string(),
     permissions: z.array(z.string().min(1)).max(200),
+    intentId: teamIntentIdSchema,
   }),
   z.object({
     action: z.literal("assignRole"),
     userId: z.string(),
     roleId: z.string(),
+    intentId: teamIntentIdSchema,
   }),
   z.object({
     action: z.literal("invite"),
     email: z.string().email(),
     roleId: z.string(),
+    intentId: teamIntentIdSchema,
   }),
 ]);
 
 export async function POST(req: Request) {
   const resolved = await getResolvedUser();
-  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-  const intentId = typeof raw?.intentId === "string" ? raw.intentId : undefined;
-  const humanCtx = resolved ? actorFromResolved(resolved, { intentId }) : null;
-  if (!resolved?.orgId || !humanCtx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!resolved?.orgId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  const raw = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const body = actionSchema.safeParse(raw);
   if (!body.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  const humanCtx = actorFromResolved(resolved, { intentId: body.data.intentId });
+  if (!humanCtx) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const db = getDb().db;
   const registry = buildRegistry(db);

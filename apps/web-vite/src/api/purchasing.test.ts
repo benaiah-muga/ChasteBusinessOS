@@ -1,0 +1,360 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  closePurchasingOrder,
+  createPurchasingVendor,
+  creditPurchasingBill,
+  fetchPurchasingEnabled,
+  fetchPurchasingInputTaxCodes,
+  fetchPurchasingPriceHistory,
+  fetchPurchasingProducts,
+  fetchPurchasingSupplierStatement,
+  fetchPurchasingWorkspace,
+  payPurchasingBill,
+  PurchasingApiError,
+  receivePurchasingGoods,
+} from "./purchasing";
+
+afterEach(() => vi.unstubAllGlobals());
+
+const workspace = {
+  baseCurrency: "USD",
+  vendors: [{
+    id: "0569aacb-58c3-4a30-8afe-3554e38eb2ce",
+    name: "Harbor Supplies",
+    email: null,
+    paymentTermDays: 30,
+    deactivatedAt: null,
+    createdAt: "2026-08-01T10:00:00.000Z",
+  }],
+  orders: [{
+    id: "1a7c1a1e-9c3a-4f1a-9b2f-3f1c2d4e5a6b",
+    number: 42,
+    vendorName: "Harbor Supplies",
+    status: "ordered",
+    memo: null,
+    orderedMinor: 12500,
+    lines: [{ lineNumber: 1, description: "Canvas bag", quantity: 2500, unitPriceMinor: 5000 }],
+  }],
+  bills: [{
+    id: "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f",
+    number: 7,
+    vendorName: "Harbor Supplies",
+    vendorRef: "INV-9",
+    memo: null,
+    totalMinor: 12500,
+    currency: "USD",
+    paidMinor: 0,
+    creditedMinor: 0,
+    status: "open",
+    dueMinor: 12500,
+    createdAt: "2026-08-12T09:30:00.000Z",
+  }],
+  requests: [],
+};
+
+const switchboard = { catalog: [{ id: "purchasing" }], enabledModules: ["purchasing"] };
+
+function postedBody(call: unknown[]): Record<string, unknown> {
+  return JSON.parse(String((call[1] as RequestInit).body));
+}
+
+describe("purchasing API module gate", () => {
+  it("confirms the module is enabled and every enabled id is in the catalog", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(switchboard));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPurchasingEnabled()).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith("/api/modules", expect.objectContaining({
+      headers: { accept: "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+    }));
+  });
+
+  it("reports Purchasing as off when the switchboard omits it", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ catalog: [{ id: "purchasing" }], enabledModules: [] })));
+    await expect(fetchPurchasingEnabled()).resolves.toBe(false);
+  });
+
+  it("refuses a switchboard whose enabled ids are not all catalogued", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      catalog: [{ id: "purchasing" }],
+      enabledModules: ["purchasing", "ghost"],
+    })));
+    await expect(fetchPurchasingEnabled()).rejects.toMatchObject({
+      name: "PurchasingApiError",
+      status: 200,
+      message: "The module switchboard returned an invalid Purchasing configuration.",
+    });
+  });
+});
+
+describe("purchasing workspace reads", () => {
+  it("returns the validated workspace and rejects an unexpected shape", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(workspace));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchPurchasingWorkspace()).resolves.toEqual(workspace);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ...workspace, orders: [{ number: 1 }] })));
+    await expect(fetchPurchasingWorkspace()).rejects.toMatchObject({
+      status: 200,
+      message: "The Purchasing service returned the purchasing workspace in an unexpected format.",
+    });
+  });
+
+  it("defaults missing requests to an empty list", async () => {
+    const { requests: _requests, ...withoutRequests } = workspace;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(withoutRequests)));
+    await expect(fetchPurchasingWorkspace()).resolves.toMatchObject({ requests: [] });
+  });
+
+  it("keeps stocked products that carry more columns than the form reads", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      items: [
+        { sku: "RC-BAG", name: "Canvas bag", avgUnitCostMinor: 5000, kind: "goods", onHand: 12 },
+        { sku: "RC-SVC", name: "Consulting", kind: "service" },
+      ],
+    })));
+    await expect(fetchPurchasingProducts()).resolves.toEqual([
+      { sku: "RC-BAG", name: "Canvas bag", avgUnitCostMinor: 5000, kind: "goods", onHand: 12 },
+      { sku: "RC-SVC", name: "Consulting", kind: "service" },
+    ]);
+  });
+
+  it("keeps only active input tax codes for a vendor bill", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      codes: [
+        { id: "3c9e3c30-1e5c-4b3c-9d4a-5b3c4d5e6f70", code: "VAT-IN", name: "Input VAT", direction: "input", rateBasisPoints: 500, priceIncludesTax: true, active: true },
+        { id: "4daf4d41-2f6d-4c4d-8e5b-6c4d5e6f7081", code: "VAT-OUT", name: "Output VAT", direction: "output", rateBasisPoints: 500, priceIncludesTax: true, active: true },
+        { id: "5eb05e52-307e-4d5e-9f6c-7d5e6f708192", code: "OLD", name: "Retired", direction: "input", rateBasisPoints: 100, priceIncludesTax: false, active: false },
+      ],
+    })));
+    await expect(fetchPurchasingInputTaxCodes()).resolves.toHaveLength(1);
+  });
+});
+
+describe("governed purchasing writes", () => {
+  it("creates vendors through the authenticated Go capability endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { vendorId: "vendor-1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_PURCHASING_VENDOR_SLICE__", true);
+
+    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies", email: "sales@example.test" }))
+      .resolves.toEqual({ kind: "completed", data: { vendorId: "vendor-1" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    }));
+    expect(postedBody(fetchMock.mock.calls[0]!)).toMatchObject({
+      capabilityId: "purchasing.createVendor",
+      input: { name: "Kampala Supplies", email: "sales@example.test" },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("preserves a Go approval response for vendor creation", async () => {
+    vi.stubGlobal("__GO_PURCHASING_VENDOR_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(
+      { ok: false, pendingApproval: true, reason: "Purchasing writes require approval." },
+      { status: 202 },
+    )));
+
+    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }))
+      .resolves.toEqual({ kind: "pending", reason: "Purchasing writes require approval." });
+  });
+
+  it("uses the established Purchasing write only when the Go capability route is absent", async () => {
+    vi.stubGlobal("__GO_PURCHASING_VENDOR_SLICE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { vendorId: "vendor-1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }))
+      .resolves.toEqual({ kind: "completed", data: { vendorId: "vendor-1" } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/purchasing");
+    expect(postedBody(fetchMock.mock.calls[1]!)).toMatchObject({ action: "createVendor", name: "Kampala Supplies" });
+  });
+
+  it("does not retry Go vendor creation on authentication or server errors", async () => {
+    vi.stubGlobal("__GO_PURCHASING_VENDOR_SLICE__", true);
+    for (const status of [401, 500]) {
+      const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "request failed" }, { status }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }))
+        .rejects.toMatchObject({ status });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("keeps legacy vendor creation as the default when the Go slice flag is off", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { vendorId: "vendor-1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }))
+      .resolves.toEqual({ kind: "completed", data: { vendorId: "vendor-1" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/purchasing");
+  });
+
+  it("stamps an intentId on every POST for idempotency", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { entryId: "e-1", creditedMinor: 100, billBalanceMinor: 0 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await creditPurchasingBill({ action: "billCreditNote", billId: "b-1", amountMinor: 100, reason: "damaged" });
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = postedBody(fetchMock.mock.calls[0]!);
+    expect(init.method).toBe("POST");
+    expect(body.action).toBe("billCreditNote");
+    expect(body.intentId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+
+  it("keeps a 202 as pending and surfaces the reason instead of reporting success", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(
+      { pendingApproval: true, reason: "Over the payment threshold." },
+      { status: 202 },
+    )));
+
+    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 5000 })).resolves.toEqual({
+      kind: "pending",
+      reason: "Over the payment threshold.",
+    });
+  });
+
+  it("falls back to the kernel error field, then to a generic reason, for a 202", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ pendingApproval: true, error: "Needs a second approver." }, { status: 202 })));
+    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 5000 }))
+      .resolves.toEqual({ kind: "pending", reason: "Needs a second approver." });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ pendingApproval: true }, { status: 202 })));
+    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 5000 }))
+      .resolves.toEqual({ kind: "pending", reason: "This action is waiting for approval." });
+  });
+
+  it("parses the receipt result and the short-close result", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({
+      ok: true,
+      data: { received: true, fullyReceived: false, receiptNumber: 3 },
+    })));
+    await expect(receivePurchasingGoods({
+      action: "receiveGoods",
+      poNumber: 42,
+      lines: [{ lineNumber: 1, quantity: 2500 }],
+    })).resolves.toEqual({ kind: "completed", data: { received: true, fullyReceived: false, receiptNumber: 3 } });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      ok: true,
+      data: { closed: true, backordered: true, shortThousandths: 1500 },
+    })));
+    await expect(closePurchasingOrder({ action: "closePurchaseOrder", poNumber: 42 })).resolves.toEqual({
+      kind: "completed",
+      data: { closed: true, backordered: true, shortThousandths: 1500 },
+    });
+  });
+
+  it("sends authority-gated overreceipt fields only when they are supplied", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { received: true, fullyReceived: true, receiptNumber: 1 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await receivePurchasingGoods({
+      action: "receiveGoods",
+      poNumber: 42,
+      lines: [{ lineNumber: 1, quantity: 10500, rejected: 0, rejectionNote: undefined }],
+      overreceiptTolerancePct: 10,
+      authorityReason: "site manager approved in writing",
+    });
+    expect(postedBody(fetchMock.mock.calls[0]!)).toMatchObject({
+      overreceiptTolerancePct: 10,
+      authorityReason: "site manager approved in writing",
+    });
+  });
+
+  it("refuses a write whose shape the capability never declared", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    // @ts-expect-error the discriminated union must reject an unknown action.
+    await expect(createPurchasingVendor({ action: "nonsense", name: "X" })).rejects.toMatchObject({
+      status: 0,
+      message: "Check the purchasing details and try again.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a completed result whose data does not match the declared output", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: { received: true, receiptNumber: 1 } })));
+    await expect(receivePurchasingGoods({ action: "receiveGoods", poNumber: 42, lines: [{ lineNumber: 1, quantity: 10 }] }))
+      .rejects.toMatchObject({
+        status: 200,
+        message: "The Purchasing service returned an unexpected result: could not recording the receipt.",
+      });
+  });
+});
+
+describe("purchasing intel reads", () => {
+  it("omits a blank SKU filter and trims a supplied one", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => Response.json({ ok: true, data: { rows: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPurchasingPriceHistory("   ")).resolves.toEqual([]);
+    expect(postedBody(fetchMock.mock.calls[0]!)).toEqual({ action: "priceHistory", intentId: expect.any(String) });
+
+    await fetchPurchasingPriceHistory("  RC-BAG  ");
+    expect(postedBody(fetchMock.mock.calls[1]!)).toMatchObject({ action: "priceHistory", sku: "RC-BAG" });
+  });
+
+  it("returns an empty statement when the kernel parks the read", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ pendingApproval: true }, { status: 202 })));
+    await expect(fetchPurchasingSupplierStatement("v-1")).resolves.toEqual({ closingBalanceMinor: 0, rows: [] });
+  });
+
+  it("returns the statement rows when the read completes", async () => {
+    const statement = {
+      closingBalanceMinor: 4200,
+      rows: [{ date: "2026-08-12T09:30:00.000Z", kind: "bill", ref: "#7", amountMinor: 12500, balanceMinor: 12500 }],
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, data: statement })));
+    await expect(fetchPurchasingSupplierStatement("v-1")).resolves.toEqual(statement);
+  });
+});
+
+describe("purchasing error mapping", () => {
+  it("prefers the service message and falls back per status", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ message: "Vendor is deactivated." }, { status: 400 })));
+    await expect(createPurchasingVendor({ action: "createVendor", name: "X" }))
+      .rejects.toMatchObject({ status: 400, message: "Vendor is deactivated." });
+
+    for (const [status, expected] of [
+      [401, "Your session has expired. Sign in again to open Purchasing."],
+      [403, "Your account does not have permission to use Purchasing."],
+      [428, "Finish setting up your workspace before using Purchasing."],
+    ] as const) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({}, { status })));
+      await expect(createPurchasingVendor({ action: "createVendor", name: "X" }))
+        .rejects.toMatchObject({ status, message: expected });
+    }
+  });
+
+  it("reports an unreachable service as a zero-status error rather than a crash", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network down")));
+    const error = await fetchPurchasingWorkspace().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PurchasingApiError);
+    expect(error).toMatchObject({
+      status: 0,
+      message: "Could not reach the Purchasing service. Check your connection and try again.",
+    });
+  });
+
+  it("lets an aborted caller signal win over the generic transport message", async () => {
+    const controller = new AbortController();
+    const abortError = new DOMException("Aborted", "AbortError");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abortError));
+    controller.abort();
+
+    await expect(fetchPurchasingWorkspace(controller.signal)).rejects.toBe(abortError);
+  });
+});

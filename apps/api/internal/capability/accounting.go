@@ -175,6 +175,13 @@ func requiredSafeInteger(fields map[string]json.RawMessage, key string) (int64, 
 	if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return 0, fmt.Errorf("%s is required", key)
 	}
+	// json.Unmarshal happily decodes a quoted "5" into a json.Number, but the
+	// Zod z.number() this mirrors rejects every string spelling. Reject the
+	// quoted forms here so Go does not accept input the TypeScript runtime
+	// refuses, which is the fail-open direction.
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '"' {
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
 	var number json.Number
 	if err := json.Unmarshal(raw, &number); err != nil {
 		return 0, fmt.Errorf("%s must be an integer", key)

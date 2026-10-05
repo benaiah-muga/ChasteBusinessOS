@@ -82,7 +82,12 @@ func newRoutineAgent(db dbx.Beginner, executor SystemCapabilityExecutor) *routin
 	return &routineAgent{db: db, executor: executor, client: &http.Client{Timeout: 2 * time.Minute}}
 }
 
-func (a *routineAgent) Run(ctx context.Context, orgID, jobID string, raw json.RawMessage) error {
+func (a *routineAgent) Run(ctx context.Context, job *ClaimedJob) error {
+	if job == nil || job.Type != routineJobType {
+		return errors.New("invalid routine job lease")
+	}
+	ctx = withJobLeaseContext(ctx, job)
+	orgID, raw := job.OrgID, job.Payload
 	var payload routinePayload
 	if err := json.Unmarshal(raw, &payload); err != nil || !routineUUID(payload.RoutineID) || payload.Trigger == "" {
 		return errors.New("invalid routine job payload")
@@ -111,7 +116,7 @@ func (a *routineAgent) Run(ctx context.Context, orgID, jobID string, raw json.Ra
 		_ = a.finish(ctx, orgID, payload, routine.ID, "failed", err.Error())
 		return err
 	}
-	final, usage, err := a.agentLoop(ctx, orgID, jobID, sessionID, routine, config)
+	final, usage, err := a.agentLoop(ctx, job, sessionID, routine, config)
 	if err != nil {
 		_ = a.finish(ctx, orgID, payload, routine.ID, "failed", err.Error())
 		return err
@@ -135,8 +140,8 @@ func (a *routineAgent) Run(ctx context.Context, orgID, jobID string, raw json.Ra
 
 func (a *routineAgent) loadRoutine(ctx context.Context, orgID, id string) (routineRow, bool, error) {
 	var row routineRow
-	err := routineTx(ctx, a.db, orgID, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT r.id::text,r.name,r.prompt,r.enabled,o.name FROM routines r JOIN organizations o ON o.id=r.org_id WHERE r.id=$1::uuid AND r.org_id=$2::uuid`, id, orgID).Scan(&row.ID, &row.Name, &row.Prompt, &row.Enabled, &row.OrgName)
+	err := routineTx(ctx, a.db, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(txCtx, `SELECT r.id::text,r.name,r.prompt,r.enabled,o.name FROM routines r JOIN organizations o ON o.id=r.org_id WHERE r.id=$1::uuid AND r.org_id=$2::uuid`, id, orgID).Scan(&row.ID, &row.Name, &row.Prompt, &row.Enabled, &row.OrgName)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -147,8 +152,8 @@ func (a *routineAgent) loadRoutine(ctx context.Context, orgID, id string) (routi
 
 func (a *routineAgent) loadConfig(ctx context.Context, orgID string) (routineConfig, error) {
 	var settings []byte
-	if err := routineTx(ctx, a.db, orgID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT settings FROM organizations WHERE id=$1::uuid`, orgID).Scan(&settings)
+	if err := routineTx(ctx, a.db, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(txCtx, `SELECT settings FROM organizations WHERE id=$1::uuid`, orgID).Scan(&settings)
 	}); err != nil {
 		return routineConfig{}, err
 	}
@@ -247,8 +252,8 @@ func envOr(key, fallback string) string {
 
 func (a *routineAgent) createSession(ctx context.Context, orgID string, routine routineRow, model string) (string, error) {
 	var id string
-	err := routineTx(ctx, a.db, orgID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `INSERT INTO agent_sessions (org_id,user_id,title,mode,model_ref) VALUES ($1::uuid,NULL,$2,'assist',$3) RETURNING id::text`, orgID, truncateRoutine("Routine: "+routine.Name, 80), model).Scan(&id)
+	err := routineTx(ctx, a.db, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(txCtx, `INSERT INTO agent_sessions (org_id,user_id,title,mode,model_ref) VALUES ($1::uuid,NULL,$2,'assist',$3) RETURNING id::text`, orgID, truncateRoutine("Routine: "+routine.Name, 80), model).Scan(&id)
 	})
 	return id, err
 }
@@ -258,22 +263,26 @@ func (a *routineAgent) appendEvent(ctx context.Context, orgID, sessionID, role s
 	if err != nil {
 		return err
 	}
-	return routineTx(ctx, a.db, orgID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO session_events(session_id,seq,role,content) SELECT $1::uuid,COALESCE(MAX(seq),0)+1,$2,$3::jsonb FROM session_events WHERE session_id=$1::uuid`, sessionID, role, string(b))
+	return routineTx(ctx, a.db, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		var lockedSessionID string
+		if err := tx.QueryRow(txCtx, `SELECT id::text FROM agent_sessions WHERE id=$1::uuid AND org_id=$2::uuid FOR UPDATE`, sessionID, orgID).Scan(&lockedSessionID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(txCtx, `INSERT INTO session_events(session_id,seq,role,content) SELECT $1::uuid,COALESCE(MAX(seq),0)+1,$2,$3::jsonb FROM session_events WHERE session_id=$1::uuid`, sessionID, role, string(b))
 		return err
 	})
 }
 
 func (a *routineAgent) addUsage(ctx context.Context, orgID, sessionID string, usage [2]int64) error {
-	return routineTx(ctx, a.db, orgID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE agent_sessions SET token_usage=jsonb_build_object('input',COALESCE((token_usage->>'input')::bigint,0)+$2,'output',COALESCE((token_usage->>'output')::bigint,0)+$3),updated_at=clock_timestamp() WHERE id=$1::uuid AND org_id=$4::uuid`, sessionID, usage[0], usage[1], orgID)
+	return routineTx(ctx, a.db, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(txCtx, `UPDATE agent_sessions SET token_usage=jsonb_build_object('input',COALESCE((token_usage->>'input')::bigint,0)+$2,'output',COALESCE((token_usage->>'output')::bigint,0)+$3),updated_at=clock_timestamp() WHERE id=$1::uuid AND org_id=$4::uuid`, sessionID, usage[0], usage[1], orgID)
 		return err
 	})
 }
 
 func (a *routineAgent) finish(ctx context.Context, orgID string, payload routinePayload, routineID, status, message string) error {
-	return routineTx(ctx, a.db, orgID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE routines SET last_status=$3,last_error=NULLIF($4,'') WHERE id=$1::uuid AND org_id=$2::uuid`, routineID, orgID, status, truncateRoutine(message, 500)); err != nil {
+	return routineTx(ctx, a.db, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(txCtx, `UPDATE routines SET last_status=$3,last_error=NULLIF($4,'') WHERE id=$1::uuid AND org_id=$2::uuid`, routineID, orgID, status, truncateRoutine(message, 500)); err != nil {
 			return err
 		}
 		if payload.OccurrenceID != nil {
@@ -281,7 +290,7 @@ func (a *routineAgent) finish(ctx context.Context, orgID string, payload routine
 			if status == "ok" {
 				occurrenceStatus = "done"
 			}
-			_, err := tx.Exec(ctx, `UPDATE routine_occurrences SET status=$3 WHERE id=$1::uuid AND routine_id=$2::uuid AND org_id=$4::uuid`, *payload.OccurrenceID, routineID, occurrenceStatus, orgID)
+			_, err := tx.Exec(txCtx, `UPDATE routine_occurrences SET status=$3 WHERE id=$1::uuid AND routine_id=$2::uuid AND org_id=$4::uuid`, *payload.OccurrenceID, routineID, occurrenceStatus, orgID)
 			return err
 		}
 		return nil
@@ -289,8 +298,8 @@ func (a *routineAgent) finish(ctx context.Context, orgID string, payload routine
 }
 
 func (a *routineAgent) notify(ctx context.Context, orgID, name, body string) error {
-	return routineTx(ctx, a.db, orgID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO notifications(org_id,user_id,kind,title,body,href) VALUES($1::uuid,NULL,'routine.run',$2,$3,'/sessions')`, orgID, "Routine \""+name+"\" has findings", truncateRoutine(body, 500))
+	return routineTx(ctx, a.db, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(txCtx, `INSERT INTO notifications(org_id,user_id,kind,title,body,href) VALUES($1::uuid,NULL,'routine.run',$2,$3,'/sessions')`, orgID, "Routine \""+name+"\" has findings", truncateRoutine(body, 500))
 		return err
 	})
 }
@@ -304,8 +313,8 @@ func (a *routineAgent) fileTicket(ctx context.Context, orgID, args string) (any,
 		return nil, errors.New("ticket title and description are required")
 	}
 	var id string
-	err := routineTx(ctx, a.db, orgID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `INSERT INTO tickets(org_id,title,description) VALUES($1::uuid,$2,$3) RETURNING id::text`, orgID, truncateRoutine(input.Title, 200), truncateRoutine(input.Description, 4000)).Scan(&id)
+	err := routineTx(ctx, a.db, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(txCtx, `INSERT INTO tickets(org_id,title,description) VALUES($1::uuid,$2,$3) RETURNING id::text`, orgID, truncateRoutine(input.Title, 200), truncateRoutine(input.Description, 4000)).Scan(&id)
 	})
 	if err != nil {
 		return nil, err
@@ -329,6 +338,9 @@ func routineToolSet() ([]routineTool, map[string]string, error) {
 		{Name: "crm_listCustomers", Capability: "crm.listCustomers", Permission: "crm.read", Description: "List customers, optionally filtered by a search query.", Schema: routineObjectSchema(map[string]any{"query": stringField("Customer name or terms to match.")}, nil)},
 		{Name: "crm_listTasks", Capability: "crm.listTasks", Permission: "crm.read", Description: "List customer follow-up tasks, optionally limited to open tasks.", Schema: routineObjectSchema(map[string]any{"openOnly": map[string]any{"type": "boolean", "description": "Only include tasks that are still open."}}, nil)},
 		{Name: "crm_customerTimeline", Capability: "crm.customerTimeline", Permission: "crm.read", Description: "Read a customer's recent quotes, invoices, payments, deals, tasks, and documents.", Schema: routineObjectSchema(map[string]any{"customerId": stringField("UUID of the customer whose timeline to read."), "limit": integerField("Maximum total number of timeline entries.", 1, 200)}, []string{"customerId"})},
+		{Name: "crm_listCustomerViews", Capability: "crm.listCustomerViews", Permission: "crm.read", Description: "List the shared saved customer views for this organization, pinned ones first.", Schema: routineObjectSchema(map[string]any{}, nil)},
+		{Name: "hr_listEmployees", Capability: "hr.listEmployees", Permission: "hr.read", Description: "List employees with their title, monthly salary, tax rate, and whether they are still active.", Schema: routineObjectSchema(map[string]any{}, nil)},
+		{Name: "hr_leaveBalance", Capability: "hr.leaveBalance", Permission: "hr.read", Description: "Read an employee's annual leave entitlement, days taken this year, and days remaining.", Schema: routineObjectSchema(map[string]any{"employeeId": map[string]any{"type": "string", "format": "uuid", "description": "UUID of the employee whose leave balance to read."}}, []string{"employeeId"})},
 		{Name: "accounting_listInvoices", Capability: "accounting.listInvoices", Permission: "accounting.read", Description: "List invoices, optionally filtered by customer, status, and result limit.", Schema: routineObjectSchema(map[string]any{"customerId": stringField("Customer UUID to filter by."), "status": map[string]any{"type": "string", "enum": []string{"draft", "sent", "paid", "void"}}, "limit": integerField("Maximum number of invoices to return.", 1, 100)}, nil)},
 		{Name: "accounting_arAging", Capability: "accounting.arAging", Permission: "accounting.read", Description: "Read outstanding customer invoices grouped by days since their due date, with aging bucket totals.", Schema: routineObjectSchema(map[string]any{}, nil)},
 		{Name: "accounting_listQuotes", Capability: "accounting.listQuotes", Permission: "accounting.read", Description: "List customer quotes and their totals, optionally filtered by quote status.", Schema: routineObjectSchema(map[string]any{"status": map[string]any{"type": "string", "enum": []string{"draft", "sent", "accepted", "declined", "expired"}, "description": "Only include quotes with this status."}}, nil)},
@@ -337,6 +349,7 @@ func routineToolSet() ([]routineTool, map[string]string, error) {
 		{Name: "accounting_balanceSheet", Capability: "accounting.balanceSheet", Permission: "accounting.read", Description: "Read assets, liabilities, equity, retained results, and whether the balance sheet balances.", Schema: routineObjectSchema(map[string]any{}, nil)},
 		{Name: "accounting_cashFlow", Capability: "accounting.cashFlow", Permission: "accounting.read", Description: "Read operating, investing, and financing cash movements and confirm whether they tie to the cash balance.", Schema: routineObjectSchema(map[string]any{"cashAccountCodes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Chart-of-accounts codes treated as cash; defaults to 1000."}}, nil)},
 		{Name: "accounting_customerStatement", Capability: "accounting.customerStatement", Permission: "accounting.read", Description: "Read a customer's dated invoices, payments, credit notes, and running balances by currency.", Schema: routineObjectSchema(map[string]any{"customerId": map[string]any{"type": "string", "format": "uuid", "description": "UUID of the customer whose statement to read."}}, []string{"customerId"})},
+		{Name: "accounting_listBudgetScenarios", Capability: "accounting.listBudgetScenarios", Permission: "accounting.read", Description: "List budget scenarios and their versions, optionally limited to one fiscal year.", Schema: routineObjectSchema(map[string]any{"fiscalYear": map[string]any{"type": "integer", "minimum": 2000, "maximum": 2100, "description": "Only include scenarios for this fiscal year."}}, nil)},
 		{Name: "documents_listDocs", Capability: "documents.listDocs", Permission: "documents.read", Description: "List authored documents with their publish status and version count.", Schema: routineObjectSchema(map[string]any{}, nil)},
 		{Name: "documents_listDocVersions", Capability: "documents.listDocVersions", Permission: "documents.read", Description: "List an authored document's version history, oldest to newest.", Schema: routineObjectSchema(map[string]any{"documentId": map[string]any{"type": "string", "format": "uuid", "description": "UUID of the authored document."}}, []string{"documentId"})},
 		{Name: "documents_getDocVersion", Capability: "documents.getDocVersion", Permission: "documents.read", Description: "Read an archived authored document version with its content and HTML.", Schema: routineObjectSchema(map[string]any{
@@ -346,8 +359,12 @@ func routineToolSet() ([]routineTool, map[string]string, error) {
 		{Name: "inventory_stockReport", Capability: "inventory.stockReport", Permission: "inventory.read", Description: "Read stock levels and valuation, optionally limited to items at or below reorder point.", Schema: routineObjectSchema(map[string]any{"belowReorderOnly": map[string]any{"type": "boolean", "description": "Only include items at or below their reorder point."}}, nil)},
 		{Name: "inventory_itemHistory", Capability: "inventory.itemHistory", Permission: "inventory.read", Description: "Read recent stock movements for an item by SKU, including quantity changes, reasons, and recorded costs.", Schema: routineObjectSchema(map[string]any{"sku": stringField("SKU of the item whose stock movements to read."), "limit": integerField("Maximum number of recent stock movements to return.", 1, 200)}, []string{"sku"})},
 		{Name: "inventory_listLocations", Capability: "inventory.listLocations", Permission: "inventory.read", Description: "List this organization's stock location codes and names in code order.", Schema: routineObjectSchema(map[string]any{}, nil)},
+		{Name: "inventory_listLots", Capability: "inventory.listLots", Permission: "inventory.read", Description: "List inventory lots with their SKU, lot code, remaining balance, and expiry date.", Schema: routineObjectSchema(map[string]any{}, nil)},
+		{Name: "inventory_listReservations", Capability: "inventory.listReservations", Permission: "inventory.read", Description: "List stock reservations with their SKU, quantity, reason, and status.", Schema: routineObjectSchema(map[string]any{"openOnly": map[string]any{"type": "boolean", "description": "Only include reservations that are still open. Defaults to true."}}, nil)},
+		{Name: "routines_list", Capability: "routines.list", Permission: "routines.read", Description: "List this organization's recurring agent routines with their schedules, next run times, and last run status.", Schema: routineObjectSchema(map[string]any{"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 50, "description": "Maximum number of routines to return."}}, nil)},
 		{Name: "purchasing_supplierStatement", Capability: "purchasing.supplierStatement", Permission: "purchasing.read", Description: "Read a supplier's dated bills, payments, credits, and running balance.", Schema: routineObjectSchema(map[string]any{"vendorId": map[string]any{"type": "string", "format": "uuid", "description": "UUID of the supplier whose statement to read."}}, []string{"vendorId"})},
 		{Name: "purchasing_apAging", Capability: "purchasing.apAging", Permission: "purchasing.read", Description: "Read outstanding supplier bills grouped into current, 30, 60, and 90-plus day aging buckets.", Schema: routineObjectSchema(map[string]any{}, nil)},
+		{Name: "purchasing_listReceipts", Capability: "purchasing.listReceipts", Permission: "purchasing.read", Description: "Read a purchase order's receipts and how much of each order line was accepted, rejected, or returned.", Schema: routineObjectSchema(map[string]any{"poNumber": map[string]any{"type": "integer", "minimum": 1, "description": "Number of the purchase order whose receipts to read."}}, []string{"poNumber"})},
 		{Name: "support_listConversations", Capability: "support.listConversations", Permission: "support.read", Description: "List support conversations, optionally filtered by status and result limit.", Schema: routineObjectSchema(map[string]any{"status": map[string]any{"type": "string", "enum": []string{"open", "escalated", "resolved"}}, "limit": integerField("Maximum number of conversations to return.", 1, 100)}, nil)},
 		{Name: "support_readConversation", Capability: "support.readConversation", Permission: "support.read", Description: "Read a support conversation by its UUID.", Schema: routineObjectSchema(map[string]any{"conversationId": stringField("UUID returned by support_listConversations.")}, []string{"conversationId"})},
 		{Name: "support_searchKnowledge", Capability: "support.searchKnowledge", Permission: "support.read", Description: "Search the support knowledge base for an answer to a question.", Schema: routineObjectSchema(map[string]any{"query": stringField("Search phrase, at least two characters.")}, []string{"query"})},
@@ -375,7 +392,8 @@ func routineObjectSchema(properties map[string]any, required []string) map[strin
 	return schema
 }
 
-func (a *routineAgent) agentLoop(ctx context.Context, orgID, jobID, sessionID string, routine routineRow, config routineConfig) (string, [2]int64, error) {
+func (a *routineAgent) agentLoop(ctx context.Context, job *ClaimedJob, sessionID string, routine routineRow, config routineConfig) (string, [2]int64, error) {
+	orgID, jobID := job.OrgID, job.ID
 	tools, byName, err := routineToolSet()
 	if err != nil {
 		return "", [2]int64{}, err
@@ -416,14 +434,20 @@ func (a *routineAgent) agentLoop(ctx context.Context, orgID, jobID, sessionID st
 				result = map[string]any{"ok": false, "error": "unknown capability"}
 			} else {
 				args := json.RawMessage(call.Function.Arguments)
-				if !json.Valid(args) || len(bytes.TrimSpace(args)) == 0 {
+				if len(bytes.TrimSpace(args)) == 0 {
 					args = json.RawMessage(`{}`)
 				}
-				capResult, execErr := a.executor.ExecuteSystem(ctx, capability.SystemClaims{OrganizationID: orgID, CapabilityID: id, Permission: GoCapabilityPermissions[id], IntentID: routineIntent(jobID, step, index, call.ID), AgentSessionID: sessionID}, args)
-				if execErr != nil {
-					result = map[string]any{"ok": false, "error": execErr.Error()}
+				if id != "routines.list" && !json.Valid(args) {
+					args = json.RawMessage(`{}`)
+				}
+				if id == "routines.list" {
+					if validationErr := validateRoutineListToolInput(args); validationErr != nil {
+						result = map[string]any{"ok": false, "error": "invalid arguments"}
+					} else {
+						result = a.executeRoutineTool(ctx, job, sessionID, orgID, id, args, routineIntent(jobID, step, index, call.ID))
+					}
 				} else {
-					result = capResult
+					result = a.executeRoutineTool(ctx, job, sessionID, orgID, id, args, routineIntent(jobID, step, index, call.ID))
 				}
 			}
 			if err != nil {
@@ -438,6 +462,38 @@ func (a *routineAgent) agentLoop(ctx context.Context, orgID, jobID, sessionID st
 		}
 	}
 	return "", usage, errors.New("routine agent exceeded 6 model steps")
+}
+
+func validateRoutineListToolInput(raw json.RawMessage) error {
+	var fields map[string]json.RawMessage
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if err := decoder.Decode(&fields); err != nil || fields == nil {
+		return errors.New("routine list arguments must be an object")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return errors.New("routine list arguments contain trailing JSON data")
+	}
+	for key := range fields {
+		if key != "limit" {
+			return fmt.Errorf("unsupported routines.list argument %q", key)
+		}
+	}
+	_, err := capability.ParseRoutinesListInput(raw)
+	return err
+}
+
+func (a *routineAgent) executeRoutineTool(ctx context.Context, job *ClaimedJob, sessionID, orgID, capabilityID string, args json.RawMessage, intentID string) any {
+	capResult, err := executeSystemWithLeaseGate(ctx, a.executor, capability.SystemClaims{
+		OrganizationID: orgID, CapabilityID: capabilityID, Permission: GoCapabilityPermissions[capabilityID],
+		IntentID: intentID, AgentSessionID: sessionID,
+		JobID: job.ID, LeaseOwner: job.WorkerID, FencingToken: job.FencingToken,
+		LeaseExtensionMillis: job.LeaseExtensionMillis,
+	}, args)
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}
+	}
+	return capResult
 }
 
 func (a *routineAgent) complete(ctx context.Context, config routineConfig, messages []routineMessage, tools []map[string]any) (routineCompletion, error) {
@@ -512,7 +568,14 @@ func truncateRoutine(s string, max int) string {
 	}
 	return string([]rune(s)[:max])
 }
-func routineTx(ctx context.Context, db dbx.Beginner, org string, fn func(pgx.Tx) error) error {
-	_, err := dbx.WithOrgTx(ctx, db, org, func(tx pgx.Tx) (struct{}, error) { return struct{}{}, fn(tx) })
+func routineTx(ctx context.Context, db dbx.Beginner, org string, fn func(context.Context, pgx.Tx) error) error {
+	if job, ok := ctx.Value(jobLeaseContextKey{}).(*ClaimedJob); ok {
+		return withCurrentJobLeaseTx(ctx, db, job, org, fn)
+	}
+	txCtx, cancel := context.WithTimeout(ctx, leaseStateTxTimeout)
+	defer cancel()
+	_, err := dbx.WithOrgTx(txCtx, db, org, func(tx pgx.Tx) (struct{}, error) {
+		return struct{}{}, fn(txCtx, tx)
+	})
 	return err
 }

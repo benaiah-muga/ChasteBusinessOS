@@ -31,6 +31,7 @@ export interface QuickCreateResult {
   /** Primary id of the created record (customerId, vendorId, or the sku). */
   id: string;
   label: string;
+  warning?: string;
 }
 
 type SubmitOutcome =
@@ -60,24 +61,41 @@ function CustomerForm({ submitRef, resetRef }: QuickCreateFormProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [duplicate, setDuplicate] = useState<string | null>(null);
+  const intentRef = useRef({ signature: "", id: crypto.randomUUID() });
 
   resetRef.current = () => {
     setName("");
     setEmail("");
     setDuplicate(null);
+    intentRef.current = { signature: "", id: crypto.randomUUID() };
   };
   submitRef.current = async () => {
     if (!name.trim()) return { ok: false, error: "Give the customer a name." };
-    const res = await postApi<{ customerId: string; duplicateWarning?: string | null }>("/api/customers", {
+    const customerName = name.trim();
+    const customerEmail = email.trim();
+    const signature = JSON.stringify([customerName, customerEmail]);
+    if (intentRef.current.signature !== signature) {
+      intentRef.current = { signature, id: crypto.randomUUID() };
+    }
+    const res = await postApi<{ ok: true; data: { customerId: string; duplicateWarning?: string | null } }>("/api/customers", {
       action: "create",
-      name: name.trim(),
-      ...(email.trim() ? { email: email.trim() } : {}),
+      name: customerName,
+      ...(customerEmail ? { email: customerEmail } : {}),
+      intentId: intentRef.current.id,
     });
-    if (res.status === 202) return { ok: false, error: "Creation was gated by policy and now waits in the Approvals inbox.", pending: true };
-    if (!res.ok || !res.data?.customerId) {
+    if (res.status === 202) {
+      const body: unknown = res.data;
+      const pendingBody = body && typeof body === "object" ? body as Record<string, unknown> : null;
+      const message = pendingBody
+        ? [pendingBody.reason, pendingBody.error, pendingBody.hint].find((value) => typeof value === "string" && value.trim())
+        : null;
+      const pending = Boolean(body && typeof body === "object" && "ok" in body && body.ok === false && "pendingApproval" in body && body.pendingApproval === true && typeof message === "string");
+      return { ok: false, error: pending && typeof message === "string" ? message : "The customer service returned an unexpected approval response.", pending };
+    }
+    if (!res.ok || !res.data?.ok || typeof res.data.data?.customerId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(res.data.data.customerId)) {
       return { ok: false, error: res.error ? `${res.error.title}${res.error.hint ? ` - ${res.error.hint}` : ""}` : "Couldn't create the customer." };
     }
-    return { ok: true, result: { id: res.data.customerId, label: name.trim() } };
+    return { ok: true, result: { id: res.data.data.customerId, label: customerName, warning: res.data.data.duplicateWarning ?? undefined } };
   };
 
   return (
@@ -220,8 +238,14 @@ function QuickCreateModal({
     setBusy(true);
     setError(null);
     setPending(false);
-    const outcome = await submitRef.current();
-    setBusy(false);
+    let outcome: SubmitOutcome;
+    try {
+      outcome = await submitRef.current();
+    } catch (reason) {
+      outcome = { ok: false, error: reason instanceof Error ? reason.message : "The request failed. Check your connection and try again." };
+    } finally {
+      setBusy(false);
+    }
     if (outcome.ok) {
       onCreated(outcome.result);
       if (again) resetRef.current?.();
@@ -278,9 +302,11 @@ const QuickCreateCtx = createContext<QuickCreateApi | null>(null);
 
 export function QuickCreateProvider({ children }: { children: ReactNode }) {
   const [entity, setEntity] = useState<QuickCreateEntityId | null>(null);
+  const [resultWarning, setResultWarning] = useState<string | null>(null);
   const onCreatedRef = useRef<((result: QuickCreateResult) => void) | undefined>(undefined);
 
   const open = useCallback((next: QuickCreateEntityId, onCreated?: (result: QuickCreateResult) => void) => {
+    setResultWarning(null);
     onCreatedRef.current = onCreated;
     setEntity(next);
   }, []);
@@ -293,8 +319,17 @@ export function QuickCreateProvider({ children }: { children: ReactNode }) {
         <QuickCreateModal
           entity={entity}
           onClose={() => setEntity(null)}
-          onCreated={(result) => onCreatedRef.current?.(result)}
+          onCreated={(result) => {
+            setResultWarning(result.warning ? `Customer added. ${result.warning}` : null);
+            onCreatedRef.current?.(result);
+          }}
         />
+      )}
+      {resultWarning && (
+        <div className="flex items-start gap-3 px-4 py-3" aria-live="polite">
+          <Notice tone="info">{resultWarning}</Notice>
+          <button type="button" className="shrink-0 text-xs text-stone-600 underline" onClick={() => setResultWarning(null)}>Dismiss</button>
+        </div>
       )}
     </QuickCreateCtx.Provider>
   );

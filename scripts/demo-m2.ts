@@ -5,6 +5,7 @@
  * Run: pnpm demo:m2
  */
 import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { approvals, conversations, getDb, messages, users } from "@chaste/db";
 import { formatMinor } from "@chaste/erp-core";
 import { buildExecutor, buildRegistry } from "../apps/web/src/server/kernel";
@@ -15,15 +16,16 @@ async function main() {
   const registry = buildRegistry(db);
   const executor = buildExecutor(db, registry);
 
+  const runId = randomUUID();
   const [user] = await db
     .insert(users)
-    .values({ email: `m2-${Date.now()}@demo.test`, name: "M2 Founder" })
+    .values({ email: `m2-${runId}@demo.test`, name: "M2 Founder" })
     .returning();
   if (!user) throw new Error("user insert failed");
   const { orgId } = await runOnboarding(db, {
     userId: user.id,
     userEmail: user.email,
-    orgName: "M2 Demo Co",
+    orgName: `M2 Demo Co ${runId.slice(0, 8)}`,
     businessDescription: "Small furniture workshop selling direct online.",
   });
 

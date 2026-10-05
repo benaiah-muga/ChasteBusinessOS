@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AnalyticsApiError,
   analyticsReportFilename,
@@ -28,6 +28,7 @@ type WorkspaceState =
   | { status: "ready"; datasets: AnalyticsDataset[] };
 
 const NUMERIC_HINT = /minor|count|value/i;
+const MAX_REPORT_SECTIONS = 8;
 
 function errorMessage(error: unknown): string {
   if (error instanceof AnalyticsApiError) return error.message;
@@ -43,8 +44,14 @@ export function AnalyticsPage() {
   const [title, setTitle] = useState("Business report");
   const [narrative, setNarrative] = useState("");
   const [report, setReport] = useState<AnalyticsReport | null>(null);
+  const [reportTitle, setReportTitle] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const mounted = useRef(false);
+  const workspaceController = useRef<AbortController | null>(null);
+  const previewControllers = useRef(new Map<string, AbortController>());
+  const generationController = useRef<AbortController | null>(null);
+  const generationInFlight = useRef(false);
 
   const loadWorkspace = useCallback(async (signal?: AbortSignal) => {
     if (!signal) setWorkspace({ status: "loading" });
@@ -64,17 +71,34 @@ export function AnalyticsPage() {
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     const controller = new AbortController();
+    workspaceController.current = controller;
     void loadWorkspace(controller.signal);
-    return () => controller.abort();
+    return () => {
+      mounted.current = false;
+      workspaceController.current?.abort();
+      workspaceController.current = null;
+      for (const pending of previewControllers.current.values()) pending.abort();
+      previewControllers.current.clear();
+      generationController.current?.abort();
+      generationController.current = null;
+    };
   }, [loadWorkspace]);
 
   async function addDataset(datasetId: string): Promise<void> {
-    if (!datasetId || workspace.status !== "ready" || previews[datasetId] || previewLoading.has(datasetId)) return;
+    if (!datasetId || workspace.status !== "ready" || previews[datasetId] || previewControllers.current.has(datasetId)) return;
+    if (sections.length + previewControllers.current.size >= MAX_REPORT_SECTIONS) {
+      setNotice(`Reports can include up to ${MAX_REPORT_SECTIONS} sections.`);
+      return;
+    }
+    const controller = new AbortController();
+    previewControllers.current.set(datasetId, controller);
     setNotice(null);
     setPreviewLoading((current) => new Set(current).add(datasetId));
     try {
-      const preview = await fetchAnalyticsPreview(datasetId);
+      const preview = await fetchAnalyticsPreview(datasetId, controller.signal);
+      if (!mounted.current || controller.signal.aborted) return;
       setPreviews((current) => ({ ...current, [datasetId]: preview }));
       const info = workspace.datasets.find((dataset) => dataset.id === datasetId);
       const numeric = preview.columns.filter((column) => NUMERIC_HINT.test(column));
@@ -87,18 +111,26 @@ export function AnalyticsPage() {
         y: numeric.slice(0, 1),
       }]);
     } catch (error) {
-      setNotice(errorMessage(error));
+      if (mounted.current && !controller.signal.aborted) setNotice(errorMessage(error));
     } finally {
-      setPreviewLoading((current) => {
-        const next = new Set(current);
-        next.delete(datasetId);
-        return next;
-      });
+      if (previewControllers.current.get(datasetId) === controller) {
+        previewControllers.current.delete(datasetId);
+        if (mounted.current) {
+          setPreviewLoading((current) => {
+            const next = new Set(current);
+            next.delete(datasetId);
+            return next;
+          });
+        }
+      }
     }
   }
 
   async function generate(): Promise<void> {
-    if (busy || !title.trim() || sections.length === 0) return;
+    if (generationInFlight.current || !title.trim() || sections.length === 0) return;
+    generationInFlight.current = true;
+    const controller = new AbortController();
+    generationController.current = controller;
     setBusy(true);
     setNotice(null);
     try {
@@ -114,12 +146,18 @@ export function AnalyticsPage() {
             ? { chart: { type: section.chartType, x: section.x, y: section.y } }
             : {}),
         })),
-      });
+      }, controller.signal);
+      if (!mounted.current || controller.signal.aborted) return;
       setReport(result);
+      setReportTitle(title.trim());
     } catch (error) {
-      setNotice(errorMessage(error));
+      if (mounted.current && !controller.signal.aborted) setNotice(errorMessage(error));
     } finally {
-      setBusy(false);
+      if (generationController.current === controller) {
+        generationController.current = null;
+        generationInFlight.current = false;
+        if (mounted.current) setBusy(false);
+      }
     }
   }
 
@@ -129,7 +167,7 @@ export function AnalyticsPage() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = analyticsReportFilename(title);
+    anchor.download = analyticsReportFilename(reportTitle ?? title);
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -152,7 +190,18 @@ export function AnalyticsPage() {
             <h1 id="analytics-load-error-title">Could not load analytics</h1>
             <p>{workspace.message}</p>
           </div>
-          <button className="analytics-secondary-button" type="button" onClick={() => void loadWorkspace()}>Try again</button>
+          <button
+            className="analytics-secondary-button"
+            type="button"
+            onClick={() => {
+              const controller = new AbortController();
+              workspaceController.current?.abort();
+              workspaceController.current = controller;
+              void loadWorkspace(controller.signal);
+            }}
+          >
+            Try again
+          </button>
         </section>
       </main>
     );
@@ -171,6 +220,7 @@ export function AnalyticsPage() {
 
   const numericColumns = (datasetId: string) => (previews[datasetId]?.columns ?? []).filter((column) => NUMERIC_HINT.test(column));
   const allColumns = (datasetId: string) => previews[datasetId]?.columns ?? [];
+  const reportSectionLimitReached = sections.length + previewLoading.size >= MAX_REPORT_SECTIONS;
 
   return (
     <main className="analytics-page">
@@ -215,6 +265,7 @@ export function AnalyticsPage() {
                   onChange={(event) => void addDataset(event.currentTarget.value)}
                   aria-labelledby="analytics-dataset-label"
                   aria-describedby="analytics-dataset-hint"
+                  disabled={reportSectionLimitReached}
                 >
                   <option value="">Choose a permission-filtered dataset…</option>
                   {workspace.datasets.map((dataset) => (
@@ -223,7 +274,11 @@ export function AnalyticsPage() {
                     </option>
                   ))}
                 </select>
-                <span id="analytics-dataset-hint" className="analytics-field-hint">Only datasets permitted for your role are listed.</span>
+                <span id="analytics-dataset-hint" className="analytics-field-hint">
+                  {reportSectionLimitReached
+                    ? `Reports are limited to ${MAX_REPORT_SECTIONS} sections.`
+                    : "Only datasets permitted for your role are listed."}
+                </span>
               </label>
               {sections.length > 0 && (
                 <button
@@ -337,7 +392,7 @@ export function AnalyticsPage() {
               <header className="analytics-report-header">
                 <div>
                   <p className="analytics-eyebrow">Generated report</p>
-                  <h2 id="analytics-report-title">{title}</h2>
+                  <h2 id="analytics-report-title">{reportTitle ?? title}</h2>
                 </div>
                 {report.region && <p className="analytics-region">Data region <strong>{report.region}</strong></p>}
               </header>

@@ -79,6 +79,11 @@ type IAMInviteMemberOutput struct {
 	ExpiresAt    string `json:"expiresAt"`
 }
 
+// IAMDomainError marks an expected role or membership refusal for HTTP adapters.
+type IAMDomainError string
+
+func (e IAMDomainError) Error() string { return string(e) }
+
 func parseIAMInput(capabilityID string, raw json.RawMessage) (any, error) {
 	fields, err := decodeJSONObject(raw)
 	if err != nil {
@@ -256,7 +261,7 @@ func iamCreateRole(ctx context.Context, tx pgx.Tx, orgID string, input IAMCreate
 		return IAMCreateRoleOutput{}, err
 	}
 	if exists {
-		return IAMCreateRoleOutput{}, fmt.Errorf("role %q already exists", input.Key)
+		return IAMCreateRoleOutput{}, IAMDomainError(fmt.Sprintf("role %q already exists", input.Key))
 	}
 	var roleID string
 	err := tx.QueryRow(ctx, `INSERT INTO roles (org_id, key, name) VALUES ($1::uuid, $2, $3) RETURNING id::text`, orgID, input.Key, input.Name).Scan(&roleID)
@@ -268,13 +273,13 @@ func iamUpdateRolePermissions(ctx context.Context, tx pgx.Tx, orgID string, inpu
 	var isSystem bool
 	err := tx.QueryRow(ctx, `SELECT id::text, key, is_system FROM roles WHERE id = $1::uuid AND org_id = $2::uuid`, input.RoleID, orgID).Scan(&roleID, &key, &isSystem)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return IAMUpdateRolePermissionsOutput{}, errors.New("role not found")
+		return IAMUpdateRolePermissionsOutput{}, IAMDomainError("role not found")
 	}
 	if err != nil {
 		return IAMUpdateRolePermissionsOutput{}, err
 	}
 	if isSystem && key == "owner" {
-		return IAMUpdateRolePermissionsOutput{}, errors.New("the owner role cannot be edited")
+		return IAMUpdateRolePermissionsOutput{}, IAMDomainError("the owner role cannot be edited")
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM role_permissions WHERE role_id = $1::uuid`, roleID); err != nil {
 		return IAMUpdateRolePermissionsOutput{}, err
@@ -304,7 +309,7 @@ func iamAssignRole(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityC
 	var memberID string
 	err := tx.QueryRow(ctx, `SELECT user_id::text FROM memberships WHERE user_id = $1::uuid AND org_id = $2::uuid`, input.UserID, orgID).Scan(&memberID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return IAMAssignRoleOutput{}, errors.New("user is not a member of this organization")
+		return IAMAssignRoleOutput{}, IAMDomainError("user is not a member of this organization")
 	}
 	if err != nil {
 		return IAMAssignRoleOutput{}, err
@@ -312,7 +317,7 @@ func iamAssignRole(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityC
 	var roleID, roleKey string
 	err = tx.QueryRow(ctx, `SELECT id::text, key FROM roles WHERE id = $1::uuid AND org_id = $2::uuid`, input.RoleID, orgID).Scan(&roleID, &roleKey)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return IAMAssignRoleOutput{}, errors.New("role not found")
+		return IAMAssignRoleOutput{}, IAMDomainError("role not found")
 	}
 	if err != nil {
 		return IAMAssignRoleOutput{}, err
@@ -364,19 +369,19 @@ func iamAssertNotLastOwner(ctx context.Context, tx pgx.Tx, orgID, userID string)
 	}
 	rows.Close()
 	if owners == 0 {
-		return errors.New("cannot remove the organization's last owner: grant the owner role to someone else first")
+		return IAMDomainError("cannot remove the organization's last owner: grant the owner role to someone else first")
 	}
 	return nil
 }
 
 func iamInviteMember(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, now time.Time, input IAMInviteMemberInput) (IAMInviteMemberOutput, error) {
 	if claims.ActorType != "human" || claims.ActorID == nil {
-		return IAMInviteMemberOutput{}, errors.New("member invitations require a human actor; ask your principal to send the invite")
+		return IAMInviteMemberOutput{}, IAMDomainError("member invitations require a human actor; ask your principal to send the invite")
 	}
 	var roleID string
 	err := tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE id = $1::uuid AND org_id = $2::uuid`, input.RoleID, claims.OrganizationID).Scan(&roleID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return IAMInviteMemberOutput{}, errors.New("role not found")
+		return IAMInviteMemberOutput{}, IAMDomainError("role not found")
 	}
 	if err != nil {
 		return IAMInviteMemberOutput{}, err

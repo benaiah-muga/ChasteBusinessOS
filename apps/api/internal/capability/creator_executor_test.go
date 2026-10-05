@@ -93,12 +93,7 @@ func TestGoCreatorPluginVerificationUsesGovernedExecutor(t *testing.T) {
 	fx := newExecutorFixture(t)
 	input := json.RawMessage(`{"manifest":{},"signatureBase64":"invalid-signature","publisherPublicKeyBase64":"invalid-public-key"}`)
 	intentID := executorUUID(t)
-	result, err := fx.executor.ExecuteSystem(fx.ctx, SystemClaims{
-		OrganizationID: fx.orgID,
-		CapabilityID:   creatorVerifyPluginCapabilityID,
-		Permission:     "platform.creator",
-		IntentID:       intentID,
-	}, input)
+	result, err := fx.executor.ExecuteSystem(fx.ctx, fx.systemClaims(t, creatorVerifyPluginCapabilityID, "platform.creator", intentID, "", ""), input)
 	if err != nil || !result.OK {
 		t.Fatalf("creator.verifyPlugin execution=%+v err=%v", result, err)
 	}
@@ -161,12 +156,7 @@ func TestGoCreatorMarketplaceReadMatchesLegacyRowsAndWireFields(t *testing.T) {
 		}
 	}
 	input := json.RawMessage(`{}`)
-	result, err := fx.executor.ExecuteSystem(fx.ctx, SystemClaims{
-		OrganizationID: fx.orgID,
-		CapabilityID:   creatorListMarketplaceCapabilityID,
-		Permission:     "platform.browse",
-		IntentID:       executorUUID(t),
-	}, input)
+	result, err := fx.executor.ExecuteSystem(fx.ctx, fx.systemClaims(t, creatorListMarketplaceCapabilityID, "platform.browse", executorUUID(t), "", ""), input)
 	if err != nil || !result.OK {
 		t.Fatalf("creator.listMarketplace result=%+v err=%v", result, err)
 	}
@@ -373,12 +363,7 @@ func TestGoCreatorMarketplaceVerifyPreservesLegacyHumanAccess(t *testing.T) {
 		t.Fatalf("human Marketplace verification data=%s output=%+v err=%v, want invalid-signature verdict", result.Data, output, err)
 	}
 
-	systemResult, err := fx.executor.ExecuteSystem(fx.ctx, SystemClaims{
-		OrganizationID: fx.orgID,
-		CapabilityID:   creatorVerifyPluginCapabilityID,
-		Permission:     "platform.creator",
-		IntentID:       executorUUID(t),
-	}, input)
+	systemResult, err := fx.executor.ExecuteSystem(fx.ctx, fx.systemClaims(t, creatorVerifyPluginCapabilityID, "platform.creator", executorUUID(t), "", ""), input)
 	if err != nil || systemResult.OK || systemResult.Error != `module "creator" is disabled for this organization` {
 		t.Fatalf("system Marketplace verification with Creator disabled = %+v, %v; want module denial", systemResult, err)
 	}

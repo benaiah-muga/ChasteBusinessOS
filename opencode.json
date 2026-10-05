@@ -1,5 +1,6 @@
 {
   "$schema": "https://app.kilo.ai/config.json",
+  "snapshot": false,
   "mcp": {
     "graft": {
       "type": "local",

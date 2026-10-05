@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { createDb, customers, organizations, supportConversations, type Database } from "@chaste/db";
+import { createDb, customers, organizations, supportConversations, supportKbArticles, type Database } from "@chaste/db";
 import { CapabilityRegistry, type ActionContext } from "@chaste/kernel";
 import { registerSupportCapabilities, type ModuleDeps } from "./index";
 
@@ -66,7 +66,12 @@ describe("ticket depth (M12.3)", () => {
   it("canned responses upsert and KB articles persist", async () => {
     const c = await run("support.createCannedResponse", { shortcut: "/refund-policy", title: "Refund policy", body: "We refund damaged goods in full within 14 days." });
     expect(c.cannedResponseId).toBeDefined();
-    const k = await run("support.createKbArticle", { title: "How refunds work", body: "Step by step refund guide.", category: "billing" });
+    const k = await run("support.createKbArticle", { title: "How refunds work", body: "Step by step refund guide.", category: "billing", isPublic: true });
     expect(k.articleId).toBeDefined();
+    const [article] = await db.db.select().from(supportKbArticles).where(eq(supportKbArticles.id, k.articleId));
+    expect(article?.isPublic).toBe(true);
+    const internal = await run("support.createKbArticle", { title: "Internal procedure", body: "For staff only." });
+    const [internalArticle] = await db.db.select().from(supportKbArticles).where(eq(supportKbArticles.id, internal.articleId));
+    expect(internalArticle?.isPublic).toBe(false);
   });
 });

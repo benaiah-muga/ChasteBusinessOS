@@ -21,6 +21,11 @@ const CatalogSchema = z.object({
   reorderAlerts: z.array(z.object({ sku: z.string(), name: z.string(), shortfallThousandths: z.number().int().safe() }).passthrough()).default([]),
   totalValueMinor: z.number().int().safe(),
 });
+const GoCatalogSchema = z.object({
+  items: z.array(ProductSchema),
+  totalValueMinor: z.number().int().safe(),
+}).strict();
+const GoCatalogResponseSchema = z.object({ ok: z.literal(true), data: GoCatalogSchema }).strict();
 const ModuleSwitchboardSchema = z.object({
   catalog: z.array(z.object({ id: z.string() })),
   enabledModules: z.array(z.string()),
@@ -47,7 +52,7 @@ const UpdateSchema = z.object({
 const ArchiveSchema = z.object({ action: z.literal("archiveItem"), sku: z.string().trim().min(1), archive: z.literal(true) }).strict();
 const AdjustSchema = z.object({ action: z.literal("adjustStock"), sku: z.string().trim().min(1), quantityDelta: z.number().int().positive().safe(), note: z.string().trim().min(3) }).strict();
 const ActionSchema = z.discriminatedUnion("action", [CreateSchema, UpdateSchema, ArchiveSchema, AdjustSchema]);
-const PendingSchema = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string() }).strict();
+const PendingSchema = z.object({ ok: z.literal(false), pendingApproval: z.literal(true), reason: z.string(), approvalId: z.string().optional() }).strict();
 const SuccessSchema = z.object({ ok: z.literal(true), data: z.record(z.string(), z.unknown()) }).strict();
 const ErrorSchema = z.object({ error: z.string() }).passthrough();
 const ImportRowSchema = z.object({ row: z.number().int().positive(), field: z.string().optional(), message: z.string() }).strict();
@@ -69,6 +74,59 @@ export class ProductsApiError extends Error {
     super(message);
     this.name = "ProductsApiError";
   }
+}
+
+type ProductCapabilityID = "inventory.createItem" | "inventory.updateItem" | "inventory.archiveItem" | "inventory.adjustStock";
+
+export function productActionRequest(action: ProductAction, intentId: string, useGo: boolean): { url: string; body: Record<string, unknown> } {
+  if (!useGo) return { url: "/api/inventory", body: { ...action, intentId } };
+  const { action: operation, ...input } = action;
+  const capabilityByAction: Record<ProductAction["action"], ProductCapabilityID> = {
+    createItem: "inventory.createItem",
+    updateItem: "inventory.updateItem",
+    archiveItem: "inventory.archiveItem",
+    adjustStock: "inventory.adjustStock",
+  };
+  return { url: "/api/capabilities/execute", body: { capabilityId: capabilityByAction[operation], input, intentId } };
+}
+
+function useGoInventoryItemSlice(): boolean {
+  return typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
+}
+
+async function fetchGoProductCatalog(signal?: AbortSignal): Promise<z.infer<typeof CatalogSchema>> {
+  let response: Response;
+  try {
+    response = await fetch("/api/capabilities/execute", {
+      method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ capabilityId: "inventory.stockReport", input: { belowReorderOnly: false }, intentId: crypto.randomUUID() }),
+      signal,
+    });
+  } catch {
+    throw new ProductsApiError(0, "Could not reach the product catalog. Check your connection and try again.");
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = ErrorSchema.safeParse(body);
+    throw new ProductsApiError(response.status, error.success ? error.data.error : "Could not load the product catalog.");
+  }
+  const catalog = GoCatalogResponseSchema.safeParse(body);
+  if (response.status !== 200 || !catalog.success) {
+    throw new ProductsApiError(response.status, "The product catalog returned data in an unexpected format.");
+  }
+  return {
+    ...catalog.data.data,
+    reorderAlerts: catalog.data.data.items.filter((item) => item.reorderNeeded).map((item) => ({
+      sku: item.sku,
+      name: item.name,
+      onHandThousandths: item.onHandThousandths,
+      reorderPointThousandths: item.reorderPointThousandths,
+      shortfallThousandths: Math.max(0, item.reorderPointThousandths - item.onHandThousandths),
+      avgUnitCostMinor: item.avgUnitCostMinor,
+    })),
+  };
 }
 
 export async function fetchProductsEnabled(signal?: AbortSignal): Promise<boolean> {
@@ -102,6 +160,7 @@ export async function fetchProductDefaults(signal?: AbortSignal): Promise<{ defa
 }
 
 export async function fetchProducts(signal?: AbortSignal): Promise<{ items: Product[]; reorderAlerts: z.infer<typeof CatalogSchema>["reorderAlerts"]; totalValueMinor: number }> {
+  if (useGoInventoryItemSlice()) return fetchGoProductCatalog(signal);
   let response: Response;
   try {
     response = await fetch("/api/inventory", { credentials: "same-origin", cache: "no-store", signal });
@@ -121,12 +180,13 @@ export async function fetchProducts(signal?: AbortSignal): Promise<{ items: Prod
 export async function submitProductAction(action: ProductAction, signal?: AbortSignal): Promise<ProductActionResult> {
   const parsed = ActionSchema.safeParse(action);
   if (!parsed.success) throw new ProductsApiError(0, "Check the product details and try again.");
+  const request = productActionRequest(parsed.data, crypto.randomUUID(), useGoInventoryItemSlice());
   let response: Response;
   try {
-    response = await fetch("/api/inventory", {
+    response = await fetch(request.url, {
       method: "POST", credentials: "same-origin", cache: "no-store",
       headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ ...parsed.data, intentId: crypto.randomUUID() }), signal,
+      body: JSON.stringify(request.body), signal,
     });
   } catch {
     throw new ProductsApiError(0, "Could not reach the inventory service. Check your connection and try again.");

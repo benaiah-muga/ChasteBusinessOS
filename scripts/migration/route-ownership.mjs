@@ -35,6 +35,12 @@ function exportedMethods(file) {
     if (ts.isVariableStatement(statement) && hasExportModifier(statement)) {
       for (const declaration of statement.declarationList.declarations) {
         if (ts.isIdentifier(declaration.name) && methods.has(declaration.name.text)) found.add(declaration.name.text);
+        if (ts.isObjectBindingPattern(declaration.name)) {
+          for (const element of declaration.name.elements) {
+            const exportedName = element.propertyName ?? element.name;
+            if (ts.isIdentifier(exportedName) && methods.has(exportedName.text)) found.add(exportedName.text);
+          }
+        }
       }
     }
   }

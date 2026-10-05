@@ -49,14 +49,17 @@ function Brand({ compact = false }: { compact?: boolean }) {
 }
 
 export function LoginPage() {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "recovery">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [verifySent, setVerifySent] = useState(false);
+  const [verificationSource, setVerificationSource] = useState<"signup" | "signin" | null>(null);
+  const [recoverySent, setRecoverySent] = useState(false);
+  const [verificationResent, setVerificationResent] = useState(false);
+  const [verifiedNotice] = useState(() => new URLSearchParams(window.location.search).get("verified") === "1");
 
   useEffect(() => {
     let mounted = true;
@@ -74,21 +77,32 @@ export function LoginPage() {
     setBusy(true);
     setError(null);
     try {
+      if (submittedMode === "recovery") {
+        const result = await authClient.requestPasswordReset(email);
+        if (result.error) throw new Error(result.error.message);
+        setRecoverySent(true);
+        setBusy(false);
+        return;
+      }
       const result = submittedMode === "signup"
         ? await authClient.signUp.email({
             email,
             password,
             name: name || (email.split("@")[0] ?? "Founder"),
+            callbackURL: "/login?verified=1",
           })
         : await authClient.signIn.email({ email, password });
       if (result.error) throw new Error(result.error.message ?? "authentication failed");
       if (submittedMode === "signup" && result.data?.token == null) {
-        setVerifySent(true);
+        setVerificationSource("signup");
         setBusy(false);
         return;
       }
       navigate("/", true);
     } catch (submitError) {
+      if (submittedMode === "signin" && (submitError instanceof Error ? submitError.message : String(submitError)).toLowerCase().includes("verif")) {
+        setVerificationSource("signin");
+      }
       setError(authErrorMessage(submitError));
       setBusy(false);
     }
@@ -97,7 +111,31 @@ export function LoginPage() {
   function toggleMode() {
     setMode((current) => current === "signup" ? "signin" : "signup");
     setError(null);
-    setVerifySent(false);
+    setVerificationSource(null);
+    setRecoverySent(false);
+    setVerificationResent(false);
+  }
+
+  async function resendVerification() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await authClient.sendVerificationEmail(email.trim());
+      if (result.error) throw new Error(result.error.message);
+      setVerificationResent(true);
+    } catch (resendError) {
+      setError(authErrorMessage(resendError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function returnToSignIn() {
+    setMode("signin");
+    setError(null);
+    setRecoverySent(false);
+    setVerificationSource(null);
+    setVerificationResent(false);
   }
 
   return (
@@ -135,25 +173,45 @@ export function LoginPage() {
             <div className="login-card-heading">
               <div>
                 <p className="login-card-eyebrow">
-                  {verifySent ? "One more step" : mode === "signup" ? "Create your workspace" : "Welcome back"}
+                  {verificationSource ? "One more step" : recoverySent ? "Check your inbox" : mode === "recovery" ? "Account recovery" : mode === "signup" ? "Create your workspace" : "Welcome back"}
                 </p>
-                <h2>{verifySent ? "Check your inbox." : mode === "signup" ? "Start with clarity." : "Good to see you."}</h2>
-                <p>{verifySent ? "Confirm your email to open the door." : mode === "signup" ? "Create your workspace to get started." : "Sign in to your workspace."}</p>
+                <h2>{verificationSource ? "Check your inbox." : recoverySent ? "If the address has an account, a link is on its way." : mode === "recovery" ? "Reset your password." : mode === "signup" ? "Start with clarity." : "Good to see you."}</h2>
+                <p>{verificationSource ? "Confirm your email to open the door." : recoverySent ? "Use the password reset link in your email to choose a new password." : mode === "recovery" ? "Enter the email address for your account." : mode === "signup" ? "Create your workspace to get started." : "Sign in to your workspace."}</p>
               </div>
-              <span className="login-card-badge" aria-hidden="true">{verifySent ? "✉" : mode === "signup" ? "01" : "↗"}</span>
+              <span className="login-card-badge" aria-hidden="true">{verificationSource ? "✉" : mode === "signup" ? "01" : "↗"}</span>
             </div>
 
-            {verifySent ? (
+            {verifiedNotice && mode === "signin" && !verificationSource && !recoverySent && (
+              <p className="login-verification-message" role="status">Email verified. You can sign in now.</p>
+            )}
+
+            {verificationSource ? (
               <div className="login-verification">
                 <div className="login-verification-message" role="status">
                   <span aria-hidden="true">✉</span>
                   <p>
-                    We sent a verification link to <strong>{email.trim()}</strong>. Click it to prove
-                    the address is yours - then sign in and we&apos;ll take you straight into setup.
+                    {verificationSource === "signup" ? (
+                      <>If you created a new account, check <strong>{email.trim()}</strong> for a verification link. If you already have an account, sign in; accounts that still need verification will receive a fresh link.</>
+                    ) : (
+                      <>We sent a fresh verification link to <strong>{email.trim()}</strong>. Click it to prove the address is yours, then sign in and we&apos;ll take you straight into setup.</>
+                    )}
                   </p>
                 </div>
-                <p className="login-hint">No email? Check spam, or try signing in - that sends a fresh link automatically.</p>
-                <button className="login-text-button login-back-button" type="button" onClick={toggleMode}>
+                <p className="login-hint">No email? Check your spam folder, or request another verification link.</p>
+                {verificationResent ? <p className="login-hint" role="status">If this account still needs verification, check your inbox for a new link.</p> : (
+                  <button className="login-text-button" type="button" onClick={() => void resendVerification()} disabled={busy}>
+                    {busy ? "Sending…" : "Resend verification email"}
+                  </button>
+                )}
+                {error && <p className="login-error" role="alert">{error}</p>}
+                <button className="login-text-button login-back-button" type="button" onClick={returnToSignIn}>
+                  <span aria-hidden="true">←</span> Back to sign in
+                </button>
+              </div>
+            ) : recoverySent ? (
+              <div className="login-verification">
+                <p className="login-verification-message" role="status">We sent a password reset link to <strong>{email.trim()}</strong> if an account uses that address.</p>
+                <button className="login-text-button login-back-button" type="button" onClick={returnToSignIn}>
                   <span aria-hidden="true">←</span> Back to sign in
                 </button>
               </div>
@@ -188,7 +246,7 @@ export function LoginPage() {
                     />
                   </div>
 
-                  <div className="login-field">
+                  {mode !== "recovery" && <div className="login-field">
                     <label htmlFor="login-password">Password</label>
                     <div className="login-password-wrap">
                       <input
@@ -216,7 +274,7 @@ export function LoginPage() {
                         )}
                       </button>
                     </div>
-                  </div>
+                  </div>}
 
                   {error && (
                     <p className="login-error" role="alert">
@@ -226,17 +284,18 @@ export function LoginPage() {
 
                   <button className="login-submit" type="submit" disabled={busy}>
                     {busy && <Spinner />}
-                    {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
+                    {busy ? "Please wait…" : mode === "recovery" ? "Send reset link" : mode === "signup" ? "Create account" : "Sign in"}
                     {!busy && <span aria-hidden="true">→</span>}
                   </button>
                 </form>
 
                 <p className="login-mode-switch">
-                  {mode === "signup" ? "Already have an account?" : "New to Chaste?"}{" "}
-                  <button className="login-text-button" type="button" onClick={toggleMode}>
-                    {mode === "signup" ? "Sign in" : "Create an account"}
+                  {mode === "recovery" ? "Remembered your password?" : mode === "signup" ? "Already have an account?" : "New to Chaste?"}{" "}
+                  <button className="login-text-button" type="button" onClick={mode === "recovery" ? returnToSignIn : toggleMode}>
+                    {mode === "recovery" ? "Sign in" : mode === "signup" ? "Sign in" : "Create an account"}
                   </button>
                 </p>
+                {mode === "signin" && <p className="login-mode-switch"><button className="login-text-button" type="button" onClick={() => { setMode("recovery"); setError(null); }}>Forgot your password?</button></p>}
               </>
             )}
           </div>

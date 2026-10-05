@@ -37,7 +37,7 @@ const bodySchema = z.object({
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   invoiceFooter: z.string().max(300).optional(),
   layout: z.enum(["classic", "modern"]).optional(),
-  intentId: z.string().optional(),
+  intentId: z.string().max(200).refine((value) => !value.includes("\r") && !value.includes("\n") && !value.includes("\u0000")).optional(),
 });
 
 export async function POST(req: Request) {
@@ -50,12 +50,12 @@ export async function POST(req: Request) {
   const db = getDb().db;
   const executor = buildExecutor(db, buildRegistry(db));
   const result = await executor.execute("iam.setOrgBranding", ctx, parsed.data);
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 });
   if (result.pendingApproval) {
     return NextResponse.json(
       { pendingApproval: true, hint: "Branding changes proposed by the workmate wait for approval in the Approvals inbox." },
       { status: 202 },
     );
   }
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 });
   return NextResponse.json({ ok: true });
 }

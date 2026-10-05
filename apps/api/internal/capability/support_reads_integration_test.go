@@ -49,6 +49,11 @@ func TestGoSupportLibraryReadMatchesLegacyListsAndScopesOrganization(t *testing.
 		VALUES ($1::uuid, 'Foreign article', 'Must stay hidden', 'other')`, fx.otherOrgID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := fx.owner.Exec(fx.ctx, `
+		INSERT INTO support_kb_articles (org_id, title, body, category, is_public)
+		VALUES ($1::uuid, 'Published returns policy', 'Public returns instructions', 'billing', true)`, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
 
 	input := json.RawMessage(`{}`)
 	result, err := fx.executor.Execute(fx.ctx,
@@ -65,9 +70,23 @@ func TestGoSupportLibraryReadMatchesLegacyListsAndScopesOrganization(t *testing.
 		output.Canned[1].ID != refundID || output.Canned[1].Shortcut != "/refund" || output.Canned[0].ID == foreignCannedID {
 		t.Fatalf("canned responses=%+v, want this organization's two rows ordered by shortcut", output.Canned)
 	}
-	if len(output.Articles) != 2 || output.Articles[0].ID != faqID || output.Articles[0].Category != nil ||
-		output.Articles[1].ID != returnsID || output.Articles[1].Category == nil || *output.Articles[1].Category != "billing" {
+	if len(output.Articles) != 3 || output.Articles[0].ID != faqID || output.Articles[0].Category != nil ||
+		output.Articles[1].IsPublic != true || output.Articles[1].Title != "Published returns policy" ||
+		output.Articles[2].ID != returnsID || output.Articles[2].Category == nil || *output.Articles[2].Category != "billing" {
 		t.Fatalf("articles=%+v, want this organization's rows ordered by title with nullable category", output.Articles)
+	}
+
+	publicResult, err := RunPublicSupportReadTool(fx.ctx, fx.owner, fx.orgID,
+		"22222222-2222-4222-8222-222222222222", PublicSupportSearchKnowledgeTool, json.RawMessage(`{"query":"returns"}`))
+	if err != nil {
+		t.Fatalf("public support knowledge lookup: %v", err)
+	}
+	var publicOutput SupportSearchKnowledgeOutput
+	if err := json.Unmarshal(publicResult, &publicOutput); err != nil {
+		t.Fatalf("decode public support knowledge output: %v", err)
+	}
+	if len(publicOutput.Results) != 1 || publicOutput.Results[0].Source == nil || *publicOutput.Results[0].Source != "Published returns policy" {
+		t.Fatalf("public support search exposed unpublished or foreign articles: %+v", publicOutput.Results)
 	}
 }
 

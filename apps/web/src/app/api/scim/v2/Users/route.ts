@@ -24,6 +24,17 @@ const scimError = (status: number, detail: string) =>
     { status },
   );
 
+const DEFAULT_PAGE_COUNT = 100;
+const MAX_PAGE_COUNT = 200;
+const MAX_INT32 = 2_147_483_647;
+
+function parsePage(value: string | null, fallback: number, minimum: number): number | null {
+  if (value === null || value === "") return fallback;
+  if (!/^\+?\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed <= MAX_INT32 && parsed >= minimum ? parsed : null;
+}
+
 async function resolveOrg(req: Request): Promise<string | null> {
   const limit = scimAuthLimit(requestIp(req));
   if (!limit.allowed) return null;
@@ -61,8 +72,16 @@ export async function GET(req: Request) {
   const orgId = await resolveOrg(req);
   if (!orgId) return scimError(401, "invalid or missing SCIM token");
   const db = getDb().db;
-  const filter = new URL(req.url).searchParams.get("filter") ?? "";
-  const eqMatch = /userName\s+eq\s+"([^"]+)"/i.exec(filter);
+  const params = new URL(req.url).searchParams;
+  const startIndex = parsePage(params.get("startIndex"), 1, 1);
+  const requestedCount = parsePage(params.get("count"), DEFAULT_PAGE_COUNT, 0);
+  if (startIndex === null || requestedCount === null) {
+    return scimError(400, "startIndex and count must be non-negative integers; startIndex must be at least 1");
+  }
+  const count = Math.min(requestedCount, MAX_PAGE_COUNT);
+  const filter = params.get("filter") ?? "";
+  const eqMatch = filter === "" ? null : /^\s*userName\s+eq\s+"([^"\\]{1,320})"\s*$/i.exec(filter);
+  if (filter !== "" && !eqMatch) return scimError(400, "unsupported SCIM filter");
 
   const rows = await db
     .select({ id: users.id, email: users.email, name: users.name })
@@ -70,11 +89,20 @@ export async function GET(req: Request) {
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(eq(memberships.orgId, orgId));
 
-  const matched = eqMatch ? rows.filter((r) => r.email.toLowerCase() === eqMatch[1]!.toLowerCase()) : rows;
+  const matched = (eqMatch ? rows.filter((r) => r.email.toLowerCase() === eqMatch[1]!.toLowerCase()) : rows)
+    .sort((left, right) => {
+      const leftEmail = left.email.toLowerCase();
+      const rightEmail = right.email.toLowerCase();
+      if (leftEmail !== rightEmail) return leftEmail < rightEmail ? -1 : 1;
+      return left.id === right.id ? 0 : left.id < right.id ? -1 : 1;
+    });
+  const page = matched.slice(startIndex - 1, startIndex - 1 + count);
   return NextResponse.json({
     schemas: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
     totalResults: matched.length,
-    Resources: matched.map((r) => toScimUser(r, true)),
+    startIndex,
+    itemsPerPage: page.length,
+    Resources: page.map((r) => toScimUser(r, true)),
   });
 }
 

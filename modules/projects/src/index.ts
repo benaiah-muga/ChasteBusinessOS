@@ -93,6 +93,7 @@ const createTask = (deps: ModuleDeps) =>
           .select({ id: projects.id, status: projects.status })
           .from(projects)
           .where(and(eq(projects.id, input.projectId), eq(projects.orgId, ctx.actor.orgId)))
+          .for("update")
           .limit(1);
         if (!project) throw new Error("project not found");
         if (project.status !== "active") throw new Error("project is not active");
@@ -142,16 +143,26 @@ const moveTask = (deps: ModuleDeps) =>
     }),
     output: z.object({ moved: z.literal(true), status: z.string() }),
     execute: async (ctx, input) => {
-      const updated = await deps.db
-        .update(projectTasks)
-        .set({
-          status: input.status,
-          ...(input.position !== undefined ? { position: input.position } : {}),
-        })
-        .where(and(eq(projectTasks.id, input.taskId), eq(projectTasks.orgId, ctx.actor.orgId)))
-        .returning({ id: projectTasks.id });
-      if (updated.length === 0) throw new Error("task not found");
-      return { moved: true as const, status: input.status };
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [task] = await tx
+          .select({ projectStatus: projects.status })
+          .from(projectTasks)
+          .innerJoin(projects, and(eq(projects.id, projectTasks.projectId), eq(projects.orgId, projectTasks.orgId)))
+          .where(and(eq(projectTasks.id, input.taskId), eq(projectTasks.orgId, ctx.actor.orgId)))
+          .for("update", { of: projects })
+          .limit(1);
+        if (!task) throw new Error("task not found");
+        if (task.projectStatus !== "active") throw new Error("project is not active");
+
+        await tx
+          .update(projectTasks)
+          .set({
+            status: input.status,
+            ...(input.position !== undefined ? { position: input.position } : {}),
+          })
+          .where(and(eq(projectTasks.id, input.taskId), eq(projectTasks.orgId, ctx.actor.orgId)));
+        return { moved: true as const, status: input.status };
+      });
     },
   });
 
@@ -166,13 +177,23 @@ const assignTask = (deps: ModuleDeps) =>
     input: z.object({ taskId: z.string().uuid(), assigneeUserId: z.string().uuid().optional() }),
     output: z.object({ assigned: z.literal(true) }),
     execute: async (ctx, input) => {
-      const updated = await deps.db
-        .update(projectTasks)
-        .set({ assigneeUserId: input.assigneeUserId ?? null })
-        .where(and(eq(projectTasks.id, input.taskId), eq(projectTasks.orgId, ctx.actor.orgId)))
-        .returning({ id: projectTasks.id });
-      if (updated.length === 0) throw new Error("task not found");
-      return { assigned: true as const };
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [task] = await tx
+          .select({ projectStatus: projects.status })
+          .from(projectTasks)
+          .innerJoin(projects, and(eq(projects.id, projectTasks.projectId), eq(projects.orgId, projectTasks.orgId)))
+          .where(and(eq(projectTasks.id, input.taskId), eq(projectTasks.orgId, ctx.actor.orgId)))
+          .for("update", { of: projects })
+          .limit(1);
+        if (!task) throw new Error("task not found");
+        if (task.projectStatus !== "active") throw new Error("project is not active");
+
+        await tx
+          .update(projectTasks)
+          .set({ assigneeUserId: input.assigneeUserId ?? null })
+          .where(and(eq(projectTasks.id, input.taskId), eq(projectTasks.orgId, ctx.actor.orgId)));
+        return { assigned: true as const };
+      });
     },
   });
 

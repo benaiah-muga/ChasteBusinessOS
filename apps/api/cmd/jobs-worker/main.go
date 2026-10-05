@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/capability"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/dbx"
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/jobs"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -73,7 +75,94 @@ func run(logger *slog.Logger) error {
 	logger.Info("Go capability jobs worker started", "worker_id", workerID,
 		"routine_scheduler_enabled", os.Getenv("GO_ROUTINE_SCHEDULER") == "1",
 		"routine_agent_runner_enabled", os.Getenv("GO_ROUTINE_AGENT_RUNNER") == "1")
-	return worker.Run(runCtx)
+	var embeddingErr chan error
+	if os.Getenv("GO_SUPPORT_EMBEDDING_WORKER") == "1" {
+		model, err := capability.SupportEmbeddingModelFromEnv()
+		if err != nil {
+			return err
+		}
+		embedder, err := capability.SupportEmbeddingClientFromEnv()
+		if err != nil {
+			return err
+		}
+		embeddingErr = make(chan error, 1)
+		logger.Info("Go public support embedding worker started", "model", model)
+		go func() {
+			if err := runSupportEmbeddingWorker(runCtx, workerPool, appPool, model, embedder, logger); err != nil && !errors.Is(err, context.Canceled) {
+				embeddingErr <- err
+				stop()
+			}
+		}()
+	}
+	err = worker.Run(runCtx)
+	if embeddingErr != nil {
+		select {
+		case workerErr := <-embeddingErr:
+			return workerErr
+		default:
+		}
+	}
+	return err
+}
+
+func runSupportEmbeddingWorker(ctx context.Context, candidateDB interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, appDB dbx.Beginner, model string, embedder capability.SupportKnowledgeEmbedder, logger *slog.Logger) error {
+	if candidateDB == nil || appDB == nil || model == "" || embedder == nil {
+		return errors.New("public support embedding worker is not configured")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	lastOrgID := ""
+	for {
+		nextOrgID, err := processSupportEmbeddingBatch(ctx, candidateDB, appDB, model, embedder, logger, lastOrgID)
+		if err != nil {
+			return err
+		}
+		lastOrgID = nextOrgID
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func processSupportEmbeddingBatch(ctx context.Context, candidateDB interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, appDB dbx.Beginner, model string, embedder capability.SupportKnowledgeEmbedder, logger *slog.Logger, afterOrgID string) (string, error) {
+	var cursor any
+	if afterOrgID != "" {
+		cursor = afterOrgID
+	}
+	rows, err := candidateDB.Query(ctx, `SELECT org_id::text FROM jobs_worker.list_public_support_embedding_orgs($1, $2::uuid)`, 20, cursor)
+	if err != nil {
+		return afterOrgID, err
+	}
+	orgIDs := make([]string, 0, 20)
+	for rows.Next() {
+		var orgID string
+		if err := rows.Scan(&orgID); err != nil {
+			rows.Close()
+			return afterOrgID, err
+		}
+		orgIDs = append(orgIDs, orgID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return afterOrgID, err
+	}
+	rows.Close()
+	for _, orgID := range orgIDs {
+		afterOrgID = orgID
+		if _, err := capability.ProcessOnePublicSupportArticleEmbedding(ctx, appDB, orgID, model, embedder); err != nil {
+			logger.Error("public support article embedding failed", "org_id", orgID, "error", err.Error())
+		}
+	}
+	return afterOrgID, nil
 }
 
 func newWorkerID() (string, error) {

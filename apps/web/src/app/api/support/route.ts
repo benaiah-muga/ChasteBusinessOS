@@ -58,6 +58,7 @@ const actionSchema = z.discriminatedUnion("action", [
     title: z.string().min(1).max(200),
     body: z.string().min(1).max(20000),
     category: z.string().max(40).optional(),
+    isPublic: z.boolean().optional(),
   }),
 ]);
 
@@ -229,6 +230,7 @@ export async function GET(req: Request) {
               title: z.string(),
               body: z.string(),
               category: z.string().nullable(),
+              isPublic: z.boolean(),
             }).strict()).max(100),
           }).strict(),
         }).strict().safeParse(body);
@@ -264,7 +266,7 @@ export async function GET(req: Request) {
       .limit(100);
     return NextResponse.json({
       canned: canned.map((c) => ({ id: c.id, shortcut: c.shortcut, title: c.title, body: c.body })),
-      articles: articles.map((a) => ({ id: a.id, title: a.title, body: a.body, category: a.category })),
+      articles: articles.map((a) => ({ id: a.id, title: a.title, body: a.body, category: a.category, isPublic: a.isPublic })),
     });
   }
 
@@ -457,6 +459,7 @@ export async function POST(req: Request) {
         title: input.title,
         body: input.body,
         category: input.category,
+        isPublic: input.isPublic,
       });
       return respond(result);
     }

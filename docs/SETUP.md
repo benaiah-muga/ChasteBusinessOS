@@ -214,10 +214,12 @@ pnpm dev
 ```
 
 Open <http://localhost:3000>. This is the React/Vite app. The legacy
-compatibility server runs on <http://localhost:3001> and serves API routes and
-pages that have not moved yet. Vite proxies those requests to port 3001.
-Better Auth remains the session owner during migration. Use `localhost` for
-both URLs so the browser sends the existing host-scoped session cookie. Set
+compatibility server runs on <http://localhost:3001> and serves pages and API
+routes that have not moved yet. Vite proxies supported `/api/auth/*` requests
+to Go by default and other unmigrated API routes to port 3001. Set
+`CHASTE_GO_AUTH_ROUTE=0` only to use the legacy auth bridge for compatibility.
+Use `localhost` for both URLs so the browser sends the existing host-scoped
+session cookie. Set
 `CHASTE_LEGACY_WEB_ORIGIN` if the compatibility server uses a different port.
 The Go API runs separately on port 8080 when Go-backed routes are enabled.
 

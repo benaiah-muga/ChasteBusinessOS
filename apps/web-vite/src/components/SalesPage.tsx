@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { fetchSalesEnabled, fetchSalesOrders, SalesApiError, type SalesOrder } from "../api/sales";
+import { confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, SalesApiError, type SalesOrder } from "../api/sales";
 import { CrmApiError, fetchCrmCustomers, type CrmCustomer } from "../api/crm";
 import { legacyUrl } from "../legacy";
 import "./sales-page.css";
@@ -63,10 +63,56 @@ function formatStatus(status: string): string {
   return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function savedConfirmIntent(orderId: string): string | null {
+  try {
+    const value = sessionStorage.getItem(`chaste:sales-confirm-intent:${orderId}`);
+    return value && /^[0-9a-f-]{36}$/i.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function savedAllowBackorder(orderId: string): boolean {
+  try {
+    return sessionStorage.getItem(`chaste:sales-confirm-backorder:${orderId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistConfirmIntent(orderId: string, intentId: string, pending: boolean, allowBackorder: boolean) {
+  try {
+    sessionStorage.setItem(`chaste:sales-confirm-intent:${orderId}`, intentId);
+    sessionStorage.setItem(`chaste:sales-confirm-pending:${orderId}`, pending ? "1" : "0");
+    sessionStorage.setItem(`chaste:sales-confirm-backorder:${orderId}`, allowBackorder ? "1" : "0");
+  } catch { /* In-memory intent reuse still protects retries for this page. */ }
+}
+
+function clearConfirmIntent(orderId: string) {
+  try {
+    sessionStorage.removeItem(`chaste:sales-confirm-intent:${orderId}`);
+    sessionStorage.removeItem(`chaste:sales-confirm-pending:${orderId}`);
+    sessionStorage.removeItem(`chaste:sales-confirm-backorder:${orderId}`);
+  } catch { /* The server remains the source of truth for the action result. */ }
+}
+
+function hasSavedPendingApproval(orderId: string): boolean {
+  try {
+    return sessionStorage.getItem(`chaste:sales-confirm-pending:${orderId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<OrderFilter>("all");
+  const [confirmingOrderId, setConfirmingOrderId] = useState<string | null>(null);
+  const [approvalWaitingOrderIds, setApprovalWaitingOrderIds] = useState<Set<string>>(() => new Set());
+  const [allowBackorder, setAllowBackorder] = useState<Record<string, boolean>>({});
+  const [actionNotice, setActionNotice] = useState<{ tone: "success" | "pending" | "error"; message: string } | null>(null);
+  const confirmIntents = useRef(new Map<string, string>());
   const searchRef = useRef<HTMLInputElement>(null);
   const currency = useMemo(() => currencyFor(baseCurrency), [baseCurrency]);
 
@@ -128,6 +174,56 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
     });
   }, [customerNames, filter, search, state]);
 
+  async function handleConfirm(order: SalesOrder) {
+    const checkingApproval = approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id);
+    if (!checkingApproval && !window.confirm(`Confirm order #${order.number}?`)) return;
+    const intentId = confirmIntents.current.get(order.id) ?? savedConfirmIntent(order.id) ?? crypto.randomUUID();
+    confirmIntents.current.set(order.id, intentId);
+    const backorderChoice = allowBackorder[order.id] ?? savedAllowBackorder(order.id);
+    persistConfirmIntent(order.id, intentId, checkingApproval, backorderChoice);
+    setConfirmingOrderId(order.id);
+    setActionNotice(null);
+    try {
+      const result = await confirmSalesOrder(order.id, intentId, backorderChoice);
+      if (result.kind === "pending") {
+        persistConfirmIntent(order.id, intentId, true, backorderChoice);
+        setApprovalWaitingOrderIds((current) => new Set(current).add(order.id));
+        setActionNotice({ tone: "pending", message: result.reason });
+        return;
+      }
+      confirmIntents.current.delete(order.id);
+      clearConfirmIntent(order.id);
+      setApprovalWaitingOrderIds((current) => {
+        const next = new Set(current);
+        next.delete(order.id);
+        return next;
+      });
+      setState((current) => current.status !== "ready" ? current : {
+        ...current,
+        orders: current.orders.map((candidate) => candidate.id === order.id
+          ? { ...candidate, status: "confirmed", backordered: result.backordered }
+          : candidate),
+      });
+      setActionNotice({ tone: "success", message: `Order #${order.number} confirmed.` });
+    } catch (error) {
+      if (error instanceof SalesApiError && error.status === 422) {
+        confirmIntents.current.delete(order.id);
+        clearConfirmIntent(order.id);
+        setApprovalWaitingOrderIds((current) => {
+          const next = new Set(current);
+          next.delete(order.id);
+          return next;
+        });
+      }
+      setActionNotice({
+        tone: "error",
+        message: error instanceof SalesApiError ? error.message : "The order confirmation could not be completed.",
+      });
+    } finally {
+      setConfirmingOrderId(null);
+    }
+  }
+
   return (
     <main className="sales-page">
       <header className="sales-page-header">
@@ -141,6 +237,8 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
           <a className="sales-full-workspace" href={legacyUrl("/sales")}>Open full sales workspace</a>
         </div>
       </header>
+
+      {actionNotice && <p className={`sales-action-notice sales-action-notice-${actionNotice.tone}`} role={actionNotice.tone === "error" ? "alert" : "status"}>{actionNotice.message}</p>}
 
       {state.status === "ready" && state.orders.length > 0 && (
         <div className="sales-order-tools">
@@ -209,7 +307,7 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
         <section className="sales-table-card" aria-label="Sales orders">
           <div className="sales-table-scroll">
             <table className="sales-table">
-              <thead><tr><th scope="col">Order</th><th scope="col">Customer</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Total</th></tr></thead>
+              <thead><tr><th scope="col">Order</th><th scope="col">Customer</th><th scope="col">Status</th><th scope="col">Created</th><th scope="col">Total</th><th scope="col">Actions</th></tr></thead>
               <tbody>{filtered.map((order) => (
                 <tr key={order.id}>
                   <th scope="row">#{order.number}</th>
@@ -217,6 +315,21 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
                   <td><span className="sales-status">{formatStatus(order.status)}</span></td>
                   <td><time dateTime={order.createdAt}>{new Date(order.createdAt).toLocaleDateString()}</time></td>
                   <td className="sales-total">{formatMoney(order.totalMinor, currency)}</td>
+                  <td>{order.status === "draft" && <>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={allowBackorder[order.id] ?? savedAllowBackorder(order.id)}
+                        onChange={(event) => {
+                          const checked = event.currentTarget.checked;
+                          setAllowBackorder((current) => ({ ...current, [order.id]: checked }));
+                        }}
+                        disabled={confirmingOrderId === order.id || approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) || savedConfirmIntent(order.id) !== null || confirmIntents.current.has(order.id)}
+                      />
+                      Allow backorder
+                    </label>
+                    <button type="button" disabled={confirmingOrderId !== null} onClick={() => void handleConfirm(order)}>{confirmingOrderId === order.id ? "Checking…" : approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) ? `Check approval #${order.number}` : `Confirm #${order.number}`}</button>
+                  </>}</td>
                 </tr>
               ))}</tbody>
             </table>

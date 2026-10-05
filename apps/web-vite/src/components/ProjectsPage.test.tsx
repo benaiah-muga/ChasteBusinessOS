@@ -79,6 +79,49 @@ describe("Vite projects page", () => {
     expect(fetchMock).toHaveBeenCalledWith(`/api/projects?projectId=${projectId}`, expect.objectContaining({ credentials: "same-origin" }));
   });
 
+  it("ignores an already-started board response after switching projects", async () => {
+    const secondProject = { ...activeProject, id: secondProjectId, name: "Warehouse fit-out" };
+    let resolveFirstBoard!: (response: Response) => void;
+    const firstBoardResponse = new Promise<Response>((resolve) => { resolveFirstBoard = resolve; });
+    let firstBoardRequest = true;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/modules") return projectModules();
+      if (path === "/api/projects") return Response.json({ projects: [activeProject, secondProject] });
+      if (path === `/api/projects?projectId=${projectId}` && firstBoardRequest) {
+        firstBoardRequest = false;
+        return firstBoardResponse;
+      }
+      if (path === `/api/projects?projectId=${projectId}`) return Response.json(board());
+      if (path === `/api/projects?projectId=${secondProjectId}`) return Response.json({
+        columns: [
+          { status: "todo", tasks: [{ id: taskId, title: "Measure loading bay", parentTaskId: null, priority: "medium", assigneeUserId: null, dueAt: null, position: 0 }] },
+          { status: "doing", tasks: [] },
+          { status: "done", tasks: [] },
+        ],
+      });
+      if (path === "/api/team") return team();
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectsPage />);
+
+    const secondProjectButton = await screen.findByRole("button", { name: /Warehouse fit-out/ });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === `/api/projects?projectId=${projectId}`)).toBe(true));
+    fireEvent.click(secondProjectButton);
+    expect(await screen.findByText("Measure loading bay")).not.toBeNull();
+
+    await act(async () => {
+      resolveFirstBoard(Response.json(board()));
+      await firstBoardResponse;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByRole("heading", { name: "Board · Warehouse fit-out" })).not.toBeNull();
+    expect(screen.getByRole("region", { name: "todo task column" }).textContent).toContain("Measure loading bay");
+    expect(screen.getByRole("region", { name: "todo task column" }).textContent).not.toContain("Draft the launch brief");
+  });
+
   it("creates a project with the legacy date format, refreshes the list, and selects its board", async () => {
     const createdProject = { ...activeProject, id: secondProjectId, name: "Q4 rollout", dueAt: "2026-12-02T00:00:00.000Z" };
     let projects = [activeProject];
@@ -170,6 +213,46 @@ describe("Vite projects page", () => {
     expect(payload.intentId).toEqual(expect.any(String));
   });
 
+  it("keeps the selected project board when an earlier project's move finishes late", async () => {
+    const secondProject = { ...activeProject, id: secondProjectId, name: "Warehouse fit-out" };
+    let resolveMove!: (response: Response) => void;
+    const moveResponse = new Promise<Response>((resolve) => { resolveMove = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return projectModules();
+      if (path === "/api/projects" && init?.method !== "POST") return Response.json({ projects: [activeProject, secondProject] });
+      if (path === `/api/projects?projectId=${projectId}`) return Response.json(board());
+      if (path === `/api/projects?projectId=${secondProjectId}`) return Response.json({
+        columns: [
+          { status: "todo", tasks: [{ id: taskId, title: "Measure loading bay", parentTaskId: null, priority: "medium", assigneeUserId: null, dueAt: null, position: 0 }] },
+          { status: "doing", tasks: [] },
+          { status: "done", tasks: [] },
+        ],
+      });
+      if (path === "/api/team") return team();
+      if (path === "/api/projects" && init?.method === "POST") return moveResponse;
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ProjectsPage />);
+    await screen.findByRole("heading", { name: "Board · Website relaunch" });
+
+    fireEvent.change(await screen.findByRole("combobox", { name: "Move Draft the launch brief" }), { target: { value: "doing" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: /Warehouse fit-out/ }));
+    expect(await screen.findByRole("heading", { name: "Board · Warehouse fit-out" })).not.toBeNull();
+    expect((await screen.findByRole("region", { name: "todo task column" })).textContent).toContain("Measure loading bay");
+
+    await act(async () => {
+      resolveMove(Response.json({ ok: true, data: { moved: true, status: "doing" } }));
+    });
+
+    expect(screen.getByRole("heading", { name: "Board · Warehouse fit-out" })).not.toBeNull();
+    expect(screen.getByRole("region", { name: "todo task column" }).textContent).toContain("Measure loading bay");
+    expect(screen.getByRole("region", { name: "todo task column" }).textContent).not.toContain("Draft the launch brief");
+  });
+
   it("clears task assignment by omitting the empty assignee field", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -192,7 +275,7 @@ describe("Vite projects page", () => {
     expect(JSON.parse(String(post?.[1]?.body))).not.toHaveProperty("assigneeUserId");
   });
 
-  it("requires archive confirmation and keeps archived task controls consistent with the legacy page", async () => {
+  it("requires archive confirmation and makes archived task controls read-only", async () => {
     let project = activeProject;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -220,8 +303,9 @@ describe("Vite projects page", () => {
     expect(await screen.findByText(/This project is archived/)).not.toBeNull();
     expect(screen.queryByLabelText("New task")).toBeNull();
     expect(screen.queryByRole("button", { name: "Archive project" })).toBeNull();
-    expect((screen.getByRole("combobox", { name: "Move Draft the launch brief" }) as HTMLSelectElement).disabled).toBe(false);
-    expect((screen.getByRole("combobox", { name: "Assign Review the copy" }) as HTMLSelectElement).disabled).toBe(false);
+    expect((screen.getByRole("combobox", { name: "Move Draft the launch brief" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Assign Review the copy" }) as HTMLSelectElement).disabled).toBe(true);
+    expect(screen.getByText("Draft the launch brief").closest("li")?.draggable).toBe(false);
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ action: "archiveProject", projectId });
     expect(JSON.parse(String(post?.[1]?.body)).intentId).toEqual(expect.any(String));
