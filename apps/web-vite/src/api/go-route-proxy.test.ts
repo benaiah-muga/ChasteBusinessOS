@@ -193,6 +193,15 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/signals/")).toBe(false);
   });
 
+  it("keeps the My Work selector GET-only and exact", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MY_WORK_ROUTE: "1" });
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work?status=open")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work/summarize")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/my-work/")).toBe(false);
+  });
+
   it("keeps unsupported routine methods and subpaths on the legacy route", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ROUTINES_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "DELETE", "/api/routines")).toBe(false);
@@ -533,6 +542,7 @@ describe("Vite Go route proxy selection", () => {
 
     for (const [method, path] of [
       ["GET", "/api/my-work/summarize"],
+      ["GET", "/api/my-work/"],
       ["DELETE", "/api/my-work/summarize"],
       ["POST", "/api/my-work/summarize/extra"],
       ["POST", "/api/signals"],

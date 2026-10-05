@@ -728,6 +728,9 @@ type rejectionPayload struct {
 }
 
 func permissionForCapability(capabilityID string) (string, bool) {
+	if spec, ok := capabilitySpecs[capabilityID]; ok && spec.permission != "" {
+		return spec.permission, true
+	}
 	switch capabilityID {
 	case createCustomerCapabilityID, saveCustomerViewCapabilityID, restoreCustomerViewCapabilityID, deactivateCustomerCapabilityID,
 		mergeCustomersCapabilityID, restoreCustomerMergeCapabilityID, importCustomersCapabilityID,
