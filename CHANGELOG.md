@@ -17,6 +17,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - The `/sessions` page is now Vite-owned, with session trajectories, canonical replay, durable-run details, and context metrics read through Go's authenticated GET routes. Go returns oversized details with the same bounded error behavior as legacy.
 - The `/ledger` page is now Vite-owned and its session-authenticated `GET /api/ledger` read is Go-owned. Unsupported API methods and unknown paths keep their legacy fallback.
 - Session-authenticated `GET /api/support/channels` now uses Go with org, membership, and module checks. Embed tokens remain visible only to organization admins; POST settings changes stay on legacy.
+- Vite segment creation now defaults to the Go `marketing.createSegment` capability. Permission checks, policy approvals, intent receipts, and the legacy path for other Marketing actions remain in place.
 - SCIM collection and single-user reads and writes now use Go by default. Bearer token writes execute through the governed `iam.scimProvisionUser` capability with org scope, idempotent receipts, and external-actor audit events; malformed identity inputs are rejected.
 - Session-authenticated `GET /api/inventory` now serves the Go capability-backed catalog and SKU movement history. Inventory writes remain on legacy, and the response preserves the full catalog payload for Vite inventory consumers.
 - The `/login` page is now Vite-owned. Sign-in, sign-up, verification, and password recovery continue to use the Go-backed auth endpoints.
