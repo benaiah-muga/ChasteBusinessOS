@@ -8,6 +8,7 @@ import {
   goInventoryTransferWritesFromEnv,
   goInventoryLocationReservationWritesFromEnv,
   goInventoryBarcodeLookupFromEnv,
+  goCrmDealStageMoveFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -54,6 +55,14 @@ describe("inventory barcode lookup Go selector", () => {
     expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_INVENTORY_BARCODE_LOOKUP: "1" })).toBe(true);
     expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goInventoryBarcodeLookupFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_INVENTORY_BARCODE_LOOKUP: "1" })).toBe(false);
+  });
+});
+
+describe("CRM deal stage Go selector", () => {
+  it("requires both the deal-stage selector and session capability route", () => {
+    expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_DEAL_STAGE_MOVE: "1" })).toBe(true);
+    expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_DEAL_STAGE_MOVE: "1" })).toBe(false);
   });
 });
 

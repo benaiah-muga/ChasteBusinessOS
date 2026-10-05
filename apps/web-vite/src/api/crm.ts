@@ -180,6 +180,97 @@ export async function submitCrmAction<T extends Record<string, unknown> = Record
   signal?: AbortSignal,
 ): Promise<CrmActionOutcome<T>> {
   const { response, body } = await request(path, { method: "POST", body: JSON.stringify({ ...action, intentId: crypto.randomUUID() }) }, signal);
+  return parseCrmActionOutcome<T>(response, body);
+}
+
+export async function submitCrmDealStageMove(
+  input: { dealId: string; stage: "lead" | "qualified" | "proposal" | "negotiation" | "won" | "lost"; lostReason?: string },
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: { actorId: string | null; organizationId: string | null },
+): Promise<CrmActionOutcome<{ moved: boolean; stage: string }>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_DEAL_STAGE_MOVE__ !== "undefined" && __GO_CRM_DEAL_STAGE_MOVE__);
+  const action = { action: "move", ...input };
+  if (!useGo) return submitCrmAction("/api/deals", action, signal);
+  if (!retryScope?.actorId?.trim() || !retryScope.organizationId?.trim()) {
+    throw new CrmApiError(0, "CRM is waiting for your account and organization details. Wait for your organization to finish loading, then try again.");
+  }
+
+  const attempt = await crmDealStageAttempt(input, retryScope);
+  try {
+    let { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.moveDealStage", input, intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) {
+      ({ response, body } = await request("/api/deals", { method: "POST", body: JSON.stringify({ ...action, intentId: attempt.intentId }) }, signal));
+    }
+    const outcome = parseCrmActionOutcome<{ moved: boolean; stage: string }>(response, body);
+    if (outcome.kind === "completed") await clearCrmDealStageAttempt(attempt.storageKey);
+    return outcome;
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500) {
+      await clearCrmDealStageAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+const crmDealStageIntents = new Map<string, string>();
+
+async function crmDealStageAttempt(input: { dealId: string; stage: string; lostReason?: string }, scope?: { actorId: string | null; organizationId: string | null }): Promise<{ storageKey: string; intentId: string }> {
+  const canonical = JSON.stringify({
+    actorId: scope?.actorId ?? null,
+    organizationId: scope?.organizationId ?? null,
+    dealId: input.dealId,
+    stage: input.stage,
+    lostReason: input.lostReason?.trim() || null,
+  });
+  const canPersist = Boolean(scope?.actorId && scope.organizationId);
+  let fingerprint: string | null = null;
+  if (canPersist) {
+    try {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+      fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    } catch {
+      // Use an in-memory attempt if WebCrypto is unavailable.
+    }
+  }
+  const storageKey = fingerprint ? `chaste.crm.deal-stage.intent.v1:${fingerprint}` : `memory:${canonical}`;
+  let intentId: string | null = null;
+  if (fingerprint) {
+    try {
+      intentId = sessionStorage.getItem(storageKey);
+    } catch {
+      // The in-memory copy remains available for this page.
+    }
+  }
+  intentId ??= crmDealStageIntents.get(storageKey) ?? crypto.randomUUID();
+  crmDealStageIntents.set(storageKey, intentId);
+  if (fingerprint) {
+    try {
+      sessionStorage.setItem(storageKey, intentId);
+    } catch {
+      // The in-memory copy still keeps retries on the same attempt.
+    }
+  }
+  return { storageKey, intentId };
+}
+
+async function clearCrmDealStageAttempt(storageKey: string): Promise<void> {
+  crmDealStageIntents.delete(storageKey);
+  if (!storageKey.startsWith("chaste.crm.deal-stage.intent.v1:")) return;
+  try {
+    sessionStorage.removeItem(storageKey);
+  } catch {
+    // The terminal result is still cleared in memory.
+  }
+}
+
+function parseCrmActionOutcome<T extends Record<string, unknown>>(
+  response: Response,
+  body: unknown,
+): CrmActionOutcome<T> {
   if (response.status === 202) {
     const parsed = PendingSchema.safeParse(body);
     if (!parsed.success) throw new CrmApiError(202, "The CRM service returned an unexpected approval response.");

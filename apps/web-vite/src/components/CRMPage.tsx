@@ -17,6 +17,7 @@ import {
   fetchCrmViews,
   importCrmCustomers,
   submitCrmAction,
+  submitCrmDealStageMove,
   undoCrmImport,
 } from "../api/crm";
 import { selectedCustomersCsv } from "./customer-export";
@@ -126,7 +127,7 @@ function downloadCustomerTemplate() {
   URL.revokeObjectURL(href);
 }
 
-export function CRMPage() {
+export function CRMPage({ actorId = null, organizationId = null }: { actorId?: string | null; organizationId?: string | null } = {}) {
   const [tab, setTab] = useState<Tab>("overview");
   const [deals, setDeals] = useState<CrmDeal[]>([]);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
@@ -184,6 +185,7 @@ export function CRMPage() {
   const [draftCopied, setDraftCopied] = useState(false);
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   const timelineRequest = useRef(0);
+  const movingDealIds = useRef(new Set<string>());
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setError(null);
@@ -266,10 +268,10 @@ export function CRMPage() {
     }
   }, []);
 
-  async function mutate(path: "/api/deals" | "/api/customers" | "/api/crm" | "/api/crm/views", action: Record<string, unknown>, onDone?: (data: Record<string, unknown>) => void): Promise<boolean> {
+  async function mutate(path: "/api/deals" | "/api/customers" | "/api/crm" | "/api/crm/views", action: Record<string, unknown>, onDone?: (data: Record<string, unknown>) => void, submitAction?: () => ReturnType<typeof submitCrmAction>): Promise<boolean> {
     setBusy(true);
     try {
-      const outcome = await submitCrmAction(path, action);
+      const outcome = await (submitAction ? submitAction() : submitCrmAction(path, action));
       if (outcome.kind === "pending") {
         setNotice({ tone: "pending", text: outcome.reason });
         return false;
@@ -289,12 +291,23 @@ export function CRMPage() {
   }
 
   async function moveDeal(deal: CrmDeal, next: (typeof stages)[number], reason?: string) {
-    if (next === "lost" && (reason?.trim().length ?? 0) < 3) return;
-    const before = deals;
+    const trimmedReason = reason?.trim();
+    if (movingDealIds.current.has(deal.id) || (next === "lost" && (!trimmedReason || trimmedReason.length < 3 || trimmedReason.length > 500))) return;
+    const beforeStage = deals.find((item) => item.id === deal.id)?.stage ?? deal.stage;
     setDeals((current) => current.map((item) => item.id === deal.id ? { ...item, stage: next } : item));
-    const accepted = await mutate("/api/deals", { action: "move", dealId: deal.id, stage: next, ...(reason ? { lostReason: reason.trim() } : {}) });
-    if (!accepted) setDeals(before);
-    setMoveTarget(null); setLostReason("");
+    movingDealIds.current.add(deal.id);
+    try {
+      const action = { dealId: deal.id, stage: next, ...(trimmedReason ? { lostReason: trimmedReason } : {}) };
+      const accepted = await mutate("/api/deals", { action: "move", ...action }, undefined, () => submitCrmDealStageMove(action, undefined, undefined, { actorId, organizationId }));
+      if (!accepted) {
+        setDeals((current) => current.map((item) => item.id === deal.id ? { ...item, stage: beforeStage } : item));
+        return;
+      }
+      setMoveTarget(null);
+      setLostReason("");
+    } finally {
+      movingDealIds.current.delete(deal.id);
+    }
   }
 
   function requestMove(deal: CrmDeal, next: (typeof stages)[number]) {
@@ -598,7 +611,7 @@ export function CRMPage() {
       {profileTab === "overview" ? <><div className="crm-profile-fields"><label>Name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })} /></label><label>Email<input value={selected.email ?? ""} readOnly /></label><label>Phone<input value={profileDraft.phone} onChange={(event) => setProfileDraft({ ...profileDraft, phone: event.target.value })} /></label><label>Owner<select value={profileDraft.ownerUserId} onChange={(event) => setProfileDraft({ ...profileDraft, ownerUserId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label><label>Preferred contact<select value={profileDraft.preferredContactMethod} onChange={(event) => setProfileDraft({ ...profileDraft, preferredContactMethod: event.target.value as typeof profileDraft.preferredContactMethod })}><option value="email">Email</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option></select></label><label>Tags, comma separated<input value={profileDraft.tags} onChange={(event) => setProfileDraft({ ...profileDraft, tags: event.target.value })} /></label><label className="crm-check"><input type="checkbox" checked={profileDraft.doNotContact} onChange={(event) => setProfileDraft({ ...profileDraft, doNotContact: event.target.checked })} /> Do not contact</label><label className="crm-span">Notes<textarea value={profileDraft.notes} onChange={(event) => setProfileDraft({ ...profileDraft, notes: event.target.value })} /></label></div><div className="crm-modal-actions"><button type="button" disabled={busy} onClick={() => void saveCustomerProfile()}>Save profile</button><button type="button" onClick={() => { setTaskDraft({ ...taskDraft, customerId: selected.id, title: `Follow up with ${selected.name}` }); navigateToTab("tasks"); }}>Create follow-up</button><button type="button" onClick={() => setProfileTab("activity")}>View history</button></div>{selected.nextStep && <p className="crm-next-step">Next step: {selected.nextStep.summary}</p>}<section className="crm-follow-up-draft" aria-label="AI follow-up draft"><header><div><h3>Follow-up draft</h3><p>Use recent CRM records as context, then review and edit before outreach.</p></div><button type="button" disabled={selected.doNotContact || draftState.status === "loading"} onClick={() => void generateFollowUpDraft()}>{draftState.status === "loading" ? "Drafting…" : draftState.status === "ready" ? "Regenerate draft" : "Draft with AI"}</button></header>{selected.doNotContact ? <p className="crm-draft-warning">This customer is marked do not contact. Drafting and outreach shortcuts are disabled.</p> : draftState.status === "loading" ? <p role="status">Reviewing recent invoices, quotes, and follow-ups…</p> : draftState.status === "failed" ? <p role="alert" className="crm-draft-warning">{draftState.message}</p> : draftState.status === "ready" ? <><label>Subject<input value={draftState.subject} maxLength={180} onChange={(event) => setDraftState({ ...draftState, subject: event.target.value })} /></label><label>Message<textarea value={draftState.body} maxLength={4000} onChange={(event) => setDraftState({ ...draftState, body: event.target.value })} /></label><p className="crm-source-heading">Records used</p><ul className="crm-draft-sources">{draftState.draft.sources.map((source) => <li key={`${source.kind}-${source.refId}`}><button type="button" onClick={() => openDraftSource(source)}><strong>{source.kind}</strong><span>{source.summary}</span><small>{new Date(source.date).toLocaleDateString()}, open related record</small></button></li>)}</ul><button type="button" onClick={() => void copyFollowUpDraft()}>{draftCopied ? "Copied" : "Copy draft"}</button></> : <p>Generate a draft from recent invoices, quotes, and follow-up tasks.</p>}</section></> : <div className="crm-timeline" aria-live="polite">{timeline.filter((entry) => profileTab === "activity" || (profileTab === "invoices" ? ["invoice", "payment", "quote"].includes(entry.kind) : entry.kind === "document")).map((entry) => <article key={`${entry.kind}-${entry.refId}`}><span>{new Date(entry.date).toLocaleString()}</span><strong>{entry.kind}</strong><p>{entry.summary}</p></article>)}{timeline.length === 0 && <p>No {profileTab === "invoices" ? "invoice or payment" : profileTab === "documents" ? "document" : "activity"} history is available.</p>}</div>}
     </section></div>}
 
-    {moveTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-lost-title"><h2 id="crm-lost-title">{moveTarget.stage === "lost" ? `Mark “${moveTarget.deal.title}” as lost?` : `Move “${moveTarget.deal.title}” to ${stageLabels[moveTarget.stage]}?`}</h2><p>{moveTarget.stage === "lost" ? "Record why the deal was lost. This will be included in its audit history." : "This stage change updates the weighted pipeline forecast."}</p>{moveTarget.stage === "lost" && <label>Lost reason<textarea required autoFocus value={lostReason} onChange={(event) => setLostReason(event.target.value)} /></label>}<footer><button type="button" onClick={() => { setMoveTarget(null); setLostReason(""); }}>Cancel</button><button type="button" disabled={busy || (moveTarget.stage === "lost" && lostReason.trim().length < 3)} onClick={() => void moveDeal(moveTarget.deal, moveTarget.stage, lostReason)}>{moveTarget.stage === "lost" ? "Confirm lost" : `Move to ${stageLabels[moveTarget.stage]}`}</button></footer></section></div>}
+    {moveTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-lost-title"><h2 id="crm-lost-title">{moveTarget.stage === "lost" ? `Mark “${moveTarget.deal.title}” as lost?` : `Move “${moveTarget.deal.title}” to ${stageLabels[moveTarget.stage]}?`}</h2><p>{moveTarget.stage === "lost" ? "Record why the deal was lost. This will be included in its audit history." : "This stage change updates the weighted pipeline forecast."}</p>{moveTarget.stage === "lost" && <label>Lost reason<textarea required maxLength={500} autoFocus value={lostReason} onChange={(event) => setLostReason(event.target.value)} /></label>}<footer><button type="button" disabled={busy} onClick={() => { setMoveTarget(null); setLostReason(""); }}>Cancel</button><button type="button" disabled={busy || (moveTarget.stage === "lost" && (lostReason.trim().length < 3 || lostReason.trim().length > 500))} onClick={() => void moveDeal(moveTarget.deal, moveTarget.stage, lostReason)}>{moveTarget.stage === "lost" ? "Confirm lost" : `Move to ${stageLabels[moveTarget.stage]}`}</button></footer></section></div>}
 
     {convertTarget && <div className="crm-modal-backdrop"><section className="crm-modal crm-confirm" role="dialog" aria-modal="true" aria-labelledby="crm-convert-title"><h2 id="crm-convert-title">Convert lead</h2><p>Qualify “{convertTarget.title}” and link it to a new or existing customer.</p><div className="crm-convert-modes"><button type="button" aria-pressed={convertMode === "new"} onClick={() => setConvertMode("new")}>Create customer</button><button type="button" aria-pressed={convertMode === "existing"} onClick={() => setConvertMode("existing")}>Use existing customer</button></div>{convertMode === "new" ? <label>Customer name<input autoFocus required value={convertCustomerName} onChange={(event) => setConvertCustomerName(event.target.value)} /></label> : <label>Customer<select value={convertCustomerId} onChange={(event) => setConvertCustomerId(event.target.value)}><option value="">Choose a customer</option>{activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>}<footer><button type="button" onClick={() => setConvertTarget(null)}>Cancel</button><button type="button" disabled={busy || (convertMode === "new" ? !convertCustomerName.trim() : !convertCustomerId)} onClick={() => void convertLead()}>Convert lead</button></footer></section></div>}
 

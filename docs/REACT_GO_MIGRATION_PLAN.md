@@ -1570,3 +1570,13 @@ new owners and the manifest shows zero legacy runtime paths.
      to use the legacy `/api/inventory` action; a missing Go capability route
      falls back automatically. Preserve the `{ sku, name } | null` result and
      existing error behavior. Other cycle-count actions remain unchanged.
+161. Route only Vite CRM deal stage changes through Go's session-authenticated
+     `crm.moveDealStage` capability when `CHASTE_GO_CRM_DEAL_STAGE_MOVE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the selector to `0` to restore
+     `/api/deals`; all other CRM mutations stay on their existing routes. Keep
+     the lost-reason requirement and 500-character limit, per-deal optimistic
+     rollback, and the reason draft after pending or failed responses. Scope
+     persisted retry intents to the active actor and organization, retain the
+     intent across pending and uncertain retries, and clear it on success or a
+     terminal 4xx. A missing Go capability route falls back with the same
+     intent. Focused Vite tests pass; browser proof remains open.

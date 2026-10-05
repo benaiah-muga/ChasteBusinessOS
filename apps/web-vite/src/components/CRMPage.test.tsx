@@ -82,6 +82,45 @@ describe("Vite CRM page", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ action: "move", dealId, stage: "lost", lostReason: "Customer chose another vendor" });
   });
 
+  it("uses Go for lost-stage moves and keeps the reason draft after a pending approval", async () => {
+    vi.stubGlobal("__GO_CRM_DEAL_STAGE_MOVE__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals" && init?.method !== "POST") return Response.json({ deals: [deal("proposal")] });
+      if (path === "/api/customers") return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute") return Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Move Annual renewal" }), { target: { value: "lost" } });
+    const dialog = await screen.findByRole("dialog", { name: /Mark “Annual renewal” as lost/ });
+    const reason = screen.getByLabelText("Lost reason") as HTMLTextAreaElement;
+    expect(reason.maxLength).toBe(500);
+    expect((screen.getByRole("button", { name: "Confirm lost" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(reason, { target: { value: "ab" } });
+    expect((screen.getByRole("button", { name: "Confirm lost" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(reason, { target: { value: "x".repeat(501) } });
+    expect((screen.getByRole("button", { name: "Confirm lost" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(reason, { target: { value: "Customer chose another vendor" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm lost" }));
+
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    await waitFor(() => expect((screen.getByRole("combobox", { name: "Move Annual renewal" }) as HTMLSelectElement).value).toBe("proposal"));
+    expect(screen.getByRole("dialog", { name: /Mark “Annual renewal” as lost/ })).toBe(dialog);
+    expect((screen.getByLabelText("Lost reason") as HTMLTextAreaElement).value).toBe("Customer chose another vendor");
+    const post = fetchMock.mock.calls.find(([path]) => String(path) === "/api/capabilities/execute");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      capabilityId: "crm.moveDealStage",
+      input: { dealId, stage: "lost", lostReason: "Customer chose another vendor" },
+      intentId: expect.any(String),
+    });
+  });
+
   it("keeps a follow-up draft intact when task creation is waiting for approval", async () => {
     let taskReads = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

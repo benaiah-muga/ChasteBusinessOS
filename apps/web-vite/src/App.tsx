@@ -268,7 +268,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                             : hrPage
                               ? <HrPage key={organizationRevision} baseCurrency={baseCurrency} />
                               : crmPage
-                            ? <CRMPage key={organizationRevision} />
+                            ? <CRMPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                             : salesPage
                               ? <SalesPage key={organizationRevision} baseCurrency={baseCurrency} />
                               : posSummaryPage
