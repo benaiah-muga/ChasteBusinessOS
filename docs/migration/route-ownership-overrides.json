@@ -21,6 +21,12 @@
     },
     {
       "kind": "page",
+      "path": "/portal/[token]",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
       "path": "/",
       "owner": "vite",
       "parity": "verified"
@@ -59,6 +65,13 @@
     {
       "kind": "api",
       "path": "/api/setup",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/portal/invoice/[token]",
       "method": "GET",
       "owner": "go",
       "parity": "verified"

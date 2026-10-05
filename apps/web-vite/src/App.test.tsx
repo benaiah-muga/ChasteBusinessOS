@@ -317,6 +317,36 @@ describe("Vite app frame", () => {
     expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
+  it("serves public invoice links in Vite without session auth or credential forwarding", async () => {
+    const token = "share-token-1234567890123456";
+    window.history.replaceState(null, "", `/portal/${token}`);
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).not.toBeNull();
+    expect(authMocks.getSession).not.toHaveBeenCalled();
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(`/api/portal/invoice/${token}`, expect.objectContaining({
+      method: "GET",
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      redirect: "error",
+      headers: { Accept: "application/json" },
+    }));
+  });
+
+  it("keeps extra portal path segments on the legacy fallback", () => {
+    const path = "/portal/share-token-1234567890123456/extra";
+    window.history.replaceState(null, "", path);
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Opening this page in the current app." })).not.toBeNull();
+    expect(legacyMocks.redirectToLegacy).toHaveBeenCalledWith(path);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/portal/invoice/"))).toBe(false);
+  });
+
   it("keeps direct CRM access behind the existing session check", async () => {
     window.history.replaceState(null, "", "/crm");
     authMocks.getSession.mockResolvedValue({ data: { user: null } });

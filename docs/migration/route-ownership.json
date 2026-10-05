@@ -886,8 +886,8 @@
       "path": "/api/portal/invoice/[token]",
       "method": "GET",
       "source": "apps/web/src/app/api/portal/invoice/[token]/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1381,8 +1381,8 @@
       "kind": "page",
       "path": "/portal/[token]",
       "source": "apps/web/src/app/portal/[token]/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",

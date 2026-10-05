@@ -351,7 +351,7 @@ export function App() {
   // out and to / when a workspace already exists, so it must render outside the
   // authenticated shell.
   if (pathname === "/onboarding") return <OnboardingPage />;
-  if (pathname.startsWith("/portal/")) return <PortalInvoicePage pathname={pathname} />;
+  if (/^\/portal\/[^/]+$/.test(pathname)) return <PortalInvoicePage pathname={pathname} />;
   if (pathname.startsWith("/widget/")) return <WidgetPage pathname={pathname} />;
   // The print sheet renders outside the shell: it is chrome-less on purpose so
   // the printed page carries only the invoice.

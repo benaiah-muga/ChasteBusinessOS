@@ -435,6 +435,9 @@ describe("Vite Go route proxy selection", () => {
     const enabledMethod = await fetch(`${origin}/api/portal/invoice/token?download=1`);
     expect((await enabledMethod.json()).target).toBe("go");
 
+    const portalSuffixFallback = await fetch(`${origin}/api/portal/invoice/token/extra`);
+    expect((await portalSuffixFallback.json()).target).toBe("legacy");
+
     const modulesReadWithoutFlag = await fetch(`${origin}/api/modules`);
     expect((await modulesReadWithoutFlag.json()).target).toBe("legacy");
 
