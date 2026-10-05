@@ -1480,3 +1480,13 @@ new owners and the manifest shows zero legacy runtime paths.
      their legacy fallback. Pair `GO_SALES_ORDERS_ROUTE` with
      `CHASTE_GO_SALES_ORDERS_ROUTE` for rollback. Handler, router, and selector
      tests pass; browser proof remains open.
+151. (Implemented; Go route ownership verified) Route the Support settings
+     `POST /api/support/channels` through the existing Go handler with the
+     separate `CHASTE_GO_SUPPORT_CHANNELS_WRITE_ROUTE` selector. The handler
+     requires same-origin cookie writes and rechecks verified organization
+     membership, Support module availability, and `iam.admin` inside the
+     organization-scoped upsert. The existing GET selector is unchanged;
+     unsupported methods and extra paths remain on legacy. Set the Vite write
+     selector to `0` for rollback. Focused proxy tests pass; the existing Go
+     handler tests use a fake store, so runtime-role database upsert proof is
+     not part of this route-only tranche. Browser proof remains open.

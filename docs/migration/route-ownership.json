@@ -1198,8 +1198,8 @@
       "path": "/api/support/channels",
       "method": "POST",
       "source": "apps/web/src/app/api/support/channels/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
