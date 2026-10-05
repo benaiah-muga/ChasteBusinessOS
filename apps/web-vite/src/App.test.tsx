@@ -283,6 +283,7 @@ describe("Vite app frame", () => {
   it("admits migrated routes and document editor URLs with a document id", () => {
     expect(isViteAppPath("/analytics")).toBe(true);
     expect(isViteAppPath("/projects")).toBe(true);
+    expect(isViteAppPath("/team")).toBe(true);
     expect(isViteAppPath("/products")).toBe(true);
     expect(isViteAppPath("/documents/editor/doc-123")).toBe(true);
     expect(isViteAppPath("/documents/editor/")).toBe(false);
@@ -491,7 +492,7 @@ describe("Vite app frame", () => {
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/ledger?limit=100")).toHaveLength(2);
   });
 
-  it("keeps the team and roles page in Vite and reloads its data after an organization switch", async () => {
+  it("routes the team page to Vite and reloads its Go-owned data after an organization switch", async () => {
     window.history.replaceState(null, "", "/team");
     const fetchMock = vi.mocked(globalThis.fetch);
     render(<App />);
