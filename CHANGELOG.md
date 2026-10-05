@@ -17,7 +17,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Mount Go auth routes by default to match the Vite proxy; set `GO_AUTH_ROUTE=0` only to keep auth on the legacy handler.
 - Route the Vite Products catalog and create, edit, archive, and stock actions through Go's session-authenticated capability endpoint in new local setups. Product defaults and CSV import/undo remain on legacy routes.
 - Go supports authored document reads and parses pasted text or uploaded documents into org-scoped memory using the configured OCR and embedding providers. Parse failures retain the failed document state and failure receipt.
-- Align the opt-in Go project, team, module, dashboard, and setup handlers with legacy validation, response, permission, and readiness behavior. Route ownership remains pending until served-app proofs pass.
+- Align the Go project, team, module, dashboard, and setup handlers with legacy validation, response, permission, and readiness behavior. Project and team Go API routes are enabled in the local Vite environment and marked verified against the API contracts.
 - The `/analytics` page is now recorded as Vite-owned in the migration manifest. Direct visits load the React Analytics page and its verified Go-backed API routes.
 - The `/projects` page is now recorded as Vite-owned. Its React page preserves project and board reads, creation, task assignment and movement, archive confirmation, module state, and pending approval behavior.
 - The `/products` page is now recorded as Vite-owned. The Vite catalog preserves filtering, product and service creation, stock opening, edits, archive, CSV import with undo, module defaults, and approval-pending feedback.

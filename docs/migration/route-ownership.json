@@ -910,16 +910,16 @@
       "path": "/api/projects",
       "method": "GET",
       "source": "apps/web/src/app/api/projects/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/projects",
       "method": "POST",
       "source": "apps/web/src/app/api/projects/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1214,16 +1214,16 @@
       "path": "/api/team",
       "method": "GET",
       "source": "apps/web/src/app/api/team/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/team",
       "method": "POST",
       "source": "apps/web/src/app/api/team/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
