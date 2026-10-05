@@ -115,7 +115,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "sessions", "durableRuns"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -133,8 +133,8 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/support/public")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/scim/v2/Users")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/scim/v2/Users")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/sessions")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/durable-runs")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/sessions")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/durable-runs")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/notifications")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/analytics?dataset=analytics.invoiceAging")).toBe(true);
@@ -297,14 +297,14 @@ describe("Vite Go route proxy selection", () => {
   it("keeps sessions and durable-runs selectors independent and exact", () => {
     const sessionItem = "/api/sessions/aaaaaaaa-0000-4000-8000-000000000001";
     const runsItem = "/api/durable-runs/aaaaaaaa-0000-4000-8000-000000000001";
-    const sessionsOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSIONS_ROUTE: "1" });
+    const sessionsOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSIONS_ROUTE: "1", CHASTE_GO_DURABLE_RUNS_ROUTE: "0" });
     expect(isGoRouteRequest(sessionsOnly, "GET", "/api/sessions?limit=10")).toBe(true);
     expect(isGoRouteRequest(sessionsOnly, "GET", `${sessionItem}?include=events`)).toBe(true);
     expect(isGoRouteRequest(sessionsOnly, "GET", `${sessionItem}/replay`)).toBe(true);
     expect(isGoRouteRequest(sessionsOnly, "GET", "/api/durable-runs")).toBe(false);
     expect(isGoRouteRequest(sessionsOnly, "GET", runsItem)).toBe(false);
 
-    const durableRunsOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_DURABLE_RUNS_ROUTE: "1" });
+    const durableRunsOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSIONS_ROUTE: "0", CHASTE_GO_DURABLE_RUNS_ROUTE: "1" });
     expect(isGoRouteRequest(durableRunsOnly, "GET", "/api/durable-runs?limit=10")).toBe(true);
     expect(isGoRouteRequest(durableRunsOnly, "GET", `${runsItem}?include=steps`)).toBe(true);
     expect(isGoRouteRequest(durableRunsOnly, "GET", "/api/sessions")).toBe(false);
@@ -320,6 +320,16 @@ describe("Vite Go route proxy selection", () => {
     ] as const) {
       expect(isGoRouteRequest(flags, method, path)).toBe(false);
     }
+  });
+
+  it("enables session and durable-run reads by default and allows explicit rollback", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(isGoRouteRequest(defaults, "GET", "/api/sessions")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/durable-runs")).toBe(true);
+
+    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSIONS_ROUTE: "0", CHASTE_GO_DURABLE_RUNS_ROUTE: "0" });
+    expect(isGoRouteRequest(disabled, "GET", "/api/sessions")).toBe(false);
+    expect(isGoRouteRequest(disabled, "GET", "/api/durable-runs")).toBe(false);
   });
 
   it("keeps the metrics selector GET-only and exact", () => {

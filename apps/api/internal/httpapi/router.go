@@ -3,6 +3,7 @@ package httpapi
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 func NewRouter(pinger Pinger, logger *slog.Logger, bridgeSecret string, policyReader PolicyReader, ledgerReader LedgerReader, orgMembershipChecker OrgMembershipChecker, capabilityExecutor CapabilityExecutor, approvalDeciders ...ApprovalDecisionDecider) http.Handler {
@@ -236,25 +237,50 @@ func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportC
 // MountGoSessionReadRoutes mounts session and durable-run reads only when
 // their handlers are explicitly enabled by the API process configuration.
 func MountGoSessionReadRoutes(base, sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute http.Handler) http.Handler {
-	mux := http.NewServeMux()
-	if sessionsListRoute != nil {
-		mux.Handle("GET /api/sessions", sessionsListRoute)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			switch {
+			case r.URL.Path == "/api/sessions" && sessionsListRoute != nil:
+				sessionsListRoute.ServeHTTP(w, r)
+				return
+			case sessionsDetailRoute != nil && sessionDetailRoutePath(r.URL.Path):
+				sessionsDetailRoute.ServeHTTP(w, r)
+				return
+			case r.URL.Path == "/api/durable-runs" && durableRunsRoute != nil:
+				durableRunsRoute.ServeHTTP(w, r)
+				return
+			case durableRunsRoute != nil && durableRunDetailRoutePath(r.URL.Path):
+				durableRunsRoute.ServeHTTP(w, r)
+				return
+			case r.URL.Path == "/api/notifications" && notificationsRoute != nil:
+				notificationsRoute.ServeHTTP(w, r)
+				return
+			}
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+}
+
+func sessionDetailRoutePath(path string) bool {
+	if !strings.HasPrefix(path, "/api/sessions/") {
+		return false
 	}
-	if sessionsDetailRoute != nil {
-		mux.Handle("GET /api/sessions/{id}", sessionsDetailRoute)
-		mux.Handle("GET /api/sessions/{id}/replay", sessionsDetailRoute)
+	parts := strings.Split(strings.TrimPrefix(path, "/api/sessions/"), "/")
+	if len(parts) == 1 {
+		return isUUID(parts[0])
 	}
-	if durableRunsRoute != nil {
-		mux.Handle("GET /api/durable-runs", durableRunsRoute)
-		mux.Handle("GET /api/durable-runs/{id}", durableRunsRoute)
+	return len(parts) == 2 && isUUID(parts[0]) && parts[1] == "replay"
+}
+
+func durableRunDetailRoutePath(path string) bool {
+	if !strings.HasPrefix(path, "/api/durable-runs/") {
+		return false
 	}
-	if notificationsRoute != nil {
-		mux.Handle("GET /api/notifications", notificationsRoute)
-	}
-	if base != nil {
-		mux.Handle("/", base)
-	}
-	return mux
+	return isUUID(strings.TrimPrefix(path, "/api/durable-runs/"))
 }
 
 func MountGoNotificationReadRoute(base, notificationReadRoute http.Handler) http.Handler {

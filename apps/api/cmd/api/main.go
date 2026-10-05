@@ -43,6 +43,14 @@ func goAnalyticsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goSessionsRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
+func goDurableRunsRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("GO_DATABASE_URL")
 	if databaseURL == "" {
@@ -262,7 +270,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go my work summary route mounted", "path", "POST /api/my-work/summarize")
 	}
 	var sessionsListRoute, sessionsDetailRoute http.Handler
-	if os.Getenv("GO_SESSIONS_ROUTE") == "1" {
+	if goSessionsRouteEnabledFromEnv(os.Getenv("GO_SESSIONS_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -272,7 +280,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go sessions routes mounted", "paths", []string{"GET /api/sessions", "GET /api/sessions/{id}", "GET /api/sessions/{id}/replay"})
 	}
 	var durableRunsRoute http.Handler
-	if os.Getenv("GO_DURABLE_RUNS_ROUTE") == "1" {
+	if goDurableRunsRouteEnabledFromEnv(os.Getenv("GO_DURABLE_RUNS_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

@@ -257,15 +257,17 @@ func TestMountGoSCIMTokenManagementRouteIsOptInAndExactPath(t *testing.T) {
 	}
 }
 
-func TestMountGoSessionReadRoutesAreOptInAndExact(t *testing.T) {
+func TestMountGoSessionReadRoutesUseExactMethodsAndUUIDPaths(t *testing.T) {
 	legacy := routeMarker("legacy")
 	sessionsList := routeMarker("sessions-list")
 	sessionsDetail := routeMarker("sessions-detail")
 	durableRuns := routeMarker("durable-runs")
 	notifications := routeMarker("notifications")
 	handler := MountGoSessionReadRoutes(legacy, sessionsList, sessionsDetail, durableRuns, notifications)
+	sessionID := "aaaaaaaa-0000-4000-8000-000000000001"
+	runID := "bbbbbbbb-0000-4000-8000-000000000002"
 
-	for _, path := range []string{"/api/sessions", "/api/sessions/session-1", "/api/sessions/session-1/replay", "/api/durable-runs", "/api/durable-runs/run-1", "/api/notifications"} {
+	for _, path := range []string{"/api/sessions", "/api/sessions/" + sessionID, "/api/sessions/" + sessionID + "/replay", "/api/durable-runs", "/api/durable-runs/" + runID, "/api/notifications"} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 		if response.Body.String() == "legacy" {
@@ -273,13 +275,26 @@ func TestMountGoSessionReadRoutesAreOptInAndExact(t *testing.T) {
 		}
 	}
 
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/sessions", nil))
-	if got := response.Body.String(); got != "legacy" {
-		t.Fatalf("unsupported method did not reach fallback: got %q", got)
+	for _, test := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/api/sessions"},
+		{method: http.MethodHead, path: "/api/sessions"},
+		{method: http.MethodGet, path: "/api/sessions/not-a-uuid"},
+		{method: http.MethodGet, path: "/api/sessions/" + sessionID + "/events"},
+		{method: http.MethodHead, path: "/api/sessions/" + sessionID},
+		{method: http.MethodGet, path: "/api/durable-runs/not-a-uuid"},
+		{method: http.MethodHead, path: "/api/durable-runs/" + runID},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
+		if got := response.Body.String(); got != "legacy" {
+			t.Errorf("%s %s response body=%q, want legacy fallback", test.method, test.path, got)
+		}
 	}
 
-	response = httptest.NewRecorder()
+	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/notifications", nil))
 	if got := response.Body.String(); got != "legacy" {
 		t.Fatalf("notification write did not reach fallback: got %q", got)

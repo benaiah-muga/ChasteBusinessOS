@@ -51,6 +51,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Fixed
 
+- Make Go session and durable-run mounts fall through to legacy for invalid UUIDs, unsupported methods, and extra path segments instead of capturing them with wildcard route patterns.
 - Pass the loaded `.env` values into the Go API process launched by `pnpm dev:api`, and forward shutdown signals to it.
 - Require stable intent IDs for Go Projects and Team writes, including the legacy-to-Go Team bridge, so retries use executor receipts instead of silently running without idempotency. Reject blank, overlong, and control-containing Team IDs in both React and server adapters.
 - Require the dashboard `signals` array in Vite responses and reject malformed or duplicate organization selectors before Go dashboard reads.
@@ -74,7 +75,7 @@ The full v1 changelog is preserved at the bottom of this file.
 ### Added
 
 - The Go API serves `GET` and `POST /api/notifications`, including per-user read receipts through governed `notifications.markRead` and `notifications.restoreRead` capabilities. Unsupported methods and paths continue to the legacy API.
-- The Go API can opt sessions list, detail, replay, and durable-run reads into Go with `GO_SESSIONS_ROUTE=1` and `GO_DURABLE_RUNS_ROUTE=1`, paired with their `CHASTE_GO_*_ROUTE=1` Vite selectors. Session and run visibility remains scoped to the active organization and authenticated user, with admin access preserved. Both selectors default off, and unmatched methods or paths continue to the legacy API.
+- Go serves session list, detail, replay, and durable-run list/detail reads by default. Both API mounts and Vite selectors default on unless their corresponding flags are set to `0`; set both paired flags to `0` for a route's legacy fallback. Session and run visibility remains scoped to the active organization and authenticated user, with admin access preserved. Unmatched methods and paths continue to the legacy API.
 - Session-authenticated `GET /api/my-work` now routes through Go by default in both Vite and the API. Set `CHASTE_GO_MY_WORK_ROUTE=0` and `GO_MY_WORK_ROUTE=0` to use the legacy handler; unsupported methods and extra paths keep the legacy fallback.
 - The Go API can opt authenticated work summaries into `POST /api/my-work/summarize` with `GO_MY_WORK_SUMMARY_ROUTE=1`, paired with `CHASTE_GO_MY_WORK_SUMMARY_ROUTE=1`. It loads and decrypts workspace credentials server-side, uses the legacy fast-to-primary fallback, pins public HTTPS model endpoints, and permits loopback HTTP only in explicit development mode. It can run the authenticated user's default OpenCode connection with tools disabled or the same user's isolated Codex home in read-only CLI mode. Unsupported providers and missing Codex runtime resources fail closed. Both selectors are default-off and route ownership remains legacy.
 - The Go API can opt `GET /api/signals` into Go with `GO_SIGNALS_ROUTE=1`, paired with `CHASTE_GO_SIGNALS_ROUTE=1`. The verified session and `signals.list` capability govern the read; severity and module filters, `{signals}` response, and no-store behavior match legacy. Both selectors are default-off and route ownership remains legacy.

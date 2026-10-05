@@ -1418,16 +1418,21 @@ new owners and the manifest shows zero legacy runtime paths.
      secrecy, idempotency, and rollback for both writes. Listing preserves the
      legacy organization-member guard and timestamp precision. Provider-backed
      runtime proof remains open.
-145. (Implemented; route ownership remains legacy) Add Go session list,
+145. (Implemented; Go route ownership verified) Add Go session list,
      detail, replay, and durable-run list/detail reads behind
      `GO_SESSIONS_ROUTE=1` and `GO_DURABLE_RUNS_ROUTE=1`, paired with the
-     matching default-off Vite selectors. Session and run reads use verified
+     matching Vite selectors, which default on unless explicitly set to `0`.
+     Both the Go mounts and Vite selectors can be rolled back by setting both
+     paired flags to `0`. Session and run reads use verified
      identity, active-organization transactions, and initiator/session-owner
      visibility with admin access. Legacy timestamp and response shapes are
      preserved. Both runtimes return 413 for details exceeding the shared
      event, step, or encoded-response limits, and both check owner/admin
      visibility before reporting an oversized durable run. Event and durable
-     JSONB logical sizes are checked before their payloads are loaded.
+     JSONB logical sizes are checked before their payloads are loaded. Go's
+     router dispatches only exact GET collection paths and UUID detail/replay
+     paths; invalid IDs, HEAD, other methods, and suffixes retain legacy
+     fallback.
      Handler, router, and selector
      tests pass. Runtime proof remains open.
 146. (Implemented; Go owns the routes in the manifest) Add the Go notification feed
