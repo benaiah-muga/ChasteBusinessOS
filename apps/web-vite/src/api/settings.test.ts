@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchAiConfig,
+  fetchBranding,
   fetchCompositions,
   fetchModuleSettings,
   fetchModuleSwitchboard,
@@ -122,6 +123,31 @@ describe("Vite settings API", () => {
       modules: ["crm", "iam", "routines", "signals"],
       intentId: expect.any(String),
     });
+  });
+
+  it("reads the Go branding response with the permission indicator", async () => {
+    const branding = {
+      logoDataUrl: null,
+      accentColor: "#AABBCC",
+      invoiceFooter: "Thanks",
+      layout: "modern",
+    };
+    const fetchMock = vi.fn(async () => Response.json({ branding, canEdit: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchBranding()).resolves.toEqual({ branding, canEdit: true });
+    expect(fetchMock).toHaveBeenCalledWith("/api/branding", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+  });
+
+  it("accepts the Go branding approval envelope", async () => {
+    const hint = "Branding changes proposed by the workmate wait for approval in the Approvals inbox.";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true, hint }, { status: 202 })));
+
+    await expect(submitGoverned("/api/branding", { accentColor: "#AABBCC", layout: "modern" }))
+      .resolves.toEqual({ kind: "pending", reason: hint });
   });
 
   it("surfaces an approval-pending envelope as pending, not as an error or a success", async () => {

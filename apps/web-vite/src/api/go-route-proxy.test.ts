@@ -59,6 +59,7 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_SALES_INVOICE_ROUTE", flag: "salesInvoice", method: "GET", url: "/api/sales/order-id" },
   { env: "CHASTE_GO_MODULES_ROUTE", flag: "modulesRead", method: "GET", url: "/api/modules" },
   { env: "CHASTE_GO_MODULES_WRITE_ROUTE", flag: "modulesWrite", method: "POST", url: "/api/modules" },
+  { env: "CHASTE_GO_BRANDING_ROUTE", flag: "branding", method: "GET", url: "/api/branding" },
   { env: "CHASTE_GO_PROJECTS_ROUTE", flag: "projects", method: "POST", url: "/api/projects" },
   { env: "CHASTE_GO_ROUTINES_ROUTE", flag: "routines", method: "GET", url: "/api/routines" },
   { env: "CHASTE_GO_ROUTINES_ROUTE", flag: "routines", method: "POST", url: "/api/routines" },
@@ -175,6 +176,15 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/modules/")).toBe(false);
   });
 
+  it("keeps branding selection limited to exact GET and POST requests", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_BRANDING_ROUTE: "1" });
+    expect(isGoRouteRequest(flags, "GET", "/api/branding")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/branding")).toBe(true);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/branding")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/branding/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/branding/")).toBe(false);
+  });
+
   it("keeps unsupported routine methods and subpaths on the legacy route", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ROUTINES_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "DELETE", "/api/routines")).toBe(false);
@@ -284,6 +294,7 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_SALES_INVOICE_ROUTE: "1",
       CHASTE_GO_MODULES_ROUTE: "1",
       CHASTE_GO_MODULES_WRITE_ROUTE: "1",
+      CHASTE_GO_BRANDING_ROUTE: "1",
       CHASTE_GO_TEAM_READ_ROUTE: "1",
       CHASTE_GO_TEAM_WRITE_ROUTE: "1",
       CHASTE_GO_SETUP_ROUTE: "1",
@@ -481,6 +492,21 @@ describe("Vite Go route proxy selection", () => {
 
     const modulesWriteSuffix = await fetch(`${origin}/api/modules/extra`, { method: "POST" });
     expect((await modulesWriteSuffix.json()).target).toBe("legacy");
+
+    const brandingRead = await fetch(`${origin}/api/branding`);
+    expect((await brandingRead.json()).target).toBe("go");
+
+    const brandingWrite = await fetch(`${origin}/api/branding`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ accentColor: "#AABBCC", layout: "modern" }),
+    });
+    expect((await brandingWrite.json()).target).toBe("go");
+
+    for (const path of ["/api/branding/extra", "/api/branding/"]) {
+      const fallback = await fetch(`${origin}${path}`);
+      expect((await fallback.json()).target).toBe("legacy");
+    }
 
     const prefixFallback = await fetch(`${origin}/api/setup/extra`);
     expect((await prefixFallback.json()).target).toBe("legacy");

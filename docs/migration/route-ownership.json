@@ -174,16 +174,16 @@
       "path": "/api/branding",
       "method": "GET",
       "source": "apps/web/src/app/api/branding/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
       "path": "/api/branding",
       "method": "POST",
       "source": "apps/web/src/app/api/branding/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
