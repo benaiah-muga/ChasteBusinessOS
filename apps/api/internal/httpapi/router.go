@@ -196,15 +196,39 @@ func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportC
 	if sessionCapabilityRoute != nil {
 		mux.Handle("/api/capabilities/execute", sessionCapabilityRoute)
 	}
-	if modulesRoute != nil {
-		mux.Handle("GET /api/modules", modulesRoute)
-	}
-	if modulesWriteRoute != nil {
-		mux.Handle("POST /api/modules", modulesWriteRoute)
+	if modulesRoute != nil || modulesWriteRoute != nil {
+		mux.HandleFunc("/api/modules", func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				if modulesRoute != nil {
+					modulesRoute.ServeHTTP(w, r)
+					return
+				}
+			case http.MethodPost:
+				if modulesWriteRoute != nil {
+					modulesWriteRoute.ServeHTTP(w, r)
+					return
+				}
+			}
+			if base != nil {
+				base.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+		})
 	}
 	if projectsRoute != nil {
-		mux.Handle("GET /api/projects", projectsRoute)
-		mux.Handle("POST /api/projects", projectsRoute)
+		mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet || r.Method == http.MethodPost {
+				projectsRoute.ServeHTTP(w, r)
+				return
+			}
+			if base != nil {
+				base.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+		})
 	}
 	if teamReadRoute != nil || teamWriteRoute != nil {
 		mux.HandleFunc("/api/team", func(w http.ResponseWriter, r *http.Request) {

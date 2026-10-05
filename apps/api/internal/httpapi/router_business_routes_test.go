@@ -123,6 +123,38 @@ func TestMountGoBusinessRoutesDispatchesTeamMethodsExactly(t *testing.T) {
 	}
 }
 
+func TestMountGoBusinessRoutesDispatchesModulesAndProjectsExactly(t *testing.T) {
+	legacy := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("legacy")) })
+	handler := MountGoBusinessRoutes(
+		legacy,
+		nil, nil, nil, nil,
+		routeMarker("modules read"), routeMarker("modules write"), routeMarker("projects"),
+		nil, nil, nil, nil, nil, nil, nil,
+	)
+
+	for _, test := range []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{method: http.MethodGet, path: "/api/modules", want: "modules read"},
+		{method: http.MethodPost, path: "/api/modules", want: "modules write"},
+		{method: http.MethodHead, path: "/api/modules", want: "legacy"},
+		{method: http.MethodGet, path: "/api/modules/extra", want: "legacy"},
+		{method: http.MethodGet, path: "/api/projects", want: "projects"},
+		{method: http.MethodPost, path: "/api/projects", want: "projects"},
+		{method: http.MethodHead, path: "/api/projects", want: "legacy"},
+		{method: http.MethodDelete, path: "/api/projects", want: "legacy"},
+		{method: http.MethodGet, path: "/api/projects/extra", want: "legacy"},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
+		if response.Body.String() != test.want {
+			t.Errorf("%s %s body=%q, want %q", test.method, test.path, response.Body.String(), test.want)
+		}
+	}
+}
+
 func TestMountGoBusinessRoutesKeepsTeamMethodsAndPathsOptIn(t *testing.T) {
 	legacy := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

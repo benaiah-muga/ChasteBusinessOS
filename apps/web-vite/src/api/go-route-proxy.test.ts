@@ -115,7 +115,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "teamRead", "teamWrite", "sessions", "durableRuns"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -176,14 +176,14 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "POST", "/api/auth/sign-in/email")).toBe(false);
   });
 
-  it.each(selectorCases)("enables $flag only with its Vite selector", ({ env, flag, method, url }) => {
+  it.each(selectorCases)("routes $flag requests when enabled", ({ env, flag, method, url }) => {
     const flags = goRouteProxyFlagsFromEnv({ [env]: "1" });
     expect(flags[flag]).toBe(true);
     expect(isGoRouteRequest(flags, method, url)).toBe(true);
   });
 
   it("keeps the modules write selector POST-only and exact", () => {
-    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MODULES_WRITE_ROUTE: "1" });
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MODULES_ROUTE: "0", CHASTE_GO_MODULES_WRITE_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "POST", "/api/modules")).toBe(true);
     expect(isGoRouteRequest(flags, "GET", "/api/modules")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/modules/extra")).toBe(false);
@@ -278,6 +278,21 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(writeOnly, "DELETE", `${userPath}/`)).toBe(false);
     expect(isGoRouteRequest(writeOnly, "DELETE", "/api/scim/v2/Users/not-a-uuid")).toBe(false);
     expect(isGoRouteRequest(writeOnly, "PUT", userPath)).toBe(false);
+  });
+
+  it("routes project operations and module switchboard reads to Go by default", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(isGoRouteRequest(defaults, "GET", "/api/projects")).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/projects")).toBe(true);
+    expect(isGoRouteRequest(defaults, "GET", "/api/modules")).toBe(true);
+    expect(isGoRouteRequest(defaults, "POST", "/api/modules")).toBe(false);
+    expect(isGoRouteRequest(defaults, "HEAD", "/api/projects")).toBe(false);
+    expect(isGoRouteRequest(defaults, "GET", "/api/projects/extra")).toBe(false);
+
+    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_PROJECTS_ROUTE: "0", CHASTE_GO_MODULES_ROUTE: "0" });
+    expect(isGoRouteRequest(disabled, "GET", "/api/projects")).toBe(false);
+    expect(isGoRouteRequest(disabled, "POST", "/api/projects")).toBe(false);
+    expect(isGoRouteRequest(disabled, "GET", "/api/modules")).toBe(false);
   });
 
   it("keeps team read and write selectors independent and exact", () => {

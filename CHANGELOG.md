@@ -26,6 +26,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Session trajectory and durable-run detail reads now enforce matching response limits in the Go API and legacy API: 10,000 session events, 256 KiB per event, an 8 MiB session response, and 200 durable-run steps with a 2 MiB logical JSON response cap. Both APIs check visibility before revealing an oversized durable run.
 
 ### Changed
+- Route Vite module switchboard reads and the Projects page's GET/POST operations through Go by default. Project writes keep session, tenant, permission, approval, and intent checks; set the matching `CHASTE_GO_*_ROUTE` selector to `0` to restore legacy proxying, and the paired `GO_*_ROUTE` flag to `0` to unmount that Go handler.
 - Route Vite `/team` GET and POST requests through Go by default. Session verification, organization scope, capability permissions, approvals, and intent receipts remain enforced; set the matching Go and Vite team route flags to `0` for legacy fallback.
 - Enable the Vite Sessions page metrics read through Go by default. Set `CHASTE_GO_METRICS_ROUTE=0` to restore the legacy proxy, or `GO_METRICS_ROUTE=0` to unmount the Go handler; unsupported methods and extra paths retain legacy fallback.
 - Route exact session-authenticated `GET /api/analytics` requests through Go by default for dataset discovery and previews. Go report `POST /api/analytics` remains on the legacy handler; setting both analytics route flags to `0` rolls back the GET route.

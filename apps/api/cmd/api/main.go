@@ -55,6 +55,14 @@ func goTeamWriteRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goProjectsRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
+func goModulesReadRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func goSessionsRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
@@ -165,7 +173,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go session capability route mounted", "path", "/api/capabilities/execute")
 	}
 	var modulesRoute http.Handler
-	if os.Getenv("GO_MODULES_ROUTE") == "1" {
+	if goModulesReadRouteEnabledFromEnv(os.Getenv("GO_MODULES_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr
@@ -183,7 +191,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go module switchboard write route mounted", "path", "/api/modules")
 	}
 	var projectsRoute http.Handler
-	if os.Getenv("GO_PROJECTS_ROUTE") == "1" {
+	if goProjectsRouteEnabledFromEnv(os.Getenv("GO_PROJECTS_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

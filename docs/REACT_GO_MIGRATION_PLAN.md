@@ -1464,3 +1464,11 @@ new owners and the manifest shows zero legacy runtime paths.
      only exact GET and POST requests; HEAD, unsupported methods, and suffix
      paths retain legacy fallback. Handler and selector tests pass. Browser
      proof remains open.
+149. (Implemented; Go route ownership verified) Enable Vite's authenticated
+     `GET /api/modules` switchboard reads and the Projects page's
+     `GET`/`POST /api/projects` requests through Go by default. Each route can
+     be rolled back with its paired Go and Vite flags. Projects dispatch only
+     exact GET and POST requests; module requests dispatch only exact GET, with optional POST
+     still controlled separately. HEAD, unsupported methods, and suffix paths
+     retain legacy fallback. Handler, selector, and full Go verification pass.
+     Browser proof remains open.
