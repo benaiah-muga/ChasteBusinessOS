@@ -766,8 +766,8 @@
       "path": "/api/modules",
       "method": "GET",
       "source": "apps/web/src/app/api/modules/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

@@ -23,6 +23,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Session trajectory and durable-run detail reads now enforce matching response limits in the Go API and legacy API: 10,000 session events, 256 KiB per event, an 8 MiB session response, and 200 durable-run steps with a 2 MiB logical JSON response cap. Both APIs check visibility before revealing an oversized durable run.
 
 ### Changed
+- Enable the session-authenticated Go `GET /api/modules` switchboard by default in Vite and the Go API. `POST /api/modules` remains on the legacy route.
 - Mount Go auth routes by default to match the Vite proxy; set `GO_AUTH_ROUTE=0` only to keep auth on the legacy handler.
 - Route the Vite Products catalog and create, edit, archive, and stock actions through Go's session-authenticated capability endpoint in new local setups. Product defaults and CSV import/undo remain on legacy routes.
 - Go supports authored document reads and parses pasted text or uploaded documents into org-scoped memory using the configured OCR and embedding providers. Parse failures retain the failed document state and failure receipt.
