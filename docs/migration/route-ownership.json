@@ -1102,8 +1102,8 @@
       "path": "/api/scim/v2/Users",
       "method": "POST",
       "source": "apps/web/src/app/api/scim/v2/Users/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1126,8 +1126,8 @@
       "path": "/api/scim/v2/Users/[id]",
       "method": "DELETE",
       "source": "apps/web/src/app/api/scim/v2/Users/[id]/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

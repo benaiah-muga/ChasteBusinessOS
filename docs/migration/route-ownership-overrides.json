@@ -297,6 +297,20 @@
       "method": "GET",
       "owner": "go",
       "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/scim/v2/Users/[id]",
+      "method": "DELETE",
+      "owner": "go",
+      "parity": "verified"
     }
   ]
 }

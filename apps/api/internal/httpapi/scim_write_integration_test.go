@@ -118,6 +118,16 @@ func TestGoSCIMWriteRouteUsesExternalCapabilityAndIdempotentReceipts(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	invalidTokenRequest := httptest.NewRequest(http.MethodPost, "/api/scim/v2/Users", strings.NewReader(`{"userName":"outside@example.test"}`))
+	invalidTokenRequest.RemoteAddr = "192.0.2.79:12345"
+	invalidTokenRequest.Header.Set("Authorization", "Bearer invalid-scim-token")
+	invalidTokenResponse := httptest.NewRecorder()
+	handler.ServeHTTP(invalidTokenResponse, invalidTokenRequest)
+	var invalidTokenError scimErrorResponse
+	if invalidTokenResponse.Code != http.StatusUnauthorized || json.Unmarshal(invalidTokenResponse.Body.Bytes(), &invalidTokenError) != nil ||
+		invalidTokenError.Status != "401" || invalidTokenError.Detail != "invalid or missing SCIM token" {
+		t.Fatalf("invalid SCIM token response status=%d body=%s", invalidTokenResponse.Code, invalidTokenResponse.Body.String())
+	}
 	email := "scim-write-" + orgID[:8] + "@fixture.test"
 	body := `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"` + email + `","name":{"givenName":"SCIM Fixture"}}`
 	request := httptest.NewRequest(http.MethodPost, "/api/scim/v2/Users", strings.NewReader(body))
@@ -134,7 +144,9 @@ func TestGoSCIMWriteRouteUsesExternalCapabilityAndIdempotentReceipts(t *testing.
 	if err := json.Unmarshal(response.Body.Bytes(), &resource); err != nil {
 		t.Fatal(err)
 	}
-	if resource.ID == "" || resource.UserName != email || !resource.Active {
+	if resource.ID == "" || resource.UserName != email || resource.Name.GivenName != "SCIM Fixture" || !resource.Active ||
+		len(resource.Schemas) != 1 || resource.Schemas[0] != "urn:ietf:params:scim:schemas:core:2.0:User" ||
+		len(resource.Emails) != 1 || resource.Emails[0] != (scimUserEmail{Value: email, Primary: true}) {
 		t.Fatalf("SCIM created resource=%+v", resource)
 	}
 	userID = resource.ID
@@ -356,7 +368,9 @@ func TestGoSCIMWriteRouteUsesExternalCapabilityAndIdempotentReceipts(t *testing.
 	lastOwnerDelete.Header.Set("Authorization", "Bearer "+rawToken)
 	lastOwnerResponse := httptest.NewRecorder()
 	handler.ServeHTTP(lastOwnerResponse, lastOwnerDelete)
-	if lastOwnerResponse.Code != http.StatusConflict {
+	var lastOwnerError scimErrorResponse
+	if lastOwnerResponse.Code != http.StatusConflict || json.Unmarshal(lastOwnerResponse.Body.Bytes(), &lastOwnerError) != nil ||
+		lastOwnerError.Status != "409" || lastOwnerError.Detail != "cannot deactivate the organization's last owner" {
 		t.Fatalf("last-owner SCIM deactivation status=%d body=%s", lastOwnerResponse.Code, lastOwnerResponse.Body.String())
 	}
 	lastOwnerRetry := httptest.NewRecorder()
@@ -455,7 +469,10 @@ func TestGoSCIMWriteRouteUsesExternalCapabilityAndIdempotentReceipts(t *testing.
 	invalidRequest.Header.Set("Authorization", "Bearer "+rawToken)
 	invalidRequest.Header.Set("Idempotency-Key", "30000000-0000-4000-8000-000000000004")
 	handler.ServeHTTP(invalid, invalidRequest)
-	if invalid.Code != http.StatusBadRequest {
+	var invalidError scimErrorResponse
+	if invalid.Code != http.StatusBadRequest || json.Unmarshal(invalid.Body.Bytes(), &invalidError) != nil ||
+		invalidError.Status != "400" || invalidError.Detail == "" || len(invalidError.Schemas) != 1 ||
+		invalidError.Schemas[0] != "urn:ietf:params:scim:api:messages:2.0:Error" {
 		t.Fatalf("invalid SCIM payload status=%d body=%s", invalid.Code, invalid.Body.String())
 	}
 }

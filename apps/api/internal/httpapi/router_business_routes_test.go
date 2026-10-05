@@ -209,6 +209,8 @@ func TestMountGoSCIMRoutesKeepsReadsAndWritesIndependent(t *testing.T) {
 		{method: http.MethodGet, path: "/api/scim/v2/Users/user-1", want: "read"},
 		{method: http.MethodPost, path: "/api/scim/v2/Users", want: "write"},
 		{method: http.MethodDelete, path: "/api/scim/v2/Users/user-1", want: "write"},
+		{method: http.MethodHead, path: "/api/scim/v2/Users", want: "base"},
+		{method: http.MethodHead, path: "/api/scim/v2/Users/user-1", want: "base"},
 		{method: http.MethodPatch, path: "/api/scim/v2/Users/user-1", want: "base"},
 	} {
 		response := httptest.NewRecorder()

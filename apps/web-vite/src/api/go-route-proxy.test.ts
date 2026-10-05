@@ -256,6 +256,12 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(writeOnly, "GET", userPath)).toBe(false);
     expect(isGoRouteRequest(writeOnly, "POST", "/api/scim/v2/Users")).toBe(true);
     expect(isGoRouteRequest(writeOnly, "DELETE", userPath)).toBe(true);
+    expect(isGoRouteRequest(writeOnly, "POST", "/api/scim/v2/Users/extra")).toBe(false);
+    expect(isGoRouteRequest(writeOnly, "POST", "/api/scim/v2/Users/")).toBe(false);
+    expect(isGoRouteRequest(writeOnly, "DELETE", `${userPath}/extra`)).toBe(false);
+    expect(isGoRouteRequest(writeOnly, "DELETE", `${userPath}/`)).toBe(false);
+    expect(isGoRouteRequest(writeOnly, "DELETE", "/api/scim/v2/Users/not-a-uuid")).toBe(false);
+    expect(isGoRouteRequest(writeOnly, "PUT", userPath)).toBe(false);
   });
 
   it("keeps team read and write selectors independent and exact", () => {

@@ -118,6 +118,12 @@ func MountGoSCIMRoutes(base, scimReadRoute, scimWriteRoute http.Handler) http.Ha
 	if scimReadRoute != nil {
 		mux.Handle("GET /api/scim/v2/Users", scimReadRoute)
 		mux.Handle("GET /api/scim/v2/Users/{id}", scimReadRoute)
+		fallback := base
+		if fallback == nil {
+			fallback = http.NotFoundHandler()
+		}
+		mux.Handle("HEAD /api/scim/v2/Users", fallback)
+		mux.Handle("HEAD /api/scim/v2/Users/{id}", fallback)
 	}
 	if scimWriteRoute != nil {
 		mux.Handle("POST /api/scim/v2/Users", scimWriteRoute)
