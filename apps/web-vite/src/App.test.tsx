@@ -281,6 +281,7 @@ afterEach(() => {
 
 describe("Vite app frame", () => {
   it("admits migrated routes and document editor URLs with a document id", () => {
+    expect(isViteAppPath("/")).toBe(true);
     expect(isViteAppPath("/analytics")).toBe(true);
     expect(isViteAppPath("/projects")).toBe(true);
     expect(isViteAppPath("/team")).toBe(true);
@@ -576,6 +577,7 @@ describe("Vite app frame", () => {
     // app does not serve: unknown routes must still fall back to legacy with
     // their query and hash intact rather than rendering a broken shell.
     window.history.replaceState(null, "", "/not-a-workspace-route?step=profile#business");
+    expect(isViteAppPath("/not-a-workspace-route")).toBe(false);
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "Opening this page in the current app." })).not.toBeNull();

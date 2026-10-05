@@ -47,7 +47,7 @@ func (r *SetupPostgresReader) ForOrg(ctx context.Context, orgID string) (SetupPa
 	if err != nil {
 		return SetupPayload{}, err
 	}
-	return setupPayload(counts, os.Getenv("SMTP_HOST") != "", codingAgentAvailable()), nil
+	return setupPayloadFromRuntime(counts), nil
 }
 
 type setupCounts struct {
@@ -72,6 +72,10 @@ func setupPayload(counts setupCounts, emailConfigured, codingAgentInstalled bool
 		}
 	}
 	return SetupPayload{Items: items, Remaining: remaining}
+}
+
+func setupPayloadFromRuntime(counts setupCounts) SetupPayload {
+	return setupPayload(counts, os.Getenv("SMTP_HOST") != "", codingAgentAvailable())
 }
 
 func codingAgentAvailable() bool {

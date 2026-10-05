@@ -3,6 +3,12 @@
   "overrides": [
     {
       "kind": "page",
+      "path": "/",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
       "path": "/team",
       "owner": "vite",
       "parity": "verified"
@@ -23,6 +29,20 @@
       "kind": "page",
       "path": "/analytics",
       "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/dashboard",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/setup",
+      "method": "GET",
+      "owner": "go",
       "parity": "verified"
     },
     {

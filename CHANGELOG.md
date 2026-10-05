@@ -11,6 +11,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- The `/` Dashboard page and its `GET /api/dashboard` and `GET /api/setup` reads are now Vite/Go-owned. Mirror `SMTP_HOST` and coding-agent CLI `PATH` between Go and Next so the setup checklist agrees across runtimes; unknown paths and unsupported API methods keep their legacy fallback.
 - The `/team` page is now Vite-owned and uses the Go-owned `GET` and `POST /api/team` routes. Other paths continue through the existing legacy fallback.
 - Session trajectory and durable-run detail reads now enforce matching response limits in the Go API and legacy API: 10,000 session events, 256 KiB per event, an 8 MiB session response, and 200 durable-run steps with a 2 MiB logical JSON response cap. Both APIs check visibility before revealing an oversized durable run.
 
@@ -99,7 +100,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 - Vite routes explicitly implemented auth method and path pairs to Go by default. Unsupported Better Auth methods and paths continue through the legacy auth handler.
 - Vite vendor creation can opt into Go's session-authenticated `purchasing.createVendor` capability with `GO_SESSION_CAPABILITY_ROUTE=1`, `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`, and `CHASTE_GO_PURCHASING_VENDOR_SLICE=1`. It preserves approval responses and falls back to the existing Purchasing action only when the Go route is absent; default flags keep the legacy request path.
-- **Added direct Go reads for the Vite dashboard, ledger, and metrics APIs.** Each route remains on the legacy owner unless its matching Go mount and Vite proxy flags are enabled.
+- **Added direct Go reads for the Vite dashboard, ledger, and metrics APIs.** Dashboard and setup reads now use Go by default; ledger and metrics remain legacy-owned unless their matching Go mount and Vite proxy flags are enabled.
 - **Opt-in Go ownership for projects, team, module settings, branding, and analytics.** Go can now serve session-authenticated `GET`/`POST /api/modules`, `GET`/`POST /api/team`, `GET`/`POST /api/projects`, `GET`/`POST /api/branding`, and `GET /api/analytics` behind matching API and Vite flags. State changes run through the governed capability executor; the team response derives its permission catalog from Go capability metadata. Other methods keep their current owner.
 - **Added opt-in Go ownership for invoice, support-channel, and governed-action endpoints.** Go now resolves Better Auth cookie or bearer sessions directly for `/api/sales/{orderId}`, `/api/support/channels`, and `/api/capabilities/execute`; native clients can select an organization with `X-Organization-ID`, which the Go session resolver checks against membership. Public portal invoice reads use a narrowly granted token resolver. Go and Vite route flags keep the legacy API as the default until each route is proven.
 - **Made Go auth mode explicit and email delivery durable.** `GO_AUTH_ROUTE=1` now requires `GO_AUTH_MODE`; production auth independently enforces an explicit HTTPS origin and secure cookie policy. Verification and recovery links enter a PostgreSQL outbox in the same transaction as their account or recovery token, with leased retry, expiry cleanup, and process restart recovery.

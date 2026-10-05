@@ -56,6 +56,20 @@ func TestSetupSessionHandlerReturnsTenantScopedChecklist(t *testing.T) {
 	}
 }
 
+func TestSetupSessionHandlerRejectsMismatchedOrganization(t *testing.T) {
+	identity := directTestIdentity()
+	identity.Permissions["iam.admin"] = true
+	reader := &fakeSetupReader{}
+	request := setupRequest(http.MethodGet)
+	request.Header.Set("X-Organization-ID", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	response := httptest.NewRecorder()
+	NewSetupSessionHandler(&fakeDirectSessionResolver{resolved: identity}, reader, nil).ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden || reader.calls != 0 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, reader.calls, response.Body.String())
+	}
+}
+
 func TestSetupSessionHandlerRequiresIAMAdmin(t *testing.T) {
 	reader := &fakeSetupReader{}
 	response := httptest.NewRecorder()
