@@ -204,6 +204,29 @@ func MountGoPOSReadRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoPOSCustomersRoute sends only the POS customer lookup GET to Go.
+func MountGoPOSCustomersRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/pos/customers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			route.ServeHTTP(w, r)
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoPOSShiftSummaryRoute sends only the POS shift summary POST to Go.
 func MountGoPOSShiftSummaryRoute(base, route http.Handler) http.Handler {
 	if route == nil {

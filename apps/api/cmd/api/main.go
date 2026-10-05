@@ -83,6 +83,10 @@ func goPosShiftSummaryRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goPosCustomersRouteEnabledFromEnv(value string) bool {
+	return value != "0"
+}
+
 func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("GO_DATABASE_URL")
 	if databaseURL == "" {
@@ -282,6 +286,15 @@ func run(logger *slog.Logger) error {
 		}
 		posReadRoute = httpapi.NewPosReadSessionHandler(pool, resolver, logger)
 		logger.Info("Go POS read route mounted", "path", "GET /api/pos")
+	}
+	var posCustomersRoute http.Handler
+	if goPosCustomersRouteEnabledFromEnv(os.Getenv("GO_POS_CUSTOMERS_ROUTE")) {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		posCustomersRoute = httpapi.NewPosCustomersSessionHandler(pool, resolver, logger)
+		logger.Info("Go POS customer lookup route mounted", "path", "GET /api/pos/customers")
 	}
 	var posShiftSummaryRoute http.Handler
 	if goPosShiftSummaryRouteEnabledFromEnv(os.Getenv("GO_POS_SHIFT_SUMMARY_ROUTE")) {
@@ -507,7 +520,7 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr: addr,
-		Handler: httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
+		Handler: httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
 			pool,
 			logger,
 			os.Getenv("GO_INTERNAL_AUTH_SECRET"),
@@ -520,7 +533,7 @@ func run(logger *slog.Logger) error {
 			orgRoute,
 			authRoute,
 			approvalDecider,
-		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), posReadRoute), posShiftSummaryRoute),
+		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

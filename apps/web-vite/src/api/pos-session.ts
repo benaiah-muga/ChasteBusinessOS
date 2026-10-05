@@ -244,8 +244,18 @@ export async function fetchPosCatalog(signal?: AbortSignal): Promise<PosCatalogI
   return parsed.data.items;
 }
 
-export async function fetchPosCustomers(signal?: AbortSignal): Promise<PosCustomer[]> {
-  const result = await readJson("/api/customers", signal, "Customer lookup took too long to load. Try again.");
+export async function fetchPosCustomers(signal?: AbortSignal, options: { useGo?: boolean } = {}): Promise<PosCustomer[]> {
+  const configuredForGo = typeof __GO_POS_CUSTOMERS_SLICE__ !== "undefined" && __GO_POS_CUSTOMERS_SLICE__;
+  const useGo = options.useGo ?? configuredForGo;
+  let result: { status: number; ok: boolean; body: unknown };
+  if (useGo) {
+    result = await readJson("/api/pos/customers", signal, "Customer lookup took too long to load. Try again.");
+    if (result.status === 404) {
+      result = await readJson("/api/customers", signal, "Customer lookup took too long to load. Try again.");
+    }
+  } else {
+    result = await readJson("/api/customers", signal, "Customer lookup took too long to load. Try again.");
+  }
   if (!result.ok) throw readError(result.status, result.body, "Customer lookup is unavailable.");
   const parsed = CustomerListSchema.safeParse(result.body);
   if (!parsed.success) throw new PosApiError(result.status, "Customer lookup returned an unexpected format.");

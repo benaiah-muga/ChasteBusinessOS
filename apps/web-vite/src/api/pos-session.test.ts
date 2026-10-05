@@ -121,6 +121,36 @@ describe("POS register session API client", () => {
     await expect(fetchPosCatalog()).rejects.toMatchObject({ status: 403, message: "nope" });
   });
 
+  it("loads POS customer options from Go and keeps the legacy response schema", async () => {
+    const customers = [{ id: "50000000-0000-4000-8000-000000000005", name: "Amina", email: "amina@example.test", purchaseCount: 3, lifetimeSpendMinor: 4500 }];
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ customers }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPosCustomers(undefined, { useGo: true })).resolves.toEqual(customers);
+    expect(fetchMock).toHaveBeenCalledWith("/api/pos/customers", expect.objectContaining({
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { accept: "application/json" },
+    }));
+  });
+
+  it("falls back to legacy POS customer lookup only when the Go route is missing", async () => {
+    const customers = [{ id: "50000000-0000-4000-8000-000000000005", name: "Amina", email: "amina@example.test", purchaseCount: 3, lifetimeSpendMinor: 4500 }];
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ customers }));
+    fetchMock.mockImplementationOnce(async () => Response.json({ error: "route not mounted" }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchPosCustomers(undefined, { useGo: true })).resolves.toEqual(customers);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/pos/customers", "/api/customers"]);
+  });
+
+  it.each([401, 403, 500])("does not fall back after Go customer lookup HTTP %s", async (status) => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ error: "Go rejected customer read" }, { status }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchPosCustomers(undefined, { useGo: true })).rejects.toMatchObject({ status });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("derives module gates from the switchboard and rejects an inconsistent one", async () => {
     const catalog = [{ id: "pos" }, { id: "inventory" }, { id: "crm" }];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ catalog, enabledModules: ["pos"] })));

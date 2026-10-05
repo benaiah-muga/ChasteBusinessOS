@@ -291,4 +291,13 @@ func TestPostgresPosReadReaderUsesRuntimeRLSAndMapsSaleReturns(t *testing.T) {
 		len(legacyFull.Lines) != 1 || legacyFull.Lines[0].StockTracked {
 		t.Fatalf("legacy full sale = %+v, want memo tender fallback and unmatched stock leg", legacyFull)
 	}
+
+	customers, err := (postgresPosCustomersReader{pool: runtime}).Read(ctx, orgID)
+	if err != nil {
+		t.Fatalf("read POS customer options through runtime RLS: %v", err)
+	}
+	if len(customers.Customers) != 1 || customers.Customers[0].ID != customerID ||
+		customers.Customers[0].PurchaseCount != 3 || customers.Customers[0].LifetimeSpendMinor != 4500 {
+		t.Fatalf("POS customers = %+v, want only the tenant customer with three sales and 4500 net spend", customers.Customers)
+	}
 }

@@ -1525,3 +1525,13 @@ new owners and the manifest shows zero legacy runtime paths.
      only a missing Go route falls back to legacy, reusing the same intent.
      Other POS actions and `/pos` page ownership remain unchanged. Focused
      selector and client tests pass; authenticated browser proof remains open.
+156. Route only Vite POS customer lookup through a direct Go session-authenticated
+     `GET /api/pos/customers` reader, independently of the generic session-
+     capability route. Preserve the legacy POS authorization rule:
+     verified organization members with either `crm.read` or `pos.sell` may
+     read active canonical customer options, with no CRM module requirement.
+     Keep name ordering, the 500-row limit, purchase counts, and lifetime net
+     spend. Set `CHASTE_GO_POS_CUSTOMERS_SLICE=0` to restore the legacy lookup;
+     only a missing Go route falls back automatically. Set
+     `GO_POS_CUSTOMERS_ROUTE=0` to unmount the endpoint. CRM and Support callers
+     remain unchanged. Focused Go/Vite tests pass; browser proof remains open.

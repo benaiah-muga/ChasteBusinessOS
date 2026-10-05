@@ -5,6 +5,7 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import {
   createGoRouteProxyPlugin,
   goPosCloseSessionSliceFromEnv,
+  goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
   isGoRouteRequest,
@@ -26,6 +27,14 @@ describe("POS register closing Go selector", () => {
     expect(goPosCloseSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(true);
     expect(goPosCloseSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_POS_CLOSE_SESSION_SLICE: "0" })).toBe(false);
     expect(goPosCloseSessionSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
+  });
+});
+
+describe("POS customer lookup Go selector", () => {
+  it("enables the direct Go reader independently and supports rollback", () => {
+    expect(goPosCustomersSliceFromEnv({})).toBe(true);
+    expect(goPosCustomersSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(true);
+    expect(goPosCustomersSliceFromEnv({ CHASTE_GO_POS_CUSTOMERS_SLICE: "0" })).toBe(false);
   });
 });
 
@@ -137,7 +146,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "posRead", "posShiftSummary"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "posRead", "posShiftSummary", "posCustomers"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -322,6 +331,19 @@ describe("Vite Go route proxy selection", () => {
     expect(goUnmounted.posShiftSummary).toBe(true);
   });
 
+  it("routes only the exact POS customer GET independently of the generic capability route", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" });
+    expect(flags.posCustomers).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/pos/customers")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/pos/customers?active=1")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/pos/customers")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/pos/customers/extra")).toBe(false);
+
+    const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_CUSTOMERS_SLICE: "0" });
+    expect(disabled.posCustomers).toBe(false);
+    expect(isGoRouteRequest(disabled, "GET", "/api/pos/customers")).toBe(false);
+  });
+
   it("keeps SCIM read and write selectors independent", () => {
     const userPath = "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001";
     const readOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SCIM_READ_ROUTE: "1" });
@@ -478,6 +500,7 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_NOTIFICATIONS_ROUTE: "1",
       CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE: "1",
       CHASTE_GO_POS_READ_ROUTE: "1",
+      CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1",
     });
     const vite: ViteDevServer = await createViteServer({
       configFile: false,
@@ -678,6 +701,12 @@ describe("Vite Go route proxy selection", () => {
 
     const posRead = await fetch(`${origin}/api/pos?status=open`, { headers: { cookie: "auth-session=browser" } });
     expect((await posRead.json())).toMatchObject({ target: "go", method: "GET", url: "/api/pos?status=open", cookie: "auth-session=browser" });
+
+    const posCustomers = await fetch(`${origin}/api/pos/customers?active=1`, { headers: { cookie: "auth-session=browser" } });
+    expect((await posCustomers.json())).toMatchObject({ target: "go", method: "GET", url: "/api/pos/customers?active=1", cookie: "auth-session=browser" });
+
+    const posCustomersUnsupportedMethod = await fetch(`${origin}/api/pos/customers`, { method: "POST" });
+    expect((await posCustomersUnsupportedMethod.json())).toMatchObject({ target: "legacy", method: "POST" });
 
     const posUnsupportedMethod = await fetch(`${origin}/api/pos`, { method: "POST" });
     expect((await posUnsupportedMethod.json())).toMatchObject({ target: "legacy", method: "POST" });

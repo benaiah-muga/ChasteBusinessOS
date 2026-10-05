@@ -38,6 +38,7 @@ export type GoRouteProxyFlags = {
   inventoryRead: boolean;
   posRead: boolean;
   posShiftSummary: boolean;
+  posCustomers: boolean;
 };
 
 export function goPosOpenSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
@@ -46,6 +47,10 @@ export function goPosOpenSessionSliceFromEnv(env: Record<string, string | undefi
 
 export function goPosCloseSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_POS_CLOSE_SESSION_SLICE !== "0";
+}
+
+export function goPosCustomersSliceFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_POS_CUSTOMERS_SLICE !== "0";
 }
 
 export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>): GoRouteProxyFlags {
@@ -86,6 +91,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     inventoryRead: env.CHASTE_GO_INVENTORY_READ_ROUTE === "1",
     posRead: env.CHASTE_GO_POS_READ_ROUTE !== "0",
     posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
+    posCustomers: goPosCustomersSliceFromEnv(env),
   };
 }
 
@@ -122,6 +128,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.notificationsWrite && method === "POST" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
   if (flags.inventoryRead && method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
   if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;
+  if (flags.posCustomers && method === "GET" && /^\/api\/pos\/customers(?:\?.*)?$/.test(path)) return true;
   if (flags.posShiftSummary && method === "POST" && /^\/api\/pos\/shift-summary(?:\?.*)?$/.test(path)) return true;
   if (flags.dashboard && method === "GET" && /^\/api\/dashboard(?:\?.*)?$/.test(path)) return true;
   if (flags.setup && isGoSetupRequest(method, path)) return true;
