@@ -32,6 +32,7 @@ export type GoRouteProxyFlags = {
   durableRuns: boolean;
   notifications: boolean;
   notificationsWrite: boolean;
+  inventoryRead: boolean;
 };
 
 export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>): GoRouteProxyFlags {
@@ -66,6 +67,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     durableRuns: env.CHASTE_GO_DURABLE_RUNS_ROUTE === "1",
     notifications: env.CHASTE_GO_NOTIFICATIONS_ROUTE === "1",
     notificationsWrite: env.CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE === "1",
+    inventoryRead: env.CHASTE_GO_INVENTORY_READ_ROUTE === "1",
   };
 }
 
@@ -97,6 +99,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.durableRuns && method === "GET" && new RegExp(`^/api/durable-runs(?:/${uuid})?(?:\\?.*)?$`, "i").test(path)) return true;
   if (flags.notifications && method === "GET" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
   if (flags.notificationsWrite && method === "POST" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
+  if (flags.inventoryRead && method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
   if (flags.dashboard && method === "GET" && /^\/api\/dashboard(?:\?.*)?$/.test(path)) return true;
   if (flags.setup && isGoSetupRequest(method, path)) return true;
   if (flags.ledger && method === "GET" && /^\/api\/ledger(?:\?.*)?$/.test(path)) return true;

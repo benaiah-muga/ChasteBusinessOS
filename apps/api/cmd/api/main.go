@@ -208,6 +208,15 @@ func run(logger *slog.Logger) error {
 		analyticsRoute = httpapi.NewAnalyticsSessionHandler(resolver, capabilityExecutor, logger)
 		logger.Info("Go analytics route mounted", "path", "/api/analytics")
 	}
+	var inventoryReadRoute http.Handler
+	if os.Getenv("GO_INVENTORY_READ_ROUTE") == "1" {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		inventoryReadRoute = httpapi.NewInventoryReadSessionHandler(resolver, capabilityExecutor, logger)
+		logger.Info("Go inventory read route mounted", "path", "GET /api/inventory")
+	}
 	var dashboardRoute http.Handler
 	if os.Getenv("GO_DASHBOARD_ROUTE") == "1" {
 		resolver, resolverErr := getSessionResolver()
@@ -423,7 +432,7 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr: addr,
-		Handler: httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
+		Handler: httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
 			pool,
 			logger,
 			os.Getenv("GO_INTERNAL_AUTH_SECRET"),
@@ -436,7 +445,7 @@ func run(logger *slog.Logger) error {
 			orgRoute,
 			authRoute,
 			approvalDecider,
-		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute),
+		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

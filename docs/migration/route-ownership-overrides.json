@@ -97,6 +97,13 @@
     },
     {
       "kind": "api",
+      "path": "/api/inventory",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
+      "kind": "api",
       "path": "/api/support/public",
       "method": "POST",
       "owner": "go",

@@ -590,8 +590,8 @@
       "path": "/api/inventory",
       "method": "GET",
       "source": "apps/web/src/app/api/inventory/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",

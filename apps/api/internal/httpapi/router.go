@@ -159,6 +159,20 @@ func MountGoRoutinesRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoInventoryReadRoute mounts only the read-only inventory collection
+// endpoint. Writes and nested inventory paths continue to the existing owner.
+func MountGoInventoryReadRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/inventory", route)
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoBusinessRoutes mounts API handlers only when their Go route is opted in.
 // Unprovided handlers continue to fall through to the existing API owner.
 func MountGoBusinessRoutes(base, portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute http.Handler) http.Handler {
