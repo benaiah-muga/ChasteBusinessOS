@@ -622,8 +622,8 @@
       "path": "/api/ledger",
       "method": "GET",
       "source": "apps/web/src/app/api/ledger/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
@@ -1332,8 +1332,8 @@
       "kind": "page",
       "path": "/ledger",
       "source": "apps/web/src/app/(app)/ledger/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",

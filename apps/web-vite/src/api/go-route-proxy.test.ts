@@ -175,6 +175,14 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/routines/unknown")).toBe(false);
   });
 
+  it("keeps unsupported ledger methods and subpaths on the legacy route", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_LEDGER_ROUTE: "1" });
+    expect(isGoRouteRequest(flags, "POST", "/api/ledger")).toBe(false);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/ledger")).toBe(false);
+    expect(isGoRouteRequest(flags, "HEAD", "/api/ledger")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/ledger/extra")).toBe(false);
+  });
+
   it("keeps SCIM read and write selectors independent", () => {
     const userPath = "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001";
     const readOnly = goRouteProxyFlagsFromEnv({ CHASTE_GO_SCIM_READ_ROUTE: "1" });

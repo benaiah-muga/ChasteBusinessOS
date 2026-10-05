@@ -285,6 +285,7 @@ describe("Vite app frame", () => {
     expect(isViteAppPath("/login")).toBe(true);
     expect(isViteAppPath("/analytics")).toBe(true);
     expect(isViteAppPath("/projects")).toBe(true);
+    expect(isViteAppPath("/ledger")).toBe(true);
     expect(isViteAppPath("/team")).toBe(true);
     expect(isViteAppPath("/products")).toBe(true);
     expect(isViteAppPath("/documents/editor/doc-123")).toBe(true);
@@ -494,6 +495,7 @@ describe("Vite app frame", () => {
     expect(await screen.findByRole("heading", { name: "Event Ledger" })).not.toBeNull();
     expect(await screen.findByText("invoice.created")).not.toBeNull();
     expect(screen.getByRole("link", { name: "Ledger" }).getAttribute("aria-current")).toBe("page");
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith("/api/ledger?limit=100", expect.objectContaining({ credentials: "same-origin" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: "Active organization" }), { target: { value: secondOrgId } });
