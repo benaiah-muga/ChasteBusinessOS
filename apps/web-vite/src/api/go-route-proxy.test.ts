@@ -87,6 +87,7 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_NOTIFICATIONS_ROUTE", flag: "notifications", method: "GET", url: "/api/notifications?limit=10&cursor=next" },
   { env: "CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE", flag: "notificationsWrite", method: "POST", url: "/api/notifications" },
   { env: "CHASTE_GO_POS_READ_ROUTE", flag: "posRead", method: "GET", url: "/api/pos?status=open" },
+  { env: "CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE", flag: "posShiftSummary", method: "POST", url: "/api/pos/shift-summary" },
 ];
 
 const supportedGoAuthRoutes: Array<{ method: string; url: string }> = [
@@ -118,7 +119,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
-    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "posRead"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
+    expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "posRead", "posShiftSummary"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
@@ -288,6 +289,19 @@ describe("Vite Go route proxy selection", () => {
     const disabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_READ_ROUTE: "0" });
     expect(disabled.posRead).toBe(false);
     expect(isGoRouteRequest(disabled, "GET", "/api/pos")).toBe(false);
+  });
+
+  it("routes only the dedicated POS shift-summary POST under the Vite selector", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE: "1", GO_POS_SHIFT_SUMMARY_ROUTE: "1" });
+    expect(flags.posShiftSummary).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/pos/shift-summary")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/pos/shift-summary")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/pos/shift-summary/extra")).toBe(false);
+
+    const viteDisabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE: "0", GO_POS_SHIFT_SUMMARY_ROUTE: "1" });
+    expect(viteDisabled.posShiftSummary).toBe(false);
+    const goUnmounted = goRouteProxyFlagsFromEnv({ CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE: "1", GO_POS_SHIFT_SUMMARY_ROUTE: "0" });
+    expect(goUnmounted.posShiftSummary).toBe(true);
   });
 
   it("keeps SCIM read and write selectors independent", () => {

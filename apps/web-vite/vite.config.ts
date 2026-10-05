@@ -18,6 +18,7 @@ export default defineConfig(({ mode }) => {
   const goPosCloseSessionSlice = env.CHASTE_GO_POS_CLOSE_SESSION_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goPosCompleteSaleSlice = env.CHASTE_GO_POS_COMPLETE_SALE_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goPosReturnSaleSlice = env.CHASTE_GO_POS_RETURN_SALE_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
+  const goPosShiftSummaryRoute = env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0";
 
   return {
     plugins: [react(), goRouteProxy],
@@ -34,6 +35,7 @@ export default defineConfig(({ mode }) => {
       __GO_POS_CLOSE_SESSION_SLICE__: JSON.stringify(goPosCloseSessionSlice),
       __GO_POS_COMPLETE_SALE_SLICE__: JSON.stringify(goPosCompleteSaleSlice),
       __GO_POS_RETURN_SALE_SLICE__: JSON.stringify(goPosReturnSaleSlice),
+      __GO_POS_SHIFT_SUMMARY_ROUTE__: JSON.stringify(goPosShiftSummaryRoute),
     },
     server: {
       host: "localhost",

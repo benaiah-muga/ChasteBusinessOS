@@ -37,6 +37,7 @@ export type GoRouteProxyFlags = {
   notificationsWrite: boolean;
   inventoryRead: boolean;
   posRead: boolean;
+  posShiftSummary: boolean;
 };
 
 export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>): GoRouteProxyFlags {
@@ -76,6 +77,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     notificationsWrite: env.CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE === "1",
     inventoryRead: env.CHASTE_GO_INVENTORY_READ_ROUTE === "1",
     posRead: env.CHASTE_GO_POS_READ_ROUTE !== "0",
+    posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
   };
 }
 
@@ -112,6 +114,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.notificationsWrite && method === "POST" && /^\/api\/notifications(?:\?.*)?$/.test(path)) return true;
   if (flags.inventoryRead && method === "GET" && /^\/api\/inventory(?:\?.*)?$/.test(path)) return true;
   if (flags.posRead && method === "GET" && /^\/api\/pos(?:\?.*)?$/.test(path)) return true;
+  if (flags.posShiftSummary && method === "POST" && /^\/api\/pos\/shift-summary(?:\?.*)?$/.test(path)) return true;
   if (flags.dashboard && method === "GET" && /^\/api\/dashboard(?:\?.*)?$/.test(path)) return true;
   if (flags.setup && isGoSetupRequest(method, path)) return true;
   if (flags.ledger && method === "GET" && /^\/api\/ledger(?:\?.*)?$/.test(path)) return true;

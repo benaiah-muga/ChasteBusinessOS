@@ -204,6 +204,29 @@ func MountGoPOSReadRoute(base, route http.Handler) http.Handler {
 	return mux
 }
 
+// MountGoPOSShiftSummaryRoute sends only the POS shift summary POST to Go.
+func MountGoPOSShiftSummaryRoute(base, route http.Handler) http.Handler {
+	if route == nil {
+		return base
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/pos/shift-summary", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			route.ServeHTTP(w, r)
+			return
+		}
+		if base != nil {
+			base.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	if base != nil {
+		mux.Handle("/", base)
+	}
+	return mux
+}
+
 // MountGoSalesOrdersRoute sends only the orders collection GET to Go. The
 // invoice detail route and all other sales methods remain with the base owner.
 func MountGoSalesOrdersRoute(base, route http.Handler) http.Handler {

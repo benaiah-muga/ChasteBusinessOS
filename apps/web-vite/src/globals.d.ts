@@ -10,3 +10,4 @@ declare const __GO_POS_OPEN_SESSION_SLICE__: boolean;
 declare const __GO_POS_CLOSE_SESSION_SLICE__: boolean;
 declare const __GO_POS_COMPLETE_SALE_SLICE__: boolean;
 declare const __GO_POS_RETURN_SALE_SLICE__: boolean;
+declare const __GO_POS_SHIFT_SUMMARY_ROUTE__: boolean;

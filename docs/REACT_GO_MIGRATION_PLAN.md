@@ -1500,3 +1500,14 @@ new owners and the manifest shows zero legacy runtime paths.
      tests plus runtime database integration pass. The `/pos` page remains
      legacy-owned; this milestone moved the Vite API read only. Browser proof
      remains open.
+153. Route exact Vite `POST /api/pos/shift-summary`
+     through Go's session-authenticated `pos.shiftSummary` capability and
+     preserve the legacy response envelope. `GO_POS_SHIFT_SUMMARY_ROUTE` and
+     `CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE` default on. Set
+     `CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE=0` to send Vite traffic to legacy
+     `POST /api/pos`; also set `GO_POS_SHIFT_SUMMARY_ROUTE=0` to unmount the
+     Go route. Other POS POST actions remain on legacy. The `/pos` page remains
+     legacy-owned. Focused tests, full workspace tests, Go verification,
+     typecheck, lint, route ownership checks, and contract checks pass.
+     Authenticated browser proof remains open because the local environment
+     does not provide `BETTER_AUTH_SECRET`.

@@ -80,16 +80,28 @@ export async function fetchPosShiftSummary(sessionId: string, signal?: AbortSign
     throw new PosApiError(0, "Choose a valid register session.");
   }
 
+  const intentId = crypto.randomUUID();
+  const useGoRoute = typeof __GO_POS_SHIFT_SUMMARY_ROUTE__ !== "undefined" && __GO_POS_SHIFT_SUMMARY_ROUTE__;
   let response: Response;
   try {
-    response = await fetch("/api/pos", {
+    const request = (url: string, body: unknown) => fetch(url, {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json", "content-type": "application/json" },
       cache: "no-store",
       signal: requestSignal(signal),
-      body: JSON.stringify({ action: "shiftSummary", sessionId, intentId: crypto.randomUUID() }),
+      body: JSON.stringify(body),
     });
+    response = useGoRoute
+      ? await request("/api/pos/shift-summary", {
+        capabilityId: "pos.shiftSummary",
+        input: { sessionId },
+        intentId,
+      })
+      : await request("/api/pos", { action: "shiftSummary", sessionId, intentId });
+    if (useGoRoute && response.status === 404) {
+      response = await request("/api/pos", { action: "shiftSummary", sessionId, intentId });
+    }
   } catch (error) {
     if (signal?.aborted) throw error;
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";
