@@ -92,7 +92,7 @@ const navigationItems = [
 // workspace. They must stay in the routing set or they fall back to legacy.
 const additionalVitePaths = ["/accounting", "/purchasing"];
 
-const viteAppPaths = new Set(["/", ...navigationItems.map((item) => item.href), ...additionalVitePaths]);
+const viteAppPaths = new Set(["/", "/login", ...navigationItems.map((item) => item.href), ...additionalVitePaths]);
 
 export function isViteAppPath(pathname: string): boolean {
   return viteAppPaths.has(pathname) || /^\/documents\/editor\/[^/]+$/.test(pathname);
@@ -356,6 +356,6 @@ export function App() {
   // The print sheet renders outside the shell: it is chrome-less on purpose so
   // the printed page carries only the invoice.
   if (pathname.startsWith("/print/invoice/")) return <InvoicePrintPage pathname={pathname} />;
-  if (!isViteAppPath(pathname) && pathname !== "/login") return <LegacyRoute pathname={pathname} />;
+  if (!isViteAppPath(pathname)) return <LegacyRoute pathname={pathname} />;
   return <AuthenticatedApp pathname={pathname} />;
 }

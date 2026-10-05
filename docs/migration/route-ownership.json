@@ -1339,8 +1339,8 @@
       "kind": "page",
       "path": "/login",
       "source": "apps/web/src/app/login/page.tsx",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "vite",
+      "parity": "verified"
     },
     {
       "kind": "page",

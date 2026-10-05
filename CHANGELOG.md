@@ -11,6 +11,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- The `/login` page is now Vite-owned. Sign-in, sign-up, verification, and password recovery continue to use the Go-backed auth endpoints.
 - The `/` Dashboard page and its `GET /api/dashboard` and `GET /api/setup` reads are now Vite/Go-owned. Mirror `SMTP_HOST` and coding-agent CLI `PATH` between Go and Next so the setup checklist agrees across runtimes; unknown paths and unsupported API methods keep their legacy fallback.
 - The `/team` page is now Vite-owned and uses the Go-owned `GET` and `POST /api/team` routes. Other paths continue through the existing legacy fallback.
 - Session trajectory and durable-run detail reads now enforce matching response limits in the Go API and legacy API: 10,000 session events, 256 KiB per event, an 8 MiB session response, and 200 durable-run steps with a 2 MiB logical JSON response cap. Both APIs check visibility before revealing an oversized durable run.

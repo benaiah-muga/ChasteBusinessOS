@@ -3,6 +3,12 @@
   "overrides": [
     {
       "kind": "page",
+      "path": "/login",
+      "owner": "vite",
+      "parity": "verified"
+    },
+    {
+      "kind": "page",
       "path": "/",
       "owner": "vite",
       "parity": "verified"

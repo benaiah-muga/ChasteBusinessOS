@@ -280,8 +280,9 @@ afterEach(() => {
 });
 
 describe("Vite app frame", () => {
-  it("admits migrated routes and document editor URLs with a document id", () => {
+  it("admits migrated routes, sign-in, and document editor URLs with a document id", () => {
     expect(isViteAppPath("/")).toBe(true);
+    expect(isViteAppPath("/login")).toBe(true);
     expect(isViteAppPath("/analytics")).toBe(true);
     expect(isViteAppPath("/projects")).toBe(true);
     expect(isViteAppPath("/team")).toBe(true);
@@ -297,6 +298,15 @@ describe("Vite app frame", () => {
 
     expect(await screen.findByRole("heading", { name: "Good to see you." })).not.toBeNull();
     expect(window.location.pathname).toBe("/login");
+  });
+
+  it("serves sign-in in Vite without sending it through the legacy fallback", async () => {
+    window.history.replaceState(null, "", "/login");
+    authMocks.getSession.mockResolvedValue({ data: { user: null } });
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Good to see you." })).not.toBeNull();
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
   });
 
   it("keeps direct CRM access behind the existing session check", async () => {
