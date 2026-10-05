@@ -103,16 +103,37 @@ describe("Vite settings API", () => {
     expect(String(body.intentId)).toHaveLength(36);
   });
 
+  it("accepts the Go module switchboard success envelope", async () => {
+    const fetchMock = vi.fn(async () => Response.json({
+      ok: true,
+      data: { enabledModules: ["iam", "crm", "routines", "signals"] },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitGoverned("/api/modules", { modules: ["crm", "iam", "routines", "signals"] }))
+      .resolves.toEqual({
+        kind: "completed",
+        data: { ok: true, data: { enabledModules: ["iam", "crm", "routines", "signals"] } },
+      });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("/api/modules");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      modules: ["crm", "iam", "routines", "signals"],
+      intentId: expect.any(String),
+    });
+  });
+
   it("surfaces an approval-pending envelope as pending, not as an error or a success", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(
-      { pendingApproval: true, hint: "This settings change waits for approval in the Approvals inbox." },
+      { pendingApproval: true, hint: "Module changes proposed by the workmate wait for approval in the Approvals inbox." },
       { status: 202 },
     )));
 
-    await expect(submitGoverned("/api/module-settings", { module: "inventory", settings: {} }))
+    await expect(submitGoverned("/api/modules", { modules: ["crm"] }))
       .resolves.toEqual({
         kind: "pending",
-        reason: "This settings change waits for approval in the Approvals inbox.",
+        reason: "Module changes proposed by the workmate wait for approval in the Approvals inbox.",
       });
   });
 

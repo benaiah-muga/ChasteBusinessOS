@@ -9,6 +9,13 @@
       "parity": "verified"
     },
     {
+      "kind": "api",
+      "path": "/api/modules",
+      "method": "POST",
+      "owner": "go",
+      "parity": "verified"
+    },
+    {
       "kind": "page",
       "path": "/login",
       "owner": "vite",

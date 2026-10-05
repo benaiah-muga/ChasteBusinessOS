@@ -167,6 +167,14 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, method, url)).toBe(true);
   });
 
+  it("keeps the modules write selector POST-only and exact", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_MODULES_WRITE_ROUTE: "1" });
+    expect(isGoRouteRequest(flags, "POST", "/api/modules")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/modules")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/modules/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/modules/")).toBe(false);
+  });
+
   it("keeps unsupported routine methods and subpaths on the legacy route", () => {
     const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ROUTINES_ROUTE: "1" });
     expect(isGoRouteRequest(flags, "DELETE", "/api/routines")).toBe(false);
@@ -275,6 +283,7 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_PORTAL_INVOICE_ROUTE: "1",
       CHASTE_GO_SALES_INVOICE_ROUTE: "1",
       CHASTE_GO_MODULES_ROUTE: "1",
+      CHASTE_GO_MODULES_WRITE_ROUTE: "1",
       CHASTE_GO_TEAM_READ_ROUTE: "1",
       CHASTE_GO_TEAM_WRITE_ROUTE: "1",
       CHASTE_GO_SETUP_ROUTE: "1",
@@ -468,7 +477,10 @@ describe("Vite Go route proxy selection", () => {
     expect((await modulesRead.json()).target).toBe("go");
 
     const modulesWrite = await fetch(`${origin}/api/modules`, { method: "POST" });
-    expect((await modulesWrite.json()).target).toBe("legacy");
+    expect((await modulesWrite.json()).target).toBe("go");
+
+    const modulesWriteSuffix = await fetch(`${origin}/api/modules/extra`, { method: "POST" });
+    expect((await modulesWriteSuffix.json()).target).toBe("legacy");
 
     const prefixFallback = await fetch(`${origin}/api/setup/extra`);
     expect((await prefixFallback.json()).target).toBe("legacy");

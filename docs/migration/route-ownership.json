@@ -774,8 +774,8 @@
       "path": "/api/modules",
       "method": "POST",
       "source": "apps/web/src/app/api/modules/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
