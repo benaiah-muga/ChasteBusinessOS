@@ -16,6 +16,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - The standalone support widget now loads in Vite and posts public start, poll, message, and escalation actions to Go. Configure `GO_SUPPORT_TRUSTED_PROXY_CIDRS` with the exact proxy peers in production so Go can safely rate-limit by visitor IP.
 - The `/sessions` page is now Vite-owned, with session trajectories, canonical replay, durable-run details, and context metrics read through Go's authenticated GET routes. Go returns oversized details with the same bounded error behavior as legacy.
 - The `/ledger` page is now Vite-owned and its session-authenticated `GET /api/ledger` read is Go-owned. Unsupported API methods and unknown paths keep their legacy fallback.
+- Session-authenticated `GET /api/support/channels` now uses Go with org, membership, and module checks. Embed tokens remain visible only to organization admins; POST settings changes stay on legacy.
 - Session-authenticated `GET /api/inventory` now serves the Go capability-backed catalog and SKU movement history. Inventory writes remain on legacy, and the response preserves the full catalog payload for Vite inventory consumers.
 - The `/login` page is now Vite-owned. Sign-in, sign-up, verification, and password recovery continue to use the Go-backed auth endpoints.
 - The `/` Dashboard page and its `GET /api/dashboard` and `GET /api/setup` reads are now Vite/Go-owned. Mirror `SMTP_HOST` and coding-agent CLI `PATH` between Go and Next so the setup checklist agrees across runtimes; unknown paths and unsupported API methods keep their legacy fallback.
@@ -23,6 +24,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Session trajectory and durable-run detail reads now enforce matching response limits in the Go API and legacy API: 10,000 session events, 256 KiB per event, an 8 MiB session response, and 200 durable-run steps with a 2 MiB logical JSON response cap. Both APIs check visibility before revealing an oversized durable run.
 
 ### Changed
+- Enable the Go support channel settings read by default in Vite while keeping POST settings updates on the legacy route.
 - Enable the tenant-scoped Go `GET /api/my-work` reader by default. PostgreSQL-backed coverage verifies approval and receipt-remainder cards remain isolated by organization.
 - Enable the session-authenticated, capability-backed Go `GET /api/signals` feed by default. Unsupported methods and suffix paths continue through legacy.
 - Enable Go's session-authenticated `GET` and governed `POST /api/branding` by default in Vite and the Go API. Branding approval responses remain compatible with Settings.

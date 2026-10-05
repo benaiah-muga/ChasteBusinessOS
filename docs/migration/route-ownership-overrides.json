@@ -276,6 +276,13 @@
       "method": "POST",
       "owner": "go",
       "parity": "verified"
+    },
+    {
+      "kind": "api",
+      "path": "/api/support/channels",
+      "method": "GET",
+      "owner": "go",
+      "parity": "verified"
     }
   ]
 }

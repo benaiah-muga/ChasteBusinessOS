@@ -45,9 +45,6 @@ export default defineConfig(({ mode }) => {
         "/api/health": {
           target: goApiOrigin,
         },
-        ...(env.CHASTE_GO_SUPPORT_CHANNELS_ROUTE === "1" ? {
-          "/api/support/channels": { target: goApiOrigin, changeOrigin: false },
-        } : {}),
         ...(env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" ? {
           "/api/capabilities/execute": { target: goApiOrigin, changeOrigin: false },
         } : {}),

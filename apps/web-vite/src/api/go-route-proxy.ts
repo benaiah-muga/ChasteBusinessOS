@@ -8,6 +8,7 @@ export type GoRouteProxyFlags = {
   auth: boolean;
   authOidc: boolean;
   authSaml: boolean;
+  supportChannelsRead: boolean;
   scimRead: boolean;
   scimWrite: boolean;
   portalInvoice: boolean;
@@ -43,6 +44,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     auth: env.CHASTE_GO_AUTH_ROUTE !== "0" && env.GO_AUTH_ROUTE !== "0",
     authOidc: env.CHASTE_GO_AUTH_OIDC_ROUTE === "1",
     authSaml: env.CHASTE_GO_AUTH_SAML_ROUTE === "1",
+    supportChannelsRead: env.CHASTE_GO_SUPPORT_CHANNELS_ROUTE === "1",
     scimRead: env.CHASTE_GO_SCIM_READ_ROUTE === "1",
     scimWrite: env.CHASTE_GO_SCIM_WRITE_ROUTE === "1",
     portalInvoice: env.CHASTE_GO_PORTAL_INVOICE_ROUTE === "1",
@@ -74,6 +76,7 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
 export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?: string): boolean {
   const path = url ?? "";
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
+  if (flags.supportChannelsRead && method === "GET" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   if (flags.auth && isGoAuthRequest(flags, method, path)) return true;
   const scimUserPath = /^\/api\/scim\/v2\/Users(?:\?.*)?$/;
   const scimUserItemPath = /^\/api\/scim\/v2\/Users\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\?.*)?$/i;

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createSupportCustomer,
+  fetchSupportChannels,
   fetchSupportConversations,
   fetchSupportDraft,
   fetchSupportEnabled,
@@ -238,6 +239,18 @@ describe("support drafting", () => {
 });
 
 describe("support channel settings", () => {
+  it("reads channel settings using the strict legacy and Go response contract", async () => {
+    const expected = { autoReplyEnabled: true, greeting: "Welcome", embedToken: null, canManage: false };
+    const fetchMock = vi.fn(async () => jsonResponse(expected));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSupportChannels()).resolves.toEqual(expected);
+    expect(fetchMock).toHaveBeenCalledWith("/api/support/channels", expect.objectContaining({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    }));
+  });
+
   it("refuses a channel change that says nothing", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);

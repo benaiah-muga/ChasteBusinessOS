@@ -51,6 +51,7 @@ function requestRecorder(target: string, streamed = false): Server {
 const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method: string; url: string }> = [
   { env: "CHASTE_GO_SUPPORT_PUBLIC_ROUTE", flag: "supportPublic", method: "POST", url: "/api/support/public?widget=1" },
   { env: "CHASTE_GO_AUTH_ROUTE", flag: "auth", method: "POST", url: "/api/auth/sign-in/email" },
+  { env: "CHASTE_GO_SUPPORT_CHANNELS_ROUTE", flag: "supportChannelsRead", method: "GET", url: "/api/support/channels?view=settings" },
   { env: "CHASTE_GO_SCIM_READ_ROUTE", flag: "scimRead", method: "GET", url: "/api/scim/v2/Users?startIndex=1" },
   { env: "CHASTE_GO_SCIM_READ_ROUTE", flag: "scimRead", method: "GET", url: "/api/scim/v2/Users/aaaaaaaa-0000-4000-8000-000000000001" },
   { env: "CHASTE_GO_SCIM_WRITE_ROUTE", flag: "scimWrite", method: "POST", url: "/api/scim/v2/Users" },
@@ -174,6 +175,14 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/modules")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/modules/extra")).toBe(false);
     expect(isGoRouteRequest(flags, "POST", "/api/modules/")).toBe(false);
+  });
+
+  it("keeps support channel selection GET-only and exact", () => {
+    const flags = goRouteProxyFlagsFromEnv({ CHASTE_GO_SUPPORT_CHANNELS_ROUTE: "1" });
+    expect(isGoRouteRequest(flags, "GET", "/api/support/channels?view=settings")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/support/channels")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/support/channels/extra")).toBe(false);
+    expect(isGoRouteRequest(flags, "GET", "/api/support/channels/")).toBe(false);
   });
 
   it("keeps branding selection limited to exact GET and POST requests", () => {
@@ -305,6 +314,7 @@ describe("Vite Go route proxy selection", () => {
 
     const flags = goRouteProxyFlagsFromEnv({
       CHASTE_GO_SUPPORT_PUBLIC_ROUTE: "1",
+      CHASTE_GO_SUPPORT_CHANNELS_ROUTE: "1",
       CHASTE_GO_SCIM_READ_ROUTE: "1",
       CHASTE_GO_SCIM_WRITE_ROUTE: "1",
       CHASTE_GO_PORTAL_INVOICE_ROUTE: "1",
@@ -368,6 +378,16 @@ describe("Vite Go route proxy selection", () => {
 
     const setup = await fetch(`${origin}/api/setup?source=dashboard`);
     expect((await setup.json()).target).toBe("go");
+
+    const supportChannels = await fetch(`${origin}/api/support/channels?view=settings`);
+    expect((await supportChannels.json())).toMatchObject({ target: "go", method: "GET", url: "/api/support/channels?view=settings" });
+
+    const supportChannelsWrite = await fetch(`${origin}/api/support/channels`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ greeting: "Hello" }),
+    });
+    expect((await supportChannelsWrite.json())).toMatchObject({ target: "legacy", method: "POST", url: "/api/support/channels" });
 
     const teamRead = await fetch(`${origin}/api/team?view=members`);
     expect((await teamRead.json())).toMatchObject({ target: "go", method: "GET", url: "/api/team?view=members" });
