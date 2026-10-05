@@ -1381,7 +1381,7 @@ new owners and the manifest shows zero legacy runtime paths.
      continue to the legacy API. Focused real Vite middleware tests verify the
      selectors and fallbacks. SCIM provider-backed proof and route ownership
      remain open.
-142. (Implemented; route ownership remains legacy) Add Go `POST
+142. (Implemented; route ownership verified) Add Go `POST
      /api/my-work/summarize` with verified-session and organization checks,
      bounded work-card input, server-side workspace credential decryption, and
      the legacy fast-model to primary-model fallback. Workspace provider URLs
@@ -1392,13 +1392,12 @@ new owners and the manifest shows zero legacy runtime paths.
      server, and OpenCode tools are disabled. Codex uses only that user's
      hashed, persisted `CODEX_HOME`, an isolated temporary working directory,
      and read-only CLI mode with no MCP tools. Unsupported providers and missing
-     Codex runtime resources fail closed. The API and paired Vite selectors are
-     opt-in at `GO_MY_WORK_SUMMARY_ROUTE=1` and
+     Codex runtime resources fail closed. The API and paired Vite selectors
+     default on at `GO_MY_WORK_SUMMARY_ROUTE=1` and
      `CHASTE_GO_MY_WORK_SUMMARY_ROUTE=1`; Vite selects only exact POST path
      matches. Provider, handler, CLI, route-mount, and selector tests pass. The
      Go runtime must share the configured persistent Codex home and CLI binary
-     with the connection setup runtime. Runtime proof and route ownership
-     remain open.
+     with the connection setup runtime. Runtime proof remains open.
 143. (Implemented; route ownership remains legacy) Add Go `GET /api/signals`
      behind `GO_SIGNALS_ROUTE=1` and paired `CHASTE_GO_SIGNALS_ROUTE=1`.
      Verified session identity and active organization feed the governed

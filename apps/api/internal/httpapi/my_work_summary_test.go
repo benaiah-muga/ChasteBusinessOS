@@ -344,6 +344,26 @@ func TestMyWorkSummaryHandlerRequiresVerifiedSessionAndOrganizationMatch(t *test
 	}
 }
 
+func TestMyWorkSummaryHandlerAcceptsBearerSessionForSelectedOrganization(t *testing.T) {
+	identity := directTestIdentity()
+	resolver := &fakeDirectSessionResolver{resolved: identity}
+	config := &fakeMyWorkSummaryConfigReader{config: myWorkSummaryConfig{apiKey: "workspace-key", fastModel: "fast", primaryModel: "primary"}}
+	model := &fakeMyWorkSummaryModel{briefs: []string{"Review one approval."}}
+	request := httptest.NewRequest(http.MethodPost, "/api/my-work/summarize", strings.NewReader(validMyWorkSummaryBody))
+	request.Header.Set("Authorization", "Bearer native-client-token")
+	request.Header.Set("X-Organization-ID", *identity.OrgID)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	NewMyWorkSummarySessionHandler(resolver, config, model, nil).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || resolver.bearerCalls != 1 || resolver.bearer != "native-client-token" || resolver.activeOrg != *identity.OrgID {
+		t.Fatalf("status=%d bearer calls=%d token=%q org=%q body=%s", response.Code, resolver.bearerCalls, resolver.bearer, resolver.activeOrg, response.Body.String())
+	}
+	if config.calls != 1 || config.orgID != *identity.OrgID || config.userID != identity.UserID || !strings.Contains(response.Body.String(), `"brief":"Review one approval."`) {
+		t.Fatalf("config scope=%s/%s calls=%d body=%s", config.orgID, config.userID, config.calls, response.Body.String())
+	}
+}
+
 func TestOpenAIWorkSummaryModelUsesServerCredentialAndLegacyRequestShape(t *testing.T) {
 	var requestSeen bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

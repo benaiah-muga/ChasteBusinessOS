@@ -790,8 +790,8 @@
       "path": "/api/my-work/summarize",
       "method": "POST",
       "source": "apps/web/src/app/api/my-work/summarize/route.ts",
-      "owner": "legacy",
-      "parity": "pending"
+      "owner": "go",
+      "parity": "verified"
     },
     {
       "kind": "api",
