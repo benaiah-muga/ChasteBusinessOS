@@ -262,6 +262,7 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_SCIM_READ_ROUTE: "1",
       CHASTE_GO_SCIM_WRITE_ROUTE: "1",
       CHASTE_GO_PORTAL_INVOICE_ROUTE: "1",
+      CHASTE_GO_SALES_INVOICE_ROUTE: "1",
       CHASTE_GO_MODULES_WRITE_ROUTE: "1",
       CHASTE_GO_TEAM_READ_ROUTE: "1",
       CHASTE_GO_TEAM_WRITE_ROUTE: "1",
@@ -437,6 +438,20 @@ describe("Vite Go route proxy selection", () => {
 
     const portalSuffixFallback = await fetch(`${origin}/api/portal/invoice/token/extra`);
     expect((await portalSuffixFallback.json()).target).toBe("legacy");
+
+    const salesInvoice = await fetch(`${origin}/api/sales/aaaaaaaa-0000-4000-8000-000000000001?print=1`);
+    expect((await salesInvoice.json()).target).toBe("go");
+
+    for (const path of [
+      "/api/sales/aaaaaaaa-0000-4000-8000-000000000001/extra",
+      "/api/sales/aaaaaaaa-0000-4000-8000-000000000001/",
+    ]) {
+      const fallback = await fetch(`${origin}${path}`);
+      expect((await fallback.json()).target).toBe("legacy");
+    }
+
+    const salesInvoiceUnsupportedMethod = await fetch(`${origin}/api/sales/aaaaaaaa-0000-4000-8000-000000000001`, { method: "POST" });
+    expect((await salesInvoiceUnsupportedMethod.json()).target).toBe("legacy");
 
     const modulesReadWithoutFlag = await fetch(`${origin}/api/modules`);
     expect((await modulesReadWithoutFlag.json()).target).toBe("legacy");

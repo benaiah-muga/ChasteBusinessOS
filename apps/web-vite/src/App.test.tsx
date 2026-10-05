@@ -347,6 +347,35 @@ describe("Vite app frame", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/portal/invoice/"))).toBe(false);
   });
 
+  it("serves an exact invoice print path in Vite with the active session", async () => {
+    const orderId = "aaaaaaaa-0000-4000-8000-000000000001";
+    window.history.replaceState(null, "", `/print/invoice/${orderId}`);
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).not.toBeNull();
+    expect(authMocks.getSession).not.toHaveBeenCalled();
+    expect(legacyMocks.redirectToLegacy).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(`/api/sales/${orderId}`, expect.objectContaining({
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { accept: "application/json" },
+    }));
+  });
+
+  it.each([
+    "/print/invoice/aaaaaaaa-0000-4000-8000-000000000001/extra",
+    "/print/invoice/aaaaaaaa-0000-4000-8000-000000000001/",
+  ])("keeps non-exact invoice print path %s on the legacy fallback", (path) => {
+    window.history.replaceState(null, "", path);
+    const fetchMock = vi.mocked(globalThis.fetch);
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Opening this page in the current app." })).not.toBeNull();
+    expect(legacyMocks.redirectToLegacy).toHaveBeenCalledWith(path);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/sales/"))).toBe(false);
+  });
+
   it("keeps direct CRM access behind the existing session check", async () => {
     window.history.replaceState(null, "", "/crm");
     authMocks.getSession.mockResolvedValue({ data: { user: null } });

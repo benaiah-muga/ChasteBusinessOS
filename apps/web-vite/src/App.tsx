@@ -355,7 +355,7 @@ export function App() {
   if (pathname.startsWith("/widget/")) return <WidgetPage pathname={pathname} />;
   // The print sheet renders outside the shell: it is chrome-less on purpose so
   // the printed page carries only the invoice.
-  if (pathname.startsWith("/print/invoice/")) return <InvoicePrintPage pathname={pathname} />;
+  if (/^\/print\/invoice\/[^/]+$/.test(pathname)) return <InvoicePrintPage pathname={pathname} />;
   if (!isViteAppPath(pathname)) return <LegacyRoute pathname={pathname} />;
   return <AuthenticatedApp pathname={pathname} />;
 }
