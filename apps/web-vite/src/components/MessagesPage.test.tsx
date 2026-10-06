@@ -341,6 +341,38 @@ describe("messages page states", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("restores the exact Go message edit after approval is pending and the page reloads", async () => {
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      paths.push(path);
+      if (path === "/api/capabilities/execute") return Response.json({ ok: false, pendingApproval: true, reason: "Manager review required." }, { status: 202 });
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    const first = render(<MessagesPage {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit message" }));
+    const editor = await screen.findByLabelText("Edit message");
+    fireEvent.change(editor, { target: { value: "Corrected after reload" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(paths).toContain("/api/capabilities/execute"));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Manager review required"));
+    expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Corrected after reload");
+
+    first.unmount();
+    render(<MessagesPage {...props} />);
+    await waitFor(() => expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Corrected after reload"));
+    const goBody = JSON.parse(String(fetchMock.mock.calls.find(([path]) => String(path) === "/api/capabilities/execute")?.[1]?.body)) as Record<string, unknown>;
+    expect(goBody).toMatchObject({ capabilityId: "messaging.editMessage", input: { body: "Corrected after reload" }, intentId: expect.any(String) });
+  });
+
   it("keeps the draft and raises an alert when the send fails", async () => {
     const fetchMock = router([
       moduleRoute,

@@ -294,7 +294,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                                 : accountingPage
                                                   ? <AccountingPage key={organizationRevision} />
                                                   : messagesPage
-                                                    ? <MessagesPage key={organizationRevision} />
+                                                    ? <MessagesPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                                                     : settingsPage
                                                       ? <SettingsPage key={organizationRevision} />
                                                       : supportPage

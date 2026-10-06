@@ -153,6 +153,15 @@ export type MessagingOutcome<T = Record<string, unknown>> =
   | { kind: "completed"; data: T }
   | { kind: "pending"; reason: string };
 
+export type PendingMessageEdit = { messageId: string; conversationId: string | null; body: string; intentId: string };
+
+type MessageEditScope = { actorId: string | null; organizationId: string | null };
+const pendingMessageEditPrefix = "chaste:message-edit-attempt:";
+const GoEditMessageEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ messageId: z.string().min(1), editedAt: IsoTimestampSchema }).strict(),
+}).strict();
+
 export class MessagingApiError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -426,11 +435,130 @@ export async function searchMessages(query: string, signal?: AbortSignal): Promi
   return result.results;
 }
 
-export function editMessage(messageId: string, body: string, signal?: AbortSignal): Promise<MessagingOutcome<{ ok: true }>> {
+function editMessageLegacy(messageId: string, body: string, signal?: AbortSignal): Promise<MessagingOutcome<{ ok: true }>> {
   return governed(`/api/messages/${encodeURIComponent(messageId)}`, {
     method: "PATCH",
     body: JSON.stringify({ body, intentId: newIntentId() }),
   }, "edit this message", OkEnvelopeSchema, "Your edit is waiting for approval.", signal);
+}
+
+export function editMessage(
+  messageId: string,
+  body: string,
+  signal?: AbortSignal,
+  options: { allowGo?: boolean; actorId?: string | null; organizationId?: string | null; conversationId?: string | null } = {},
+): Promise<MessagingOutcome<{ ok: true }>> {
+  const useGo = options.allowGo === true && typeof __GO_MESSAGING_EDIT_SLICE__ !== "undefined" && __GO_MESSAGING_EDIT_SLICE__;
+  if (!useGo) return editMessageLegacy(messageId, body, signal);
+  return editMessageThroughGo(messageId, body, { actorId: options.actorId ?? null, organizationId: options.organizationId ?? null }, signal, options.conversationId ?? null);
+}
+
+async function messageEditStorageKey(scope: MessageEditScope): Promise<string> {
+  const actorId = scope.actorId?.trim() ?? "";
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!actorId || !organizationId) throw new MessagingApiError(0, "Message editing needs a signed-in actor and active organization.");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
+  const fingerprint = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${pendingMessageEditPrefix}${fingerprint}`;
+}
+
+function readPendingMessageEdit(key: string): PendingMessageEdit | null {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(key);
+  } catch {
+    throw new MessagingApiError(0, "Saved message-edit recovery is unavailable. Check browser storage settings and try again.");
+  }
+  if (raw == null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null && "messageId" in parsed && typeof parsed.messageId === "string" &&
+      "body" in parsed && typeof parsed.body === "string" && "conversationId" in parsed &&
+      (typeof parsed.conversationId === "string" || parsed.conversationId === null) && "intentId" in parsed && typeof parsed.intentId === "string" &&
+      z.string().uuid().safeParse(parsed.intentId).success) {
+      return { messageId: parsed.messageId, conversationId: parsed.conversationId, body: parsed.body, intentId: parsed.intentId };
+    }
+  } catch {
+    // A damaged retry marker must not silently create a second message edit.
+  }
+  throw new MessagingApiError(0, "A saved message edit could not be verified. Refresh the conversation before editing again.");
+}
+
+export async function getPendingMessageEdit(scope: MessageEditScope): Promise<PendingMessageEdit | null> {
+  return readPendingMessageEdit(await messageEditStorageKey(scope));
+}
+
+function writePendingMessageEdit(key: string, action: PendingMessageEdit): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(action));
+  } catch {
+    throw new MessagingApiError(0, "Message-edit retry protection is unavailable. Check browser storage settings and try again.");
+  }
+}
+
+function clearPendingMessageEdit(key: string, intentId: string): void {
+  try {
+    const current = readPendingMessageEdit(key);
+    if (current?.intentId === intentId) localStorage.removeItem(key);
+  } catch {
+    // A completed response is authoritative; a stale marker is harmless and can be cleared on next recovery.
+  }
+}
+
+export async function editMessageThroughGo(
+  messageId: string,
+  body: string,
+  scope: MessageEditScope,
+  signal?: AbortSignal,
+  conversationId: string | null = null,
+): Promise<MessagingOutcome<{ ok: true }>> {
+  const key = await messageEditStorageKey(scope);
+  const pending = readPendingMessageEdit(key);
+  if (pending && (pending.messageId !== messageId || pending.body !== body)) {
+    throw new MessagingApiError(0, "A message edit is unresolved. Retry the saved edit or refresh the conversation before changing it.");
+  }
+  if (pending && pending.conversationId !== conversationId) {
+    throw new MessagingApiError(0, "A message edit is unresolved. Retry the saved edit or refresh the conversation before changing it.");
+  }
+  const action = pending ?? { messageId, conversationId, body, intentId: newIntentId() };
+  if (!pending) writePendingMessageEdit(key, action);
+
+  const input = { messageId: action.messageId, body: action.body };
+  const legacy = () => governed(`/api/messages/${encodeURIComponent(action.messageId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ body: action.body, intentId: action.intentId }),
+  }, "edit this message", OkEnvelopeSchema, "Your edit is waiting for approval.", signal);
+  const result = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "messaging.editMessage", input, intentId: action.intentId }),
+  }, "edit this message", signal);
+  if (result.response.status === 404) {
+    try {
+      const outcome = await legacy();
+      if (outcome.kind === "completed") clearPendingMessageEdit(key, action.intentId);
+      return outcome;
+    } catch (error) {
+      const status = error instanceof MessagingApiError ? error.status : 0;
+      if (status >= 400 && status < 500 && status !== 408 && status !== 429) clearPendingMessageEdit(key, action.intentId);
+      throw error;
+    }
+  }
+  if (result.response.status === 202) {
+    const parsed = PendingApprovalSchema.safeParse(result.body);
+    if (!parsed.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to edit this message.");
+    return { kind: "pending", reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? "Your edit is waiting for approval." };
+  }
+  if (!result.response.ok) {
+    const terminal = result.response.status >= 400 && result.response.status < 500 && result.response.status !== 408 && result.response.status !== 429;
+    if (terminal) clearPendingMessageEdit(key, action.intentId);
+    throw new MessagingApiError(result.response.status, readError(result.response.status, result.body, "edit this message"));
+  }
+  const parsed = GoEditMessageEnvelopeSchema.safeParse(result.body);
+  if (!parsed.success || parsed.data.data.messageId !== action.messageId) {
+    throw new MessagingApiError(result.response.status, "The messaging service returned an unexpected response to edit this message.");
+  }
+  clearPendingMessageEdit(key, action.intentId);
+  return { kind: "completed", data: { ok: true } };
 }
 
 export function deleteMessage(messageId: string, signal?: AbortSignal): Promise<MessagingOutcome<{ ok: true }>> {

@@ -15,6 +15,7 @@ import {
   fetchConversations,
   fetchMessagingEnabled,
   fetchOlderMessages,
+  getPendingMessageEdit,
   reportConversationPresence,
   searchMessages,
   sendConversationMessage,
@@ -511,7 +512,7 @@ function ChannelName({ conversation }: { conversation: Conversation }) {
   return <>{conversation.kind === "dm" ? "" : "#"}{conversation.title}</>;
 }
 
-export function MessagesPage() {
+export function MessagesPage({ actorId = null, organizationId = null }: { actorId?: string | null; organizationId?: string | null } = {}) {
   const wide = useWideViewport();
   const [moduleState, setModuleState] = useState<ModuleState>({ status: "checking" });
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -586,6 +587,22 @@ export function MessagesPage() {
       : people.filter((person) => personAlias(person).toLocaleLowerCase().startsWith(mentionQuery.toLocaleLowerCase()))),
     [mentionQuery, people],
   );
+
+  useEffect(() => {
+    const goEditEnabled = typeof __GO_MESSAGING_EDIT_SLICE__ !== "undefined" && __GO_MESSAGING_EDIT_SLICE__;
+    if (!goEditEnabled || !actorId || !organizationId) return;
+    let current = true;
+    void getPendingMessageEdit({ actorId, organizationId }).then((pending) => {
+      if (!current || !pending) return;
+      if (pending.conversationId) setActiveId(pending.conversationId);
+      setEditingId(pending.messageId);
+      setEditingBody(pending.body);
+      setNotice({ tone: "pending", text: "An earlier message edit is unresolved. Retry the restored edit to check its result." });
+    }).catch((error: unknown) => {
+      if (current) setNotice({ tone: "error", text: errorText(error, "Could not restore the pending message edit.") });
+    });
+    return () => { current = false; };
+  }, [actorId, organizationId]);
 
   const loadConversations = useCallback(async (signal?: AbortSignal) => {
     setLoadError(null);
@@ -996,19 +1013,32 @@ export function MessagesPage() {
 
   const saveEdit = useCallback(async () => {
     if (!editingId || !editingBody.trim()) return;
+    const goEditEnabled = typeof __GO_MESSAGING_EDIT_SLICE__ !== "undefined" && __GO_MESSAGING_EDIT_SLICE__;
+    const retainDraft = goEditEnabled && actorId != null && organizationId != null && activeId != null;
+    let keepEditing = false;
     try {
-      const outcome = await editMessage(editingId, editingBody.trim());
+      const outcome = await editMessage(editingId, editingBody.trim(), undefined, {
+        allowGo: retainDraft,
+        actorId,
+        organizationId,
+        conversationId: activeId,
+      });
       if (report(outcome, "Your edit is waiting for approval.")) {
         if (activeId) await refreshThread(activeId);
         setNotice({ tone: "success", text: "Message updated." });
+      } else {
+        keepEditing = retainDraft;
       }
     } catch (error) {
       setNotice({ tone: "error", text: errorText(error, "Could not update the message.") });
+      keepEditing = retainDraft;
     } finally {
-      setEditingId(null);
-      setEditingBody("");
+      if (!keepEditing) {
+        setEditingId(null);
+        setEditingBody("");
+      }
     }
-  }, [activeId, editingBody, editingId, refreshThread, report]);
+  }, [activeId, actorId, editingBody, editingId, organizationId, refreshThread, report]);
 
   const removeMessage = useCallback(async (messageId: string) => {
     setConfirmDeleteMessageId(null);

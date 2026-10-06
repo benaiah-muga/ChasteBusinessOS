@@ -1758,3 +1758,8 @@ new owners and the manifest shows zero legacy runtime paths.
      Scan actor/org scoped retry records on load, keep affected tasks locked
      from completion across editor switches, and require the Go task ID to
      match before clearing a saved attempt. Browser proof remains open.
+180. Add the opt-in `CHASTE_GO_MESSAGING_EDIT_SLICE` selector for Vite message
+     edits through Go's `messaging.editMessage` capability. Restore the exact
+     actor/org scoped edit and intent after pending or uncertain results,
+     validate Go output, and use legacy only when the capability route is
+     missing. Browser proof remains open.
