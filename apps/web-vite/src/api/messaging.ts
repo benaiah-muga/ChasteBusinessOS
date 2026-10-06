@@ -584,16 +584,27 @@ function deleteMessageLegacy(messageId: string, signal?: AbortSignal, intentId =
   }, "delete this message", OkEnvelopeSchema, "Deleting this message is waiting for approval.", signal);
 }
 
-export function deleteMessage(
+export async function deleteMessage(
   messageId: string,
   signal?: AbortSignal,
   options: { allowGo?: boolean; actorId?: string | null; organizationId?: string | null; conversationId?: string | null } = {},
 ): Promise<MessagingOutcome<{ ok: true }>> {
+  const actorId = options.actorId?.trim();
+  const organizationId = options.organizationId?.trim();
+  if (!actorId || !organizationId) {
+    throw new MessagingApiError(0, "Message deletion needs a signed-in actor and active organization.");
+  }
   const useGo = options.allowGo === true && typeof __GO_MESSAGING_DELETE_SLICE__ !== "undefined" && __GO_MESSAGING_DELETE_SLICE__;
-  if (!useGo) return deleteMessageLegacy(messageId, signal);
+  if (!useGo) {
+    const pending = await getPendingMessageDelete({ actorId, organizationId });
+    if (pending) {
+      throw new MessagingApiError(0, "A Go message deletion is unresolved. Restore Go message deletion to retry the saved deletion before starting another deletion.");
+    }
+    return deleteMessageLegacy(messageId, signal);
+  }
   return deleteMessageThroughGo(messageId, {
-    actorId: options.actorId ?? null,
-    organizationId: options.organizationId ?? null,
+    actorId,
+    organizationId,
     conversationId: options.conversationId ?? null,
   }, signal);
 }

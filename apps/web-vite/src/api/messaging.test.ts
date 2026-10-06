@@ -342,6 +342,46 @@ describe("messaging API client", () => {
     await expect(getPendingMessageDelete({ actorId: "user-delete", organizationId: "org-other" })).resolves.toBeNull();
   });
 
+  it("blocks legacy deletion after selector rollback while the scoped Go delete is unresolved", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
+    const scope = { actorId: "user-delete-rollback", organizationId: "org-delete-rollback" };
+    await deleteMessage(messageId, undefined, { allowGo: true, ...scope, conversationId });
+
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
+    const legacyFetch = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", legacyFetch);
+    await expect(deleteMessage(messageId, undefined, { ...scope, conversationId })).rejects.toMatchObject({
+      message: expect.stringContaining("Go message deletion is unresolved"),
+    });
+    expect(legacyFetch).not.toHaveBeenCalled();
+    await expect(getPendingMessageDelete(scope)).resolves.toMatchObject({ messageId, conversationId });
+  });
+
+  it("blocks selector-off deletion when actor or organization scope is missing", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(deleteMessage(messageId)).rejects.toMatchObject({
+      message: expect.stringContaining("signed-in actor and active organization"),
+    });
+    await expect(deleteMessage(messageId, undefined, { actorId: "user-delete-missing-org" })).rejects.toMatchObject({
+      message: expect.stringContaining("signed-in actor and active organization"),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps fresh selector-off deletions on the legacy route", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(deleteMessage(messageId, undefined, {
+      actorId: "user-delete-legacy", organizationId: "org-delete-legacy", conversationId,
+    })).resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(new RegExp(`^/api/messages/${messageId}\\?intentId=`));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a Go deletion after an uncertain result and validates the tombstone output", async () => {
     vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
     const scope = { actorId: "user-delete-retry", organizationId: "org-delete-retry" };
@@ -425,7 +465,7 @@ describe("messaging API client", () => {
   it("passes the message tombstone intent id in the query string", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
-    await deleteMessage(messageId);
+    await deleteMessage(messageId, undefined, { actorId: "user-delete-query", organizationId: "org-delete-query" });
     expect(lastUrl(fetchMock)).toMatch(new RegExp(`^/api/messages/${messageId}\\?intentId=.+$`));
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("DELETE");
   });

@@ -463,9 +463,104 @@ describe("messages page states", () => {
     expect(capabilityBodies[0]).toMatchObject({ capabilityId: "messaging.deleteMessage", input: { messageId: "m1" }, intentId: expect.any(String) });
     render(<MessagesPage {...props} />);
     const restoredDialog = await screen.findByRole("alertdialog", { name: "Delete this message?" });
+    expect((within(restoredDialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(restoredDialog).getByRole("button", { name: "Delete message" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(within(restoredDialog).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(restoredDialog.parentElement!);
+    expect(screen.getByRole("alertdialog", { name: "Delete this message?" })).not.toBeNull();
     fireEvent.click(within(restoredDialog).getByRole("button", { name: "Delete message" }));
     await waitFor(() => expect(capabilityBodies).toHaveLength(2));
     expect(capabilityBodies[1]?.intentId).toBe(capabilityBodies[0]?.intentId);
+  });
+
+  it("restores and locks an unresolved Go deletion after selector rollback", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const writes: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute" || path.startsWith("/api/messages/")) writes.push(path);
+      if (path === "/api/capabilities/execute") return Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 });
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    await deleteMessage("m1", undefined, { allowGo: true, ...props, conversationId: channelId });
+    const writesBeforeReload = writes.length;
+
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", false);
+    render(<MessagesPage {...props} />);
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete this message?" });
+    expect((within(dialog).getByRole("button", { name: "Delete message" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete message" }));
+    expect(writes).toHaveLength(writesBeforeReload);
+  });
+
+  it.each([true, false])("blocks message deletion until actor and organization scope resolve when Go selector is %s", async (goDeleteEnabled) => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", goDeleteEnabled);
+    const writes: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute" || path.startsWith("/api/messages/")) writes.push(path);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete message" }));
+    fireEvent.click(within(screen.getByRole("alertdialog", { name: "Delete this message?" })).getByRole("button", { name: "Delete message" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("paused until the actor");
+    expect(writes).toEqual([]);
+  });
+
+  it("ignores a stale Go deletion response after the active actor or organization changes", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const finishRequests: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        return new Promise((resolve) => { finishRequests.push(resolve); });
+      }
+      if (path === "/api/modules") return Promise.resolve(Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] }));
+      if (path === "/api/conversations") return Promise.resolve(Response.json({ conversations: [conversation()], me }));
+      if (path.startsWith("/api/conversations/people")) return Promise.resolve(Response.json({ people }));
+      if (path.includes("/presence")) return Promise.resolve(Response.json({ people: [] }));
+      if (path.endsWith("/messages")) return Promise.resolve(Response.json(threadBody()));
+      return Promise.resolve(Response.json({ error: "not found" }, { status: 404 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const scopeA = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    const view = render(<MessagesPage {...scopeA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete message" }));
+    fireEvent.click(within(screen.getByRole("alertdialog", { name: "Delete this message?" })).getByRole("button", { name: "Delete message" }));
+    await waitFor(() => expect(finishRequests).toHaveLength(1));
+
+    view.rerender(<MessagesPage actorId={other} organizationId="7d15d9ac-d8b6-4f49-8ca5-387adf08b8e5" />);
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Delete this message?" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Delete message" }));
+    fireEvent.click(within(screen.getByRole("alertdialog", { name: "Delete this message?" })).getByRole("button", { name: "Delete message" }));
+    await waitFor(() => expect(finishRequests).toHaveLength(2));
+    await act(async () => {
+      finishRequests[1]?.(Response.json({ pendingApproval: true, reason: "B review required." }, { status: 202 }));
+    });
+    expect(screen.getByRole("alertdialog", { name: "Delete this message?" })).not.toBeNull();
+
+    await act(async () => {
+      finishRequests[0]?.(Response.json({ ok: true, data: { deleted: true } }));
+    });
+    expect(screen.getByRole("alertdialog", { name: "Delete this message?" })).not.toBeNull();
+    expect(screen.queryByText("Message deleted.")).toBeNull();
   });
 
   it("closes a restored deletion confirmation when the actor or organization changes", async () => {
@@ -895,7 +990,7 @@ it("reports typing presence after the debounce and clears it on the mount heartb
       return Response.json({ error: "not found" }, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<MessagesPage />);
+    render(<MessagesPage actorId={me} organizationId="legacy-delete-org" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Delete message" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Delete this message?" });
