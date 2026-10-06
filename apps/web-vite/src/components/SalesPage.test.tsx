@@ -131,6 +131,155 @@ describe("Vite sales page", () => {
     });
   });
 
+  it("retains the create draft while approval is pending, then clears it on success", async () => {
+    let writes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") {
+        writes += 1;
+        return writes === 1
+          ? Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required", approvalId: "30000000-0000-4000-8000-000000000001" }, { status: 202 })
+          : Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } });
+      }
+      return Response.json({ error: `unexpected route ${String(input)} ${String(init?.method)}` }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Coffee beans" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2.5" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "12.50" } });
+    fireEvent.change(screen.getByLabelText("Tax"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Order note"), { target: { value: "Deliver Friday" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    expect((screen.getByLabelText("Customer") as HTMLSelectElement).value).toBe(customers.customers[0]!.id);
+    expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("Coffee beans");
+    expect((screen.getByLabelText("Quantity") as HTMLInputElement).value).toBe("2.5");
+    expect((screen.getByLabelText("Unit price") as HTMLInputElement).value).toBe("12.50");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "Create sales order" })).toBeNull();
+    const requests = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    expect(requests).toHaveLength(2);
+    const firstBody = JSON.parse(String(requests[0]?.[1]?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> };
+    const retryBody = JSON.parse(String(requests[1]?.[1]?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> };
+    expect(firstBody).toMatchObject({ capabilityId: "sales.createOrder", input: { customerId: customers.customers[0]!.id, note: "Deliver Friday" } });
+    expect(firstBody.intentId).toBe(retryBody.intentId);
+    expect(retryBody.input).toEqual(firstBody.input);
+  });
+
+  it("keeps the delivery target open through pending approval and closes after completion", async () => {
+    let writes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") {
+        writes += 1;
+        return writes === 1
+          ? Response.json({ ok: false, pendingApproval: true, reason: "Delivery approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { invoiceId: "40000000-0000-4000-8000-000000000001", invoiceNumber: 900, invoiceTotalMinor: 129900, orderStatus: "delivered" } });
+      }
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    render(<SalesPage baseCurrency="USD" actorId="actor-1" organizationId="org-1" />);
+
+    const orderRow = await screen.findByRole("row", { name: /#41/ });
+    fireEvent.click(within(orderRow).getByRole("button", { name: "Deliver #41" }));
+    expect(screen.getByRole("dialog").textContent).toContain("Order #41");
+    fireEvent.click(screen.getByRole("button", { name: "Deliver all and invoice" }));
+    expect(await screen.findByText("Delivery approval required")).not.toBeNull();
+    expect(screen.getByRole("dialog").textContent).toContain("Order #41");
+
+    fireEvent.click(screen.getByRole("button", { name: "Deliver all and invoice" }));
+    expect(await screen.findByText("Order #41 fully delivered and invoiced.")).not.toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const requests = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const bodies = requests.map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toMatchObject({ capabilityId: "sales.deliverOrder", input: { orderId: orders[0]!.id } });
+    expect(bodies[0]?.input).not.toHaveProperty("lines");
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+  });
+
+  it("keeps the Go partial-delivery status when refreshing the order list fails", async () => {
+    let salesReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") {
+        salesReads += 1;
+        return salesReads === 1
+          ? Response.json({ orders })
+          : Response.json({ error: "order list temporarily unavailable" }, { status: 503 });
+      }
+      if (input === "/api/capabilities/execute") return Response.json({
+        ok: true,
+        data: { invoiceId: "40000000-0000-4000-8000-000000000002", invoiceNumber: 901, invoiceTotalMinor: 65000, orderStatus: "confirmed" },
+      });
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    render(<SalesPage baseCurrency="USD" actorId="actor-1" organizationId="org-1" />);
+
+    const orderRow = await screen.findByRole("row", { name: /#41/ });
+    fireEvent.click(within(orderRow).getByRole("button", { name: "Deliver #41" }));
+    expect(screen.getByRole("dialog").textContent).toContain("invoice for those delivered lines");
+    expect(screen.getByRole("dialog").textContent).not.toContain("$1,299.00");
+    fireEvent.click(screen.getByRole("button", { name: "Deliver all and invoice" }));
+
+    expect(await screen.findByText("Reserved quantities delivered and invoiced for order #41. The order remains confirmed.")).not.toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(within(screen.getByRole("row", { name: /#41/ })).getByRole("cell", { name: "Confirmed" })).not.toBeNull();
+    expect(salesReads).toBe(2);
+  });
+
+  it("keeps the cancellation target open through pending approval and closes after completion", async () => {
+    let writes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") {
+        writes += 1;
+        return writes === 1
+          ? Response.json({ ok: false, pendingApproval: true, reason: "Cancellation approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { status: "cancelled", releasedThousandths: 1000 } });
+      }
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+
+    const orderRow = await screen.findByRole("row", { name: /#41/ });
+    fireEvent.click(within(orderRow).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("dialog").textContent).toContain("Order #41");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel order" }));
+    expect(await screen.findByText("Cancellation approval required")).not.toBeNull();
+    expect(screen.getByRole("dialog").textContent).toContain("Order #41");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel order" }));
+    expect(await screen.findByText("Order #41 cancelled.")).not.toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const requests = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const bodies = requests.map(([, init]) => JSON.parse(String(init?.body)) as { capabilityId: string; intentId: string; input: Record<string, unknown> });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toMatchObject({ capabilityId: "sales.cancelOrder", input: { orderId: orders[0]!.id } });
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+  });
+
   it("keeps the approval intent across remounts and clears it after resolution", async () => {
     let capabilityAttempt = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

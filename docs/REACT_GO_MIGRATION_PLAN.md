@@ -1614,3 +1614,17 @@ new owners and the manifest shows zero legacy runtime paths.
      Go requests, and validate UUIDs, quantities, yield, work center, note, and
      lot code against the capability contract. Focused Vite checks pass;
      browser proof remains open.
+165. Add Vite Sales order creation, deliver-all, and cancellation through Go's
+     session-authenticated `sales.createOrder`, `sales.deliverOrder`, and
+     `sales.cancelOrder` capabilities when `CHASTE_GO_SALES_ORDER_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep confirmation on its existing
+     Go path and fall back to the legacy `/api/sales` action only when the Go
+     capability route is absent, reusing the same intent. Persist exact action
+     retries by actor and organization through pending or uncertain results;
+     retain form drafts and action targets until success. Create lines preserve
+     optional SKU inventory linking. Delivery omits explicit lines to deliver
+     all remaining reserved quantities, including service lines, matching the
+     existing Next flow; partial line delivery and catalog quick-create remain
+     outside this Vite form. Go rejects duplicate delivery line IDs and the
+     internal deliver-all sentinel as explicit quantities. Focused checks pass;
+     browser proof remains open.

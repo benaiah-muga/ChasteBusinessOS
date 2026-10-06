@@ -181,6 +181,8 @@ func TestSalesOrdersParserRejections(t *testing.T) {
 		`{"orderId":"` + orderID + `","lines":[{"lineId":"` + orderID + `","quantityThousandths":0}]}`,
 		`{"orderId":"` + orderID + `","lines":[{"lineId":"` + orderID + `","quantityThousandths":-5}]}`,
 		`{"orderId":"` + orderID + `","lines":[{"lineId":"` + orderID + `","quantityThousandths":1.5}]}`,
+		`{"orderId":"` + orderID + `","lines":[{"lineId":"` + orderID + `","quantityThousandths":1000},{"lineId":"` + orderID + `","quantityThousandths":1000}]}`,
+		fmt.Sprintf(`{"orderId":%q,"lines":[{"lineId":%q,"quantityThousandths":%d}]}`, orderID, orderID, maxSafeInteger),
 	} {
 		if _, err := ParseSalesDeliverOrderInput(json.RawMessage(raw)); err == nil {
 			t.Errorf("ParseSalesDeliverOrderInput accepted %s", raw)

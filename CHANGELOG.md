@@ -112,6 +112,7 @@ The full v1 changelog is preserved at the bottom of this file.
 - Vite can opt marketing segment creation into Go's authenticated `marketing.createSegment` capability with `CHASTE_GO_MARKETING_SEGMENT_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; the default remains the legacy route, and other marketing actions are unchanged.
 - Vite can opt eligible conversation message sends into Go's authenticated `messaging.sendMessage` capability with `CHASTE_GO_MESSAGING_SEND_SLICE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; the default remains the legacy route, user mentions, replies, attachments, and approval-pending behavior are preserved. Agent-enabled conversations and @agent messages remain on the legacy route until Go workmate replies are supported.
 - Vite Sales can confirm draft orders through Go's existing authenticated `sales.confirmOrder` capability. Approval responses are preserved, and all other sales actions remain on their existing routes.
+- Vite Sales can create, deliver, and cancel orders through Go's authenticated `sales.createOrder`, `sales.deliverOrder`, and `sales.cancelOrder` capabilities with `CHASTE_GO_SALES_ORDER_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Drafts and action targets stay in place on pending or failed responses, and create/deliver-all/cancel retries reuse actor- and organization-scoped intents. Delivery records all remaining reserved lines, matching the existing Next flow.
 
 ### Fixed
 

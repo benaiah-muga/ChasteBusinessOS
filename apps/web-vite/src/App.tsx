@@ -270,7 +270,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                               : crmPage
                             ? <CRMPage key={organizationRevision} actorId={currentUserId} organizationId={activeOrgId} />
                             : salesPage
-                              ? <SalesPage key={organizationRevision} baseCurrency={baseCurrency} />
+                              ? <SalesPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                               : posSummaryPage
                                 ? <PosShiftSummaryPage key={organizationRevision} baseCurrency={baseCurrency} />
                                 : inventoryPage

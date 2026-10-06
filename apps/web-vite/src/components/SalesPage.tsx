@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, SalesApiError, type SalesOrder } from "../api/sales";
+import { confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, SalesApiError, submitSalesOrderWrite, type SalesOrder } from "../api/sales";
 import { CrmApiError, fetchCrmCustomers, type CrmCustomer } from "../api/crm";
 import { legacyUrl } from "../legacy";
 import "./sales-page.css";
@@ -13,6 +13,9 @@ type PageState =
 
 type CurrencyStyle = { symbol: string; minorUnits: number };
 type OrderFilter = "all" | "draft" | "confirmed" | "delivered" | "cancelled";
+type OrderDraftLine = { sku: string; description: string; quantity: string; unitPrice: string; tax: string };
+type OrderActionTarget = { action: "deliver" | "cancel"; order: SalesOrder };
+const emptyOrderDraftLine = (): OrderDraftLine => ({ sku: "", description: "", quantity: "1", unitPrice: "0", tax: "0" });
 const ORDER_FILTERS: { value: OrderFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "draft", label: "Draft" },
@@ -63,6 +66,20 @@ function formatStatus(status: string): string {
   return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function minorFromInput(value: string, minorUnits: number): number | null {
+  const parsed = Number(value.trim() || "0");
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  const minor = Math.round(parsed * (10 ** minorUnits));
+  return Number.isSafeInteger(minor) ? minor : null;
+}
+
+function quantityFromInput(value: string): number | null {
+  const parsed = Number(value.trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  const thousandths = Math.round(parsed * 1000);
+  return Number.isSafeInteger(thousandths) && thousandths > 0 ? thousandths : null;
+}
+
 function savedConfirmIntent(orderId: string): string | null {
   try {
     const value = sessionStorage.getItem(`chaste:sales-confirm-intent:${orderId}`);
@@ -104,7 +121,7 @@ function hasSavedPendingApproval(orderId: string): boolean {
   }
 }
 
-export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
+export function SalesPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<OrderFilter>("all");
@@ -112,6 +129,11 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
   const [approvalWaitingOrderIds, setApprovalWaitingOrderIds] = useState<Set<string>>(() => new Set());
   const [allowBackorder, setAllowBackorder] = useState<Record<string, boolean>>({});
   const [actionNotice, setActionNotice] = useState<{ tone: "success" | "pending" | "error"; message: string } | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createForm, setCreateForm] = useState({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [writeBusy, setWriteBusy] = useState(false);
+  const [orderActionTarget, setOrderActionTarget] = useState<OrderActionTarget | null>(null);
   const confirmIntents = useRef(new Map<string, string>());
   const searchRef = useRef<HTMLInputElement>(null);
   const currency = useMemo(() => currencyFor(baseCurrency), [baseCurrency]);
@@ -224,21 +246,156 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
     }
   }
 
+  async function refreshOrderList(): Promise<void> {
+    try {
+      const orders = await fetchSalesOrders();
+      setState((current) => current.status === "ready" ? { ...current, orders } : current);
+    } catch {
+      setActionNotice((current) => current ?? { tone: "error", message: "The action completed, but the order list could not refresh." });
+    }
+  }
+
+  async function handleCreateOrder(): Promise<void> {
+    const described = createForm.lines.filter((line) => line.description.trim().length > 0);
+    if (!createForm.customerId || described.length === 0) {
+      setCreateError("Choose a customer and add at least one described line item.");
+      return;
+    }
+    const lines = [] as Array<{ sku?: string; description: string; quantity: number; unitPriceMinor: number; taxMinor: number }>;
+    for (const line of described) {
+      const quantity = quantityFromInput(line.quantity);
+      const unitPriceMinor = minorFromInput(line.unitPrice, currency.minorUnits);
+      const taxMinor = minorFromInput(line.tax, currency.minorUnits);
+      if (quantity === null || unitPriceMinor === null || taxMinor === null) {
+        setCreateError("Each line needs a positive quantity and non-negative price and tax.");
+        return;
+      }
+      lines.push({
+        description: line.description.trim(), quantity, unitPriceMinor, taxMinor,
+        ...(line.sku.trim() ? { sku: line.sku.trim() } : {}),
+      });
+    }
+    if (createForm.note.length > 4000) {
+      setCreateError("Keep the order note under 4,000 characters.");
+      return;
+    }
+    setWriteBusy(true);
+    setCreateError(null);
+    setActionNotice(null);
+    try {
+      const result = await submitSalesOrderWrite({
+        action: "create", customerId: createForm.customerId,
+        ...(createForm.note.trim() ? { note: createForm.note.trim() } : {}), lines,
+      }, { actorId, organizationId });
+      if (result.kind === "pending") {
+        setActionNotice({ tone: "pending", message: result.reason });
+        return;
+      }
+      setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
+      setShowCreateForm(false);
+      setActionNotice({ tone: "success", message: "Sales order created as a draft." });
+      await refreshOrderList();
+    } catch (error) {
+      setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The sales order could not be created." });
+    } finally {
+      setWriteBusy(false);
+    }
+  }
+
+  async function handleOrderAction(): Promise<void> {
+    if (!orderActionTarget) return;
+    const target = orderActionTarget;
+    setWriteBusy(true);
+    setActionNotice(null);
+    try {
+      const result = await submitSalesOrderWrite({ action: target.action, orderId: target.order.id }, { actorId, organizationId });
+      if (result.kind === "pending") {
+        setActionNotice({ tone: "pending", message: result.reason });
+        return;
+      }
+      const nextStatus = result.action === "cancel" ? "cancelled"
+        : result.action === "deliver" ? result.data.orderStatus : target.order.status;
+      setOrderActionTarget(null);
+      setState((current) => current.status !== "ready" ? current : {
+        ...current,
+        orders: current.orders.map((order) => order.id === target.order.id
+          ? { ...order, status: nextStatus }
+          : order),
+      });
+      setActionNotice({
+        tone: "success",
+        message: result.action === "cancel"
+          ? `Order #${target.order.number} cancelled.`
+          : result.action === "deliver" && result.data.orderStatus === "delivered"
+            ? `Order #${target.order.number} fully delivered and invoiced.`
+            : result.action === "deliver"
+              ? `Reserved quantities delivered and invoiced for order #${target.order.number}. The order remains confirmed.`
+              : `Order #${target.order.number} updated.`,
+      });
+      await refreshOrderList();
+    } catch (error) {
+      setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The sales order action could not be completed." });
+    } finally {
+      setWriteBusy(false);
+    }
+  }
+
   return (
     <main className="sales-page">
       <header className="sales-page-header">
         <div>
           <p className="sales-eyebrow">Revenue · preview</p>
           <h1 id="sales-title">Sales orders</h1>
-          <p>Review orders, delivery progress, and order totals. Create and manage orders in the full sales workspace.</p>
+          <p>Review orders, create drafts, and deliver or cancel confirmed orders. Use the full workspace for quotes and advanced workflows.</p>
         </div>
         <div className="sales-header-actions">
           {state.status === "ready" && <span className="sales-order-count">{state.orders.length} {state.orders.length === 1 ? "order" : "orders"}</span>}
+          <button className="sales-new-order" type="button" onClick={() => { setShowCreateForm((open) => !open); setCreateError(null); }} aria-expanded={showCreateForm}>
+            {showCreateForm ? "Close order form" : "Create sales order"}
+          </button>
           <a className="sales-full-workspace" href={legacyUrl("/sales")}>Open full sales workspace</a>
         </div>
       </header>
 
       {actionNotice && <p className={`sales-action-notice sales-action-notice-${actionNotice.tone}`} role={actionNotice.tone === "error" ? "alert" : "status"}>{actionNotice.message}</p>}
+
+      {showCreateForm && state.status === "ready" && (
+        <section className="sales-write-card" aria-labelledby="sales-create-title">
+          <div className="sales-write-heading">
+            <div><p className="sales-eyebrow">New draft</p><h2 id="sales-create-title">Create sales order</h2></div>
+            <p>Prices and tax use {baseCurrency ?? "the workspace currency"}. A non-empty SKU links the line to inventory.</p>
+          </div>
+          <div className="sales-write-grid">
+            <label>Customer
+              <select value={createForm.customerId} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, customerId: value })); setCreateError(null); }} disabled={writeBusy}>
+                <option value="">Choose a customer</option>
+                {state.customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
+              </select>
+            </label>
+            <label>Order note
+              <input value={createForm.note} maxLength={4000} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, note: value })); setCreateError(null); }} disabled={writeBusy} />
+            </label>
+          </div>
+          <div className="sales-write-lines">
+            <h3>Line items</h3>
+            {createForm.lines.map((line, index) => (
+              <div className="sales-write-line" key={index}>
+                <label>SKU (optional)<input value={line.sku} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, sku: value } : item) })); }} disabled={writeBusy} /></label>
+                <label>Description<input value={line.description} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item) })); setCreateError(null); }} disabled={writeBusy} /></label>
+                <label>Quantity<input inputMode="decimal" value={line.quantity} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: value } : item) })); }} disabled={writeBusy} /></label>
+                <label>Unit price<input inputMode="decimal" value={line.unitPrice} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: value } : item) })); }} disabled={writeBusy} /></label>
+                <label>Tax<input inputMode="decimal" value={line.tax} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, tax: value } : item) })); }} disabled={writeBusy} /></label>
+                <button type="button" className="sales-write-remove" disabled={writeBusy || createForm.lines.length === 1} aria-label={`Remove line ${index + 1}`} onClick={() => setCreateForm((current) => ({ ...current, lines: current.lines.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
+              </div>
+            ))}
+            <div className="sales-write-actions">
+              <button type="button" className="sales-write-secondary" disabled={writeBusy} onClick={() => setCreateForm((current) => ({ ...current, lines: [...current.lines, emptyOrderDraftLine()] }))}>Add line</button>
+              <button type="button" className="sales-write-primary" disabled={writeBusy} onClick={() => void handleCreateOrder()}>{writeBusy ? "Saving…" : "Create draft"}</button>
+            </div>
+            {createError && <p className="sales-write-error" role="alert">{createError}</p>}
+          </div>
+        </section>
+      )}
 
       {state.status === "ready" && state.orders.length > 0 && (
         <div className="sales-order-tools">
@@ -293,7 +450,7 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
         <section className="sales-empty" role="status">
           <span aria-hidden="true">↗</span>
           <h2>No sales orders yet</h2>
-          <p>Orders will appear here as your team confirms customer purchases.</p>
+          <p>Create a draft order, then confirm it to check credit and reserve stock.</p>
         </section>
       )}
       {state.status === "ready" && state.orders.length > 0 && filtered.length === 0 && (
@@ -329,12 +486,31 @@ export function SalesPage({ baseCurrency = null }: { baseCurrency?: string | nul
                       Allow backorder
                     </label>
                     <button type="button" disabled={confirmingOrderId !== null} onClick={() => void handleConfirm(order)}>{confirmingOrderId === order.id ? "Checking…" : approvalWaitingOrderIds.has(order.id) || hasSavedPendingApproval(order.id) ? `Check approval #${order.number}` : `Confirm #${order.number}`}</button>
+                    <button type="button" className="sales-row-action" disabled={writeBusy || confirmingOrderId !== null} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
+                  </>}{order.status === "confirmed" && <>
+                    <button type="button" disabled={writeBusy} onClick={() => setOrderActionTarget({ action: "deliver", order })}>Deliver #{order.number}</button>
+                    <button type="button" className="sales-row-action" disabled={writeBusy} onClick={() => setOrderActionTarget({ action: "cancel", order })}>Cancel</button>
                   </>}</td>
                 </tr>
               ))}</tbody>
             </table>
           </div>
         </section>
+      )}
+      {orderActionTarget && (
+        <div className="sales-modal-backdrop">
+          <section className="sales-modal" role="dialog" aria-modal="true" aria-labelledby="sales-action-title">
+            <p className="sales-eyebrow">Order #{orderActionTarget.order.number}</p>
+            <h2 id="sales-action-title">{orderActionTarget.action === "deliver" ? "Deliver and invoice order?" : "Cancel sales order?"}</h2>
+            <p>{orderActionTarget.action === "deliver"
+              ? "This delivers all remaining reserved quantities, including service lines, and creates an invoice for those delivered lines."
+              : "This withdraws the order and releases its remaining stock reservations. Delivered or partially delivered orders must be reversed through the invoice."}</p>
+            <div className="sales-write-actions">
+              <button type="button" className="sales-write-secondary" disabled={writeBusy} onClick={() => setOrderActionTarget(null)}>Keep order</button>
+              <button type="button" className="sales-write-primary" disabled={writeBusy} onClick={() => void handleOrderAction()}>{writeBusy ? "Working…" : orderActionTarget.action === "deliver" ? "Deliver all and invoice" : "Cancel order"}</button>
+            </div>
+          </section>
+        </div>
       )}
     </main>
   );

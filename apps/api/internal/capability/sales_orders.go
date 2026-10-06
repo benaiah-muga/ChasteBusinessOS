@@ -227,6 +227,7 @@ func ParseSalesDeliverOrderInput(raw json.RawMessage) (SalesDeliverOrderInput, e
 		return SalesDeliverOrderInput{}, errors.New("lines must be an array")
 	}
 	lines := make([]SalesDeliverOrderLineInput, 0, len(lineValues))
+	seenLineIDs := make(map[string]struct{}, len(lineValues))
 	for _, lineRaw := range lineValues {
 		lineFields, err := decodeJSONObject(lineRaw)
 		if err != nil {
@@ -239,8 +240,12 @@ func ParseSalesDeliverOrderInput(raw json.RawMessage) (SalesDeliverOrderInput, e
 		if !isZodUUID(lineID) {
 			return SalesDeliverOrderInput{}, errors.New("lineId must be a UUID")
 		}
+		if _, exists := seenLineIDs[lineID]; exists {
+			return SalesDeliverOrderInput{}, errors.New("delivery line IDs must be unique")
+		}
+		seenLineIDs[lineID] = struct{}{}
 		quantity, err := requiredSafeInteger(lineFields, "quantityThousandths")
-		if err != nil || quantity <= 0 {
+		if err != nil || quantity <= 0 || quantity == maxSafeInteger {
 			return SalesDeliverOrderInput{}, errors.New("quantityThousandths must be a positive integer")
 		}
 		lines = append(lines, SalesDeliverOrderLineInput{LineID: lineID, QuantityThousandths: quantity})
