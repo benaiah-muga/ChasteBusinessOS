@@ -426,7 +426,24 @@ describe("CRM API client", () => {
     await expect(submitCrmCustomerProfileUpdate(input, undefined, true, { actorId: customerId, organizationId: dealId })).rejects.toMatchObject({ requestMayHaveReachedServer: true });
   });
 
-  it("keeps an exact profile action through pending and uncertainty and uses the same intent on 404 fallback", async () => {
+  it("keeps profile writes on the legacy customer route when the Go selector is disabled", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { updatedCount: 1 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { action: "updateProfile" as const, customerIds: [customerId], notes: "Legacy route" };
+
+    await expect(submitCrmCustomerProfileUpdate(input, undefined, false)).resolves.toEqual({ kind: "completed", data: { updatedCount: 1 } });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/customers");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      action: "updateProfile",
+      customerIds: [customerId],
+      notes: "Legacy route",
+      intentId: expect.any(String),
+    });
+  });
+
+  it("keeps the exact profile action and scoped intent after a Go 404 without falling back to the legacy writer", async () => {
     const previous = { customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Approval required" }, { status: 202 }))
@@ -441,11 +458,19 @@ describe("CRM API client", () => {
     await expect(readPendingCrmCustomerProfileUpdate(scope)).resolves.toEqual(input);
     await expect(submitCrmCustomerProfileUpdate({ ...input, name: "Changed payload" }, undefined, true, scope)).rejects.toMatchObject({ status: 0 });
     await expect(submitCrmCustomerProfileUpdate(input, undefined, true, scope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    await expect(submitCrmCustomerProfileUpdate(input, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingCrmCustomerProfileUpdate(scope)).resolves.toEqual(input);
     await expect(submitCrmCustomerProfileUpdate(input, undefined, true, scope)).resolves.toMatchObject({ kind: "completed" });
 
-    const goCall = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
-    const fallbackCall = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body)) as { intentId: string; action: string };
-    expect(fallbackCall).toMatchObject({ action: "updateProfile", intentId: goCall.intentId });
+    const goCalls = fetchMock.mock.calls;
+    expect(goCalls.map(([path]) => path)).toEqual([
+      "/api/capabilities/execute",
+      "/api/capabilities/execute",
+      "/api/capabilities/execute",
+      "/api/capabilities/execute",
+    ]);
+    const intents = goCalls.map(([, init]) => JSON.parse(String(init?.body)).intentId);
+    expect(new Set(intents).size).toBe(1);
     expect(await readPendingCrmCustomerProfileUpdate(scope)).toBeNull();
   });
 

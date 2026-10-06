@@ -1726,17 +1726,20 @@ new owners and the manifest shows zero legacy runtime paths.
      deal ID. Go must enforce the legacy title limit, same-organization
      customer association, and same-organization owner membership. Browser
      proof remains open.
-174. Route only Vite CRM customer profile saves and bulk profile updates through
-     Go's session-authenticated `crm.updateCustomerProfiles` capability when
+174. (Implemented; local Go/Vite default-on) Route only Vite CRM customer
+     profile saves and bulk profile updates through Go's session-authenticated
+     `crm.updateCustomerProfiles` capability under the paired
      `CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep other customer writes on their
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` flags. Set the profile selector to
+     `0` to roll back to `/api/customers`; other customer writes keep their
      current routes. Persist the exact actor and organization scoped action and
      intent through pending and uncertain results, restore the pending profile
-     or bulk target after reload, and reuse the same intent on the missing-route
-     fallback. Strictly validate the updated count and complete previous
-     snapshots. Lock customer and membership rows while capturing and applying
-     snapshots so undo cannot overwrite an intervening profile edit. Browser
-     proof remains open.
+     or bulk target after reload, and fail closed on Go 404 without calling the
+     legacy writer while retaining the scoped retry identity. Strictly validate
+     the updated count and complete previous snapshots. Lock customer and
+     membership rows while capturing and applying snapshots so undo cannot
+     overwrite an intervening profile edit. Authenticated browser proof remains
+     open because the in-app browser is unavailable in this environment.
 175. When the Vite Go auth proxy is enabled, route every method and path under
      `/api/auth` to Go. Unsupported Better Auth compatibility paths now fail
      closed in the Go auth handler instead of falling through to the legacy

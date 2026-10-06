@@ -582,16 +582,11 @@ export async function submitCrmCustomerProfileUpdate(
   const scope = await crmTaskScope(retryScope);
   const attempt = await crmTaskAttempt(input, scope, "profiles", CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX);
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.updateCustomerProfiles", input: Object.fromEntries(Object.entries(input).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
     }, signal);
-    if (response.status === 404) {
-      ({ response, body } = await request("/api/customers", {
-        method: "POST",
-        body: JSON.stringify({ ...input, intentId: attempt.intentId }),
-      }, signal));
-    }
+    if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
     const parsed = CrmCustomerProfileUpdateOutputSchema.safeParse(outcome.data);
@@ -601,7 +596,7 @@ export async function submitCrmCustomerProfileUpdate(
     await clearCrmTaskAttempt(attempt.storageKey);
     return { kind: "completed", data: parsed.data };
   } catch (error) {
-    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
       await clearCrmTaskAttempt(attempt.storageKey);
     }
     throw error;
