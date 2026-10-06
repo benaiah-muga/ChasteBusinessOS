@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
   const goPurchasingSourcingWrites = goPurchasingSourcingWritesFromEnv(env);
   const goPurchasingVendorSlice = env.CHASTE_GO_PURCHASING_VENDOR_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goMarketingSegmentSlice = env.CHASTE_GO_MARKETING_SEGMENT_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
+  const goMarketingCampaignWrites = env.CHASTE_GO_MARKETING_CAMPAIGN_WRITES === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goManufacturingDefineBomSlice = env.CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goManufacturingWorkOrderWrites = goManufacturingWorkOrderWritesFromEnv(env);
   const goManufacturingProductionWrites = goManufacturingProductionWritesFromEnv(env);
@@ -51,6 +52,7 @@ export default defineConfig(({ mode }) => {
       __GO_PURCHASING_SOURCING_WRITES__: JSON.stringify(goPurchasingSourcingWrites),
       __GO_PURCHASING_VENDOR_SLICE__: JSON.stringify(goPurchasingVendorSlice),
       __GO_MARKETING_SEGMENT_SLICE__: JSON.stringify(goMarketingSegmentSlice),
+      __GO_MARKETING_CAMPAIGN_WRITES__: JSON.stringify(goMarketingCampaignWrites),
       __GO_MANUFACTURING_DEFINE_BOM_SLICE__: JSON.stringify(goManufacturingDefineBomSlice),
       __GO_MANUFACTURING_WORK_ORDER_WRITES__: JSON.stringify(goManufacturingWorkOrderWrites),
       __GO_MANUFACTURING_PRODUCTION_WRITES__: JSON.stringify(goManufacturingProductionWrites),

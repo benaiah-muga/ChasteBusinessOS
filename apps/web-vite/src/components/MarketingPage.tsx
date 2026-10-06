@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { z } from "zod";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import "./MarketingPage.css";
 import {
@@ -70,6 +71,17 @@ const styles = `
 @media (max-width: 560px) { .mk-page { width: min(100% - 28px, 1320px); padding-top: 27px; } }
 `;
 
+const EmptyCampaignForm = { segmentId: "", name: "", subject: "", body: "" };
+const PersistedCampaignFormSchema = z.object({
+  campaignForm: z.object({
+    segmentId: z.string(),
+    name: z.string().max(120),
+    subject: z.string().max(200),
+    body: z.string().max(10000),
+  }).strict(),
+  unresolved: z.boolean(),
+}).strict();
+
 const styleTag = <style>{styles}</style>;
 
 type SendResult = { recipients: number; skippedOptOut: number; skippedNoAddress: number; alreadySent: number };
@@ -128,7 +140,7 @@ function sendSummary(result: SendResult): string {
   return `Queued ${result.recipients} recipients, ${result.skippedOptOut} opted-out skipped, ${result.skippedNoAddress} without an address skipped${already}.`;
 }
 
-export function MarketingPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
+export function MarketingPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const currency = baseCurrency ?? "USD";
   const minorUnits = currencyMinorUnits(currency) ?? 2;
   const [moduleState, setModuleState] = useState<ModuleState>({ status: "loading" });
@@ -136,9 +148,71 @@ export function MarketingPage({ baseCurrency = null }: { baseCurrency?: string |
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [segmentForm, setSegmentForm] = useState({ name: "", minSpend: "0.00" });
-  const [campaignForm, setCampaignForm] = useState({ segmentId: "", name: "", subject: "", body: "" });
+  const [campaignForm, setCampaignForm] = useState(EmptyCampaignForm);
+  const goCampaignWritesEnabled = typeof __GO_MARKETING_CAMPAIGN_WRITES__ !== "undefined" && __GO_MARKETING_CAMPAIGN_WRITES__;
+  const campaignScopeIdentity = actorId?.trim() && organizationId?.trim()
+    ? JSON.stringify({ actorId: actorId.trim(), organizationId: organizationId.trim() })
+    : null;
+  const [campaignDraftStorageKey, setCampaignDraftStorageKey] = useState<string | null>(null);
+  const [campaignDraftKeyScopeIdentity, setCampaignDraftKeyScopeIdentity] = useState<string | null>(null);
+  const [campaignDraftStatus, setCampaignDraftStatus] = useState<"loading" | "ready" | "failed">(goCampaignWritesEnabled ? "loading" : "ready");
+  const [campaignDraftLocked, setCampaignDraftLocked] = useState(false);
+  const campaignDraftReady = !goCampaignWritesEnabled || Boolean(campaignScopeIdentity && campaignDraftStorageKey && campaignDraftKeyScopeIdentity === campaignScopeIdentity && campaignDraftStatus === "ready");
   const [sendResults, setSendResults] = useState<Record<string, SendResult>>({});
   const [analytics, setAnalytics] = useState<Record<string, CampaignAnalytics>>({});
+
+  useEffect(() => {
+    if (!goCampaignWritesEnabled) return;
+    let active = true;
+    setCampaignDraftStorageKey(null);
+    setCampaignDraftKeyScopeIdentity(null);
+    setCampaignDraftStatus("loading");
+    setCampaignForm(EmptyCampaignForm);
+    setCampaignDraftLocked(false);
+    if (!campaignScopeIdentity) {
+      setCampaignDraftStatus("failed");
+      return () => { active = false; };
+    }
+    void crypto.subtle.digest("SHA-256", new TextEncoder().encode(campaignScopeIdentity)).then((digest) => {
+      if (!active) return;
+      const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      setCampaignDraftStorageKey(`chaste.marketing.campaign-draft.v1:${hex}`);
+      setCampaignDraftKeyScopeIdentity(campaignScopeIdentity);
+    }).catch(() => {
+      if (active) setCampaignDraftStatus("failed");
+    });
+    return () => { active = false; };
+  }, [campaignScopeIdentity, goCampaignWritesEnabled]);
+
+  useEffect(() => {
+    if (!goCampaignWritesEnabled || !campaignDraftStorageKey || !campaignScopeIdentity || campaignDraftKeyScopeIdentity !== campaignScopeIdentity) return;
+    try {
+      const raw = window.localStorage.getItem(campaignDraftStorageKey);
+      if (raw === null) {
+        setCampaignForm(EmptyCampaignForm);
+        setCampaignDraftLocked(false);
+      } else {
+        const parsed = PersistedCampaignFormSchema.safeParse(JSON.parse(raw));
+        if (!parsed.success) throw new Error("saved campaign draft has an invalid shape");
+        setCampaignForm(parsed.data.campaignForm);
+        setCampaignDraftLocked(parsed.data.unresolved);
+      }
+      setCampaignDraftStatus("ready");
+    } catch {
+      setCampaignDraftStatus("failed");
+    }
+  }, [campaignDraftKeyScopeIdentity, campaignDraftStorageKey, campaignScopeIdentity, goCampaignWritesEnabled]);
+
+  useEffect(() => {
+    if (!goCampaignWritesEnabled || !campaignDraftStorageKey || !campaignScopeIdentity || campaignDraftKeyScopeIdentity !== campaignScopeIdentity || campaignDraftStatus !== "ready") return;
+    try {
+      const serialized = JSON.stringify({ campaignForm, unresolved: campaignDraftLocked });
+      window.localStorage.setItem(campaignDraftStorageKey, serialized);
+      if (window.localStorage.getItem(campaignDraftStorageKey) !== serialized) throw new Error("campaign draft did not persist");
+    } catch {
+      setCampaignDraftStatus("failed");
+    }
+  }, [campaignDraftKeyScopeIdentity, campaignDraftStorageKey, campaignDraftStatus, campaignDraftLocked, campaignDraftReady, campaignForm, campaignScopeIdentity, goCampaignWritesEnabled]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!signal) setDataState({ status: "loading" });
@@ -172,19 +246,21 @@ export function MarketingPage({ baseCurrency = null }: { baseCurrency?: string |
     return () => controller.abort();
   }, [loadModules]);
 
-  async function run<Output>(label: string, send: () => Promise<{ kind: "pending"; reason: string } | { kind: "completed"; data: Output }>): Promise<Output | null> {
+  async function run<Output>(label: string, send: () => Promise<{ kind: "pending"; reason: string } | { kind: "completed"; data: Output }>, lifecycle?: { onPending?: () => void; onError?: (error: unknown) => void }): Promise<Output | null> {
     if (busy) return null;
     setBusy(true);
     setNotice(null);
     try {
       const outcome = await send();
       if (outcome.kind === "pending") {
+        lifecycle?.onPending?.();
         setNotice({ tone: "pending", message: outcome.reason || `${label} needs human approval. It is in the Approvals inbox.` });
         return null;
       }
       await load();
       return outcome.data;
     } catch (error) {
+      lifecycle?.onError?.(error);
       setNotice({ tone: "error", message: messageFor(error) });
       return null;
     } finally {
@@ -210,25 +286,71 @@ export function MarketingPage({ baseCurrency = null }: { baseCurrency?: string |
 
   async function createCampaign(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy) return;
     const name = campaignForm.name.trim();
     const subject = campaignForm.subject.trim();
     const body = campaignForm.body;
     if (!campaignForm.segmentId || !name || !subject || !body.trim()) return;
+    if (goCampaignWritesEnabled) {
+      if (!campaignDraftReady || !campaignDraftStorageKey) {
+        setNotice({ tone: "error", message: "Wait for the scoped campaign draft to finish loading before submitting." });
+        return;
+      }
+      try {
+        const serialized = JSON.stringify({ campaignForm, unresolved: true });
+        window.localStorage.setItem(campaignDraftStorageKey, serialized);
+        if (window.localStorage.getItem(campaignDraftStorageKey) !== serialized) throw new Error("campaign draft did not persist");
+        setCampaignDraftLocked(true);
+      } catch {
+        setCampaignDraftStatus("failed");
+        setNotice({ tone: "error", message: "Browser storage could not save this campaign draft, so it was not submitted." });
+        return;
+      }
+    }
     const done = await run("Create campaign", () => submitMarketingAction({
       action: "createCampaign",
       segmentId: campaignForm.segmentId,
       name,
       subject,
       body,
-    }));
+    }, crypto.randomUUID(), { actorId, organizationId }), {
+      onPending: () => {
+        if (goCampaignWritesEnabled) setCampaignDraftLocked(true);
+      },
+      onError: (error) => {
+        if (!goCampaignWritesEnabled) return;
+        const unresolved = error instanceof MarketingApiError && error.requestMayHaveReachedServer;
+        setCampaignDraftLocked(unresolved);
+        if (!unresolved && campaignDraftStorageKey) {
+          try {
+            const serialized = JSON.stringify({ campaignForm, unresolved: false });
+            window.localStorage.setItem(campaignDraftStorageKey, serialized);
+            if (window.localStorage.getItem(campaignDraftStorageKey) !== serialized) throw new Error("campaign draft did not persist");
+          } catch {
+            setCampaignDraftStatus("failed");
+          }
+        }
+      },
+    });
     if (done) {
       setNotice({ tone: "success", message: "Campaign drafted. Nothing goes out until you press Send." });
-      setCampaignForm({ segmentId: "", name: "", subject: "", body: "" });
+      setCampaignForm(EmptyCampaignForm);
+      setCampaignDraftLocked(false);
+      if (goCampaignWritesEnabled && campaignDraftStorageKey) {
+        try {
+          const serialized = JSON.stringify({ campaignForm: EmptyCampaignForm, unresolved: false });
+          window.localStorage.setItem(campaignDraftStorageKey, serialized);
+          if (window.localStorage.getItem(campaignDraftStorageKey) !== serialized) throw new Error("campaign draft did not persist");
+        } catch {
+          setCampaignDraftStatus("failed");
+          setNotice({ tone: "error", message: "Campaign was created, but browser storage could not clear its saved draft. Reload after enabling browser storage." });
+        }
+      }
     }
   }
 
   async function sendCampaign(campaignId: string) {
-    const result = await run("Send campaign", () => submitMarketingAction({ action: "sendCampaign", campaignId }));
+    const result = await run("Send campaign", () => submitMarketingAction({ action: "sendCampaign", campaignId }, crypto.randomUUID(), { actorId, organizationId }));
     if (!result) return;
     setSendResults((current) => ({ ...current, [campaignId]: result }));
     setNotice({ tone: "success", message: sendSummary(result) });
@@ -312,20 +434,29 @@ export function MarketingPage({ baseCurrency = null }: { baseCurrency?: string |
 
         <section className="mk-panel" aria-labelledby="mk-campaigns-heading">
           <h2 id="mk-campaigns-heading">Campaigns</h2>
+          {goCampaignWritesEnabled && campaignDraftStatus === "loading" && <p role="status" className="mk-form-hint">Loading the scoped campaign draft before enabling campaign actions.</p>}
+          {goCampaignWritesEnabled && campaignDraftStatus === "failed" && (
+            <p role="alert" className="mk-error">
+              {campaignScopeIdentity
+                ? "Browser storage could not retain this scoped campaign draft. Enable browser storage and reload before submitting campaign actions."
+                : "Wait for the active user and organization to load before using campaign actions."}
+            </p>
+          )}
+          {goCampaignWritesEnabled && campaignDraftReady && campaignDraftLocked && <p role="status" className="mk-form-hint">This create attempt is pending or uncertain. Its exact draft is locked; submit again to retry with the same intent.</p>}
           <form className="mk-form" onSubmit={(event) => void createCampaign(event)}>
             <div className="mk-form-row">
               <label htmlFor="mk-campaign-segment">Segment
-                <select id="mk-campaign-segment" value={campaignForm.segmentId} onChange={(event) => setCampaignForm({ ...campaignForm, segmentId: event.currentTarget.value })}>
+                <select id="mk-campaign-segment" disabled={busy || !campaignDraftReady || campaignDraftLocked} value={campaignForm.segmentId} onChange={(event) => setCampaignForm({ ...campaignForm, segmentId: event.currentTarget.value })}>
                   <option value="">Pick a segment…</option>
                   {segments.map((segment) => <option key={segment.id} value={segment.id}>{segment.name}</option>)}
                 </select>
               </label>
-              <label htmlFor="mk-campaign-name">Campaign name<input id="mk-campaign-name" maxLength={120} placeholder="Spring renewal" value={campaignForm.name} onChange={(event) => setCampaignForm({ ...campaignForm, name: event.currentTarget.value })} /></label>
+              <label htmlFor="mk-campaign-name">Campaign name<input id="mk-campaign-name" disabled={busy || !campaignDraftReady || campaignDraftLocked} maxLength={120} placeholder="Spring renewal" value={campaignForm.name} onChange={(event) => setCampaignForm({ ...campaignForm, name: event.currentTarget.value })} /></label>
             </div>
-            <label htmlFor="mk-campaign-subject">Subject<input id="mk-campaign-subject" maxLength={200} placeholder="Subject" value={campaignForm.subject} onChange={(event) => setCampaignForm({ ...campaignForm, subject: event.currentTarget.value })} /></label>
-            <label htmlFor="mk-campaign-body">Body<textarea id="mk-campaign-body" rows={3} placeholder="What every recipient will read" value={campaignForm.body} onChange={(event) => setCampaignForm({ ...campaignForm, body: event.currentTarget.value })} /></label>
+            <label htmlFor="mk-campaign-subject">Subject<input id="mk-campaign-subject" disabled={busy || !campaignDraftReady || campaignDraftLocked} maxLength={200} placeholder="Subject" value={campaignForm.subject} onChange={(event) => setCampaignForm({ ...campaignForm, subject: event.currentTarget.value })} /></label>
+            <label htmlFor="mk-campaign-body">Body<textarea id="mk-campaign-body" disabled={busy || !campaignDraftReady || campaignDraftLocked} maxLength={10000} rows={3} placeholder="What every recipient will read" value={campaignForm.body} onChange={(event) => setCampaignForm({ ...campaignForm, body: event.currentTarget.value })} /></label>
             <p className="mk-form-hint">Drafting sends nothing. Delivery is a separate, logged step.</p>
-            <div><button type="submit" disabled={busy || !campaignForm.segmentId || !campaignForm.name.trim() || !campaignForm.subject.trim() || !campaignForm.body.trim()}>{busy ? "Working…" : "Create campaign"}</button></div>
+            <div><button type="submit" disabled={busy || !campaignDraftReady || !campaignForm.segmentId || !campaignForm.name.trim() || !campaignForm.subject.trim() || !campaignForm.body.trim()}>{busy ? "Working…" : campaignDraftLocked ? "Retry campaign attempt" : "Create campaign"}</button></div>
           </form>
           {campaigns.length === 0 ? (
             <p className="mk-empty"><span aria-hidden="true">✉</span>No campaigns yet. Draft one against a saved segment; sending writes one append-only log row per recipient.</p>
@@ -343,7 +474,7 @@ export function MarketingPage({ baseCurrency = null }: { baseCurrency?: string |
                     </div>
                     <p className="mk-campaign-preview" title={`${campaign.subject}: ${campaign.body}`}>{campaign.subject} - {campaign.body}</p>
                     <div className="mk-campaign-actions">
-                      <button type="button" disabled={busy} onClick={() => void sendCampaign(campaign.id)}>Send</button>
+                      <button type="button" disabled={busy || !campaignDraftReady || campaign.queuedAt !== null} onClick={() => void sendCampaign(campaign.id)}>Send</button>
                       <button type="button" disabled={busy} onClick={() => void loadAnalytics(campaign.id)}>Analytics</button>
                     </div>
                     {sent && (

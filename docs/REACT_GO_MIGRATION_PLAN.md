@@ -1678,3 +1678,17 @@ new owners and the manifest shows zero legacy runtime paths.
      drafts and request targets after reload until an action completes. Go serializes decisions and
      quote actions on the parent request and rejects duplicate vendor IDs in
      RFQ creation. Browser proof remains open.
+170. Route only Vite Marketing campaign creation and sends through Go's
+     session-authenticated `marketing.createCampaign` and `marketing.sendCampaign`
+     capabilities when `CHASTE_GO_MARKETING_CAMPAIGN_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Preserve the legacy route as the
+     same-intent fallback only when the Go capability route is absent. Persist
+     exact actor and organization scoped intent IDs through pending or uncertain
+     outcomes, lock and restore the exact create draft after reload, require the
+     resolved current scope and durable browser storage before Go writes, and
+     validate the strict campaign and send output shapes. Retain attempts after
+     network, 408, 429, and 5xx uncertainty; block changed payloads until the
+     original create is resolved. Segment creation, analytics, and reads remain
+     unchanged.
+     Disable send after the campaign snapshot reports queued. Browser proof
+     remains open.

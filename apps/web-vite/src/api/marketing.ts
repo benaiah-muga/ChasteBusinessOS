@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const uuid = z.string().uuid();
 const instant = z.string().datetime();
-const count = z.number().int().nonnegative();
+const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
 /** Money is always integer minor units, never a float, on this boundary. */
 const SegmentSchema = z.object({
@@ -111,6 +111,9 @@ const PendingSchema = z.object({
   approvalId: uuid.optional(),
 }).strict();
 const ApiErrorSchema = z.object({ error: z.string().optional(), message: z.string().optional() });
+const MarketingAttemptSchema = z.object({ fingerprint: z.string().min(1), intentId: uuid }).strict();
+
+export type MarketingRetryScope = { actorId: string | null; organizationId: string | null };
 
 export type MarketingSegment = z.infer<typeof SegmentSchema>;
 export type MarketingCampaign = z.infer<typeof CampaignSchema>;
@@ -125,7 +128,7 @@ export type MarketingActionOutcome<Action extends MarketingAction> =
   | { kind: "pending"; reason: string };
 
 export class MarketingApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly requestMayHaveReachedServer = false) {
     super(message);
     this.name = "MarketingApiError";
   }
@@ -152,7 +155,9 @@ async function readJson(response: Response): Promise<unknown> {
   try {
     return await response.json();
   } catch {
-    throw new MarketingApiError(response.status, "The marketing service returned an unreadable response.");
+    const retryableClientStatus = response.status === 408 || response.status === 429;
+    const terminalClientError = response.status >= 400 && response.status < 500 && response.status !== 202 && !retryableClientStatus;
+    throw new MarketingApiError(response.status, "The marketing service returned an unreadable response.", response.status > 0 && !terminalClientError);
   }
 }
 
@@ -201,23 +206,32 @@ export async function fetchMarketingSnapshot(signal?: AbortSignal): Promise<Mark
 export async function submitMarketingAction<Action extends MarketingAction>(
   action: Action,
   intentId: string = crypto.randomUUID(),
+  retryScope?: MarketingRetryScope,
 ): Promise<MarketingActionOutcome<Action>> {
   const parsedAction = MarketingActionSchema.safeParse(action);
   if (!parsedAction.success) throw new MarketingApiError(0, "The marketing action contains invalid details.");
   if (!intentId.trim()) throw new MarketingApiError(0, "The marketing action needs an intent identity. Try again.");
 
-  const useGo = parsedAction.data.action === "createSegment"
+  const useGoSegment = parsedAction.data.action === "createSegment"
     && typeof __GO_MARKETING_SEGMENT_SLICE__ !== "undefined"
     && __GO_MARKETING_SEGMENT_SLICE__;
-  const legacyBody = { ...parsedAction.data, intentId };
+  const campaignWritesEnabled = typeof __GO_MARKETING_CAMPAIGN_WRITES__ !== "undefined" && __GO_MARKETING_CAMPAIGN_WRITES__;
+  const useGoCampaign = campaignWritesEnabled && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign");
+  const useGo = useGoSegment || useGoCampaign;
+  let attempt: MarketingAttempt | null = null;
+  if (useGoCampaign && (parsedAction.data.action === "createCampaign" || parsedAction.data.action === "sendCampaign")) {
+    attempt = await getMarketingAttempt(parsedAction.data, retryScope);
+  }
+  const activeIntentId = attempt?.intentId ?? intentId;
+  const legacyBody = { ...parsedAction.data, intentId: activeIntentId };
   const requestPath = useGo ? "/api/capabilities/execute" : "/api/marketing";
-  const requestBody: Record<string, unknown> = useGo && parsedAction.data.action === "createSegment"
-    ? {
-      capabilityId: "marketing.createSegment",
-      input: { name: parsedAction.data.name, minSpendMinor: parsedAction.data.minSpendMinor },
-      intentId,
-    }
-    : legacyBody;
+  const requestBody: Record<string, unknown> = useGoSegment && parsedAction.data.action === "createSegment"
+    ? { capabilityId: "marketing.createSegment", input: { name: parsedAction.data.name, minSpendMinor: parsedAction.data.minSpendMinor }, intentId: activeIntentId }
+    : useGoCampaign && parsedAction.data.action === "createCampaign"
+      ? { capabilityId: "marketing.createCampaign", input: { segmentId: parsedAction.data.segmentId, name: parsedAction.data.name, subject: parsedAction.data.subject, body: parsedAction.data.body }, intentId: activeIntentId }
+      : useGoCampaign && parsedAction.data.action === "sendCampaign"
+        ? { capabilityId: "marketing.sendCampaign", input: { campaignId: parsedAction.data.campaignId }, intentId: activeIntentId }
+        : legacyBody;
 
   const send = (path: string, body: Record<string, unknown>) => fetch(path, {
     method: "POST",
@@ -236,22 +250,86 @@ export async function submitMarketingAction<Action extends MarketingAction>(
     if (useGo && response.status === 404) response = await send("/api/marketing", legacyBody);
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new MarketingApiError(0, "The marketing action took too long. Check the send log before trying again.");
+      throw new MarketingApiError(0, "The marketing action took too long. Check the send log before trying again.", true);
     }
-    throw new MarketingApiError(0, "Could not reach the marketing service. Check your connection and try again.");
+    throw new MarketingApiError(0, "Could not reach the marketing service. Check your connection and try again.", true);
   }
 
+  const retryableStatus = response.status === 408 || response.status === 429;
+  const terminalClientError = response.status >= 400 && response.status < 500 && response.status !== 202 && !retryableStatus;
+  if (attempt && terminalClientError) clearMarketingAttempt(attempt);
   const raw = await readJson(response);
   if (response.status === 202) {
     const pending = PendingSchema.safeParse(raw);
-    if (!pending.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected approval response.");
+    if (!pending.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected approval response.", true);
     return { kind: "pending", reason: pending.data.reason ?? "This action is waiting for human approval. It is in the Approvals inbox." };
   }
-  if (!response.ok) throw new MarketingApiError(response.status, errorMessage(response.status, raw));
+  if (!response.ok) {
+    throw new MarketingApiError(response.status, errorMessage(response.status, raw), Boolean(attempt && !terminalClientError));
+  }
 
   const envelope = SuccessSchema.safeParse(raw);
-  if (!envelope.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected action response.");
+  if (!envelope.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected action response.", Boolean(attempt));
   const output = MarketingActionOutputSchemas[parsedAction.data.action].safeParse(envelope.data.data);
-  if (!output.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected action result.");
+  if (!output.success) throw new MarketingApiError(response.status, "The marketing service returned an unexpected action result.", Boolean(attempt));
+  if (attempt) clearMarketingAttempt(attempt);
   return { kind: "completed", data: output.data as MarketingActionOutput<Action> };
+}
+
+type MarketingAttempt = { storageKey: string; fingerprint: string; intentId: string };
+
+async function getMarketingAttempt(action: Extract<MarketingAction, { action: "createCampaign" | "sendCampaign" }>, scope?: MarketingRetryScope): Promise<MarketingAttempt> {
+  const actorId = scope?.actorId?.trim();
+  const organizationId = scope?.organizationId?.trim();
+  if (!actorId || !organizationId || !uuid.safeParse(actorId).success || !uuid.safeParse(organizationId).success) {
+    throw new MarketingApiError(0, "Wait for the active user and organization to load before changing campaigns.");
+  }
+  let scopeHash: string;
+  let fingerprint: string;
+  try {
+    const hash = async (value: string) => {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    };
+    [scopeHash, fingerprint] = await Promise.all([
+      hash(JSON.stringify({ actorId, organizationId })),
+      hash(JSON.stringify(action)),
+    ]);
+  } catch {
+    throw new MarketingApiError(0, "Could not prepare a durable campaign retry. Check browser storage and try again.");
+  }
+  const actionTarget = action.action === "createCampaign" ? "create" : `send:${action.campaignId}`;
+  const storageKey = `chaste.marketing.campaign-intent.v1:${scopeHash}:${actionTarget}`;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (raw !== null) {
+      let decoded: unknown;
+      try {
+        decoded = JSON.parse(raw);
+      } catch {
+        throw new Error("campaign retry marker is malformed");
+      }
+      const stored = MarketingAttemptSchema.safeParse(decoded);
+      if (!stored.success || stored.data.fingerprint !== fingerprint) throw new Error("another campaign payload is unresolved");
+      return { storageKey, fingerprint, intentId: stored.data.intentId };
+    }
+    const intent = { fingerprint, intentId: crypto.randomUUID() };
+    const serialized = JSON.stringify(intent);
+    window.localStorage.setItem(storageKey, serialized);
+    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("campaign retry did not persist");
+    return { storageKey, fingerprint, intentId: intent.intentId };
+  } catch {
+    throw new MarketingApiError(0, "A previous campaign attempt is still unresolved or browser storage could not retain this retry. Restore the exact draft or resolve the earlier attempt before changing it.");
+  }
+}
+
+function clearMarketingAttempt(attempt: MarketingAttempt): void {
+  try {
+    const stored = MarketingAttemptSchema.safeParse(JSON.parse(window.localStorage.getItem(attempt.storageKey) ?? "null"));
+    if (stored.success && stored.data.fingerprint === attempt.fingerprint && stored.data.intentId === attempt.intentId) {
+      window.localStorage.removeItem(attempt.storageKey);
+    }
+  } catch {
+    // A saved marker cannot change the server result, so resolution continues.
+  }
 }

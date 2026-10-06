@@ -45,6 +45,7 @@ function snapshot() {
 }
 
 afterEach(() => {
+  window.localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -229,5 +230,139 @@ describe("marketing governed writes", () => {
       message: "The marketing action contains invalid details.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+const retryScope = { actorId: "5c3f7c5c-9a2a-4d3e-8c0b-1f2a3b4c5d6e", organizationId: "6d4a8d6d-0b3b-4e4f-9d1c-2a3b4c5d6e7f" };
+const createCampaignAction = { action: "createCampaign" as const, segmentId, name: "Spring renewal", subject: "Renewal", body: "A note" };
+
+describe("marketing campaign Go routing", () => {
+  it("routes createCampaign through Go with a durable scoped intent and strict output", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { campaignId: "7ed25b56-02d4-4f5b-b858-9681920abdd0" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction(createCampaignAction, undefined, retryScope)).resolves.toEqual({
+      kind: "completed", data: { campaignId: "7ed25b56-02d4-4f5b-b858-9681920abdd0" },
+    });
+    const [path, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      capabilityId: "marketing.createCampaign",
+      input: { segmentId, name: "Spring renewal", subject: "Renewal", body: "A note" },
+      intentId: expect.any(String),
+    });
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("reuses the exact send intent through pending and uncertain outcomes", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Needs review" }, { status: 202 }))
+      .mockRejectedValueOnce(new TypeError("network lost"))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Still waiting" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).rejects.toBeInstanceOf(MarketingApiError);
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).resolves.toMatchObject({ kind: "pending" });
+    const intentIds = fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)).intentId);
+    expect(intentIds[0]).toBe(intentIds[1]);
+    expect(intentIds[1]).toBe(intentIds[2]);
+  });
+
+  it("blocks a changed campaign payload while the prior create is pending", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "Needs review" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submitMarketingAction(createCampaignAction, undefined, retryScope);
+    await expect(submitMarketingAction({ ...createCampaignAction, body: "A changed body" }, undefined, retryScope)).rejects.toThrow(/previous campaign attempt is still unresolved/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the same attempt after timeout and rate-limit responses", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "timed out" }, { status: 408 }))
+      .mockResolvedValueOnce(Response.json({ error: "rate limited" }, { status: 429 }))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Still waiting" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    await submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope);
+    const intentIds = fetchMock.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)).intentId);
+    expect(new Set(intentIds).size).toBe(1);
+  });
+
+  it("separates retry identities by actor and organization", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "Needs review" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submitMarketingAction(createCampaignAction, undefined, retryScope);
+    await submitMarketingAction(createCampaignAction, undefined, { ...retryScope, organizationId: "aa8c635d-405e-4488-824c-a557b1c1fbe1" });
+    const first = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const second = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(first[1].body)).intentId).not.toBe(JSON.parse(String(second[1].body)).intentId);
+  });
+
+  it("uses the same ID for Go 404 fallback and legacy completion", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { recipients: 3, skippedOptOut: 1, skippedNoAddress: 0, alreadySent: 2 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).resolves.toEqual({
+      kind: "completed", data: { recipients: 3, skippedOptOut: 1, skippedNoAddress: 0, alreadySent: 2 },
+    });
+    const first = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const second = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(first[0]).toBe("/api/capabilities/execute");
+    expect(second[0]).toBe("/api/marketing");
+    expect(JSON.parse(String(second[1].body))).toMatchObject({ action: "sendCampaign", campaignId, intentId: JSON.parse(String(first[1].body)).intentId });
+  });
+
+  it.each([401, 403, 500])("does not fall back to legacy after Go returns %s", async (status) => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "unavailable" }, { status }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction({ action: "sendCampaign", campaignId }, undefined, retryScope)).rejects.toBeInstanceOf(MarketingApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+  });
+
+  it("fails closed without scope or when a stored intent marker is malformed", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitMarketingAction(createCampaignAction, undefined, { actorId: null, organizationId: retryScope.organizationId })).rejects.toThrow(/active user and organization/);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const scopeHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(retryScope)));
+    const scopeHex = Array.from(new Uint8Array(scopeHash), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    window.localStorage.setItem(`chaste.marketing.campaign-intent.v1:${scopeHex}:create`, "not-json");
+    await expect(submitMarketingAction(createCampaignAction, undefined, retryScope)).rejects.toThrow(/previous campaign attempt is still unresolved/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("clears the old scoped intent on terminal 4xx and does not change segment routing", async () => {
+    vi.stubGlobal("__GO_MARKETING_CAMPAIGN_WRITES__", true);
+    vi.stubGlobal("__GO_MARKETING_SEGMENT_SLICE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "invalid campaign" }, { status: 422 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { campaignId: "7ed25b56-02d4-4f5b-b858-9681920abdd0" } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { segmentId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitMarketingAction(createCampaignAction, undefined, retryScope)).rejects.toBeInstanceOf(MarketingApiError);
+    await submitMarketingAction(createCampaignAction, undefined, retryScope);
+    await submitMarketingAction({ action: "createSegment", name: "All", minSpendMinor: 0 });
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(JSON.parse(String(calls[0]?.[1].body)).intentId).not.toBe(JSON.parse(String(calls[1]?.[1].body)).intentId);
+    expect(JSON.parse(String(calls[2]?.[1].body))).toMatchObject({ capabilityId: "marketing.createSegment" });
   });
 });
