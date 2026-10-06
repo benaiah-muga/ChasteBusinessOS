@@ -416,9 +416,6 @@ func selectWinningQuote(ctx context.Context, tx pgx.Tx, orgID string, input Sele
 	if err != nil {
 		return SelectWinningQuoteOutput{}, err
 	}
-	if requestStatus != "approved" {
-		return SelectWinningQuoteOutput{}, errors.New("request is no longer approvable into an order")
-	}
 	var rfqID, vendorID, status string
 	var quoteAmountMinor *int64
 	err = tx.QueryRow(ctx, `
@@ -434,6 +431,9 @@ func selectWinningQuote(ctx context.Context, tx pgx.Tx, orgID string, input Sele
 	}
 	if status != "quoted" {
 		return SelectWinningQuoteOutput{}, errors.New("record this vendor's quote before awarding")
+	}
+	if requestStatus != "approved" {
+		return SelectWinningQuoteOutput{}, errors.New("request is no longer approvable into an order")
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE rfqs SET status = 'lost'

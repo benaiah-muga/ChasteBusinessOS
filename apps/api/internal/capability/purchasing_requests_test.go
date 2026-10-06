@@ -606,7 +606,7 @@ func TestPurchasingRequestsConcurrentDecisionsSerialize(t *testing.T) {
 	cleanupPurchasingRequestsFixture(t, fx)
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 	requestID := seedPurchasingRequest(t, fx, fx.orgID, fx.userID, "Concurrent decision", "Decision must be singular", "pending_review", nil, now)
-	claims := authbridge.CapabilityClaims{ActorType: "human", ActorID: &fx.userID}
+	claims := authbridge.CapabilityClaims{ActorType: "human", ActorID: &fx.userID, OrganizationID: fx.orgID}
 	start := make(chan struct{})
 	type result struct {
 		out DecidePurchaseRequestOutput
