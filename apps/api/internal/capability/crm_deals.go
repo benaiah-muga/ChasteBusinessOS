@@ -130,7 +130,7 @@ func ParseCreateDealInput(raw json.RawMessage) (CreateDealInput, error) {
 	if err != nil {
 		return CreateDealInput{}, err
 	}
-	title, err := requiredCRMDealString(fields, "title", 1, 0)
+	title, err := requiredCRMDealString(fields, "title", 1, 120)
 	if err != nil {
 		return CreateDealInput{}, err
 	}
@@ -138,6 +138,9 @@ func ParseCreateDealInput(raw json.RawMessage) (CreateDealInput, error) {
 	input.CustomerID, err = optionalCRMDealString(fields, "customerId", 0, false)
 	if err != nil {
 		return CreateDealInput{}, err
+	}
+	if input.CustomerID != nil && !projectUUIDPattern.MatchString(*input.CustomerID) {
+		return CreateDealInput{}, errors.New("customerId must be a valid UUID")
 	}
 	if _, ok := fields["valueMinor"]; ok {
 		input.ValueMinor, err = requiredSafeInteger(fields, "valueMinor")
@@ -271,6 +274,18 @@ func createDeal(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClai
 		}
 		if !owned {
 			return CreateDealOutput{}, errors.New("customer not found in this organization")
+		}
+	}
+	if input.OwnerUserID != nil {
+		var member bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM memberships WHERE user_id = $1::uuid AND org_id = $2::uuid
+			)`, *input.OwnerUserID, claims.OrganizationID).Scan(&member); err != nil {
+			return CreateDealOutput{}, err
+		}
+		if !member {
+			return CreateDealOutput{}, errors.New("deal owner not found in this organization")
 		}
 	}
 	var createdByUserID *string

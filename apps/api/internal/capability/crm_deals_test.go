@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -89,7 +90,11 @@ func TestGoCRMDealsParsersMatchCRMContracts(t *testing.T) {
 	if _, err := ParseCreateDealInput(json.RawMessage(`{"title":""}`)); err == nil {
 		t.Fatal("empty title was accepted")
 	}
+	if input, err := ParseCreateDealInput(json.RawMessage(`{"title":"` + strings.Repeat("d", 120) + `"}`)); err != nil || len(input.Title) != 120 {
+		t.Fatalf("120-character title input=%+v err=%v, want accepted", input, err)
+	}
 	for _, raw := range []string{
+		`{"title":"` + strings.Repeat("d", 121) + `"}`,
 		`{"title":"Deal","valueMinor":-1}`,
 		`{"title":"Deal","valueMinor":1.5}`,
 		`{"title":"Deal","valueMinor":9007199254740992}`,
@@ -99,6 +104,7 @@ func TestGoCRMDealsParsersMatchCRMContracts(t *testing.T) {
 		`{"title":"Deal","ownerUserId":"11111111-1111-0111-8111-111111111111"}`,
 		`{"title":"Deal","ownerUserId":"11111111-1111-4111-7111-111111111111"}`,
 		`{"title":"Deal","customerId":null}`,
+		`{"title":"Deal","customerId":"not-a-uuid"}`,
 	} {
 		if _, err := ParseCreateDealInput(json.RawMessage(raw)); err == nil {
 			t.Errorf("ParseCreateDealInput accepted %s", raw)
@@ -222,6 +228,18 @@ func TestGoCRMDealsEnforceTenancyConversionAuditsAndReceiptReplay(t *testing.T) 
 	fx := newExecutorFixture(t)
 	localCustomerID := seedCRMDealCustomer(t, fx, fx.orgID, "Local buyer")
 	foreignCustomerID := seedCRMDealCustomer(t, fx, fx.otherOrgID, "Foreign buyer")
+	foreignOwnerID := executorUUID(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO users (id, email, name) VALUES ($1::uuid, $2, 'Other organization member')`, foreignOwnerID, "deal-owner-"+foreignOwnerID[:8]+"@fixture.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO memberships (org_id, user_id) VALUES ($1::uuid, $2::uuid)`, fx.otherOrgID, foreignOwnerID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := fx.owner.Exec(context.Background(), `DELETE FROM users WHERE id = $1::uuid`, foreignOwnerID); err != nil {
+			t.Errorf("delete foreign deal owner fixture: %v", err)
+		}
+	})
 	dealPayload := json.RawMessage(fmt.Sprintf(`{"title":"Local opportunity","customerId":%q,"valueMinor":52500,"source":"referral","ownerUserId":%q,"note":"first call"}`, localCustomerID, fx.userID))
 	first := executeCRMDeal(t, fx, createDealCapabilityID, dealPayload, "crm-deal-receipt-create")
 	if !first.OK || first.Replayed {
@@ -233,6 +251,10 @@ func TestGoCRMDealsEnforceTenancyConversionAuditsAndReceiptReplay(t *testing.T) 
 	}
 	if !isUUID(created.DealID) {
 		t.Fatalf("createDeal output=%+v, want UUID dealId", created)
+	}
+	foreignOwnerPayload := json.RawMessage(fmt.Sprintf(`{"title":"Foreign owner deal","ownerUserId":%q}`, foreignOwnerID))
+	if _, err := executeCRMDealWithError(fx, createDealCapabilityID, foreignOwnerPayload, "crm-deal-foreign-owner"); err == nil || !strings.Contains(err.Error(), "deal owner not found in this organization") {
+		t.Fatalf("createDeal with foreign owner error=%v, want same-organization membership refusal", err)
 	}
 	replay := executeCRMDeal(t, fx, createDealCapabilityID, dealPayload, "crm-deal-receipt-create")
 	var replayed CreateDealOutput

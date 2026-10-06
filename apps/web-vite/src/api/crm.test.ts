@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmTaskCreate, submitCrmAction, submitCrmCustomerCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmDealCreate, readPendingCrmTaskCreate, submitCrmAction, submitCrmCustomerCreate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -121,6 +121,67 @@ describe("CRM API client", () => {
     const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/deals"]);
     expect(legacyBody).toMatchObject({ action: "move", dealId, stage: "proposal", intentId: goBody.intentId });
+  });
+
+  it("routes deal creation through Go and strictly validates the deal ID", async () => {
+    const input = { title: "Renewal", valueMinor: 25_500, customerId };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmDealCreate(input, undefined, true, { actorId: customerId, organizationId: dealId })).resolves.toEqual({ kind: "completed", data: { dealId } });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createDeal", input, intentId: expect.any(String) });
+
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId, extra: true } })));
+    await expect(submitCrmDealCreate(input, undefined, true, { actorId: customerId, organizationId: dealId })).rejects.toMatchObject({ name: "CrmApiError", message: "The CRM service returned an unexpected deal result." });
+  });
+
+  it("restores exact deal drafts and reuses intent through pending, uncertainty, and same-intent 404 fallback", async () => {
+    const scope = { actorId: customerId, organizationId: dealId };
+    const input = { title: "Renewal", valueMinor: 25_500, customerId };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }))
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 }))
+      .mockRejectedValueOnce(new TypeError("connection reset"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmDealCreate(input, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
+    await expect(readPendingCrmDealCreate(scope)).resolves.toEqual(input);
+    const intentId = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
+    await expect(submitCrmDealCreate(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+
+    const legacyFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }))
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { dealId } }));
+    vi.stubGlobal("fetch", legacyFetch);
+    await expect(submitCrmDealCreate(input, undefined, true, scope)).resolves.toEqual({ kind: "completed", data: { dealId } });
+    const goBody = JSON.parse(String(legacyFetch.mock.calls[0]?.[1]?.body));
+    const legacyBody = JSON.parse(String(legacyFetch.mock.calls[1]?.[1]?.body));
+    expect(legacyFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/deals"]);
+    expect(goBody.intentId).toBe(intentId);
+    expect(legacyBody).toMatchObject({ action: "create", ...input, intentId });
+    await expect(readPendingCrmDealCreate(scope)).resolves.toBeNull();
+  });
+
+  it("fails closed for deal creation without scope and blocks changed drafts after an uncertain result", async () => {
+    const scope = { actorId: customerId, organizationId: dealId };
+    const input = { title: "Renewal", valueMinor: 25_500 };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } })).mockRejectedValueOnce(new TypeError("connection reset"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmDealCreate(input, undefined, true)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(submitCrmDealCreate(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    await expect(submitCrmDealCreate({ ...input, title: "Changed" }, undefined, true, scope)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps legacy deal creation on /api/deals when Go is disabled", async () => {
+    const input = { title: "Renewal", valueMinor: 25_500, customerId };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await submitCrmDealCreate(input, undefined, false);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/deals");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ action: "create", ...input, intentId: expect.any(String) });
   });
 
   it("routes task creation and completion through strict Go capability outputs", async () => {

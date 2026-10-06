@@ -218,6 +218,7 @@ export async function submitCrmDealStageMove(
 
 const CRM_TASK_INTENT_PREFIX = "chaste.crm.task-intent.v1:";
 const CRM_CUSTOMER_CREATE_INTENT_PREFIX = "chaste.crm.customer-create-intent.v1:";
+const CRM_DEAL_CREATE_INTENT_PREFIX = "chaste.crm.deal-create-intent.v1:";
 const CrmTaskAttemptSchema = z.object({
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   intentId: z.string().uuid(),
@@ -231,7 +232,9 @@ export type CrmTaskMutation =
   | { action: "completeTask"; taskId: string };
 type CrmCustomerCreateMutation = { action: "createCustomer"; name: string; email?: string; phone?: string; preferredContactMethod: "email" | "phone" | "whatsapp" | "other"; doNotContact: boolean };
 export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
-type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation;
+type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string };
+export type CrmDealCreateInput = Omit<CrmDealCreateMutation, "action">;
+type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmDealCreateMutation;
 
 const CrmTaskMutationSchema = z.discriminatedUnion("action", [
   z.object({
@@ -342,6 +345,74 @@ const CrmCustomerCreateMutationSchema = z.object({
   doNotContact: z.boolean(),
 }).strict();
 const CrmCustomerCreateOutputSchema = z.object({ customerId: uuid, duplicateWarning: z.string().nullable() }).strict();
+const CrmDealCreateMutationSchema = z.object({
+  action: z.literal("createDeal"),
+  title: z.string().min(1).max(120),
+  valueMinor: z.number().int().nonnegative().refine(Number.isSafeInteger),
+  customerId: uuid.optional(),
+}).strict();
+const CrmDealCreateOutputSchema = z.object({ dealId: uuid }).strict();
+
+export async function readPendingCrmDealCreate(scope: CrmTaskRetryScope): Promise<CrmDealCreateInput | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_DEAL_CREATE_INTENT_PREFIX}${scopeHash}:create`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to restore an unresolved CRM deal draft."); }
+  if (raw === null) return null;
+  const parsed = parseCrmTaskAttempt(raw);
+  const action = CrmDealCreateMutationSchema.safeParse(parsed.action);
+  if (!action.success) throw new CrmApiError(0, "An unresolved CRM deal draft could not be restored. Contact an administrator before creating another deal.");
+  if (await crmTaskFingerprint(action.data) !== parsed.fingerprint) throw new CrmApiError(0, "An unresolved CRM deal draft could not be verified. Contact an administrator before creating another deal.");
+  return {
+    title: action.data.title,
+    valueMinor: action.data.valueMinor,
+    ...(action.data.customerId ? { customerId: action.data.customerId } : {}),
+  };
+}
+
+export async function submitCrmDealCreate(
+  input: CrmDealCreateInput,
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<{ dealId: string }>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_DEAL_CREATE__ !== "undefined" && __GO_CRM_DEAL_CREATE__);
+  const action = { action: "createDeal" as const, ...input };
+  const legacyAction = { action: "create", ...input };
+  if (!useGo) return submitCrmAction("/api/deals", legacyAction, signal);
+  if (!CrmDealCreateMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the deal details and correct invalid values before submitting.");
+  const scope = await crmTaskScope(retryScope);
+  const attempt = await crmTaskAttempt(action, scope, "create", CRM_DEAL_CREATE_INTENT_PREFIX);
+  try {
+    let { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.createDeal", input, intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) {
+      ({ response, body } = await request("/api/deals", {
+        method: "POST",
+        body: JSON.stringify({ ...legacyAction, intentId: attempt.intentId }),
+      }, signal));
+    }
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const parsed = CrmDealCreateOutputSchema.safeParse(outcome.data);
+    if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected deal result.", true);
+    await clearCrmDealCreateAttempt(attempt.storageKey);
+    return { kind: "completed", data: parsed.data };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+      await clearCrmDealCreateAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+async function clearCrmDealCreateAttempt(storageKey: string): Promise<void> {
+  try { window.localStorage.removeItem(storageKey); }
+  catch { throw new CrmApiError(0, "The deal was saved, but its retry marker could not be cleared. Reload CRM before submitting another deal.", true); }
+}
 
 export async function submitCrmCustomerCreate(
   input: CrmCustomerCreateInput,

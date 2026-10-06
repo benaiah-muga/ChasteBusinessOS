@@ -1712,3 +1712,14 @@ new owners and the manifest shows zero legacy runtime paths.
      unresolved, validate the customer ID and duplicate warning, and include
      the warning in the success notice. The Go parser enforces the legacy
      120-character name limit. Browser proof remains open.
+173. Route only Vite CRM deal creation through Go's session-authenticated
+     `crm.createDeal` capability when `CHASTE_GO_CRM_DEAL_CREATE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep stage changes, conversion,
+     and all other CRM writes on their current routes. Preserve the legacy path
+     as a same-intent fallback only when the Go capability route is absent.
+     Persist the exact actor and organization scoped attempt and form draft
+     across pending and uncertain results, restore it on reload, and fail closed
+     while account or organization scope is unresolved. Validate the returned
+     deal ID. Go must enforce the legacy title limit, same-organization
+     customer association, and same-organization owner membership. Browser
+     proof remains open.

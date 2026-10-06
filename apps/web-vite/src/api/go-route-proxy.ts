@@ -65,6 +65,10 @@ export function goCrmDealStageMoveFromEnv(env: Record<string, string | undefined
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_DEAL_STAGE_MOVE === "1";
 }
 
+export function goCrmDealCreateFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_DEAL_CREATE === "1";
+}
+
 export function goCrmTaskWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_TASK_WRITES === "1";
 }
