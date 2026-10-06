@@ -8,9 +8,14 @@ const saleRetryIntentByDigest = new Map<string, string>();
 const RETURN_INTENT_STORAGE_PREFIX = "chaste.pos.return-intent.v1:";
 const returnRetryIntentByDigest = new Map<string, string>();
 const RETURN_ACTIVE_ATTEMPT_PREFIX = "chaste.pos.return-active.v1:";
+const REGISTER_ACTIVE_ATTEMPT_PREFIX = "chaste.pos.register-active.v1:";
 type ReturnAttemptStatus = "uncertain" | "pending";
 type ActiveReturnAttempt = { fingerprint: string; intentId: string; action: PosReturnAction; status: ReturnAttemptStatus };
 const returnActiveAttemptByScope = new Map<string, ActiveReturnAttempt>();
+type RegisterAttemptStatus = "uncertain" | "pending";
+type RegisterAttemptAction = PosOpenAction | PosCloseAction;
+type ActiveRegisterAttempt = { fingerprint: string; intentId: string; action: RegisterAttemptAction; status: RegisterAttemptStatus };
+type RegisterAttemptRead = { kind: "none" } | { kind: "valid"; attempt: ActiveRegisterAttempt } | { kind: "corrupt" };
 
 export const PosRegisterSessionSchema = z.object({
   id: z.string().min(1),
@@ -507,6 +512,103 @@ export async function restorePosReturnAttempt(
   return { action: attempt.action, intentId: attempt.intentId, status: attempt.status };
 }
 
+async function registerAttemptStorageKey(scopeId: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ scopeId })));
+  const hexDigest = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${REGISTER_ACTIVE_ATTEMPT_PREFIX}${hexDigest}`;
+}
+
+async function registerAttemptFingerprint(action: RegisterAttemptAction): Promise<string> {
+  const canonical = JSON.stringify(canonicalValue(action));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function readRegisterActiveAttempt(storageKey: string): RegisterAttemptRead {
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(storageKey);
+  } catch {
+    return { kind: "corrupt" };
+  }
+  if (raw === null) return { kind: "none" };
+  try {
+    const record: unknown = JSON.parse(raw);
+    if (record === null || typeof record !== "object" || !("fingerprint" in record) || typeof record.fingerprint !== "string"
+      || !/^[0-9a-f]{64}$/i.test(record.fingerprint)
+      || !("intentId" in record) || typeof record.intentId !== "string" || !uuid.safeParse(record.intentId).success
+      || !("status" in record) || (record.status !== "uncertain" && record.status !== "pending") || !("action" in record)) return { kind: "corrupt" };
+    const open = PosOpenActionSchema.safeParse(record.action);
+    const close = PosCloseActionSchema.safeParse(record.action);
+    const action = open.success ? open.data : close.success ? close.data : null;
+    if (!action) return { kind: "corrupt" };
+    const attempt: ActiveRegisterAttempt = {
+      fingerprint: record.fingerprint,
+      intentId: record.intentId,
+      action,
+      status: record.status,
+    };
+    return { kind: "valid", attempt };
+  } catch {
+    return { kind: "corrupt" };
+  }
+}
+
+function rememberRegisterActiveAttempt(storageKey: string, attempt: ActiveRegisterAttempt, required = false): void {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(attempt));
+  } catch {
+    if (required) {
+      throw new PosApiError(0, "Register retry recovery could not be saved. Enable local storage before opening or closing the register.");
+    }
+  }
+}
+
+function assertRegisterRecoveryStorageAvailable(storageKey: string): void {
+  const probeKey = `${storageKey}:probe`;
+  try {
+    window.localStorage.setItem(probeKey, "available");
+    window.localStorage.removeItem(probeKey);
+  } catch {
+    try {
+      window.localStorage.removeItem(probeKey);
+    } catch {
+      // A storage failure is handled below and blocks the register write.
+    }
+    throw new PosApiError(0, "Register retry recovery is unavailable in this browser. Enable local storage before opening or closing the register.");
+  }
+}
+
+function assertRegisterScopeCurrent(isScopeCurrent: (() => boolean) | undefined): void {
+  if (isScopeCurrent && !isScopeCurrent()) {
+    throw new PosApiError(0, "The active organization changed. Reload the register before retrying this action.");
+  }
+}
+
+function clearRegisterActiveAttempt(storageKey: string, fingerprint: string, intentId: string): void {
+  try {
+    const record: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
+    if (record !== null && typeof record === "object" && "fingerprint" in record && record.fingerprint === fingerprint
+      && "intentId" in record && record.intentId === intentId) window.localStorage.removeItem(storageKey);
+  } catch {
+    // A malformed or unavailable storage entry cannot change the server result.
+  }
+}
+
+export async function restorePosRegisterAttempt(
+  scopeId: string,
+): Promise<{ action: RegisterAttemptAction; intentId: string; status: RegisterAttemptStatus } | null> {
+  const storageKey = await registerAttemptStorageKey(scopeId);
+  const result = readRegisterActiveAttempt(storageKey);
+  if (result.kind === "none") return null;
+  if (result.kind === "corrupt") throw new PosApiError(0, "A saved register retry marker is damaged. Verify the register before starting another action.");
+  const attempt = result.attempt;
+  if (attempt.fingerprint !== await registerAttemptFingerprint(attempt.action)) {
+    throw new PosApiError(0, "A saved register retry marker does not match its action. Verify the register before starting another action.");
+  }
+  return { action: attempt.action, intentId: attempt.intentId, status: attempt.status };
+}
+
 function rememberReturnIntent(storageKey: string, intentId: string): void {
   returnRetryIntentByDigest.set(storageKey, intentId);
   try {
@@ -544,19 +646,35 @@ function clearReturnIntent(storageKey: string, intentId: string): void {
 export async function openPosSession(
   action: PosOpenAction,
   signal?: AbortSignal,
-  options: { useGo?: boolean } = {},
+  options: { useGo?: boolean; scopeId?: string | null; intentId?: string; isScopeCurrent?: () => boolean } = {},
 ): Promise<PosActionOutcome<z.infer<typeof OpenOutputSchema>>> {
   const payload = parseOrThrow(PosOpenActionSchema, action, "Check the opening float and try again.");
-  const intentId = crypto.randomUUID();
   const configuredForGo = typeof __GO_POS_OPEN_SESSION_SLICE__ !== "undefined" && __GO_POS_OPEN_SESSION_SLICE__;
   const useGo = options.useGo ?? configuredForGo;
-  if (!useGo) return interpret(await postPosAction(payload, intentId, signal), OpenOutputSchema, "Could not open the register.");
+  if (!useGo) return interpret(await postPosAction(payload, options.intentId ?? crypto.randomUUID(), signal), OpenOutputSchema, "Could not open the register.");
 
-  const result = await postGoPosCapability("pos.openSession", { openingFloatMinor: payload.openingFloatMinor }, intentId, signal);
-  if (result.status === 404) {
-    return interpret(await postPosAction(payload, intentId, signal), OpenOutputSchema, "Could not open the register.");
+  const scopeId = options.scopeId?.trim();
+  if (!scopeId) throw new PosApiError(0, "Register opening requires an authenticated actor and organization scope.");
+  const storageKey = await registerAttemptStorageKey(scopeId);
+  const fingerprint = await registerAttemptFingerprint(payload);
+  assertRegisterRecoveryStorageAvailable(storageKey);
+  assertRegisterScopeCurrent(options.isScopeCurrent);
+  const activeResult = readRegisterActiveAttempt(storageKey);
+  if (activeResult.kind === "corrupt") throw new PosApiError(0, "A saved register retry marker is damaged. Verify the register before starting another action.");
+  const active = activeResult.kind === "valid" ? activeResult.attempt : null;
+  if (active && active.fingerprint !== fingerprint) {
+    throw new PosApiError(0, "A register action is unresolved. Retry the exact opening or verify the register before starting another action.");
   }
-  return interpret(result, OpenOutputSchema, "Could not open the register.");
+  const intentId = options.intentId ?? active?.intentId ?? crypto.randomUUID();
+  rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "uncertain" }, true);
+
+  let result = await postGoPosCapability("pos.openSession", { openingFloatMinor: payload.openingFloatMinor }, intentId, signal);
+  if (result.status === 404) result = await postPosAction(payload, intentId, signal);
+  if (result.status >= 400 && result.status < 500 && result.status !== 408 && result.status !== 429) clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
+  const outcome = interpret(result, OpenOutputSchema, "Could not open the register.");
+  if (outcome.kind === "completed") clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
+  if (outcome.kind === "pending") rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "pending" });
+  return outcome;
 }
 
 /**
@@ -606,24 +724,40 @@ export async function clearPosSaleRetryIntent(action: PosSaleAction, scopeId: st
 export async function closePosSession(
   action: PosCloseAction,
   signal?: AbortSignal,
-  options: { useGo?: boolean } = {},
+  options: { useGo?: boolean; scopeId?: string | null; intentId?: string; isScopeCurrent?: () => boolean } = {},
 ): Promise<PosActionOutcome<z.infer<typeof CloseOutputSchema>>> {
   const payload = parseOrThrow(PosCloseActionSchema, action, "Check the counted cash and the variance note before closing.");
-  const intentId = crypto.randomUUID();
   const configuredForGo = typeof __GO_POS_CLOSE_SESSION_SLICE__ !== "undefined" && __GO_POS_CLOSE_SESSION_SLICE__;
   const useGo = options.useGo ?? configuredForGo;
-  if (!useGo) return interpret(await postPosAction(payload, intentId, signal), CloseOutputSchema, "The register session could not be closed.");
+  if (!useGo) return interpret(await postPosAction(payload, options.intentId ?? crypto.randomUUID(), signal), CloseOutputSchema, "The register session could not be closed.");
+
+  const scopeId = options.scopeId?.trim();
+  if (!scopeId) throw new PosApiError(0, "Register closing requires an authenticated actor and organization scope.");
+  const storageKey = await registerAttemptStorageKey(scopeId);
+  const fingerprint = await registerAttemptFingerprint(payload);
+  assertRegisterRecoveryStorageAvailable(storageKey);
+  assertRegisterScopeCurrent(options.isScopeCurrent);
+  const activeResult = readRegisterActiveAttempt(storageKey);
+  if (activeResult.kind === "corrupt") throw new PosApiError(0, "A saved register retry marker is damaged. Verify the register before starting another action.");
+  const active = activeResult.kind === "valid" ? activeResult.attempt : null;
+  if (active && active.fingerprint !== fingerprint) {
+    throw new PosApiError(0, "A register action is unresolved. Retry the exact close or verify the register before starting another action.");
+  }
+  const intentId = options.intentId ?? active?.intentId ?? crypto.randomUUID();
+  rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "uncertain" }, true);
 
   const input = {
     sessionId: payload.sessionId,
     countedCashMinor: payload.countedCashMinor,
     ...(payload.varianceReason === undefined ? {} : { varianceReason: payload.varianceReason }),
   };
-  const result = await postGoPosCapability("pos.closeSession", input, intentId, signal);
-  if (result.status === 404) {
-    return interpret(await postPosAction(payload, intentId, signal), CloseOutputSchema, "The register session could not be closed.");
-  }
-  return interpret(result, CloseOutputSchema, "The register session could not be closed.");
+  let result = await postGoPosCapability("pos.closeSession", input, intentId, signal);
+  if (result.status === 404) result = await postPosAction(payload, intentId, signal);
+  if (result.status >= 400 && result.status < 500 && result.status !== 408 && result.status !== 429) clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
+  const outcome = interpret(result, CloseOutputSchema, "The register session could not be closed.");
+  if (outcome.kind === "completed") clearRegisterActiveAttempt(storageKey, fingerprint, intentId);
+  if (outcome.kind === "pending") rememberRegisterActiveAttempt(storageKey, { fingerprint, intentId, action: payload, status: "pending" });
+  return outcome;
 }
 
 export async function requestPosReturn(

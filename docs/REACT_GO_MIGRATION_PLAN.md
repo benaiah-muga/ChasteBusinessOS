@@ -1748,3 +1748,8 @@ new owners and the manifest shows zero legacy runtime paths.
      the exact adjustment after reload, ignore responses from a prior scope,
      retain retry identities for 408/429, and reuse the intent on missing-route
      fallback. Browser proof remains open.
+178. Persist Vite POS register open/close actions under resolved actor/org
+     scope before sending them. Restore and freeze exact attempts through
+     pending or uncertain outcomes, reject stale scope responses, retain 408/429
+     identity, and fail closed on unavailable storage or corrupt markers.
+     Browser proof remains open.

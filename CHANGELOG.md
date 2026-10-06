@@ -11,6 +11,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- Fixed Vite POS register open and close recovery so retries use the exact actor/org scoped payload and intent. Missing scope, unavailable storage, and corrupt retry markers fail closed; scope changes ignore stale responses, unresolved inputs are frozen, and 408/429 keep the retry identity.
 - Fixed Vite manual stock adjustments so pending and uncertain Go writes restore the exact actor/org scoped action and retry intent after reload. Inputs freeze while saving or unresolved, and stale responses from an old workspace are ignored.
 - Fixed Vite Sales order creation recovery so pending and uncertain drafts restore after reload, stay locked until resolved, and reuse the exact actor/org scoped intent. A definitive 4xx unlocks the draft so corrected input starts a new intent.
 - The Vite Go auth proxy now owns the entire `/api/auth/*` namespace whenever Go auth is enabled. Unsupported paths and methods fail closed in Go instead of falling through to the legacy auth service; the explicit compatibility opt-out remains available.

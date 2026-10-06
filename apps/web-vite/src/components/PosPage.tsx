@@ -13,6 +13,7 @@ import {
   fetchPosRegisterState,
   openPosSession,
   requestPosReturn,
+  restorePosRegisterAttempt,
   restorePosReturnAttempt,
   submitPosSale,
   type PosCatalogItem,
@@ -20,6 +21,8 @@ import {
   type PosSaleAction,
   type PosReturnAction,
   type PosRegisterSession,
+  type PosOpenAction,
+  type PosCloseAction,
   type PosSale,
   type PosSaleLine,
 } from "../api/pos-session";
@@ -27,6 +30,7 @@ import { legacyUrl } from "../legacy";
 import "./PosPage.css";
 
 type Tab = "overview" | "sell" | "sessions";
+type PosRegisterAttempt = { action: PosOpenAction | PosCloseAction; intentId: string; status: "uncertain" | "pending" };
 const TABS: readonly Tab[] = ["overview", "sell", "sessions"];
 type PosStorageBucket = "cart" | "parked-carts" | "queued-sales";
 
@@ -185,6 +189,14 @@ function noticeFor(error: unknown, hint: string): Notice {
   return { tone: "error", title: "Could not reach the POS service.", hint };
 }
 
+function registerRecoveryUnavailable(error: unknown): boolean {
+  return error instanceof PosApiError && error.status === 0
+    && (error.message.includes("authenticated actor and organization scope")
+      || error.message.includes("retry recovery is unavailable")
+      || error.message.includes("retry recovery could not be saved")
+      || error.message.includes("saved register retry marker"));
+}
+
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -198,6 +210,16 @@ function saleLineTotalMinor(line: PosSaleLine): number {
 }
 
 export function PosPage({ baseCurrency = null, actorId = null, organizationId = null, useGoCompleteSale, useGoReturnSale }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null; useGoCompleteSale?: boolean; useGoReturnSale?: boolean }) {
+  const registerScopeId = actorId && organizationId ? `${organizationId}:${actorId}` : null;
+  const registerScopeRef = useRef(registerScopeId);
+  const registerScopeGeneration = useRef(0);
+  const registerRequestController = useRef<AbortController | null>(null);
+  if (registerScopeRef.current !== registerScopeId) {
+    registerRequestController.current?.abort();
+    registerRequestController.current = null;
+    registerScopeRef.current = registerScopeId;
+    registerScopeGeneration.current += 1;
+  }
   const currency = useMemo(() => currencyFor(baseCurrency), [baseCurrency]);
   const digits = currency.minorUnits;
   const scale = 10 ** digits;
@@ -269,6 +291,9 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
   const [returnAttemptPending, setReturnAttemptPending] = useState(false);
   const [returnAttemptAction, setReturnAttemptAction] = useState<PosReturnAction | null>(null);
   const [returnRecoveryBlocked, setReturnRecoveryBlocked] = useState(false);
+  const [registerAttempt, setRegisterAttempt] = useState<PosRegisterAttempt | null>(null);
+  const [registerAttemptScopeId, setRegisterAttemptScopeId] = useState<string | null>(null);
+  const [registerRecoveryBlocked, setRegisterRecoveryBlocked] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [returnQuantities, setReturnQuantities] = useState<Record<string, string>>({});
   const [refundMethod, setRefundMethod] = useState<RefundMethod>("cash");
@@ -277,10 +302,12 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
   const [receiptShareFeedback, setReceiptShareFeedback] = useState<string | null>(null);
   const wasOnline = useRef(true);
   const returnRecoveryScope = useRef<string | null>(null);
+  const registerRecoveryScope = useRef<string | null>(null);
   const returnAttemptLocked = returnAttemptPending || returnAttemptUncertain;
 
   const openSession = useMemo(() => sessions?.find((session) => session.status === "open") ?? null, [sessions]);
   const openSessionId = openSession?.id ?? null;
+  const activeRegisterAttempt = registerAttemptScopeId === registerScopeId ? registerAttempt : null;
   const selectedCustomer = useMemo(() => customers.find((customer) => customer.id === customerId) ?? null, [customers, customerId]);
   const inventoryEnabled = modules?.inventory ?? false;
   const workspaceParkedCarts = useMemo(
@@ -294,16 +321,18 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
   }, []);
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const generation = registerScopeGeneration.current;
+    const expectedScopeId = actorId && organizationId ? `${organizationId}:${actorId}` : null;
     try {
       const state = await fetchPosRegisterState(signal);
-      if (signal?.aborted) return;
+      if (signal?.aborted || registerScopeGeneration.current !== generation) return;
       setSessions(state.sessions);
       setSales(state.sales);
       setRegisterStateLoaded(true);
-      setRegisterStateScope(actorId && organizationId ? `${organizationId}:${actorId}` : null);
+      setRegisterStateScope(expectedScopeId);
       setLoadError(null);
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || registerScopeGeneration.current !== generation) return;
       setLoadError(noticeFor(error, "Your register history is still on file. Check the connection, then retry.").title);
     }
   }, [actorId, organizationId]);
@@ -387,6 +416,42 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       }
     });
   }, [actorId, organizationId, sales, registerStateLoaded, registerStateScope]);
+
+  useEffect(() => {
+    setRegisterAttempt(null);
+    setRegisterAttemptScopeId(null);
+    setRegisterRecoveryBlocked(false);
+    setBusy(false);
+    registerRecoveryScope.current = null;
+  }, [registerScopeId]);
+
+  useEffect(() => {
+    if (!registerStateLoaded || !actorId || !organizationId) return;
+    const scopeId = `${organizationId}:${actorId}`;
+    if (registerStateScope !== scopeId || registerRecoveryScope.current === scopeId) return;
+    const generation = registerScopeGeneration.current;
+    registerRecoveryScope.current = scopeId;
+    void restorePosRegisterAttempt(scopeId).then((attempt) => {
+      if (registerRecoveryScope.current !== scopeId || registerScopeGeneration.current !== generation) return;
+      setRegisterAttempt(attempt);
+      setRegisterAttemptScopeId(scopeId);
+      setRegisterRecoveryBlocked(false);
+      if (!attempt) return;
+      if (attempt.action.action === "open") setFloat(String(attempt.action.openingFloatMinor / scale));
+      if (attempt.action.action === "close") {
+        setCounted(String(attempt.action.countedCashMinor / scale));
+        setVarianceReason(attempt.action.varianceReason ?? "");
+      }
+      setNotice(attempt.status === "pending"
+        ? { tone: "pending", title: "A register action is waiting for approval.", hint: "Its exact inputs and identity have been restored. Retry safely to check for completion." }
+        : { tone: "error", title: "The register action result is unknown", hint: "Its exact inputs and identity have been restored. Retry it or verify the register before starting another action." });
+    }).catch(() => {
+      if (registerRecoveryScope.current === scopeId && registerScopeGeneration.current === generation) {
+        setRegisterRecoveryBlocked(true);
+        setNotice({ tone: "error", title: "Could not restore the register action", hint: "Refresh the register or verify the session before opening or closing another register." });
+      }
+    });
+  }, [actorId, organizationId, registerStateLoaded, registerStateScope, registerScopeId, scale]);
 
   useEffect(() => {
     if (modules === null) return;
@@ -633,36 +698,91 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
   }, [customers, customerQuery]);
 
   async function openRegister() {
+    if (registerRecoveryBlocked || (activeRegisterAttempt && activeRegisterAttempt.action.action !== "open")) return;
+    const generation = registerScopeGeneration.current;
+    const scopeId = registerScopeId;
+    const isScopeCurrent = () => registerScopeGeneration.current === generation && registerScopeRef.current === scopeId;
+    const controller = new AbortController();
+    registerRequestController.current = controller;
     setBusy(true);
     try {
-      const outcome = await openPosSession({ action: "open", openingFloatMinor: Math.max(0, toMinor(float, digits)) });
+      const action = activeRegisterAttempt?.action.action === "open"
+        ? activeRegisterAttempt.action
+        : { action: "open" as const, openingFloatMinor: Math.max(0, toMinor(float, digits)) };
+      const outcome = await openPosSession(action, controller.signal, {
+        scopeId,
+        isScopeCurrent,
+        ...(activeRegisterAttempt?.action.action === "open" ? { intentId: activeRegisterAttempt.intentId } : {}),
+      });
+      if (!isScopeCurrent()) return;
       if (outcome.kind === "pending") {
+        if (scopeId) {
+          const restored = await restorePosRegisterAttempt(scopeId);
+          if (!isScopeCurrent()) return;
+          setRegisterAttempt(restored);
+          setRegisterAttemptScopeId(scopeId);
+        }
         setNotice({ tone: "pending", title: "Opening the register is waiting for approval.", hint: outcome.reason });
         return;
       }
+      setRegisterAttempt(null);
+      setRegisterAttemptScopeId(null);
       setNotice({ tone: "success", title: "Register session opened." });
       await load();
     } catch (error) {
+      if (!isScopeCurrent()) return;
+      if (registerRecoveryUnavailable(error)) setRegisterRecoveryBlocked(true);
+      if (scopeId) {
+        const restored = await restorePosRegisterAttempt(scopeId).catch(() => null);
+        if (!isScopeCurrent()) return;
+        setRegisterAttempt(restored);
+        setRegisterAttemptScopeId(scopeId);
+      }
       setNotice(noticeFor(error, "Check the opening float and try again."));
     } finally {
-      setBusy(false);
+      if (isScopeCurrent()) {
+        registerRequestController.current = null;
+        setBusy(false);
+      }
     }
   }
 
   async function closeRegister() {
     if (!openSessionId) return;
+    if (registerRecoveryBlocked || (activeRegisterAttempt && activeRegisterAttempt.action.action !== "close")) return;
+    const generation = registerScopeGeneration.current;
+    const scopeId = registerScopeId;
+    const isScopeCurrent = () => registerScopeGeneration.current === generation && registerScopeRef.current === scopeId;
+    const controller = new AbortController();
+    registerRequestController.current = controller;
     setBusy(true);
     try {
-      const outcome = await closePosSession({
-        action: "close",
-        sessionId: openSessionId,
-        countedCashMinor: Math.max(0, countedCashMinor),
-        ...(liveVariance !== null && liveVariance !== 0 ? { varianceReason: varianceReason.trim() } : {}),
+      const action = activeRegisterAttempt?.action.action === "close"
+        ? activeRegisterAttempt.action
+        : {
+            action: "close" as const,
+            sessionId: openSessionId,
+            countedCashMinor: Math.max(0, countedCashMinor),
+            ...(liveVariance !== null && liveVariance !== 0 ? { varianceReason: varianceReason.trim() } : {}),
+          };
+      const outcome = await closePosSession(action, controller.signal, {
+        scopeId,
+        isScopeCurrent,
+        ...(activeRegisterAttempt?.action.action === "close" ? { intentId: activeRegisterAttempt.intentId } : {}),
       });
+      if (!isScopeCurrent()) return;
       if (outcome.kind === "pending") {
+        if (scopeId) {
+          const restored = await restorePosRegisterAttempt(scopeId);
+          if (!isScopeCurrent()) return;
+          setRegisterAttempt(restored);
+          setRegisterAttemptScopeId(scopeId);
+        }
         setNotice({ tone: "pending", title: "Closing the register is waiting for approval.", hint: outcome.reason });
         return;
       }
+      setRegisterAttempt(null);
+      setRegisterAttemptScopeId(null);
       const { expectedCashMinor, varianceMinor, flagged } = outcome.data;
       const drawerExpected = expectedCashMinor || expectedCash;
       setNotice(varianceMinor === 0
@@ -678,9 +798,60 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
       setLines([]);
       await load();
     } catch (error) {
+      if (!isScopeCurrent()) return;
+      if (registerRecoveryUnavailable(error)) setRegisterRecoveryBlocked(true);
+      if (scopeId) {
+        const restored = await restorePosRegisterAttempt(scopeId).catch(() => null);
+        if (!isScopeCurrent()) return;
+        setRegisterAttempt(restored);
+        setRegisterAttemptScopeId(scopeId);
+      }
       setNotice(noticeFor(error, "Recount the drawer and try again."));
     } finally {
-      setBusy(false);
+      if (isScopeCurrent()) {
+        registerRequestController.current = null;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function retryRegisterAttempt() {
+    const attempt = activeRegisterAttempt;
+    if (!attempt || !registerScopeId) return;
+    const generation = registerScopeGeneration.current;
+    const scopeId = registerScopeId;
+    const isScopeCurrent = () => registerScopeGeneration.current === generation && registerScopeRef.current === scopeId;
+    const controller = new AbortController();
+    registerRequestController.current = controller;
+    setBusy(true);
+    try {
+      const outcome = attempt.action.action === "open"
+        ? await openPosSession(attempt.action, controller.signal, { useGo: true, scopeId, intentId: attempt.intentId, isScopeCurrent })
+        : await closePosSession(attempt.action, controller.signal, { useGo: true, scopeId, intentId: attempt.intentId, isScopeCurrent });
+      if (!isScopeCurrent()) return;
+      const restored = await restorePosRegisterAttempt(scopeId);
+      if (!isScopeCurrent()) return;
+      setRegisterAttempt(restored);
+      setRegisterAttemptScopeId(scopeId);
+      if (outcome.kind === "pending") {
+        setNotice({ tone: "pending", title: "The register action is still waiting for approval.", hint: outcome.reason });
+        return;
+      }
+      setNotice({ tone: "success", title: attempt.action.action === "open" ? "Register session opened." : "Register session closed." });
+      await load();
+    } catch (error) {
+      if (!isScopeCurrent()) return;
+      if (registerRecoveryUnavailable(error)) setRegisterRecoveryBlocked(true);
+      const restored = await restorePosRegisterAttempt(scopeId).catch(() => attempt);
+      if (!isScopeCurrent()) return;
+      setRegisterAttempt(restored);
+      setRegisterAttemptScopeId(scopeId);
+      setNotice(noticeFor(error, "Retry the saved register action or verify the session."));
+    } finally {
+      if (isScopeCurrent()) {
+        registerRequestController.current = null;
+        setBusy(false);
+      }
     }
   }
 
@@ -1318,6 +1489,22 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
   return (
     <main className="pos-page">
       {pageHeader}
+
+      {registerRecoveryBlocked ? (
+        <section className="pos-banner pos-banner-stale" role="alert">
+          <strong>Register recovery needs attention</strong>
+          <span>Verify the register state before starting another open or close action.</span>
+        </section>
+      ) : null}
+      {activeRegisterAttempt ? (
+        <section className={`pos-banner ${activeRegisterAttempt.status === "pending" ? "pos-banner-pending" : "pos-banner-stale"}`} role="status">
+          <strong>{activeRegisterAttempt.action.action === "open" ? "Register opening" : "Register closing"} needs a retry</strong>
+          <span>The saved inputs and action identity will be reused.</span>
+          <button type="button" className="pos-button" disabled={busy} onClick={() => void retryRegisterAttempt()}>
+            {busy ? "Checking…" : "Retry saved action"}
+          </button>
+        </section>
+      ) : null}
 
       {sessions === null ? (
         <section className="pos-error" role="alert">
@@ -2196,12 +2383,13 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                             onChange={(event) => { setCounted(event.target.value); setVarianceReason(""); }}
                             inputMode="decimal"
                             placeholder="Count the drawer"
-                            disabled={countByDenomination}
+                            disabled={countByDenomination || Boolean(activeRegisterAttempt) || registerRecoveryBlocked || busy}
                           />
                         </label>
                         <button
                           type="button"
                           className="pos-link-button"
+                          disabled={Boolean(activeRegisterAttempt) || registerRecoveryBlocked || busy}
                           onClick={() => {
                             setCountByDenomination((enabled) => !enabled);
                             setCounted("");
@@ -2226,6 +2414,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                                   inputMode="numeric"
                                   aria-label={`${money(amount)} notes or coins`}
                                   value={denominationCounts[String(amount)] ?? ""}
+                                  disabled={Boolean(activeRegisterAttempt) || registerRecoveryBlocked || busy}
                                   onChange={(event) => { setDenominationCounts((current) => ({ ...current, [String(amount)]: event.target.value })); setVarianceReason(""); }}
                                 />
                               </label>
@@ -2253,6 +2442,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                               className="pos-textarea"
                               maxLength={500}
                               value={varianceReason}
+                              disabled={Boolean(activeRegisterAttempt) || registerRecoveryBlocked || busy}
                               onChange={(event) => setVarianceReason(event.target.value)}
                               placeholder="For example: one cash refund was entered after the count."
                             />
@@ -2263,7 +2453,7 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                         <button
                           type="button"
                           className="pos-button pos-button-danger pos-button-block"
-                          disabled={!hasCashCount || (liveVariance !== null && liveVariance !== 0 && varianceReason.trim().length < 3) || lines.length > 0 || busy}
+                          disabled={!hasCashCount || (liveVariance !== null && liveVariance !== 0 && varianceReason.trim().length < 3) || lines.length > 0 || busy || Boolean(activeRegisterAttempt) || registerRecoveryBlocked}
                           onClick={() => setCloseConfirm(true)}
                         >
                           Close session and reconcile
@@ -2287,11 +2477,12 @@ export function PosPage({ baseCurrency = null, actorId = null, organizationId = 
                           onChange={(event) => setFloat(event.target.value)}
                           inputMode="decimal"
                           placeholder={minorToInput(10000, digits)}
+                          disabled={busy || Boolean(activeRegisterAttempt) || registerRecoveryBlocked}
                         />
                         <small>The counted cash this register starts from. It is part of expected drawer cash until you close the shift.</small>
                       </div>
                       <span aria-hidden="true" />
-                      <button type="submit" className="pos-button pos-button-primary" disabled={busy}>
+                      <button type="submit" className="pos-button pos-button-primary" disabled={busy || Boolean(activeRegisterAttempt) || registerRecoveryBlocked}>
                         {busy ? "Opening…" : "Open register"}
                       </button>
                     </form>

@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { closePosSession, openPosSession, restorePosRegisterAttempt } from "../api/pos-session";
 import { PosPage } from "./PosPage";
 
 const sessionId = "10000000-0000-4000-8000-000000000001";
@@ -84,7 +85,7 @@ const shiftSummary = {
 type Payload = Record<string, unknown>;
 
 /** Routes the page's own reads and writes so each test only overrides what it asserts. */
-function registerRoute(overrides: (url: string, payload: Payload | null) => Response | null = () => null) {
+function registerRoute(overrides: (url: string, payload: Payload | null) => Response | Promise<Response> | null = () => null) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const payload = init?.body ? (JSON.parse(String(init.body)) as Payload) : null;
@@ -138,6 +139,87 @@ afterEach(() => {
 });
 
 describe("Vite POS register page", () => {
+  it("restores a pending register opening and retries the exact Go action after reload", async () => {
+    const actorId = "operator-register-recovery";
+    const organizationId = "workspace-register-recovery";
+    const scopeId = `${organizationId}:${actorId}`;
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 })));
+    await openPosSession({ action: "open", openingFloatMinor: 8750 }, undefined, { useGo: true, scopeId });
+    const saved = await restorePosRegisterAttempt(scopeId);
+    expect(saved).not.toBeNull();
+
+    const fetchMock = registerRoute((url, payload) => {
+      if (url === "/api/capabilities/execute" && payload?.capabilityId === "pos.openSession") {
+        return Response.json({ ok: true, data: { sessionId } });
+      }
+      if (url === "/api/pos" && payload === null) return Response.json({ sessions: [], sales: [] });
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/pos?tab=sell");
+    render(<PosPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
+
+    expect(await screen.findByText("Register opening needs a retry")).not.toBeNull();
+    expect((screen.getByLabelText("Opening float") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retry saved action" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === "/api/capabilities/execute"
+      && call[1]?.body && JSON.parse(String(call[1].body)).capabilityId === "pos.openSession")).toBe(true));
+    const retried = fetchMock.mock.calls.find((call) => call[0] === "/api/capabilities/execute"
+      && call[1]?.body && JSON.parse(String(call[1].body)).capabilityId === "pos.openSession");
+    expect(JSON.parse(String(retried?.[1]?.body))).toEqual({
+      capabilityId: "pos.openSession",
+      input: { openingFloatMinor: 8750 },
+      intentId: saved?.intentId,
+    });
+    await waitFor(() => expect(screen.queryByText("Register opening needs a retry")).toBeNull());
+  });
+
+  it("does not apply a delayed register response after switching organizations", async () => {
+    const firstActor = "operator-register-org-a";
+    const firstOrg = "workspace-register-org-a";
+    const firstScope = `${firstOrg}:${firstActor}`;
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 })));
+    await openPosSession({ action: "open", openingFloatMinor: 6400 }, undefined, { useGo: true, scopeId: firstScope });
+
+    let resolveGo!: (response: Response) => void;
+    const fetchMock = registerRoute((url, payload) => {
+      if (url === "/api/capabilities/execute" && payload?.capabilityId === "pos.openSession") {
+        return new Promise<Response>((resolve) => { resolveGo = resolve; });
+      }
+      return null;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const page = render(<PosPage baseCurrency="USD" actorId={firstActor} organizationId={firstOrg} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry saved action" }));
+    await waitFor(() => expect(resolveGo).toBeTypeOf("function"));
+
+    page.rerender(<PosPage baseCurrency="USD" actorId="operator-register-org-b" organizationId="workspace-register-org-b" />);
+    resolveGo(Response.json({ ok: true, data: { sessionId } }));
+
+    await waitFor(() => expect(screen.queryByText("Register opening needs a retry")).toBeNull());
+    expect(screen.queryByText("Register session opened.")).toBeNull();
+  });
+
+  it("freezes register inputs while a Go close is unresolved", async () => {
+    const actorId = "operator-register-close-freeze";
+    const organizationId = "workspace-register-close-freeze";
+    const scopeId = `${organizationId}:${actorId}`;
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 })));
+    await closePosSession({
+      action: "close",
+      sessionId,
+      countedCashMinor: 14000,
+      varianceReason: "cash refund entered after count",
+    }, undefined, { useGo: true, scopeId });
+    vi.stubGlobal("fetch", registerRoute());
+    window.history.replaceState(null, "", "/pos?tab=sell");
+    render(<PosPage baseCurrency="USD" actorId={actorId} organizationId={organizationId} />);
+
+    expect(await screen.findByText("Register closing needs a retry")).not.toBeNull();
+    expect((await screen.findByLabelText("Counted cash") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Explain the variance") as HTMLTextAreaElement).disabled).toBe(true);
+  });
+
   it("summarises the floor and the drawer from the register state", async () => {
     vi.stubGlobal("fetch", registerRoute());
     render(<PosPage baseCurrency="USD" />);
