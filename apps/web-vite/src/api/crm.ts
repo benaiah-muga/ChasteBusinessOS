@@ -524,21 +524,22 @@ export async function submitCrmCustomerCreate(
 ): Promise<CrmActionOutcome<{ customerId: string; duplicateWarning?: string | null }>> {
   const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_CREATE__ !== "undefined" && __GO_CRM_CUSTOMER_CREATE__);
   const action = { action: "createCustomer" as const, ...input };
-  if (!useGo) return submitCrmAction("/api/customers", { action: "create", ...input }, signal);
-  if (!CrmCustomerCreateMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the customer details and correct invalid values before submitting.");
   const scope = await crmTaskScope(retryScope);
+  if (!useGo) {
+    const unresolved = await readPendingCrmCustomerCreate(scope);
+    if (unresolved) {
+      throw new CrmApiError(0, "A Go customer creation is unresolved. Restore the Go customer route and retry its exact details before creating another customer.", true);
+    }
+    return submitCrmAction("/api/customers", { action: "create", ...input }, signal);
+  }
+  if (!CrmCustomerCreateMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the customer details and correct invalid values before submitting.");
   const attempt = await crmTaskAttempt(action, scope, "create", CRM_CUSTOMER_CREATE_INTENT_PREFIX);
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.createCustomer", input, intentId: attempt.intentId }),
     }, signal);
-    if (response.status === 404) {
-      ({ response, body } = await request("/api/customers", {
-        method: "POST",
-        body: JSON.stringify({ action: "create", ...input, intentId: attempt.intentId }),
-      }, signal));
-    }
+    if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
     const parsed = CrmCustomerCreateOutputSchema.safeParse(outcome.data);
@@ -546,7 +547,7 @@ export async function submitCrmCustomerCreate(
     await clearCrmTaskAttempt(attempt.storageKey);
     return { kind: "completed", data: parsed.data };
   } catch (error) {
-    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
       await clearCrmTaskAttempt(attempt.storageKey);
     }
     throw error;

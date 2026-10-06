@@ -33,7 +33,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Northwind Ltd" } });
@@ -43,6 +43,85 @@ describe("Vite CRM page", () => {
     expect(await screen.findByText(`Customer added. ${duplicateWarning}`)).not.toBeNull();
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
     expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")?.[1]?.body))).toMatchObject({ action: "create", name: "Northwind Ltd", email: "office@northwind.test" });
+  });
+
+  it("blocks legacy customer creation until the actor and organization scope resolve", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", false);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={null} organizationId={null} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    expect(await screen.findByText("CRM is waiting for account and organization details or restoring a saved customer draft.")).not.toBeNull();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Add customer" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Add customer" }));
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")).toBe(false);
+  });
+
+  it("locks an exact Go customer draft after 404 and retries without a legacy write", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
+    const goBodies: Array<{ capabilityId: string; input: { name: string }; intentId: string }> = [];
+    let legacyWrites = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method === "POST") {
+        legacyWrites += 1;
+        return Response.json({ ok: true, data: { customerId, duplicateWarning: null } });
+      }
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as (typeof goBodies)[number];
+        goBodies.push(body);
+        return goBodies.length === 1
+          ? Response.json({ error: "Route not found" }, { status: 404 })
+          : Response.json({ ok: true, data: { customerId, duplicateWarning: null } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add customer" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Northwind Ltd" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add customer" }));
+
+    expect(await screen.findByText("This customer creation is pending or uncertain. Retry the same details to resolve it.")).not.toBeNull();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Northwind Ltd");
+    expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
+    expect(legacyWrites).toBe(0);
+
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", false);
+    view.rerender(<CRMPage actorId={customerId} organizationId={dealId} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Retry customer" })).toHaveProperty("disabled", false);
+      expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(true);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry customer" }));
+    expect(await screen.findByText(/A Go customer creation is unresolved/)).not.toBeNull();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Northwind Ltd");
+    expect(legacyWrites).toBe(0);
+    expect(goBodies).toHaveLength(1);
+
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
+    view.rerender(<CRMPage actorId={customerId} organizationId={dealId} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry customer" })).toHaveProperty("disabled", false));
+    fireEvent.click(screen.getByRole("button", { name: "Retry customer" }));
+    expect(await screen.findByText("Customer added.")).not.toBeNull();
+    expect(goBodies).toHaveLength(2);
+    expect(goBodies[1]).toEqual(goBodies[0]);
+    expect(legacyWrites).toBe(0);
   });
 
   it("ignores a customer-create response after the active account scope changes", async () => {

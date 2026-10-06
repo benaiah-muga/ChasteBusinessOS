@@ -1705,16 +1705,22 @@ new owners and the manifest shows zero legacy runtime paths.
      strict output shapes, and fail closed when account or organization scope
      or browser storage is unavailable. Authenticated browser proof remains
      open because the in-app browser is unavailable in this environment.
-172. Route only Vite CRM customer creation through Go's session-authenticated
-     `crm.createCustomer` capability when `CHASTE_GO_CRM_CUSTOMER_CREATE=1` and
-     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep all other CRM actions on their
-     current routes. Preserve the legacy route as a same-intent fallback only
-     when the Go capability route is absent. Persist the exact actor and
-     organization scoped attempt and form draft across pending and uncertain
-     results, restore it on reload, fail closed while the active scope is
-     unresolved, validate the customer ID and duplicate warning, and include
-     the warning in the success notice. The Go parser enforces the legacy
-     120-character name limit. Browser proof remains open.
+172. (Implemented; local Go/Vite default-on) Route only Vite CRM customer
+     creation through Go's session-authenticated `crm.createCustomer` capability
+     under the paired `CHASTE_GO_CRM_CUSTOMER_CREATE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` flags. Set the customer-create
+     selector to `0` to route fresh creates to `/api/customers`; unresolved Go
+     creates remain locked and block legacy writes until Go routing is restored
+     and the exact action is retried. All other CRM actions keep their current
+     routes. Both Go and legacy create requests require resolved actor and
+     organization scope; no customer-create request is sent before scope
+     resolves. Persist the exact actor and organization scoped attempt and form
+     draft across pending and uncertain results, restore it on reload, and fail
+     closed on Go 404 without calling the legacy writer while retaining the
+     scoped retry identity. Validate the customer ID and duplicate warning, and
+     include the warning in the success notice. The Go parser enforces the legacy
+     120-character name limit. Authenticated browser proof remains open because
+     the in-app browser is unavailable in this environment.
 173. Route only Vite CRM deal creation through Go's session-authenticated
      `crm.createDeal` capability when `CHASTE_GO_CRM_DEAL_CREATE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep stage changes, conversion,

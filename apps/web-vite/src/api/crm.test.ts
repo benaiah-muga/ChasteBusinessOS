@@ -317,7 +317,7 @@ describe("CRM API client", () => {
     await expect(submitCrmCustomerCreate(customerCreateInput, undefined, true, { actorId: dealId, organizationId: customerId })).rejects.toMatchObject({ name: "CrmApiError", message: "The CRM service returned an unexpected customer result." });
   });
 
-  it("restores customer drafts and keeps the same intent through pending, uncertain response, and 404 fallback", async () => {
+  it("restores customer drafts and keeps the same intent through pending, uncertainty, and Go 404 without legacy fallback", async () => {
     const scope = { actorId: dealId, organizationId: customerId };
     const input = { name: "Northwind", email: "office@northwind.test", preferredContactMethod: "email" as const, doNotContact: false };
     const fetchMock = vi.fn()
@@ -329,23 +329,47 @@ describe("CRM API client", () => {
     const pendingIntentId = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
     await expect(submitCrmCustomerCreate(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
 
-    const legacyFetch = vi.fn()
+    const goFetch = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { customerId, duplicateWarning: null } }));
-    vi.stubGlobal("fetch", legacyFetch);
+    vi.stubGlobal("fetch", goFetch);
+    await expect(submitCrmCustomerCreate(input, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingCrmCustomerCreate(scope)).resolves.toEqual(input);
+    await expect(submitCrmCustomerCreate(input, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    await expect(submitCrmCustomerCreate({ ...input, name: "Changed customer" }, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(goFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
+    await expect(readPendingCrmCustomerCreate(scope)).resolves.toEqual(input);
+
+    const retryFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { customerId, duplicateWarning: null } }));
+    vi.stubGlobal("fetch", retryFetch);
     await expect(submitCrmCustomerCreate(input, undefined, true, scope)).resolves.toMatchObject({ kind: "completed", data: { customerId, duplicateWarning: null } });
-    const goBody = JSON.parse(String(legacyFetch.mock.calls[0]?.[1]?.body));
-    const legacyBody = JSON.parse(String(legacyFetch.mock.calls[1]?.[1]?.body));
-    expect(legacyFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/customers"]);
-    expect(goBody.intentId).toBe(pendingIntentId);
-    expect(legacyBody).toMatchObject({ action: "create", ...input, intentId: pendingIntentId });
+    expect(retryFetch.mock.calls).toHaveLength(1);
+    expect(retryFetch.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(retryFetch.mock.calls[0]?.[1]?.body)).intentId).toBe(pendingIntentId);
     await expect(readPendingCrmCustomerCreate(scope)).resolves.toBeNull();
+  });
+
+  it("keeps customer creation on the legacy customer route when the Go selector is disabled", async () => {
+    const input = { name: "Northwind", preferredContactMethod: "email" as const, doNotContact: false };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { customerId } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmCustomerCreate(input, undefined, false, { actorId: dealId, organizationId: customerId })).resolves.toEqual({ kind: "completed", data: { customerId } });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/customers");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      action: "create",
+      ...input,
+      intentId: expect.any(String),
+    });
   });
 
   it("fails closed for customer creation without actor and organization scope", async () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { customerId, duplicateWarning: null } }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(submitCrmCustomerCreate({ name: "Northwind", preferredContactMethod: "email", doNotContact: false }, undefined, true)).rejects.toMatchObject({ name: "CrmApiError", status: 0 });
+    await expect(submitCrmCustomerCreate({ name: "Northwind", preferredContactMethod: "email", doNotContact: false }, undefined, false)).rejects.toMatchObject({ name: "CrmApiError", status: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
