@@ -294,14 +294,15 @@ describe("Vite Go route proxy selection", () => {
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
     }
-    expect(isGoRouteRequest(flags, "POST", "/api/auth/sign-in/social")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/auth/change-password")).toBe(false);
-    expect(isGoRouteRequest(flags, "DELETE", "/api/auth/get-session")).toBe(false);
-    expect(isGoRouteRequest(flags, "OPTIONS", "/api/auth/get-session")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/auth/reset-password")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/auth/reset-password/token/extra")).toBe(false);
-    expect(isGoRouteRequest(flags, "GET", "/api/auth/sign-in/oidc")).toBe(false);
-    expect(isGoRouteRequest(flags, "POST", "/api/auth/callback/saml")).toBe(false);
+    expect(isGoRouteRequest(flags, "POST", "/api/auth/sign-in/social")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/auth/change-password")).toBe(true);
+    expect(isGoRouteRequest(flags, "DELETE", "/api/auth/get-session")).toBe(true);
+    expect(isGoRouteRequest(flags, "OPTIONS", "/api/auth/get-session")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/auth/reset-password")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/auth/reset-password/token/extra")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/auth/sign-in/oidc")).toBe(true);
+    expect(isGoRouteRequest(flags, "POST", "/api/auth/callback/saml")).toBe(true);
+    expect(isGoRouteRequest(flags, "GET", "/api/auth")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/authentication/get-session")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/setup")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/routines")).toBe(false);
@@ -326,17 +327,17 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/analytics")).toBe(false);
   });
 
-  it("routes optional federated auth only when its matching Go selector is enabled", () => {
+  it("keeps the whole auth namespace on Go when auth is enabled", () => {
     const oidc = goRouteProxyFlagsFromEnv({ CHASTE_GO_AUTH_OIDC_ROUTE: "1" });
     expect(isGoRouteRequest(oidc, "GET", "/api/auth/sign-in/oidc")).toBe(true);
     expect(isGoRouteRequest(oidc, "GET", "/api/auth/callback/oidc?code=one")).toBe(true);
     expect(isGoRouteRequest(oidc, "POST", "/api/auth/native/exchange")).toBe(true);
-    expect(isGoRouteRequest(oidc, "GET", "/api/auth/sign-in/saml")).toBe(false);
+    expect(isGoRouteRequest(oidc, "GET", "/api/auth/sign-in/saml")).toBe(true);
 
     const saml = goRouteProxyFlagsFromEnv({ CHASTE_GO_AUTH_SAML_ROUTE: "1" });
     expect(isGoRouteRequest(saml, "GET", "/api/auth/sign-in/saml")).toBe(true);
     expect(isGoRouteRequest(saml, "POST", "/api/auth/callback/saml")).toBe(true);
-    expect(isGoRouteRequest(saml, "GET", "/api/auth/sign-in/oidc")).toBe(false);
+    expect(isGoRouteRequest(saml, "GET", "/api/auth/sign-in/oidc")).toBe(true);
   });
 
   it("allows an explicit legacy-auth compatibility opt-out", () => {
@@ -611,7 +612,7 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(disabled, "GET", "/api/metrics")).toBe(false);
   });
 
-  it("preserves auth fallback, setup, method-specific, path-prefix, body, cookie, and streaming behavior", async () => {
+  it("keeps the selected auth namespace on Go while preserving other proxy behavior", async () => {
     const go = requestRecorder("go", true);
     const goOrigin = await listen(go);
     runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
@@ -682,10 +683,10 @@ describe("Vite Go route proxy selection", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ provider: "unexpected" }),
     });
-    expect(await unsupportedAuth.json()).toMatchObject({ target: "legacy", url: "/api/auth/sign-in/social" });
+    expect(await unsupportedAuth.json()).toMatchObject({ target: "go", url: "/api/auth/sign-in/social" });
 
     const unsupportedAuthMethod = await fetch(`${origin}/api/auth/get-session`, { method: "DELETE" });
-    expect(await unsupportedAuthMethod.json()).toMatchObject({ target: "legacy", method: "DELETE" });
+    expect(await unsupportedAuthMethod.json()).toMatchObject({ target: "go", method: "DELETE" });
 
     const setup = await fetch(`${origin}/api/setup?source=dashboard`);
     expect((await setup.json()).target).toBe("go");

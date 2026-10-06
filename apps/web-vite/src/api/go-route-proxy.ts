@@ -120,8 +120,7 @@ export function goPosCustomersSliceFromEnv(env: Record<string, string | undefine
 export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>): GoRouteProxyFlags {
   return {
     supportPublic: env.CHASTE_GO_SUPPORT_PUBLIC_ROUTE === "1",
-    // Go owns its explicitly implemented auth endpoints by default. Other
-    // Better Auth paths and methods continue through the legacy catch-all.
+    // Go owns the auth namespace by default and returns 404 or 405 for unsupported routes.
     auth: env.CHASTE_GO_AUTH_ROUTE !== "0" && env.GO_AUTH_ROUTE !== "0",
     authOidc: env.CHASTE_GO_AUTH_OIDC_ROUTE === "1",
     authSaml: env.CHASTE_GO_AUTH_SAML_ROUTE === "1",
@@ -164,7 +163,7 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsRead && method === "GET" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsWrite && method === "POST" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
-  if (flags.auth && isGoAuthRequest(flags, method, path)) return true;
+  if (flags.auth && isGoAuthRequest(path)) return true;
   const scimUserPath = /^\/api\/scim\/v2\/Users(?:\?.*)?$/;
   const scimUserItemPath = /^\/api\/scim\/v2\/Users\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\?.*)?$/i;
   if (flags.scimRead && method === "GET" && (scimUserPath.test(path) || scimUserItemPath.test(path))) return true;
@@ -200,39 +199,9 @@ export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?
   return flags.metrics && method === "GET" && /^\/api\/metrics(?:\?.*)?$/.test(path);
 }
 
-function isGoAuthRequest(flags: GoRouteProxyFlags, method = "", url = ""): boolean {
+function isGoAuthRequest(url: string): boolean {
   const pathname = url.split("?", 1)[0] ?? "";
-  if (
-    (method === "POST" && [
-      "/api/auth/sign-up/email",
-      "/api/auth/sign-in/email",
-      "/api/auth/send-verification-email",
-      "/api/auth/request-password-reset",
-      "/api/auth/reset-password",
-      "/api/auth/sign-out",
-      "/api/auth/revoke-session",
-      "/api/auth/revoke-sessions",
-    ].includes(pathname)) ||
-    ((method === "GET" || method === "POST") && pathname === "/api/auth/get-session") ||
-    (method === "GET" && (
-      pathname === "/api/auth/verify-email" ||
-      /^\/api\/auth\/reset-password\/[^/]+$/.test(pathname)
-    ))
-  ) {
-    return true;
-  }
-
-  if (flags.authOidc && (
-    (method === "GET" && ["/api/auth/sign-in/oidc", "/api/auth/callback/oidc"].includes(pathname)) ||
-    (method === "POST" && pathname === "/api/auth/native/exchange")
-  )) {
-    return true;
-  }
-
-  return flags.authSaml && (
-    (method === "GET" && pathname === "/api/auth/sign-in/saml") ||
-    (method === "POST" && pathname === "/api/auth/callback/saml")
-  );
+  return pathname === "/api/auth" || pathname.startsWith("/api/auth/");
 }
 
 function sendProxyError(response: ServerResponse, error: Error): void {

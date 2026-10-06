@@ -1734,3 +1734,8 @@ new owners and the manifest shows zero legacy runtime paths.
      snapshots. Lock customer and membership rows while capturing and applying
      snapshots so undo cannot overwrite an intervening profile edit. Browser
      proof remains open.
+175. When the Vite Go auth proxy is enabled, route every method and path under
+     `/api/auth` to Go. Unsupported Better Auth compatibility paths now fail
+     closed in the Go auth handler instead of falling through to the legacy
+     service; the explicit `CHASTE_GO_AUTH_ROUTE=0` compatibility opt-out is
+     retained. Other API namespaces and their route selectors are unchanged.
