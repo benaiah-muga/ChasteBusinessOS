@@ -17,14 +17,15 @@ import (
 )
 
 const (
-	manufacturingCreateWorkOrderCapabilityID            = "manufacturing.createWorkOrder"
-	manufacturingReleaseWorkOrderCapabilityID           = "manufacturing.releaseWorkOrder"
-	manufacturingCompleteWorkOrderCapabilityID          = "manufacturing.completeWorkOrder"
-	manufacturingCancelWorkOrderCapabilityID            = "manufacturing.cancelWorkOrder"
-	manufacturingReverseProductionRunCapabilityID       = "manufacturing.reverseProductionRun"
-	manufacturingCheckProductionFeasibilityCapabilityID = "manufacturing.checkProductionFeasibility"
-	manufacturingWorkOrdersListCapabilityID             = "manufacturing.workOrdersList"
-	manufacturingProduceFromBomCapabilityID             = "manufacturing.produceFromBom"
+	manufacturingCreateWorkOrderCapabilityID                  = "manufacturing.createWorkOrder"
+	manufacturingReleaseWorkOrderCapabilityID                 = "manufacturing.releaseWorkOrder"
+	manufacturingCompleteWorkOrderCapabilityID                = "manufacturing.completeWorkOrder"
+	manufacturingCancelWorkOrderCapabilityID                  = "manufacturing.cancelWorkOrder"
+	manufacturingReverseProductionRunCapabilityID             = "manufacturing.reverseProductionRun"
+	manufacturingCheckProductionFeasibilityCapabilityID       = "manufacturing.checkProductionFeasibility"
+	manufacturingWorkOrdersListCapabilityID                   = "manufacturing.workOrdersList"
+	manufacturingProduceFromBomCapabilityID                   = "manufacturing.produceFromBom"
+	manufacturingMaxWorkOrderPlannedThousandths         int64 = 2_147_483_647
 )
 
 // Percentages are stored as thousandths of a percent (5% = 5000) and
@@ -184,6 +185,9 @@ func ParseManufacturingCreateWorkOrderInput(raw json.RawMessage) (ManufacturingC
 	}
 	if input.PlannedQtyThousandths, err = manufacturingRequiredPositiveQuantity(fields, "plannedQtyThousandths"); err != nil {
 		return ManufacturingCreateWorkOrderInput{}, err
+	}
+	if input.PlannedQtyThousandths > manufacturingMaxWorkOrderPlannedThousandths {
+		return ManufacturingCreateWorkOrderInput{}, fmt.Errorf("plannedQtyThousandths must be at most %d", manufacturingMaxWorkOrderPlannedThousandths)
 	}
 	if input.YieldPctThousandths, err = manufacturingOptionalPctThousandths(fields, "yieldPctThousandths", manufacturingPctScale); err != nil {
 		return ManufacturingCreateWorkOrderInput{}, err

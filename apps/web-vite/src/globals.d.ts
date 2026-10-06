@@ -11,6 +11,7 @@ declare const __GO_PURCHASING_RECEIVE_GOODS__: boolean;
 declare const __GO_PURCHASING_VENDOR_SLICE__: boolean;
 declare const __GO_MARKETING_SEGMENT_SLICE__: boolean;
 declare const __GO_MANUFACTURING_DEFINE_BOM_SLICE__: boolean;
+declare const __GO_MANUFACTURING_WORK_ORDER_WRITES__: boolean;
 declare const __GO_MESSAGING_SEND_SLICE__: boolean;
 declare const __GO_POS_OPEN_SESSION_SLICE__: boolean;
 declare const __GO_POS_CLOSE_SESSION_SLICE__: boolean;

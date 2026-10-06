@@ -1602,3 +1602,15 @@ new owners and the manifest shows zero legacy runtime paths.
      pending and error responses, and validate quantities, aggregate limits,
      rejection reasons, and overreceipt authority against Go's contract.
      Focused Vite checks pass; browser proof remains open.
+164. Route Vite work order create, release, completion, and cancellation through
+     Go's session-authenticated `manufacturing.createWorkOrder`,
+     `manufacturing.releaseWorkOrder`, `manufacturing.completeWorkOrder`, and
+     `manufacturing.cancelWorkOrder` capabilities when
+     `CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. A missing capability route falls
+     back to `/api/manufacturing` with the same intent; other manufacturing
+     writes remain unchanged. Persist exact-action retry identity by actor and
+     organization through pending and uncertain results, require scope before
+     Go requests, and validate UUIDs, quantities, yield, work center, note, and
+     lot code against the capability contract. Focused Vite checks pass;
+     browser proof remains open.

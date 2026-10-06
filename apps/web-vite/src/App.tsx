@@ -300,7 +300,7 @@ function AuthenticatedApp({ pathname }: { pathname: string }) {
                                                       : supportPage
                                                         ? <SupportPage key={organizationRevision} />
                                                         : manufacturingPage
-                                                          ? <ManufacturingPage key={organizationRevision} baseCurrency={baseCurrency} />
+                                                          ? <ManufacturingPage key={organizationRevision} baseCurrency={baseCurrency} actorId={currentUserId} organizationId={activeOrgId} />
                                                           : marketingPage
                                                             ? <MarketingPage key={organizationRevision} baseCurrency={baseCurrency} />
                                                             : proposalsPage

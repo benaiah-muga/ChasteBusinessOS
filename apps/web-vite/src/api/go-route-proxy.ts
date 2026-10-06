@@ -73,6 +73,10 @@ export function goPurchasingReceiveGoodsFromEnv(env: Record<string, string | und
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_RECEIVE_GOODS === "1";
 }
 
+export function goManufacturingWorkOrderWritesFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES === "1";
+}
+
 export function goPosCustomersSliceFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_POS_CUSTOMERS_SLICE !== "0";
 }

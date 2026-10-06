@@ -231,7 +231,7 @@ function ShortfallTable({ lines, byItemId }: { lines: Array<{ key?: string; sku:
   );
 }
 
-export function ManufacturingPage({ baseCurrency = null }: { baseCurrency?: string | null }) {
+export function ManufacturingPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
   const currency = baseCurrency || "USD";
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -300,7 +300,7 @@ export function ManufacturingPage({ baseCurrency = null }: { baseCurrency?: stri
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitManufacturingAction(action);
+      const result = await submitManufacturingAction(action, undefined, { retryScope: { actorId, organizationId } });
       if (result.kind === "pending") {
         setNotice({ tone: "pending", text: `${label} requires approval. ${result.reason}` });
         return false;
@@ -405,8 +405,8 @@ export function ManufacturingPage({ baseCurrency = null }: { baseCurrency?: stri
   function createWorkOrder() {
     const planned = toThousandths(woPlannedUnits);
     const yieldPctThousandths = toTenThousandths(woYieldPct, 100);
-    if (!woAssemblySku.trim() || planned === null || yieldPctThousandths === null) {
-      setNotice({ tone: "error", text: "Enter an assembly SKU, a planned quantity above zero, and a yield percent of zero or more." });
+    if (!woAssemblySku.trim() || planned === null || planned > 2_147_483_647 || yieldPctThousandths === null || yieldPctThousandths > 1_000_000 || woNote.trim().length > 500) {
+      setNotice({ tone: "error", text: "Enter an assembly SKU, a supported planned quantity, a yield percent from zero to 100, and a note up to 500 characters." });
       return;
     }
     void run({

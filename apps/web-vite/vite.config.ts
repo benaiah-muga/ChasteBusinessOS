@@ -1,6 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goCrmDealStageMoveFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingReceiveGoodsFromEnv, goRouteProxyFlagsFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goCrmDealStageMoveFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goManufacturingWorkOrderWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingReceiveGoodsFromEnv, goRouteProxyFlagsFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "CHASTE_");
@@ -19,6 +19,7 @@ export default defineConfig(({ mode }) => {
   const goPurchasingVendorSlice = env.CHASTE_GO_PURCHASING_VENDOR_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goMarketingSegmentSlice = env.CHASTE_GO_MARKETING_SEGMENT_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goManufacturingDefineBomSlice = env.CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
+  const goManufacturingWorkOrderWrites = goManufacturingWorkOrderWritesFromEnv(env);
   const goMessagingSendSlice = env.CHASTE_GO_MESSAGING_SEND_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goPosOpenSessionSlice = goPosOpenSessionSliceFromEnv(env);
   const goPosCloseSessionSlice = goPosCloseSessionSliceFromEnv(env);
@@ -43,6 +44,7 @@ export default defineConfig(({ mode }) => {
       __GO_PURCHASING_VENDOR_SLICE__: JSON.stringify(goPurchasingVendorSlice),
       __GO_MARKETING_SEGMENT_SLICE__: JSON.stringify(goMarketingSegmentSlice),
       __GO_MANUFACTURING_DEFINE_BOM_SLICE__: JSON.stringify(goManufacturingDefineBomSlice),
+      __GO_MANUFACTURING_WORK_ORDER_WRITES__: JSON.stringify(goManufacturingWorkOrderWrites),
       __GO_MESSAGING_SEND_SLICE__: JSON.stringify(goMessagingSendSlice),
       __GO_POS_OPEN_SESSION_SLICE__: JSON.stringify(goPosOpenSessionSlice),
       __GO_POS_CLOSE_SESSION_SLICE__: JSON.stringify(goPosCloseSessionSlice),

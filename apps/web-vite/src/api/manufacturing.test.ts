@@ -51,7 +51,10 @@ function stubSequenced(responses: Array<Response | (() => Response)>) {
   return fetchMock;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+});
 
 describe("manufacturing API", () => {
   it("validates the manufacturing report payload", async () => {
@@ -120,6 +123,87 @@ describe("manufacturing API", () => {
       components: [{ sku: "LEG-1", quantityThousandths: 4000, scrapPctThousandths: 20_000 }],
     })).resolves.toEqual({ kind: "completed" });
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/manufacturing");
+  });
+
+  it("maps all four work order actions to their Go capability envelopes", () => {
+    const cases = [
+      [{ action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000 }, "manufacturing.createWorkOrder", { assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000 }],
+      [{ action: "releaseWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111" }, "manufacturing.releaseWorkOrder", { workOrderId: "11111111-1111-4111-8111-111111111111" }],
+      [{ action: "completeWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111", quantityThousandths: 1000, lotCode: "LOT-1" }, "manufacturing.completeWorkOrder", { workOrderId: "11111111-1111-4111-8111-111111111111", quantityThousandths: 1000, lotCode: "LOT-1" }],
+      [{ action: "cancelWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111" }, "manufacturing.cancelWorkOrder", { workOrderId: "11111111-1111-4111-8111-111111111111" }],
+    ] as const;
+    for (const [action, capabilityId, input] of cases) {
+      expect(manufacturingActionRequest(action, "intent-12345678901234567890", false, true)).toEqual({
+        url: "/api/capabilities/execute",
+        body: { capabilityId, input, intentId: "intent-12345678901234567890" },
+      });
+      expect(manufacturingActionRequest(action, "intent-12345678901234567890", false)).toMatchObject({ url: "/api/manufacturing" });
+    }
+  });
+
+  it("fails closed before a Go work order request when actor or organization scope is missing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitManufacturingAction({ action: "cancelWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111" }, undefined, {
+      useGoWorkOrders: true,
+      retryScope: { actorId: null, organizationId: "org-1" },
+    })).rejects.toThrow("Wait for your account and organization");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("retains the exact Go intent through network uncertainty and approval pending, then clears on success", async () => {
+    const action = { action: "createWorkOrder" as const, assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000 };
+    const options = { useGoWorkOrders: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("network"))
+      .mockResolvedValueOnce(Response.json({
+        ok: false,
+        pendingApproval: true,
+        reason: "amount 50001 exceeds autonomous threshold 50000",
+        approvalId: "33333333-3333-4333-8333-333333333333",
+      }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { workOrderId: "33333333-3333-4333-8333-333333333333", number: 10, expectedGoodThousandths: 4000 } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { workOrderId: "44444444-4444-4444-8444-444444444444", number: 11, expectedGoodThousandths: 4000 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitManufacturingAction(action, undefined, options)).rejects.toBeInstanceOf(ManufacturingApiError);
+    await expect(submitManufacturingAction(action, undefined, options)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
+    const bodies = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)) as { intentId: string; capabilityId: string });
+    expect(bodies).toHaveLength(3);
+    expect(bodies.map((body) => body.intentId)).toEqual([bodies[0]?.intentId, bodies[0]?.intentId, bodies[0]?.intentId]);
+    expect(bodies[0]?.capabilityId).toBe("manufacturing.createWorkOrder");
+    await submitManufacturingAction(action, undefined, options);
+    const newAttempt = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body)) as { intentId: string };
+    expect(newAttempt.intentId).not.toBe(bodies[0]?.intentId);
+  });
+
+  it("falls back only for a missing Go route and keeps the same intent", async () => {
+    const fetchMock = stubSequenced([
+      Response.json({ error: "not found" }, { status: 404 }),
+      Response.json({ ok: true, data: { workOrderId: "33333333-3333-4333-8333-333333333333", number: 10, expectedGoodThousandths: 4000 } }),
+    ]);
+    await expect(submitManufacturingAction({ action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000 }, undefined, {
+      useGoWorkOrders: true,
+      retryScope: { actorId: "actor-1", organizationId: "org-1" },
+    })).resolves.toEqual({ kind: "completed" });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/manufacturing"]);
+    const goBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(legacyBody.intentId).toBe(goBody.intentId);
+  });
+
+  it("retires a Go retry intent after a terminal client rejection", async () => {
+    const fetchMock = stubSequenced([
+      Response.json({ error: "work order not found" }, { status: 422 }),
+      Response.json({ ok: true, data: { cancelled: true } }),
+    ]);
+    const action = { action: "cancelWorkOrder" as const, workOrderId: "11111111-1111-4111-8111-111111111111" };
+    const options = { useGoWorkOrders: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    await expect(submitManufacturingAction(action, undefined, options)).rejects.toThrow("work order not found");
+    await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
+    const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(second.intentId).not.toBe(first.intentId);
   });
 
   it("maps defineBom to the authenticated Go capability contract when opted in", () => {
@@ -197,14 +281,30 @@ describe("manufacturing API", () => {
   it("refuses write payloads that would not pass the capability contract", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await expect(submitManufacturingAction({ action: "completeWorkOrder", workOrderId: "wo-1", quantityThousandths: 0 })).rejects.toThrow("Check the production details");
+    await expect(submitManufacturingAction({ action: "completeWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111", quantityThousandths: 0 })).rejects.toThrow("Check the production details");
+    await expect(submitManufacturingAction({ action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: Number.MAX_SAFE_INTEGER, yieldPctThousandths: 1_000_000 })).rejects.toThrow("Check the production details");
     await expect(submitManufacturingAction({ action: "defineBom", assemblySku: "DESK-1", components: [] })).rejects.toBeInstanceOf(ManufacturingApiError);
+    await expect(submitManufacturingAction({ action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: 2_147_483_648, yieldPctThousandths: 1_000_000 })).rejects.toThrow("Check the production details");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts MaxInt32 planned quantity and rejects the next integer", async () => {
+    const fetchMock = stubSequenced([Response.json({ ok: true, data: {
+      workOrderId: "33333333-3333-4333-8333-333333333333", number: 10, expectedGoodThousandths: 2_147_483_647,
+    } })]);
+    const options = { useGoWorkOrders: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    await expect(submitManufacturingAction({
+      action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: 2_147_483_647, yieldPctThousandths: 1_000_000,
+    }, undefined, options)).resolves.toEqual({ kind: "completed" });
+    await expect(submitManufacturingAction({
+      action: "createWorkOrder", assemblySku: "DESK-1", plannedQtyThousandths: 2_147_483_648, yieldPctThousandths: 1_000_000,
+    }, undefined, options)).rejects.toThrow("Check the production details");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("reports governed write failures with the server message", async () => {
     stubSequenced([Response.json({ ok: false, error: "DESK-1 has no bill of materials" }, { status: 422 })]);
-    await expect(submitManufacturingAction({ action: "releaseWorkOrder", workOrderId: "wo-1" })).rejects.toThrow("DESK-1 has no bill of materials");
+    await expect(submitManufacturingAction({ action: "releaseWorkOrder", workOrderId: "11111111-1111-4111-8111-111111111111" })).rejects.toThrow("DESK-1 has no bill of materials");
   });
 
   it("reads cost previews, feasibility, and BOM reports through the read envelope", async () => {

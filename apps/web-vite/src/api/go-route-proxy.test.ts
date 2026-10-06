@@ -11,6 +11,7 @@ import {
   goCrmDealStageMoveFromEnv,
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
+  goManufacturingWorkOrderWritesFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -81,6 +82,14 @@ describe("purchase receipt Go selector", () => {
     expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_RECEIVE_GOODS: "1" })).toBe(true);
     expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_RECEIVE_GOODS: "1" })).toBe(false);
+  });
+});
+
+describe("manufacturing work order Go selector", () => {
+  it("requires both the work order selector and session capability route", () => {
+    expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES: "1" })).toBe(true);
+    expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES: "1" })).toBe(false);
   });
 });
 

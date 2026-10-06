@@ -135,6 +135,10 @@ func TestManufacturingWorkOrdersParsersMirrorZodContracts(t *testing.T) {
 	if err != nil || defaulted.YieldPctThousandths != 1_000_000 || defaulted.WorkCenter != nil || defaulted.Note != nil {
 		t.Fatalf("defaulted createWorkOrder input = %+v, %v, want the full yield default", defaulted, err)
 	}
+	maxPlanned, err := ParseManufacturingCreateWorkOrderInput(json.RawMessage(`{"assemblySku":"BIKE","plannedQtyThousandths":2147483647}`))
+	if err != nil || maxPlanned.PlannedQtyThousandths != 2_147_483_647 {
+		t.Fatalf("maximum createWorkOrder planned quantity = %+v, %v, want MaxInt32", maxPlanned, err)
+	}
 	for _, raw := range []string{
 		`{}`,
 		`{"plannedQtyThousandths":3000}`,
@@ -144,6 +148,7 @@ func TestManufacturingWorkOrdersParsersMirrorZodContracts(t *testing.T) {
 		`{"assemblySku":"BIKE","plannedQtyThousandths":-5}`,
 		`{"assemblySku":"BIKE","plannedQtyThousandths":1.5}`,
 		`{"assemblySku":"BIKE","plannedQtyThousandths":"5"}`,
+		`{"assemblySku":"BIKE","plannedQtyThousandths":2147483648}`,
 		`{"assemblySku":"BIKE","plannedQtyThousandths":3000,"yieldPctThousandths":null}`,
 		`{"assemblySku":"BIKE","plannedQtyThousandths":3000,"yieldPctThousandths":-1}`,
 		`{"assemblySku":"BIKE","plannedQtyThousandths":3000,"yieldPctThousandths":1000001}`,

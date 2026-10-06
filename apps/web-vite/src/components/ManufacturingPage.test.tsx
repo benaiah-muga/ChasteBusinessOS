@@ -17,12 +17,12 @@ const report = {
   assemblies: [{ sku: "DESK-1", name: "Oak desk" }],
   workOrders: [
     {
-      id: "wo-draft", number: 9, assemblySku: "DESK-1", assemblyName: "Oak desk", status: "draft",
+      id: "11111111-1111-4111-8111-111111111111", number: 9, assemblySku: "DESK-1", assemblyName: "Oak desk", status: "draft",
       plannedQtyThousandths: 10_000, producedQtyThousandths: 0, yieldPctThousandths: 1_000_000,
       expectedGoodThousandths: 10_000, note: "Rush order", createdAt: "2026-05-12T10:30:00.000Z", completedAt: null,
     },
     {
-      id: "wo-released", number: 8, assemblySku: "DESK-1", assemblyName: "Oak desk", status: "released",
+      id: "22222222-2222-4222-8222-222222222222", number: 8, assemblySku: "DESK-1", assemblyName: "Oak desk", status: "released",
       plannedQtyThousandths: 10_000, producedQtyThousandths: 4000, yieldPctThousandths: 1_000_000,
       expectedGoodThousandths: 10_000, note: null, createdAt: "2026-05-11T10:30:00.000Z", completedAt: null,
     },
@@ -55,8 +55,12 @@ function manufacturingFetch({ onPost, payload = report, enabled = true }: StubOp
     if (input === "/api/modules") {
       return Response.json({ catalog: switchboard.catalog, enabledModules: enabled ? ["manufacturing"] : [] });
     }
-    if (input === "/api/manufacturing" && init?.method === "POST") {
-      return onPost?.(JSON.parse(String(init.body)) as PostedBody) ?? Response.json({ ok: true, data: {} });
+    if ((input === "/api/manufacturing" || input === "/api/capabilities/execute") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as PostedBody;
+      const action = typeof body.capabilityId === "string" && typeof body.input === "object" && body.input !== null
+        ? { ...(body.input as PostedBody), action: body.capabilityId.split(".").at(-1), intentId: body.intentId }
+        : body;
+      return onPost?.(action) ?? Response.json({ ok: true, data: {} });
     }
     return Response.json(payload);
   });
@@ -65,7 +69,12 @@ function manufacturingFetch({ onPost, payload = report, enabled = true }: StubOp
 function postedActions(fetchMock: ReturnType<typeof manufacturingFetch>): PostedBody[] {
   return fetchMock.mock.calls
     .filter((call) => (call[1] as RequestInit | undefined)?.method === "POST")
-    .map((call) => JSON.parse(String((call[1] as RequestInit).body)) as PostedBody);
+    .map((call) => {
+      const body = JSON.parse(String((call[1] as RequestInit).body)) as PostedBody;
+      return typeof body.capabilityId === "string" && typeof body.input === "object" && body.input !== null
+        ? { ...(body.input as PostedBody), action: body.capabilityId.split(".").at(-1), intentId: body.intentId }
+        : body;
+    });
 }
 
 afterEach(() => {
@@ -220,15 +229,61 @@ describe("Vite manufacturing page", () => {
     expect(postedActions(fetchMock).find((body) => body.action === "createWorkOrder")).toMatchObject({ assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000, note: "Rush order" });
 
     fireEvent.click(screen.getByRole("button", { name: "Release for production" }));
-    await waitFor(() => expect(postedActions(fetchMock).some((body) => body.action === "releaseWorkOrder" && body.workOrderId === "wo-draft")).toBe(true));
+    await waitFor(() => expect(postedActions(fetchMock).some((body) => body.action === "releaseWorkOrder" && body.workOrderId === "11111111-1111-4111-8111-111111111111")).toBe(true));
 
     fireEvent.change(screen.getByLabelText("Units to record on WO #8"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Record completion" }));
     await waitFor(() => expect(postedActions(fetchMock).some((body) => body.action === "completeWorkOrder")).toBe(true));
-    expect(postedActions(fetchMock).find((body) => body.action === "completeWorkOrder")).toMatchObject({ workOrderId: "wo-released", quantityThousandths: 1000 });
+    expect(postedActions(fetchMock).find((body) => body.action === "completeWorkOrder")).toMatchObject({ workOrderId: "22222222-2222-4222-8222-222222222222", quantityThousandths: 1000 });
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(postedActions(fetchMock).some((body) => body.action === "cancelWorkOrder" && body.workOrderId === "wo-released")).toBe(true));
+    await waitFor(() => expect(postedActions(fetchMock).some((body) => body.action === "cancelWorkOrder" && body.workOrderId === "22222222-2222-4222-8222-222222222222")).toBe(true));
+  });
+
+  it("keeps a Go work order draft and intent through approval pending until success", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_WORK_ORDER_WRITES__", true);
+    let submissions = 0;
+    const fetchMock = manufacturingFetch({
+      onPost: () => {
+        submissions += 1;
+        return submissions === 1
+          ? Response.json({ ok: false, pendingApproval: true, reason: "Supervisor review" }, { status: 202 })
+          : Response.json({ ok: true, data: { workOrderId: "33333333-3333-4333-8333-333333333333", number: 10, expectedGoodThousandths: 4000 } });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: /^Work orders/ }));
+    fireEvent.change(screen.getByLabelText("Work order assembly SKU"), { target: { value: "DESK-1" } });
+    fireEvent.change(screen.getByLabelText("Planned units"), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText(/Create WO for DESK-1 requires approval/)).not.toBeNull();
+    expect((screen.getByLabelText("Work order assembly SKU") as HTMLInputElement).value).toBe("DESK-1");
+    expect((screen.getByLabelText("Planned units") as HTMLInputElement).value).toBe("4");
+    const goRequests = fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute");
+    expect(goRequests).toHaveLength(1);
+    const firstBody = JSON.parse(String((goRequests[0]?.[1] as RequestInit).body)) as PostedBody;
+    expect(firstBody).toMatchObject({ capabilityId: "manufacturing.createWorkOrder", input: { assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000 } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    await waitFor(() => expect(submissions).toBe(2));
+    const retriedBody = JSON.parse(String((fetchMock.mock.calls.find(([url], index) => url === "/api/capabilities/execute" && index > 0)?.[1] as RequestInit).body)) as PostedBody;
+    expect(retriedBody.intentId).toBe(firstBody.intentId);
+    expect((screen.getByLabelText("Work order assembly SKU") as HTMLInputElement).value).toBe("");
+  });
+
+  it("rejects a work order quantity above the database integer limit before submission", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_WORK_ORDER_WRITES__", true);
+    const fetchMock = manufacturingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: /^Work orders/ }));
+    fireEvent.change(screen.getByLabelText("Work order assembly SKU"), { target: { value: "DESK-1" } });
+    fireEvent.change(screen.getByLabelText("Planned units"), { target: { value: "2147484" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText(/supported planned quantity/)).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/capabilities/execute")).toBe(false);
   });
 
   it("lists production runs, reverses them, and links lots to upstream traceability", async () => {
