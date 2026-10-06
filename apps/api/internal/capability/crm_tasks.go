@@ -87,7 +87,7 @@ func ParseCreateTaskInput(raw json.RawMessage) (CreateTaskInput, error) {
 	if err != nil {
 		return CreateTaskInput{}, err
 	}
-	title, err := requiredCRMDealString(fields, "title", 1, 0)
+	title, err := requiredCRMDealString(fields, "title", 1, 200)
 	if err != nil {
 		return CreateTaskInput{}, err
 	}
@@ -123,6 +123,9 @@ func ParseCompleteTaskInput(raw json.RawMessage) (CompleteTaskInput, error) {
 	taskID, err := requiredCRMDealString(fields, "taskId", 0, 0)
 	if err != nil {
 		return CompleteTaskInput{}, err
+	}
+	if !isZodUUID(taskID) {
+		return CompleteTaskInput{}, errors.New("taskId must be a UUID")
 	}
 	return CompleteTaskInput{TaskID: taskID}, nil
 }
@@ -207,6 +210,18 @@ func createTask(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClai
 	dueAt, err := projectDateTimeValue(input.DueAt)
 	if err != nil {
 		return CreateTaskOutput{}, err
+	}
+	if input.AssigneeUserID != nil {
+		var member bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM memberships WHERE org_id = $1::uuid AND user_id = $2::uuid
+			)`, claims.OrganizationID, *input.AssigneeUserID).Scan(&member); err != nil {
+			return CreateTaskOutput{}, err
+		}
+		if !member {
+			return CreateTaskOutput{}, errors.New("assignee is not a member of this organization")
+		}
 	}
 	var refType *string
 	if input.RefID != nil {

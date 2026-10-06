@@ -9,6 +9,7 @@ import {
   goInventoryLocationReservationWritesFromEnv,
   goInventoryBarcodeLookupFromEnv,
   goCrmDealStageMoveFromEnv,
+  goCrmTaskWritesFromEnv,
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
   goPurchasingReturnCloseFromEnv,
@@ -71,6 +72,14 @@ describe("CRM deal stage Go selector", () => {
     expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_DEAL_STAGE_MOVE: "1" })).toBe(true);
     expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_DEAL_STAGE_MOVE: "1" })).toBe(false);
+  });
+});
+
+describe("CRM task Go selector", () => {
+  it("requires both the task selector and session capability route", () => {
+    expect(goCrmTaskWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_TASK_WRITES: "1" })).toBe(true);
+    expect(goCrmTaskWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goCrmTaskWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_TASK_WRITES: "1" })).toBe(false);
   });
 });
 

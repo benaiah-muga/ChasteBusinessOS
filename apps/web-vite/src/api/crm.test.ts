@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, submitCrmAction, submitCrmDealStageMove, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmTaskCreate, submitCrmAction, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); window.localStorage.clear(); });
 
 describe("CRM API client", () => {
   it("validates the legacy deals list and carries the same-origin session", async () => {
@@ -121,6 +121,64 @@ describe("CRM API client", () => {
     const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/deals"]);
     expect(legacyBody).toMatchObject({ action: "move", dealId, stage: "proposal", intentId: goBody.intentId });
+  });
+
+  it("routes task creation and completion through strict Go capability outputs", async () => {
+    const taskId = "77e93149-61d7-48ed-929d-754ddfa263b1";
+    const scope = { actorId: customerId, organizationId: dealId };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { completed: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer", note: "Discuss renewal", refType: "customer", refId: customerId }, undefined, true, scope)).resolves.toEqual({ kind: "completed", data: { taskId } });
+    await expect(submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, true, scope)).resolves.toEqual({ kind: "completed", data: { completed: true } });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createTask", input: { title: "Call customer", note: "Discuss renewal", refType: "customer", refId: customerId }, intentId: expect.any(String) });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ capabilityId: "crm.completeTask", input: { taskId }, intentId: expect.any(String) });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId, extra: true } })));
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true, scope)).rejects.toMatchObject({ name: "CrmApiError", message: "The CRM service returned an unexpected task result." });
+  });
+
+  it("retains the exact create-task draft and intent while pending, after reload, and on 404 fallback", async () => {
+    const scope = { actorId: customerId, organizationId: dealId };
+    const action = { action: "createTask" as const, title: "Prepare renewal notes", dueAt: "2026-10-15T12:00:00.000Z", note: "Include updated terms", refType: "customer", refId: customerId };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId: "77e93149-61d7-48ed-929d-754ddfa263b1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmTaskMutation(action, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
+    await expect(readPendingCrmTaskCreate(scope)).resolves.toEqual(action);
+    const pendingIntentId = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
+    const legacyFetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId: "77e93149-61d7-48ed-929d-754ddfa263b1" } }));
+    vi.stubGlobal("fetch", legacyFetch);
+    await submitCrmTaskMutation(action, undefined, true, scope);
+    const goBody = JSON.parse(String(legacyFetch.mock.calls[0]?.[1]?.body));
+    const legacyBody = JSON.parse(String(legacyFetch.mock.calls[1]?.[1]?.body));
+    expect(legacyFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/crm"]);
+    expect(goBody.intentId).toBe(pendingIntentId);
+    expect(legacyBody).toMatchObject({ ...action, intentId: goBody.intentId });
+    await expect(readPendingCrmTaskCreate(scope)).resolves.toBeNull();
+  });
+
+  it("fails closed on missing scope and does not rotate task intents after uncertainty or for changed drafts", async () => {
+    const scope = { actorId: customerId, organizationId: dealId };
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId: "77e93149-61d7-48ed-929d-754ddfa263b1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    await expect(submitCrmTaskMutation({ action: "createTask", title: "Different title" }, undefined, true, scope)).rejects.toMatchObject({ status: 0 });
+    await submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true, scope);
+    const bodies = fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute").map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]?.intentId).toBe(bodies[1]?.intentId);
   });
 
   it("accepts only the established envelope for saved-view writes", async () => {

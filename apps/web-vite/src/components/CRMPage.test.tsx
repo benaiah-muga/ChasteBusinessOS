@@ -432,6 +432,30 @@ describe("Vite CRM page", () => {
     expect(screen.getByText("Completed call")).not.toBeNull();
   });
 
+  it("leaves a task completion checkbox unchecked when the action is pending", async () => {
+    const taskId = "99999999-9999-4999-8999-999999999999";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [{ id: taskId, title: "Review renewal", doneAt: null }] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === "/api/crm" && init?.method === "POST") return Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    const completion = screen.getByRole("checkbox", { name: "Review renewal" }) as HTMLInputElement;
+    fireEvent.click(completion);
+
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    expect(completion.checked).toBe(false);
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")?.[1]?.body))).toMatchObject({ action: "completeTask", taskId });
+  });
+
   it("downloads a CSV containing the selected customer rows", async () => {
     const exportedCustomer = { ...customer(), name: "=1+1" };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

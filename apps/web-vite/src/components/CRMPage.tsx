@@ -16,8 +16,10 @@ import {
   fetchCrmTimeline,
   fetchCrmViews,
   importCrmCustomers,
+  readPendingCrmTaskCreate,
   submitCrmAction,
   submitCrmDealStageMove,
+  submitCrmTaskMutation,
   undoCrmImport,
 } from "../api/crm";
 import { selectedCustomersCsv } from "./customer-export";
@@ -161,6 +163,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [newDoNotContact, setNewDoNotContact] = useState(false);
   const [profileDraft, setProfileDraft] = useState({ name: "", phone: "", notes: "", tags: "", ownerUserId: "", doNotContact: false, preferredContactMethod: "email" as "email" | "phone" | "whatsapp" | "other" });
   const [taskDraft, setTaskDraft] = useState({ title: "", dueAt: "", note: "", customerId: "", assigneeUserId: "" });
+  const [taskDraftResolvedScope, setTaskDraftResolvedScope] = useState<string | null>(null);
+  const [taskDraftLocked, setTaskDraftLocked] = useState(false);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [moveTarget, setMoveTarget] = useState<{ deal: CrmDeal; stage: (typeof stages)[number] } | null>(null);
@@ -186,6 +190,9 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   const timelineRequest = useRef(0);
   const movingDealIds = useRef(new Set<string>());
+  const goCrmTaskWrites = typeof __GO_CRM_TASK_WRITES__ !== "undefined" && __GO_CRM_TASK_WRITES__;
+  const taskDraftScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
+  const taskDraftReady = !goCrmTaskWrites || Boolean(taskDraftScopeIdentity && taskDraftResolvedScope === taskDraftScopeIdentity);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setError(null);
@@ -212,6 +219,37 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       controller.abort();
     };
   }, [load]);
+
+  useEffect(() => {
+    if (!goCrmTaskWrites) {
+      setTaskDraftResolvedScope(null);
+      setTaskDraftLocked(false);
+      return;
+    }
+    let active = true;
+    setTaskDraftResolvedScope(null);
+    setTaskDraftLocked(false);
+    setTaskDraft({ title: "", dueAt: "", note: "", customerId: "", assigneeUserId: "" });
+    if (!actorId?.trim() || !organizationId?.trim()) return () => { active = false; };
+    void readPendingCrmTaskCreate({ actorId, organizationId }).then((pending) => {
+      if (!active) return;
+      if (pending) {
+        setTaskDraft({
+          title: pending.title,
+          dueAt: pending.dueAt ? pending.dueAt.slice(0, 10) : "",
+          note: pending.note ?? "",
+          customerId: pending.refId ?? "",
+          assigneeUserId: pending.assigneeUserId ?? "",
+        });
+        setTaskDraftLocked(true);
+      }
+      setTaskDraftResolvedScope(taskDraftScopeIdentity);
+    }).catch((reason: unknown) => {
+      if (!active) return;
+      setNotice({ tone: "error", text: friendlyError(reason) });
+    });
+    return () => { active = false; };
+  }, [actorId, goCrmTaskWrites, organizationId, taskDraftScopeIdentity]);
 
   useEffect(() => {
     if ((tab !== "customers" && tab !== "tasks") || membersLoaded) return;
@@ -421,9 +459,28 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
 
   async function createTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!taskDraft.title.trim()) return;
-    const accepted = await mutate("/api/crm", { action: "createTask", title: taskDraft.title.trim(), ...(taskDraft.dueAt ? { dueAt: new Date(`${taskDraft.dueAt}T12:00:00`).toISOString() } : {}), ...(taskDraft.assigneeUserId ? { assigneeUserId: taskDraft.assigneeUserId } : {}), ...(taskDraft.note.trim() ? { note: taskDraft.note.trim() } : {}), ...(taskDraft.customerId ? { refType: "customer", refId: taskDraft.customerId } : {}) });
-    if (accepted) setTaskDraft({ title: "", dueAt: "", note: "", customerId: "", assigneeUserId: "" });
+    if (!taskDraft.title.trim() || !taskDraftReady || busy) return;
+    const action = { action: "createTask" as const, title: taskDraft.title.trim(), ...(taskDraft.dueAt ? { dueAt: new Date(`${taskDraft.dueAt}T12:00:00`).toISOString() } : {}), ...(taskDraft.assigneeUserId ? { assigneeUserId: taskDraft.assigneeUserId } : {}), ...(taskDraft.note.trim() ? { note: taskDraft.note.trim() } : {}), ...(taskDraft.customerId ? { refType: "customer", refId: taskDraft.customerId } : {}) };
+    const accepted = await mutate("/api/crm", action, undefined, async () => {
+      try {
+        const outcome = await submitCrmTaskMutation(action, undefined, goCrmTaskWrites, { actorId, organizationId });
+        if (outcome.kind === "pending") setTaskDraftLocked(true);
+        else setTaskDraftLocked(false);
+        return outcome;
+      } catch (reason) {
+        if (reason instanceof Error && "status" in reason) {
+          const status = Number((reason as { status: unknown }).status);
+          const mayHaveReached = Boolean((reason as { requestMayHaveReachedServer?: unknown }).requestMayHaveReachedServer);
+          if ((mayHaveReached || status === 408 || status === 429 || status >= 500) && !(status >= 400 && status < 500 && status !== 408 && status !== 429)) setTaskDraftLocked(true);
+          if (status >= 400 && status < 500 && status !== 408 && status !== 429) setTaskDraftLocked(false);
+        }
+        throw reason;
+      }
+    });
+    if (accepted) {
+      setTaskDraft({ title: "", dueAt: "", note: "", customerId: "", assigneeUserId: "" });
+      setTaskDraftLocked(false);
+    }
   }
 
   async function refreshViews() {
@@ -580,13 +637,15 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     {tab === "tasks" && <section className="crm-panel" aria-label="Follow-up tasks">
       <header><h2>Follow-up tasks</h2><p>Open work stays attached to the customer record and timeline.</p></header>
       <form className="crm-inline-form" onSubmit={(event) => void createTask(event)}>
-        <label>Task<input required value={taskDraft.title} onChange={(event) => setTaskDraft({ ...taskDraft, title: event.target.value })} /></label>
-        <label>Due<input type="date" value={taskDraft.dueAt} onChange={(event) => setTaskDraft({ ...taskDraft, dueAt: event.target.value })} /></label>
-        <label>Customer<select value={taskDraft.customerId} onChange={(event) => setTaskDraft({ ...taskDraft, customerId: event.target.value })}><option value="">No customer</option>{activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
-        <label>Assignee<select value={taskDraft.assigneeUserId} onChange={(event) => setTaskDraft({ ...taskDraft, assigneeUserId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label>
-        <label>Note<input value={taskDraft.note} onChange={(event) => setTaskDraft({ ...taskDraft, note: event.target.value })} /></label>
-        <button disabled={busy}>Add task</button>
+        <label>Task<input required maxLength={200} disabled={busy || !taskDraftReady || taskDraftLocked} value={taskDraft.title} onChange={(event) => setTaskDraft({ ...taskDraft, title: event.target.value })} /></label>
+        <label>Due<input type="date" disabled={busy || !taskDraftReady || taskDraftLocked} value={taskDraft.dueAt} onChange={(event) => setTaskDraft({ ...taskDraft, dueAt: event.target.value })} /></label>
+        <label>Customer<select disabled={busy || !taskDraftReady || taskDraftLocked} value={taskDraft.customerId} onChange={(event) => setTaskDraft({ ...taskDraft, customerId: event.target.value })}><option value="">No customer</option>{activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+        <label>Assignee<select disabled={busy || !taskDraftReady || taskDraftLocked} value={taskDraft.assigneeUserId} onChange={(event) => setTaskDraft({ ...taskDraft, assigneeUserId: event.target.value })}><option value="">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label>
+        <label>Note<input maxLength={2000} disabled={busy || !taskDraftReady || taskDraftLocked} value={taskDraft.note} onChange={(event) => setTaskDraft({ ...taskDraft, note: event.target.value })} /></label>
+        <button disabled={busy || !taskDraftReady}>{taskDraftLocked ? "Retry task" : "Add task"}</button>
       </form>
+      {goCrmTaskWrites && !taskDraftReady && <p role="status">CRM is restoring the task draft for the active organization.</p>}
+      {goCrmTaskWrites && taskDraftLocked && <p role="status">This task attempt is pending or uncertain. Retry the same task details to resolve it.</p>}
       <div className="crm-task-queue-controls">
         <div role="group" aria-label="Task view">
           <button type="button" aria-pressed={taskFilter === "today"} onClick={() => setTaskFilter("today")}>Today ({dueTodayTasks.length})</button>
@@ -598,7 +657,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       </div>
       <ul className="crm-task-list">
         {visibleTasks.map((task) => <li id={`crm-task-${task.id}`} tabIndex={-1} className={focusedTaskId === task.id ? "crm-task-source-focused" : undefined} key={task.id}>
-          {task.doneAt ? <strong>{task.title}</strong> : <label><input type="checkbox" disabled={busy} onChange={() => void mutate("/api/crm", { action: "completeTask", taskId: task.id })} /> <strong>{task.title}</strong></label>}
+          {task.doneAt ? <strong>{task.title}</strong> : <label><input type="checkbox" checked={Boolean(task.doneAt)} disabled={busy} onChange={() => void mutate("/api/crm", { action: "completeTask", taskId: task.id }, undefined, () => submitCrmTaskMutation({ action: "completeTask", taskId: task.id }, undefined, goCrmTaskWrites, { actorId, organizationId }))} /> <strong>{task.title}</strong></label>}
           <span>{task.doneAt ? `Completed ${new Date(task.doneAt).toLocaleDateString()}` : task.dueAt ? new Date(task.dueAt).toLocaleDateString() : "No due date"}</span>
           <span>{task.assigneeName ?? "Unassigned"}</span>
           {!task.doneAt && task.refId && <button type="button" onClick={() => { const customer = customers.find((entry) => entry.id === task.refId); if (customer) void openProfile(customer, "activity"); }}>Open customer</button>}

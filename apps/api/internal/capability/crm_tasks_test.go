@@ -101,6 +101,10 @@ func TestGoCRMTasksCapabilityContractsDispatchAndOutputs(t *testing.T) {
 
 func TestGoCRMTasksParsersMatchCRMContracts(t *testing.T) {
 	validID := "11111111-1111-4111-8111-111111111111"
+	maxTitle, err := ParseCreateTaskInput(json.RawMessage(`{"title":"` + strings.Repeat("t", 200) + `"}`))
+	if err != nil || len(maxTitle.Title) != 200 {
+		t.Fatalf("200-character task title input=%+v err=%v", maxTitle, err)
+	}
 	input, err := ParseCreateTaskInput(json.RawMessage(`{"title":"  Call Acme  ","dueAt":"2026-10-01T09:30:00.123Z","refType":"customer","refId":"` + validID + `","note":"` + strings.Repeat("n", 2000) + `","unknown":true}`))
 	if err != nil || input.Title != "  Call Acme  " || input.DueAt == nil || input.RefType == nil || input.RefID == nil || len(*input.Note) != 2000 {
 		t.Fatalf("create task input=%+v err=%v", input, err)
@@ -111,6 +115,7 @@ func TestGoCRMTasksParsersMatchCRMContracts(t *testing.T) {
 	for _, raw := range []string{
 		`{"title":""}`,
 		`{"title":null}`,
+		`{"title":"` + strings.Repeat("t", 201) + `"}`,
 		`{"title":"Call","dueAt":"2026-10-01T09:30:00+02:00"}`,
 		`{"title":"Call","dueAt":"2026-10-01 09:30:00"}`,
 		`{"title":"Call","dueAt":null}`,
@@ -131,9 +136,12 @@ func TestGoCRMTasksParsersMatchCRMContracts(t *testing.T) {
 	if _, err := ParseCompleteTaskInput(json.RawMessage(`{"taskId":null}`)); err == nil {
 		t.Fatal("null completeTask taskId was accepted")
 	}
-	completed, err := ParseCompleteTaskInput(json.RawMessage(`{"taskId":"any-string-value"}`))
-	if err != nil || completed.TaskID != "any-string-value" {
-		t.Fatalf("completeTask input=%+v err=%v, want unconstrained string taskId", completed, err)
+	if _, err := ParseCompleteTaskInput(json.RawMessage(`{"taskId":"not-a-uuid"}`)); err == nil {
+		t.Fatal("invalid completeTask taskId was accepted")
+	}
+	completed, err := ParseCompleteTaskInput(json.RawMessage(`{"taskId":"` + validID + `"}`))
+	if err != nil || completed.TaskID != validID {
+		t.Fatalf("completeTask input=%+v err=%v, want UUID taskId", completed, err)
 	}
 
 	for _, raw := range []string{
@@ -297,6 +305,9 @@ func TestGoCRMTasksEnforceTenancyCompletionAuditsAndReceiptReplay(t *testing.T) 
 	}
 
 	nonMemberID := executorUUID(t)
+	if _, err := executeCRMTaskWithError(fx, createTaskCapabilityID, json.RawMessage(fmt.Sprintf(`{"title":"Assign outside org","assigneeUserId":%q}`, nonMemberID)), "crm-task-create-nonmember"); err == nil || !strings.Contains(err.Error(), "assignee is not a member of this organization") {
+		t.Fatalf("createTask non-member assignee error=%v", err)
+	}
 	if _, err := executeCRMTaskWithError(fx, updateTaskDetailsCapabilityID, json.RawMessage(fmt.Sprintf(`{"taskId":%q,"assigneeUserId":%q}`, detailsTaskID, nonMemberID)), "crm-task-nonmember"); err == nil || !strings.Contains(err.Error(), "assignee is not a member of this organization") {
 		t.Fatalf("non-member assignee error=%v", err)
 	}

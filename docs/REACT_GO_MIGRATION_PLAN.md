@@ -1692,3 +1692,13 @@ new owners and the manifest shows zero legacy runtime paths.
      unchanged.
      Disable send after the campaign snapshot reports queued. Browser proof
      remains open.
+171. Route Vite CRM task creation and completion through Go's session-authenticated
+     `crm.createTask` and `crm.completeTask` capabilities when
+     `CHASTE_GO_CRM_TASK_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`.
+     Keep task-detail edits, CRM reads, and other CRM mutations on their current
+     routes. Preserve the legacy route as a same-intent fallback only when the
+     Go capability route is absent. Persist exact actor and organization scoped
+     intents across pending and uncertain results, restore unresolved create
+     drafts after reload, validate strict output shapes, and fail closed when
+     account or organization scope or browser storage is unavailable. Browser
+     proof remains open.
