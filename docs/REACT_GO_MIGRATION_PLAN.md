@@ -1806,12 +1806,15 @@ new owners and the manifest shows zero legacy runtime paths.
      and organization scope for both Go and legacy delete writes, and keep
      unresolved Go deletions locked across selector rollback. Focused API/UI
      tests pass; authenticated browser proof remains open.
-182. Add the internal pre-organization database bootstrap primitive for Go.
-     Derive the owner from a live verified Better Auth session, serialize
-     attempts by that user, and create the organization, seeded records, and
-     intent receipt atomically under a dedicated `chaste_bootstrap_owner` role
-     with `NOBYPASSRLS`, a pinned search path, and execution granted only to
-     `chaste_app`.
+182. (Implemented) Add the internal pre-organization database bootstrap
+     primitive for Go. Derive the owner from a live verified Better Auth
+     session, serialize attempts by that user, and create the organization,
+     seeded records, and intent receipt atomically under a dedicated
+     `chaste_bootstrap_owner` role with `NOBYPASSRLS`, a pinned search path,
+     and execution granted only to `chaste_app`. The database boundary test
+     checks the grants, role attributes, session-derived ownership, replay and
+     concurrency behavior, and transaction rollback. Local DB integration
+     execution remains open until a Go integration database is configured.
 183. Add the verified pre-organization `iam.bootstrapOrganization` executor
      entrypoint. Keep the capability out of ordinary org-scoped dispatch and
      agent tool lists; verify the live session and its resolved identity,
