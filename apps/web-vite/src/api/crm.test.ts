@@ -202,7 +202,7 @@ describe("CRM API client", () => {
     await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true, scope)).rejects.toMatchObject({ name: "CrmApiError", message: "The CRM service returned an unexpected task result." });
   });
 
-  it("routes task detail updates through Go, restores the exact pending payload, and falls back with the same intent on 404", async () => {
+  it("routes task detail updates through Go and keeps the exact pending payload when the Go route is missing", async () => {
     const taskId = "77e93149-61d7-48ed-929d-754ddfa263b1";
     const assigneeUserId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
     const scope = { actorId: customerId, organizationId: dealId };
@@ -216,15 +216,23 @@ describe("CRM API client", () => {
     await expect(submitCrmTaskMutation(action, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
     await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toEqual(action);
     await expect(readPendingCrmTaskDetailsForScope(scope)).resolves.toEqual([action]);
-    await submitCrmTaskMutation(action, undefined, true, scope);
+    await expect(submitCrmTaskMutation(action, undefined, true, scope)).rejects.toMatchObject({
+      status: 404,
+      requestMayHaveReachedServer: true,
+      message: "The Go CRM task route is unavailable. Ask an administrator to check the Go task route configuration.",
+    });
 
     const goBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
-    const legacyBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute", "/api/crm"]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
     expect(goBody).toMatchObject({ capabilityId: "crm.updateTaskDetails", input: { taskId, dueAt: null, assigneeUserId }, intentId: expect.any(String) });
     expect(retryBody.intentId).toBe(goBody.intentId);
-    expect(legacyBody).toMatchObject({ ...action, intentId: goBody.intentId });
+    await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toEqual(action);
+    await expect(readPendingCrmTaskDetailsForScope(scope)).resolves.toEqual([action]);
+
+    await submitCrmTaskMutation(action, undefined, true, scope);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)).intentId).toBe(goBody.intentId);
     await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toBeNull();
     await expect(readPendingCrmTaskDetailsForScope(scope)).resolves.toEqual([]);
 
@@ -237,7 +245,7 @@ describe("CRM API client", () => {
     await expect(submitCrmTaskMutation(action, undefined, true, scope)).rejects.toMatchObject({ message: "The CRM service returned an unexpected task result." });
   });
 
-  it("retains the exact create-task draft and intent while pending, after reload, and on 404 fallback", async () => {
+  it("retains the exact create-task draft and intent while pending and fails closed on a missing Go route", async () => {
     const scope = { actorId: customerId, organizationId: dealId };
     const action = { action: "createTask" as const, title: "Prepare renewal notes", dueAt: "2026-10-15T12:00:00.000Z", note: "Include updated terms", refType: "customer", refId: customerId };
     const fetchMock = vi.fn()
@@ -248,17 +256,36 @@ describe("CRM API client", () => {
     await expect(submitCrmTaskMutation(action, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
     await expect(readPendingCrmTaskCreate(scope)).resolves.toEqual(action);
     const pendingIntentId = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
-    const legacyFetch = vi.fn()
+    const goFetch = vi.fn()
       .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
       .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId: "77e93149-61d7-48ed-929d-754ddfa263b1" } }));
-    vi.stubGlobal("fetch", legacyFetch);
-    await submitCrmTaskMutation(action, undefined, true, scope);
-    const goBody = JSON.parse(String(legacyFetch.mock.calls[0]?.[1]?.body));
-    const legacyBody = JSON.parse(String(legacyFetch.mock.calls[1]?.[1]?.body));
-    expect(legacyFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/crm"]);
+    vi.stubGlobal("fetch", goFetch);
+    await expect(submitCrmTaskMutation(action, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    const goBody = JSON.parse(String(goFetch.mock.calls[0]?.[1]?.body));
+    expect(goFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
     expect(goBody.intentId).toBe(pendingIntentId);
-    expect(legacyBody).toMatchObject({ ...action, intentId: goBody.intentId });
+    await expect(readPendingCrmTaskCreate(scope)).resolves.toEqual(action);
+
+    await submitCrmTaskMutation(action, undefined, true, scope);
+    expect(goFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(JSON.parse(String(goFetch.mock.calls[1]?.[1]?.body)).intentId).toBe(pendingIntentId);
     await expect(readPendingCrmTaskCreate(scope)).resolves.toBeNull();
+  });
+
+  it("does not send task completion to legacy when the selected Go route returns 404", async () => {
+    const taskId = "77e93149-61d7-48ed-929d-754ddfa263b1";
+    const scope = { actorId: customerId, organizationId: dealId };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { completed: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
+    const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    await submitCrmTaskMutation({ action: "completeTask", taskId }, undefined, true, scope);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).intentId).toBe(first.intentId);
   });
 
   it("fails closed on missing scope and does not rotate task intents after uncertainty or for changed drafts", async () => {

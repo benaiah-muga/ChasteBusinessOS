@@ -373,15 +373,12 @@ export async function submitCrmTaskMutation(
   const capabilityId = action.action === "createTask" ? "crm.createTask" : action.action === "completeTask" ? "crm.completeTask" : "crm.updateTaskDetails";
   const outputSchema = action.action === "createTask" ? CreateTaskOutputSchema : action.action === "completeTask" ? CompleteTaskOutputSchema : UpdateTaskDetailsOutputSchema;
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId, input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
     }, signal);
     if (response.status === 404) {
-      ({ response, body } = await request("/api/crm", {
-        method: "POST",
-        body: JSON.stringify({ ...action, intentId: attempt.intentId }),
-      }, signal));
+      throw new CrmApiError(404, "The Go CRM task route is unavailable. Ask an administrator to check the Go task route configuration.", true);
     }
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
@@ -393,7 +390,7 @@ export async function submitCrmTaskMutation(
     await clearCrmTaskAttempt(attempt.storageKey);
     return { kind: "completed", data: parsed.data };
   } catch (error) {
-    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429) {
       await clearCrmTaskAttempt(attempt.storageKey);
     }
     throw error;

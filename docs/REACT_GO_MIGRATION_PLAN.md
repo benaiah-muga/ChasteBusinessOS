@@ -1692,16 +1692,19 @@ new owners and the manifest shows zero legacy runtime paths.
      unchanged.
      Disable send after the campaign snapshot reports queued. Browser proof
      remains open.
-171. Route Vite CRM task creation and completion through Go's session-authenticated
-     `crm.createTask` and `crm.completeTask` capabilities when
-     `CHASTE_GO_CRM_TASK_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`.
-     Keep task-detail edits, CRM reads, and other CRM mutations on their current
-     routes. Preserve the legacy route as a same-intent fallback only when the
-     Go capability route is absent. Persist exact actor and organization scoped
-     intents across pending and uncertain results, restore unresolved create
-     drafts after reload, validate strict output shapes, and fail closed when
-     account or organization scope or browser storage is unavailable. Browser
-     proof remains open.
+171. (Implemented; local Go/Vite default-on) Route Vite CRM task creation and
+     completion through Go's session-authenticated `crm.createTask` and
+     `crm.completeTask` capabilities. The local template enables both
+     `GO_CRM_TASK_WRITES=1` and `CHASTE_GO_CRM_TASK_WRITES=1` with
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`; set both task flags to `0` to
+     restore legacy `/api/crm` handling. A Go 404 fails closed without retrying
+     through the legacy writer; retain the exact draft and intent so a retry
+     after restoring the Go route cannot create a duplicate across runtimes.
+     Persist exact actor and organization scoped intents across pending and
+     uncertain results, restore unresolved create drafts after reload, validate
+     strict output shapes, and fail closed when account or organization scope
+     or browser storage is unavailable. Authenticated browser proof remains
+     open because the in-app browser is unavailable in this environment.
 172. Route only Vite CRM customer creation through Go's session-authenticated
      `crm.createCustomer` capability when `CHASTE_GO_CRM_CUSTOMER_CREATE=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep all other CRM actions on their
@@ -1753,11 +1756,15 @@ new owners and the manifest shows zero legacy runtime paths.
      pending or uncertain outcomes, reject stale scope responses, retain 408/429
      identity, and fail closed on unavailable storage or corrupt markers.
      Browser proof remains open.
-179. Route Vite CRM task due date and assignee updates through the Go
-     `crm.updateTaskDetails` capability under `CHASTE_GO_CRM_TASK_WRITES=1`.
-     Scan actor/org scoped retry records on load, keep affected tasks locked
-     from completion across editor switches, and require the Go task ID to
-     match before clearing a saved attempt. Browser proof remains open.
+179. (Implemented; local Go/Vite default-on with item 171) Route Vite CRM task
+     due date and assignee updates through the Go `crm.updateTaskDetails`
+     capability under the paired task-write flags described in item 171. A Go
+     404 fails closed without sending the update through the legacy writer and
+     retains the exact retry record. Scan actor/org scoped retry records on
+     load, keep affected tasks locked from completion across editor switches,
+     and require the Go task ID to match before clearing a saved attempt.
+     Authenticated browser proof remains open because the in-app browser is
+     unavailable in this environment.
 180. Add the opt-in `CHASTE_GO_MESSAGING_EDIT_SLICE` selector for Vite message
      edits through Go's `messaging.editMessage` capability. Restore the exact
      actor/org scoped edit and intent after pending or uncertain results,
