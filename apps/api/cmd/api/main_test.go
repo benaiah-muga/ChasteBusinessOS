@@ -17,6 +17,22 @@ func TestGoAuthRouteEnabledFromEnvMatchesViteProxyDefault(t *testing.T) {
 	}
 }
 
+func TestGoOnboardingRouteEnabledFromEnvDefaultsOff(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "", want: false},
+		{value: "0", want: false},
+		{value: "1", want: true},
+		{value: "true", want: false},
+	} {
+		if got := goOnboardingRouteEnabledFromEnv(test.value); got != test.want {
+			t.Errorf("goOnboardingRouteEnabledFromEnv(%q) = %t, want %t", test.value, got, test.want)
+		}
+	}
+}
+
 func TestGoMyWorkRouteEnabledFromEnvMatchesViteProxyDefault(t *testing.T) {
 	for _, test := range []struct {
 		value string

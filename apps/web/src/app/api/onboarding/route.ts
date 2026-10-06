@@ -7,11 +7,10 @@ import {
   ONBOARDING_STEPS,
   completeOnboarding,
   parseOnboardingState,
-  runOnboarding,
   setOnboardingStep,
 } from "@/server/onboarding";
 import { getResolvedUser } from "@/server/session";
-import { checkRateLimit } from "@/server/rate-limit";
+import { proxyGoOnboardingCreate } from "@/server/onboarding-go-proxy";
 
 /**
  * Every failure carries a machine-readable `code` so the wizard can explain
@@ -33,16 +32,6 @@ function fail(code: ErrorCode, message: string, status: number, extra: Record<st
 
 const stepKeySchema = z.enum(ONBOARDING_STEPS);
 
-const createSchema = z.object({
-  orgName: z.string().min(2).max(80),
-  businessDescription: z.string().min(20).max(8000),
-  baseCurrency: z.string().length(3).optional(),
-  path: z.enum(["fresh", "import", "connect"]).optional(),
-  deferredSteps: z.array(z.string()).optional(),
-  /** Client action identity (B01/T08): one bootstrap intent, replayable. */
-  intentId: z.string().min(8).max(100).optional(),
-});
-
 const updateSchema = z.object({
   step: stepKeySchema.optional(),
   status: z.enum(["done", "pending", "skipped"]).optional(),
@@ -50,76 +39,8 @@ const updateSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const resolved = await getResolvedUser();
-  if (!resolved) {
-    return fail("unauthorized", "Your session has expired. Sign in again to continue.", 401);
-  }
-
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    return fail("invalid", "Could not read that request.", 400);
-  }
-
-  const body = createSchema.safeParse(raw);
-  if (!body.success) {
-    const first = body.error.issues[0];
-    const field = first?.path.join(".") ?? "";
-    const known: Record<string, string> = {
-      orgName: "Business name needs at least 2 characters.",
-      businessDescription: "Tell us a little more - at least 20 characters about what you do.",
-    };
-    return fail("invalid", known[field] ?? (first?.message || "That doesn't look right."), 400, {
-      field,
-      detail: body.error.issues,
-    });
-  }
-
-  // A retry carrying its intent id may pass even though the session now
-  // resolves an org: the receipt replay in the service answers it. Only a
-  // fresh create from an onboarded account is refused here.
-  if (resolved.orgId && !body.data.intentId) {
-    return fail("already_onboarded", "This account already has a workspace.", 409);
-  }
-
-  // Onboarding seeds an org, chart of accounts, and embeddings; a burst from
-  // one account would multiply provider calls and rows.
-  const limit = checkRateLimit(`onboarding:${resolved.userId}`, { max: 5, windowMs: 10 * 60_000 });
-  if (!limit.allowed) {
-    return fail(
-      "rate_limited",
-      `Too many attempts. Try again in ${limit.retryAfterSec}s.`,
-      429,
-      { retryAfterSec: limit.retryAfterSec },
-    );
-  }
-
-  try {
-    const result = await runOnboarding(getDb().db, {
-      userId: resolved.userId,
-      userEmail: resolved.email,
-      orgName: body.data.orgName,
-      businessDescription: body.data.businessDescription,
-      baseCurrency: body.data.baseCurrency,
-      path: body.data.path,
-      deferredSteps: body.data.deferredSteps,
-      intentId: body.data.intentId,
-    });
-    return NextResponse.json(result);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("unsupported base currency")) {
-      return fail("invalid", `We don't support ${body.data.baseCurrency} as a base currency yet.`, 422);
-    }
-    if (message.includes("intent conflict")) {
-      return fail("intent_conflict", "This setup was already started with different details.", 409);
-    }
-    if (message.includes("already belongs")) {
-      return fail("already_onboarded", "This account already has a workspace.", 409);
-    }
-    return fail("server_error", message, 422);
-  }
+  // Go resolves the live session and is the sole organization bootstrap writer.
+  return proxyGoOnboardingCreate(req);
 }
 
 /**

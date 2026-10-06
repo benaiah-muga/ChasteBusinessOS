@@ -94,6 +94,18 @@ routine agent runner default on for local work; set either
 worker uses `JOBS_WORKER_DATABASE_URL` and `GO_DATABASE_URL`, while the outbox
 worker uses `OUTBOX_WORKER_DATABASE_URL`.
 
+The sample `.env` enables `GO_ONBOARDING_ROUTE=1` and direct Vite onboarding
+with `CHASTE_GO_ONBOARDING_ROUTE=1`. The Vite selector defaults off in code;
+when disabled, Vite sends onboarding POST through the Next compatibility route,
+which proxies to the same Go writer. Onboarding GET and PATCH remain on Next
+during this transition. If HTTPS terminates before Go, set
+`GO_API_TRUSTED_PROXY_CIDRS` to the exact Next proxy peer CIDRs so Go can verify
+the forwarded scheme without accepting another origin.
+`GO_API_INTERNAL_URL` must identify the trusted Go API endpoint because the Next
+onboarding proxy forwards incoming Cookie and Authorization headers to it. HTTPS
+may point to a remote or private service you control; the Next proxy accepts
+cleartext HTTP only for loopback hosts.
+
 ## Why React and Go: measured build benefits
 
 We chose React and TypeScript on Vite to shorten frontend compile feedback and

@@ -212,6 +212,9 @@ function requestRecorder(target: string, streamed = false): Server {
         method: request.method,
         url: request.url,
         cookie: request.headers.cookie,
+        authorization: request.headers.authorization,
+        origin: request.headers.origin,
+        host: request.headers.host,
         idempotencyKey: request.headers["idempotency-key"],
         body: Buffer.concat(chunks).toString("utf8"),
       }));
@@ -259,6 +262,7 @@ const selectorCases: Array<{ env: string; flag: keyof GoRouteProxyFlags; method:
   { env: "CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE", flag: "notificationsWrite", method: "POST", url: "/api/notifications" },
   { env: "CHASTE_GO_POS_READ_ROUTE", flag: "posRead", method: "GET", url: "/api/pos?status=open" },
   { env: "CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE", flag: "posShiftSummary", method: "POST", url: "/api/pos/shift-summary" },
+  { env: "CHASTE_GO_ONBOARDING_ROUTE", flag: "onboarding", method: "POST", url: "/api/onboarding" },
 ];
 
 const supportedGoAuthRoutes: Array<{ method: string; url: string }> = [
@@ -290,6 +294,7 @@ describe("Vite Go route proxy selection", () => {
     expect(flags.auth).toBe(true);
     expect(flags.analytics).toBe(true);
     expect(flags.myWork).toBe(true);
+    expect(flags.onboarding).toBe(false);
     expect(Object.entries(flags).filter(([key]) => !["auth", "analytics", "myWork", "metrics", "modulesRead", "projects", "teamRead", "teamWrite", "sessions", "durableRuns", "salesOrders", "posRead", "posShiftSummary", "posCustomers"].includes(key)).every(([, enabled]) => !enabled)).toBe(true);
     for (const { method, url } of supportedGoAuthRoutes) {
       expect(isGoRouteRequest(flags, method, url), `${method} ${url}`).toBe(true);
@@ -319,6 +324,21 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(flags, "GET", "/api/analytics/extra")).toBe(false);
     expect(isGoRouteRequest(flags, "GET", "/api/my-work?status=open")).toBe(true);
     expect(isGoRouteRequest(flags, "POST", "/api/my-work")).toBe(false);
+  });
+
+  it("routes only POST onboarding when the explicit selector is enabled", () => {
+    const defaults = goRouteProxyFlagsFromEnv({});
+    expect(defaults.onboarding).toBe(false);
+    expect(isGoRouteRequest(defaults, "POST", "/api/onboarding")).toBe(false);
+
+    const enabled = goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "1" });
+    expect(isGoRouteRequest(enabled, "POST", "/api/onboarding?source=wizard")).toBe(true);
+    expect(isGoRouteRequest(enabled, "GET", "/api/onboarding")).toBe(false);
+    expect(isGoRouteRequest(enabled, "PATCH", "/api/onboarding")).toBe(false);
+    expect(isGoRouteRequest(enabled, "PUT", "/api/onboarding")).toBe(false);
+    expect(isGoRouteRequest(enabled, "POST", "/api/onboarding/extra")).toBe(false);
+    expect(isGoRouteRequest(enabled, "POST", "/api/onboarding/")).toBe(false);
+    expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "0" }), "POST", "/api/onboarding")).toBe(false);
   });
 
   it("allows the analytics read proxy to be disabled for rollback", () => {
@@ -669,7 +689,7 @@ describe("Vite Go route proxy selection", () => {
       body: JSON.stringify({ email: "person@example.test" }),
     });
     const selectedPayload = await selected.json() as { target: string; method: string; url: string; cookie: string; body: string };
-    expect(selectedPayload).toEqual({
+    expect(selectedPayload).toMatchObject({
       target: "go",
       method: "POST",
       url: "/api/auth/sign-in/email?intent=signup",
@@ -677,6 +697,57 @@ describe("Vite Go route proxy selection", () => {
       body: JSON.stringify({ email: "person@example.test" }),
     });
     expect(selected.headers.get("set-cookie")).toContain("proxy-result=preserved");
+
+    const onboardingFlags = goRouteProxyFlagsFromEnv({ CHASTE_GO_ONBOARDING_ROUTE: "1" });
+    const onboardingVite: ViteDevServer = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(onboardingFlags, goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+      },
+    });
+    await onboardingVite.listen();
+    runningServers.push({ close: () => onboardingVite.close() });
+    const onboardingAddress = onboardingVite.httpServer?.address() as AddressInfo;
+    const onboardingOrigin = `http://127.0.0.1:${onboardingAddress.port}`;
+    const onboardingBody = JSON.stringify({
+      orgName: "Vite Go Workspace",
+      businessDescription: "A workspace bootstrap request sent through the Vite Go route.",
+      intentId: "vite-go-onboarding-intent",
+    });
+    const onboardingPost = await fetch(`${onboardingOrigin}/api/onboarding?flow=wizard`, {
+      method: "POST",
+      headers: {
+        cookie: "better-auth.session_token=browser-session",
+        authorization: "Bearer browser-bearer-token",
+        origin: onboardingOrigin,
+        "content-type": "application/json",
+      },
+      body: onboardingBody,
+    });
+    const onboardingPostPayload = await onboardingPost.json() as Record<string, string>;
+    expect(onboardingPostPayload).toMatchObject({
+      target: "go",
+      method: "POST",
+      url: "/api/onboarding?flow=wizard",
+      cookie: "better-auth.session_token=browser-session",
+      authorization: "Bearer browser-bearer-token",
+      origin: onboardingOrigin,
+      host: new URL(onboardingOrigin).host,
+      body: onboardingBody,
+    });
+
+    for (const method of ["GET", "PATCH"] as const) {
+      const transitionRequest = await fetch(`${onboardingOrigin}/api/onboarding`, {
+        method,
+        ...(method === "PATCH" ? { headers: { "content-type": "application/json" }, body: JSON.stringify({ complete: true }) } : {}),
+      });
+      expect(await transitionRequest.json()).toMatchObject({ target: "legacy", method, url: "/api/onboarding" });
+    }
 
     const unsupportedAuth = await fetch(`${origin}/api/auth/sign-in/social`, {
       method: "POST",

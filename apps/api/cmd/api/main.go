@@ -88,6 +88,10 @@ func goPosCustomersRouteEnabledFromEnv(value string) bool {
 	return value != "0"
 }
 
+func goOnboardingRouteEnabledFromEnv(value string) bool {
+	return value == "1"
+}
+
 func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("GO_DATABASE_URL")
 	if databaseURL == "" {
@@ -494,7 +498,7 @@ func run(logger *slog.Logger) error {
 		logger.Info("Go public support route mounted", "path", "/api/support/public")
 	}
 	var onboardingRoute http.Handler
-	if os.Getenv("GO_ONBOARDING_ROUTE") == "1" {
+	if goOnboardingRouteEnabledFromEnv(os.Getenv("GO_ONBOARDING_ROUTE")) {
 		resolver, resolverErr := getSessionResolver()
 		if resolverErr != nil {
 			return resolverErr

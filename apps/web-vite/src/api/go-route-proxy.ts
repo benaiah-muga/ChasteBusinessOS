@@ -39,6 +39,7 @@ export type GoRouteProxyFlags = {
   posRead: boolean;
   posShiftSummary: boolean;
   posCustomers: boolean;
+  onboarding: boolean;
 };
 
 export function goPosOpenSessionSliceFromEnv(env: Record<string, string | undefined>): boolean {
@@ -155,11 +156,13 @@ export function goRouteProxyFlagsFromEnv(env: Record<string, string | undefined>
     posRead: env.CHASTE_GO_POS_READ_ROUTE !== "0",
     posShiftSummary: env.CHASTE_GO_POS_SHIFT_SUMMARY_ROUTE !== "0",
     posCustomers: goPosCustomersSliceFromEnv(env),
+    onboarding: env.CHASTE_GO_ONBOARDING_ROUTE === "1",
   };
 }
 
 export function isGoRouteRequest(flags: GoRouteProxyFlags, method?: string, url?: string): boolean {
   const path = url ?? "";
+  if (flags.onboarding && method === "POST" && /^\/api\/onboarding(?:\?.*)?$/.test(path)) return true;
   if (flags.supportPublic && method === "POST" && /^\/api\/support\/public(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsRead && method === "GET" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;
   if (flags.supportChannelsWrite && method === "POST" && /^\/api\/support\/channels(?:\?.*)?$/.test(path)) return true;

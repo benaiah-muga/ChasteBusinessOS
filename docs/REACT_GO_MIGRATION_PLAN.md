@@ -1778,6 +1778,15 @@ new owners and the manifest shows zero legacy runtime paths.
      entrypoint. Keep the capability out of ordinary org-scoped dispatch and
      agent tool lists; verify the live session and its resolved identity,
      execute bootstrap and append its first-create ledger event in one
-     transaction, then upgrade embeddings best-effort after commit. The Go
-     endpoint remains opt-in until Vite routing and legacy cross-runtime
-     serialization are resolved. Browser proof remains open.
+     transaction, then upgrade embeddings best-effort after commit. The
+     endpoint was initially opt-in; its single-writer routing is covered in
+     item 184. Browser proof remains open.
+184. Make Go the only public organization-creation writer. The Next POST must
+     forward the original body, Cookie or Bearer token, Origin, and Host to Go,
+     preserve Go's exact same-origin check, validate the bounded request and
+     response, and fail closed on upstream errors or timeouts without calling
+     the TypeScript bootstrap. Keep Next GET/PATCH on the legacy handlers for
+     now. Add the explicit default-off Vite `CHASTE_GO_ONBOARDING_ROUTE` POST
+     selector, paired with `GO_ONBOARDING_ROUTE=1` on the API. When HTTPS
+     terminates before Go, trust only the exact Next proxy peer CIDRs for the
+     forwarded-scheme check. Browser proof remains open.
