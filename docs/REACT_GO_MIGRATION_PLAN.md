@@ -1825,12 +1825,15 @@ new owners and the manifest shows zero legacy runtime paths.
      Database handler tests cover identity mismatch, revoked sessions, one
      creation event on replay, audit-failure rollback, and best-effort
      embedding. Browser proof remains open.
-184. Make Go the only public organization-creation writer. The Next POST must
-     forward the original body, Cookie or Bearer token, Origin, and Host to Go,
-     preserve Go's exact same-origin check, validate the bounded request and
-     response, and fail closed on upstream errors or timeouts without calling
-     the TypeScript bootstrap. Keep Next GET/PATCH on the legacy handlers for
-     now. Add the explicit default-off Vite `CHASTE_GO_ONBOARDING_ROUTE` POST
-     selector, paired with `GO_ONBOARDING_ROUTE=1` on the API. When HTTPS
-     terminates before Go, trust only the exact Next proxy peer CIDRs for the
-     forwarded-scheme check. Browser proof remains open.
+184. (Implemented) Make Go the only public organization-creation writer. The
+     Next POST forwards the original body, Cookie or Bearer token, Origin, and
+     Host to Go, preserves Go's exact same-origin check, validates the bounded
+     request and response, and fails closed on upstream errors or timeouts
+     without calling the TypeScript bootstrap. Keep Next GET/PATCH on the
+     legacy handlers for now. The default-off Vite
+     `CHASTE_GO_ONBOARDING_ROUTE` selector routes only POST and is paired with
+     `GO_ONBOARDING_ROUTE=1` on the API. When HTTPS terminates before Go, only
+     the exact Next proxy peer CIDRs in `GO_API_TRUSTED_PROXY_CIDRS` can supply
+     the forwarded scheme; an unset list trusts no proxy. Proxy, selector,
+     response-contract, and trusted-peer tests pass. Browser proof remains
+     open.

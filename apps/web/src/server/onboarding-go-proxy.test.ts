@@ -71,7 +71,7 @@ describe("onboarding Go endpoint validation", () => {
 
 describe("legacy onboarding Go transport", () => {
   it("relays the exact payload and verified-session credentials without deriving identity from the body", async () => {
-    let seen: { method?: string; url?: string; host?: string; origin?: string; cookie?: string; authorization?: string; body?: string } = {};
+    let seen: { method?: string; url?: string; host?: string; origin?: string; cookie?: string; authorization?: string; forwardedProto?: string; body?: string } = {};
     const server = createServer((incoming, response) => {
       const chunks: Buffer[] = [];
       incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -83,6 +83,7 @@ describe("legacy onboarding Go transport", () => {
           origin: incoming.headers.origin,
           cookie: incoming.headers.cookie,
           authorization: incoming.headers.authorization,
+          forwardedProto: incoming.headers["x-forwarded-proto"]?.toString(),
           body: Buffer.concat(chunks).toString("utf8"),
         };
         response.writeHead(200, { "content-type": "application/json" });
@@ -97,6 +98,7 @@ describe("legacy onboarding Go transport", () => {
       headers: {
         host: "business.example.test",
         origin: "http://business.example.test",
+        "x-forwarded-proto": "https",
         cookie: "better-auth.session_token=session-token",
         authorization: "Bearer browser-token",
         "content-type": "application/json",
@@ -113,6 +115,7 @@ describe("legacy onboarding Go transport", () => {
       origin: "http://business.example.test",
       cookie: "better-auth.session_token=session-token",
       authorization: "Bearer browser-token",
+      forwardedProto: "https",
       body,
     });
   });
@@ -149,6 +152,18 @@ describe("legacy onboarding Go transport", () => {
       error: "Workspace setup is unavailable. Try again in a moment.",
       code: "server_error",
     });
+  });
+
+  it("fails closed when a successful Go response omits its replay state", async () => {
+    const server = createServer((_incoming, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ orgId: "d4d0f18b-d20c-421e-a7fc-78281a97cab4" }));
+    });
+    servers.push(server);
+
+    const response = await proxyGoOnboardingCreate(request(validBody), { baseUrl: await listen(server) });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "server_error" });
   });
 
   it("fails closed on timeout without retrying against the TypeScript writer", async () => {

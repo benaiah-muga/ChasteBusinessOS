@@ -61,7 +61,7 @@ type onboardingRequest struct {
 
 type onboardingResponse struct {
 	OrgID    string `json:"orgId"`
-	Replayed bool   `json:"replayed,omitempty"`
+	Replayed bool   `json:"replayed"`
 }
 
 // NewGoOnboardingHandler serves session-owned workspace creation. A nil

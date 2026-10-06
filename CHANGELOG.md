@@ -14,9 +14,13 @@ The full v1 changelog is preserved at the bottom of this file.
 ### Changed
 
 - Organization creation now has a single Go writer. The legacy Next POST is a
-  strict session-preserving proxy to Go with no TypeScript fallback; Vite can
-  opt into direct Go routing with `CHASTE_GO_ONBOARDING_ROUTE=1`, while
-  onboarding GET and PATCH stay on the legacy handlers during transition.
+  strict session-preserving proxy to Go with no TypeScript fallback; it
+  forwards the original bounded body, Cookie or Bearer token, Origin, and Host,
+  then validates Go's response. The Vite POST selector defaults off in code
+  and pairs with `GO_ONBOARDING_ROUTE=1`; onboarding GET and PATCH stay on the
+  legacy handlers during transition. HTTPS terminated before Go requires the
+  exact Next proxy peer CIDRs in `GO_API_TRUSTED_PROXY_CIDRS` for forwarded
+  scheme checks.
 
 - Added the Go pre-organization `iam.bootstrapOrganization` capability boundary for verified human workspace creation. The dedicated executor stays out of org-scoped dispatch and agent tools, checks the live verified session against the resolved identity, and atomically commits bootstrap data and the first `organization.created` ledger event. Its internal database function derives ownership from that session, serializes attempts by user, and atomically creates the organization, seed records, and intent receipt under a dedicated `NOBYPASSRLS` owner role; only `chaste_app` can execute it. The bounded nullable auth-session reference is hash-covered and preserved after logout without a foreign key. Embedding upgrade runs best-effort after commit. The Go endpoint stays off unless `GO_ONBOARDING_ROUTE=1`.
 - Fixed Go purchasing quote-award validation to report a losing or already-awarded RFQ before checking whether its parent request can create an order. Kept the serialized request decision check intact.
