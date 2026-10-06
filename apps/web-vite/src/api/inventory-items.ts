@@ -62,7 +62,7 @@ async function adjustmentAttemptStorageKey(scope: InventoryAdjustmentRetryScope)
 }
 
 function parseAdjustmentAttempt(raw: string | null): z.infer<typeof AdjustmentAttemptSchema> | null {
-  if (!raw) return null;
+  if (raw === null) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -157,9 +157,15 @@ export async function submitInventoryItemAction(
   if (!parsedAction.success) throw new InventoryItemActionError(0, "Check the item details and try again.");
 
   const useGo = typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
-  const attempt = useGo && parsedAction.data.action === "adjustStock"
-    ? await getOrCreateAdjustmentAttempt(parsedAction.data, retryScope ?? { actorId: null, organizationId: null })
-    : null;
+  let attempt: InventoryAdjustmentAttempt | null = null;
+  if (parsedAction.data.action === "adjustStock") {
+    const scope = retryScope ?? { actorId: null, organizationId: null };
+    if (useGo) {
+      attempt = await getOrCreateAdjustmentAttempt(parsedAction.data, scope);
+    } else if (await getPendingInventoryAdjustment(scope)) {
+      throw new InventoryItemActionError(0, "A Go stock adjustment is unresolved. Restore Go inventory item writes and retry the saved adjustment before using the legacy route.");
+    }
+  }
   const intentId = attempt?.intentId ?? crypto.randomUUID();
   const request = inventoryItemActionRequest(parsedAction.data, intentId, useGo);
 

@@ -68,19 +68,21 @@ export function InventoryItemActions({
   const [form, setForm] = useState<FormValues>(blankForm);
   const [adjustment, setAdjustment] = useState<AdjustmentValues>({ sku: "", direction: "increase", quantity: "", note: "", lotCode: "", locationCode: "" });
   const [retryState, setRetryState] = useState<RetryState>(() => goItemWritesEnabled() ? "loading" : "clear");
+  const [retryStateScopeIdentity, setRetryStateScopeIdentity] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const minorUnits = currencyMinorUnits(currency) ?? 2;
   const retryScopeIdentity = `${retryScope?.actorId?.trim() ?? ""}:${retryScope?.organizationId?.trim() ?? ""}`;
   const retryScopeIdentityRef = useRef(retryScopeIdentity);
   retryScopeIdentityRef.current = retryScopeIdentity;
+  const retryScopeChecked = retryStateScopeIdentity === retryScopeIdentity;
+  const retryBlockedByRoute = retryState === "unresolved" && !goItemWritesEnabled();
 
   useEffect(() => {
     setBusy(false);
-    if (!goItemWritesEnabled()) {
-      setRetryState("clear");
-      return;
-    }
+    setRetryState("loading");
+    setRetryStateScopeIdentity(null);
+    setNotice(null);
     const actorId = retryScope?.actorId?.trim();
     const organizationId = retryScope?.organizationId?.trim();
     if (!actorId || !organizationId) {
@@ -93,6 +95,7 @@ export function InventoryItemActions({
     setAdjustment({ sku: "", direction: "increase", quantity: "", note: "", lotCode: "", locationCode: "" });
     void getPendingInventoryAdjustment({ actorId, organizationId }).then((action) => {
       if (!active) return;
+      setRetryStateScopeIdentity(retryScopeIdentity);
       if (action) {
         setAdjustment(adjustmentValuesFromAction(action));
         setRetryState("unresolved");
@@ -110,17 +113,16 @@ export function InventoryItemActions({
   }, [retryScopeIdentity]);
 
   async function recoverAdjustmentRetryState(terminal: boolean, expectedScopeIdentity: string): Promise<void> {
-    if (!goItemWritesEnabled()) {
-      setRetryState("clear");
-      return;
-    }
+    if (retryScopeIdentityRef.current !== expectedScopeIdentity) return;
     if (terminal) {
       setRetryState("clear");
+      setRetryStateScopeIdentity(expectedScopeIdentity);
       return;
     }
     try {
       const action = await getPendingInventoryAdjustment(retryScope ?? { actorId: null, organizationId: null });
       if (retryScopeIdentityRef.current !== expectedScopeIdentity) return;
+      setRetryStateScopeIdentity(expectedScopeIdentity);
       if (action) {
         setAdjustment(adjustmentValuesFromAction(action));
         setRetryState("unresolved");
@@ -214,6 +216,7 @@ export function InventoryItemActions({
   async function handleAdjustment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const submittedScopeIdentity = retryScopeIdentity;
+    if (!retryScopeChecked || (retryState !== "clear" && retryState !== "unresolved")) return;
     const quantity = scaledInteger(adjustment.quantity, 3);
     if (quantity === null || quantity <= 0) {
       setNotice({ tone: "error", message: "Enter a stock quantity greater than zero with no more than 3 decimal places." });
@@ -284,14 +287,14 @@ export function InventoryItemActions({
           <h3>Adjust stock</h3>
           {items.length === 0 ? <p>Add a goods item before adjusting stock.</p> : <>
             <div className="inventory-item-fields">
-              <label className="inventory-item-field-wide">Item<select required value={adjustment.sku} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, sku: event.currentTarget.value })}><option value="">Choose an item</option>{adjustment.sku && !items.some((item) => item.sku === adjustment.sku) && <option value={adjustment.sku}>{adjustment.sku} · saved adjustment</option>}{items.filter((item) => item.kind !== "service").map((item) => <option key={item.sku} value={item.sku}>{item.sku} · {item.name}</option>)}</select></label>
-              <label>Direction<select value={adjustment.direction} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, direction: event.currentTarget.value as AdjustmentValues["direction"] })}><option value="increase">Increase stock</option><option value="decrease">Decrease stock</option></select></label>
-              <label>Quantity<input required inputMode="decimal" value={adjustment.quantity} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, quantity: event.currentTarget.value })} placeholder="0" /></label>
-              <label>Lot code<input maxLength={40} value={adjustment.lotCode} disabled={busy || retryState !== "clear" || adjustment.direction !== "increase"} onChange={(event) => setAdjustment({ ...adjustment, lotCode: event.currentTarget.value })} /></label>
-              <label>Location code<input maxLength={20} value={adjustment.locationCode} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, locationCode: event.currentTarget.value })} /></label>
-              <label className="inventory-item-field-wide">Reason<input required minLength={3} value={adjustment.note} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, note: event.currentTarget.value })} /></label>
+              <label className="inventory-item-field-wide">Item<select required value={adjustment.sku} disabled={busy || !retryScopeChecked || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, sku: event.currentTarget.value })}><option value="">Choose an item</option>{adjustment.sku && !items.some((item) => item.sku === adjustment.sku) && <option value={adjustment.sku}>{adjustment.sku} · saved adjustment</option>}{items.filter((item) => item.kind !== "service").map((item) => <option key={item.sku} value={item.sku}>{item.sku} · {item.name}</option>)}</select></label>
+              <label>Direction<select value={adjustment.direction} disabled={busy || !retryScopeChecked || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, direction: event.currentTarget.value as AdjustmentValues["direction"] })}><option value="increase">Increase stock</option><option value="decrease">Decrease stock</option></select></label>
+              <label>Quantity<input required inputMode="decimal" value={adjustment.quantity} disabled={busy || !retryScopeChecked || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, quantity: event.currentTarget.value })} placeholder="0" /></label>
+              <label>Lot code<input maxLength={40} value={adjustment.lotCode} disabled={busy || !retryScopeChecked || retryState !== "clear" || adjustment.direction !== "increase"} onChange={(event) => setAdjustment({ ...adjustment, lotCode: event.currentTarget.value })} /></label>
+              <label>Location code<input maxLength={20} value={adjustment.locationCode} disabled={busy || !retryScopeChecked || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, locationCode: event.currentTarget.value })} /></label>
+              <label className="inventory-item-field-wide">Reason<input required minLength={3} value={adjustment.note} disabled={busy || !retryScopeChecked || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, note: event.currentTarget.value })} /></label>
             </div>
-            <button className="shell-button" type="submit" disabled={busy || retryState === "loading" || retryState === "failed" || items.every((item) => item.kind === "service")}>{busy ? "Saving…" : retryState === "unresolved" ? "Retry saved adjustment" : "Record adjustment"}</button>
+            <button className="shell-button" type="submit" disabled={busy || !retryScopeChecked || retryState === "loading" || retryState === "failed" || retryBlockedByRoute || items.every((item) => item.kind === "service")}>{retryBlockedByRoute ? "Restore Go writes to retry" : busy ? "Saving…" : retryState === "unresolved" ? "Retry saved adjustment" : "Record adjustment"}</button>
           </>}
         </form>
       </div>

@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { inventoryItemActionRequest } from "../api/inventory-items";
+import { inventoryItemActionRequest, submitInventoryItemAction } from "../api/inventory-items";
 import type { InventoryItem } from "../api/inventory";
 import { InventoryItemActions } from "./InventoryItemActions";
 
@@ -19,6 +19,7 @@ const item: InventoryItem = {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -62,7 +63,7 @@ describe("InventoryItemActions", () => {
     const onChanged = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<InventoryItemActions items={[]} onChanged={onChanged} />);
+    render(<InventoryItemActions items={[]} onChanged={onChanged} retryScope={{ actorId: "actor-1", organizationId: "org-1" }} />);
     fireEvent.change(screen.getByLabelText("SKU"), { target: { value: "BEANS-1KG" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Coffee beans" } });
     fireEvent.change(screen.getByLabelText("Opening stock"), { target: { value: "1.25" } });
@@ -83,7 +84,8 @@ describe("InventoryItemActions", () => {
     const onChanged = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<InventoryItemActions items={[item]} onChanged={onChanged} />);
+    render(<InventoryItemActions items={[item]} onChanged={onChanged} retryScope={{ actorId: "actor-1", organizationId: "org-1" }} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Record adjustment" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Item"), { target: { value: item.sku } });
     fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "decrease" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "0.5" } });
@@ -108,6 +110,7 @@ describe("InventoryItemActions", () => {
 
     const firstRender = render(<InventoryItemActions items={[item]} onChanged={onChanged} retryScope={retryScope} />);
     await screen.findByRole("button", { name: "Record adjustment" });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Record adjustment" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Item"), { target: { value: item.sku } });
     fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "decrease" } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "0.5" } });
@@ -133,6 +136,22 @@ describe("InventoryItemActions", () => {
     expect(bodies[1]?.input).toMatchObject({ sku: item.sku, quantityDelta: -500, note: "Damaged in storage" });
   });
 
+  it("keeps an unresolved Go adjustment locked when the selector is rolled back", async () => {
+    const retryScope = { actorId: "actor-1", organizationId: "org-1" };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", true);
+    await expect(submitInventoryItemAction({ action: "adjustStock", sku: item.sku, quantityDelta: -500, note: "Damaged in storage" }, undefined, retryScope))
+      .resolves.toMatchObject({ kind: "pending" });
+
+    vi.stubGlobal("__GO_INVENTORY_ITEM_SLICE__", false);
+    render(<InventoryItemActions items={[item]} onChanged={vi.fn()} retryScope={retryScope} />);
+    expect(await screen.findByText("A stock adjustment is unresolved. Retry the saved adjustment to confirm its outcome.")).not.toBeNull();
+    expect((screen.getByLabelText("Quantity") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Restore Go writes to retry" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("disables inputs while saving and ignores a delayed response after the active workspace changes", async () => {
     let resolveResponse: ((response: Response) => void) | undefined;
     const delayedResponse = new Promise<Response>((resolve) => { resolveResponse = resolve; });
@@ -145,6 +164,7 @@ describe("InventoryItemActions", () => {
 
     const view = render(<InventoryItemActions items={[item]} onChanged={onChanged} retryScope={firstScope} />);
     await screen.findByRole("button", { name: "Record adjustment" });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Record adjustment" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Item"), { target: { value: item.sku } });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "0.5" } });
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Damaged in storage" } });

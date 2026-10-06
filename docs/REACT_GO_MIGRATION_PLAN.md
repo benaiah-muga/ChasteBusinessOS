@@ -1765,11 +1765,15 @@ new owners and the manifest shows zero legacy runtime paths.
      actor/org marker check completes, and damaged markers fail closed.
      Authenticated browser proof remains open because the in-app browser is
      unavailable in this environment.
-177. Persist manual Vite inventory adjustment payloads and stable actor/org
-     scoped intents through pending and uncertain outcomes. Restore and lock
-     the exact adjustment after reload, ignore responses from a prior scope,
-     retain retry identities for 408/429, and reuse the intent on missing-route
-     fallback. Browser proof remains open.
+177. (Implemented) Persist manual Vite inventory adjustment payloads and stable
+     actor/org scoped intents through pending and uncertain outcomes. Restore
+     and lock the exact adjustment after reload, ignore responses from a prior
+     scope, retain retry identities for 408/429, and reuse the intent on
+     missing-route fallback. Corrupt markers fail closed, and selector rollback
+     checks for unresolved Go actions before allowing a fresh legacy write.
+     Focused API and UI tests cover recovery, retries, fallback, selector
+     rollback, and scope changes. Authenticated browser proof remains open
+     because the in-app browser is unavailable in this environment.
 178. Persist Vite POS register open/close actions under resolved actor/org
      scope before sending them. Restore and freeze exact attempts through
      pending or uncertain outcomes, reject stale scope responses, retain 408/429
