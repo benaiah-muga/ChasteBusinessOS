@@ -64,6 +64,12 @@ const SalesOrderAttemptPrefix = "chaste:sales-order-write-attempt:";
 
 type SalesRetryScope = { actorId: string | null; organizationId: string | null };
 type SalesOrderWrite = z.infer<typeof SalesOrderWriteSchema>;
+const StoredSalesOrderAttemptSchema = z.object({
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  intentId: z.string().uuid(),
+  action: SalesOrderWriteSchema,
+}).strict();
+type StoredSalesOrderAttempt = z.infer<typeof StoredSalesOrderAttemptSchema>;
 export type SalesOrderWriteOutcome =
   | { kind: "pending"; reason: string }
   | { kind: "completed"; action: "create"; data: z.infer<typeof CreateOrderOutputSchema> }
@@ -72,17 +78,25 @@ export type SalesOrderWriteOutcome =
 
 type SalesOrderAttempt = { storageKey: string; fingerprint: string; intentId: string };
 
-function parseSalesOrderAttempt(value: string | null): { fingerprint: string; intentId: string; action: SalesOrderWrite | null } | null {
-  if (!value) return null;
+function parseSalesOrderAttempt(value: string | null): StoredSalesOrderAttempt | null {
+  if (value === null) return null;
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const attempt = parsed as { fingerprint?: unknown; intentId?: unknown; action?: unknown };
-    const action = SalesOrderWriteSchema.safeParse(attempt.action);
-    return typeof attempt.fingerprint === "string" && typeof attempt.intentId === "string"
-      ? { fingerprint: attempt.fingerprint, intentId: attempt.intentId, action: action.success ? action.data : null }
-      : null;
-  } catch { return null; }
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("saved sales order retry marker is not valid JSON");
+  }
+  const attempt = StoredSalesOrderAttemptSchema.safeParse(parsed);
+  if (!attempt.success) throw new Error("saved sales order retry marker has an invalid shape");
+  return attempt.data;
+}
+
+function readSalesOrderAttempt(storageKey: string): StoredSalesOrderAttempt | null {
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new SalesApiError(0, "Enable browser storage before changing a sales order so an uncertain action can be retried safely."); }
+  try { return parseSalesOrderAttempt(raw); }
+  catch { throw new SalesApiError(0, "A saved sales order retry marker is damaged. Verify order history before submitting another change."); }
 }
 
 async function salesOrderDigest(value: string): Promise<string> {
@@ -104,9 +118,15 @@ async function createSalesOrderAttempt(action: SalesOrderWrite, retryScope: Sale
     throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again.");
   }
   const storageKey = `${SalesOrderAttemptPrefix}${scopeDigest}`;
-  let stored: { fingerprint: string; intentId: string } | null;
-  try { stored = parseSalesOrderAttempt(window.localStorage.getItem(storageKey)); }
-  catch { throw new SalesApiError(0, "Enable browser storage before changing a sales order so an uncertain action can be retried safely."); }
+  const stored = readSalesOrderAttempt(storageKey);
+  if (stored) {
+    let storedFingerprint: string;
+    try { storedFingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action })); }
+    catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
+    if (storedFingerprint !== stored.fingerprint) {
+      throw new SalesApiError(0, "A saved sales order retry marker does not match its action. Verify order history before submitting another change.");
+    }
+  }
   if (stored && stored.fingerprint !== fingerprint) {
     throw new SalesApiError(0, "A previous sales order result is unresolved. Retry that exact action or check order history before changing it.");
   }
@@ -124,7 +144,7 @@ async function createSalesOrderAttempt(action: SalesOrderWrite, retryScope: Sale
 
 function clearSalesOrderAttempt(attempt: SalesOrderAttempt): void {
   try {
-    const stored = parseSalesOrderAttempt(window.localStorage.getItem(attempt.storageKey));
+    const stored = readSalesOrderAttempt(attempt.storageKey);
     if (stored?.fingerprint === attempt.fingerprint && stored.intentId === attempt.intentId) window.localStorage.removeItem(attempt.storageKey);
   } catch { /* Keep the unresolved intent if storage cannot verify it. */ }
 }
@@ -134,16 +154,18 @@ export type SalesOrder = z.infer<typeof OrderSchema>;
 export async function restorePendingSalesOrderCreate(retryScope: SalesRetryScope): Promise<Extract<SalesOrderWrite, { action: "create" }> | null> {
   const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
   if (!scope.actorId || !scope.organizationId) return null;
-  try {
-    const storageKey = `${SalesOrderAttemptPrefix}${await salesOrderDigest(JSON.stringify(scope))}`;
-    const stored = parseSalesOrderAttempt(window.localStorage.getItem(storageKey));
-    if (!stored?.action || stored.action.action !== "create") return null;
-    const fingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action }));
-    if (fingerprint !== stored.fingerprint) return null;
-    return stored.action;
-  } catch {
-    throw new SalesApiError(0, "Enable browser storage to restore the unresolved sales order draft safely.");
+  let storageKey: string;
+  try { storageKey = `${SalesOrderAttemptPrefix}${await salesOrderDigest(JSON.stringify(scope))}`; }
+  catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
+  const stored = readSalesOrderAttempt(storageKey);
+  if (!stored || stored.action.action !== "create") return null;
+  let fingerprint: string;
+  try { fingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action })); }
+  catch { throw new SalesApiError(0, "Sales order retry protection is unavailable. Check browser security settings and try again."); }
+  if (fingerprint !== stored.fingerprint) {
+    throw new SalesApiError(0, "A saved sales order retry marker does not match its action. Verify order history before submitting another change.");
   }
+  return stored.action;
 }
 
 export class SalesApiError extends Error {

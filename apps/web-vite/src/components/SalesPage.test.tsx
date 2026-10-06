@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SalesPage } from "./SalesPage";
+import { submitSalesOrderWrite } from "../api/sales";
 
 const orders = [
   {
@@ -216,6 +217,134 @@ describe("Vite sales page", () => {
     const retryBody = JSON.parse(String(requests[1]?.[1]?.body)) as { intentId: string; input: Record<string, unknown> };
     expect(retryBody.intentId).toBe(firstBody.intentId);
     expect(retryBody.input).toEqual(firstBody.input);
+  });
+
+  it("locks and clears a create draft while the organization scope changes", async () => {
+    let releaseScopeDigest: (() => void) | undefined;
+    let scopeDigestStarted = false;
+    const scopeDigestGate = new Promise<void>((resolve) => { releaseScopeDigest = resolve; });
+    const originalDigest = crypto.subtle.digest.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, data) => {
+      if (new TextDecoder().decode(data) === JSON.stringify({ actorId: "actor-1", organizationId: "org-2" })) {
+        scopeDigestStarted = true;
+        await scopeDigestGate;
+      }
+      return originalDigest(algorithm, data);
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") return Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } });
+      void init;
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Org A draft" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "12.50" } });
+
+    view.rerender(<SalesPage actorId="actor-1" organizationId="org-2" />);
+    await waitFor(() => expect(scopeDigestStarted).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Create sales order" }));
+    expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Description") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(fetchMock.mock.calls.some(([input]) => input === "/api/capabilities/execute")).toBe(false);
+
+    releaseScopeDigest?.();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[1]!.id } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Org B draft" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
+
+    const request = fetchMock.mock.calls.find(([input]) => input === "/api/capabilities/execute");
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+      capabilityId: "sales.createOrder",
+      input: { customerId: customers.customers[1]!.id, lines: [{ description: "Org B draft" }] },
+    });
+  });
+
+  it("ignores a prior-scope create response after restoring the active scope's pending draft", async () => {
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    let releaseOrgA: ((response: Response) => void) | undefined;
+    const orgAResponse = new Promise<Response>((resolve) => { releaseOrgA = resolve; });
+    let writes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      if (input === "/api/capabilities/execute") {
+        writes += 1;
+        if (writes === 1) return Response.json({ ok: false, pendingApproval: true, reason: "Org B approval required" }, { status: 202 });
+        if (writes === 2) return orgAResponse;
+        return Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000005", orderNumber: 45 } });
+      }
+      void init;
+      return Response.json({ error: "unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const orgBAction = {
+      action: "create" as const,
+      customerId: customers.customers[1]!.id,
+      note: "Org B note",
+      lines: [{ description: "Org B pending draft", quantity: 1000, unitPriceMinor: 2000, taxMinor: 0 }],
+    };
+    await expect(submitSalesOrderWrite(orgBAction, { actorId: "actor-1", organizationId: "org-2" })).resolves.toMatchObject({ kind: "pending" });
+
+    const view = render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Org A in-flight draft" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    await waitFor(() => expect(writes).toBe(2));
+
+    view.rerender(<SalesPage actorId="actor-1" organizationId="org-2" />);
+    expect(await screen.findByDisplayValue("Org B pending draft")).not.toBeNull();
+    expect((screen.getByLabelText("Description") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false);
+
+    releaseOrgA?.(Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } }));
+    await waitFor(() => expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("Org B pending draft"));
+    expect((screen.getByLabelText("Description") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByText("An earlier sales order submission is unresolved. Retry the restored draft to check its result.")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
+
+    const writeBodies = fetchMock.mock.calls
+      .filter(([input]) => input === "/api/capabilities/execute")
+      .map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string; input: Record<string, unknown> });
+    expect(writeBodies).toHaveLength(3);
+    expect(writeBodies[2]?.intentId).toBe(writeBodies[0]?.intentId);
+    expect(writeBodies[2]?.input).toEqual(writeBodies[0]?.input);
+  });
+
+  it("keeps create recovery locked when the scoped retry marker is corrupt", async () => {
+    const actorId = "actor-1";
+    const organizationId = "org-1";
+    const scopeDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
+    const digestHex = Array.from(new Uint8Array(scopeDigest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    localStorage.setItem(`chaste:sales-order-write-attempt:${digestHex}`, "{");
+    vi.stubGlobal("fetch", salesFetch());
+    render(<SalesPage actorId={actorId} organizationId={organizationId} />);
+
+    expect(await screen.findByText(/saved sales order retry marker is damaged/i)).not.toBeNull();
+    expect((await screen.findByLabelText("Description") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(localStorage.getItem(`chaste:sales-order-write-attempt:${digestHex}`)).toBe("{");
   });
 
   it("unlocks a pending create after a terminal error and submits corrected input with a new intent", async () => {

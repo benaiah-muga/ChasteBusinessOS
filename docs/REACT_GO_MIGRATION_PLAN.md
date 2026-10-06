@@ -1756,10 +1756,15 @@ new owners and the manifest shows zero legacy runtime paths.
      closed in the Go auth handler instead of falling through to the legacy
      service; the explicit `CHASTE_GO_AUTH_ROUTE=0` compatibility opt-out is
      retained. Other API namespaces and their route selectors are unchanged.
-176. Persist the exact Vite Sales create action alongside its actor/org scoped
-     intent. Restore and lock unresolved drafts after remount, retry with the
-     original payload and intent, and unlock on definitive 4xx so a corrected
-     request starts with a fresh identity. Browser proof remains open.
+176. (Implemented) Persist the exact Vite Sales create action alongside its
+     actor/org scoped intent. Restore and lock unresolved drafts after remount,
+     retry with the original payload and intent, and unlock on definitive 4xx
+     so a corrected request starts with a fresh identity. The API and UI tests
+     cover payload restoration, retry identity, corrected requests, scope
+     changes, and corrupt retry markers. Create writes wait until the active
+     actor/org marker check completes, and damaged markers fail closed.
+     Authenticated browser proof remains open because the in-app browser is
+     unavailable in this environment.
 177. Persist manual Vite inventory adjustment payloads and stable actor/org
      scoped intents through pending and uncertain outcomes. Restore and lock
      the exact adjustment after reload, ignore responses from a prior scope,

@@ -134,10 +134,19 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const [createError, setCreateError] = useState<string | null>(null);
   const [writeBusy, setWriteBusy] = useState(false);
   const [createAttemptPending, setCreateAttemptPending] = useState(false);
+  const [createAttemptRestoredScope, setCreateAttemptRestoredScope] = useState<string | null>(null);
   const [orderActionTarget, setOrderActionTarget] = useState<OrderActionTarget | null>(null);
   const confirmIntents = useRef(new Map<string, string>());
+  const previousCreateScope = useRef<string | null>(null);
+  const currentCreateScope = useRef<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const currency = useMemo(() => currencyFor(baseCurrency), [baseCurrency]);
+  const createScopeIdentity = actorId?.trim() && organizationId?.trim()
+    ? JSON.stringify([actorId.trim(), organizationId.trim()])
+    : null;
+  currentCreateScope.current = createScopeIdentity;
+  const createScopeReady = createScopeIdentity !== null && createAttemptRestoredScope === createScopeIdentity;
+  const createWriteLocked = !createScopeReady || createAttemptPending;
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setState({ status: "loading" });
@@ -171,10 +180,22 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
 
   useEffect(() => {
     let current = true;
+    const scopeChanged = previousCreateScope.current !== createScopeIdentity;
+    previousCreateScope.current = createScopeIdentity;
+    setCreateAttemptRestoredScope(null);
     setCreateAttemptPending(false);
-    if (!actorId || !organizationId) return () => { current = false; };
+    if (scopeChanged) {
+      setWriteBusy(false);
+      setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
+      setShowCreateForm(false);
+      setCreateError(null);
+      setActionNotice(null);
+    }
+    if (!actorId || !organizationId || !createScopeIdentity) return () => { current = false; };
     void restorePendingSalesOrderCreate({ actorId, organizationId }).then((action) => {
-      if (!current || !action) return;
+      if (!current) return;
+      setCreateAttemptRestoredScope(createScopeIdentity);
+      if (!action) return;
       setCreateForm({
         customerId: action.customerId,
         note: action.note ?? "",
@@ -191,10 +212,12 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       setActionNotice({ tone: "pending", message: "An earlier sales order submission is unresolved. Retry the restored draft to check its result." });
     }).catch((error: unknown) => {
       if (!current) return;
+      setCreateAttemptPending(true);
+      setShowCreateForm(true);
       setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The saved sales order draft could not be restored." });
     });
     return () => { current = false; };
-  }, [actorId, currency.minorUnits, organizationId]);
+  }, [actorId, createScopeIdentity, currency.minorUnits, organizationId]);
 
   useEffect(() => {
     function onShortcut(event: KeyboardEvent) {
@@ -274,16 +297,20 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     }
   }
 
-  async function refreshOrderList(): Promise<void> {
+  async function refreshOrderList(expectedScope?: string): Promise<void> {
     try {
       const orders = await fetchSalesOrders();
+      if (expectedScope !== undefined && currentCreateScope.current !== expectedScope) return;
       setState((current) => current.status === "ready" ? { ...current, orders } : current);
     } catch {
+      if (expectedScope !== undefined && currentCreateScope.current !== expectedScope) return;
       setActionNotice((current) => current ?? { tone: "error", message: "The action completed, but the order list could not refresh." });
     }
   }
 
   async function handleCreateOrder(): Promise<void> {
+    if (!createScopeReady) return;
+    const submittedScope = createScopeIdentity;
     const described = createForm.lines.filter((line) => line.description.trim().length > 0);
     if (!createForm.customerId || described.length === 0) {
       setCreateError("Choose a customer and add at least one described line item.");
@@ -316,6 +343,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         action: "create", customerId: createForm.customerId,
         ...(createForm.note.trim() ? { note: createForm.note.trim() } : {}), lines,
       }, { actorId, organizationId });
+      if (currentCreateScope.current !== submittedScope) return;
       if (result.kind === "pending") {
         setCreateAttemptPending(true);
         setActionNotice({ tone: "pending", message: result.reason });
@@ -325,14 +353,15 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
       setShowCreateForm(false);
       setActionNotice({ tone: "success", message: "Sales order created as a draft." });
-      await refreshOrderList();
+      await refreshOrderList(submittedScope);
     } catch (error) {
+      if (currentCreateScope.current !== submittedScope) return;
       if (error instanceof SalesApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
         setCreateAttemptPending(false);
       }
       setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The sales order could not be created." });
     } finally {
-      setWriteBusy(false);
+      if (currentCreateScope.current === submittedScope) setWriteBusy(false);
     }
   }
 
@@ -401,30 +430,30 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
           </div>
           <div className="sales-write-grid">
             <label>Customer
-              <select value={createForm.customerId} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, customerId: value })); setCreateError(null); }} disabled={writeBusy || createAttemptPending}>
+              <select value={createForm.customerId} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, customerId: value })); setCreateError(null); }} disabled={writeBusy || createWriteLocked}>
                 <option value="">Choose a customer</option>
                 {state.customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
               </select>
             </label>
             <label>Order note
-              <input value={createForm.note} maxLength={4000} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, note: value })); setCreateError(null); }} disabled={writeBusy || createAttemptPending} />
+              <input value={createForm.note} maxLength={4000} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, note: value })); setCreateError(null); }} disabled={writeBusy || createWriteLocked} />
             </label>
           </div>
           <div className="sales-write-lines">
             <h3>Line items</h3>
             {createForm.lines.map((line, index) => (
               <div className="sales-write-line" key={index}>
-                <label>SKU (optional)<input value={line.sku} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, sku: value } : item) })); }} disabled={writeBusy || createAttemptPending} /></label>
-                <label>Description<input value={line.description} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item) })); setCreateError(null); }} disabled={writeBusy || createAttemptPending} /></label>
-                <label>Quantity<input inputMode="decimal" value={line.quantity} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: value } : item) })); }} disabled={writeBusy || createAttemptPending} /></label>
-                <label>Unit price<input inputMode="decimal" value={line.unitPrice} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: value } : item) })); }} disabled={writeBusy || createAttemptPending} /></label>
-                <label>Tax<input inputMode="decimal" value={line.tax} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, tax: value } : item) })); }} disabled={writeBusy || createAttemptPending} /></label>
-                <button type="button" className="sales-write-remove" disabled={writeBusy || createAttemptPending || createForm.lines.length === 1} aria-label={`Remove line ${index + 1}`} onClick={() => setCreateForm((current) => ({ ...current, lines: current.lines.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
+                <label>SKU (optional)<input value={line.sku} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, sku: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
+                <label>Description<input value={line.description} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item) })); setCreateError(null); }} disabled={writeBusy || createWriteLocked} /></label>
+                <label>Quantity<input inputMode="decimal" value={line.quantity} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
+                <label>Unit price<input inputMode="decimal" value={line.unitPrice} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
+                <label>Tax<input inputMode="decimal" value={line.tax} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, tax: value } : item) })); }} disabled={writeBusy || createWriteLocked} /></label>
+                <button type="button" className="sales-write-remove" disabled={writeBusy || createWriteLocked || createForm.lines.length === 1} aria-label={`Remove line ${index + 1}`} onClick={() => setCreateForm((current) => ({ ...current, lines: current.lines.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
               </div>
             ))}
             <div className="sales-write-actions">
-              <button type="button" className="sales-write-secondary" disabled={writeBusy || createAttemptPending} onClick={() => setCreateForm((current) => ({ ...current, lines: [...current.lines, emptyOrderDraftLine()] }))}>Add line</button>
-              <button type="button" className="sales-write-primary" disabled={writeBusy} onClick={() => void handleCreateOrder()}>{writeBusy ? "Saving…" : "Create draft"}</button>
+              <button type="button" className="sales-write-secondary" disabled={writeBusy || createWriteLocked} onClick={() => setCreateForm((current) => ({ ...current, lines: [...current.lines, emptyOrderDraftLine()] }))}>Add line</button>
+              <button type="button" className="sales-write-primary" disabled={writeBusy || !createScopeReady} onClick={() => void handleCreateOrder()}>{writeBusy ? "Saving…" : "Create draft"}</button>
             </div>
             {createError && <p className="sales-write-error" role="alert">{createError}</p>}
           </div>

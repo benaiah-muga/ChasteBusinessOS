@@ -60,6 +60,27 @@ describe("sales order writes", () => {
     await expect(restorePendingSalesOrderCreate({ ...scope, actorId: "different-actor" })).resolves.toBeNull();
   });
 
+  it("fails closed on corrupt retry marker JSON and shapes", async () => {
+    goWrites();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "create" as const, customerId, lines: [{ description: "Coffee", quantity: 1000, unitPriceMinor: 1250 }] };
+    await submitSalesOrderWrite(action, scope);
+    const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith("chaste:sales-order-write-attempt:"));
+    expect(key).toBeDefined();
+
+    window.localStorage.setItem(key!, "{");
+    await expect(submitSalesOrderWrite(action, scope)).rejects.toThrow("saved sales order retry marker is damaged");
+    await expect(restorePendingSalesOrderCreate(scope)).rejects.toThrow("saved sales order retry marker is damaged");
+    expect(window.localStorage.getItem(key!)).toBe("{");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    window.localStorage.setItem(key!, JSON.stringify({ fingerprint: "not-a-digest", intentId: crypto.randomUUID(), action }));
+    await expect(submitSalesOrderWrite(action, scope)).rejects.toThrow("saved sales order retry marker is damaged");
+    await expect(restorePendingSalesOrderCreate(scope)).rejects.toThrow("saved sales order retry marker is damaged");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("reuses create intent after an uncertain network result", async () => {
     goWrites();
     const fetchMock = vi.fn()
