@@ -1815,13 +1815,16 @@ new owners and the manifest shows zero legacy runtime paths.
      checks the grants, role attributes, session-derived ownership, replay and
      concurrency behavior, and transaction rollback. Local DB integration
      execution remains open until a Go integration database is configured.
-183. Add the verified pre-organization `iam.bootstrapOrganization` executor
-     entrypoint. Keep the capability out of ordinary org-scoped dispatch and
-     agent tool lists; verify the live session and its resolved identity,
-     execute bootstrap and append its first-create ledger event in one
-     transaction, then upgrade embeddings best-effort after commit. The
-     endpoint was initially opt-in; its single-writer routing is covered in
-     item 184. Browser proof remains open.
+183. (Implemented) Add the verified pre-organization
+     `iam.bootstrapOrganization` executor entrypoint. Keep the capability out
+     of ordinary org-scoped dispatch and agent tool lists; verify the live
+     session and its resolved identity, execute bootstrap and append its
+     first-create ledger event in one transaction, then upgrade embeddings
+     best-effort after commit. The HTTP mount remains off unless
+     `GO_ONBOARDING_ROUTE=1`; its single-writer routing is covered in item 184.
+     Database handler tests cover identity mismatch, revoked sessions, one
+     creation event on replay, audit-failure rollback, and best-effort
+     embedding. Browser proof remains open.
 184. Make Go the only public organization-creation writer. The Next POST must
      forward the original body, Cookie or Bearer token, Origin, and Host to Go,
      preserve Go's exact same-origin check, validate the bounded request and
