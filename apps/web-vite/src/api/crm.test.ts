@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmDealCreate, readPendingCrmTaskCreate, submitCrmAction, submitCrmCustomerCreate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -348,5 +348,49 @@ describe("CRM API client", () => {
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ draft: "Only a draft" })));
     await expect(fetchCrmFollowUpDraft(customerId)).rejects.toMatchObject({ name: "CrmApiError" });
+  });
+
+  it("routes profile updates through Go and strictly validates previous snapshots", async () => {
+    const previous = { customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { updatedCount: 1, previous: [previous] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { action: "updateProfile" as const, customerIds: [customerId], name: "Northwind Ltd", phone: null, notes: "Updated note", ownerUserId: null, addTags: ["priority"], removeTags: ["renewal"], doNotContact: true, preferredContactMethod: "whatsapp" as const };
+
+    await expect(submitCrmCustomerProfileUpdate(input, undefined, true, { actorId: customerId, organizationId: dealId })).resolves.toEqual({ kind: "completed", data: { updatedCount: 1, previous: [previous] } });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.updateCustomerProfiles", input: { customerIds: [customerId], name: "Northwind Ltd" }, intentId: expect.any(String) });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { updatedCount: 1, previous: [{}] } })));
+    await expect(submitCrmCustomerProfileUpdate(input, undefined, true, { actorId: customerId, organizationId: dealId })).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+  });
+
+  it("keeps an exact profile action through pending and uncertainty and uses the same intent on 404 fallback", async () => {
+    const previous = { customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Approval required" }, { status: 202 }))
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+      .mockResolvedValueOnce(Response.json({ error: "Route not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { updatedCount: 1, previous: [previous] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const scope = { actorId: customerId, organizationId: dealId };
+    const input = { action: "updateProfile" as const, customerIds: [customerId], name: "Northwind Ltd" };
+
+    await expect(submitCrmCustomerProfileUpdate(input, undefined, true, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(readPendingCrmCustomerProfileUpdate(scope)).resolves.toEqual(input);
+    await expect(submitCrmCustomerProfileUpdate({ ...input, name: "Changed payload" }, undefined, true, scope)).rejects.toMatchObject({ status: 0 });
+    await expect(submitCrmCustomerProfileUpdate(input, undefined, true, scope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    await expect(submitCrmCustomerProfileUpdate(input, undefined, true, scope)).resolves.toMatchObject({ kind: "completed" });
+
+    const goCall = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const fallbackCall = JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body)) as { intentId: string; action: string };
+    expect(fallbackCall).toMatchObject({ action: "updateProfile", intentId: goCall.intentId });
+    expect(await readPendingCrmCustomerProfileUpdate(scope)).toBeNull();
+  });
+
+  it("fails closed when Go profile updates have no actor and organization scope", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitCrmCustomerProfileUpdate({ action: "updateProfile", customerIds: [customerId], notes: "Updated" }, undefined, true)).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

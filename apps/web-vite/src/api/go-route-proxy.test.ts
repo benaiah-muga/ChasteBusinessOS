@@ -11,6 +11,7 @@ import {
   goCrmDealStageMoveFromEnv,
   goCrmDealCreateFromEnv,
   goCrmCustomerCreateFromEnv,
+  goCrmCustomerProfileUpdateFromEnv,
   goCrmTaskWritesFromEnv,
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
@@ -98,6 +99,14 @@ describe("CRM customer create Go selector", () => {
     expect(goCrmCustomerCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_CUSTOMER_CREATE: "1" })).toBe(true);
     expect(goCrmCustomerCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goCrmCustomerCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_CUSTOMER_CREATE: "1" })).toBe(false);
+  });
+});
+
+describe("CRM customer profile update Go selector", () => {
+  it("requires both the profile selector and session capability route", () => {
+    expect(goCrmCustomerProfileUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE: "1" })).toBe(true);
+    expect(goCrmCustomerProfileUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goCrmCustomerProfileUpdateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE: "1" })).toBe(false);
   });
 });
 

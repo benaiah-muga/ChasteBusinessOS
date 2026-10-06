@@ -94,7 +94,7 @@
 .crm-profile-tabs { display: flex; gap: 5px; margin-bottom: 15px; border-bottom: 1px solid #e7e4da; }
 .crm-profile-tabs button { border: 0; border-radius: 0; background: transparent; color: #7f8077; text-transform: capitalize; }
 .crm-profile-tabs button[aria-pressed=true] { border-bottom: 2px solid #927b4d; color: #3d5544; }
-.crm-profile-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.crm-profile-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .crm-profile-fields .crm-span { grid-column: 1 / -1; }
 .crm-modal-actions, .crm-confirm footer { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
 .crm-next-step { border-radius: 6px; padding: 10px; background: #fbf7e9; color: #786640; font-size: 10px; }

@@ -476,6 +476,203 @@ describe("Vite CRM page", () => {
     expect(timelineReads).toBeGreaterThan(1);
   });
 
+  it("restores and retries the exact Go profile update after pending approval, including close and reopen", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_PROFILE_UPDATE__", true);
+    const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
+    let currentCustomer = { ...customer(), phone: "+256 700 111 222", notes: "Old note", ownerUserId: ownerId };
+    let profileAttempts = 0;
+    let resolvePending!: (response: Response) => void;
+    const pendingResponse = new Promise<Response>((resolve) => { resolvePending = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [currentCustomer] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
+      if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [] });
+      if (path === "/api/capabilities/execute") {
+        profileAttempts += 1;
+        if (profileAttempts === 1) return pendingResponse;
+        const body = JSON.parse(String(init?.body)) as { input: { name: string } };
+        currentCustomer = { ...currentCustomer, name: body.input.name };
+        return Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }] } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    let view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    let dialog = await screen.findByRole("dialog", { name: "Northwind" });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save profile" })).toHaveProperty("disabled", false));
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Northwind Ltd" } });
+    fireEvent.change(within(dialog).getByLabelText("Phone"), { target: { value: "" } });
+    fireEvent.change(within(dialog).getByLabelText("Owner"), { target: { value: "" } });
+    fireEvent.change(within(dialog).getByLabelText("Notes"), { target: { value: "" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save profile" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/capabilities/execute")).toBe(true));
+    expect((within(dialog).getByLabelText("Name") as HTMLInputElement).matches(":disabled")).toBe(true);
+    await act(async () => { resolvePending(Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 })); });
+    expect(await screen.findByText("This profile update is pending or uncertain. Retry the same action to resolve it.")).not.toBeNull();
+    expect((within(dialog).getByLabelText("Name") as HTMLInputElement).matches(":disabled")).toBe(true);
+
+    const firstRequest = fetchMock.mock.calls.find(([path]) => String(path) === "/api/capabilities/execute");
+    expect(JSON.parse(String(firstRequest?.[1]?.body))).toMatchObject({ input: { name: "Northwind Ltd", phone: null, notes: null, ownerUserId: null } });
+
+    view.unmount();
+    view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    dialog = await screen.findByRole("dialog", { name: "Northwind" });
+    expect(within(dialog).getByLabelText("Name")).toHaveProperty("value", "Northwind Ltd");
+    expect(within(dialog).getByLabelText("Phone")).toHaveProperty("value", "");
+    expect(within(dialog).getByLabelText("Owner")).toHaveProperty("value", "");
+    expect(within(dialog).getByLabelText("Notes")).toHaveProperty("value", "");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retry profile update" }));
+
+    expect(await screen.findByText("Updated 1 customer.")).not.toBeNull();
+    expect(currentCustomer.name).toBe("Northwind Ltd");
+    expect(profileAttempts).toBe(2);
+    const requests = fetchMock.mock.calls.filter(([path]) => String(path) === "/api/capabilities/execute");
+    const first = JSON.parse(String(requests[0]?.[1]?.body)) as { intentId: string; input: unknown };
+    const second = JSON.parse(String(requests[1]?.[1]?.body)) as { intentId: string; input: unknown };
+    expect(second).toEqual({ ...first, intentId: first.intentId });
+    view.unmount();
+  });
+
+  it("unlocks a profile draft after a terminal retry error so it can be corrected and restarted", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_PROFILE_UPDATE__", true);
+    let attempts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [] });
+      if (path === "/api/capabilities/execute") {
+        attempts += 1;
+        if (attempts === 1) return Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 });
+        if (attempts === 2) return Response.json({ error: "The customer name is invalid." }, { status: 422 });
+        return Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }] } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Northwind" });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save profile" })).toHaveProperty("disabled", false));
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Bad name" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save profile" }));
+    expect(await screen.findByText("This profile update is pending or uncertain. Retry the same action to resolve it.")).not.toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Retry profile update" }));
+    expect(await screen.findByText("The customer name is invalid.")).not.toBeNull();
+    expect((within(dialog).getByLabelText("Name") as HTMLInputElement).matches(":disabled")).toBe(false);
+    expect(within(dialog).getByRole("button", { name: "Save profile" })).toHaveProperty("disabled", false);
+
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Northwind Ltd" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save profile" }));
+    expect(await screen.findByText("Updated 1 customer.")).not.toBeNull();
+    expect(attempts).toBe(3);
+    const requests = fetchMock.mock.calls.filter(([path]) => String(path) === "/api/capabilities/execute");
+    const first = JSON.parse(String(requests[0]?.[1]?.body)) as { intentId: string };
+    const retry = JSON.parse(String(requests[1]?.[1]?.body)) as { intentId: string };
+    const restarted = JSON.parse(String(requests[2]?.[1]?.body)) as { intentId: string };
+    expect(retry.intentId).toBe(first.intentId);
+    expect(restarted.intentId).not.toBe(first.intentId);
+  });
+
+  it("ignores a Go profile update response after the active organization changes", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_PROFILE_UPDATE__", true);
+    let finishUpdate!: (response: Response) => void;
+    const updateResponse = new Promise<Response>((resolve) => { finishUpdate = resolve; });
+    const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
+      if (path === `/api/crm?timeline=${customerId}`) return Response.json({ entries: [] });
+      if (path === "/api/capabilities/execute") return updateResponse;
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Northwind" });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save profile" })).toHaveProperty("disabled", false));
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Northwind Ltd" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save profile" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything()));
+
+    view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
+    await act(async () => {
+      finishUpdate(Response.json({ ok: true, data: { updatedCount: 1, previous: [{ customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false }] } }));
+    });
+
+    expect(screen.queryByText("Updated 1 customer.")).toBeNull();
+  });
+
+  it("freezes bulk selections and fields while an exact Go bulk profile update is unresolved", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_PROFILE_UPDATE__", true);
+    const secondCustomerId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
+    const customers = [customer(), { ...customer("Contoso"), id: secondCustomerId, tags: [] }];
+    let attempts = 0;
+    const submittedInputs: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method !== "POST") return Response.json({ customers });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
+      if (path === "/api/capabilities/execute") {
+        attempts += 1;
+        submittedInputs.push(JSON.parse(String(init?.body)).input);
+        if (attempts === 1) return Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 });
+        return Response.json({ ok: true, data: { updatedCount: 2, previous: [
+          { customerId, name: "Northwind", ownerUserId: null, tags: ["renewal"], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false },
+          { customerId: secondCustomerId, name: "Contoso", ownerUserId: null, tags: [], notes: "Priority account", phone: null, preferredContactMethod: "email", doNotContact: false },
+        ] } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    await screen.findAllByRole("option", { name: "Avery" });
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select Northwind" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Contoso" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Bulk owner" }), { target: { value: ownerId } });
+    const bulkTag = screen.getByRole("textbox", { name: "Bulk tag" });
+    fireEvent.change(bulkTag, { target: { value: "vip" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply to selected" }));
+
+    const retry = await screen.findByRole("button", { name: "Retry profile update" });
+    expect(retry).toHaveProperty("disabled", false);
+    expect((screen.getByRole("combobox", { name: "Bulk owner" }) as HTMLSelectElement).matches(":disabled")).toBe(true);
+    expect((bulkTag as HTMLInputElement).matches(":disabled")).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "Select Northwind" }) as HTMLInputElement).matches(":disabled")).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "Select Contoso" }) as HTMLInputElement).matches(":disabled")).toBe(true);
+    expect(screen.getAllByRole("button", { name: "Merge" }).every((button) => (button as HTMLButtonElement).matches(":disabled"))).toBe(true);
+    fireEvent.click(retry);
+
+    expect(await screen.findByText("Updated 2 customers.")).not.toBeNull();
+    expect(attempts).toBe(2);
+    expect(submittedInputs[1]).toEqual(submittedInputs[0]);
+    expect(submittedInputs[0]).toEqual({ customerIds: [customerId, secondCustomerId], ownerUserId: ownerId, addTags: ["vip"] });
+  });
+
   it("persists contact preference and do-not-contact fields through profile update", async () => {
     let currentCustomer = customer();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

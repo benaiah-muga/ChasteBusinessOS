@@ -98,10 +98,16 @@ func ParseCustomerProfileUpdateInput(raw json.RawMessage) (CustomerProfileUpdate
 	if !ok || bytes.Equal(bytes.TrimSpace(customerIDsRaw), []byte("null")) || json.Unmarshal(customerIDsRaw, &input.CustomerIDs) != nil || len(input.CustomerIDs) < 1 || len(input.CustomerIDs) > 100 {
 		return CustomerProfileUpdateInput{}, errors.New("customerIds must contain between 1 and 100 UUIDs")
 	}
+	seenCustomerIDs := make(map[string]struct{}, len(input.CustomerIDs))
 	for _, id := range input.CustomerIDs {
 		if !isZodUUID(id) {
 			return CustomerProfileUpdateInput{}, errors.New("customerIds must contain UUIDs")
 		}
+		canonicalID := strings.ToLower(id)
+		if _, exists := seenCustomerIDs[canonicalID]; exists {
+			return CustomerProfileUpdateInput{}, errors.New("customerIds must not contain duplicates")
+		}
+		seenCustomerIDs[canonicalID] = struct{}{}
 	}
 
 	if value, exists := fields["name"]; exists {
@@ -199,11 +205,17 @@ func ParseCustomerProfileSnapshotsInput(raw json.RawMessage) (CustomerProfileSna
 		return CustomerProfileSnapshotsInput{}, errors.New("profiles must contain between 1 and 100 snapshots")
 	}
 	input := CustomerProfileSnapshotsInput{Profiles: make([]CustomerProfileSnapshot, 0, len(entries))}
+	seenCustomerIDs := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		profile, err := parseCustomerProfileSnapshot(entry)
 		if err != nil {
 			return CustomerProfileSnapshotsInput{}, err
 		}
+		canonicalID := strings.ToLower(profile.CustomerID)
+		if _, exists := seenCustomerIDs[canonicalID]; exists {
+			return CustomerProfileSnapshotsInput{}, errors.New("profiles must not contain duplicate customers")
+		}
+		seenCustomerIDs[canonicalID] = struct{}{}
 		input.Profiles = append(input.Profiles, profile)
 	}
 	return input, nil
@@ -487,7 +499,7 @@ func selectCustomerProfiles(ctx context.Context, tx pgx.Tx, orgID string, ids []
 		arguments = append(arguments, id)
 		placeholders[index] = fmt.Sprintf("$%d::uuid", index+2)
 	}
-	query := `SELECT id::text, name, owner_user_id::text, tags, notes, phone, preferred_contact_method, do_not_contact FROM customers WHERE org_id = $1::uuid AND id IN (` + strings.Join(placeholders, ",") + ")"
+	query := `SELECT id::text, name, owner_user_id::text, tags, notes, phone, preferred_contact_method, do_not_contact FROM customers WHERE org_id = $1::uuid AND id IN (` + strings.Join(placeholders, ",") + ") ORDER BY id FOR UPDATE"
 	rows, err := tx.Query(ctx, query, arguments...)
 	if err != nil {
 		return nil, err
@@ -517,9 +529,21 @@ func requireOrganizationOwners(ctx context.Context, tx pgx.Tx, orgID string, own
 		arguments = append(arguments, owner)
 		placeholders[index] = fmt.Sprintf("$%d::uuid", index+2)
 	}
-	query := `SELECT count(DISTINCT user_id) FROM memberships WHERE org_id = $1::uuid AND user_id IN (` + strings.Join(placeholders, ",") + ")"
-	var count int
-	if err := tx.QueryRow(ctx, query, arguments...).Scan(&count); err != nil {
+	query := `SELECT user_id::text FROM memberships WHERE org_id = $1::uuid AND user_id IN (` + strings.Join(placeholders, ",") + ") ORDER BY user_id FOR KEY SHARE"
+	rows, err := tx.Query(ctx, query, arguments...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var ownerID string
+		if err := rows.Scan(&ownerID); err != nil {
+			return err
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
 		return err
 	}
 	if count != len(owners) {
@@ -548,7 +572,7 @@ func updateCustomerProfileRow(ctx context.Context, tx pgx.Tx, claims authbridge.
 	if claims.ActorType == "human" {
 		updatedByUserID = claims.ActorID
 	}
-	_, err := tx.Exec(ctx, `
+	result, err := tx.Exec(ctx, `
 		UPDATE customers SET
 			name = CASE WHEN $1::boolean THEN $2::text ELSE name END,
 			owner_user_id = CASE WHEN $3::boolean THEN $4::uuid ELSE owner_user_id END,
@@ -564,7 +588,13 @@ func updateCustomerProfileRow(ctx context.Context, tx pgx.Tx, claims authbridge.
 		changes.PreferredContactSet, changes.PreferredContactMethod,
 		changes.DoNotContactSet, changes.DoNotContact, updatedByUserID, now,
 		claims.OrganizationID, customerID)
-	return err
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errors.New("customer profile changed while applying the update")
+	}
+	return nil
 }
 
 func updateTags(existing []string, input CustomerProfileUpdateInput, fold cases.Caser) []string {

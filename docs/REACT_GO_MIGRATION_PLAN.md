@@ -1723,3 +1723,14 @@ new owners and the manifest shows zero legacy runtime paths.
      deal ID. Go must enforce the legacy title limit, same-organization
      customer association, and same-organization owner membership. Browser
      proof remains open.
+174. Route only Vite CRM customer profile saves and bulk profile updates through
+     Go's session-authenticated `crm.updateCustomerProfiles` capability when
+     `CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep other customer writes on their
+     current routes. Persist the exact actor and organization scoped action and
+     intent through pending and uncertain results, restore the pending profile
+     or bulk target after reload, and reuse the same intent on the missing-route
+     fallback. Strictly validate the updated count and complete previous
+     snapshots. Lock customer and membership rows while capturing and applying
+     snapshots so undo cannot overwrite an intervening profile edit. Browser
+     proof remains open.

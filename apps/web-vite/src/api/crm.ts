@@ -218,6 +218,7 @@ export async function submitCrmDealStageMove(
 
 const CRM_TASK_INTENT_PREFIX = "chaste.crm.task-intent.v1:";
 const CRM_CUSTOMER_CREATE_INTENT_PREFIX = "chaste.crm.customer-create-intent.v1:";
+const CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX = "chaste.crm.customer-profile-update-intent.v1:";
 const CRM_DEAL_CREATE_INTENT_PREFIX = "chaste.crm.deal-create-intent.v1:";
 const CrmTaskAttemptSchema = z.object({
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
@@ -231,10 +232,22 @@ export type CrmTaskMutation =
   | { action: "createTask"; title: string; dueAt?: string; assigneeUserId?: string; refType?: string; refId?: string; note?: string }
   | { action: "completeTask"; taskId: string };
 type CrmCustomerCreateMutation = { action: "createCustomer"; name: string; email?: string; phone?: string; preferredContactMethod: "email" | "phone" | "whatsapp" | "other"; doNotContact: boolean };
+export type CrmCustomerProfileUpdateMutation = {
+  action: "updateProfile";
+  customerIds: string[];
+  name?: string;
+  ownerUserId?: string | null;
+  addTags?: string[];
+  removeTags?: string[];
+  notes?: string | null;
+  phone?: string | null;
+  preferredContactMethod?: "email" | "phone" | "whatsapp" | "other";
+  doNotContact?: boolean;
+};
 export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
 type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string };
 export type CrmDealCreateInput = Omit<CrmDealCreateMutation, "action">;
-type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmDealCreateMutation;
+type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation;
 
 const CrmTaskMutationSchema = z.discriminatedUnion("action", [
   z.object({
@@ -345,6 +358,33 @@ const CrmCustomerCreateMutationSchema = z.object({
   doNotContact: z.boolean(),
 }).strict();
 const CrmCustomerCreateOutputSchema = z.object({ customerId: uuid, duplicateWarning: z.string().nullable() }).strict();
+const CrmCustomerProfileUpdateMutationSchema = z.object({
+  action: z.literal("updateProfile"),
+  customerIds: z.array(uuid).min(1).max(100),
+  name: z.string().min(1).max(120).optional(),
+  ownerUserId: uuid.nullable().optional(),
+  addTags: z.array(z.string().min(1).max(40)).max(20).optional(),
+  removeTags: z.array(z.string().min(1).max(40)).max(20).optional(),
+  notes: z.string().max(4000).nullable().optional(),
+  phone: z.string().max(40).nullable().optional(),
+  preferredContactMethod: z.enum(["email", "phone", "whatsapp", "other"]).optional(),
+  doNotContact: z.boolean().optional(),
+}).strict().refine((input) => input.name === undefined || input.customerIds.length === 1, "A customer name can only be changed on one record at a time")
+  .refine((input) => Object.keys(input).some((key) => key !== "action" && key !== "customerIds"), "Include at least one profile change");
+const CrmCustomerProfileSnapshotSchema = z.object({
+  customerId: uuid,
+  name: z.string().min(1).max(120),
+  ownerUserId: uuid.nullable(),
+  tags: z.array(z.string()),
+  notes: z.string().nullable(),
+  phone: z.string().nullable(),
+  preferredContactMethod: z.enum(["email", "phone", "whatsapp", "other"]),
+  doNotContact: z.boolean(),
+}).strict();
+const CrmCustomerProfileUpdateOutputSchema = z.object({
+  updatedCount: z.number().int().positive().max(100),
+  previous: z.array(CrmCustomerProfileSnapshotSchema).min(1).max(100),
+}).strict();
 const CrmDealCreateMutationSchema = z.object({
   action: z.literal("createDeal"),
   title: z.string().min(1).max(120),
@@ -441,6 +481,61 @@ export async function submitCrmCustomerCreate(
     if (outcome.kind === "pending") return outcome;
     const parsed = CrmCustomerCreateOutputSchema.safeParse(outcome.data);
     if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected customer result.", true);
+    await clearCrmTaskAttempt(attempt.storageKey);
+    return { kind: "completed", data: parsed.data };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+      await clearCrmTaskAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+export async function readPendingCrmCustomerProfileUpdate(scope: CrmTaskRetryScope): Promise<CrmCustomerProfileUpdateMutation | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX}${scopeHash}:profiles`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to restore an unresolved CRM profile update."); }
+  if (raw === null) return null;
+  const attempt = parseCrmTaskAttempt(raw);
+  const action = CrmCustomerProfileUpdateMutationSchema.safeParse(attempt.action);
+  if (!action.success || await crmTaskFingerprint(action.data) !== attempt.fingerprint) {
+    throw new CrmApiError(0, "An unresolved CRM profile update could not be verified. Contact an administrator before retrying.");
+  }
+  return action.data;
+}
+
+export async function submitCrmCustomerProfileUpdate(
+  input: CrmCustomerProfileUpdateMutation,
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<z.infer<typeof CrmCustomerProfileUpdateOutputSchema>>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_PROFILE_UPDATE__ !== "undefined" && __GO_CRM_CUSTOMER_PROFILE_UPDATE__);
+  if (!useGo) return submitCrmAction("/api/customers", input, signal);
+  if (!CrmCustomerProfileUpdateMutationSchema.safeParse(input).success) {
+    throw new CrmApiError(0, "Review the customer profile changes and correct invalid values before submitting.");
+  }
+  const scope = await crmTaskScope(retryScope);
+  const attempt = await crmTaskAttempt(input, scope, "profiles", CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX);
+  try {
+    let { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.updateCustomerProfiles", input: Object.fromEntries(Object.entries(input).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) {
+      ({ response, body } = await request("/api/customers", {
+        method: "POST",
+        body: JSON.stringify({ ...input, intentId: attempt.intentId }),
+      }, signal));
+    }
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const parsed = CrmCustomerProfileUpdateOutputSchema.safeParse(outcome.data);
+    if (!parsed.success || parsed.data.updatedCount !== input.customerIds.length || parsed.data.previous.length !== input.customerIds.length) {
+      throw new CrmApiError(response.status, "The CRM service returned an unexpected profile update result.", true);
+    }
     await clearCrmTaskAttempt(attempt.storageKey);
     return { kind: "completed", data: parsed.data };
   } catch (error) {

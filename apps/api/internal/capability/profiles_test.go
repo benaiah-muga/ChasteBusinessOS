@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
@@ -55,6 +56,7 @@ func TestParseCustomerProfileInputsEnforceLegacySchema(t *testing.T) {
 	validID := "01234567-89ab-4cde-8fab-0123456789ab"
 	for _, input := range []string{
 		`{"customerIds":[],"notes":"x"}`,
+		`{"customerIds":["01234567-89ab-4cde-8fab-0123456789ab","01234567-89ab-4cde-8fab-0123456789AB"],"notes":"x"}`,
 		`{"customerIds":["01234567-89ab-0cde-8fab-0123456789ab"],"notes":"x"}`,
 		`{"customerIds":["01234567-89ab-4cde-8fab-0123456789ab"],"addTags":["  "]}`,
 		`{"customerIds":["01234567-89ab-4cde-8fab-0123456789ab"],"notes":null,"name":""}`,
@@ -63,6 +65,10 @@ func TestParseCustomerProfileInputsEnforceLegacySchema(t *testing.T) {
 		if _, err := ParseCustomerProfileUpdateInput(json.RawMessage(input)); err == nil {
 			t.Errorf("ParseCustomerProfileUpdateInput(%s) succeeded, want validation error", input)
 		}
+	}
+	duplicateSnapshots := json.RawMessage(`{"profiles":[{"customerId":"01234567-89ab-4cde-8fab-0123456789ab","ownerUserId":null,"tags":[],"notes":null,"phone":null,"preferredContactMethod":"email","doNotContact":false},{"customerId":"01234567-89ab-4cde-8fab-0123456789AB","ownerUserId":null,"tags":[],"notes":null,"phone":null,"preferredContactMethod":"email","doNotContact":false}]}`)
+	if _, err := ParseCustomerProfileSnapshotsInput(duplicateSnapshots); err == nil {
+		t.Fatal("duplicate profile snapshots were accepted")
 	}
 	input, err := ParseCustomerProfileUpdateInput(json.RawMessage(fmt.Sprintf(`{"customerIds":[%q],"notes":null}`, validID)))
 	if err != nil || !input.NotesSet || input.Notes != nil {
@@ -155,6 +161,48 @@ func TestGoCustomerProfileUpdatesAndInversesMatchLegacy(t *testing.T) {
 	}
 	if got := fx.count(`SELECT count(*) FROM action_receipts WHERE org_id = $1::uuid AND intent_key IN ($2,$3,$4)`, fx.orgID, fx.orgID+":profile-update", fx.orgID+":profile-restore", fx.orgID+":profile-reapply"); got != 3 {
 		t.Fatalf("profile receipts=%d, want one for each update/restore/reapply", got)
+	}
+}
+
+func TestGoCustomerProfileOverlappingUpdatesReturnSerializedPreviousSnapshots(t *testing.T) {
+	fx := newExecutorFixture(t)
+	customerID := seedProfileCustomer(t, fx, fx.orgID)
+	inputs := []json.RawMessage{
+		json.RawMessage(fmt.Sprintf(`{"customerIds":[%q],"name":"Update A"}`, customerID)),
+		json.RawMessage(fmt.Sprintf(`{"customerIds":[%q],"name":"Update B"}`, customerID)),
+	}
+	start := make(chan struct{})
+	results := make([]Result, len(inputs))
+	errs := make([]error, len(inputs))
+	var workers sync.WaitGroup
+	for index := range inputs {
+		workers.Add(1)
+		go func(index int) {
+			defer workers.Done()
+			<-start
+			claims := profileCapabilityClaims(fx, updateCustomerProfilesCapabilityID, inputs[index], fmt.Sprintf("overlapping-profile-update-%d", index), "human", "")
+			results[index], errs[index] = fx.executor.Execute(fx.ctx, claims, updateCustomerProfilesCapabilityID, inputs[index])
+		}(index)
+	}
+	close(start)
+	workers.Wait()
+
+	previousNames := make(map[string]struct{}, len(results))
+	for index, result := range results {
+		if errs[index] != nil || !result.OK || result.PendingApproval {
+			t.Fatalf("concurrent profile update %d result=%+v err=%v", index, result, errs[index])
+		}
+		var output CustomerProfileUpdateOutput
+		if err := json.Unmarshal(result.Data, &output); err != nil {
+			t.Fatal(err)
+		}
+		if len(output.Previous) != 1 || output.Previous[0].Name == nil {
+			t.Fatalf("concurrent profile update %d previous snapshot=%+v", index, output.Previous)
+		}
+		previousNames[*output.Previous[0].Name] = struct{}{}
+	}
+	if _, hasOriginal := previousNames["Original profile"]; !hasOriginal || len(previousNames) != 2 {
+		t.Fatalf("overlapping updates observed previous names %v, want original and one serialized update", previousNames)
 	}
 }
 
