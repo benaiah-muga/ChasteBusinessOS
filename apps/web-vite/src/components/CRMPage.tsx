@@ -246,7 +246,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }
   const busy = sharedBusy || customerCreateBusy || dealCreateBusy || profileUpdateBusyCount > 0;
   const customerCreateReady = Boolean(customerCreateScopeIdentity && customerCreateResolvedScope === customerCreateScopeIdentity);
-  const dealCreateReady = !goCrmDealCreate || Boolean(dealCreateScopeIdentity && dealCreateResolvedScope === dealCreateScopeIdentity);
+  const dealCreateReady = Boolean(dealCreateScopeIdentity && dealCreateResolvedScope === dealCreateScopeIdentity);
   const taskDraftScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
   const taskDraftReady = !goCrmTaskWrites || Boolean(taskDraftScopeIdentity && taskDraftResolvedScope === taskDraftScopeIdentity);
   const taskDetailsReady = !goCrmTaskWrites || Boolean(taskDraftScopeIdentity && taskDetailsRecoveryScope === taskDraftScopeIdentity);
@@ -407,11 +407,6 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   }, [actorId, customerCreateScopeIdentity, goCrmCustomerCreate, organizationId]);
 
   useEffect(() => {
-    if (!goCrmDealCreate) {
-      setDealCreateResolvedScope(null);
-      setDealCreateLocked(false);
-      return;
-    }
     let active = true;
     setDealCreateResolvedScope(null);
     setDealCreateLocked(false);
@@ -571,7 +566,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     const input: CrmDealCreateInput = { title, valueMinor, ...(createDeal.customerId ? { customerId: createDeal.customerId } : {}) };
     const operationScope = dealCreateScopeIdentity;
     const operationScopeGeneration = dealCreateScopeGeneration.current;
-    const isCurrentScope = () => !goCrmDealCreate || Boolean(operationScope && dealCreateScopeRef.current === operationScope && dealCreateScopeGeneration.current === operationScopeGeneration);
+    const isCurrentScope = () => Boolean(operationScope && dealCreateScopeRef.current === operationScope && dealCreateScopeGeneration.current === operationScopeGeneration);
     const accepted = await mutate("/api/deals", { action: "create", ...input }, undefined, async () => {
       try {
         const outcome = await submitCrmDealCreate(input, undefined, goCrmDealCreate, { actorId, organizationId });
@@ -588,11 +583,11 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
           const status = Number((reason as { status: unknown }).status);
           const mayHaveReached = Boolean((reason as { requestMayHaveReachedServer?: unknown }).requestMayHaveReachedServer);
           if (goCrmDealCreate && (mayHaveReached || status === 408 || status === 429 || status >= 500)) setDealCreateLocked(true);
-          if (goCrmDealCreate && status >= 400 && status < 500 && status !== 408 && status !== 429) setDealCreateLocked(false);
+          else if (goCrmDealCreate && status >= 400 && status < 500 && status !== 408 && status !== 429) setDealCreateLocked(false);
         }
         throw reason;
       }
-    }, isCurrentScope, goCrmDealCreate ? "deal-create" : "shared");
+    }, isCurrentScope, "deal-create");
     if (accepted && isCurrentScope()) {
       setCreateDeal({ title: "", value: "", customerId: "" });
       setDealCreateLocked(false);
@@ -985,7 +980,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
 
     {tab === "pipeline" && <section className="crm-panel" aria-label="Deals pipeline"><header className="crm-panel-heading"><div><h2>Deals pipeline</h2><p>Move deals through six stages. Stage changes that affect the forecast require confirmation, and lost deals require a reason.</p></div><label>Show <select aria-label="Filter deals" value={dealFilter} onChange={(event) => setDealFilter(event.target.value as typeof dealFilter)}><option value="all">All deals</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></label></header>
       <form className="crm-inline-form" onSubmit={(event) => void createNewDeal(event)}><label>Deal name<input required maxLength={120} disabled={busy || !dealCreateReady || dealCreateLocked} value={createDeal.title} onChange={(event) => setCreateDeal({ ...createDeal, title: event.target.value })} /></label><label>Value<input type="number" min="0" step="0.01" disabled={busy || !dealCreateReady || dealCreateLocked} value={createDeal.value} onChange={(event) => setCreateDeal({ ...createDeal, value: event.target.value })} /></label><label>Customer<select disabled={busy || !dealCreateReady || dealCreateLocked} value={createDeal.customerId} onChange={(event) => setCreateDeal({ ...createDeal, customerId: event.target.value })}><option value="">No linked customer</option>{activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label><button disabled={busy || !dealCreateReady}>{dealCreateLocked ? "Retry deal" : "Add deal"}</button></form>
-      {goCrmDealCreate && !dealCreateReady && <p role="status">CRM is waiting for account and organization details or restoring a saved deal draft.</p>}
+      {!dealCreateReady && <p role="status">CRM is waiting for account and organization details or restoring a saved deal draft.</p>}
       {goCrmDealCreate && dealCreateLocked && <p role="status">This deal creation is pending or uncertain. Retry the same details to resolve it.</p>}
       <div className="crm-deal-controls"><label>Search deals<input type="search" value={dealSearch} onChange={(event) => setDealSearch(event.target.value)} placeholder="Deal, customer, or note" /></label><div role="group" aria-label="Deal layout"><button type="button" aria-pressed={dealView === "board"} onClick={() => setDealView("board")}>Board</button><button type="button" aria-pressed={dealView === "table"} onClick={() => setDealView("table")}>Table</button></div></div>
       {dealView === "board" ? <div className="crm-deal-board">{stages.filter((stageName) => dealFilter === "all" || (dealFilter === "open" ? stageName !== "won" && stageName !== "lost" : stageName === dealFilter)).map((stageName) => <section className={`crm-deal-column${overStage === stageName ? " crm-deal-column-over" : ""}`} key={stageName} aria-label={`${stageLabels[stageName]} deals`} onDragOver={(event) => { event.preventDefault(); setOverStage(stageName); }} onDragLeave={() => setOverStage((current) => current === stageName ? null : current)} onDrop={(event) => { event.preventDefault(); const deal = deals.find((entry) => entry.id === draggingDealId); if (deal) requestMove(deal, stageName); setDraggingDealId(null); setOverStage(null); }}><h3>{stageLabels[stageName]} <span>{visibleDeals.filter((deal) => deal.stage === stageName).length}</span></h3>{visibleDeals.filter((deal) => deal.stage === stageName).map((deal) => <article className={`crm-deal-card${draggingDealId === deal.id ? " crm-deal-card-dragging" : ""}`} key={deal.id} draggable onDragStart={(event) => { setDraggingDealId(deal.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", deal.id); }} onDragEnd={() => { setDraggingDealId(null); setOverStage(null); }}><strong>{deal.title}</strong><span>{money(deal.valueMinor)}</span>{deal.customerName && <small>{deal.customerName}</small>}{deal.note && <small>{deal.note}</small>}<label>Move to<select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}><option value={deal.stage}>{stageLabels[deal.stage]}</option>{stages.filter((candidate) => candidate !== deal.stage).map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></label>{deal.stage === "lead" && <button type="button" onClick={() => { setConvertTarget(deal); setConvertMode("new"); setConvertCustomerName(deal.customerName ?? ""); setConvertCustomerId(""); }}>Convert lead</button>}</article>)}</section>)}</div> : <div className="crm-table-wrap"><table className="crm-table crm-deal-table"><thead><tr><th>Deal</th><th>Customer</th><th>Stage</th><th>Value</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{visibleDeals.map((deal) => <tr key={deal.id}><td><strong>{deal.title}</strong>{deal.note && <small>{deal.note}</small>}</td><td>{deal.customerName ?? "Unlinked"}</td><td><select aria-label={`Move ${deal.title}`} value={deal.stage} disabled={busy} onChange={(event) => requestMove(deal, event.target.value as (typeof stages)[number])}>{stages.map((candidate) => <option key={candidate} value={candidate}>{stageLabels[candidate]}</option>)}</select></td><td>{money(deal.valueMinor)}</td><td>{new Date(deal.updatedAt).toLocaleDateString()}</td><td>{deal.stage === "lead" && <button type="button" onClick={() => { setConvertTarget(deal); setConvertMode("new"); setConvertCustomerName(deal.customerName ?? ""); setConvertCustomerId(""); }}>Convert lead</button>}</td></tr>)}</tbody></table>{visibleDeals.length === 0 && <p className="crm-empty">No deals match this filter.</p>}</div>}

@@ -482,21 +482,22 @@ export async function submitCrmDealCreate(
   const useGo = useGoOverride ?? (typeof __GO_CRM_DEAL_CREATE__ !== "undefined" && __GO_CRM_DEAL_CREATE__);
   const action = { action: "createDeal" as const, ...input };
   const legacyAction = { action: "create", ...input };
-  if (!useGo) return submitCrmAction("/api/deals", legacyAction, signal);
-  if (!CrmDealCreateMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the deal details and correct invalid values before submitting.");
   const scope = await crmTaskScope(retryScope);
+  if (!useGo) {
+    const unresolved = await readPendingCrmDealCreate(scope);
+    if (unresolved) {
+      throw new CrmApiError(0, "A Go deal creation is unresolved. Restore the Go deal route and retry its exact details before creating another deal.", true);
+    }
+    return submitCrmAction("/api/deals", legacyAction, signal);
+  }
+  if (!CrmDealCreateMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the deal details and correct invalid values before submitting.");
   const attempt = await crmTaskAttempt(action, scope, "create", CRM_DEAL_CREATE_INTENT_PREFIX);
   try {
-    let { response, body } = await request("/api/capabilities/execute", {
+    const { response, body } = await request("/api/capabilities/execute", {
       method: "POST",
       body: JSON.stringify({ capabilityId: "crm.createDeal", input, intentId: attempt.intentId }),
     }, signal);
-    if (response.status === 404) {
-      ({ response, body } = await request("/api/deals", {
-        method: "POST",
-        body: JSON.stringify({ ...legacyAction, intentId: attempt.intentId }),
-      }, signal));
-    }
+    if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
     const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
     if (outcome.kind === "pending") return outcome;
     const parsed = CrmDealCreateOutputSchema.safeParse(outcome.data);
@@ -504,7 +505,7 @@ export async function submitCrmDealCreate(
     await clearCrmDealCreateAttempt(attempt.storageKey);
     return { kind: "completed", data: parsed.data };
   } catch (error) {
-    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
       await clearCrmDealCreateAttempt(attempt.storageKey);
     }
     throw error;

@@ -15,6 +15,7 @@ function deal(stage: string) {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -28,6 +29,7 @@ describe("Vite CRM page", () => {
       if (path === "/api/deals") return Response.json({ deals: [] });
       if (path === "/api/customers" && init?.method === "POST") return Response.json({ ok: true, data: { customerId: createdId, duplicateWarning } });
       if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/team") return Response.json({ members: [] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
       if (path === "/api/crm/views") return Response.json({ views: [] });
       return new Response(null, { status: 404 });
@@ -163,6 +165,7 @@ describe("Vite CRM page", () => {
 
   it("keeps an unrelated CRM mutation busy when customer scope changes", async () => {
     vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
+    vi.stubGlobal("__GO_CRM_DEAL_CREATE__", false);
     let finishDeal!: (response: Response) => void;
     const dealResponse = new Promise<Response>((resolve) => { finishDeal = resolve; });
     const otherOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
@@ -191,15 +194,20 @@ describe("Vite CRM page", () => {
       finishDeal(Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 }));
     });
 
-    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    expect(screen.queryByText("Manager approval required")).toBeNull();
     await waitFor(() => expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(false));
   });
 
   it("keeps a Go deal draft locked and retries the same payload and intent after approval is pending", async () => {
     vi.stubGlobal("__GO_CRM_DEAL_CREATE__", true);
     let createCalls = 0;
+    let legacyCreateCalls = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
+      if (path === "/api/deals" && _init?.method === "POST") {
+        legacyCreateCalls += 1;
+        return Response.json({ ok: true, data: { dealId } });
+      }
       if (path === "/api/deals") return Response.json({ deals: [] });
       if (path === "/api/customers") return Response.json({ customers: [customer()] });
       if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
@@ -213,7 +221,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(false));
@@ -226,6 +234,19 @@ describe("Vite CRM page", () => {
     expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe(" Renewal ");
     expect((screen.getByLabelText("Deal name") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Retry deal" }) as HTMLButtonElement).disabled).toBe(false);
+
+    vi.stubGlobal("__GO_CRM_DEAL_CREATE__", false);
+    view.rerender(<CRMPage actorId={customerId} organizationId={dealId} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Retry deal" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Retry deal" }));
+    expect(await screen.findByText(/A Go deal creation is unresolved/)).not.toBeNull();
+    expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe("Renewal");
+    expect((screen.getByLabelText("Deal name") as HTMLInputElement).disabled).toBe(true);
+    expect(legacyCreateCalls).toBe(0);
+
+    vi.stubGlobal("__GO_CRM_DEAL_CREATE__", true);
+    view.rerender(<CRMPage actorId={customerId} organizationId={dealId} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Retry deal" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Retry deal" }));
 
     await waitFor(() => expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe(""));
@@ -233,6 +254,67 @@ describe("Vite CRM page", () => {
     expect(submissions).toHaveLength(2);
     expect(JSON.parse(String(submissions[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createDeal", input: { title: "Renewal", valueMinor: 25_500, customerId }, intentId: expect.any(String) });
     expect(JSON.parse(String(submissions[1]?.[1]?.body))).toEqual(JSON.parse(String(submissions[0]?.[1]?.body)));
+    expect(legacyCreateCalls).toBe(0);
+  });
+
+  it("keeps a Go deal draft locked after 404 and preserves Retry deal for the exact action", async () => {
+    vi.stubGlobal("__GO_CRM_DEAL_CREATE__", true);
+    let createCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals" && init?.method === "POST") throw new Error("deal create must not fall back to the legacy route");
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute") {
+        createCalls += 1;
+        return createCalls === 1
+          ? Response.json({ error: "not found" }, { status: 404 })
+          : Response.json({ ok: true, data: { dealId } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: " Quarterly renewal " } });
+    fireEvent.change(screen.getByLabelText("Value"), { target: { value: "420.00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add deal" }));
+
+    expect(await screen.findByText("not found")).not.toBeNull();
+    expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe(" Quarterly renewal ");
+    expect((screen.getByLabelText("Deal name") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Retry deal" })).toHaveProperty("disabled", false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry deal" }));
+    await waitFor(() => expect((screen.getByLabelText("Deal name") as HTMLInputElement).value).toBe(""));
+    const submissions = fetchMock.mock.calls.filter(([path]) => String(path) === "/api/capabilities/execute");
+    expect(submissions).toHaveLength(2);
+    expect(JSON.parse(String(submissions[1]?.[1]?.body))).toEqual(JSON.parse(String(submissions[0]?.[1]?.body)));
+  });
+
+  it("blocks legacy deal creation until the actor and organization scope resolve", async () => {
+    vi.stubGlobal("__GO_CRM_DEAL_CREATE__", false);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={null} organizationId={null} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    expect(await screen.findByText("CRM is waiting for account and organization details or restoring a saved deal draft.")).not.toBeNull();
+    expect((screen.getByLabelText("Deal name") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Add deal" }));
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path) === "/api/deals" && init?.method === "POST")).toBe(false);
   });
 
   it("ignores an old deal-create response after the organization scope changes", async () => {

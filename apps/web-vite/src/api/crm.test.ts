@@ -136,7 +136,7 @@ describe("CRM API client", () => {
     await expect(submitCrmDealCreate(input, undefined, true, { actorId: customerId, organizationId: dealId })).rejects.toMatchObject({ name: "CrmApiError", message: "The CRM service returned an unexpected deal result." });
   });
 
-  it("restores exact deal drafts and reuses intent through pending, uncertainty, and same-intent 404 fallback", async () => {
+  it("restores exact deal drafts and keeps intent through pending, uncertainty, and Go 404 without legacy fallback", async () => {
     const scope = { actorId: customerId, organizationId: dealId };
     const input = { title: "Renewal", valueMinor: 25_500, customerId };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }))
@@ -149,16 +149,22 @@ describe("CRM API client", () => {
     const intentId = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
     await expect(submitCrmDealCreate(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
 
-    const legacyFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }))
-      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
-      .mockResolvedValueOnce(Response.json({ ok: true, data: { dealId } }));
-    vi.stubGlobal("fetch", legacyFetch);
+    const go404Fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ error: "not found" }, { status: 404 }));
+    vi.stubGlobal("fetch", go404Fetch);
+    await expect(submitCrmDealCreate(input, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(go404Fetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
+    expect(JSON.parse(String(go404Fetch.mock.calls[0]?.[1]?.body)).intentId).toBe(intentId);
+    await expect(readPendingCrmDealCreate(scope)).resolves.toEqual(input);
+    await expect(submitCrmDealCreate(input, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    await expect(submitCrmDealCreate({ ...input, title: "Changed" }, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(go404Fetch).toHaveBeenCalledTimes(1);
+    await expect(readPendingCrmDealCreate(scope)).resolves.toEqual(input);
+
+    const retryFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }));
+    vi.stubGlobal("fetch", retryFetch);
     await expect(submitCrmDealCreate(input, undefined, true, scope)).resolves.toEqual({ kind: "completed", data: { dealId } });
-    const goBody = JSON.parse(String(legacyFetch.mock.calls[0]?.[1]?.body));
-    const legacyBody = JSON.parse(String(legacyFetch.mock.calls[1]?.[1]?.body));
-    expect(legacyFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/deals"]);
-    expect(goBody.intentId).toBe(intentId);
-    expect(legacyBody).toMatchObject({ action: "create", ...input, intentId });
+    expect(retryFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute"]);
+    expect(JSON.parse(String(retryFetch.mock.calls[0]?.[1]?.body)).intentId).toBe(intentId);
     await expect(readPendingCrmDealCreate(scope)).resolves.toBeNull();
   });
 
@@ -169,6 +175,7 @@ describe("CRM API client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(submitCrmDealCreate(input, undefined, true)).rejects.toMatchObject({ status: 0 });
+    await expect(submitCrmDealCreate(input, undefined, false)).rejects.toMatchObject({ status: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
     await expect(submitCrmDealCreate(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
     await expect(submitCrmDealCreate({ ...input, title: "Changed" }, undefined, true, scope)).rejects.toMatchObject({ status: 0 });
@@ -179,7 +186,7 @@ describe("CRM API client", () => {
     const input = { title: "Renewal", valueMinor: 25_500, customerId };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { dealId } }));
     vi.stubGlobal("fetch", fetchMock);
-    await submitCrmDealCreate(input, undefined, false);
+    await submitCrmDealCreate(input, undefined, false, { actorId: customerId, organizationId: dealId });
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/deals");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ action: "create", ...input, intentId: expect.any(String) });
   });
