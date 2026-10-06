@@ -1768,3 +1768,12 @@ new owners and the manifest shows zero legacy runtime paths.
      Restore the actor/org scoped confirmation and intent after pending or
      uncertain results, validate the response, and block stale confirmation
      state across organization or session changes. Browser proof remains open.
+182. Add the internal pre-organization database bootstrap primitive for Go.
+     Derive the owner from a live verified Better Auth session, serialize
+     attempts by that user, and create the organization, seeded records, and
+     intent receipt atomically under a dedicated `chaste_bootstrap_owner` role
+     with `NOBYPASSRLS`, a pinned search path, and execution granted only to
+     `chaste_app`. This is foundation only: the public Go handler must also
+     append `organization.created`, perform the best-effort embedding upgrade,
+     and coordinate with the legacy route before cutover. Browser proof remains
+     open.

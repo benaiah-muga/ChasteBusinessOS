@@ -884,6 +884,13 @@
       "when": 1791100800005,
       "tag": "0125_rotate_public_support_embedding_candidates",
       "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1791270394891,
+      "tag": "0126_go_organization_bootstrap",
+      "breakpoints": true
     }
   ]
 }
