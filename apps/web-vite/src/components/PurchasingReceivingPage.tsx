@@ -132,7 +132,7 @@ function orderTitle(error: ReceivingApiError, fallback: string): string {
   return fallback;
 }
 
-export function PurchasingReceivingPage({ baseCurrency = null }: { baseCurrency?: string | null } = {}) {
+export function PurchasingReceivingPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null } = {}) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [poNumber, setPoNumber] = useState("");
   const [openNumber, setOpenNumber] = useState<number | null>(null);
@@ -224,6 +224,16 @@ export function PurchasingReceivingPage({ baseCurrency = null }: { baseCurrency?
       setNotice({ tone: "error", text: "Nothing to receive. Enter what arrived on at least one line." });
       return;
     }
+    const invalidQuantity = lines.find((line) => !Number.isSafeInteger(line.quantity) || !Number.isSafeInteger(line.rejected)
+      || line.quantity < 0 || line.rejected < 0 || line.quantity > 2_147_483_647 || line.rejected > 2_147_483_647);
+    if (invalidQuantity || lines.some((line) => {
+      const sameLine = lines.filter((entry) => entry.lineNumber === line.lineNumber);
+      return sameLine.reduce((sum, entry) => sum + entry.quantity, 0) > 2_147_483_647
+        || sameLine.reduce((sum, entry) => sum + entry.rejected, 0) > 2_147_483_647;
+    })) {
+      setNotice({ tone: "error", text: "Enter whole quantities within the supported range for every receipt line." });
+      return;
+    }
     const missingReason = lines.find((line) => line.rejected > 0 && !line.rejectionNote);
     if (missingReason) {
       setNotice({
@@ -232,11 +242,19 @@ export function PurchasingReceivingPage({ baseCurrency = null }: { baseCurrency?
       });
       return;
     }
+    if (lines.some((line) => line.rejected > 0 && (line.rejectionNote.length > 500))) {
+      setNotice({ tone: "error", text: "Rejection reasons must be 500 characters or fewer." });
+      return;
+    }
     const tolerancePct = Number(tolerance) || 0;
-    if (tolerancePct > 0 && !authority.trim()) {
+    if (!Number.isSafeInteger(tolerancePct) || tolerancePct < 0 || tolerancePct > 10) {
+      setNotice({ tone: "error", text: "Overreceipt tolerance must be a whole percentage from 0 to 10." });
+      return;
+    }
+    if (tolerancePct > 0 && (authority.trim().length < 10 || authority.trim().length > 500)) {
       setNotice({
         tone: "error",
-        text: "Accepting more than ordered needs a named authority. Say who approved the over-receipt.",
+        text: "Accepting more than ordered needs a named authority reason between 10 and 500 characters.",
       });
       return;
     }
@@ -255,11 +273,17 @@ export function PurchasingReceivingPage({ baseCurrency = null }: { baseCurrency?
     setBusy(true);
     setNotice(null);
     try {
-      const outcome = await submitReceiveGoods(action);
+      const outcome = await submitReceiveGoods(action, undefined, { actorId, organizationId });
       if (outcome.kind === "pending") {
         setNotice({ tone: "pending", text: `${outcome.reason} Nothing has been received yet; the receipt lands once it is approved.` });
         return;
       }
+      setDraft((current) => Object.fromEntries(Object.entries(current).map(([lineNumber, line]) => [
+        lineNumber,
+        { ...line, accepted: "0", rejected: "0" },
+      ])));
+      setTolerance("");
+      setAuthority("");
       setLastReceipt({ number: outcome.data.receiptNumber, fullyReceived: outcome.data.fullyReceived });
       setNotice({
         tone: "success",
@@ -268,7 +292,8 @@ export function PurchasingReceivingPage({ baseCurrency = null }: { baseCurrency?
           : "Partially received; what is still expected stays visible on the order."}`,
       });
       try {
-        setDetail(await fetchReceivingDetail(order.number));
+        const refreshedDetail = await fetchReceivingDetail(order.number);
+        setDetail(refreshedDetail);
       } catch {
         setDetailError("The receipt was recorded, but the history could not be reloaded.");
       }
@@ -278,7 +303,7 @@ export function PurchasingReceivingPage({ baseCurrency = null }: { baseCurrency?
     } finally {
       setBusy(false);
     }
-  }, [order, draft, tolerance, authority, busy, load]);
+  }, [order, draft, tolerance, authority, busy, load, actorId, organizationId]);
 
   const receiptHistory = useMemo(() => detail?.receipts ?? [], [detail]);
 

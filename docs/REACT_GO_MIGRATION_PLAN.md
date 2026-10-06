@@ -1591,3 +1591,14 @@ new owners and the manifest shows zero legacy runtime paths.
      draft on pending or failed responses, validate positive safe-integer
      quantities and valid non-negative prices, and preserve other purchasing
      actions. Focused Vite checks pass; browser proof remains open.
+163. Route Vite receiving-desk submissions through Go's session-authenticated
+     `purchasing.receiveGoods` capability when
+     `CHASTE_GO_PURCHASING_RECEIVE_GOODS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the selector to `0` to restore
+     `/api/purchasing`; a missing Go capability route falls back with the same
+     intent. Scope persistent retry identity to the active actor and
+     organization, retain it for approval-pending or uncertain submissions,
+     and clear it on success or terminal 4xx. Preserve receipt drafts on
+     pending and error responses, and validate quantities, aggregate limits,
+     rejection reasons, and overreceipt authority against Go's contract.
+     Focused Vite checks pass; browser proof remains open.

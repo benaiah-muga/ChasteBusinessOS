@@ -7,7 +7,10 @@ import {
   submitReceiveGoods,
 } from "./purchasing-receiving";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  window.localStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 const switchboard = { catalog: [{ id: "purchasing" }], enabledModules: ["purchasing"] };
 
@@ -143,6 +146,77 @@ describe("recording a receipt", () => {
     poNumber: 42,
     lines: [{ lineNumber: 1, quantity: 1500, rejected: 500, rejectionNote: "Torn stitching" }],
   };
+  const retryScope = { actorId: "actor-1", organizationId: "org-1" };
+
+  it("requires actor and organization scope before a Go receipt request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
+
+    await expect(submitReceiveGoods(action, undefined, { actorId: "actor-1", organizationId: null }))
+      .rejects.toMatchObject({ status: 0, message: expect.stringContaining("organization") });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("routes through Go with the capability envelope and reuses its scoped intent while pending or uncertain", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Overreceipt needs approval." }, { status: 202 }))
+      .mockImplementation(() => Promise.resolve(Response.json({ ok: true, data: { received: true, fullyReceived: true, receiptNumber: 2 } })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitReceiveGoods(action, undefined, retryScope)).rejects.toMatchObject({ status: 0 });
+    const first = postedBody(fetchMock.mock.calls[0]!);
+    await expect(submitReceiveGoods(action, undefined, retryScope)).resolves.toEqual({
+      kind: "pending",
+      reason: "Overreceipt needs approval.",
+    });
+    const second = postedBody(fetchMock.mock.calls[1]!);
+    expect(second).toMatchObject({
+      capabilityId: "purchasing.receiveGoods",
+      input: { poNumber: 42, lines: action.lines },
+      intentId: first.intentId,
+    });
+    expect(second.input).not.toHaveProperty("action");
+    await expect(submitReceiveGoods(action, undefined, retryScope)).resolves.toEqual({
+      kind: "completed",
+      data: { received: true, fullyReceived: true, receiptNumber: 2 },
+    });
+    expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(first.intentId);
+  });
+
+  it("falls back to the legacy receipt route with the same intent when Go is unavailable", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { received: true, fullyReceived: false, receiptNumber: 3 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitReceiveGoods(action, undefined, retryScope)).resolves.toMatchObject({ kind: "completed", data: { receiptNumber: 3 } });
+    const intentId = postedBody(fetchMock.mock.calls[0]!).intentId;
+    expect(postedBody(fetchMock.mock.calls[1]!)).toMatchObject({ action: "receiveGoods", poNumber: 42, intentId });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/purchasing");
+  });
+
+  it("rejects Go-incompatible quantities, totals, reasons, and authority values before requests", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const tooLarge = 2_147_483_648;
+
+    for (const invalid of [
+      { ...action, poNumber: tooLarge },
+      { ...action, lines: [{ lineNumber: 1, quantity: tooLarge }] },
+      { ...action, lines: [{ lineNumber: 1, quantity: 1, rejected: 1 }] },
+      { ...action, lines: [{ lineNumber: 1, quantity: tooLarge }, { lineNumber: 1, quantity: 1 }] },
+      { ...action, overreceiptTolerancePct: 10, authorityReason: "short" },
+      { ...action, overreceiptTolerancePct: 11, authorityReason: "site manager approved" },
+    ]) {
+      await expect(submitReceiveGoods(invalid, undefined, retryScope)).rejects.toMatchObject({ status: 0 });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it("stamps an intentId and returns the receipt result", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { received: true, fullyReceived: true, receiptNumber: 2 } }));
@@ -178,7 +252,7 @@ describe("recording a receipt", () => {
       { status: 202 },
     )));
 
-    await expect(submitReceiveGoods({ ...action, overreceiptTolerancePct: 25 })).resolves.toEqual({
+    await expect(submitReceiveGoods({ ...action, overreceiptTolerancePct: 10, authorityReason: "site manager approved" })).resolves.toEqual({
       kind: "pending",
       reason: "Overreceipt needs a second approver.",
     });
@@ -222,7 +296,7 @@ describe("recording a receipt", () => {
       { error: "overreceipt needs explicit authority" },
       { status: 422 },
     )));
-    await expect(submitReceiveGoods({ ...action, overreceiptTolerancePct: 5 })).rejects.toMatchObject({
+    await expect(submitReceiveGoods({ ...action, overreceiptTolerancePct: 5, authorityReason: "site manager approved" })).rejects.toMatchObject({
       status: 422,
       message: "overreceipt needs explicit authority",
     });

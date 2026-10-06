@@ -10,6 +10,7 @@ import {
   goInventoryBarcodeLookupFromEnv,
   goCrmDealStageMoveFromEnv,
   goPurchasingCreateOrderFromEnv,
+  goPurchasingReceiveGoodsFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -72,6 +73,14 @@ describe("purchase order creation Go selector", () => {
     expect(goPurchasingCreateOrderFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_CREATE_ORDER: "1" })).toBe(true);
     expect(goPurchasingCreateOrderFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingCreateOrderFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_CREATE_ORDER: "1" })).toBe(false);
+  });
+});
+
+describe("purchase receipt Go selector", () => {
+  it("requires both the receiving selector and session capability route", () => {
+    expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_RECEIVE_GOODS: "1" })).toBe(true);
+    expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_RECEIVE_GOODS: "1" })).toBe(false);
   });
 });
 

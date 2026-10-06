@@ -579,22 +579,40 @@ describe("PurchasingReceivingPage", () => {
   };
 
   function receivingFetch(post?: (body: Record<string, unknown>) => unknown) {
+    let latestRollup = rollup;
     return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/modules") return Response.json(switchboard);
       if (url === "/api/purchasing" && (init?.method ?? "GET") === "GET") return Response.json(receivingOrders);
+      if (url === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as { capabilityId?: string; input?: Record<string, unknown>; intentId?: string };
+        if (body.capabilityId !== "purchasing.receiveGoods" || !body.input) throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
+        return resolve(post ? post({ ...body.input, action: "receiveGoods", intentId: body.intentId }) : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 4 } });
+      }
       if (url === "/api/purchasing") {
         const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-        if (body.action === "receiptDetail") return Response.json({ ok: true, data: rollup });
-        return resolve(post ? post(body) : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 4 } });
+        if (body.action === "receiptDetail") return Response.json({ ok: true, data: latestRollup });
+        const response = resolve(post ? post(body) : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 4 } });
+        if (body.action === "receiveGoods" && response.status !== 202 && Array.isArray(body.lines)) {
+          const acceptedByLine = new Map((body.lines as Array<{ lineNumber: number; quantity: number }>).map((line) => [line.lineNumber, line.quantity]));
+          latestRollup = {
+            ...rollup,
+            orderLines: rollup.orderLines.map((line) => ({
+              ...line,
+              acceptedThousandths: line.acceptedThousandths + (acceptedByLine.get(line.position) ?? 0),
+              remainingThousandths: Math.max(0, line.remainingThousandths - (acceptedByLine.get(line.position) ?? 0)),
+            })),
+          };
+        }
+        return response;
       }
       throw new TypeError(`unrouted ${url}`);
     });
   }
 
-  async function openOrder(fetchMock: ReturnType<typeof receivingFetch>) {
+  async function openOrder(fetchMock: ReturnType<typeof receivingFetch>, scope?: { actorId: string; organizationId: string }) {
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingReceivingPage />);
+    render(<PurchasingReceivingPage actorId={scope?.actorId} organizationId={scope?.organizationId} />);
     fireEvent.change(await screen.findByLabelText("PO number"), { target: { value: "42" } });
     fireEvent.click(screen.getByRole("button", { name: "Open order" }));
     await screen.findByRole("heading", { name: /PO 42/ });
@@ -673,6 +691,51 @@ describe("PurchasingReceivingPage", () => {
     expect(screen.queryByRole("heading", { name: /^Receipt \d+$/ })).toBeNull();
   });
 
+  it("keeps the receipt draft and Go intent while approval is pending, then retries with that intent", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RECEIVE_GOODS__", true);
+    let attempt = 0;
+    const fetchMock = receivingFetch(() => {
+      attempt += 1;
+      return attempt === 1
+        ? Response.json({ pendingApproval: true, reason: "Manager approval required." }, { status: 202 })
+        : { ok: true, data: { received: true, fullyReceived: false, receiptNumber: 5 } };
+    });
+    await openOrder(fetchMock, { actorId: "actor-1", organizationId: "org-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+
+    expect(await screen.findByText(/Manager approval required/)).toBeTruthy();
+    expect((screen.getByLabelText("accepted on line 1") as HTMLInputElement).value).toBe("500");
+    const capabilityPosts = () => fetchMock.mock.calls
+      .filter(([url, init]) => String(url) === "/api/capabilities/execute" && (init as RequestInit | undefined)?.method === "POST")
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
+    const first = capabilityPosts()[0]!;
+    expect(first).toMatchObject({
+      capabilityId: "purchasing.receiveGoods",
+      input: { poNumber: 42, lines: [{ lineNumber: 1, quantity: 500, rejected: 0 }, { lineNumber: 2, quantity: 1000, rejected: 0 }] },
+      intentId: expect.any(String),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    expect(await screen.findByText(/Receipt 5 recorded/)).toBeTruthy();
+    expect(capabilityPosts()[1]?.intentId).toBe(first.intentId);
+  });
+
+  it("blocks out-of-range quantities and too-short overreceipt reasons before submission", async () => {
+    const fetchMock = receivingFetch();
+    await openOrder(fetchMock);
+    fireEvent.change(screen.getByLabelText("accepted on line 1"), { target: { value: "2147483648" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    expect(await screen.findByText(/supported range/)).toBeTruthy();
+    expect(postedActions(fetchMock, "receiveGoods")).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("accepted on line 1"), { target: { value: "500" } });
+    fireEvent.change(screen.getByLabelText("tolerance %"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("authorized by"), { target: { value: "manager" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    expect(await screen.findByText(/authority reason between 10 and 500/)).toBeTruthy();
+    expect(postedActions(fetchMock, "receiveGoods")).toHaveLength(0);
+  });
+
   it("confirms a recorded receipt and says what is still expected", async () => {
     const fetchMock = receivingFetch(() => ({ ok: true, data: { received: true, fullyReceived: true, receiptNumber: 4 } }));
     await openOrder(fetchMock);
@@ -681,6 +744,29 @@ describe("PurchasingReceivingPage", () => {
 
     expect(await screen.findByText(/Receipt 4 recorded\. Everything ordered is now on the books\./)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Receipt 4" })).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText("accepted on line 1") as HTMLInputElement).value).toBe("0"));
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    expect(await screen.findByText(/Nothing to receive/)).toBeTruthy();
+    expect(postedActions(fetchMock, "receiveGoods")).toHaveLength(1);
+  });
+
+  it("does not resubmit a partial receipt after success until the quantity is deliberately entered again", async () => {
+    const fetchMock = receivingFetch(() => ({ ok: true, data: { received: true, fullyReceived: false, receiptNumber: 6 } }));
+    await openOrder(fetchMock);
+
+    fireEvent.change(screen.getByLabelText("accepted on line 1"), { target: { value: "250" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    expect(await screen.findByText(/Receipt 6 recorded/)).toBeTruthy();
+    expect((screen.getByLabelText("accepted on line 1") as HTMLInputElement).value).toBe("0");
+    expect((screen.getByLabelText("rejected on line 1") as HTMLInputElement).value).toBe("0");
+
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    expect(await screen.findByText(/Nothing to receive/)).toBeTruthy();
+    expect(postedActions(fetchMock, "receiveGoods")).toHaveLength(1);
+
+    fireEvent.change(screen.getByLabelText("accepted on line 1"), { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record receipt" }));
+    await waitFor(() => expect(postedActions(fetchMock, "receiveGoods")).toHaveLength(2));
   });
 
   it("refuses an order number that is not one of this team's", async () => {
