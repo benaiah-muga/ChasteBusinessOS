@@ -11,6 +11,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- Fixed Vite Sales order creation recovery so pending and uncertain drafts restore after reload, stay locked until resolved, and reuse the exact actor/org scoped intent. A definitive 4xx unlocks the draft so corrected input starts a new intent.
 - The Vite Go auth proxy now owns the entire `/api/auth/*` namespace whenever Go auth is enabled. Unsupported paths and methods fail closed in Go instead of falling through to the legacy auth service; the explicit compatibility opt-out remains available.
 - Vite CRM customer profile saves and bulk profile updates can opt into Go's session-authenticated `crm.updateCustomerProfiles` capability with `CHASTE_GO_CRM_CUSTOMER_PROFILE_UPDATE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Actor and organization scoped retry identities and exact payloads persist through pending or uncertain results, and Go returns validated prior snapshots for undo. Other customer writes retain their current routes.
 - Vite CRM deal creation can opt into Go's session-authenticated `crm.createDeal` capability with `CHASTE_GO_CRM_DEAL_CREATE=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The exact deal draft and actor/org-scoped retry intent survive pending or uncertain responses and restore after reload; Go's deal ID is strictly validated, and other deal actions keep their current routes.

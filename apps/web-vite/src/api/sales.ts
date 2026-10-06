@@ -72,14 +72,15 @@ export type SalesOrderWriteOutcome =
 
 type SalesOrderAttempt = { storageKey: string; fingerprint: string; intentId: string };
 
-function parseSalesOrderAttempt(value: string | null): { fingerprint: string; intentId: string } | null {
+function parseSalesOrderAttempt(value: string | null): { fingerprint: string; intentId: string; action: SalesOrderWrite | null } | null {
   if (!value) return null;
   try {
     const parsed: unknown = JSON.parse(value);
     if (typeof parsed !== "object" || parsed === null) return null;
-    const attempt = parsed as { fingerprint?: unknown; intentId?: unknown };
+    const attempt = parsed as { fingerprint?: unknown; intentId?: unknown; action?: unknown };
+    const action = SalesOrderWriteSchema.safeParse(attempt.action);
     return typeof attempt.fingerprint === "string" && typeof attempt.intentId === "string"
-      ? { fingerprint: attempt.fingerprint, intentId: attempt.intentId }
+      ? { fingerprint: attempt.fingerprint, intentId: attempt.intentId, action: action.success ? action.data : null }
       : null;
   } catch { return null; }
 }
@@ -112,7 +113,7 @@ async function createSalesOrderAttempt(action: SalesOrderWrite, retryScope: Sale
   if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
   const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
   try {
-    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId, action }));
     const persisted = parseSalesOrderAttempt(window.localStorage.getItem(storageKey));
     if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
     return { ...attempt, intentId: persisted.intentId };
@@ -129,6 +130,21 @@ function clearSalesOrderAttempt(attempt: SalesOrderAttempt): void {
 }
 
 export type SalesOrder = z.infer<typeof OrderSchema>;
+
+export async function restorePendingSalesOrderCreate(retryScope: SalesRetryScope): Promise<Extract<SalesOrderWrite, { action: "create" }> | null> {
+  const scope = { actorId: retryScope.actorId?.trim() ?? "", organizationId: retryScope.organizationId?.trim() ?? "" };
+  if (!scope.actorId || !scope.organizationId) return null;
+  try {
+    const storageKey = `${SalesOrderAttemptPrefix}${await salesOrderDigest(JSON.stringify(scope))}`;
+    const stored = parseSalesOrderAttempt(window.localStorage.getItem(storageKey));
+    if (!stored?.action || stored.action.action !== "create") return null;
+    const fingerprint = await salesOrderDigest(JSON.stringify({ ...scope, action: stored.action }));
+    if (fingerprint !== stored.fingerprint) return null;
+    return stored.action;
+  } catch {
+    throw new SalesApiError(0, "Enable browser storage to restore the unresolved sales order draft safely.");
+  }
+}
 
 export class SalesApiError extends Error {
   constructor(readonly status: number, message: string) {

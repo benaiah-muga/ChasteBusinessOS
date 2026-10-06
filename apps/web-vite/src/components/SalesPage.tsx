@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
-import { confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, SalesApiError, submitSalesOrderWrite, type SalesOrder } from "../api/sales";
+import { confirmSalesOrder, fetchSalesEnabled, fetchSalesOrders, restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite, type SalesOrder } from "../api/sales";
 import { CrmApiError, fetchCrmCustomers, type CrmCustomer } from "../api/crm";
 import { legacyUrl } from "../legacy";
 import "./sales-page.css";
@@ -133,6 +133,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
   const [createForm, setCreateForm] = useState({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
   const [createError, setCreateError] = useState<string | null>(null);
   const [writeBusy, setWriteBusy] = useState(false);
+  const [createAttemptPending, setCreateAttemptPending] = useState(false);
   const [orderActionTarget, setOrderActionTarget] = useState<OrderActionTarget | null>(null);
   const confirmIntents = useRef(new Map<string, string>());
   const searchRef = useRef<HTMLInputElement>(null);
@@ -167,6 +168,33 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  useEffect(() => {
+    let current = true;
+    setCreateAttemptPending(false);
+    if (!actorId || !organizationId) return () => { current = false; };
+    void restorePendingSalesOrderCreate({ actorId, organizationId }).then((action) => {
+      if (!current || !action) return;
+      setCreateForm({
+        customerId: action.customerId,
+        note: action.note ?? "",
+        lines: action.lines.map((line) => ({
+          sku: line.sku ?? "",
+          description: line.description,
+          quantity: String(line.quantity / 1000),
+          unitPrice: String(line.unitPriceMinor / (10 ** currency.minorUnits)),
+          tax: String((line.taxMinor ?? 0) / (10 ** currency.minorUnits)),
+        })),
+      });
+      setShowCreateForm(true);
+      setCreateAttemptPending(true);
+      setActionNotice({ tone: "pending", message: "An earlier sales order submission is unresolved. Retry the restored draft to check its result." });
+    }).catch((error: unknown) => {
+      if (!current) return;
+      setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The saved sales order draft could not be restored." });
+    });
+    return () => { current = false; };
+  }, [actorId, currency.minorUnits, organizationId]);
 
   useEffect(() => {
     function onShortcut(event: KeyboardEvent) {
@@ -280,6 +308,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
       return;
     }
     setWriteBusy(true);
+    setCreateAttemptPending(true);
     setCreateError(null);
     setActionNotice(null);
     try {
@@ -288,14 +317,19 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         ...(createForm.note.trim() ? { note: createForm.note.trim() } : {}), lines,
       }, { actorId, organizationId });
       if (result.kind === "pending") {
+        setCreateAttemptPending(true);
         setActionNotice({ tone: "pending", message: result.reason });
         return;
       }
+      setCreateAttemptPending(false);
       setCreateForm({ customerId: "", note: "", lines: [emptyOrderDraftLine()] });
       setShowCreateForm(false);
       setActionNotice({ tone: "success", message: "Sales order created as a draft." });
       await refreshOrderList();
     } catch (error) {
+      if (error instanceof SalesApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+        setCreateAttemptPending(false);
+      }
       setActionNotice({ tone: "error", message: error instanceof SalesApiError ? error.message : "The sales order could not be created." });
     } finally {
       setWriteBusy(false);
@@ -350,7 +384,7 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
         </div>
         <div className="sales-header-actions">
           {state.status === "ready" && <span className="sales-order-count">{state.orders.length} {state.orders.length === 1 ? "order" : "orders"}</span>}
-          <button className="sales-new-order" type="button" onClick={() => { setShowCreateForm((open) => !open); setCreateError(null); }} aria-expanded={showCreateForm}>
+          <button className="sales-new-order" type="button" disabled={createAttemptPending} onClick={() => { setShowCreateForm((open) => !open); setCreateError(null); }} aria-expanded={showCreateForm}>
             {showCreateForm ? "Close order form" : "Create sales order"}
           </button>
           <a className="sales-full-workspace" href={legacyUrl("/sales")}>Open full sales workspace</a>
@@ -367,29 +401,29 @@ export function SalesPage({ baseCurrency = null, actorId = null, organizationId 
           </div>
           <div className="sales-write-grid">
             <label>Customer
-              <select value={createForm.customerId} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, customerId: value })); setCreateError(null); }} disabled={writeBusy}>
+              <select value={createForm.customerId} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, customerId: value })); setCreateError(null); }} disabled={writeBusy || createAttemptPending}>
                 <option value="">Choose a customer</option>
                 {state.customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
               </select>
             </label>
             <label>Order note
-              <input value={createForm.note} maxLength={4000} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, note: value })); setCreateError(null); }} disabled={writeBusy} />
+              <input value={createForm.note} maxLength={4000} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, note: value })); setCreateError(null); }} disabled={writeBusy || createAttemptPending} />
             </label>
           </div>
           <div className="sales-write-lines">
             <h3>Line items</h3>
             {createForm.lines.map((line, index) => (
               <div className="sales-write-line" key={index}>
-                <label>SKU (optional)<input value={line.sku} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, sku: value } : item) })); }} disabled={writeBusy} /></label>
-                <label>Description<input value={line.description} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item) })); setCreateError(null); }} disabled={writeBusy} /></label>
-                <label>Quantity<input inputMode="decimal" value={line.quantity} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: value } : item) })); }} disabled={writeBusy} /></label>
-                <label>Unit price<input inputMode="decimal" value={line.unitPrice} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: value } : item) })); }} disabled={writeBusy} /></label>
-                <label>Tax<input inputMode="decimal" value={line.tax} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, tax: value } : item) })); }} disabled={writeBusy} /></label>
-                <button type="button" className="sales-write-remove" disabled={writeBusy || createForm.lines.length === 1} aria-label={`Remove line ${index + 1}`} onClick={() => setCreateForm((current) => ({ ...current, lines: current.lines.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
+                <label>SKU (optional)<input value={line.sku} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, sku: value } : item) })); }} disabled={writeBusy || createAttemptPending} /></label>
+                <label>Description<input value={line.description} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, description: value } : item) })); setCreateError(null); }} disabled={writeBusy || createAttemptPending} /></label>
+                <label>Quantity<input inputMode="decimal" value={line.quantity} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: value } : item) })); }} disabled={writeBusy || createAttemptPending} /></label>
+                <label>Unit price<input inputMode="decimal" value={line.unitPrice} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, unitPrice: value } : item) })); }} disabled={writeBusy || createAttemptPending} /></label>
+                <label>Tax<input inputMode="decimal" value={line.tax} onChange={(event) => { const value = event.currentTarget.value; setCreateForm((current) => ({ ...current, lines: current.lines.map((item, itemIndex) => itemIndex === index ? { ...item, tax: value } : item) })); }} disabled={writeBusy || createAttemptPending} /></label>
+                <button type="button" className="sales-write-remove" disabled={writeBusy || createAttemptPending || createForm.lines.length === 1} aria-label={`Remove line ${index + 1}`} onClick={() => setCreateForm((current) => ({ ...current, lines: current.lines.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
               </div>
             ))}
             <div className="sales-write-actions">
-              <button type="button" className="sales-write-secondary" disabled={writeBusy} onClick={() => setCreateForm((current) => ({ ...current, lines: [...current.lines, emptyOrderDraftLine()] }))}>Add line</button>
+              <button type="button" className="sales-write-secondary" disabled={writeBusy || createAttemptPending} onClick={() => setCreateForm((current) => ({ ...current, lines: [...current.lines, emptyOrderDraftLine()] }))}>Add line</button>
               <button type="button" className="sales-write-primary" disabled={writeBusy} onClick={() => void handleCreateOrder()}>{writeBusy ? "Saving…" : "Create draft"}</button>
             </div>
             {createError && <p className="sales-write-error" role="alert">{createError}</p>}

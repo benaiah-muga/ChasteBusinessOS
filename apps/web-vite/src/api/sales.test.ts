@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SalesApiError, submitSalesOrderWrite } from "./sales";
+import { restorePendingSalesOrderCreate, SalesApiError, submitSalesOrderWrite } from "./sales";
 
 const scope = { actorId: "actor-1", organizationId: "org-1" };
 const orderId = "10000000-0000-4000-8000-000000000001";
@@ -49,6 +49,15 @@ describe("sales order writes", () => {
       input: { customerId, note: "Deliver after Friday", lines: [{ description: "Coffee beans", quantity: 2500, unitPriceMinor: 1250, taxMinor: 0, sku: "COFFEE-1" }] },
     });
     expect(requests[1]?.intentId).toBe(requests[0]?.intentId);
+  });
+
+  it("restores only the exact scoped pending create payload", async () => {
+    goWrites();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: false, pendingApproval: true }, { status: 202 })));
+    const action = { action: "create" as const, customerId, note: "Friday", lines: [{ description: "Coffee", quantity: 2500, unitPriceMinor: 1250, taxMinor: 10, sku: "COFFEE-1" }] };
+    await submitSalesOrderWrite(action, scope);
+    await expect(restorePendingSalesOrderCreate(scope)).resolves.toEqual(action);
+    await expect(restorePendingSalesOrderCreate({ ...scope, actorId: "different-actor" })).resolves.toBeNull();
   });
 
   it("reuses create intent after an uncertain network result", async () => {

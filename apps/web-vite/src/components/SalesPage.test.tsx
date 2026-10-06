@@ -176,6 +176,88 @@ describe("Vite sales page", () => {
     expect(retryBody.input).toEqual(firstBody.input);
   });
 
+  it("restores and locks an unresolved create draft after remount", async () => {
+    let writes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      writes += 1;
+      return writes === 1
+        ? Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 })
+        : Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    const props = { actorId: "actor-1", organizationId: "org-1" };
+    const firstMount = render(<SalesPage {...props} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Coffee beans" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2.5" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "12.50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    const firstRequest = fetchMock.mock.calls.find(([input]) => input === "/api/capabilities/execute");
+    const firstBody = JSON.parse(String(firstRequest?.[1]?.body)) as { intentId: string; input: Record<string, unknown> };
+
+    firstMount.unmount();
+    render(<SalesPage {...props} />);
+    expect((await screen.findByLabelText("Description") as HTMLInputElement).value).toBe("Coffee beans");
+    expect((screen.getByLabelText("Customer") as HTMLSelectElement).value).toBe(customers.customers[0]!.id);
+    expect((screen.getByLabelText("Description") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Create draft" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+
+    expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
+    const requests = fetchMock.mock.calls.filter(([input]) => input === "/api/capabilities/execute");
+    const retryBody = JSON.parse(String(requests[1]?.[1]?.body)) as { intentId: string; input: Record<string, unknown> };
+    expect(retryBody.intentId).toBe(firstBody.intentId);
+    expect(retryBody.input).toEqual(firstBody.input);
+  });
+
+  it("unlocks a pending create after a terminal error and submits corrected input with a new intent", async () => {
+    let writes = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      if (input === "/api/modules") return Response.json(switchboard);
+      if (input === "/api/customers") return Response.json(customers);
+      if (input === "/api/sales") return Response.json({ orders });
+      writes += 1;
+      if (writes === 1) return Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 });
+      if (writes === 2) return Response.json({ error: "The order is invalid." }, { status: 422 });
+      return Response.json({ ok: true, data: { orderId: "10000000-0000-4000-8000-000000000004", orderNumber: 44 } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_SALES_ORDER_WRITES__", true);
+    render(<SalesPage actorId="actor-1" organizationId="org-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Create sales order" }));
+    fireEvent.change(screen.getByLabelText("Customer"), { target: { value: customers.customers[0]!.id } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Coffee beans" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2.5" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "12.50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("The order is invalid.")).not.toBeNull();
+    expect((screen.getByLabelText("Description") as HTMLInputElement).disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Tea leaves" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Sales order created as a draft.")).not.toBeNull();
+
+    const requests = fetchMock.mock.calls
+      .filter(([input]) => input === "/api/capabilities/execute")
+      .map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string; input: Record<string, unknown> });
+    expect(requests).toHaveLength(3);
+    expect(requests[0]?.intentId).toBe(requests[1]?.intentId);
+    expect(requests[2]?.intentId).not.toBe(requests[1]?.intentId);
+    expect(requests[2]?.input).toMatchObject({ lines: [{ description: "Tea leaves" }] });
+  });
+
   it("keeps the delivery target open through pending approval and closes after completion", async () => {
     let writes = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
