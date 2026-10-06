@@ -219,7 +219,7 @@ export function InventoryPage({
           )}
         </>
       )}
-      {state.status === "ready" && <InventoryItemActions items={state.items} currency={currency} onChanged={refresh} />}
+      {state.status === "ready" && <InventoryItemActions items={state.items} currency={currency} onChanged={refresh} retryScope={{ actorId, organizationId }} />}
       {state.status === "ready" && locationReservationGoWritesEnabled && (!actorId || !organizationId)
         ? <p className="inventory-empty" role="status">Loading the active workspace before location and reservation actions are available.</p>
         : state.status === "ready" && <InventoryLocationsReservationsPanel items={state.items} locations={state.locations} reservations={state.reservations} onChanged={refresh} retryScope={actorId && organizationId ? { actorId, organizationId } : undefined} />}

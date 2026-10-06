@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { type InventoryItem } from "../api/inventory";
-import { InventoryItemActionError, submitInventoryItemAction as submitItemAction, type InventoryItemActionResult } from "../api/inventory-items";
+import { getPendingInventoryAdjustment, InventoryItemActionError, submitInventoryItemAction as submitItemAction, type InventoryAdjustmentRetryScope, type InventoryItemActionResult } from "../api/inventory-items";
 import "./inventory-item-actions.css";
 
 type FormValues = {
@@ -19,6 +19,23 @@ type FormValues = {
 
 type AdjustmentValues = { sku: string; direction: "increase" | "decrease"; quantity: string; note: string; lotCode: string; locationCode: string };
 type Notice = { tone: "success" | "pending" | "error"; message: string };
+type RetryState = "loading" | "clear" | "unresolved" | "failed";
+
+function goItemWritesEnabled(): boolean {
+  return typeof __GO_INVENTORY_ITEM_SLICE__ !== "undefined" && __GO_INVENTORY_ITEM_SLICE__;
+}
+
+function adjustmentValuesFromAction(action: { sku: string; quantityDelta: number; note: string; lotCode?: string; locationCode?: string }): AdjustmentValues {
+  const quantity = (Math.abs(action.quantityDelta) / 1000).toFixed(3).replace(/\.?0+$/, "");
+  return {
+    sku: action.sku,
+    direction: action.quantityDelta < 0 ? "decrease" : "increase",
+    quantity,
+    note: action.note,
+    lotCode: action.lotCode ?? "",
+    locationCode: action.locationCode ?? "",
+  };
+}
 
 function scaledInteger(value: string, decimals: number): number | null {
   const text = value.trim();
@@ -41,19 +58,84 @@ export function InventoryItemActions({
   items,
   currency = "USD",
   onChanged,
+  retryScope,
 }: {
   items: InventoryItem[];
   currency?: string;
   onChanged: () => void | Promise<void>;
+  retryScope?: InventoryAdjustmentRetryScope;
 }) {
   const [form, setForm] = useState<FormValues>(blankForm);
   const [adjustment, setAdjustment] = useState<AdjustmentValues>({ sku: "", direction: "increase", quantity: "", note: "", lotCode: "", locationCode: "" });
+  const [retryState, setRetryState] = useState<RetryState>(() => goItemWritesEnabled() ? "loading" : "clear");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const minorUnits = currencyMinorUnits(currency) ?? 2;
+  const retryScopeIdentity = `${retryScope?.actorId?.trim() ?? ""}:${retryScope?.organizationId?.trim() ?? ""}`;
+  const retryScopeIdentityRef = useRef(retryScopeIdentity);
+  retryScopeIdentityRef.current = retryScopeIdentity;
+
+  useEffect(() => {
+    setBusy(false);
+    if (!goItemWritesEnabled()) {
+      setRetryState("clear");
+      return;
+    }
+    const actorId = retryScope?.actorId?.trim();
+    const organizationId = retryScope?.organizationId?.trim();
+    if (!actorId || !organizationId) {
+      setRetryState("failed");
+      setNotice({ tone: "pending", message: "Loading the active workspace before stock adjustments are available." });
+      return;
+    }
+    let active = true;
+    setRetryState("loading");
+    setAdjustment({ sku: "", direction: "increase", quantity: "", note: "", lotCode: "", locationCode: "" });
+    void getPendingInventoryAdjustment({ actorId, organizationId }).then((action) => {
+      if (!active) return;
+      if (action) {
+        setAdjustment(adjustmentValuesFromAction(action));
+        setRetryState("unresolved");
+        setNotice({ tone: "pending", message: "A stock adjustment is unresolved. Retry the saved adjustment to confirm its outcome." });
+      } else {
+        setRetryState("clear");
+        setNotice(null);
+      }
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setRetryState("failed");
+      setNotice({ tone: "error", message: error instanceof InventoryItemActionError ? error.message : "Stock adjustment retry recovery is unavailable." });
+    });
+    return () => { active = false; };
+  }, [retryScopeIdentity]);
+
+  async function recoverAdjustmentRetryState(terminal: boolean, expectedScopeIdentity: string): Promise<void> {
+    if (!goItemWritesEnabled()) {
+      setRetryState("clear");
+      return;
+    }
+    if (terminal) {
+      setRetryState("clear");
+      return;
+    }
+    try {
+      const action = await getPendingInventoryAdjustment(retryScope ?? { actorId: null, organizationId: null });
+      if (retryScopeIdentityRef.current !== expectedScopeIdentity) return;
+      if (action) {
+        setAdjustment(adjustmentValuesFromAction(action));
+        setRetryState("unresolved");
+      } else {
+        setRetryState("clear");
+      }
+    } catch {
+      if (retryScopeIdentityRef.current !== expectedScopeIdentity) return;
+      setRetryState("failed");
+    }
+  }
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const submittedScopeIdentity = retryScopeIdentity;
     const salePriceMinor = scaledInteger(form.salePrice, minorUnits);
     const reorderPointThousandths = form.kind === "goods" ? scaledInteger(form.reorder, 3) : 0;
     const openingQuantity = form.kind === "goods" ? scaledInteger(form.openingQty, 3) : 0;
@@ -77,19 +159,24 @@ export function InventoryItemActions({
         ...(form.imageUrl.trim() ? { imageUrl: form.imageUrl.trim() } : {}),
         tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
       });
+      if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       if (created.kind === "pending") {
         setNotice({ tone: "pending", message: created.reason });
         return;
       }
     } catch (error) {
+      if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       if (error instanceof InventoryItemActionError && error.status === 0) await onChanged();
+      if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       setNotice({ tone: "error", message: error instanceof InventoryItemActionError ? error.message : "The inventory action could not be completed." });
       return;
     } finally {
-      setBusy(false);
+      if (retryScopeIdentityRef.current === submittedScopeIdentity) setBusy(false);
     }
 
+    if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
     await onChanged();
+    if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
     setForm(blankForm());
     if (openingQuantity > 0 && form.kind === "goods") {
       setBusy(true);
@@ -99,18 +186,25 @@ export function InventoryItemActions({
           sku: form.sku.trim(),
           quantityDelta: openingQuantity,
           note: "Opening stock",
-        });
+        }, undefined, retryScope);
+        if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
         if (opening.kind === "pending") {
+          setAdjustment(adjustmentValuesFromAction({ sku: form.sku.trim(), quantityDelta: openingQuantity, note: "Opening stock" }));
+          setRetryState(goItemWritesEnabled() ? "unresolved" : "clear");
           setNotice({ tone: "pending", message: "Item created. Opening stock is waiting for approval." });
         } else {
           await onChanged();
+          if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
           setNotice({ tone: "success", message: "Item created and opening stock recorded." });
         }
       } catch (error) {
+        if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
         await onChanged();
+        if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
+        await recoverAdjustmentRetryState(error instanceof InventoryItemActionError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429, submittedScopeIdentity);
         setNotice({ tone: "error", message: `Item created, but opening stock could not be recorded: ${error instanceof InventoryItemActionError ? error.message : "check the current stock before retrying."}` });
       } finally {
-        setBusy(false);
+        if (retryScopeIdentityRef.current === submittedScopeIdentity) setBusy(false);
       }
       return;
     }
@@ -119,6 +213,7 @@ export function InventoryItemActions({
 
   async function handleAdjustment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const submittedScopeIdentity = retryScopeIdentity;
     const quantity = scaledInteger(adjustment.quantity, 3);
     if (quantity === null || quantity <= 0) {
       setNotice({ tone: "error", message: "Enter a stock quantity greater than zero with no more than 3 decimal places." });
@@ -127,26 +222,35 @@ export function InventoryItemActions({
     setBusy(true);
     setNotice(null);
     try {
-      const result = await submitItemAction({
+      const action = {
         action: "adjustStock",
         sku: adjustment.sku,
         quantityDelta: adjustment.direction === "increase" ? quantity : -quantity,
         note: adjustment.note.trim(),
         ...(adjustment.lotCode.trim() && adjustment.direction === "increase" ? { lotCode: adjustment.lotCode.trim() } : {}),
         ...(adjustment.locationCode.trim() ? { locationCode: adjustment.locationCode.trim() } : {}),
-      });
+      } as const;
+      const result = await submitItemAction(action, undefined, retryScope);
+      if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       if (result.kind === "pending") {
+        setRetryState(goItemWritesEnabled() ? "unresolved" : "clear");
         setNotice({ tone: "pending", message: result.reason });
         return;
       }
+      setRetryState("clear");
       await onChanged();
+      if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       setAdjustment((current) => ({ ...current, quantity: "", note: "", lotCode: "" }));
       setNotice({ tone: "success", message: "Stock adjustment recorded." });
     } catch (error) {
+      if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
+      await recoverAdjustmentRetryState(error instanceof InventoryItemActionError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429, submittedScopeIdentity);
+      if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       if (error instanceof InventoryItemActionError && error.status === 0) await onChanged();
+      if (retryScopeIdentityRef.current !== submittedScopeIdentity) return;
       setNotice({ tone: "error", message: error instanceof InventoryItemActionError ? error.message : "The stock adjustment could not be completed." });
     } finally {
-      setBusy(false);
+      if (retryScopeIdentityRef.current === submittedScopeIdentity) setBusy(false);
     }
   }
 
@@ -180,14 +284,14 @@ export function InventoryItemActions({
           <h3>Adjust stock</h3>
           {items.length === 0 ? <p>Add a goods item before adjusting stock.</p> : <>
             <div className="inventory-item-fields">
-              <label className="inventory-item-field-wide">Item<select required value={adjustment.sku} onChange={(event) => setAdjustment({ ...adjustment, sku: event.currentTarget.value })}><option value="">Choose an item</option>{items.filter((item) => item.kind !== "service").map((item) => <option key={item.sku} value={item.sku}>{item.sku} · {item.name}</option>)}</select></label>
-              <label>Direction<select value={adjustment.direction} onChange={(event) => setAdjustment({ ...adjustment, direction: event.currentTarget.value as AdjustmentValues["direction"] })}><option value="increase">Increase stock</option><option value="decrease">Decrease stock</option></select></label>
-              <label>Quantity<input required inputMode="decimal" value={adjustment.quantity} onChange={(event) => setAdjustment({ ...adjustment, quantity: event.currentTarget.value })} placeholder="0" /></label>
-              <label>Lot code<input maxLength={40} value={adjustment.lotCode} disabled={adjustment.direction !== "increase"} onChange={(event) => setAdjustment({ ...adjustment, lotCode: event.currentTarget.value })} /></label>
-              <label>Location code<input maxLength={20} value={adjustment.locationCode} onChange={(event) => setAdjustment({ ...adjustment, locationCode: event.currentTarget.value })} /></label>
-              <label className="inventory-item-field-wide">Reason<input required minLength={3} value={adjustment.note} onChange={(event) => setAdjustment({ ...adjustment, note: event.currentTarget.value })} /></label>
+              <label className="inventory-item-field-wide">Item<select required value={adjustment.sku} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, sku: event.currentTarget.value })}><option value="">Choose an item</option>{adjustment.sku && !items.some((item) => item.sku === adjustment.sku) && <option value={adjustment.sku}>{adjustment.sku} · saved adjustment</option>}{items.filter((item) => item.kind !== "service").map((item) => <option key={item.sku} value={item.sku}>{item.sku} · {item.name}</option>)}</select></label>
+              <label>Direction<select value={adjustment.direction} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, direction: event.currentTarget.value as AdjustmentValues["direction"] })}><option value="increase">Increase stock</option><option value="decrease">Decrease stock</option></select></label>
+              <label>Quantity<input required inputMode="decimal" value={adjustment.quantity} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, quantity: event.currentTarget.value })} placeholder="0" /></label>
+              <label>Lot code<input maxLength={40} value={adjustment.lotCode} disabled={busy || retryState !== "clear" || adjustment.direction !== "increase"} onChange={(event) => setAdjustment({ ...adjustment, lotCode: event.currentTarget.value })} /></label>
+              <label>Location code<input maxLength={20} value={adjustment.locationCode} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, locationCode: event.currentTarget.value })} /></label>
+              <label className="inventory-item-field-wide">Reason<input required minLength={3} value={adjustment.note} disabled={busy || retryState !== "clear"} onChange={(event) => setAdjustment({ ...adjustment, note: event.currentTarget.value })} /></label>
             </div>
-            <button className="shell-button" type="submit" disabled={busy || items.every((item) => item.kind === "service")}>{busy ? "Saving…" : "Record adjustment"}</button>
+            <button className="shell-button" type="submit" disabled={busy || retryState === "loading" || retryState === "failed" || items.every((item) => item.kind === "service")}>{busy ? "Saving…" : retryState === "unresolved" ? "Retry saved adjustment" : "Record adjustment"}</button>
           </>}
         </form>
       </div>

@@ -1743,3 +1743,8 @@ new owners and the manifest shows zero legacy runtime paths.
      intent. Restore and lock unresolved drafts after remount, retry with the
      original payload and intent, and unlock on definitive 4xx so a corrected
      request starts with a fresh identity. Browser proof remains open.
+177. Persist manual Vite inventory adjustment payloads and stable actor/org
+     scoped intents through pending and uncertain outcomes. Restore and lock
+     the exact adjustment after reload, ignore responses from a prior scope,
+     retain retry identities for 408/429, and reuse the intent on missing-route
+     fallback. Browser proof remains open.
