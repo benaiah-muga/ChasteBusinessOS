@@ -69,6 +69,10 @@ export function goCrmTaskWritesFromEnv(env: Record<string, string | undefined>):
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_TASK_WRITES === "1";
 }
 
+export function goCrmCustomerCreateFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_CRM_CUSTOMER_CREATE === "1";
+}
+
 export function goPurchasingCreateOrderFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_CREATE_ORDER === "1";
 }

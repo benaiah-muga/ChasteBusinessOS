@@ -2,6 +2,7 @@ package capability
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +22,7 @@ func TestParseCreateCustomerInputRejectsInvalidBoundaryValues(t *testing.T) {
 		"missing name":              `{}`,
 		"empty name":                `{"name":""}`,
 		"null name":                 `{"name":null}`,
+		"name too long":             `{"name":"` + strings.Repeat("n", 121) + `"}`,
 		"invalid email":             `{"name":"Acme","email":"bad"}`,
 		"null email":                `{"name":"Acme","email":null}`,
 		"null phone":                `{"name":"Acme","phone":null}`,
@@ -61,6 +63,10 @@ func TestCustomerEmailValidationMatchesZodEmailVectors(t *testing.T) {
 }
 
 func TestParseCreateCustomerInputUsesUTF16LengthLikeJavaScript(t *testing.T) {
+	oneTwentyCharacters := strings.Repeat("n", 120)
+	if _, err := ParseCreateCustomerInput(json.RawMessage(`{"name":"` + oneTwentyCharacters + `"}`)); err != nil {
+		t.Fatalf("120-character customer name was rejected: %v", err)
+	}
 	fortyEmoji := ""
 	for range 20 {
 		fortyEmoji += "😀"

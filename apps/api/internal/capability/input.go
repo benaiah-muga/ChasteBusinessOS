@@ -50,8 +50,8 @@ func ParseCreateCustomerInput(raw json.RawMessage) (CreateCustomerInput, error) 
 	}
 	var input CreateCustomerInput
 	name, ok := fields["name"]
-	if !ok || json.Unmarshal(name, &input.Name) != nil || input.Name == "" {
-		return CreateCustomerInput{}, errors.New("name must be a non-empty string")
+	if !ok || json.Unmarshal(name, &input.Name) != nil || input.Name == "" || utf16Length(input.Name) > 120 {
+		return CreateCustomerInput{}, errors.New("name must be a non-empty string of at most 120 characters")
 	}
 	if value, exists := fields["email"]; exists {
 		email, err := readOptionalString(value)

@@ -19,6 +19,102 @@ afterEach(() => {
 });
 
 describe("Vite CRM page", () => {
+  it("shows the duplicate warning returned after customer creation", async () => {
+    const createdId = "d79382ac-743f-4d27-8b5f-92f2cba74d8e";
+    const duplicateWarning = 'Looks like existing customer "Northwind" (matched by email). Merge or deactivate one of them.';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method === "POST") return Response.json({ ok: true, data: { customerId: createdId, duplicateWarning } });
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Northwind Ltd" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "office@northwind.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add customer" }));
+
+    expect(await screen.findByText(`Customer added. ${duplicateWarning}`)).not.toBeNull();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/customers" && init?.method === "POST")?.[1]?.body))).toMatchObject({ action: "create", name: "Northwind Ltd", email: "office@northwind.test" });
+  });
+
+  it("ignores a customer-create response after the active account scope changes", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
+    let finishCreate!: (response: Response) => void;
+    const createResponse = new Promise<Response>((resolve) => { finishCreate = resolve; });
+    const otherOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers" && init?.method === "POST") return createResponse;
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute") return createResponse;
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add customer" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Old organization customer" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add customer" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything()));
+
+    view.rerender(<CRMPage actorId={customerId} organizationId={otherOrganizationId} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add customer" }) as HTMLButtonElement).disabled).toBe(false));
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+
+    await act(async () => {
+      finishCreate(Response.json({ ok: true, data: { customerId: "d79382ac-743f-4d27-8b5f-92f2cba74d8e", duplicateWarning: null } }));
+    });
+
+    expect(screen.queryByText("Customer added.")).toBeNull();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "Add customer" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("keeps an unrelated CRM mutation busy when customer scope changes", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_CREATE__", true);
+    let finishDeal!: (response: Response) => void;
+    const dealResponse = new Promise<Response>((resolve) => { finishDeal = resolve; });
+    const otherOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals" && init?.method === "POST") return dealResponse;
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
+    fireEvent.change(screen.getByLabelText("Deal name"), { target: { value: "Long-running deal" } });
+    fireEvent.change(screen.getByLabelText("Value"), { target: { value: "125" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add deal" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/deals", expect.objectContaining({ method: "POST" })));
+
+    view.rerender(<CRMPage actorId={customerId} organizationId={otherOrganizationId} />);
+    expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      finishDeal(Response.json({ error: "Manager approval required", pendingApproval: true }, { status: 202 }));
+    });
+
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add deal" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
   it("applies a pinned saved customer view to the directory filters", async () => {
     const inactiveCustomer = {
       ...customer("Dormant Company"),

@@ -217,6 +217,7 @@ export async function submitCrmDealStageMove(
 }
 
 const CRM_TASK_INTENT_PREFIX = "chaste.crm.task-intent.v1:";
+const CRM_CUSTOMER_CREATE_INTENT_PREFIX = "chaste.crm.customer-create-intent.v1:";
 const CrmTaskAttemptSchema = z.object({
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   intentId: z.string().uuid(),
@@ -228,6 +229,9 @@ const CompleteTaskOutputSchema = z.object({ completed: z.literal(true) }).strict
 export type CrmTaskMutation =
   | { action: "createTask"; title: string; dueAt?: string; assigneeUserId?: string; refType?: string; refId?: string; note?: string }
   | { action: "completeTask"; taskId: string };
+type CrmCustomerCreateMutation = { action: "createCustomer"; name: string; email?: string; phone?: string; preferredContactMethod: "email" | "phone" | "whatsapp" | "other"; doNotContact: boolean };
+export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
+type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation;
 
 const CrmTaskMutationSchema = z.discriminatedUnion("action", [
   z.object({
@@ -254,6 +258,26 @@ export async function readPendingCrmTaskCreate(scope: CrmTaskRetryScope): Promis
   if (!action.success) throw new CrmApiError(0, "An unresolved CRM task draft could not be restored. Contact an administrator before creating another task.");
   if (await crmTaskFingerprint(action.data) !== parsed.fingerprint) throw new CrmApiError(0, "An unresolved CRM task draft could not be verified. Contact an administrator before creating another task.");
   return action.data;
+}
+
+export async function readPendingCrmCustomerCreate(scope: CrmTaskRetryScope): Promise<CrmCustomerCreateInput | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_CUSTOMER_CREATE_INTENT_PREFIX}${scopeHash}:create`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to restore an unresolved CRM customer draft."); }
+  if (raw === null) return null;
+  const parsed = parseCrmTaskAttempt(raw);
+  const action = CrmCustomerCreateMutationSchema.safeParse(parsed.action);
+  if (!action.success) throw new CrmApiError(0, "An unresolved CRM customer draft could not be restored. Contact an administrator before creating another customer.");
+  if (await crmTaskFingerprint(action.data) !== parsed.fingerprint) throw new CrmApiError(0, "An unresolved CRM customer draft could not be verified. Contact an administrator before creating another customer.");
+  return {
+    name: action.data.name,
+    ...(action.data.email ? { email: action.data.email } : {}),
+    ...(action.data.phone ? { phone: action.data.phone } : {}),
+    preferredContactMethod: action.data.preferredContactMethod,
+    doNotContact: action.data.doNotContact,
+  };
 }
 
 export async function submitCrmTaskMutation(
@@ -309,15 +333,62 @@ async function crmTaskScope(scope?: CrmTaskRetryScope): Promise<{ actorId: strin
   }
 }
 
-async function crmTaskAttempt(action: CrmTaskMutation, scope: { scopeHash: string }, target: string): Promise<{ storageKey: string; intentId: string }> {
-  const storageKey = `${CRM_TASK_INTENT_PREFIX}${scope.scopeHash}:${target}`;
+const CrmCustomerCreateMutationSchema = z.object({
+  action: z.literal("createCustomer"),
+  name: z.string().min(1).max(120),
+  email: z.string().email().optional(),
+  phone: z.string().max(40).optional(),
+  preferredContactMethod: z.enum(["email", "phone", "whatsapp", "other"]),
+  doNotContact: z.boolean(),
+}).strict();
+const CrmCustomerCreateOutputSchema = z.object({ customerId: uuid, duplicateWarning: z.string().nullable() }).strict();
+
+export async function submitCrmCustomerCreate(
+  input: CrmCustomerCreateInput,
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<{ customerId: string; duplicateWarning?: string | null }>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_CREATE__ !== "undefined" && __GO_CRM_CUSTOMER_CREATE__);
+  const action = { action: "createCustomer" as const, ...input };
+  if (!useGo) return submitCrmAction("/api/customers", { action: "create", ...input }, signal);
+  if (!CrmCustomerCreateMutationSchema.safeParse(action).success) throw new CrmApiError(0, "Review the customer details and correct invalid values before submitting.");
+  const scope = await crmTaskScope(retryScope);
+  const attempt = await crmTaskAttempt(action, scope, "create", CRM_CUSTOMER_CREATE_INTENT_PREFIX);
+  try {
+    let { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.createCustomer", input, intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) {
+      ({ response, body } = await request("/api/customers", {
+        method: "POST",
+        body: JSON.stringify({ action: "create", ...input, intentId: attempt.intentId }),
+      }, signal));
+    }
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const parsed = CrmCustomerCreateOutputSchema.safeParse(outcome.data);
+    if (!parsed.success) throw new CrmApiError(response.status, "The CRM service returned an unexpected customer result.", true);
+    await clearCrmTaskAttempt(attempt.storageKey);
+    return { kind: "completed", data: parsed.data };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+      await clearCrmTaskAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+async function crmTaskAttempt(action: CrmRetryMutation, scope: { scopeHash: string }, target: string, prefix = CRM_TASK_INTENT_PREFIX): Promise<{ storageKey: string; intentId: string }> {
+  const storageKey = `${prefix}${scope.scopeHash}:${target}`;
   const fingerprint = await crmTaskFingerprint(action);
   let raw: string | null;
   try { raw = window.localStorage.getItem(storageKey); }
-  catch { throw new CrmApiError(0, "Enable browser storage before changing CRM tasks so an uncertain result can be retried safely."); }
+  catch { throw new CrmApiError(0, "Enable browser storage before changing CRM data so an uncertain result can be retried safely."); }
   if (raw !== null) {
     const stored = parseCrmTaskAttempt(raw);
-    if (stored.fingerprint !== fingerprint) throw new CrmApiError(0, "A previous CRM task result is unresolved. Retry its exact task details before starting another task action.");
+    if (stored.fingerprint !== fingerprint) throw new CrmApiError(0, "A previous CRM result is unresolved. Retry its exact action details before starting another action.");
     return { storageKey, intentId: stored.intentId };
   }
   const attempt = { fingerprint, intentId: crypto.randomUUID(), action };
@@ -326,12 +397,12 @@ async function crmTaskAttempt(action: CrmTaskMutation, scope: { scopeHash: strin
     window.localStorage.setItem(storageKey, serialized);
     if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("CRM task retry did not persist");
   } catch {
-    throw new CrmApiError(0, "Enable browser storage before changing CRM tasks so an uncertain result can be retried safely.");
+    throw new CrmApiError(0, "Enable browser storage before changing CRM data so an uncertain result can be retried safely.");
   }
   return { storageKey, intentId: attempt.intentId };
 }
 
-async function crmTaskFingerprint(action: CrmTaskMutation): Promise<string> {
+async function crmTaskFingerprint(action: CrmRetryMutation): Promise<string> {
   try {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalCrmTaskJSON(action)));
     return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");

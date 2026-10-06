@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmTaskCreate, submitCrmAction, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmTaskCreate, submitCrmAction, submitCrmCustomerCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -179,6 +179,51 @@ describe("CRM API client", () => {
     const bodies = fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute").map(([, init]) => JSON.parse(String(init?.body)));
     expect(bodies).toHaveLength(2);
     expect(bodies[0]?.intentId).toBe(bodies[1]?.intentId);
+  });
+
+  it("routes customer creation through Go and preserves the duplicate warning output", async () => {
+    const customerCreateInput = { name: "Northwind Ltd", email: "office@northwind.test", phone: "+256 700 111 222", preferredContactMethod: "whatsapp" as const, doNotContact: true };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { customerId, duplicateWarning: 'Looks like existing customer "Northwind" (matched by similar_name). Merge or deactivate one of them.' } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmCustomerCreate(customerCreateInput, undefined, true, { actorId: dealId, organizationId: customerId })).resolves.toEqual({ kind: "completed", data: { customerId, duplicateWarning: 'Looks like existing customer "Northwind" (matched by similar_name). Merge or deactivate one of them.' } });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ capabilityId: "crm.createCustomer", input: customerCreateInput, intentId: expect.any(String) });
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { customerId } })));
+    await expect(submitCrmCustomerCreate(customerCreateInput, undefined, true, { actorId: dealId, organizationId: customerId })).rejects.toMatchObject({ name: "CrmApiError", message: "The CRM service returned an unexpected customer result." });
+  });
+
+  it("restores customer drafts and keeps the same intent through pending, uncertain response, and 404 fallback", async () => {
+    const scope = { actorId: dealId, organizationId: customerId };
+    const input = { name: "Northwind", email: "office@northwind.test", preferredContactMethod: "email" as const, doNotContact: false };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 }))
+      .mockRejectedValueOnce(new TypeError("connection reset"));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitCrmCustomerCreate(input, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
+    await expect(readPendingCrmCustomerCreate(scope)).resolves.toEqual(input);
+    const pendingIntentId = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).intentId;
+    await expect(submitCrmCustomerCreate(input, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+
+    const legacyFetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { customerId, duplicateWarning: null } }));
+    vi.stubGlobal("fetch", legacyFetch);
+    await expect(submitCrmCustomerCreate(input, undefined, true, scope)).resolves.toMatchObject({ kind: "completed", data: { customerId, duplicateWarning: null } });
+    const goBody = JSON.parse(String(legacyFetch.mock.calls[0]?.[1]?.body));
+    const legacyBody = JSON.parse(String(legacyFetch.mock.calls[1]?.[1]?.body));
+    expect(legacyFetch.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/customers"]);
+    expect(goBody.intentId).toBe(pendingIntentId);
+    expect(legacyBody).toMatchObject({ action: "create", ...input, intentId: pendingIntentId });
+    await expect(readPendingCrmCustomerCreate(scope)).resolves.toBeNull();
+  });
+
+  it("fails closed for customer creation without actor and organization scope", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { customerId, duplicateWarning: null } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitCrmCustomerCreate({ name: "Northwind", preferredContactMethod: "email", doNotContact: false }, undefined, true)).rejects.toMatchObject({ name: "CrmApiError", status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("accepts only the established envelope for saved-view writes", async () => {

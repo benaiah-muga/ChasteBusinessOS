@@ -16,9 +16,11 @@ import {
   fetchCrmTimeline,
   fetchCrmViews,
   importCrmCustomers,
+  readPendingCrmCustomerCreate,
   readPendingCrmTaskCreate,
   submitCrmAction,
   submitCrmDealStageMove,
+  submitCrmCustomerCreate,
   submitCrmTaskMutation,
   undoCrmImport,
 } from "../api/crm";
@@ -146,7 +148,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [notice, setNotice] = useState<Notice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [sharedBusy, setSharedBusy] = useState(false);
+  const [customerCreateBusy, setCustomerCreateBusy] = useState(false);
   const [dealFilter, setDealFilter] = useState<"all" | "open" | "won" | "lost">("all");
   const [dealSearch, setDealSearch] = useState("");
   const [dealView, setDealView] = useState<"board" | "table">("board");
@@ -159,6 +162,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [bulkTag, setBulkTag] = useState("");
   const [createDeal, setCreateDeal] = useState({ title: "", value: "", customerId: "" });
   const [createCustomer, setCreateCustomer] = useState({ name: "", email: "", phone: "" });
+  const [customerCreateResolvedScope, setCustomerCreateResolvedScope] = useState<string | null>(null);
+  const [customerCreateLocked, setCustomerCreateLocked] = useState(false);
   const [newContactMethod, setNewContactMethod] = useState<"email" | "phone" | "whatsapp" | "other">("email");
   const [newDoNotContact, setNewDoNotContact] = useState(false);
   const [profileDraft, setProfileDraft] = useState({ name: "", phone: "", notes: "", tags: "", ownerUserId: "", doNotContact: false, preferredContactMethod: "email" as "email" | "phone" | "whatsapp" | "other" });
@@ -190,15 +195,26 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   const timelineRequest = useRef(0);
   const movingDealIds = useRef(new Set<string>());
+  const customerCreateScopeRef = useRef<string | null>(null);
+  const customerCreateScopeGeneration = useRef(0);
   const goCrmTaskWrites = typeof __GO_CRM_TASK_WRITES__ !== "undefined" && __GO_CRM_TASK_WRITES__;
+  const goCrmCustomerCreate = typeof __GO_CRM_CUSTOMER_CREATE__ !== "undefined" && __GO_CRM_CUSTOMER_CREATE__;
+  const customerCreateScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
+  if (customerCreateScopeRef.current !== customerCreateScopeIdentity) {
+    customerCreateScopeRef.current = customerCreateScopeIdentity;
+    customerCreateScopeGeneration.current += 1;
+  }
+  const busy = sharedBusy || customerCreateBusy;
+  const customerCreateReady = !goCrmCustomerCreate || Boolean(customerCreateScopeIdentity && customerCreateResolvedScope === customerCreateScopeIdentity);
   const taskDraftScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
   const taskDraftReady = !goCrmTaskWrites || Boolean(taskDraftScopeIdentity && taskDraftResolvedScope === taskDraftScopeIdentity);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async (signal?: AbortSignal, isCurrent: () => boolean = () => true) => {
+    if (!isCurrent()) return;
     setError(null);
     setLoading(true);
     const results = await Promise.allSettled([fetchCrmDeals(signal), fetchCrmCustomers(signal), fetchCrmTasks(signal)]);
-    if (signal?.aborted) return;
+    if (signal?.aborted || !isCurrent()) return;
     const failed = results.find((result) => result.status === "rejected");
     if (failed?.status === "rejected") setError(friendlyError(failed.reason));
     if (results[0]?.status === "fulfilled") setDeals(results[0].value);
@@ -250,6 +266,36 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     });
     return () => { active = false; };
   }, [actorId, goCrmTaskWrites, organizationId, taskDraftScopeIdentity]);
+
+  useEffect(() => {
+    if (!goCrmCustomerCreate) {
+      setCustomerCreateResolvedScope(null);
+      setCustomerCreateLocked(false);
+      return;
+    }
+    let active = true;
+    setCustomerCreateResolvedScope(null);
+    setCustomerCreateLocked(false);
+    setCustomerCreateBusy(false);
+    setCreateCustomer({ name: "", email: "", phone: "" });
+    setNewContactMethod("email");
+    setNewDoNotContact(false);
+    if (!actorId?.trim() || !organizationId?.trim()) return () => { active = false; };
+    void readPendingCrmCustomerCreate({ actorId, organizationId }).then((pending) => {
+      if (!active) return;
+      if (pending) {
+        setCreateCustomer({ name: pending.name, email: pending.email ?? "", phone: pending.phone ?? "" });
+        setNewContactMethod(pending.preferredContactMethod);
+        setNewDoNotContact(pending.doNotContact);
+        setCustomerCreateLocked(true);
+      }
+      setCustomerCreateResolvedScope(customerCreateScopeIdentity);
+    }).catch((reason: unknown) => {
+      if (!active) return;
+      setNotice({ tone: "error", text: friendlyError(reason) });
+    });
+    return () => { active = false; };
+  }, [actorId, customerCreateScopeIdentity, goCrmCustomerCreate, organizationId]);
 
   useEffect(() => {
     if ((tab !== "customers" && tab !== "tasks") || membersLoaded) return;
@@ -306,26 +352,31 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     }
   }, []);
 
-  async function mutate(path: "/api/deals" | "/api/customers" | "/api/crm" | "/api/crm/views", action: Record<string, unknown>, onDone?: (data: Record<string, unknown>) => void, submitAction?: () => ReturnType<typeof submitCrmAction>): Promise<boolean> {
-    setBusy(true);
+  async function mutate(path: "/api/deals" | "/api/customers" | "/api/crm" | "/api/crm/views", action: Record<string, unknown>, onDone?: (data: Record<string, unknown>) => void, submitAction?: () => ReturnType<typeof submitCrmAction>, isCurrent: () => boolean = () => true, busyOwner: "shared" | "customer-create" = "shared"): Promise<boolean> {
+    const setOperationBusy = busyOwner === "customer-create" ? setCustomerCreateBusy : setSharedBusy;
+    setOperationBusy(true);
     try {
       const outcome = await (submitAction ? submitAction() : submitCrmAction(path, action));
+      if (!isCurrent()) return false;
       if (outcome.kind === "pending") {
         setNotice({ tone: "pending", text: outcome.reason });
         return false;
       }
       onDone?.(outcome.data);
       setNotice({ tone: "success", text: "CRM changes saved." });
-      await load();
+      await load(undefined, isCurrent);
+      if (!isCurrent()) return false;
       if (selected) {
         const refreshed = (await fetchCrmCustomers()).find((customer) => customer.id === selected.id);
+        if (!isCurrent()) return false;
         if (refreshed) await openProfile(refreshed, profileTab);
       }
       return true;
     } catch (reason) {
+      if (!isCurrent()) return false;
       setNotice({ tone: "error", text: friendlyError(reason) });
       return false;
-    } finally { setBusy(false); }
+    } finally { if (isCurrent()) setOperationBusy(false); }
   }
 
   async function moveDeal(deal: CrmDeal, next: (typeof stages)[number], reason?: string) {
@@ -369,9 +420,41 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
 
   async function createNewCustomer(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!createCustomer.name.trim()) return;
-    const accepted = await mutate("/api/customers", { action: "create", name: createCustomer.name.trim(), ...(createCustomer.email.trim() ? { email: createCustomer.email.trim() } : {}), ...(createCustomer.phone.trim() ? { phone: createCustomer.phone.trim() } : {}), preferredContactMethod: newContactMethod, doNotContact: newDoNotContact });
-    if (accepted) { setCreateCustomer({ name: "", email: "", phone: "" }); setNewContactMethod("email"); setNewDoNotContact(false); }
+    if (!createCustomer.name.trim() || !customerCreateReady || busy) return;
+    const input = { name: createCustomer.name.trim(), ...(createCustomer.email.trim() ? { email: createCustomer.email.trim() } : {}), ...(createCustomer.phone.trim() ? { phone: createCustomer.phone.trim() } : {}), preferredContactMethod: newContactMethod, doNotContact: newDoNotContact };
+    const operationScope = customerCreateScopeIdentity;
+    const operationScopeGeneration = customerCreateScopeGeneration.current;
+    const isCurrentScope = () => !goCrmCustomerCreate || Boolean(operationScope && customerCreateScopeRef.current === operationScope && customerCreateScopeGeneration.current === operationScopeGeneration);
+    let duplicateWarning: string | null = null;
+    const accepted = await mutate("/api/customers", { action: "create", ...input }, undefined, async () => {
+      try {
+        const outcome = await submitCrmCustomerCreate(input, undefined, goCrmCustomerCreate, { actorId, organizationId });
+        if (!isCurrentScope()) return outcome;
+        if (outcome.kind === "pending") {
+          if (goCrmCustomerCreate) setCustomerCreateLocked(true);
+        } else {
+          setCustomerCreateLocked(false);
+          duplicateWarning = outcome.data.duplicateWarning ?? null;
+        }
+        return outcome;
+      } catch (reason) {
+        if (!isCurrentScope()) throw reason;
+        if (reason instanceof Error && "status" in reason) {
+          const status = Number((reason as { status: unknown }).status);
+          const mayHaveReached = Boolean((reason as { requestMayHaveReachedServer?: unknown }).requestMayHaveReachedServer);
+          if (goCrmCustomerCreate && (mayHaveReached || status === 408 || status === 429 || status >= 500) && !(status >= 400 && status < 500 && status !== 408 && status !== 429)) setCustomerCreateLocked(true);
+          if (goCrmCustomerCreate && status >= 400 && status < 500 && status !== 408 && status !== 429) setCustomerCreateLocked(false);
+        }
+        throw reason;
+      }
+    }, isCurrentScope, "customer-create");
+    if (accepted && isCurrentScope()) {
+      setCreateCustomer({ name: "", email: "", phone: "" });
+      setNewContactMethod("email");
+      setNewDoNotContact(false);
+      setCustomerCreateLocked(false);
+      setNotice({ tone: "success", text: duplicateWarning ? `Customer added. ${duplicateWarning}` : "Customer added." });
+    }
   }
 
   const activeCustomers = customers.filter((customer) => !customer.deactivatedAt);
@@ -571,7 +654,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   async function submitImport() {
     const rows = importRows.filter((row) => row.include && !row.error).map(({ rowNumber, name, email, phone, allowDuplicate }) => ({ rowNumber, name, ...(email ? { email } : {}), ...(phone ? { phone } : {}), allowDuplicate }));
     if (!rows.length) return;
-    setBusy(true);
+    setSharedBusy(true);
     try {
       const result = await importCrmCustomers(rows);
       if (result.kind === "pending") { setNotice({ tone: "pending", text: result.reason }); return; }
@@ -579,12 +662,12 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       setNotice({ tone: "success", text: `Imported ${result.data.inserted} customers. ${result.data.skippedDuplicates} likely duplicates were skipped.` });
       await load();
     } catch (reason) { setNotice({ tone: "error", text: friendlyError(reason) }); }
-    finally { setBusy(false); }
+    finally { setSharedBusy(false); }
   }
 
   async function undoImport() {
     if (!importSummary?.ids.length) return;
-    setBusy(true);
+    setSharedBusy(true);
     try {
       const result = await undoCrmImport(importSummary.ids);
       if (result.kind === "pending") { setNotice({ tone: "pending", text: result.reason }); return; }
@@ -592,7 +675,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       setNotice({ tone: "success", text: result.data.remaining ? `Deactivated ${result.data.undone} imported customers. ${result.data.remaining} had already changed.` : `Undid this import. ${result.data.undone} imported customers were deactivated.` });
       await load();
     } catch (reason) { setNotice({ tone: "error", text: friendlyError(reason) }); }
-    finally { setBusy(false); }
+    finally { setSharedBusy(false); }
   }
 
   const tabButton = (id: Tab, label: string, count?: number) => <button type="button" className={`crm-tab${tab === id ? " is-active" : ""}`} aria-pressed={tab === id} onClick={() => navigateToTab(id)}>{label}{count !== undefined && <span>{count}</span>}</button>;
@@ -622,7 +705,9 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     </section>}
 
     {tab === "customers" && <section className="crm-panel" aria-label="Customer directory"><header className="crm-panel-heading"><div><h2>Customers</h2><p>Profiles retain linked records when a customer is deactivated or merged.</p></div><button type="button" onClick={() => { setImportOpen(true); setImportSummary(null); }}>Import CSV</button></header>
-      <form className="crm-inline-form" onSubmit={(event) => void createNewCustomer(event)}><label>Name<input required value={createCustomer.name} onChange={(event) => setCreateCustomer({ ...createCustomer, name: event.target.value })} /></label><label>Email<input type="email" value={createCustomer.email} onChange={(event) => setCreateCustomer({ ...createCustomer, email: event.target.value })} /></label><label>Phone<input value={createCustomer.phone} onChange={(event) => setCreateCustomer({ ...createCustomer, phone: event.target.value })} /></label><label>Preferred contact<select value={newContactMethod} onChange={(event) => setNewContactMethod(event.target.value as typeof newContactMethod)}><option value="email">Email</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option></select></label><label className="crm-check"><input type="checkbox" checked={newDoNotContact} onChange={(event) => setNewDoNotContact(event.target.checked)} /> Do not contact</label><button disabled={busy}>Add customer</button></form>
+      <form className="crm-inline-form" onSubmit={(event) => void createNewCustomer(event)}><label>Name<input required maxLength={120} disabled={busy || !customerCreateReady || customerCreateLocked} value={createCustomer.name} onChange={(event) => setCreateCustomer({ ...createCustomer, name: event.target.value })} /></label><label>Email<input type="email" disabled={busy || !customerCreateReady || customerCreateLocked} value={createCustomer.email} onChange={(event) => setCreateCustomer({ ...createCustomer, email: event.target.value })} /></label><label>Phone<input maxLength={40} disabled={busy || !customerCreateReady || customerCreateLocked} value={createCustomer.phone} onChange={(event) => setCreateCustomer({ ...createCustomer, phone: event.target.value })} /></label><label>Preferred contact<select disabled={busy || !customerCreateReady || customerCreateLocked} value={newContactMethod} onChange={(event) => setNewContactMethod(event.target.value as typeof newContactMethod)}><option value="email">Email</option><option value="phone">Phone</option><option value="whatsapp">WhatsApp</option><option value="other">Other</option></select></label><label className="crm-check"><input type="checkbox" disabled={busy || !customerCreateReady || customerCreateLocked} checked={newDoNotContact} onChange={(event) => setNewDoNotContact(event.target.checked)} /> Do not contact</label><button disabled={busy || !customerCreateReady}>{customerCreateLocked ? "Retry customer" : "Add customer"}</button></form>
+      {goCrmCustomerCreate && !customerCreateReady && <p role="status">CRM is waiting for account and organization details or restoring a saved customer draft.</p>}
+      {goCrmCustomerCreate && customerCreateLocked && <p role="status">This customer creation is pending or uncertain. Retry the same details to resolve it.</p>}
       <div className="crm-filter-row"><label>Search<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, email, phone, or tag" /></label><label>Status<select value={customerFilter.status} onChange={(event) => setCustomerFilter({ ...customerFilter, status: event.target.value as CustomerFilter["status"] })}><option value="active">Active</option><option value="inactive">Inactive</option><option value="all">All</option></select></label><label>Owner<select value={customerFilter.owner} onChange={(event) => setCustomerFilter({ ...customerFilter, owner: event.target.value })}><option value="all">All owners</option><option value="unassigned">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label><label>Tag<input value={customerFilter.tag} onChange={(event) => setCustomerFilter({ ...customerFilter, tag: event.target.value })} /></label><label className="crm-check"><input type="checkbox" checked={customerFilter.staleOnly} onChange={(event) => setCustomerFilter({ ...customerFilter, staleOnly: event.target.checked })} /> No activity in 30 days</label><label className="crm-check"><input type="checkbox" checked={customerFilter.duplicateOnly} onChange={(event) => setCustomerFilter({ ...customerFilter, duplicateOnly: event.target.checked })} /> Possible duplicates</label></div>
       <div className="crm-saved-views"><label>Saved views<select aria-label="Saved customer views" value="" onChange={(event) => { const view = views.find((entry) => entry.id === event.target.value); if (view) setCustomerFilter(view.filters); }}><option value="">Choose a view</option>{views.filter((view) => view.isPinned).map((view) => <option key={view.id} value={view.id}>★ {view.name}</option>)}{views.filter((view) => !view.isPinned).map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><input aria-label="Saved view name" placeholder="Name this view" value={saveViewName} onChange={(event) => setSaveViewName(event.target.value)} /><button type="button" disabled={!saveViewName.trim() || busy} onClick={() => void saveView()}>Save current view</button>{views.map((view) => <span className="crm-view-chip" key={view.id}>{view.name}<button type="button" aria-label={`Pin ${view.name}`} onClick={() => void saveView(view.name, { ...view, isPinned: !view.isPinned })}>{view.isPinned ? "★" : "☆"}</button><button type="button" aria-label={`Share ${view.name}`} onClick={() => void saveView(view.name, { ...view, isShared: !view.isShared })}>{view.isShared ? "Shared" : "Private"}</button></span>)}</div>
       <form className="crm-bulk-customer-form" aria-label="Bulk customer updates" onSubmit={(event) => { event.preventDefault(); void applyBulkCustomerUpdate(); }}>

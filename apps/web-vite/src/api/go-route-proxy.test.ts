@@ -9,6 +9,7 @@ import {
   goInventoryLocationReservationWritesFromEnv,
   goInventoryBarcodeLookupFromEnv,
   goCrmDealStageMoveFromEnv,
+  goCrmCustomerCreateFromEnv,
   goCrmTaskWritesFromEnv,
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
@@ -80,6 +81,14 @@ describe("CRM task Go selector", () => {
     expect(goCrmTaskWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_TASK_WRITES: "1" })).toBe(true);
     expect(goCrmTaskWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goCrmTaskWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_TASK_WRITES: "1" })).toBe(false);
+  });
+});
+
+describe("CRM customer create Go selector", () => {
+  it("requires both the customer create selector and session capability route", () => {
+    expect(goCrmCustomerCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_CUSTOMER_CREATE: "1" })).toBe(true);
+    expect(goCrmCustomerCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goCrmCustomerCreateFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_CUSTOMER_CREATE: "1" })).toBe(false);
   });
 });
 

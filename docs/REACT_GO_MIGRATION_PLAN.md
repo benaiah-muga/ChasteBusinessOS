@@ -1702,3 +1702,13 @@ new owners and the manifest shows zero legacy runtime paths.
      drafts after reload, validate strict output shapes, and fail closed when
      account or organization scope or browser storage is unavailable. Browser
      proof remains open.
+172. Route only Vite CRM customer creation through Go's session-authenticated
+     `crm.createCustomer` capability when `CHASTE_GO_CRM_CUSTOMER_CREATE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep all other CRM actions on their
+     current routes. Preserve the legacy route as a same-intent fallback only
+     when the Go capability route is absent. Persist the exact actor and
+     organization scoped attempt and form draft across pending and uncertain
+     results, restore it on reload, fail closed while the active scope is
+     unresolved, validate the customer ID and duplicate warning, and include
+     the warning in the success notice. The Go parser enforces the legacy
+     120-character name limit. Browser proof remains open.

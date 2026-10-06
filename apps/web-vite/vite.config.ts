@@ -1,6 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goCrmDealStageMoveFromEnv, goCrmTaskWritesFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goManufacturingProductionWritesFromEnv, goManufacturingWorkOrderWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderWritesFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goCrmCustomerCreateFromEnv, goCrmDealStageMoveFromEnv, goCrmTaskWritesFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goManufacturingProductionWritesFromEnv, goManufacturingWorkOrderWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goPurchasingCreateOrderFromEnv, goPurchasingFinanceWritesFromEnv, goPurchasingReceiveGoodsFromEnv, goPurchasingReturnCloseFromEnv, goPurchasingSourcingWritesFromEnv, goRouteProxyFlagsFromEnv, goSalesOrderWritesFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "CHASTE_");
@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
   const goInventoryBarcodeLookup = goInventoryBarcodeLookupFromEnv(env);
   const goCrmDealStageMove = goCrmDealStageMoveFromEnv(env);
   const goCrmTaskWrites = goCrmTaskWritesFromEnv(env);
+  const goCrmCustomerCreate = goCrmCustomerCreateFromEnv(env);
   const goPurchasingCreateOrder = goPurchasingCreateOrderFromEnv(env);
   const goPurchasingReceiveGoods = goPurchasingReceiveGoodsFromEnv(env);
   const goPurchasingReturnClose = goPurchasingReturnCloseFromEnv(env);
@@ -47,6 +48,7 @@ export default defineConfig(({ mode }) => {
       __GO_INVENTORY_BARCODE_LOOKUP__: JSON.stringify(goInventoryBarcodeLookup),
       __GO_CRM_DEAL_STAGE_MOVE__: JSON.stringify(goCrmDealStageMove),
       __GO_CRM_TASK_WRITES__: JSON.stringify(goCrmTaskWrites),
+      __GO_CRM_CUSTOMER_CREATE__: JSON.stringify(goCrmCustomerCreate),
       __GO_PURCHASING_CREATE_ORDER__: JSON.stringify(goPurchasingCreateOrder),
       __GO_PURCHASING_RECEIVE_GOODS__: JSON.stringify(goPurchasingReceiveGoods),
       __GO_PURCHASING_RETURN_CLOSE__: JSON.stringify(goPurchasingReturnClose),
