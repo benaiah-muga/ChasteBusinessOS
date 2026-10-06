@@ -16,6 +16,7 @@ import {
   fetchConversations,
   fetchMessagingEnabled,
   fetchOlderMessages,
+  getPendingMessageDelete,
   getPendingMessageEdit,
   reportConversationPresence,
   searchMessages,
@@ -265,6 +266,70 @@ describe("messaging API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`/api/messages/${messageId}`);
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ body: "Legacy fallback", intentId: expect.any(String) });
+  });
+
+  it("retries a Go message deletion with the exact actor/org scoped intent", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const bodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return Response.json({ pendingApproval: true, reason: "Manager review required." }, { status: 202 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const scope = { actorId: "user-delete", organizationId: "org-delete" };
+    const options = { allowGo: true, ...scope, conversationId };
+
+    await expect(deleteMessage(messageId, undefined, options)).resolves.toEqual({ kind: "pending", reason: "Manager review required." });
+    const recovered = await getPendingMessageDelete(scope);
+    expect(recovered).toMatchObject({ messageId, conversationId, intentId: expect.any(String) });
+    await expect(deleteMessage(messageId, undefined, options)).resolves.toMatchObject({ kind: "pending" });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toMatchObject({
+      capabilityId: "messaging.deleteMessage",
+      input: { messageId },
+      intentId: recovered?.intentId,
+    });
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+    await expect(deleteMessage("another-message", undefined, options)).rejects.toMatchObject({
+      message: expect.stringContaining("Retry the saved deletion"),
+    });
+    await expect(getPendingMessageDelete({ actorId: "user-delete", organizationId: "org-other" })).resolves.toBeNull();
+  });
+
+  it("keeps a Go deletion after an uncertain result and validates the tombstone output", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const scope = { actorId: "user-delete-retry", organizationId: "org-delete-retry" };
+    const options = { allowGo: true, ...scope, conversationId };
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("offline"); }));
+    await expect(deleteMessage(messageId, undefined, options)).rejects.toBeInstanceOf(MessagingApiError);
+    const recovered = await getPendingMessageDelete(scope);
+    expect(recovered).toMatchObject({ messageId, conversationId });
+
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, data: { deleted: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(deleteMessage(messageId, undefined, options)).resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(lastBody(fetchMock)).toMatchObject({ intentId: recovered?.intentId });
+    await expect(getPendingMessageDelete(scope)).resolves.toBeNull();
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { deleted: false } })));
+    await expect(deleteMessage(messageId, undefined, { allowGo: true, actorId: "user-delete-invalid", organizationId: "org-delete-invalid", conversationId }))
+      .rejects.toMatchObject({ message: expect.stringContaining("unexpected response") });
+  });
+
+  it("falls back to the legacy tombstone route only on a capability 404 with the same intent", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/capabilities/execute") return Response.json({ error: "not found" }, { status: 404 });
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(deleteMessage(messageId, undefined, {
+      allowGo: true, actorId: "user-delete-fallback", organizationId: "org-delete-fallback", conversationId,
+    })).resolves.toEqual({ kind: "completed", data: { ok: true } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const legacyUrl = new URL(String(fetchMock.mock.calls[1]?.[0]), "http://localhost");
+    expect(legacyUrl.pathname).toBe(`/api/messages/${messageId}`);
+    expect(legacyUrl.searchParams.get("intentId")).toEqual(expect.any(String));
   });
 
   it("preserves Go capability errors for the composer", async () => {

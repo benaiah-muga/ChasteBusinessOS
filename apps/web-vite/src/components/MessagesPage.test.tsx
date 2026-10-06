@@ -18,6 +18,7 @@ import {
 } from "./MessagesPage";
 import {
   MAX_ATTACHMENT_BYTES,
+  deleteMessage,
   type Conversation,
   type Message,
   type MessageReader,
@@ -371,6 +372,87 @@ describe("messages page states", () => {
     await waitFor(() => expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Corrected after reload"));
     const goBody = JSON.parse(String(fetchMock.mock.calls.find(([path]) => String(path) === "/api/capabilities/execute")?.[1]?.body)) as Record<string, unknown>;
     expect(goBody).toMatchObject({ capabilityId: "messaging.editMessage", input: { body: "Corrected after reload" }, intentId: expect.any(String) });
+  });
+
+  it("restores the Go message deletion confirmation and intent after reload", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const capabilityBodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute") {
+        capabilityBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return Response.json({ pendingApproval: true, reason: "Manager review required." }, { status: 202 });
+      }
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    await deleteMessage("m1", undefined, { allowGo: true, ...props, conversationId: channelId });
+    expect(capabilityBodies).toHaveLength(1);
+    expect(capabilityBodies[0]).toMatchObject({ capabilityId: "messaging.deleteMessage", input: { messageId: "m1" }, intentId: expect.any(String) });
+    render(<MessagesPage {...props} />);
+    const restoredDialog = await screen.findByRole("alertdialog", { name: "Delete this message?" });
+    fireEvent.click(within(restoredDialog).getByRole("button", { name: "Delete message" }));
+    await waitFor(() => expect(capabilityBodies).toHaveLength(2));
+    expect(capabilityBodies[1]?.intentId).toBe(capabilityBodies[0]?.intentId);
+  });
+
+  it("closes a restored deletion confirmation when the actor or organization changes", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const capabilityBodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute") {
+        capabilityBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 });
+      }
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const scopeA = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    await deleteMessage("m1", undefined, { allowGo: true, ...scopeA, conversationId: channelId });
+    const view = render(<MessagesPage {...scopeA} />);
+    expect(await screen.findByRole("alertdialog", { name: "Delete this message?" })).not.toBeNull();
+
+    view.rerender(<MessagesPage actorId={other} organizationId="7d15d9ac-d8b6-4f49-8ca5-387adf08b8e5" />);
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Delete this message?" })).toBeNull());
+    expect(capabilityBodies).toHaveLength(1);
+  });
+
+  it("does not send a restored Go deletion after its actor and organization become unresolved", async () => {
+    vi.stubGlobal("__GO_MESSAGING_DELETE_SLICE__", true);
+    const deleteRequests: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute" || path.startsWith("/api/messages/m1?intentId=")) deleteRequests.push(path);
+      if (path === "/api/capabilities/execute") return Response.json({ pendingApproval: true, reason: "Review required." }, { status: 202 });
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const scopeA = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    await deleteMessage("m1", undefined, { allowGo: true, ...scopeA, conversationId: channelId });
+    const view = render(<MessagesPage {...scopeA} />);
+    expect(await screen.findByRole("alertdialog", { name: "Delete this message?" })).not.toBeNull();
+    expect(deleteRequests).toHaveLength(1);
+
+    view.rerender(<MessagesPage actorId={null} organizationId={null} />);
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Delete this message?" })).toBeNull());
+    expect(deleteRequests).toHaveLength(1);
   });
 
   it("keeps the draft and raises an alert when the send fails", async () => {

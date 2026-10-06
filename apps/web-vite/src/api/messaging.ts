@@ -154,12 +154,18 @@ export type MessagingOutcome<T = Record<string, unknown>> =
   | { kind: "pending"; reason: string };
 
 export type PendingMessageEdit = { messageId: string; conversationId: string | null; body: string; intentId: string };
+export type PendingMessageDelete = { messageId: string; conversationId: string | null; intentId: string };
 
-type MessageEditScope = { actorId: string | null; organizationId: string | null };
+export type MessageRetryScope = { actorId: string | null; organizationId: string | null };
 const pendingMessageEditPrefix = "chaste:message-edit-attempt:";
+const pendingMessageDeletePrefix = "chaste:message-delete-attempt:";
 const GoEditMessageEnvelopeSchema = z.object({
   ok: z.literal(true),
   data: z.object({ messageId: z.string().min(1), editedAt: IsoTimestampSchema }).strict(),
+}).strict();
+const GoDeleteMessageEnvelopeSchema = z.object({
+  ok: z.literal(true),
+  data: z.object({ deleted: z.literal(true) }).strict(),
 }).strict();
 
 export class MessagingApiError extends Error {
@@ -453,7 +459,7 @@ export function editMessage(
   return editMessageThroughGo(messageId, body, { actorId: options.actorId ?? null, organizationId: options.organizationId ?? null }, signal, options.conversationId ?? null);
 }
 
-async function messageEditStorageKey(scope: MessageEditScope): Promise<string> {
+async function messageEditStorageKey(scope: MessageRetryScope): Promise<string> {
   const actorId = scope.actorId?.trim() ?? "";
   const organizationId = scope.organizationId?.trim() ?? "";
   if (!actorId || !organizationId) throw new MessagingApiError(0, "Message editing needs a signed-in actor and active organization.");
@@ -484,7 +490,7 @@ function readPendingMessageEdit(key: string): PendingMessageEdit | null {
   throw new MessagingApiError(0, "A saved message edit could not be verified. Refresh the conversation before editing again.");
 }
 
-export async function getPendingMessageEdit(scope: MessageEditScope): Promise<PendingMessageEdit | null> {
+export async function getPendingMessageEdit(scope: MessageRetryScope): Promise<PendingMessageEdit | null> {
   return readPendingMessageEdit(await messageEditStorageKey(scope));
 }
 
@@ -508,7 +514,7 @@ function clearPendingMessageEdit(key: string, intentId: string): void {
 export async function editMessageThroughGo(
   messageId: string,
   body: string,
-  scope: MessageEditScope,
+  scope: MessageRetryScope,
   signal?: AbortSignal,
   conversationId: string | null = null,
 ): Promise<MessagingOutcome<{ ok: true }>> {
@@ -561,11 +567,118 @@ export async function editMessageThroughGo(
   return { kind: "completed", data: { ok: true } };
 }
 
-export function deleteMessage(messageId: string, signal?: AbortSignal): Promise<MessagingOutcome<{ ok: true }>> {
+function deleteMessageLegacy(messageId: string, signal?: AbortSignal, intentId = newIntentId()): Promise<MessagingOutcome<{ ok: true }>> {
   // The legacy tombstone route reads the idempotency key from the query string.
-  return governed(`/api/messages/${encodeURIComponent(messageId)}?intentId=${newIntentId()}`, {
+  return governed(`/api/messages/${encodeURIComponent(messageId)}?intentId=${intentId}`, {
     method: "DELETE",
   }, "delete this message", OkEnvelopeSchema, "Deleting this message is waiting for approval.", signal);
+}
+
+export function deleteMessage(
+  messageId: string,
+  signal?: AbortSignal,
+  options: { allowGo?: boolean; actorId?: string | null; organizationId?: string | null; conversationId?: string | null } = {},
+): Promise<MessagingOutcome<{ ok: true }>> {
+  const useGo = options.allowGo === true && typeof __GO_MESSAGING_DELETE_SLICE__ !== "undefined" && __GO_MESSAGING_DELETE_SLICE__;
+  if (!useGo) return deleteMessageLegacy(messageId, signal);
+  return deleteMessageThroughGo(messageId, {
+    actorId: options.actorId ?? null,
+    organizationId: options.organizationId ?? null,
+    conversationId: options.conversationId ?? null,
+  }, signal);
+}
+
+async function messageDeleteStorageKey(scope: MessageRetryScope): Promise<string> {
+  const actorId = scope.actorId?.trim() ?? "";
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!actorId || !organizationId) throw new MessagingApiError(0, "Message deletion needs a signed-in actor and active organization.");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
+  const fingerprint = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${pendingMessageDeletePrefix}${fingerprint}`;
+}
+
+function readPendingMessageDelete(key: string): PendingMessageDelete | null {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(key);
+  } catch {
+    throw new MessagingApiError(0, "Saved message-deletion recovery is unavailable. Check browser storage settings and try again.");
+  }
+  if (raw == null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null && "messageId" in parsed && typeof parsed.messageId === "string" &&
+      "conversationId" in parsed && (typeof parsed.conversationId === "string" || parsed.conversationId === null) &&
+      "intentId" in parsed && typeof parsed.intentId === "string" && z.string().uuid().safeParse(parsed.intentId).success) {
+      return { messageId: parsed.messageId, conversationId: parsed.conversationId, intentId: parsed.intentId };
+    }
+  } catch {
+    // A damaged retry marker must not silently issue another tombstone.
+  }
+  throw new MessagingApiError(0, "A saved message deletion could not be verified. Refresh the conversation before deleting again.");
+}
+
+export async function getPendingMessageDelete(scope: MessageRetryScope): Promise<PendingMessageDelete | null> {
+  return readPendingMessageDelete(await messageDeleteStorageKey(scope));
+}
+
+function clearPendingMessageDelete(key: string, intentId: string): void {
+  try {
+    if (readPendingMessageDelete(key)?.intentId === intentId) localStorage.removeItem(key);
+  } catch {
+    // A completed response is authoritative; a stale marker is safe to retry.
+  }
+}
+
+async function deleteMessageThroughGo(
+  messageId: string,
+  scope: MessageRetryScope & { conversationId: string | null },
+  signal?: AbortSignal,
+): Promise<MessagingOutcome<{ ok: true }>> {
+  const key = await messageDeleteStorageKey(scope);
+  const pending = readPendingMessageDelete(key);
+  if (pending && (pending.messageId !== messageId || pending.conversationId !== scope.conversationId)) {
+    throw new MessagingApiError(0, "A message deletion is unresolved. Retry the saved deletion or refresh the conversation before deleting another message.");
+  }
+  const action = pending ?? { messageId, conversationId: scope.conversationId, intentId: newIntentId() };
+  if (!pending) {
+    try {
+      localStorage.setItem(key, JSON.stringify(action));
+    } catch {
+      throw new MessagingApiError(0, "Message-deletion retry protection is unavailable. Check browser storage settings and try again.");
+    }
+  }
+
+  const legacy = () => deleteMessageLegacy(action.messageId, signal, action.intentId);
+  const result = await send("/api/capabilities/execute", {
+    method: "POST",
+    body: JSON.stringify({ capabilityId: "messaging.deleteMessage", input: { messageId: action.messageId }, intentId: action.intentId }),
+  }, "delete this message", signal);
+  if (result.response.status === 404) {
+    try {
+      const outcome = await legacy();
+      if (outcome.kind === "completed") clearPendingMessageDelete(key, action.intentId);
+      return outcome;
+    } catch (error) {
+      const status = error instanceof MessagingApiError ? error.status : 0;
+      if (status >= 400 && status < 500 && status !== 408 && status !== 429) clearPendingMessageDelete(key, action.intentId);
+      throw error;
+    }
+  }
+  if (result.response.status === 202) {
+    const parsed = PendingApprovalSchema.safeParse(result.body);
+    if (!parsed.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to delete this message.");
+    return { kind: "pending", reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? "Deleting this message is waiting for approval." };
+  }
+  if (!result.response.ok) {
+    const terminal = result.response.status >= 400 && result.response.status < 500 && result.response.status !== 408 && result.response.status !== 429;
+    if (terminal) clearPendingMessageDelete(key, action.intentId);
+    throw new MessagingApiError(result.response.status, readError(result.response.status, result.body, "delete this message"));
+  }
+  const parsed = GoDeleteMessageEnvelopeSchema.safeParse(result.body);
+  if (!parsed.success) throw new MessagingApiError(result.response.status, "The messaging service returned an unexpected response to delete this message.");
+  clearPendingMessageDelete(key, action.intentId);
+  return { kind: "completed", data: { ok: true } };
 }
 
 export async function setMessageReaction(messageId: string, emoji: string, active: boolean, signal?: AbortSignal): Promise<void> {

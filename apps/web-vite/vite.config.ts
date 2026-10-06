@@ -32,6 +32,7 @@ export default defineConfig(({ mode }) => {
   const goSalesOrderWrites = goSalesOrderWritesFromEnv(env);
   const goMessagingSendSlice = env.CHASTE_GO_MESSAGING_SEND_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goMessagingEditSlice = env.CHASTE_GO_MESSAGING_EDIT_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
+  const goMessagingDeleteSlice = env.CHASTE_GO_MESSAGING_DELETE_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goPosOpenSessionSlice = goPosOpenSessionSliceFromEnv(env);
   const goPosCloseSessionSlice = goPosCloseSessionSliceFromEnv(env);
   const goPosCustomersSlice = goPosCustomersSliceFromEnv(env);
@@ -68,6 +69,7 @@ export default defineConfig(({ mode }) => {
       __GO_SALES_ORDER_WRITES__: JSON.stringify(goSalesOrderWrites),
       __GO_MESSAGING_SEND_SLICE__: JSON.stringify(goMessagingSendSlice),
       __GO_MESSAGING_EDIT_SLICE__: JSON.stringify(goMessagingEditSlice),
+      __GO_MESSAGING_DELETE_SLICE__: JSON.stringify(goMessagingDeleteSlice),
       __GO_POS_OPEN_SESSION_SLICE__: JSON.stringify(goPosOpenSessionSlice),
       __GO_POS_CLOSE_SESSION_SLICE__: JSON.stringify(goPosCloseSessionSlice),
       __GO_POS_COMPLETE_SALE_SLICE__: JSON.stringify(goPosCompleteSaleSlice),

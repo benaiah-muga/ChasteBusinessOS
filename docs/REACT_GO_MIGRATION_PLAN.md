@@ -1763,3 +1763,8 @@ new owners and the manifest shows zero legacy runtime paths.
      actor/org scoped edit and intent after pending or uncertain results,
      validate Go output, and use legacy only when the capability route is
      missing. Browser proof remains open.
+181. Add the opt-in `CHASTE_GO_MESSAGING_DELETE_SLICE` selector for Vite
+     message deletions through Go's `messaging.deleteMessage` capability.
+     Restore the actor/org scoped confirmation and intent after pending or
+     uncertain results, validate the response, and block stale confirmation
+     state across organization or session changes. Browser proof remains open.

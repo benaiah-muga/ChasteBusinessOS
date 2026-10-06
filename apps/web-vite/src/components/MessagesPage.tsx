@@ -15,6 +15,7 @@ import {
   fetchConversations,
   fetchMessagingEnabled,
   fetchOlderMessages,
+  getPendingMessageDelete,
   getPendingMessageEdit,
   reportConversationPresence,
   searchMessages,
@@ -57,6 +58,10 @@ export type ListFilter = "active" | "archived";
 export type SearchMode = "conversations" | "messages";
 export type DraftStatus = "saving" | "saved" | "unavailable";
 export type BubbleTone = "system" | "agent" | "mine" | "colleague";
+
+function messageDeleteScopeIdentity(actorId: string | null, organizationId: string | null): string {
+  return JSON.stringify([actorId?.trim() ?? "", organizationId?.trim() ?? ""]);
+}
 
 export interface PendingAttachment {
   key: string;
@@ -565,6 +570,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const [dialogNotice, setDialogNotice] = useState<Notice | null>(null);
   const [confirmDeleteConversation, setConfirmDeleteConversation] = useState(false);
   const [confirmDeleteMessageId, setConfirmDeleteMessageId] = useState<string | null>(null);
+  const [confirmDeleteMessageScope, setConfirmDeleteMessageScope] = useState<string | null>(null);
 
   const threadRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -603,6 +609,31 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     });
     return () => { current = false; };
   }, [actorId, organizationId]);
+
+  useEffect(() => {
+    const goDeleteEnabled = typeof __GO_MESSAGING_DELETE_SLICE__ !== "undefined" && __GO_MESSAGING_DELETE_SLICE__;
+    if (!goDeleteEnabled || !actorId || !organizationId) return;
+    let current = true;
+    void getPendingMessageDelete({ actorId, organizationId }).then((pending) => {
+      if (!current || !pending) return;
+      if (pending.conversationId) setActiveId(pending.conversationId);
+      setConfirmDeleteMessageScope(messageDeleteScopeIdentity(actorId, organizationId));
+      setConfirmDeleteMessageId(pending.messageId);
+      setNotice({ tone: "pending", text: "An earlier message deletion is unresolved. Confirm the saved deletion to check its result." });
+    }).catch((error: unknown) => {
+      if (current) setNotice({ tone: "error", text: errorText(error, "Could not restore the pending message deletion.") });
+    });
+    return () => { current = false; };
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    if (confirmDeleteMessageId == null) return;
+    const currentScope = messageDeleteScopeIdentity(actorId, organizationId);
+    if (confirmDeleteMessageScope !== currentScope) {
+      setConfirmDeleteMessageId(null);
+      setConfirmDeleteMessageScope(null);
+    }
+  }, [actorId, confirmDeleteMessageId, confirmDeleteMessageScope, organizationId]);
 
   const loadConversations = useCallback(async (signal?: AbortSignal) => {
     setLoadError(null);
@@ -1041,17 +1072,38 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   }, [activeId, actorId, editingBody, editingId, organizationId, refreshThread, report]);
 
   const removeMessage = useCallback(async (messageId: string) => {
+    const goDeleteEnabled = typeof __GO_MESSAGING_DELETE_SLICE__ !== "undefined" && __GO_MESSAGING_DELETE_SLICE__;
+    const currentDeleteScope = messageDeleteScopeIdentity(actorId, organizationId);
+    if (goDeleteEnabled && confirmDeleteMessageScope !== currentDeleteScope) {
+      setConfirmDeleteMessageId(null);
+      setConfirmDeleteMessageScope(null);
+      setNotice({ tone: "error", text: "The active workspace changed. Reopen the deletion confirmation for this message." });
+      return;
+    }
     setConfirmDeleteMessageId(null);
+    const retainConfirmation = goDeleteEnabled && actorId != null && organizationId != null && activeId != null;
     try {
-      const outcome = await deleteMessageRequest(messageId);
+      const outcome = await deleteMessageRequest(messageId, undefined, {
+        allowGo: retainConfirmation,
+        actorId,
+        organizationId,
+        conversationId: activeId,
+      });
       if (report(outcome, "Deleting this message is waiting for approval.")) {
         if (activeId) await refreshThread(activeId);
         setNotice({ tone: "success", text: "Message deleted." });
+      } else if (retainConfirmation) {
+        setConfirmDeleteMessageScope(currentDeleteScope);
+        setConfirmDeleteMessageId(messageId);
       }
     } catch (error) {
       setNotice({ tone: "error", text: errorText(error, "Could not delete the message.") });
+      if (retainConfirmation) {
+        setConfirmDeleteMessageScope(currentDeleteScope);
+        setConfirmDeleteMessageId(messageId);
+      }
     }
-  }, [activeId, refreshThread, report]);
+  }, [activeId, actorId, confirmDeleteMessageScope, organizationId, refreshThread, report]);
 
   const changeReaction = useCallback(async (messageId: string, emoji: string, active: boolean) => {
     try {
@@ -1409,7 +1461,10 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
                       onToggleReactionMenu={(id) => setReactionMenuId((current) => (current === id ? null : id))}
                       onReact={(emoji, active) => { setReactionMenuId(null); void changeReaction(message.id, emoji, active); }}
                       onTogglePin={() => { void togglePin(message); }}
-                      onRequestDelete={setConfirmDeleteMessageId}
+                      onRequestDelete={(id) => {
+                        setConfirmDeleteMessageScope(messageDeleteScopeIdentity(actorId, organizationId));
+                        setConfirmDeleteMessageId(id);
+                      }}
                     />
                   ))}
                   {typingNames.length > 0 && (
@@ -1701,11 +1756,17 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
       />
 
       <ConfirmDialog
-        open={confirmDeleteMessageId != null}
+        open={confirmDeleteMessageId != null && (
+          typeof __GO_MESSAGING_DELETE_SLICE__ === "undefined" || !__GO_MESSAGING_DELETE_SLICE__ ||
+          confirmDeleteMessageScope === messageDeleteScopeIdentity(actorId, organizationId)
+        )}
         title="Delete this message?"
         body="It is replaced by a deletion marker for everyone. The audit trail keeps the original."
         confirmLabel="Delete message"
-        onClose={() => setConfirmDeleteMessageId(null)}
+        onClose={() => {
+          setConfirmDeleteMessageId(null);
+          setConfirmDeleteMessageScope(null);
+        }}
         onConfirm={() => { if (confirmDeleteMessageId) void removeMessage(confirmDeleteMessageId); }}
       />
     </div>
