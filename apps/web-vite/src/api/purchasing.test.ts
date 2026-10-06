@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   closePurchasingOrder,
+  createPurchasingOrder,
   createPurchasingVendor,
   creditPurchasingBill,
   fetchPurchasingEnabled,
@@ -134,6 +135,96 @@ describe("purchasing workspace reads", () => {
 });
 
 describe("governed purchasing writes", () => {
+  const poAction = {
+    action: "createPurchaseOrder" as const,
+    vendorId: "0569aacb-58c3-4a30-8afe-3554e38eb2ce",
+    memo: "March stock",
+    lines: [{ description: "Canvas bag", quantity: 2500, unitPriceMinor: 0, sku: "CB-01" }],
+  };
+  const retryScope = {
+    actorId: "actor-1",
+    organizationId: "org-1",
+  };
+
+  it("requires actor and organization scope before a Go purchase order request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("__GO_PURCHASING_CREATE_ORDER__", true);
+
+    await expect(createPurchasingOrder(poAction, undefined, { actorId: "actor-1", organizationId: null }))
+      .rejects.toMatchObject({ status: 0, message: expect.stringContaining("organization") });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends purchase orders through Go with scoped stable intent across pending and uncertain retries", async () => {
+    vi.stubGlobal("__GO_PURCHASING_CREATE_ORDER__", true);
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Approval required." }, { status: 202 }))
+      .mockImplementation(() => Promise.resolve(Response.json({ ok: true, data: { poNumber: 42 } })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createPurchasingOrder(poAction, undefined, retryScope)).rejects.toMatchObject({ status: 0 });
+    const first = postedBody(fetchMock.mock.calls[0]!);
+    await expect(createPurchasingOrder(poAction, undefined, retryScope))
+      .resolves.toEqual({ kind: "pending", reason: "Approval required." });
+    const second = postedBody(fetchMock.mock.calls[1]!);
+    expect(second.intentId).toBe(first.intentId);
+    expect(second).toMatchObject({
+      capabilityId: "purchasing.createPurchaseOrder",
+      input: { vendorId: poAction.vendorId, memo: "March stock", lines: poAction.lines },
+    });
+    await expect(createPurchasingOrder(poAction, undefined, retryScope))
+      .resolves.toEqual({ kind: "completed", data: { poNumber: 42 } });
+    expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(first.intentId);
+
+    await createPurchasingOrder(poAction, undefined, retryScope);
+    expect(postedBody(fetchMock.mock.calls[3]!).intentId).not.toBe(first.intentId);
+  });
+
+  it("falls back to the legacy route with the same purchase order intent", async () => {
+    vi.stubGlobal("__GO_PURCHASING_CREATE_ORDER__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { poNumber: 43 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createPurchasingOrder(poAction, undefined, retryScope))
+      .resolves.toEqual({ kind: "completed", data: { poNumber: 43 } });
+    const goIntent = postedBody(fetchMock.mock.calls[0]!).intentId;
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/purchasing");
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(goIntent);
+    expect(postedBody(fetchMock.mock.calls[1]!).action).toBe("createPurchaseOrder");
+  });
+
+  it("clears a terminal purchase order rejection so a corrected draft gets a new intent", async () => {
+    vi.stubGlobal("__GO_PURCHASING_CREATE_ORDER__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "invalid line" }, { status: 422 }))
+      .mockImplementation(() => Promise.resolve(Response.json({ ok: true, data: { poNumber: 45 } })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createPurchasingOrder(poAction, undefined, retryScope)).rejects.toMatchObject({ status: 422 });
+    const rejectedIntent = postedBody(fetchMock.mock.calls[0]!).intentId;
+    await expect(createPurchasingOrder({ ...poAction, memo: "Corrected draft" }, undefined, retryScope))
+      .resolves.toMatchObject({ kind: "completed" });
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).not.toBe(rejectedIntent);
+  });
+
+  it("rejects zero quantity and negative price while allowing an explicit zero price", async () => {
+    vi.stubGlobal("__GO_PURCHASING_CREATE_ORDER__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { poNumber: 44 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createPurchasingOrder({ ...poAction, lines: [{ ...poAction.lines[0]!, quantity: 0 }] }, undefined, retryScope))
+      .rejects.toMatchObject({ status: 0 });
+    await expect(createPurchasingOrder({ ...poAction, lines: [{ ...poAction.lines[0]!, unitPriceMinor: -1 }] }, undefined, retryScope))
+      .rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(createPurchasingOrder(poAction, undefined, retryScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("creates vendors through the authenticated Go capability endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { vendorId: "vendor-1" } }));
     vi.stubGlobal("fetch", fetchMock);

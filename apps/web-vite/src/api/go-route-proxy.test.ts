@@ -9,6 +9,7 @@ import {
   goInventoryLocationReservationWritesFromEnv,
   goInventoryBarcodeLookupFromEnv,
   goCrmDealStageMoveFromEnv,
+  goPurchasingCreateOrderFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -63,6 +64,14 @@ describe("CRM deal stage Go selector", () => {
     expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_CRM_DEAL_STAGE_MOVE: "1" })).toBe(true);
     expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goCrmDealStageMoveFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_CRM_DEAL_STAGE_MOVE: "1" })).toBe(false);
+  });
+});
+
+describe("purchase order creation Go selector", () => {
+  it("requires both the PO selector and session capability route", () => {
+    expect(goPurchasingCreateOrderFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_CREATE_ORDER: "1" })).toBe(true);
+    expect(goPurchasingCreateOrderFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goPurchasingCreateOrderFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_CREATE_ORDER: "1" })).toBe(false);
   });
 });
 

@@ -1580,3 +1580,14 @@ new owners and the manifest shows zero legacy runtime paths.
      intent across pending and uncertain retries, and clear it on success or a
      terminal 4xx. A missing Go capability route falls back with the same
      intent. Focused Vite tests pass; browser proof remains open.
+162. Route only Vite purchase order creation through Go's session-authenticated
+     `purchasing.createPurchaseOrder` capability when
+     `CHASTE_GO_PURCHASING_CREATE_ORDER=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set the selector to `0` to restore
+     `/api/purchasing`; a missing capability route falls back with the same
+     intent. Scope persisted retry identity to the active actor and
+     organization, preserve it for the exact draft while approval is pending or
+     the result is uncertain, and clear it on success or terminal 4xx. Keep the
+     draft on pending or failed responses, validate positive safe-integer
+     quantities and valid non-negative prices, and preserve other purchasing
+     actions. Focused Vite checks pass; browser proof remains open.

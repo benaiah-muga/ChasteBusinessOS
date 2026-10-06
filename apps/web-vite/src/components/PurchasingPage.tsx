@@ -227,10 +227,10 @@ function vendorOpenOrders(orders: PurchasingOrder[], name: string): PurchasingOr
 
 /* -------------------------------------------------------------------- submit --- */
 
-async function submitAction(action: PurchasingWrite): Promise<PurchasingActionOutcome> {
+async function submitAction(action: PurchasingWrite, retryScope?: { actorId: string | null; organizationId: string | null }): Promise<PurchasingActionOutcome> {
   switch (action.action) {
     case "createVendor": return createPurchasingVendor(action);
-    case "createPurchaseOrder": return createPurchasingOrder(action);
+    case "createPurchaseOrder": return createPurchasingOrder(action, undefined, retryScope);
     case "receiveGoods": return receivePurchasingGoods(action);
     case "returnGoods": return returnPurchasingGoods(action);
     case "closePurchaseOrder": return closePurchasingOrder(action);
@@ -287,7 +287,7 @@ function Dialog({ title, hint, wide = false, onClose, foot, children }: {
 
 /* ---------------------------------------------------------------------- page --- */
 
-export function PurchasingPage({ baseCurrency = null }: { baseCurrency?: string | null } = {}) {
+export function PurchasingPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null } = {}) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [tab, setTab] = useState<Tab>(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
@@ -358,7 +358,7 @@ export function PurchasingPage({ baseCurrency = null }: { baseCurrency?: string 
     setBusy(true);
     setNotice(null);
     try {
-      const outcome = await submitAction(action);
+      const outcome = await submitAction(action, { actorId, organizationId });
       if (outcome.kind === "pending") {
         setNotice({ tone: "pending", text: `${label} is waiting for approval${outcome.reason ? `: ${outcome.reason}` : ""}.` });
         return false;
@@ -1192,6 +1192,7 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
   onOpenClose: (order: PurchasingOrder) => void;
 }) {
   const units = currencyMinorUnits(currency) ?? 2;
+  const [poError, setPoError] = useState<string | null>(null);
 
   function updatePoLine(index: number, patch: Partial<PoLineDraft>): void {
     setPoForm({ ...poForm, lines: poForm.lines.map((line, i) => (i === index ? { ...line, ...patch } : line)) });
@@ -1207,17 +1208,34 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
           className="purchasing-form"
           onSubmit={(event) => {
             event.preventDefault();
+            const lines = poForm.lines.map((line) => ({
+              description: line.description.trim(),
+              quantity: parseThousandths(line.quantity),
+              unitPriceMinor: parseMinor(currency, line.unitPrice),
+              ...(line.sku.trim() ? { sku: line.sku.trim() } : {}),
+            }));
+            if (lines.some((line) => !line.description)) {
+              setPoError("Add a description for every purchase order line.");
+              return;
+            }
+            if (lines.some((line) => !Number.isSafeInteger(line.quantity) || line.quantity <= 0)) {
+              setPoError("Enter a quantity greater than zero for every purchase order line.");
+              return;
+            }
+            if (lines.some((line) => line.unitPriceMinor === null || !Number.isSafeInteger(line.unitPriceMinor) || line.unitPriceMinor < 0)) {
+              setPoError("Enter a valid non-negative unit price for every purchase order line.");
+              return;
+            }
+            setPoError(null);
             void onRun("Draft order", {
               action: "createPurchaseOrder",
               vendorId: poForm.vendorId,
               ...(poForm.memo.trim() ? { memo: poForm.memo.trim() } : {}),
-              lines: poForm.lines.map((line) => ({
-                description: line.description.trim(),
-                quantity: parseThousandths(line.quantity),
-                unitPriceMinor: parseMinor(currency, line.unitPrice || "0") ?? 0,
-                ...(line.sku.trim() ? { sku: line.sku.trim() } : {}),
-              })),
-            }, () => setPoForm({ vendorId: "", memo: "", lines: [emptyPoLine] }));
+              lines: lines.map((line) => ({ ...line, unitPriceMinor: line.unitPriceMinor! })),
+            }, () => {
+              setPoError(null);
+              setPoForm({ vendorId: "", memo: "", lines: [emptyPoLine] });
+            });
           }}
         >
           <div className="purchasing-form-row">
@@ -1377,6 +1395,7 @@ function OrdersTab({ orders, vendors, products, currency, busy, poForm, setPoFor
             ))}
           </div>
 
+          {poError && <p className="purchasing-inline-error" role="alert">{poError}</p>}
           <div className="purchasing-actions">
             <button
               type="button"

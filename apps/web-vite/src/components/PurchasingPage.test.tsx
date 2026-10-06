@@ -91,10 +91,11 @@ function purchasingFetch(overrides: Overrides = {}) {
         input?: Record<string, unknown>;
         intentId?: string;
       };
-      if (body.capabilityId !== "purchasing.createVendor" || !body.input) {
+      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
-      return post({ ...body.input, action: "createVendor", intentId: body.intentId });
+      const action = body.capabilityId === "purchasing.createVendor" ? "createVendor" : "createPurchaseOrder";
+      return post({ ...body.input, action, intentId: body.intentId });
     }
     throw new TypeError(`unrouted ${method} ${url}`);
   });
@@ -113,7 +114,9 @@ function postsTo(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, 
     .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>)
     .map((body) => body.capabilityId === "purchasing.createVendor"
       ? { ...(body.input as Record<string, unknown>), action: "createVendor", intentId: body.intentId }
-      : body);
+      : body.capabilityId === "purchasing.createPurchaseOrder"
+        ? { ...(body.input as Record<string, unknown>), action: "createPurchaseOrder", intentId: body.intentId }
+        : body);
 }
 
 function capabilityPosts(fetchMock: ReturnType<typeof purchasingFetch>): Record<string, unknown>[] {
@@ -263,6 +266,68 @@ describe("receiving prefills from the aggregated rollup", () => {
 /* --------------------------------------------------------------- PurchasingPage --- */
 
 describe("PurchasingPage", () => {
+  it("keeps the PO draft and stable Go intent while approval is pending, then clears on success", async () => {
+    vi.stubGlobal("__GO_PURCHASING_CREATE_ORDER__", true);
+    let attempt = 0;
+    const fetchMock = purchasingFetch({ post: () => {
+      attempt += 1;
+      return attempt === 1
+        ? Response.json({ pendingApproval: true, reason: "Manager approval required." }, { status: 202 })
+        : Response.json({ ok: true, data: { poNumber: 42 } });
+    } });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-1" organizationId="org-1" />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: vendor.id } });
+    fireEvent.change(screen.getByLabelText("Memo (optional)"), { target: { value: "March stock" } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Canvas bag" } });
+    fireEvent.change(screen.getByLabelText("Qty"), { target: { value: "2.5" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+
+    expect(await screen.findByText(/is waiting for approval: Manager approval required\./)).toBeTruthy();
+    expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("Canvas bag");
+    const pendingPost = capabilityPosts(fetchMock)[0]!;
+    expect(pendingPost).toMatchObject({
+      capabilityId: "purchasing.createPurchaseOrder",
+      input: { vendorId: vendor.id, memo: "March stock", lines: [{ description: "Canvas bag", quantity: 2500, unitPriceMinor: 0 }] },
+      intentId: expect.any(String),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    await screen.findByText(/Draft order done\./);
+    expect(capabilityPosts(fetchMock)[1]?.intentId).toBe(pendingPost.intentId);
+    expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("");
+  });
+
+  it("blocks zero quantities and malformed prices before sending a purchase order", async () => {
+    const fetchMock = purchasingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("tab", { name: /^Orders/ }));
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: vendor.id } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Canvas bag" } });
+    fireEvent.change(screen.getByLabelText("Qty"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("quantity greater than zero");
+    expect(postsTo(fetchMock).filter((body) => body.action === "createPurchaseOrder")).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Qty"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("valid non-negative unit price");
+    expect(postsTo(fetchMock).filter((body) => body.action === "createPurchaseOrder")).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("valid non-negative unit price");
+    expect(postsTo(fetchMock).filter((body) => body.action === "createPurchaseOrder")).toHaveLength(0);
+  });
+
   it("opens the tab named in the URL and keeps it shareable", async () => {
     window.history.replaceState(null, "", "/purchasing?tab=bills");
     vi.stubGlobal("fetch", purchasingFetch());

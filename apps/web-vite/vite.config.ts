@@ -1,6 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
-import { createGoRouteProxyPlugin, goCrmDealStageMoveFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goRouteProxyFlagsFromEnv } from "./src/api/go-route-proxy.ts";
+import { createGoRouteProxyPlugin, goCrmDealStageMoveFromEnv, goInventoryBarcodeLookupFromEnv, goInventoryLocationReservationWritesFromEnv, goInventoryTransferWritesFromEnv, goPosCloseSessionSliceFromEnv, goPosCustomersSliceFromEnv, goPosOpenSessionSliceFromEnv, goPurchasingCreateOrderFromEnv, goRouteProxyFlagsFromEnv } from "./src/api/go-route-proxy.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "CHASTE_");
@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => {
   const goInventoryLocationReservationWrites = goInventoryLocationReservationWritesFromEnv(env);
   const goInventoryBarcodeLookup = goInventoryBarcodeLookupFromEnv(env);
   const goCrmDealStageMove = goCrmDealStageMoveFromEnv(env);
+  const goPurchasingCreateOrder = goPurchasingCreateOrderFromEnv(env);
   const goPurchasingVendorSlice = env.CHASTE_GO_PURCHASING_VENDOR_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goMarketingSegmentSlice = env.CHASTE_GO_MARKETING_SEGMENT_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
   const goManufacturingDefineBomSlice = env.CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE === "1" && env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1";
@@ -36,6 +37,7 @@ export default defineConfig(({ mode }) => {
       __GO_INVENTORY_LOCATION_RESERVATION_WRITES__: JSON.stringify(goInventoryLocationReservationWrites),
       __GO_INVENTORY_BARCODE_LOOKUP__: JSON.stringify(goInventoryBarcodeLookup),
       __GO_CRM_DEAL_STAGE_MOVE__: JSON.stringify(goCrmDealStageMove),
+      __GO_PURCHASING_CREATE_ORDER__: JSON.stringify(goPurchasingCreateOrder),
       __GO_PURCHASING_VENDOR_SLICE__: JSON.stringify(goPurchasingVendorSlice),
       __GO_MARKETING_SEGMENT_SLICE__: JSON.stringify(goMarketingSegmentSlice),
       __GO_MANUFACTURING_DEFINE_BOM_SLICE__: JSON.stringify(goManufacturingDefineBomSlice),

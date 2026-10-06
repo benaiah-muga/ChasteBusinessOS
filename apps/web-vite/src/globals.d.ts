@@ -6,6 +6,7 @@ declare const __GO_INVENTORY_TRANSFER_WRITES__: boolean;
 declare const __GO_INVENTORY_LOCATION_RESERVATION_WRITES__: boolean;
 declare const __GO_INVENTORY_BARCODE_LOOKUP__: boolean;
 declare const __GO_CRM_DEAL_STAGE_MOVE__: boolean;
+declare const __GO_PURCHASING_CREATE_ORDER__: boolean;
 declare const __GO_PURCHASING_VENDOR_SLICE__: boolean;
 declare const __GO_MARKETING_SEGMENT_SLICE__: boolean;
 declare const __GO_MANUFACTURING_DEFINE_BOM_SLICE__: boolean;

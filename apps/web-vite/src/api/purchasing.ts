@@ -151,8 +151,8 @@ const CreateVendorSchema = z.object({
 
 const PurchaseOrderLineInputSchema = z.object({
   description: z.string().min(1),
-  quantity: SafeIntegerSchema,
-  unitPriceMinor: SafeIntegerSchema,
+  quantity: SafeIntegerSchema.positive(),
+  unitPriceMinor: NonnegativeSafeIntegerSchema,
   sku: z.string().min(1).optional(),
 }).strict();
 
@@ -496,8 +496,136 @@ export async function createPurchasingVendor(
 export async function createPurchasingOrder(
   action: z.infer<typeof CreatePurchaseOrderSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  return submit(action, OpaqueOutputSchema, "raising the purchase order", signal);
+  const parsedAction = CreatePurchaseOrderSchema.safeParse(action);
+  if (!parsedAction.success) throw new PurchasingApiError(0, "Check the purchasing details and try again.");
+  const useGo = typeof __GO_PURCHASING_CREATE_ORDER__ !== "undefined" && __GO_PURCHASING_CREATE_ORDER__;
+  if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "raising the purchase order", signal);
+  if (!retryScope?.actorId?.trim() || !retryScope.organizationId?.trim()) {
+    throw new PurchasingApiError(0, "Wait for your account and organization to finish loading before creating a purchase order.");
+  }
+
+  const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
+  const attempt = await createPurchaseOrderAttempt(parsedAction.data, scope);
+  try {
+    let { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        capabilityId: "purchasing.createPurchaseOrder",
+        input: {
+          vendorId: parsedAction.data.vendorId,
+          ...(parsedAction.data.memo === undefined ? {} : { memo: parsedAction.data.memo }),
+          lines: parsedAction.data.lines,
+        },
+        intentId: attempt.intentId,
+      }),
+    }, "raising the purchase order", signal, true);
+
+    if (response.status === 404) {
+      ({ response, body } = await request("/api/purchasing", {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ ...parsedAction.data, intentId: attempt.intentId }),
+      }, "raising the purchase order", signal));
+    }
+
+    const outcome = parsePurchasingActionOutcome(response, body, OpaqueOutputSchema, "raising the purchase order");
+    if (outcome.kind === "completed") clearPurchaseOrderAttempt(attempt);
+    return outcome;
+  } catch (error) {
+    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+      clearPurchaseOrderAttempt(attempt);
+    }
+    throw error;
+  }
+}
+
+type PurchaseOrderRetryScope = { actorId: string; organizationId: string };
+type PurchaseOrderAttempt = { storageKey: string; fingerprint: string; intentId: string };
+const purchaseOrderActiveAttemptPrefix = "chaste.purchasing.create-po.active.v1:";
+
+async function createPurchaseOrderAttempt(
+  action: z.infer<typeof CreatePurchaseOrderSchema>,
+  scope: PurchaseOrderRetryScope,
+): Promise<PurchaseOrderAttempt> {
+  let scopeDigest: string;
+  let fingerprint: string;
+  try {
+    scopeDigest = await digestHex(JSON.stringify({ actorId: scope.actorId, organizationId: scope.organizationId }));
+    fingerprint = await digestHex(JSON.stringify({ actorId: scope.actorId, organizationId: scope.organizationId, action: canonicalize(action) }));
+  } catch {
+    throw new PurchasingApiError(0, "Purchase order retry protection is unavailable. Check browser security settings and try again.");
+  }
+
+  const storageKey = `${purchaseOrderActiveAttemptPrefix}${scopeDigest}`;
+  let stored: { fingerprint: string; intentId: string } | null;
+  try {
+    stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+  } catch {
+    throw new PurchasingApiError(0, "Enable browser storage before creating a purchase order so an uncertain submission can be retried safely.");
+  }
+  if (stored && stored.fingerprint !== fingerprint) {
+    throw new PurchasingApiError(0, "A previous purchase order result is unresolved. Retry the exact draft or check purchase orders before starting another one.");
+  }
+  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+
+  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+    const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
+    return { ...attempt, intentId: persisted.intentId };
+  } catch {
+    throw new PurchasingApiError(0, "Enable browser storage before creating a purchase order so an uncertain submission can be retried safely.");
+  }
+}
+
+function parsePurchaseOrderAttempt(raw: string | null): { fingerprint: string; intentId: string } | null {
+  if (raw === null) return null;
+  const parsed: unknown = JSON.parse(raw);
+  const attempt = z.object({ fingerprint: z.string().regex(/^[0-9a-f]{64}$/), intentId: z.string().uuid() }).safeParse(parsed);
+  if (!attempt.success) throw new Error("saved purchase order attempt is invalid");
+  return attempt.data;
+}
+
+function clearPurchaseOrderAttempt(attempt: PurchaseOrderAttempt): void {
+  try {
+    const stored = parsePurchaseOrderAttempt(window.localStorage.getItem(attempt.storageKey));
+    if (stored?.fingerprint === attempt.fingerprint && stored.intentId === attempt.intentId) {
+      window.localStorage.removeItem(attempt.storageKey);
+    }
+  } catch {
+    // A saved marker cannot change the server result, so resolution continues.
+  }
+}
+
+async function digestHex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(object).sort().map((key) => [key, canonicalize(object[key])]));
+  }
+  return value;
+}
+
+function parsePurchasingActionOutcome<T>(response: Response, body: unknown, output: z.ZodType<T>, activity: string): PurchasingActionOutcome<T> {
+  if (response.status === 202) {
+    const pending = PendingEnvelopeSchema.safeParse(body);
+    if (!pending.success) throw new PurchasingApiError(202, "The Purchasing service returned an unexpected approval response.");
+    return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This action is waiting for approval." };
+  }
+  const envelope = SuccessEnvelopeSchema.safeParse(body);
+  if (!response.ok || !envelope.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not ${activity}.`);
+  const parsedOutput = output.safeParse(envelope.data.data);
+  if (!parsedOutput.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not ${activity}.`);
+  return { kind: "completed", data: parsedOutput.data };
 }
 
 export async function receivePurchasingGoods(

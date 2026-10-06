@@ -11,6 +11,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- Vite purchase order creation can opt into Go's session-authenticated `purchasing.createPurchaseOrder` capability with `CHASTE_GO_PURCHASING_CREATE_ORDER=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. It preserves approval responses and the legacy fallback, retains the exact draft and scoped idempotency intent while a result is pending or uncertain, and rejects invalid quantities and prices before submission.
 - Public invoice links now load through the Vite portal page and Go token-scoped invoice read. The page omits browser credentials, suppresses referrers, and only admits the exact token path.
 - Invoice print pages now load in Vite through Go's verified-session and organization-scoped sales invoice read. Unsupported methods and non-exact route paths keep their legacy fallback.
 - Route the Vite Sales orders collection read through Go's verified-session `sales.listOrders` capability by default. The `{ orders }` response and known status filters match the legacy API; only exact GET `/api/sales` moves, while writes and unrelated paths remain on legacy.
