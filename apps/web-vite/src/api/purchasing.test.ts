@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   closePurchasingOrder,
+  createPurchasingBill,
   createPurchasingOrder,
   createPurchasingVendor,
   creditPurchasingBill,
@@ -227,12 +228,13 @@ describe("governed purchasing writes", () => {
   });
 
   it("creates vendors through the authenticated Go capability endpoint", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { vendorId: "vendor-1" } }));
+    const vendorId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { vendorId } }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("__GO_PURCHASING_VENDOR_SLICE__", true);
 
-    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies", email: "sales@example.test" }))
-      .resolves.toEqual({ kind: "completed", data: { vendorId: "vendor-1" } });
+    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies", email: "sales@example.test" }, undefined, retryScope))
+      .resolves.toEqual({ kind: "completed", data: { vendorId } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({
       method: "POST",
@@ -253,7 +255,7 @@ describe("governed purchasing writes", () => {
       { status: 202 },
     )));
 
-    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }))
+    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }, undefined, retryScope))
       .resolves.toEqual({ kind: "pending", reason: "Purchasing writes require approval." });
   });
 
@@ -264,11 +266,12 @@ describe("governed purchasing writes", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, data: { vendorId: "vendor-1" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }))
+    await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }, undefined, retryScope))
       .resolves.toEqual({ kind: "completed", data: { vendorId: "vendor-1" } });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/purchasing");
     expect(postedBody(fetchMock.mock.calls[1]!)).toMatchObject({ action: "createVendor", name: "Kampala Supplies" });
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(postedBody(fetchMock.mock.calls[0]!).intentId);
   });
 
   it("does not retry Go vendor creation on authentication or server errors", async () => {
@@ -277,7 +280,7 @@ describe("governed purchasing writes", () => {
       const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: "request failed" }, { status }));
       vi.stubGlobal("fetch", fetchMock);
 
-      await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }))
+      await expect(createPurchasingVendor({ action: "createVendor", name: "Kampala Supplies" }, undefined, retryScope))
         .rejects.toMatchObject({ status });
       expect(fetchMock).toHaveBeenCalledTimes(1);
     }
@@ -291,6 +294,67 @@ describe("governed purchasing writes", () => {
       .resolves.toEqual({ kind: "completed", data: { vendorId: "vendor-1" } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/purchasing");
+  });
+
+  it("reuses the vendor intent after an uncertain response and rejects malformed Go output", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const vendorId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { vendorId, unexpected: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { vendorId } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "createVendor" as const, name: "Kampala Supplies" };
+
+    await expect(createPurchasingVendor(action, undefined, retryScope)).rejects.toMatchObject({ status: 0 });
+    const first = postedBody(fetchMock.mock.calls[0]!);
+    await expect(createPurchasingVendor(action, undefined, retryScope)).rejects.toMatchObject({ status: 200 });
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(first.intentId);
+    await expect(createPurchasingVendor(action, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { vendorId } });
+    expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(first.intentId);
+  });
+
+  it("routes bill creation and payment through Go with stable scoped attempts and strict results", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const billNumber = 73;
+    const entryId = "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f";
+    const paymentId = "3c9e3c30-1e5c-4b3c-9d4b-5b3c4d5e6f70";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { billNumber, totalMinor: 5000, entryId } }))
+      .mockRejectedValueOnce(new TypeError("payment response lost"))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Payment needs approval." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { paymentId, entryId, fullyPaid: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const billAction = {
+      action: "createBill" as const,
+      vendorId: "0569aacb-58c3-4a30-8afe-3554e38eb2ce",
+      vendorRef: "INV-73",
+      lines: [{ description: "Replacement parts", quantity: 1000, unitPriceMinor: 5000 }],
+    };
+    const paymentAction = { action: "payBill" as const, billNumber, amountMinor: 5000, method: "cash" as const };
+
+    await expect(createPurchasingBill(billAction, undefined, retryScope)).resolves.toEqual({
+      kind: "completed", data: { billNumber, totalMinor: 5000, entryId },
+    });
+    expect(postedBody(fetchMock.mock.calls[0]!).capabilityId).toBe("purchasing.createBill");
+    await expect(payPurchasingBill(paymentAction, undefined, retryScope)).rejects.toMatchObject({ status: 0 });
+    const uncertain = postedBody(fetchMock.mock.calls[1]!);
+    expect(uncertain).toMatchObject({ capabilityId: "purchasing.payBill", input: { billNumber, amountMinor: 5000, method: "cash" } });
+    await expect(payPurchasingBill(paymentAction, undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Payment needs approval." });
+    expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(uncertain.intentId);
+    await expect(payPurchasingBill(paymentAction, undefined, retryScope)).resolves.toEqual({ kind: "completed", data: { paymentId, entryId, fullyPaid: true } });
+    expect(postedBody(fetchMock.mock.calls[3]!).intentId).toBe(uncertain.intentId);
+  });
+
+  it("requires actor and organization scope and rejects Go payment bounds before sending", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 10 }, undefined, { actorId: "actor", organizationId: null }))
+      .rejects.toMatchObject({ status: 0, message: expect.stringContaining("organization") });
+    await expect(payPurchasingBill({ action: "payBill", billNumber: 7, amountMinor: 2_147_483_648 }, undefined, retryScope))
+      .rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("stamps an intentId on every POST for idempotency", async () => {

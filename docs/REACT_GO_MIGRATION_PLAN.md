@@ -1652,3 +1652,14 @@ new owners and the manifest shows zero legacy runtime paths.
      int32 quantity and reference bounds and return-reason limits. Receipt
      returns allocate oldest receipt numbers first, and explicit receipt scope
      cannot fall through to purchase-order history. Browser proof remains open.
+168. Route Vite vendor creation, bill recording, and bill payments through Go's
+     session-authenticated `purchasing.createVendor`, `purchasing.createBill`,
+     and `purchasing.payBill` capabilities when
+     `CHASTE_GO_PURCHASING_FINANCE_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep `/api/purchasing` as the
+     missing-route fallback with the same intent, strict capability output
+     parsing, and exact payload retry identities scoped by actor and
+     organization through pending or uncertain outcomes. Fail closed until
+     scope is available. Capability-side validation mirrors Go bill and
+     payment constraints; existing bill form fields and tax behavior remain
+     aligned with the Vite workspace. Browser proof remains open.

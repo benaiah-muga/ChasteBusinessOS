@@ -229,13 +229,13 @@ function vendorOpenOrders(orders: PurchasingOrder[], name: string): PurchasingOr
 
 async function submitAction(action: PurchasingWrite, retryScope?: { actorId: string | null; organizationId: string | null }): Promise<PurchasingActionOutcome> {
   switch (action.action) {
-    case "createVendor": return createPurchasingVendor(action);
+    case "createVendor": return createPurchasingVendor(action, undefined, retryScope);
     case "createPurchaseOrder": return createPurchasingOrder(action, undefined, retryScope);
     case "receiveGoods": return receivePurchasingGoods(action);
     case "returnGoods": return returnPurchasingGoods(action, undefined, retryScope);
     case "closePurchaseOrder": return closePurchasingOrder(action, undefined, retryScope);
-    case "createBill": return createPurchasingBill(action);
-    case "payBill": return payPurchasingBill(action);
+    case "createBill": return createPurchasingBill(action, undefined, retryScope);
+    case "payBill": return payPurchasingBill(action, undefined, retryScope);
     case "billCreditNote": return creditPurchasingBill(action);
     case "createPurchaseRequest": return createPurchasingRequest(action);
     case "decidePurchaseRequest": return decidePurchasingRequest(action);
@@ -1549,6 +1549,15 @@ function BillsTab({ bills, vendors, taxCodes, currency, outstanding, busy, form,
           className="purchasing-form"
           onSubmit={(event) => {
             event.preventDefault();
+            if (built.lines.some((line) => !Number.isSafeInteger(line.quantity) || line.quantity <= 0)) {
+              setBillError("Enter a quantity greater than zero on every bill line.");
+              return;
+            }
+            const parsedPrices = form.lines.map((line) => parseMinor(currency, line.unitPrice.trim() || "0"));
+            if (parsedPrices.some((price) => price === null || !Number.isSafeInteger(price) || price < 0)) {
+              setBillError("Enter a valid non-negative unit price on every bill line.");
+              return;
+            }
             if (built.invalid > 0) {
               setBillError(`Three-way matching needs a PO line number on every line. ${built.invalid} line${built.invalid === 1 ? " is" : "s are"} missing one.`);
               return;
@@ -1780,7 +1789,7 @@ function BillsTab({ bills, vendors, taxCodes, currency, outstanding, busy, form,
                               <button
                                 type="button"
                                 className="purchasing-button is-tiny is-primary"
-                                disabled={busy || paymentMinor === null || paymentMinor <= 0 || paymentMinor > bill.dueMinor}
+                                disabled={busy || paymentMinor === null || paymentMinor <= 0 || paymentMinor > bill.dueMinor || paymentMinor > 2_147_483_647}
                                 onClick={() => void onRun(`Payment on #${bill.number}`, {
                                   action: "payBill",
                                   billNumber: bill.number,

@@ -12,6 +12,7 @@ import {
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
   goPurchasingReturnCloseFromEnv,
+  goPurchasingFinanceWritesFromEnv,
   goManufacturingWorkOrderWritesFromEnv,
   goManufacturingProductionWritesFromEnv,
   goSalesOrderWritesFromEnv,
@@ -93,6 +94,14 @@ describe("purchase return and close Go selector", () => {
     expect(goPurchasingReturnCloseFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_RETURN_CLOSE: "1" })).toBe(true);
     expect(goPurchasingReturnCloseFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingReturnCloseFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_RETURN_CLOSE: "1" })).toBe(false);
+  });
+});
+
+describe("purchase finance Go selector", () => {
+  it("requires the finance selector and session capability route", () => {
+    expect(goPurchasingFinanceWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_FINANCE_WRITES: "1" })).toBe(true);
+    expect(goPurchasingFinanceWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goPurchasingFinanceWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_FINANCE_WRITES: "1" })).toBe(false);
   });
 });
 

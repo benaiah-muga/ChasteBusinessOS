@@ -91,12 +91,14 @@ function purchasingFetch(overrides: Overrides = {}) {
         input?: Record<string, unknown>;
         intentId?: string;
       };
-      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder") || !body.input) {
+      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
       const action = body.capabilityId === "purchasing.createVendor" ? "createVendor"
         : body.capabilityId === "purchasing.createPurchaseOrder" ? "createPurchaseOrder"
-          : body.capabilityId === "purchasing.returnGoods" ? "returnGoods" : "closePurchaseOrder";
+          : body.capabilityId === "purchasing.returnGoods" ? "returnGoods"
+            : body.capabilityId === "purchasing.closePurchaseOrder" ? "closePurchaseOrder"
+              : body.capabilityId === "purchasing.createBill" ? "createBill" : "payBill";
       return post({ ...body.input, action, intentId: body.intentId });
     }
     throw new TypeError(`unrouted ${method} ${url}`);
@@ -357,7 +359,7 @@ describe("PurchasingPage", () => {
       post: () => Response.json({ pendingApproval: true, reason: "Over the payment threshold." }, { status: 202 }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="actor-1" organizationId="org-1" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /^Vendors/ }));
@@ -367,10 +369,67 @@ describe("PurchasingPage", () => {
     const pending = await screen.findByText(/is waiting for approval: Over the payment threshold\./);
     expect(pending.closest("[role=status]")).toBeTruthy();
     expect(screen.queryByText(/done\.$/)).toBeNull();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Harbor Supplies");
     expect(postsTo(fetchMock)[0]).toMatchObject({ action: "createVendor", name: "Harbor Supplies" });
     expect(capabilityPosts(fetchMock)[0]).toMatchObject({
       capabilityId: "purchasing.createVendor",
       input: { name: "Harbor Supplies" },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("retains vendor and bill form drafts while finance capabilities await approval", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const fetchMock = purchasingFetch({
+      post: (body) => body.action === "createBill"
+        ? Response.json({ pendingApproval: true, reason: "Bill approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-finance" organizationId="org-finance" />);
+    await screen.findByRole("button", { name: /Open POs/ });
+    fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: vendor.id } });
+    fireEvent.change(screen.getByLabelText("Their ref"), { target: { value: "INV-FA-8" } });
+    fireEvent.change(screen.getByPlaceholderText("Line 1 description"), { target: { value: "Replacement part" } });
+    fireEvent.change(screen.getByLabelText("Qty"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "25.00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record bill" }));
+
+    expect(await screen.findByText(/is waiting for approval: Bill approval required\./)).toBeTruthy();
+    expect((screen.getByLabelText("Vendor") as HTMLSelectElement).value).toBe(vendor.id);
+    expect((screen.getByLabelText("Their ref") as HTMLInputElement).value).toBe("INV-FA-8");
+    expect((screen.getByPlaceholderText("Line 1 description") as HTMLInputElement).value).toBe("Replacement part");
+    expect((screen.getByLabelText("Qty") as HTMLInputElement).value).toBe("1");
+    expect((screen.getByLabelText("Unit price") as HTMLInputElement).value).toBe("25.00");
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.createBill",
+      input: { vendorId: vendor.id, vendorRef: "INV-FA-8", lines: [{ description: "Replacement part", quantity: 1000, unitPriceMinor: 2500 }] },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("retains the payment amount while Go approval is pending", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({ bills: [billFixture()] }),
+      post: (body) => body.action === "payBill"
+        ? Response.json({ pendingApproval: true, reason: "Payment approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-finance" organizationId="org-finance" />);
+    await screen.findByRole("button", { name: /Open POs/ });
+    fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
+    const amount = screen.getByLabelText("Pay amount for bill 7");
+    fireEvent.change(amount, { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pay" }));
+
+    expect(await screen.findByText(/is waiting for approval: Payment approval required\./)).toBeTruthy();
+    expect((screen.getByLabelText("Pay amount for bill 7") as HTMLInputElement).value).toBe("50");
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.payBill",
+      input: { billNumber: 7, amountMinor: 5000 },
       intentId: expect.any(String),
     });
   });
@@ -436,7 +495,7 @@ describe("PurchasingPage", () => {
         : { ok: true, data: {} }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<PurchasingPage />);
+    render(<PurchasingPage actorId="actor-vendor" organizationId="org-vendor" />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Open POs/ })).toBeTruthy());
     fireEvent.click(screen.getByRole("tab", { name: /^Vendors/ }));

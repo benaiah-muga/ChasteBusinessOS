@@ -149,6 +149,10 @@ const CreateVendorSchema = z.object({
   email: z.string().min(1).optional(),
 }).strict();
 
+const GoCreateVendorSchema = CreateVendorSchema.extend({
+  email: z.string().regex(/^[A-Za-z0-9_'+.-]*[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/).refine((value) => !value.startsWith(".") && !value.includes(".."), "Enter a valid email address.").optional(),
+});
+
 const PurchaseOrderLineInputSchema = z.object({
   description: z.string().min(1),
   quantity: SafeIntegerSchema.positive(),
@@ -217,12 +221,28 @@ const CreateBillSchema = z.object({
   }).strict()).min(1),
 }).strict();
 
+const GoCreateBillSchema = CreateBillSchema.extend({
+  poNumber: z.number().int().safe().positive().optional(),
+  lines: z.array(z.object({
+    description: z.string().min(1),
+    quantity: SafeIntegerSchema.positive(),
+    unitPriceMinor: NonnegativeSafeIntegerSchema,
+    taxCodeId: z.string().uuid().optional(),
+    poLineNumber: z.number().int().safe().positive().optional(),
+  }).strict()).min(1),
+});
+
 const PayBillSchema = z.object({
   action: z.literal("payBill"),
   billNumber: z.number().int().safe().positive(),
   amountMinor: SafeIntegerSchema,
   method: z.enum(["cash", "bank_transfer", "card"]).optional(),
 }).strict();
+
+const GoPayBillSchema = PayBillSchema.extend({
+  billNumber: z.number().int().safe().positive(),
+  amountMinor: z.number().int().safe().positive().max(2_147_483_647),
+});
 
 const BillCreditNoteSchema = z.object({
   action: z.literal("billCreditNote"),
@@ -320,6 +340,22 @@ const ClosePurchaseOrderOutputSchema = z.object({
 const ReturnGoodsOutputSchema = z.object({
   returned: z.literal(true),
   lines: z.number().int().safe().nonnegative(),
+}).strict();
+
+const CreateVendorOutputSchema = z.object({
+  vendorId: z.string().uuid(),
+}).strict();
+
+const CreateBillOutputSchema = z.object({
+  billNumber: z.number().int().safe().positive().max(2_147_483_647),
+  totalMinor: z.number().int().safe().nonnegative().max(2_147_483_647),
+  entryId: z.string().uuid(),
+}).strict();
+
+const PayBillOutputSchema = z.object({
+  paymentId: z.string().uuid(),
+  entryId: z.string().uuid(),
+  fullyPaid: z.boolean(),
 }).strict();
 
 const BillCreditNoteOutputSchema = z.object({
@@ -473,38 +509,15 @@ async function submit<T>(
 export async function createPurchasingVendor(
   action: z.infer<typeof CreateVendorSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
   const parsedAction = CreateVendorSchema.safeParse(action);
   if (!parsedAction.success) throw new PurchasingApiError(0, "Check the purchasing details and try again.");
-  const useGo = typeof __GO_PURCHASING_VENDOR_SLICE__ !== "undefined" && __GO_PURCHASING_VENDOR_SLICE__;
+  const useGo = (typeof __GO_PURCHASING_VENDOR_SLICE__ !== "undefined" && __GO_PURCHASING_VENDOR_SLICE__) || (typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__);
   if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "adding the vendor", signal);
-
-  const { response, body } = await request("/api/capabilities/execute", {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({
-      capabilityId: "purchasing.createVendor",
-      input: {
-        name: parsedAction.data.name,
-        ...(parsedAction.data.email === undefined ? {} : { email: parsedAction.data.email }),
-      },
-      intentId: crypto.randomUUID(),
-    }),
-  }, "adding the vendor", signal, true);
-
-  // The Vite and Go proxy flags are paired and default off. A missing Go route
-  // leaves the established purchasing POST as the compatible owner.
-  if (response.status === 404) return submit(parsedAction.data, OpaqueOutputSchema, "adding the vendor", signal);
-  if (response.status === 202) {
-    const pending = PendingEnvelopeSchema.safeParse(body);
-    if (!pending.success) throw new PurchasingApiError(202, "The Purchasing service returned an unexpected approval response.");
-    return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This action is waiting for approval." };
-  }
-  const envelope = SuccessEnvelopeSchema.safeParse(body);
-  if (!envelope.success) throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not add the vendor.");
-  const parsedOutput = OpaqueOutputSchema.safeParse(envelope.data.data);
-  if (!parsedOutput.success) throw new PurchasingApiError(response.status, "The Purchasing service returned an unexpected result: could not add the vendor.");
-  return { kind: "completed", data: parsedOutput.data };
+  const goAction = GoCreateVendorSchema.safeParse(parsedAction.data);
+  if (!goAction.success) throw new PurchasingApiError(0, "Enter a valid vendor name and email address before adding the vendor.");
+  return submitPurchaseFinanceCapability(goAction.data, "purchasing.createVendor", CreateVendorOutputSchema, "adding the vendor", signal, retryScope);
 }
 
 export async function createPurchasingOrder(
@@ -717,6 +730,97 @@ async function submitPurchaseLifecycle<T>(
   }
 }
 
+type PurchaseFinanceAction = z.infer<typeof GoCreateVendorSchema> | z.infer<typeof GoCreateBillSchema> | z.infer<typeof GoPayBillSchema>;
+type PurchaseFinanceAttempt = { storageKey: string; fingerprint: string; intentId: string };
+type PurchaseFinanceRetryScope = { actorId: string; organizationId: string };
+const purchaseFinanceAttemptPrefix = "chaste.purchasing.finance.active.v1:";
+
+async function createPurchaseFinanceAttempt(action: PurchaseFinanceAction, scope: PurchaseFinanceRetryScope): Promise<PurchaseFinanceAttempt> {
+  let scopeDigest: string;
+  let fingerprint: string;
+  try {
+    scopeDigest = await digestHex(JSON.stringify(scope));
+    fingerprint = await digestHex(JSON.stringify({ ...scope, action: canonicalize(action) }));
+  } catch {
+    throw new PurchasingApiError(0, "Purchasing retry protection is unavailable. Check browser security settings and try again.");
+  }
+  const storageKey = `${purchaseFinanceAttemptPrefix}${action.action}:${scopeDigest}`;
+  let stored: { fingerprint: string; intentId: string } | null;
+  try {
+    stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+  } catch {
+    throw new PurchasingApiError(0, "Enable browser storage before making this purchasing change so an uncertain result can be retried safely.");
+  }
+  if (stored && stored.fingerprint !== fingerprint) {
+    throw new PurchasingApiError(0, "A previous result for this purchasing action is unresolved. Retry the exact action or check the related record before changing it.");
+  }
+  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+    const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
+    return { ...attempt, intentId: persisted.intentId };
+  } catch {
+    throw new PurchasingApiError(0, "Enable browser storage before making this purchasing change so an uncertain result can be retried safely.");
+  }
+}
+
+function clearPurchaseFinanceAttempt(attempt: PurchaseFinanceAttempt): void {
+  try {
+    const stored = parsePurchaseOrderAttempt(window.localStorage.getItem(attempt.storageKey));
+    if (stored?.fingerprint === attempt.fingerprint && stored.intentId === attempt.intentId) {
+      window.localStorage.removeItem(attempt.storageKey);
+    }
+  } catch {
+    // A saved marker cannot change the server result, so resolution continues.
+  }
+}
+
+async function submitPurchaseFinanceCapability(
+  action: PurchaseFinanceAction,
+  capabilityId: "purchasing.createVendor" | "purchasing.createBill" | "purchasing.payBill",
+  output: z.ZodType<Record<string, unknown>>,
+  activity: string,
+  signal: AbortSignal | undefined,
+  retryScope: { actorId: string | null; organizationId: string | null } | undefined,
+): Promise<PurchasingActionOutcome> {
+  if (!retryScope?.actorId?.trim() || !retryScope.organizationId?.trim()) {
+    throw new PurchasingApiError(0, "Wait for your account and organization to finish loading before submitting this purchasing change.");
+  }
+  const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
+  const attempt = await createPurchaseFinanceAttempt(action, scope);
+  try {
+    let { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        capabilityId,
+        input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")),
+        intentId: attempt.intentId,
+      }),
+    }, activity, signal, true);
+    if (response.status === 404) {
+      ({ response, body } = await request("/api/purchasing", {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ ...action, intentId: attempt.intentId }),
+      }, activity, signal));
+      const outcome = parsePurchasingActionOutcome(response, body, OpaqueOutputSchema, activity);
+      if (outcome.kind === "completed") clearPurchaseFinanceAttempt(attempt);
+      return outcome;
+    }
+    const outcome = parsePurchasingActionOutcome(response, body, output, activity);
+    if (outcome.kind === "completed") clearPurchaseFinanceAttempt(attempt);
+    return outcome;
+  } catch (error) {
+    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+      clearPurchaseFinanceAttempt(attempt);
+    }
+    throw error;
+  }
+}
+
 function parsePurchasingActionOutcome<T>(response: Response, body: unknown, output: z.ZodType<T>, activity: string): PurchasingActionOutcome<T> {
   if (response.status === 202) {
     const pending = PendingEnvelopeSchema.safeParse(body);
@@ -764,15 +868,29 @@ export async function closePurchasingOrder(
 export async function createPurchasingBill(
   action: z.infer<typeof CreateBillSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  return submit(action, OpaqueOutputSchema, "recording the bill", signal);
+  const parsedAction = CreateBillSchema.safeParse(action);
+  if (!parsedAction.success) throw new PurchasingApiError(0, "Check the bill details and try again.");
+  const useGo = typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__;
+  if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "recording the bill", signal);
+  const goAction = GoCreateBillSchema.safeParse(parsedAction.data);
+  if (!goAction.success) throw new PurchasingApiError(0, "Check the bill quantities, prices, tax codes, and PO line references before submitting.");
+  return submitPurchaseFinanceCapability(goAction.data, "purchasing.createBill", CreateBillOutputSchema, "recording the bill", signal, retryScope);
 }
 
 export async function payPurchasingBill(
   action: z.infer<typeof PayBillSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  return submit(action, OpaqueOutputSchema, "paying the bill", signal);
+  const parsedAction = PayBillSchema.safeParse(action);
+  if (!parsedAction.success) throw new PurchasingApiError(0, "Check the payment amount and try again.");
+  const useGo = typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__;
+  if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "paying the bill", signal);
+  const goAction = GoPayBillSchema.safeParse(parsedAction.data);
+  if (!goAction.success) throw new PurchasingApiError(0, "Enter a positive payment amount within the supported database range.");
+  return submitPurchaseFinanceCapability(goAction.data, "purchasing.payBill", PayBillOutputSchema, "paying the bill", signal, retryScope);
 }
 
 export async function creditPurchasingBill(
