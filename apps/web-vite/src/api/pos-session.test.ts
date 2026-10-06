@@ -292,15 +292,30 @@ describe("POS register session API client", () => {
     setItem.mockRestore();
   });
 
-  it.each([408, 429])("retains an open register attempt after retryable HTTP %s", async (status) => {
-    const scopeId = `retryable-open-${status}`;
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "retry this request" }, { status })));
-    await expect(openPosSession({ action: "open", openingFloatMinor: 3000 }, undefined, { useGo: true, scopeId }))
-      .rejects.toMatchObject({ status });
-    await expect(restorePosRegisterAttempt(scopeId)).resolves.toMatchObject({
-      action: { action: "open", openingFloatMinor: 3000 },
-      status: "uncertain",
-    });
+  it.each(["open", "close"] as const)("retains the %s register attempt and identity after 408/429", async (kind) => {
+    for (const status of [408, 429]) {
+      const scopeId = `retryable-${kind}-${status}`;
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(Response.json({ error: "retry this request" }, { status }))
+        .mockResolvedValueOnce(Response.json({ ok: true, data: kind === "open"
+          ? { sessionId: openId }
+          : { expectedCashMinor: 14000, varianceMinor: 0, flagged: false } }));
+      vi.stubGlobal("fetch", fetchMock);
+      const action = kind === "open"
+        ? { action: "open" as const, openingFloatMinor: 3000 }
+        : { action: "close" as const, sessionId: openId, countedCashMinor: 14000 };
+      const submit = () => kind === "open"
+        ? openPosSession(action as { action: "open"; openingFloatMinor: number }, undefined, { useGo: true, scopeId })
+        : closePosSession(action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { useGo: true, scopeId });
+
+      await expect(submit()).rejects.toMatchObject({ status });
+      await expect(restorePosRegisterAttempt(scopeId)).resolves.toMatchObject({ action, status: "uncertain" });
+      await expect(submit()).resolves.toMatchObject({ kind: "completed" });
+      const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+      const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+      expect(retryBody.intentId).toBe(firstBody.intentId);
+      await expect(restorePosRegisterAttempt(scopeId)).resolves.toBeNull();
+    }
   });
 
   it("clears a register attempt after a terminal client error", async () => {
@@ -311,24 +326,41 @@ describe("POS register session API client", () => {
     await expect(restorePosRegisterAttempt(scopeId)).resolves.toBeNull();
   });
 
-  it.each([
-    "{malformed-json",
-    JSON.stringify({ fingerprint: "f".repeat(64), intentId: "40000000-0000-4000-8000-000000000004", status: "uncertain", action: { action: "open", openingFloatMinor: "bad" } }),
-  ])("does not overwrite a corrupt nonempty retry marker (%s)", async (corruptMarker) => {
-    const scopeId = `corrupt-register-marker-${corruptMarker.length}`;
+  it.each(["open", "close"] as const)("does not overwrite a corrupt %s retry marker", async (kind) => {
+    const corruptMarker = "{malformed-json";
+    const scopeId = `corrupt-register-marker-${kind}`;
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ scopeId })));
     const suffix = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     const markerKey = `chaste.pos.register-active.v1:${suffix}`;
     localStorage.removeItem(markerKey);
     const fetchMock = vi.fn(async () => Response.json({ ok: false, pendingApproval: true, reason: "manager review" }, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
-    await openPosSession({ action: "open", openingFloatMinor: 3000 }, undefined, { useGo: true, scopeId });
+    const action = kind === "open"
+      ? { action: "open" as const, openingFloatMinor: 3000 }
+      : { action: "close" as const, sessionId: openId, countedCashMinor: 14000 };
+    const submit = () => kind === "open"
+      ? openPosSession(action as { action: "open"; openingFloatMinor: number }, undefined, { useGo: true, scopeId })
+      : closePosSession(action as { action: "close"; sessionId: string; countedCashMinor: number }, undefined, { useGo: true, scopeId });
+    await submit();
     localStorage.setItem(markerKey, corruptMarker);
 
-    await expect(openPosSession({ action: "open", openingFloatMinor: 4500 }, undefined, { useGo: true, scopeId }))
-      .rejects.toMatchObject({ message: expect.stringContaining("saved register retry marker is damaged") });
+    await expect(submit()).rejects.toMatchObject({ message: expect.stringContaining("saved register retry marker is damaged") });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(markerKey)).toBe(corruptMarker);
+
+    const invalidAction = kind === "open"
+      ? { action: "open", openingFloatMinor: "bad" }
+      : { action: "close", sessionId: "invalid", countedCashMinor: -1 };
+    const corruptShape = JSON.stringify({
+      fingerprint: "f".repeat(64),
+      intentId: "40000000-0000-4000-8000-000000000004",
+      status: "uncertain",
+      action: invalidAction,
+    });
+    localStorage.setItem(markerKey, corruptShape);
+    await expect(submit()).rejects.toMatchObject({ message: expect.stringContaining("saved register retry marker is damaged") });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(markerKey)).toBe(corruptShape);
   });
 
   it("keeps the caller supplied intent identity across an offline sale retry", async () => {

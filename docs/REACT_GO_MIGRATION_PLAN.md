@@ -1774,11 +1774,14 @@ new owners and the manifest shows zero legacy runtime paths.
      Focused API and UI tests cover recovery, retries, fallback, selector
      rollback, and scope changes. Authenticated browser proof remains open
      because the in-app browser is unavailable in this environment.
-178. Persist Vite POS register open/close actions under resolved actor/org
-     scope before sending them. Restore and freeze exact attempts through
-     pending or uncertain outcomes, reject stale scope responses, retain 408/429
-     identity, and fail closed on unavailable storage or corrupt markers.
-     Browser proof remains open.
+178. (Implemented) Persist Vite POS register open/close actions under resolved
+     actor/org scope before sending them. Restore and freeze exact attempts
+     through pending or uncertain outcomes, reject stale scope responses,
+     retain 408/429 identity, and fail closed on unavailable storage or corrupt
+     markers. API and UI tests cover both action types, including close retry
+     identity after 408/429 and corrupt close markers. Authenticated browser
+     proof remains open because the in-app browser is unavailable in this
+     environment.
 179. (Implemented; local Go/Vite default-on with item 171) Route Vite CRM task
      due date and assignee updates through the Go `crm.updateTaskDetails`
      capability under the paired task-write flags described in item 171. A Go
