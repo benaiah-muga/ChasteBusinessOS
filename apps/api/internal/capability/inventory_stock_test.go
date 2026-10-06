@@ -197,6 +197,7 @@ func TestInventoryStockParsersMirrorZodContracts(t *testing.T) {
 		`{"transferId":"` + uuid + `","lines":[{"lineId":"` + lineID + `","quantityThousandths":0}]}`,
 		`{"transferId":"` + uuid + `","lines":[{"lineId":"` + lineID + `","quantityThousandths":-5}]}`,
 		`{"transferId":"` + uuid + `","lines":[{"lineId":"` + lineID + `","quantityThousandths":1.5}]}`,
+		`{"transferId":"` + uuid + `","lines":[{"lineId":"` + lineID + `","quantityThousandths":1000},{"lineId":"` + lineID + `","quantityThousandths":1000}]}`,
 	} {
 		if _, err := ParseInventoryConfirmTransferInput(json.RawMessage(raw)); err == nil {
 			t.Errorf("ParseInventoryConfirmTransferInput accepted %s", raw)

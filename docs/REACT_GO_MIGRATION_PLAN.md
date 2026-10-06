@@ -1547,10 +1547,14 @@ new owners and the manifest shows zero legacy runtime paths.
      `inventory.createTransfer` and `inventory.confirmTransfer` capabilities
      when `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Set
      `CHASTE_GO_INVENTORY_TRANSFER_WRITES=0` to restore both actions to
-     `/api/inventory`. Preserve transfer inputs, pending approval reasons, and
-     fresh intent IDs per action. Other inventory actions and page ownership
-     remain unchanged. Focused Vite API and capability proxy tests pass;
-     browser proof remains open.
+     `/api/inventory`. Preserve transfer inputs and pending approval reasons;
+     scope persistent retry identities to the active actor and organization,
+     retain them through pending or uncertain outcomes, and clear them on
+     success or terminal 4xx. A missing Go capability route falls back to the
+     legacy action with the same intent. Reject duplicate partial-confirmation
+     line IDs at the Go boundary. Other inventory actions and page ownership
+     remain unchanged. Focused Vite and Go parser checks pass; browser proof
+     remains open.
 159. Route Vite stock location creation and reservation/release through Go's
      `inventory.createLocation`, `inventory.reserveStock`, and
      `inventory.releaseReservation` capabilities when

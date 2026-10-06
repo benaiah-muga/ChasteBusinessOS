@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { InventoryItem, InventoryLocation, InventoryTransfer } from "../api/inventory";
 import {
   confirmInventoryTransfer,
   createInventoryTransfer,
   InventoryTransferApiError,
   supportsPartialConfirmation,
+  type InventoryTransferRetryScope,
   type InventoryTransferWithLineIds,
   type PartialTransferLine,
 } from "../api/inventory-transfers";
@@ -14,6 +15,7 @@ interface InventoryTransfersPanelProps {
   locations: InventoryLocation[];
   transfers: InventoryTransfer[];
   onChanged: () => void | Promise<void>;
+  retryScope: InventoryTransferRetryScope;
 }
 
 function parseQuantity(value: string): number | null {
@@ -28,7 +30,17 @@ function units(thousandths: number): string {
   return (thousandths / 1000).toLocaleString("en", { maximumFractionDigits: 3 });
 }
 
-export function InventoryTransfersPanel({ items, locations, transfers, onChanged }: InventoryTransfersPanelProps) {
+function confirmationProgressSignature(transfer: InventoryTransfer): string {
+  const lines = transfer.lines
+    .map((line) => [line.lineId ?? null, line.sku, line.quantityThousandths, line.confirmedThousandths] as const)
+    .sort(([leftId, ...left], [rightId, ...right]) => {
+      const idOrder = String(leftId).localeCompare(String(rightId));
+      return idOrder || JSON.stringify(left).localeCompare(JSON.stringify(right));
+    });
+  return JSON.stringify({ status: transfer.status, lines });
+}
+
+export function InventoryTransfersPanel({ items, locations, transfers, onChanged, retryScope }: InventoryTransfersPanelProps) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [sku, setSku] = useState("");
@@ -37,9 +49,33 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
   const [partialAmounts, setPartialAmounts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "pending" | "error"; message: string } | null>(null);
+  const partialConfirmationGuards = useRef(new Map<string, string>());
+  const [guardedTransferIds, setGuardedTransferIds] = useState<ReadonlySet<string>>(() => new Set());
   const activeItems = useMemo(() => items.filter((item) => item.kind !== "service"), [items]);
 
-  async function runAction(action: () => Promise<{ kind: "completed" } | { kind: "pending"; reason: string }>, success: string) {
+  useEffect(() => {
+    const progressedTransferIds: string[] = [];
+    for (const [transferId, previousProgress] of partialConfirmationGuards.current) {
+      const transfer = transfers.find((candidate) => candidate.id === transferId);
+      if (transfer && confirmationProgressSignature(transfer) !== previousProgress) {
+        partialConfirmationGuards.current.delete(transferId);
+        progressedTransferIds.push(transferId);
+      }
+    }
+    if (progressedTransferIds.length > 0) {
+      setGuardedTransferIds((current) => {
+        const next = new Set(current);
+        for (const transferId of progressedTransferIds) next.delete(transferId);
+        return next;
+      });
+    }
+  }, [transfers]);
+
+  async function runAction(
+    action: () => Promise<{ kind: "completed" } | { kind: "pending"; reason: string }>,
+    success: string,
+    onCompleted?: () => void,
+  ) {
     setBusy(true);
     setNotice(null);
     try {
@@ -48,6 +84,7 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
         setNotice({ kind: "pending", message: `This transfer requires approval. ${result.reason}` });
         return false;
       }
+      onCompleted?.();
       setNotice({ kind: "success", message: success });
       try {
         await onChanged();
@@ -75,7 +112,7 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
       sku,
       quantityThousandths: amount,
       note: note.trim() || undefined,
-    }), "Transfer draft created.");
+    }, retryScope), "Transfer draft created.");
     if (created) {
       setSku("");
       setQuantity("");
@@ -84,7 +121,7 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
   }
 
   async function confirmRemaining(transfer: InventoryTransfer) {
-    await runAction(() => confirmInventoryTransfer(transfer.id), `Transfer #${transfer.number} confirmed.`);
+    await runAction(() => confirmInventoryTransfer(transfer.id, retryScope), `Transfer #${transfer.number} confirmed.`);
   }
 
   async function confirmPartial(transfer: InventoryTransferWithLineIds) {
@@ -112,7 +149,19 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
       setNotice({ kind: "error", message: "Enter a partial quantity for at least one transfer line." });
       return;
     }
-    await runAction(() => confirmInventoryTransfer(transfer.id, lines), `Partial confirmation saved for transfer #${transfer.number}.`);
+    const completed = await runAction(
+      () => confirmInventoryTransfer(transfer.id, retryScope, lines),
+      `Partial confirmation saved for transfer #${transfer.number}.`,
+      () => {
+        partialConfirmationGuards.current.set(transfer.id, confirmationProgressSignature(transfer));
+        setGuardedTransferIds((current) => current.has(transfer.id) ? current : new Set(current).add(transfer.id));
+      },
+    );
+    if (completed) {
+      setPartialAmounts((current) => Object.fromEntries(
+        Object.entries(current).filter(([key]) => !key.startsWith(`${transfer.id}:`)),
+      ));
+    }
   }
 
   return (
@@ -159,6 +208,7 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
         <ul>
           {transfers.map((transfer) => {
             const transferWithIds = transfer as InventoryTransferWithLineIds;
+            const confirmationGuarded = guardedTransferIds.has(transfer.id);
             return (
               <li key={transfer.id}>
                 <div>
@@ -167,8 +217,9 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
                 </div>
                 {(transfer.status === "pending" || transfer.status === "partial") && (
                   <div>
+                    {confirmationGuarded && <p>Confirmation succeeded. Waiting for refreshed transfer progress before enabling confirmation again.</p>}
                     {supportsPartialConfirmation(transferWithIds) && (
-                      <fieldset>
+                      <fieldset disabled={busy || confirmationGuarded}>
                         <legend>Confirm part of this transfer</legend>
                         <p>Enter a quantity for every remaining line. Leave no line blank because blank lines confirm in full.</p>
                         {transferWithIds.lines.filter((line) => line.confirmedThousandths < line.quantityThousandths).map((line) => {
@@ -188,10 +239,10 @@ export function InventoryTransfersPanel({ items, locations, transfers, onChanged
                             />
                           </label>;
                         })}
-                        <button type="button" disabled={busy} onClick={() => void confirmPartial(transferWithIds)}>Confirm entered quantities</button>
+                        <button type="button" disabled={busy || confirmationGuarded} title={confirmationGuarded ? "Wait for refreshed transfer progress before confirming again" : undefined} onClick={() => void confirmPartial(transferWithIds)}>Confirm entered quantities</button>
                       </fieldset>
                     )}
-                    <button type="button" disabled={busy} title="Confirm the remaining quantity and move stock" onClick={() => void confirmRemaining(transfer)}>
+                    <button type="button" disabled={busy || confirmationGuarded} title={confirmationGuarded ? "Wait for refreshed transfer progress before confirming again" : "Confirm the remaining quantity and move stock"} onClick={() => void confirmRemaining(transfer)}>
                       Confirm remaining
                     </button>
                   </div>

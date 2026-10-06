@@ -264,6 +264,7 @@ func ParseInventoryConfirmTransferInput(raw json.RawMessage) (InventoryConfirmTr
 		return InventoryConfirmTransferInput{}, errors.New("lines must contain at most 50 lines")
 	}
 	lines := make([]InventoryConfirmTransferLineInput, 0, len(lineValues))
+	seenLineIDs := make(map[string]struct{}, len(lineValues))
 	for _, lineRaw := range lineValues {
 		lineFields, err := decodeJSONObject(lineRaw)
 		if err != nil {
@@ -276,6 +277,10 @@ func ParseInventoryConfirmTransferInput(raw json.RawMessage) (InventoryConfirmTr
 		if !isZodUUID(lineID) {
 			return InventoryConfirmTransferInput{}, errors.New("lineId must be a UUID")
 		}
+		if _, exists := seenLineIDs[lineID]; exists {
+			return InventoryConfirmTransferInput{}, errors.New("confirmation line IDs must be unique")
+		}
+		seenLineIDs[lineID] = struct{}{}
 		quantity, err := inventoryRequiredQuantity(lineFields, "quantityThousandths")
 		if err != nil || quantity <= 0 {
 			return InventoryConfirmTransferInput{}, errors.New("quantityThousandths must be a positive integer")
