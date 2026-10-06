@@ -251,6 +251,12 @@ const BillCreditNoteSchema = z.object({
   reason: z.string().min(1),
 }).strict();
 
+const GoBillCreditNoteSchema = BillCreditNoteSchema.extend({
+  billId: z.string().uuid(),
+  amountMinor: SafeIntegerSchema.positive(),
+  reason: z.string().min(3).max(500),
+});
+
 const CreatePurchaseRequestSchema = z.object({
   action: z.literal("createPurchaseRequest"),
   title: z.string().min(1),
@@ -358,6 +364,12 @@ const PayBillOutputSchema = z.object({
   fullyPaid: z.boolean(),
 }).strict();
 
+const GoBillCreditNoteOutputSchema = z.object({
+  entryId: z.string().uuid(),
+  creditedMinor: z.number().int().safe().positive(),
+  billBalanceMinor: z.number().int().safe().nonnegative(),
+}).strict();
+
 const BillCreditNoteOutputSchema = z.object({
   entryId: z.string().min(1),
   creditedMinor: z.number().int().safe(),
@@ -388,7 +400,7 @@ export type PurchasingActionOutcome<T = Record<string, unknown>> =
   | { kind: "pending"; reason: string };
 
 export class PurchasingApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly requestMayHaveReachedServer = false) {
     super(message);
     this.name = "PurchasingApiError";
   }
@@ -424,11 +436,11 @@ async function request(path: string, init: RequestInit, activity: string, signal
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";
     throw new PurchasingApiError(0, timedOut
       ? "The Purchasing service took too long to respond. Check the record before trying again."
-      : "Could not reach the Purchasing service. Check your connection and try again.");
+      : "Could not reach the Purchasing service. Check your connection and try again.", true);
   }
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok && !(allowNotFound && response.status === 404)) {
-    throw new PurchasingApiError(response.status, readError(response.status, body, activity));
+    throw new PurchasingApiError(response.status, readError(response.status, body, activity), true);
   }
   return { response, body };
 }
@@ -495,7 +507,7 @@ async function submit<T>(
 
   if (response.status === 202) {
     const pending = PendingEnvelopeSchema.safeParse(body);
-    if (!pending.success) throw new PurchasingApiError(202, "The Purchasing service returned an unexpected approval response.");
+    if (!pending.success) throw new PurchasingApiError(202, "The Purchasing service returned an unexpected approval response.", true);
     return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This action is waiting for approval." };
   }
 
@@ -730,7 +742,7 @@ async function submitPurchaseLifecycle<T>(
   }
 }
 
-type PurchaseFinanceAction = z.infer<typeof GoCreateVendorSchema> | z.infer<typeof GoCreateBillSchema> | z.infer<typeof GoPayBillSchema>;
+type PurchaseFinanceAction = z.infer<typeof GoCreateVendorSchema> | z.infer<typeof GoCreateBillSchema> | z.infer<typeof GoPayBillSchema> | z.infer<typeof GoBillCreditNoteSchema>;
 type PurchaseFinanceAttempt = { storageKey: string; fingerprint: string; intentId: string };
 type PurchaseFinanceRetryScope = { actorId: string; organizationId: string };
 const purchaseFinanceAttemptPrefix = "chaste.purchasing.finance.active.v1:";
@@ -779,7 +791,7 @@ function clearPurchaseFinanceAttempt(attempt: PurchaseFinanceAttempt): void {
 
 async function submitPurchaseFinanceCapability(
   action: PurchaseFinanceAction,
-  capabilityId: "purchasing.createVendor" | "purchasing.createBill" | "purchasing.payBill",
+  capabilityId: "purchasing.createVendor" | "purchasing.createBill" | "purchasing.payBill" | "purchasing.billCreditNote",
   output: z.ZodType<Record<string, unknown>>,
   activity: string,
   signal: AbortSignal | undefined,
@@ -814,6 +826,9 @@ async function submitPurchaseFinanceCapability(
     if (outcome.kind === "completed") clearPurchaseFinanceAttempt(attempt);
     return outcome;
   } catch (error) {
+    if (!(error instanceof PurchasingApiError)) {
+      throw new PurchasingApiError(0, "The request was interrupted. Check the record before trying again.", true);
+    }
     if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
       clearPurchaseFinanceAttempt(attempt);
     }
@@ -828,9 +843,9 @@ function parsePurchasingActionOutcome<T>(response: Response, body: unknown, outp
     return { kind: "pending", reason: pending.data.reason ?? pending.data.error ?? "This action is waiting for approval." };
   }
   const envelope = SuccessEnvelopeSchema.safeParse(body);
-  if (!response.ok || !envelope.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not ${activity}.`);
+  if (!response.ok || !envelope.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not ${activity}.`, true);
   const parsedOutput = output.safeParse(envelope.data.data);
-  if (!parsedOutput.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not ${activity}.`);
+  if (!parsedOutput.success) throw new PurchasingApiError(response.status, `The Purchasing service returned an unexpected result: could not ${activity}.`, true);
   return { kind: "completed", data: parsedOutput.data };
 }
 
@@ -896,8 +911,15 @@ export async function payPurchasingBill(
 export async function creditPurchasingBill(
   action: z.infer<typeof BillCreditNoteSchema>,
   signal?: AbortSignal,
-): Promise<PurchasingActionOutcome<z.infer<typeof BillCreditNoteOutputSchema>>> {
-  return submit(action, BillCreditNoteOutputSchema, "crediting the bill", signal);
+  retryScope?: { actorId: string | null; organizationId: string | null },
+): Promise<PurchasingActionOutcome> {
+  const parsedAction = BillCreditNoteSchema.safeParse(action);
+  if (!parsedAction.success) throw new PurchasingApiError(0, "Check the bill credit amount and reason, then try again.");
+  const useGo = typeof __GO_PURCHASING_FINANCE_WRITES__ !== "undefined" && __GO_PURCHASING_FINANCE_WRITES__;
+  if (!useGo) return submit(parsedAction.data, BillCreditNoteOutputSchema, "crediting the bill", signal);
+  const goAction = GoBillCreditNoteSchema.safeParse(parsedAction.data);
+  if (!goAction.success) throw new PurchasingApiError(0, "Enter a valid bill, positive credit amount, and reason between 3 and 500 characters.");
+  return submitPurchaseFinanceCapability(goAction.data, "purchasing.billCreditNote", GoBillCreditNoteOutputSchema, "crediting the bill", signal, retryScope);
 }
 
 export async function createPurchasingRequest(

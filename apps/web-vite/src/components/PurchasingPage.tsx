@@ -236,7 +236,7 @@ async function submitAction(action: PurchasingWrite, retryScope?: { actorId: str
     case "closePurchaseOrder": return closePurchasingOrder(action, undefined, retryScope);
     case "createBill": return createPurchasingBill(action, undefined, retryScope);
     case "payBill": return payPurchasingBill(action, undefined, retryScope);
-    case "billCreditNote": return creditPurchasingBill(action);
+    case "billCreditNote": return creditPurchasingBill(action, undefined, retryScope);
     case "createPurchaseRequest": return createPurchasingRequest(action);
     case "decidePurchaseRequest": return decidePurchasingRequest(action);
     case "createRfq": return createPurchasingRfq(action);
@@ -310,6 +310,8 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   const [billError, setBillError] = useState<string | null>(null);
   const [creditTarget, setCreditTarget] = useState<PurchasingBill | null>(null);
   const [creditForm, setCreditForm] = useState({ amount: "", reason: "" });
+  const [creditDrafts, setCreditDrafts] = useState<Record<string, { amount: string; reason: string }>>({});
+  const [creditAttemptLocked, setCreditAttemptLocked] = useState<Record<string, boolean>>({});
   const [closeTarget, setCloseTarget] = useState<PurchasingOrder | null>(null);
   const [returnTarget, setReturnTarget] = useState<PurchasingOrder | null>(null);
   const [returnLines, setReturnLines] = useState<Record<number, { qty: string; reason: string }>>({});
@@ -353,13 +355,19 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
     history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }
 
-  async function runAction(label: string, action: PurchasingWrite, after?: () => void): Promise<boolean> {
+  async function runAction(
+    label: string,
+    action: PurchasingWrite,
+    after?: () => void,
+    lifecycle?: { onPending?: () => void; onError?: (error: unknown) => void },
+  ): Promise<boolean> {
     if (busy) return false;
     setBusy(true);
     setNotice(null);
     try {
       const outcome = await submitAction(action, { actorId, organizationId });
       if (outcome.kind === "pending") {
+        lifecycle?.onPending?.();
         setNotice({ tone: "pending", text: `${label} is waiting for approval${outcome.reason ? `: ${outcome.reason}` : ""}.` });
         return false;
       }
@@ -368,6 +376,7 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
       await load({ quiet: true });
       return true;
     } catch (error) {
+      lifecycle?.onError?.(error);
       setNotice({
         tone: "error",
         text: error instanceof PurchasingApiError ? error.message : `${label} failed. Try again.`,
@@ -377,6 +386,21 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
       setBusy(false);
     }
   }
+
+  function clearCreditDraft(billId: string): void {
+    setCreditDrafts((current) => {
+      const next = { ...current };
+      delete next[billId];
+      return next;
+    });
+    setCreditAttemptLocked((current) => ({ ...current, [billId]: false }));
+  }
+
+  function creditDraftKey(billId: string): string {
+    return JSON.stringify([actorId, organizationId, billId]);
+  }
+
+  const activeCreditDraftKey = creditTarget ? creditDraftKey(creditTarget.id) : null;
 
   if (state.status === "loading") {
     return <main className="purchasing-page"><p className="purchasing-loading" role="status">Loading the purchasing workspace…</p></main>;
@@ -569,7 +593,7 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
             onRun={runAction}
             onOpenCredit={(bill) => {
               setCreditTarget(bill);
-              setCreditForm({ amount: majorToInput(bill.dueMinor, bill.currency), reason: "" });
+              setCreditForm(creditDrafts[creditDraftKey(bill.id)] ?? { amount: majorToInput(bill.dueMinor, bill.currency), reason: "" });
             }}
           />
         )}
@@ -618,7 +642,21 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
                     billId: creditTarget.id,
                     amountMinor,
                     reason: creditForm.reason.trim(),
-                  }, () => setCreditTarget(null));
+                  }, () => {
+                    if (activeCreditDraftKey) clearCreditDraft(activeCreditDraftKey);
+                    setCreditTarget(null);
+                  }, {
+                    onPending: () => {
+                      if (activeCreditDraftKey) setCreditAttemptLocked((current) => ({ ...current, [activeCreditDraftKey]: true }));
+                    },
+                    onError: (error) => {
+                      const terminal = error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+                      if (terminal && activeCreditDraftKey) clearCreditDraft(activeCreditDraftKey);
+                      else if (activeCreditDraftKey && error instanceof PurchasingApiError && error.requestMayHaveReachedServer) {
+                        setCreditAttemptLocked((current) => ({ ...current, [activeCreditDraftKey]: true }));
+                      }
+                    },
+                  });
                 }}
               >
                 Apply credit
@@ -634,7 +672,13 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
                 className="purchasing-input purchasing-input-wide"
                 inputMode="decimal"
                 value={creditForm.amount}
-                onChange={(event) => setCreditForm({ ...creditForm, amount: event.currentTarget.value })}
+                disabled={busy || (activeCreditDraftKey !== null && (creditAttemptLocked[activeCreditDraftKey] ?? false))}
+                onChange={(event) => {
+                  if (busy || (activeCreditDraftKey !== null && creditAttemptLocked[activeCreditDraftKey])) return;
+                  const next = { ...creditForm, amount: event.currentTarget.value };
+                  setCreditForm(next);
+                  if (activeCreditDraftKey) setCreditDrafts((current) => ({ ...current, [activeCreditDraftKey]: next }));
+                }}
               />
             </label>
             <label className="purchasing-field" htmlFor="purchasing-credit-reason">
@@ -643,8 +687,15 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
                 id="purchasing-credit-reason"
                 className="purchasing-input"
                 placeholder="e.g. damaged goods on delivery"
+                maxLength={500}
                 value={creditForm.reason}
-                onChange={(event) => setCreditForm({ ...creditForm, reason: event.currentTarget.value })}
+                disabled={busy || (activeCreditDraftKey !== null && (creditAttemptLocked[activeCreditDraftKey] ?? false))}
+                onChange={(event) => {
+                  if (busy || (activeCreditDraftKey !== null && creditAttemptLocked[activeCreditDraftKey])) return;
+                  const next = { ...creditForm, reason: event.currentTarget.value };
+                  setCreditForm(next);
+                  if (activeCreditDraftKey) setCreditDrafts((current) => ({ ...current, [activeCreditDraftKey]: next }));
+                }}
               />
             </label>
           </div>

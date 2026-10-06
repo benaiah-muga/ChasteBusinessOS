@@ -346,6 +346,58 @@ describe("governed purchasing writes", () => {
     expect(postedBody(fetchMock.mock.calls[3]!).intentId).toBe(uncertain.intentId);
   });
 
+  it("routes bill credits through Go, reuses the intent after pending, and validates the result", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const entryId = "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f";
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Credit approval required." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { entryId, creditedMinor: 5000, billBalanceMinor: 7500 } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { entryId, creditedMinor: 5000, billBalanceMinor: 7500, extra: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const action = {
+      action: "billCreditNote" as const,
+      billId: "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f",
+      amountMinor: 5000,
+      reason: "Damaged delivery",
+    };
+
+    await expect(creditPurchasingBill(action, undefined, retryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    const uncertainAttempt = postedBody(fetchMock.mock.calls[0]!);
+    expect(uncertainAttempt).toMatchObject({
+      capabilityId: "purchasing.billCreditNote",
+      input: { billId: action.billId, amountMinor: 5000, reason: action.reason },
+    });
+    await expect(creditPurchasingBill(action, undefined, retryScope)).resolves.toEqual({ kind: "pending", reason: "Credit approval required." });
+    const pendingAttempt = postedBody(fetchMock.mock.calls[1]!);
+    expect(pendingAttempt.intentId).toBe(uncertainAttempt.intentId);
+    await expect(creditPurchasingBill(action, undefined, retryScope)).resolves.toEqual({
+      kind: "completed", data: { entryId, creditedMinor: 5000, billBalanceMinor: 7500 },
+    });
+    expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(pendingAttempt.intentId);
+    await expect(creditPurchasingBill(action, undefined, retryScope)).rejects.toMatchObject({ status: 200 });
+
+    const fallbackFetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "Go route missing" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { entryId, creditedMinor: 5000, billBalanceMinor: 7500 } }));
+    vi.stubGlobal("fetch", fallbackFetch);
+    await expect(creditPurchasingBill(action, undefined, retryScope)).resolves.toMatchObject({ kind: "completed" });
+    expect(fallbackFetch).toHaveBeenCalledTimes(2);
+    expect(postedBody(fallbackFetch.mock.calls[0]!).intentId).toBe(postedBody(fallbackFetch.mock.calls[1]!).intentId);
+    expect(postedBody(fallbackFetch.mock.calls[1]!)).toMatchObject({ action: "billCreditNote", billId: action.billId, reason: action.reason });
+  });
+
+  it("fails closed for Go bill credits without scope or with malformed input", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "billCreditNote" as const, billId: "not-a-uuid", amountMinor: 1, reason: "x" };
+    await expect(creditPurchasingBill(action, undefined, retryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: false });
+    await expect(creditPurchasingBill({ ...action, billId: "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f", reason: "valid reason" }, undefined, { actorId: "actor", organizationId: null }))
+      .rejects.toMatchObject({ status: 0, message: expect.stringContaining("organization") });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("requires actor and organization scope and rejects Go payment bounds before sending", async () => {
     vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
     const fetchMock = vi.fn();

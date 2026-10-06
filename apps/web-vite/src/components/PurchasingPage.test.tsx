@@ -74,7 +74,7 @@ function resolve(value: unknown): Response {
  * governed POST seam that every write funnels through.
  */
 function purchasingFetch(overrides: Overrides = {}) {
-  const post = (body: Record<string, unknown>) => resolve(overrides.post ? overrides.post(body) : { ok: true, data: {} });
+  const post = async (body: Record<string, unknown>) => resolve(await (overrides.post ? overrides.post(body) : { ok: true, data: {} }));
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -91,14 +91,15 @@ function purchasingFetch(overrides: Overrides = {}) {
         input?: Record<string, unknown>;
         intentId?: string;
       };
-      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill") || !body.input) {
+      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
       const action = body.capabilityId === "purchasing.createVendor" ? "createVendor"
         : body.capabilityId === "purchasing.createPurchaseOrder" ? "createPurchaseOrder"
           : body.capabilityId === "purchasing.returnGoods" ? "returnGoods"
             : body.capabilityId === "purchasing.closePurchaseOrder" ? "closePurchaseOrder"
-              : body.capabilityId === "purchasing.createBill" ? "createBill" : "payBill";
+              : body.capabilityId === "purchasing.createBill" ? "createBill"
+                : body.capabilityId === "purchasing.billCreditNote" ? "billCreditNote" : "payBill";
       return post({ ...body.input, action, intentId: body.intentId });
     }
     throw new TypeError(`unrouted ${method} ${url}`);
@@ -432,6 +433,133 @@ describe("PurchasingPage", () => {
       input: { billNumber: 7, amountMinor: 5000 },
       intentId: expect.any(String),
     });
+  });
+
+  it("retains the credit target and form while a Go bill credit awaits approval", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({ bills: [billFixture()] }),
+      post: (body) => body.action === "billCreditNote"
+        ? Response.json({ pendingApproval: true, reason: "Credit approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-finance" organizationId="org-finance" />);
+    await screen.findByRole("button", { name: /Open POs/ });
+    fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Credit" }));
+    fireEvent.change(screen.getByLabelText("Amount (USD)"), { target: { value: "50" } });
+    const reason = screen.getByPlaceholderText("e.g. damaged goods on delivery");
+    fireEvent.change(reason, { target: { value: "Damaged delivery" } });
+    expect((reason as HTMLInputElement).maxLength).toBe(500);
+    fireEvent.click(screen.getByRole("button", { name: "Apply credit" }));
+
+    expect(await screen.findByText(/is waiting for approval: Credit approval required\./)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Credit bill #7" })).toBeTruthy();
+    expect((screen.getByLabelText("Amount (USD)") as HTMLInputElement).value).toBe("50");
+    expect((screen.getByPlaceholderText("e.g. damaged goods on delivery") as HTMLInputElement).value).toBe("Damaged delivery");
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.billCreditNote",
+      input: { billId: billFixture().id, amountMinor: 5000, reason: "Damaged delivery" },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("restores and retries the exact unresolved credit after closing and reopening its dialog", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const entryId = "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f";
+    let creditCalls = 0;
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({ bills: [billFixture()] }),
+      post: (body) => {
+        if (body.action !== "billCreditNote") return { ok: true, data: {} };
+        creditCalls += 1;
+        return creditCalls === 1
+          ? Response.json({ pendingApproval: true, reason: "Credit approval required." }, { status: 202 })
+          : Response.json({ ok: true, data: { entryId, creditedMinor: 5000, billBalanceMinor: 7500 } });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-credit-reopen" organizationId="org-credit-reopen" />);
+    await screen.findByRole("button", { name: /Open POs/ });
+    fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Credit" }));
+    fireEvent.change(screen.getByLabelText("Amount (USD)"), { target: { value: "50" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. damaged goods on delivery"), { target: { value: "Damaged delivery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply credit" }));
+    expect(await screen.findByText(/is waiting for approval: Credit approval required\./)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Credit bill #7" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Credit" }));
+    expect((screen.getByLabelText("Amount (USD)") as HTMLInputElement).value).toBe("50");
+    expect((screen.getByPlaceholderText("e.g. damaged goods on delivery") as HTMLInputElement).value).toBe("Damaged delivery");
+    expect((screen.getByLabelText("Amount (USD)") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Apply credit" }));
+
+    expect(await screen.findByText("Credit bill #7 done.")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Credit bill #7" })).toBeNull();
+    const attempts = capabilityPosts(fetchMock).filter((body) => body.capabilityId === "purchasing.billCreditNote");
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]).toMatchObject({ input: { billId: billFixture().id, amountMinor: 5000, reason: "Damaged delivery" } });
+    expect(attempts[1]).toMatchObject({ input: attempts[0]?.input, intentId: attempts[0]?.intentId });
+  });
+
+  it("keeps a scope preflight failure editable because no request was sent", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    const fetchMock = purchasingFetch({ workspace: workspaceFixture({ bills: [billFixture()] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId={null} organizationId="org-credit-preflight" />);
+    await screen.findByRole("button", { name: /Open POs/ });
+    fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Credit" }));
+    fireEvent.change(screen.getByLabelText("Amount (USD)"), { target: { value: "50" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. damaged goods on delivery"), { target: { value: "Damaged delivery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply credit" }));
+
+    expect(await screen.findByText(/Wait for your account and organization to finish loading/)).toBeTruthy();
+    const amount = screen.getByLabelText("Amount (USD)") as HTMLInputElement;
+    const reason = screen.getByPlaceholderText("e.g. damaged goods on delivery") as HTMLInputElement;
+    expect(amount.disabled).toBe(false);
+    expect(reason.disabled).toBe(false);
+    fireEvent.change(reason, { target: { value: "Wrong item received" } });
+    expect(reason.value).toBe("Wrong item received");
+    expect(capabilityPosts(fetchMock)).toHaveLength(0);
+  });
+
+  it("keeps the submitted credit snapshot when a response is delayed", async () => {
+    vi.stubGlobal("__GO_PURCHASING_FINANCE_WRITES__", true);
+    let resolveCredit!: (response: Response) => void;
+    const delayed = new Promise<Response>((resolve) => { resolveCredit = resolve; });
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({ bills: [billFixture()] }),
+      post: (body) => body.action === "billCreditNote"
+        ? delayed
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-credit-delay" organizationId="org-credit-delay" />);
+    await screen.findByRole("button", { name: /Open POs/ });
+    fireEvent.click(screen.getByRole("tab", { name: /Bills & payments/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Credit" }));
+    fireEvent.change(screen.getByLabelText("Amount (USD)"), { target: { value: "50" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. damaged goods on delivery"), { target: { value: "Damaged delivery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply credit" }));
+
+    const amount = screen.getByLabelText("Amount (USD)") as HTMLInputElement;
+    const reason = screen.getByPlaceholderText("e.g. damaged goods on delivery") as HTMLInputElement;
+    await waitFor(() => expect(amount.disabled).toBe(true));
+    expect(amount.disabled).toBe(true);
+    expect(reason.disabled).toBe(true);
+    fireEvent.change(amount, { target: { value: "99" } });
+    fireEvent.change(reason, { target: { value: "Changed during submission" } });
+    resolveCredit(Response.json({ pendingApproval: true, reason: "Credit approval required." }, { status: 202 }));
+
+    expect(await screen.findByText(/is waiting for approval: Credit approval required\./)).toBeTruthy();
+    expect(amount.value).toBe("50");
+    expect(reason.value).toBe("Damaged delivery");
+    const attempt = capabilityPosts(fetchMock)[0];
+    expect(attempt).toMatchObject({ input: { amountMinor: 5000, reason: "Damaged delivery" }, capabilityId: "purchasing.billCreditNote" });
   });
 
   it("retains the return dialog and exact draft while Go approval is pending", async () => {
