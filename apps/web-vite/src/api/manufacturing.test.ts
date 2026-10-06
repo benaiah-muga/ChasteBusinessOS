@@ -151,6 +151,82 @@ describe("manufacturing API", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("maps BOM production and run reversal to their Go capability inputs", () => {
+    expect(manufacturingActionRequest({
+      action: "produceFromBom", assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "LOT-1",
+    }, "intent-12345678901234567890", false, false, true)).toEqual({
+      url: "/api/capabilities/execute",
+      body: { capabilityId: "manufacturing.produceFromBom", input: { assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "LOT-1" }, intentId: "intent-12345678901234567890" },
+    });
+    expect(manufacturingActionRequest({
+      action: "reverseProductionRun", runId: "33333333-3333-4333-8333-333333333333",
+    }, "intent-12345678901234567890", false, false, true)).toEqual({
+      url: "/api/capabilities/execute",
+      body: { capabilityId: "manufacturing.reverseProductionRun", input: { runRef: "33333333-3333-4333-8333-333333333333" }, intentId: "intent-12345678901234567890" },
+    });
+  });
+
+  it("keeps BOM production identity through uncertain and pending outcomes and validates Go output", async () => {
+    const action = { action: "produceFromBom" as const, assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "LOT-1" };
+    const options = { useGoProductionActions: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("network"))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Supervisor review" }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: {
+        runRef: "33333333-3333-4333-8333-333333333333", producedThousandths: 2000,
+        consumedComponents: [{ sku: "LEG-1", quantityThousandths: 8000 }], costRolledUpMinor: 24000,
+      } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitManufacturingAction(action, undefined, options)).rejects.toBeInstanceOf(ManufacturingApiError);
+    await expect(submitManufacturingAction(action, undefined, options)).resolves.toMatchObject({ kind: "pending", reason: "Supervisor review" });
+    await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { intentId: string; capabilityId: string });
+    expect(bodies).toHaveLength(3);
+    expect(bodies.every((body) => body.capabilityId === "manufacturing.produceFromBom" && body.intentId === bodies[0]?.intentId)).toBe(true);
+  });
+
+  it("validates reversal output and fails closed before Go when scope or run UUID is invalid", async () => {
+    const fetchMock = stubSequenced([Response.json({ ok: true, data: {
+      reversedMovements: 3, removedFinishedThousandths: 2000,
+      restoredComponents: [{ sku: "LEG-1", quantityThousandths: 8000 }],
+      removedProduced: [{ sku: "DESK-1", quantityThousandths: 2000 }],
+    } })]);
+    const action = { action: "reverseProductionRun" as const, runId: "33333333-3333-4333-8333-333333333333" };
+    const options = { useGoProductionActions: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    await expect(submitManufacturingAction(action, undefined, options)).resolves.toEqual({ kind: "completed" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "manufacturing.reverseProductionRun", input: { runRef: action.runId },
+    });
+
+    const noRequest = vi.fn();
+    vi.stubGlobal("fetch", noRequest);
+    await expect(submitManufacturingAction(action, undefined, { ...options, retryScope: { actorId: null, organizationId: "org-1" } })).rejects.toThrow("Wait for your account and organization");
+    await expect(submitManufacturingAction({ ...action, runId: "run-1" }, undefined, options)).rejects.toThrow("valid ID");
+    expect(noRequest).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed Go production output and keeps the unresolved retry identity", async () => {
+    const action = { action: "reverseProductionRun" as const, runId: "33333333-3333-4333-8333-333333333333" };
+    const options = { useGoProductionActions: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    const fetchMock = stubSequenced([Response.json({ ok: true, data: { reversedMovements: 3 } })]);
+    await expect(submitManufacturingAction(action, undefined, options)).rejects.toThrow("unexpected production response");
+    await expect(submitManufacturingAction({ action: "produceFromBom", assemblySku: "DESK-1", quantityThousandths: 1000 }, undefined, options)).rejects.toThrow("previous manufacturing result is unresolved");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the same scoped intent when a missing production capability falls back to legacy", async () => {
+    const fetchMock = stubSequenced([
+      Response.json({ error: "not found" }, { status: 404 }),
+      Response.json({ ok: true, data: { runId: "legacy-run" } }),
+    ]);
+    const options = { useGoProductionActions: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };
+    await expect(submitManufacturingAction({ action: "produceFromBom", assemblySku: "DESK-1", quantityThousandths: 1000 }, undefined, options)).resolves.toEqual({ kind: "completed" });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/manufacturing"]);
+    const goBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { intentId: string };
+    const legacyBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { intentId: string };
+    expect(legacyBody.intentId).toBe(goBody.intentId);
+  });
+
   it("retains the exact Go intent through network uncertainty and approval pending, then clears on success", async () => {
     const action = { action: "createWorkOrder" as const, assemblySku: "DESK-1", plannedQtyThousandths: 4000, yieldPctThousandths: 1_000_000 };
     const options = { useGoWorkOrders: true, retryScope: { actorId: "actor-1", organizationId: "org-1" } };

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ManufacturingPage } from "./ManufacturingPage";
 
@@ -270,6 +270,60 @@ describe("Vite manufacturing page", () => {
     const retriedBody = JSON.parse(String((fetchMock.mock.calls.find(([url], index) => url === "/api/capabilities/execute" && index > 0)?.[1] as RequestInit).body)) as PostedBody;
     expect(retriedBody.intentId).toBe(firstBody.intentId);
     expect((screen.getByLabelText("Work order assembly SKU") as HTMLInputElement).value).toBe("");
+  });
+
+  it("keeps production input and reversal target through Go approval pending", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PRODUCTION_WRITES__", true);
+    const responses = new Map<string, number>();
+    const fetchMock = manufacturingFetch({
+      onPost: (body) => {
+        const action = String(body.action);
+        const count = (responses.get(action) ?? 0) + 1;
+        responses.set(action, count);
+        if (count === 1) return Response.json({ ok: false, pendingApproval: true, reason: "Supervisor review" }, { status: 202 });
+        if (action === "produceFromBom") return Response.json({ ok: true, data: {
+          runRef: "33333333-3333-4333-8333-333333333333", producedThousandths: 2000,
+          consumedComponents: [{ sku: "LEG-1", quantityThousandths: 8000 }], costRolledUpMinor: 24000,
+        } });
+        return Response.json({ ok: false, pendingApproval: true, reason: "Owner review" }, { status: 202 });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManufacturingPage actorId="actor-1" organizationId="org-1" />);
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: /^Produce$/ }));
+    fireEvent.change(screen.getByLabelText("Produce assembly SKU"), { target: { value: "DESK-1" } });
+    fireEvent.change(screen.getByLabelText("Units to build"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Lot code"), { target: { value: "LOT-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Produce now" }));
+    expect(await screen.findByText(/Produce DESK-1 requires approval/)).not.toBeNull();
+    expect((screen.getByLabelText("Produce assembly SKU") as HTMLInputElement).value).toBe("DESK-1");
+    expect((screen.getByLabelText("Units to build") as HTMLInputElement).value).toBe("2");
+    const lotCodeInput = screen.getByLabelText("Lot code") as HTMLInputElement;
+    expect(lotCodeInput.value).toBe("LOT-1");
+    expect(lotCodeInput.maxLength).toBe(40);
+    const firstProductionRequest = fetchMock.mock.calls.find(([url]) => url === "/api/capabilities/execute");
+    const firstProductionBody = JSON.parse(String((firstProductionRequest?.[1] as RequestInit).body)) as PostedBody;
+    fireEvent.click(screen.getByRole("button", { name: "Produce now" }));
+    await waitFor(() => expect(responses.get("produceFromBom")).toBe(2));
+
+    const productionRequests = fetchMock.mock.calls
+      .filter(([url]) => url === "/api/capabilities/execute")
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as PostedBody);
+    expect(productionRequests[1]?.intentId).toBe(firstProductionBody.intentId);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Runs & lots/ }));
+    const runId = "44444444-4444-4444-8444-444444444444";
+    fireEvent.change(screen.getByLabelText("Run id to reverse"), { target: { value: runId } });
+    const reverseSection = screen.getByRole("heading", { name: "Reverse a run manually" }).closest("section");
+    if (!reverseSection) throw new Error("manual reversal section missing");
+    fireEvent.click(within(reverseSection).getByRole("button", { name: "Reverse" }));
+    expect(await screen.findByText(/Reverse run requires approval/)).not.toBeNull();
+    expect((screen.getByLabelText("Run id to reverse") as HTMLInputElement).value).toBe(runId);
+    const lastCapabilityRequest = fetchMock.mock.calls.filter(([url]) => url === "/api/capabilities/execute").at(-1);
+    expect(JSON.parse(String((lastCapabilityRequest?.[1] as RequestInit).body))).toMatchObject({
+      capabilityId: "manufacturing.reverseProductionRun", input: { runRef: runId },
+    });
   });
 
   it("rejects a work order quantity above the database integer limit before submission", async () => {

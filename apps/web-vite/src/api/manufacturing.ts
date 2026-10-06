@@ -123,7 +123,7 @@ const ProduceFromBomSchema = z.object({
   action: z.literal("produceFromBom"),
   assemblySku: z.string().trim().min(1),
   quantityThousandths: z.number().int().positive().safe(),
-  lotCode: z.string().trim().min(1).optional(),
+  lotCode: z.string().trim().min(1).max(40).optional(),
 }).strict();
 const ReverseProductionRunSchema = z.object({
   action: z.literal("reverseProductionRun"),
@@ -182,6 +182,20 @@ const WorkOrderOutputSchemas = {
   }).passthrough(),
   cancelWorkOrder: z.object({ cancelled: z.boolean() }).passthrough(),
 } as const;
+const ProductionOutputSchemas = {
+  produceFromBom: z.object({
+    runRef: z.string().uuid(),
+    producedThousandths: z.number().int().positive().safe(),
+    consumedComponents: z.array(z.object({ sku: z.string().min(1), quantityThousandths: z.number().int().positive().safe() }).strict()),
+    costRolledUpMinor: z.number().int().nonnegative().safe(),
+  }).strict(),
+  reverseProductionRun: z.object({
+    reversedMovements: z.number().int().nonnegative().safe(),
+    removedFinishedThousandths: z.number().int().nonnegative().safe(),
+    restoredComponents: z.array(z.object({ sku: z.string().min(1), quantityThousandths: z.number().int().nonnegative().safe() }).strict()),
+    removedProduced: z.array(z.object({ sku: z.string().min(1), quantityThousandths: z.number().int().nonnegative().safe() }).strict()),
+  }).strict(),
+} as const;
 
 export type ManufacturingBomEdge = z.infer<typeof BomEdgeSchema>;
 export type ManufacturingAssembly = z.infer<typeof AssemblySchema>;
@@ -200,6 +214,7 @@ export function manufacturingActionRequest(
   intentId: string,
   useGoDefineBom: boolean,
   useGoWorkOrder = false,
+  useGoProduction = false,
 ): { url: string; body: Record<string, unknown> } {
   if (useGoDefineBom && action.action === "defineBom") {
     return {
@@ -218,6 +233,13 @@ export function manufacturingActionRequest(
       body: { capabilityId: `manufacturing.${actionName}`, input, intentId },
     };
   }
+  if (useGoProduction && action.action === "produceFromBom") {
+    const { action: _action, ...input } = action;
+    return { url: "/api/capabilities/execute", body: { capabilityId: "manufacturing.produceFromBom", input, intentId } };
+  }
+  if (useGoProduction && action.action === "reverseProductionRun") {
+    return { url: "/api/capabilities/execute", body: { capabilityId: "manufacturing.reverseProductionRun", input: { runRef: action.runId }, intentId } };
+  }
   return { url: "/api/manufacturing", body: { ...action, intentId } };
 }
 
@@ -231,6 +253,7 @@ export class ManufacturingApiError extends Error {
 type ManufacturingRetryScope = { actorId: string | null; organizationId: string | null };
 type ManufacturingAttempt = { storageKey: string; fingerprint: string; intentId: string };
 const workOrderActions = new Set(["createWorkOrder", "releaseWorkOrder", "completeWorkOrder", "cancelWorkOrder"]);
+const productionActions = new Set(["produceFromBom", "reverseProductionRun"]);
 const manufacturingAttemptPrefix = "chaste:manufacturing-work-order-attempt:";
 
 function parseManufacturingAttempt(value: string | null): { fingerprint: string; intentId: string } | null {
@@ -253,7 +276,7 @@ async function manufacturingDigest(value: string): Promise<string> {
 async function createManufacturingAttempt(action: ManufacturingWriteAction, scope: ManufacturingRetryScope): Promise<ManufacturingAttempt> {
   const canonicalScope = { actorId: scope.actorId?.trim() ?? "", organizationId: scope.organizationId?.trim() ?? "" };
   if (!canonicalScope.actorId || !canonicalScope.organizationId) {
-    throw new ManufacturingApiError(0, "Wait for your account and organization to finish loading before changing a work order.");
+    throw new ManufacturingApiError(0, "Wait for your account and organization to finish loading before submitting a manufacturing change.");
   }
   let scopeDigest: string;
   let fingerprint: string;
@@ -261,14 +284,14 @@ async function createManufacturingAttempt(action: ManufacturingWriteAction, scop
     scopeDigest = await manufacturingDigest(JSON.stringify(canonicalScope));
     fingerprint = await manufacturingDigest(JSON.stringify({ ...canonicalScope, action }));
   } catch {
-    throw new ManufacturingApiError(0, "Work order retry protection is unavailable. Check browser security settings and try again.");
+    throw new ManufacturingApiError(0, "Manufacturing retry protection is unavailable. Check browser security settings and try again.");
   }
   const storageKey = `${manufacturingAttemptPrefix}${scopeDigest}`;
   let stored: { fingerprint: string; intentId: string } | null;
   try { stored = parseManufacturingAttempt(window.localStorage.getItem(storageKey)); }
-  catch { throw new ManufacturingApiError(0, "Enable browser storage before changing a work order so an uncertain action can be retried safely."); }
+  catch { throw new ManufacturingApiError(0, "Enable browser storage before changing manufacturing data so an uncertain action can be retried safely."); }
   if (stored && stored.fingerprint !== fingerprint) {
-    throw new ManufacturingApiError(0, "A previous work order result is unresolved. Retry that exact action or check work order history before changing it.");
+    throw new ManufacturingApiError(0, "A previous manufacturing result is unresolved. Retry that exact action or check production history before changing it.");
   }
   if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
   const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
@@ -278,7 +301,7 @@ async function createManufacturingAttempt(action: ManufacturingWriteAction, scop
     if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
     return { ...attempt, intentId: persisted.intentId };
   } catch {
-    throw new ManufacturingApiError(0, "Enable browser storage before changing a work order so an uncertain action can be retried safely.");
+    throw new ManufacturingApiError(0, "Enable browser storage before changing manufacturing data so an uncertain action can be retried safely.");
   }
 }
 
@@ -348,7 +371,7 @@ export async function fetchManufacturingReport(signal?: AbortSignal): Promise<Ma
 export async function submitManufacturingAction(
   action: ManufacturingWriteAction,
   signal?: AbortSignal,
-  options: { useGoDefineBom?: boolean; useGoWorkOrders?: boolean; retryScope?: ManufacturingRetryScope } = {},
+  options: { useGoDefineBom?: boolean; useGoWorkOrders?: boolean; useGoProductionActions?: boolean; retryScope?: ManufacturingRetryScope } = {},
 ): Promise<ManufacturingActionResult> {
   const parsed = WriteActionSchema.safeParse(action);
   if (!parsed.success) throw new ManufacturingApiError(0, "Check the production details and try again.");
@@ -356,19 +379,28 @@ export async function submitManufacturingAction(
   const useGoDefineBom = (options.useGoDefineBom ?? configuredForGo) && parsed.data.action === "defineBom";
   const configuredWorkOrders = typeof __GO_MANUFACTURING_WORK_ORDER_WRITES__ !== "undefined" && __GO_MANUFACTURING_WORK_ORDER_WRITES__;
   const useGoWorkOrders = (options.useGoWorkOrders ?? configuredWorkOrders) && workOrderActions.has(parsed.data.action);
-  const attempt = useGoWorkOrders ? await createManufacturingAttempt(parsed.data, options.retryScope ?? { actorId: null, organizationId: null }) : null;
+  const configuredProductionActions = typeof __GO_MANUFACTURING_PRODUCTION_WRITES__ !== "undefined" && __GO_MANUFACTURING_PRODUCTION_WRITES__;
+  const useGoProductionActions = (options.useGoProductionActions ?? configuredProductionActions) && productionActions.has(parsed.data.action);
+  if (useGoProductionActions && parsed.data.action === "reverseProductionRun" && !z.string().uuid().safeParse(parsed.data.runId).success) {
+    throw new ManufacturingApiError(0, "Select a production run with a valid ID before reversing it.");
+  }
+  const attempt = useGoWorkOrders || useGoProductionActions
+    ? await createManufacturingAttempt(parsed.data, options.retryScope ?? { actorId: null, organizationId: null })
+    : null;
   const intentId = attempt?.intentId ?? crypto.randomUUID();
-  const route = manufacturingActionRequest(parsed.data, intentId, useGoDefineBom, useGoWorkOrders);
+  const route = manufacturingActionRequest(parsed.data, intentId, useGoDefineBom, useGoWorkOrders, useGoProductionActions);
   let { response, body } = await request(route.url, {
     method: "POST",
     body: JSON.stringify(route.body),
   }, signal);
-  if ((useGoDefineBom || useGoWorkOrders) && response.status === 404) {
+  let goResponse = useGoDefineBom || useGoWorkOrders || useGoProductionActions;
+  if (goResponse && response.status === 404) {
     const fallback = manufacturingActionRequest(parsed.data, intentId, false);
     ({ response, body } = await request(fallback.url, {
       method: "POST",
       body: JSON.stringify(fallback.body),
     }, signal));
+    goResponse = false;
   }
   if (response.status === 202) {
     const pending = PendingSchema.safeParse(body);
@@ -386,6 +418,9 @@ export async function submitManufacturingAction(
   }
   if (useGoWorkOrders && !(WorkOrderOutputSchemas[parsed.data.action as keyof typeof WorkOrderOutputSchemas]?.safeParse(envelope.data.data).success ?? false)) {
     throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected work order response.");
+  }
+  if (goResponse && useGoProductionActions && !(ProductionOutputSchemas[parsed.data.action as keyof typeof ProductionOutputSchemas]?.safeParse(envelope.data.data).success ?? false)) {
+    throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected production response.");
   }
   if (attempt) clearManufacturingAttempt(attempt);
   return { kind: "completed" };

@@ -1618,7 +1618,16 @@ new owners and the manifest shows zero legacy runtime paths.
      Go requests, and validate UUIDs, quantities, yield, work center, note, and
      lot code against the capability contract. Focused Vite checks pass;
      browser proof remains open.
-165. Add Vite Sales order creation, deliver-all, and cancellation through Go's
+165. Route Vite BOM production and production-run reversal through Go's
+     `manufacturing.produceFromBom` and `manufacturing.reverseProductionRun`
+     capabilities when `CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep the legacy manufacturing
+     route as a 404-only fallback with the same intent, persist exact-action
+     retries by actor and organization through pending or uncertain outcomes,
+     and validate capability output schemas. Go reversals lock affected stock
+     before checking prior reversals or available finished stock. Browser proof
+     remains open.
+166. Add Vite Sales order creation, deliver-all, and cancellation through Go's
      session-authenticated `sales.createOrder`, `sales.deliverOrder`, and
      `sales.cancelOrder` capabilities when `CHASTE_GO_SALES_ORDER_WRITES=1` and
      `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Keep confirmation on its existing

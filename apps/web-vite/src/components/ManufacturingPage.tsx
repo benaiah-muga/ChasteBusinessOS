@@ -712,7 +712,7 @@ export function ManufacturingPage({ baseCurrency = null, actorId = null, organiz
             </label>
             <label style={styles.label}>
               Lot code (optional)
-              <input style={{ ...styles.input, width: 160 }} aria-label="Lot code" value={produceLotCode} onChange={(event) => setProduceLotCode(event.target.value)} />
+              <input style={{ ...styles.input, width: 160 }} aria-label="Lot code" maxLength={40} value={produceLotCode} onChange={(event) => setProduceLotCode(event.target.value)} />
             </label>
           </div>
           <div style={styles.fieldRow}>

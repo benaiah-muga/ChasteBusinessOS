@@ -830,9 +830,39 @@ func TestManufacturingWorkOrdersProduceAndReverseRun(t *testing.T) {
 		t.Fatalf("produce output leg = lot %v cost %v, want no lot at 90200 per unit", outputLot, outputUnitCost)
 	}
 
-	reversed := manufacturingInOrgTx(t, fx, fx.orgID, func(tx pgx.Tx) (ManufacturingReverseProductionRunOutput, error) {
-		return manufacturingReverseProductionRun(fx.ctx, tx, claims, ManufacturingRunRefInput{RunRef: produced.RunRef})
-	})
+	type reversalResult struct {
+		output ManufacturingReverseProductionRunOutput
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan reversalResult, 2)
+	for range 2 {
+		go func() {
+			<-start
+			output, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (ManufacturingReverseProductionRunOutput, error) {
+				return manufacturingReverseProductionRun(fx.ctx, tx, claims, ManufacturingRunRefInput{RunRef: produced.RunRef})
+			})
+			results <- reversalResult{output: output, err: err}
+		}()
+	}
+	close(start)
+	var reversed ManufacturingReverseProductionRunOutput
+	var reversalSuccesses int
+	var reversalRefusals int
+	for range 2 {
+		result := <-results
+		if result.err == nil {
+			reversed = result.output
+			reversalSuccesses++
+		} else if strings.Contains(result.err.Error(), "this production run has already been reversed") {
+			reversalRefusals++
+		} else {
+			t.Fatalf("concurrent reversal failed unexpectedly: %v", result.err)
+		}
+	}
+	if reversalSuccesses != 1 || reversalRefusals != 1 {
+		t.Fatalf("concurrent reversal results: %d succeeded, %d were refused, want one of each", reversalSuccesses, reversalRefusals)
+	}
 	if reversed.ReversedMovements != 3 || reversed.RemovedFinishedThousandths != 100_000 || len(reversed.RemovedProduced) != 1 || len(reversed.RestoredComponents) != 2 {
 		t.Fatalf("reversal = %+v, want 3 mirrored movements and the finished units removed", reversed)
 	}

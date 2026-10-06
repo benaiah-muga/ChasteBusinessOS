@@ -1026,17 +1026,6 @@ func manufacturingCompleteWorkOrder(ctx context.Context, tx pgx.Tx, claims authb
 
 func manufacturingReverseProductionRun(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input ManufacturingRunRefInput) (ManufacturingReverseProductionRunOutput, error) {
 	orgID := claims.OrganizationID
-	var alreadyReversed bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM stock_movements
-			WHERE org_id = $1::uuid AND ref_type = 'production_reversal' AND ref_id = $2::uuid
-		)`, orgID, input.RunRef).Scan(&alreadyReversed); err != nil {
-		return ManufacturingReverseProductionRunOutput{}, err
-	}
-	if alreadyReversed {
-		return ManufacturingReverseProductionRunOutput{}, errors.New("this production run has already been reversed")
-	}
 	type runMovement struct {
 		itemID        string
 		quantityDelta int64
@@ -1079,6 +1068,23 @@ func manufacturingReverseProductionRun(ctx context.Context, tx pgx.Tx, claims au
 		netItemIDs = append(netItemIDs, itemID)
 	}
 	sort.Strings(netItemIDs)
+	// Lock every affected item before checking either reversal history or stock.
+	// Concurrent reversals of the same run then serialize, and the loser sees
+	// the winner's committed reversal after acquiring the locks.
+	if err := inventoryLockStockItems(ctx, tx, netItemIDs); err != nil {
+		return ManufacturingReverseProductionRunOutput{}, err
+	}
+	var alreadyReversed bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM stock_movements
+			WHERE org_id = $1::uuid AND ref_type = 'production_reversal' AND ref_id = $2::uuid
+		)`, orgID, input.RunRef).Scan(&alreadyReversed); err != nil {
+		return ManufacturingReverseProductionRunOutput{}, err
+	}
+	if alreadyReversed {
+		return ManufacturingReverseProductionRunOutput{}, errors.New("this production run has already been reversed")
+	}
 	for _, itemID := range netItemIDs {
 		net := netByItem[itemID]
 		if net <= 0 {
@@ -1091,11 +1097,6 @@ func manufacturingReverseProductionRun(ctx context.Context, tx pgx.Tx, claims au
 		if net > onHand {
 			return ManufacturingReverseProductionRunOutput{}, errors.New("cannot reverse: produced units have already been consumed or sold")
 		}
-	}
-	// Reversal legs are outbound for produced items, so lock before writing
-	// and keep the checks serialized against concurrent sales.
-	if err := inventoryLockStockItems(ctx, tx, netItemIDs); err != nil {
-		return ManufacturingReverseProductionRunOutput{}, err
 	}
 	restored := []ManufacturingConsumedComponent{}
 	removedProduced := []ManufacturingConsumedComponent{}

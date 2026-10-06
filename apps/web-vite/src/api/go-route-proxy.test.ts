@@ -12,6 +12,7 @@ import {
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
   goManufacturingWorkOrderWritesFromEnv,
+  goManufacturingProductionWritesFromEnv,
   goSalesOrderWritesFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
@@ -91,6 +92,14 @@ describe("manufacturing work order Go selector", () => {
     expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES: "1" })).toBe(true);
     expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES: "1" })).toBe(false);
+  });
+});
+
+describe("manufacturing production Go selector", () => {
+  it("requires both the production selector and session capability route", () => {
+    expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES: "1" })).toBe(true);
+    expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goManufacturingProductionWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES: "1" })).toBe(false);
   });
 });
 
