@@ -232,8 +232,8 @@ async function submitAction(action: PurchasingWrite, retryScope?: { actorId: str
     case "createVendor": return createPurchasingVendor(action);
     case "createPurchaseOrder": return createPurchasingOrder(action, undefined, retryScope);
     case "receiveGoods": return receivePurchasingGoods(action);
-    case "returnGoods": return returnPurchasingGoods(action);
-    case "closePurchaseOrder": return closePurchasingOrder(action);
+    case "returnGoods": return returnPurchasingGoods(action, undefined, retryScope);
+    case "closePurchaseOrder": return closePurchasingOrder(action, undefined, retryScope);
     case "createBill": return createPurchasingBill(action);
     case "payBill": return payPurchasingBill(action);
     case "billCreditNote": return creditPurchasingBill(action);
@@ -743,6 +743,7 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
                         className="purchasing-input purchasing-input-wide"
                         placeholder="why it goes back"
                         aria-label={`Reason for line ${line.lineNumber}`}
+                        maxLength={500}
                         value={returnLines[line.lineNumber]?.reason ?? ""}
                         onChange={(event) => {
                           const value = event.currentTarget.value;

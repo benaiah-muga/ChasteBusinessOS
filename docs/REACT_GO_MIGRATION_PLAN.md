@@ -1641,3 +1641,14 @@ new owners and the manifest shows zero legacy runtime paths.
      outside this Vite form. Go rejects duplicate delivery line IDs and the
      internal deliver-all sentinel as explicit quantities. Focused checks pass;
      browser proof remains open.
+167. Route Vite vendor returns and purchase order closing through Go's
+     session-authenticated `purchasing.returnGoods` and
+     `purchasing.closePurchaseOrder` capabilities when
+     `CHASTE_GO_PURCHASING_RETURN_CLOSE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Preserve `/api/purchasing` as the
+     missing-route fallback with the same intent, strict Go response parsing,
+     actor and organization scoped retry IDs through pending or uncertain
+     results, and open dialogs on pending or failure. Match Go's positive
+     int32 quantity and reference bounds and return-reason limits. Receipt
+     returns allocate oldest receipt numbers first, and explicit receipt scope
+     cannot fall through to purchase-order history. Browser proof remains open.

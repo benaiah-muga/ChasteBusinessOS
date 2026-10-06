@@ -91,10 +91,12 @@ function purchasingFetch(overrides: Overrides = {}) {
         input?: Record<string, unknown>;
         intentId?: string;
       };
-      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder") || !body.input) {
+      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
-      const action = body.capabilityId === "purchasing.createVendor" ? "createVendor" : "createPurchaseOrder";
+      const action = body.capabilityId === "purchasing.createVendor" ? "createVendor"
+        : body.capabilityId === "purchasing.createPurchaseOrder" ? "createPurchaseOrder"
+          : body.capabilityId === "purchasing.returnGoods" ? "returnGoods" : "closePurchaseOrder";
       return post({ ...body.input, action, intentId: body.intentId });
     }
     throw new TypeError(`unrouted ${method} ${url}`);
@@ -369,6 +371,59 @@ describe("PurchasingPage", () => {
     expect(capabilityPosts(fetchMock)[0]).toMatchObject({
       capabilityId: "purchasing.createVendor",
       input: { name: "Harbor Supplies" },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("retains the return dialog and exact draft while Go approval is pending", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RETURN_CLOSE__", true);
+    const receivedOrder = { ...orderFixture(), status: "received" };
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({ orders: [receivedOrder] }),
+      post: (body) => body.action === "returnGoods"
+        ? Response.json({ pendingApproval: true, reason: "Approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-1" organizationId="org-1" />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Orders/ }));
+    await screen.findByText("Canvas bag");
+    fireEvent.click(screen.getAllByRole("button", { name: "Return goods" })[0]!);
+    expect((screen.getByLabelText("Reason for line 1") as HTMLInputElement).maxLength).toBe(500);
+    fireEvent.change(screen.getByLabelText("Return quantity for line 1"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Reason for line 1"), { target: { value: "damaged" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Return goods" })[1]!);
+
+    expect(await screen.findByText(/is waiting for approval: Approval required\./)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Return goods against PO #42" })).toBeTruthy();
+    expect((screen.getByLabelText("Return quantity for line 1") as HTMLInputElement).value).toBe("1");
+    expect((screen.getByLabelText("Reason for line 1") as HTMLInputElement).value).toBe("damaged");
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.returnGoods",
+      input: { poNumber: 42, lines: [{ lineNumber: 1, quantity: 1000, reason: "damaged" }] },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("retains the close confirmation while Go approval is pending", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RETURN_CLOSE__", true);
+    const fetchMock = purchasingFetch({
+      post: (body) => body.action === "closePurchaseOrder"
+        ? Response.json({ pendingApproval: true, reason: "Manager approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-2" organizationId="org-2" />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Orders/ }));
+    await screen.findByText("Canvas bag");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close order" }));
+
+    expect(await screen.findByText(/is waiting for approval: Manager approval required\./)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Close PO #42?" })).toBeTruthy();
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.closePurchaseOrder",
+      input: { poNumber: 42 },
       intentId: expect.any(String),
     });
   });

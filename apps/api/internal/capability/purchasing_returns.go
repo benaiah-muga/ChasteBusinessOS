@@ -58,6 +58,7 @@ func ParseReturnGoodsInput(raw json.RawMessage) (ReturnGoodsInput, error) {
 		return ReturnGoodsInput{}, errors.New("lines must contain at least one line")
 	}
 	input.Lines = make([]ReturnGoodsLineInput, 0, len(lineValues))
+	quantityByLine := make(map[int64]int64, len(lineValues))
 	for index, rawLine := range lineValues {
 		lineFields, err := decodeJSONObject(rawLine)
 		if err != nil {
@@ -73,6 +74,10 @@ func ParseReturnGoodsInput(raw json.RawMessage) (ReturnGoodsInput, error) {
 		if line.Reason, err = requiredString(lineFields, "reason"); err != nil || utf16Length(line.Reason) < 3 || utf16Length(line.Reason) > 500 {
 			return ReturnGoodsInput{}, fmt.Errorf("line %d: reason must contain between 3 and 500 characters", index+1)
 		}
+		if line.Quantity > math.MaxInt32-quantityByLine[line.LineNumber] {
+			return ReturnGoodsInput{}, fmt.Errorf("line %d: total return quantity exceeds the database range", line.LineNumber)
+		}
+		quantityByLine[line.LineNumber] += line.Quantity
 		input.Lines = append(input.Lines, line)
 	}
 	return input, nil
@@ -212,10 +217,11 @@ func returnGoods(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityCla
 		}
 		if len(receiptIDs) > 0 {
 			receiptRows, err := tx.Query(ctx, `
-				SELECT id::text, receipt_id::text, position, accepted_thousandths, returned_thousandths
-				FROM goods_receipt_lines
-				WHERE org_id=$1::uuid AND po_line_id=$2::uuid AND receipt_id=ANY($3::uuid[])
-				ORDER BY receipt_id, position FOR UPDATE`, claims.OrganizationID, entry.line.id, receiptIDs)
+				SELECT grl.id::text, grl.receipt_id::text, grl.position, grl.accepted_thousandths, grl.returned_thousandths
+				FROM goods_receipt_lines grl
+				JOIN goods_receipts gr ON gr.org_id=grl.org_id AND gr.id=grl.receipt_id
+				WHERE grl.org_id=$1::uuid AND grl.po_line_id=$2::uuid AND grl.receipt_id=ANY($3::uuid[])
+				ORDER BY gr.number, grl.position FOR UPDATE OF grl`, claims.OrganizationID, entry.line.id, receiptIDs)
 			if err != nil {
 				return ReturnGoodsOutput{}, err
 			}
@@ -238,6 +244,9 @@ func returnGoods(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityCla
 				return ReturnGoodsOutput{}, err
 			}
 			receiptRows.Close()
+		}
+		if input.ReceiptNumber != nil && len(receiptLines) == 0 {
+			return ReturnGoodsOutput{}, fmt.Errorf("line %d: receipt %d has no received quantity available to return on this line", entry.line.position, *input.ReceiptNumber)
 		}
 		remaining := entry.quantity
 		for _, receiptLine := range receiptLines {

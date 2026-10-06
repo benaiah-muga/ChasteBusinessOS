@@ -11,6 +11,7 @@ import {
   goCrmDealStageMoveFromEnv,
   goPurchasingCreateOrderFromEnv,
   goPurchasingReceiveGoodsFromEnv,
+  goPurchasingReturnCloseFromEnv,
   goManufacturingWorkOrderWritesFromEnv,
   goManufacturingProductionWritesFromEnv,
   goSalesOrderWritesFromEnv,
@@ -84,6 +85,14 @@ describe("purchase receipt Go selector", () => {
     expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_RECEIVE_GOODS: "1" })).toBe(true);
     expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingReceiveGoodsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_RECEIVE_GOODS: "1" })).toBe(false);
+  });
+});
+
+describe("purchase return and close Go selector", () => {
+  it("requires the paired selector and session capability route", () => {
+    expect(goPurchasingReturnCloseFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_RETURN_CLOSE: "1" })).toBe(true);
+    expect(goPurchasingReturnCloseFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goPurchasingReturnCloseFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_RETURN_CLOSE: "1" })).toBe(false);
   });
 });
 

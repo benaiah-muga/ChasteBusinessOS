@@ -179,18 +179,27 @@ const ReceiveGoodsSchema = z.object({
 
 const ReturnGoodsSchema = z.object({
   action: z.literal("returnGoods"),
-  poNumber: z.number().int().safe().positive(),
-  receiptNumber: z.number().int().safe().positive().optional(),
+  poNumber: z.number().int().safe().positive().max(2_147_483_647),
+  receiptNumber: z.number().int().safe().positive().max(2_147_483_647).optional(),
   lines: z.array(z.object({
-    lineNumber: z.number().int().safe().positive(),
-    quantity: SafeIntegerSchema,
-    reason: z.string(),
+    lineNumber: z.number().int().safe().positive().max(2_147_483_647),
+    quantity: z.number().int().safe().positive().max(2_147_483_647),
+    reason: z.string().min(3).max(500),
   }).strict()).min(1),
-}).strict();
+}).strict().superRefine((action, context) => {
+  const totals = new Map<number, number>();
+  action.lines.forEach((line) => {
+    const total = (totals.get(line.lineNumber) ?? 0) + line.quantity;
+    if (total > 2_147_483_647) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "The total return quantity for each purchase order line must fit the database range." });
+    }
+    totals.set(line.lineNumber, total);
+  });
+});
 
 const ClosePurchaseOrderSchema = z.object({
   action: z.literal("closePurchaseOrder"),
-  poNumber: z.number().int().safe().positive(),
+  poNumber: z.number().int().safe().positive().max(2_147_483_647),
 }).strict();
 
 const CreateBillSchema = z.object({
@@ -306,6 +315,11 @@ const ClosePurchaseOrderOutputSchema = z.object({
   closed: z.literal(true),
   backordered: z.boolean(),
   shortThousandths: z.number().int().safe().nonnegative(),
+}).strict();
+
+const ReturnGoodsOutputSchema = z.object({
+  returned: z.literal(true),
+  lines: z.number().int().safe().nonnegative(),
 }).strict();
 
 const BillCreditNoteOutputSchema = z.object({
@@ -615,6 +629,94 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
+type PurchaseLifecycleAction = z.infer<typeof ReturnGoodsSchema> | z.infer<typeof ClosePurchaseOrderSchema>;
+type PurchaseLifecycleAttempt = { storageKey: string; fingerprint: string; intentId: string };
+type PurchaseLifecycleRetryScope = { actorId: string; organizationId: string };
+const purchaseLifecycleAttemptPrefix = "chaste.purchasing.lifecycle.active.v1:";
+
+async function createPurchaseLifecycleAttempt(action: PurchaseLifecycleAction, scope: PurchaseLifecycleRetryScope): Promise<PurchaseLifecycleAttempt> {
+  let scopeDigest: string;
+  let fingerprint: string;
+  try {
+    scopeDigest = await digestHex(JSON.stringify(scope));
+    fingerprint = await digestHex(JSON.stringify({ ...scope, action: canonicalize(action) }));
+  } catch {
+    throw new PurchasingApiError(0, "Purchase order retry protection is unavailable. Check browser security settings and try again.");
+  }
+  const storageKey = `${purchaseLifecycleAttemptPrefix}${scopeDigest}`;
+  let stored: { fingerprint: string; intentId: string } | null;
+  try {
+    stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+  } catch {
+    throw new PurchasingApiError(0, "Enable browser storage before changing a purchase order so an uncertain action can be retried safely.");
+  }
+  if (stored && stored.fingerprint !== fingerprint) {
+    throw new PurchasingApiError(0, "A previous purchase order result is unresolved. Retry that exact action or check purchase order history before making another change.");
+  }
+  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+    const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
+    return { ...attempt, intentId: persisted.intentId };
+  } catch {
+    throw new PurchasingApiError(0, "Enable browser storage before changing a purchase order so an uncertain action can be retried safely.");
+  }
+}
+
+function clearPurchaseLifecycleAttempt(attempt: PurchaseLifecycleAttempt): void {
+  try {
+    const stored = parsePurchaseOrderAttempt(window.localStorage.getItem(attempt.storageKey));
+    if (stored?.fingerprint === attempt.fingerprint && stored.intentId === attempt.intentId) {
+      window.localStorage.removeItem(attempt.storageKey);
+    }
+  } catch {
+    // A saved marker cannot change the server result, so resolution continues.
+  }
+}
+
+async function submitPurchaseLifecycle<T>(
+  action: PurchaseLifecycleAction,
+  capabilityId: "purchasing.returnGoods" | "purchasing.closePurchaseOrder",
+  output: z.ZodType<T>,
+  activity: string,
+  signal: AbortSignal | undefined,
+  retryScope: { actorId: string | null; organizationId: string | null } | undefined,
+): Promise<PurchasingActionOutcome<T>> {
+  if (!retryScope?.actorId?.trim() || !retryScope.organizationId?.trim()) {
+    throw new PurchasingApiError(0, "Wait for your account and organization to finish loading before changing a purchase order.");
+  }
+  const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
+  const attempt = await createPurchaseLifecycleAttempt(action, scope);
+  try {
+    let { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        capabilityId,
+        input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")),
+        intentId: attempt.intentId,
+      }),
+    }, activity, signal, true);
+    if (response.status === 404) {
+      ({ response, body } = await request("/api/purchasing", {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ ...action, intentId: attempt.intentId }),
+      }, activity, signal));
+    }
+    const outcome = parsePurchasingActionOutcome(response, body, output, activity);
+    if (outcome.kind === "completed") clearPurchaseLifecycleAttempt(attempt);
+    return outcome;
+  } catch (error) {
+    if (error instanceof PurchasingApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+      clearPurchaseLifecycleAttempt(attempt);
+    }
+    throw error;
+  }
+}
+
 function parsePurchasingActionOutcome<T>(response: Response, body: unknown, output: z.ZodType<T>, activity: string): PurchasingActionOutcome<T> {
   if (response.status === 202) {
     const pending = PendingEnvelopeSchema.safeParse(body);
@@ -638,15 +740,25 @@ export async function receivePurchasingGoods(
 export async function returnPurchasingGoods(
   action: z.infer<typeof ReturnGoodsSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  return submit(action, OpaqueOutputSchema, "returning the goods", signal);
+  const parsedAction = ReturnGoodsSchema.safeParse(action);
+  if (!parsedAction.success) throw new PurchasingApiError(0, "Check the return quantities and reasons, then try again.");
+  const useGo = typeof __GO_PURCHASING_RETURN_CLOSE__ !== "undefined" && __GO_PURCHASING_RETURN_CLOSE__;
+  if (!useGo) return submit(parsedAction.data, OpaqueOutputSchema, "returning the goods", signal);
+  return submitPurchaseLifecycle(parsedAction.data, "purchasing.returnGoods", ReturnGoodsOutputSchema, "returning the goods", signal, retryScope);
 }
 
 export async function closePurchasingOrder(
   action: z.infer<typeof ClosePurchaseOrderSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome<z.infer<typeof ClosePurchaseOrderOutputSchema>>> {
-  return submit(action, ClosePurchaseOrderOutputSchema, "closing the purchase order", signal);
+  const parsedAction = ClosePurchaseOrderSchema.safeParse(action);
+  if (!parsedAction.success) throw new PurchasingApiError(0, "Check the purchase order number and try again.");
+  const useGo = typeof __GO_PURCHASING_RETURN_CLOSE__ !== "undefined" && __GO_PURCHASING_RETURN_CLOSE__;
+  if (!useGo) return submit(parsedAction.data, ClosePurchaseOrderOutputSchema, "closing the purchase order", signal);
+  return submitPurchaseLifecycle(parsedAction.data, "purchasing.closePurchaseOrder", ClosePurchaseOrderOutputSchema, "closing the purchase order", signal, retryScope);
 }
 
 export async function createPurchasingBill(

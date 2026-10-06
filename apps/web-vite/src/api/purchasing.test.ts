@@ -13,6 +13,7 @@ import {
   payPurchasingBill,
   PurchasingApiError,
   receivePurchasingGoods,
+  returnPurchasingGoods,
 } from "./purchasing";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -345,6 +346,64 @@ describe("governed purchasing writes", () => {
       kind: "completed",
       data: { closed: true, backordered: true, shortThousandths: 1500 },
     });
+  });
+
+  it("routes returns and close through Go with exact outputs and stable scoped intent", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RETURN_CLOSE__", true);
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Approval required." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { returned: true, lines: 1 } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { closed: true, backordered: true, shortThousandths: 1500 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const scope = { actorId: "actor-return", organizationId: "org-return" };
+    const returnAction = { action: "returnGoods" as const, poNumber: 42, receiptNumber: 4, lines: [{ lineNumber: 1, quantity: 250, reason: "damaged carton" }] };
+
+    await expect(returnPurchasingGoods(returnAction, undefined, scope)).rejects.toMatchObject({ status: 0 });
+    const uncertainRequest = postedBody(fetchMock.mock.calls[0]!);
+    await expect(returnPurchasingGoods(returnAction, undefined, scope)).resolves.toEqual({ kind: "pending", reason: "Approval required." });
+    const pendingRequest = postedBody(fetchMock.mock.calls[1]!);
+    expect(pendingRequest.intentId).toBe(uncertainRequest.intentId);
+    expect(pendingRequest).toMatchObject({
+      capabilityId: "purchasing.returnGoods",
+      input: { poNumber: 42, receiptNumber: 4, lines: returnAction.lines },
+      intentId: expect.any(String),
+    });
+    await expect(returnPurchasingGoods(returnAction, undefined, scope)).resolves.toEqual({ kind: "completed", data: { returned: true, lines: 1 } });
+    expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(pendingRequest.intentId);
+
+    await expect(closePurchasingOrder({ action: "closePurchaseOrder", poNumber: 42 }, undefined, scope)).resolves.toMatchObject({ kind: "completed", data: { closed: true } });
+    expect(postedBody(fetchMock.mock.calls[3]!)).toMatchObject({
+      capabilityId: "purchasing.closePurchaseOrder",
+      input: { poNumber: 42 },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("uses the same scoped intent for Go 404 fallback and rejects malformed Go output", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RETURN_CLOSE__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "route absent" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { returned: true, lines: 1 } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { closed: true, backordered: false, shortThousandths: 0, extra: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const scope = { actorId: "actor-return", organizationId: "org-return" };
+
+    await expect(returnPurchasingGoods({ action: "returnGoods", poNumber: 42, lines: [{ lineNumber: 1, quantity: 5, reason: "damaged" }] }, undefined, scope))
+      .resolves.toMatchObject({ kind: "completed" });
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(postedBody(fetchMock.mock.calls[0]!).intentId);
+    await expect(closePurchasingOrder({ action: "closePurchaseOrder", poNumber: 42 }, undefined, scope)).rejects.toMatchObject({ status: 200 });
+  });
+
+  it("fails closed without actor or organization scope and checks Go bounds", async () => {
+    vi.stubGlobal("__GO_PURCHASING_RETURN_CLOSE__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const action = { action: "returnGoods" as const, poNumber: 42, lines: [{ lineNumber: 1, quantity: 1, reason: "damaged" }] };
+    await expect(returnPurchasingGoods(action, undefined, { actorId: "actor-return", organizationId: null })).rejects.toMatchObject({ status: 0 });
+    await expect(returnPurchasingGoods({ ...action, lines: [{ ...action.lines[0]!, quantity: 2_147_483_648 }] }, undefined, { actorId: "actor-return", organizationId: "org-return" })).rejects.toMatchObject({ status: 0 });
+    await expect(returnPurchasingGoods({ ...action, poNumber: 2_147_483_648 }, undefined, { actorId: "actor-return", organizationId: "org-return" })).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("sends authority-gated overreceipt fields only when they are supplied", async () => {
