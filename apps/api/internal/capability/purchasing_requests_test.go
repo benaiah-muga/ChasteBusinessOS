@@ -84,8 +84,11 @@ func TestPurchasingRequestsParsersMirrorZodContracts(t *testing.T) {
 	if _, err := ParseCreateRfqInput(json.RawMessage(`{"requestId":"req-1","vendorIds":` + tenVendors + `}`)); err != nil {
 		t.Fatalf("ParseCreateRfqInput(10 vendors) err = %v, want accepted", err)
 	}
-	if _, err := ParseCreateRfqInput(json.RawMessage(`{"requestId":"req-1","vendorIds":["v1","v1"]}`)); err != nil {
-		t.Fatalf("ParseCreateRfqInput(duplicate vendors) err = %v, want accepted", err)
+	if _, err := ParseCreateRfqInput(json.RawMessage(`{"requestId":"req-1","vendorIds":["v1","v1"]}`)); err == nil || err.Error() != "vendorIds must not contain duplicates" {
+		t.Fatalf("ParseCreateRfqInput(duplicate vendors) err = %v, want duplicate vendor rejection", err)
+	}
+	if _, err := ParseCreateRfqInput(json.RawMessage(`{"requestId":"req-1","vendorIds":["abcdefab-1234-1234-1234-abcdefabcdef","ABCDEFAB-1234-1234-1234-ABCDEFABCDEF"]}`)); err == nil {
+		t.Fatal("ParseCreateRfqInput accepted duplicate UUIDs with different casing")
 	}
 	elevenVendors := `["` + strings.Join(fillerStrings(11, "vendor"), `","`) + `"]`
 	for _, raw := range []string{
@@ -427,6 +430,11 @@ func TestPurchasingRequestsCreateRfqRequiresApprovedRequestAndKnownVendors(t *te
 	if len(seen) != 2 || seen[vendorA] != "sent" || seen[vendorB] != "sent" {
 		t.Fatalf("stored RFQs = %v, want both vendors at status sent", seen)
 	}
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateRfqOutput, error) {
+		return createRfq(fx.ctx, tx, fx.orgID, CreateRfqInput{RequestID: approved, VendorIDs: []string{vendorA}})
+	}); err == nil || err.Error() != "RFQ already exists for one or more selected vendors" {
+		t.Fatalf("createRfq(existing vendor) error = %v, want duplicate RFQ rejection", err)
+	}
 }
 
 func TestPurchasingRequestsRecordQuoteStoresBidAndGuardsDecided(t *testing.T) {
@@ -590,6 +598,191 @@ func TestPurchasingRequestsSelectWinnerRaisesPurchaseOrder(t *testing.T) {
 	}
 	if got := fx.count(`SELECT "next" FROM doc_counters WHERE org_id = $1::uuid AND kind = 'purchase_order'`, fx.orgID); got != 2 {
 		t.Fatalf("purchase_order counter next = %d, want 2", got)
+	}
+}
+
+func TestPurchasingRequestsConcurrentDecisionsSerialize(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupPurchasingRequestsFixture(t, fx)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	requestID := seedPurchasingRequest(t, fx, fx.orgID, fx.userID, "Concurrent decision", "Decision must be singular", "pending_review", nil, now)
+	claims := authbridge.CapabilityClaims{ActorType: "human", ActorID: &fx.userID}
+	start := make(chan struct{})
+	type result struct {
+		out DecidePurchaseRequestOutput
+		err error
+	}
+	results := make(chan result, 2)
+	for _, decision := range []string{"approve", "reject"} {
+		decision := decision
+		go func() {
+			<-start
+			out, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (DecidePurchaseRequestOutput, error) {
+				return decidePurchaseRequest(fx.ctx, tx, claims, DecidePurchaseRequestInput{RequestID: requestID, Decision: decision}, now)
+			})
+			results <- result{out: out, err: err}
+		}()
+	}
+	close(start)
+	successes := 0
+	failures := 0
+	for range 2 {
+		result := <-results
+		if result.err == nil {
+			successes++
+		} else if strings.Contains(result.err.Error(), "request is already") {
+			failures++
+		} else {
+			t.Fatalf("concurrent request decision error = %v, want serialized state rejection", result.err)
+		}
+	}
+	if successes != 1 || failures != 1 {
+		t.Fatalf("concurrent decisions: successes=%d failures=%d, want one each", successes, failures)
+	}
+	if got := fx.count(`SELECT count(*) FROM purchase_requests WHERE id=$1::uuid AND org_id=$2::uuid AND status IN ('approved','rejected')`, requestID, fx.orgID); got != 1 {
+		t.Fatalf("terminal request rows = %d, want exactly one terminal decision", got)
+	}
+}
+
+func TestPurchasingRequestsConcurrentQuoteAwardsCreateOneOrder(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupPurchasingRequestsFixture(t, fx)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	vendorA := seedPurchasingVendor(t, fx, fx.orgID, nil)
+	vendorB := seedPurchasingVendor(t, fx, fx.orgID, nil)
+	requestID := seedPurchasingRequest(t, fx, fx.orgID, fx.userID, "Concurrent award", "Only one vendor should win", "approved", nil, now)
+	rfqA := seedPurchasingRFQ(t, fx, fx.orgID, requestID, vendorA, "quoted", crmInt64Pointer(4200), nil, &now)
+	rfqB := seedPurchasingRFQ(t, fx, fx.orgID, requestID, vendorB, "quoted", crmInt64Pointer(4100), nil, &now)
+	start := make(chan struct{})
+	type result struct {
+		out SelectWinningQuoteOutput
+		err error
+	}
+	results := make(chan result, 2)
+	for _, rfqID := range []string{rfqA, rfqB} {
+		rfqID := rfqID
+		go func() {
+			<-start
+			out, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (SelectWinningQuoteOutput, error) {
+				return selectWinningQuote(fx.ctx, tx, fx.orgID, SelectWinningQuoteInput{RFQID: rfqID}, now)
+			})
+			results <- result{out: out, err: err}
+		}()
+	}
+	close(start)
+	successes := 0
+	failures := 0
+	for range 2 {
+		result := <-results
+		if result.err == nil {
+			successes++
+		} else if result.err.Error() == "request is no longer approvable into an order" || result.err.Error() == "record this vendor's quote before awarding" {
+			failures++
+		} else {
+			t.Fatalf("concurrent quote award error = %v, want serialized state rejection", result.err)
+		}
+	}
+	if successes != 1 || failures != 1 {
+		t.Fatalf("concurrent awards: successes=%d failures=%d, want one each", successes, failures)
+	}
+	if got := fx.count(`SELECT count(*) FROM purchase_orders WHERE org_id=$1::uuid`, fx.orgID); got != 1 {
+		t.Fatalf("purchase orders = %d, want one awarded order", got)
+	}
+	if got := fx.count(`SELECT count(*) FROM rfqs WHERE request_id=$1::uuid AND org_id=$2::uuid AND status='won'`, requestID, fx.orgID); got != 1 {
+		t.Fatalf("winning RFQs = %d, want one", got)
+	}
+}
+
+func TestPurchasingRequestsConcurrentDuplicateRFQCreationRejectsSecond(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupPurchasingRequestsFixture(t, fx)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	vendorID := seedPurchasingVendor(t, fx, fx.orgID, nil)
+	requestID := seedPurchasingRequest(t, fx, fx.orgID, fx.userID, "Concurrent RFQ", "Do not invite a supplier twice", "approved", nil, now)
+	start := make(chan struct{})
+	type result struct {
+		out CreateRfqOutput
+		err error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			<-start
+			out, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (CreateRfqOutput, error) {
+				return createRfq(fx.ctx, tx, fx.orgID, CreateRfqInput{RequestID: requestID, VendorIDs: []string{vendorID}})
+			})
+			results <- result{out: out, err: err}
+		}()
+	}
+	close(start)
+	successes := 0
+	failures := 0
+	for range 2 {
+		result := <-results
+		if result.err == nil {
+			successes++
+		} else if result.err.Error() == "RFQ already exists for one or more selected vendors" {
+			failures++
+		} else {
+			t.Fatalf("concurrent RFQ creation error = %v, want duplicate RFQ rejection", result.err)
+		}
+	}
+	if successes != 1 || failures != 1 {
+		t.Fatalf("concurrent RFQ creation: successes=%d failures=%d, want one each", successes, failures)
+	}
+	if got := fx.count(`SELECT count(*) FROM rfqs WHERE request_id=$1::uuid AND org_id=$2::uuid AND vendor_id=$3::uuid`, requestID, fx.orgID, vendorID); got != 1 {
+		t.Fatalf("RFQ rows for vendor = %d, want one", got)
+	}
+}
+
+func TestPurchasingRequestsConcurrentQuoteUpdateAndAwardSerialize(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupPurchasingRequestsFixture(t, fx)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	vendorID := seedPurchasingVendor(t, fx, fx.orgID, nil)
+	requestID := seedPurchasingRequest(t, fx, fx.orgID, fx.userID, "Concurrent quote", "Award must use a stable quote", "approved", nil, now)
+	rfqID := seedPurchasingRFQ(t, fx, fx.orgID, requestID, vendorID, "quoted", crmInt64Pointer(4200), nil, &now)
+	start := make(chan struct{})
+	type result struct {
+		err error
+	}
+	results := make(chan result, 2)
+	go func() {
+		<-start
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (RecordQuoteOutput, error) {
+			return recordQuote(fx.ctx, tx, fx.orgID, RecordQuoteInput{RFQID: rfqID, AmountMinor: 3900}, now.Add(time.Minute))
+		})
+		results <- result{err: err}
+	}()
+	go func() {
+		<-start
+		_, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (SelectWinningQuoteOutput, error) {
+			return selectWinningQuote(fx.ctx, tx, fx.orgID, SelectWinningQuoteInput{RFQID: rfqID}, now.Add(time.Minute))
+		})
+		results <- result{err: err}
+	}()
+	close(start)
+	resultsSeen := [2]error{(<-results).err, (<-results).err}
+	if resultsSeen[0] != nil && resultsSeen[0].Error() != "this RFQ is already decided" {
+		t.Fatalf("first concurrent quote/award error = %v", resultsSeen[0])
+	}
+	if resultsSeen[1] != nil && resultsSeen[1].Error() != "this RFQ is already decided" {
+		t.Fatalf("second concurrent quote/award error = %v", resultsSeen[1])
+	}
+	var status string
+	var quoteMinor int64
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT status, quote_amount_minor FROM rfqs WHERE id=$1::uuid`, rfqID).Scan(&status, &quoteMinor); err != nil {
+		t.Fatal(err)
+	}
+	if status != "won" {
+		t.Fatalf("RFQ status = %q, want won after award", status)
+	}
+	var poLineMinor int64
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT unit_price_minor FROM po_lines WHERE po_id=(SELECT id FROM purchase_orders WHERE org_id=$1::uuid)`, fx.orgID).Scan(&poLineMinor); err != nil {
+		t.Fatal(err)
+	}
+	if poLineMinor != quoteMinor {
+		t.Fatalf("awarded PO price=%d, persisted quote=%d, want matching committed quote", poLineMinor, quoteMinor)
 	}
 }
 

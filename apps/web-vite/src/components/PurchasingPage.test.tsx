@@ -91,7 +91,7 @@ function purchasingFetch(overrides: Overrides = {}) {
         input?: Record<string, unknown>;
         intentId?: string;
       };
-      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote") || !body.input) {
+      if ((body.capabilityId !== "purchasing.createVendor" && body.capabilityId !== "purchasing.createPurchaseOrder" && body.capabilityId !== "purchasing.returnGoods" && body.capabilityId !== "purchasing.closePurchaseOrder" && body.capabilityId !== "purchasing.createBill" && body.capabilityId !== "purchasing.payBill" && body.capabilityId !== "purchasing.billCreditNote" && body.capabilityId !== "purchasing.createPurchaseRequest" && body.capabilityId !== "purchasing.decidePurchaseRequest" && body.capabilityId !== "purchasing.createRfq" && body.capabilityId !== "purchasing.recordQuote" && body.capabilityId !== "purchasing.selectWinningQuote") || !body.input) {
         throw new TypeError(`unrouted capability ${body.capabilityId ?? "unknown"}`);
       }
       const action = body.capabilityId === "purchasing.createVendor" ? "createVendor"
@@ -99,7 +99,12 @@ function purchasingFetch(overrides: Overrides = {}) {
           : body.capabilityId === "purchasing.returnGoods" ? "returnGoods"
             : body.capabilityId === "purchasing.closePurchaseOrder" ? "closePurchaseOrder"
               : body.capabilityId === "purchasing.createBill" ? "createBill"
-                : body.capabilityId === "purchasing.billCreditNote" ? "billCreditNote" : "payBill";
+                : body.capabilityId === "purchasing.billCreditNote" ? "billCreditNote"
+                  : body.capabilityId === "purchasing.createPurchaseRequest" ? "createPurchaseRequest"
+                    : body.capabilityId === "purchasing.decidePurchaseRequest" ? "decidePurchaseRequest"
+                      : body.capabilityId === "purchasing.createRfq" ? "createRfq"
+                        : body.capabilityId === "purchasing.recordQuote" ? "recordQuote"
+                          : body.capabilityId === "purchasing.selectWinningQuote" ? "selectWinningQuote" : "payBill";
       return post({ ...body.input, action, intentId: body.intentId });
     }
     throw new TypeError(`unrouted ${method} ${url}`);
@@ -271,6 +276,260 @@ describe("receiving prefills from the aggregated rollup", () => {
 /* --------------------------------------------------------------- PurchasingPage --- */
 
 describe("PurchasingPage", () => {
+  it("keeps the purchase request draft when Go returns an approval pending response", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const fetchMock = purchasingFetch({
+      post: (body) => body.action === "createPurchaseRequest"
+        ? Response.json({ pendingApproval: true, reason: "Reviewer approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-sourcing-page" organizationId="org-sourcing-page" />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Packaging stock" } });
+    fireEvent.change(screen.getByLabelText("Justification"), { target: { value: "Stock will run out before confirmed orders ship." } });
+    fireEvent.change(screen.getByLabelText("Estimate (optional, USD)"), { target: { value: "42.00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+    expect(await screen.findByText(/is waiting for approval: Reviewer approval required\./)).toBeTruthy();
+    expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe("Packaging stock");
+    expect((screen.getByLabelText("Justification") as HTMLTextAreaElement).value).toBe("Stock will run out before confirmed orders ship.");
+    expect((screen.getByLabelText("Estimate (optional, USD)") as HTMLInputElement).value).toBe("42.00");
+    expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.createPurchaseRequest",
+      input: { title: "Packaging stock", justification: "Stock will run out before confirmed orders ship.", estimatedAmountMinor: 4200 },
+      intentId: expect.any(String),
+    });
+  });
+
+  it("restores the exact scoped sourcing draft and intent after a pending request reload", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const fetchMock = purchasingFetch({
+      post: (body) => body.action === "createPurchaseRequest"
+        ? Response.json({ pendingApproval: true, reason: "Reviewer approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId: "actor-sourcing-reload", organizationId: "org-sourcing-reload" };
+    const firstPage = render(<PurchasingPage {...props} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Packaging stock" } });
+    fireEvent.change(screen.getByLabelText("Justification"), { target: { value: "Stock will run out before confirmed orders ship." } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
+    await screen.findByText(/is waiting for approval/);
+    const originalIntent = capabilityPosts(fetchMock)[0]?.intentId;
+    firstPage.unmount();
+
+    render(<PurchasingPage {...props} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe("Packaging stock");
+    expect((screen.getByLabelText("Justification") as HTMLTextAreaElement).value).toBe("Stock will run out before confirmed orders ship.");
+    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
+    await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(2));
+    expect(capabilityPosts(fetchMock)[1]?.intentId).toBe(originalIntent);
+  });
+
+  it("restores a pending quote amount and notes with the original intent after reload", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const request = {
+      id: "11111111-1111-4111-8111-111111111111",
+      title: "Packaging stock",
+      justification: "Stock is low before the next shipment.",
+      estimatedAmountMinor: null,
+      status: "approved",
+      decisionReason: null,
+      createdAt: "2026-08-01T10:00:00.000Z",
+      rfqs: [{ id: "22222222-2222-4222-8222-222222222222", vendorName: "Harbor Supplies", status: "sent", quoteAmountMinor: null, quoteLeadTimeDays: null, quoteNotes: null }],
+    };
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({ requests: [request] }),
+      post: (body) => body.action === "recordQuote"
+        ? Response.json({ pendingApproval: true, reason: "Quote approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId: "actor-quote-reload", organizationId: "org-quote-reload" };
+    const firstPage = render(<PurchasingPage {...props} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    fireEvent.change(screen.getByLabelText("Quote amount from Harbor Supplies"), { target: { value: "42.50" } });
+    fireEvent.change(screen.getByLabelText("Quote notes from Harbor Supplies"), { target: { value: "Freight included" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/Quote approval required\./);
+    const originalIntent = capabilityPosts(fetchMock)[0]?.intentId;
+    firstPage.unmount();
+
+    render(<PurchasingPage {...props} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    expect((screen.getByLabelText("Quote amount from Harbor Supplies") as HTMLInputElement).value).toBe("42.50");
+    expect((screen.getByLabelText("Quote notes from Harbor Supplies") as HTMLInputElement).value).toBe("Freight included");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(2));
+    expect(capabilityPosts(fetchMock)[1]).toMatchObject({
+      intentId: originalIntent,
+      input: { amountMinor: 4250, notes: "Freight included" },
+    });
+  });
+
+  it("clears sourcing drafts when scope is unavailable and hashes scope storage keys", async () => {
+    const fetchMock = purchasingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    const page = render(<PurchasingPage actorId="scope-secret-actor" organizationId="scope-secret-org-a" />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Private draft" } });
+    await waitFor(() => expect(Object.keys(window.localStorage).some((key) => key.includes("scope-secret-actor") || key.includes("scope-secret-org-a"))).toBe(false));
+    page.rerender(<PurchasingPage actorId="scope-secret-actor" organizationId={null} />);
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe(""));
+    page.rerender(<PurchasingPage actorId="scope-secret-actor" organizationId="scope-secret-org-b" />);
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe(""));
+  });
+
+  it("blocks Go sourcing writes until the scope hash and saved draft are hydrated", async () => {
+    const props = { actorId: "actor-hydration-gate", organizationId: "org-hydration-gate" };
+    const scopeIdentity = JSON.stringify(props);
+    const storedDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(scopeIdentity));
+    const digestHex = Array.from(new Uint8Array(storedDigest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    window.localStorage.setItem(`chaste.purchasing.sourcing.draft.v1:${digestHex}`, JSON.stringify({
+      requestForm: { title: "Restored request", justification: "Saved justification for the migration gate.", estimate: "" },
+      rfqPick: {},
+      quoteDraft: {},
+      rejectFor: null,
+      rejectReason: "",
+    }));
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const fetchMock = purchasingFetch({
+      post: (body) => body.action === "createPurchaseRequest"
+        ? Response.json({ pendingApproval: true, reason: "Approval required." }, { status: 202 })
+        : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    let resolveDigest: ((value: ArrayBuffer) => void) | undefined;
+    const digestSpy = vi.spyOn(crypto.subtle, "digest").mockImplementation(() => new Promise((resolve) => { resolveDigest = resolve; }));
+    window.history.replaceState(null, "", "/purchasing?tab=requests");
+    render(<PurchasingPage {...props} />);
+    const submit = await screen.findByRole("button", { name: "Submit request" });
+    expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(true);
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(submit);
+    expect(capabilityPosts(fetchMock)).toHaveLength(0);
+
+    resolveDigest?.(new Uint8Array(storedDigest).slice().buffer);
+    digestSpy.mockRestore();
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe("Restored request"));
+    expect((screen.getByLabelText("What needs buying") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Submit request" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
+    await waitFor(() => expect(capabilityPosts(fetchMock)).toHaveLength(1));
+  });
+
+  it("fails closed when scoped sourcing draft persistence fails", async () => {
+    const props = { actorId: "actor-storage-failure", organizationId: "org-storage-failure" };
+    const scopeDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(props)));
+    const hex = Array.from(new Uint8Array(scopeDigest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const draftKey = `chaste.purchasing.sourcing.draft.v1:${hex}`;
+    window.localStorage.setItem(draftKey, JSON.stringify({
+      requestForm: { title: "Saved request", justification: "Enough detail to submit this request.", estimate: "" },
+      rfqPick: {},
+      quoteDraft: {},
+      rejectFor: null,
+      rejectReason: "",
+    }));
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const fetchMock = purchasingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/purchasing?tab=requests");
+    render(<PurchasingPage {...props} />);
+    await waitFor(() => expect((screen.getByLabelText("What needs buying") as HTMLInputElement).value).toBe("Saved request"));
+    const originalSetItem = Storage.prototype.setItem;
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith("chaste.purchasing.sourcing.draft.v1:")) throw new DOMException("Storage full", "QuotaExceededError");
+      originalSetItem.call(this, key, value);
+    });
+    fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Changed while storage is full" } });
+    await screen.findByText(/Browser storage could not retain this scoped sourcing draft/);
+    const submit = screen.getByRole("button", { name: "Submit request" });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(submit);
+    expect(capabilityPosts(fetchMock)).toHaveLength(0);
+    setItemSpy.mockRestore();
+  });
+
+  it("shows invalid estimate input instead of silently omitting it", async () => {
+    const fetchMock = purchasingFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    fireEvent.change(screen.getByLabelText("What needs buying"), { target: { value: "Packaging stock" } });
+    fireEvent.change(screen.getByLabelText("Justification"), { target: { value: "Stock will run out before confirmed orders ship." } });
+    fireEvent.change(screen.getByLabelText("Estimate (optional, USD)"), { target: { value: "12,5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Enter a valid non-negative estimate");
+    expect(postedActions(fetchMock, "createPurchaseRequest")).toHaveLength(0);
+  });
+
+  it("uses the workspace currency and carries optional quote notes", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const request = {
+      id: "11111111-1111-4111-8111-111111111111",
+      title: "Packaging stock",
+      justification: "Stock is low before the next shipment.",
+      estimatedAmountMinor: 1200,
+      status: "approved",
+      decisionReason: null,
+      createdAt: "2026-08-01T10:00:00.000Z",
+      rfqs: [{ id: "22222222-2222-4222-8222-222222222222", vendorName: "Harbor Supplies", status: "sent", quoteAmountMinor: null, quoteLeadTimeDays: null, quoteNotes: null }],
+    };
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({ baseCurrency: "JPY", requests: [request] }),
+      post: (body) => body.action === "recordQuote" ? { ok: true, data: { status: "quoted" } } : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-sourcing-currency" organizationId="org-sourcing-currency" />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    expect(screen.getByText(/Estimated/).textContent).toContain("¥");
+    fireEvent.change(screen.getByLabelText("Quote amount from Harbor Supplies"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("Quote notes from Harbor Supplies"), { target: { value: "Freight included" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.recordQuote",
+      input: { amountMinor: 12, notes: "Freight included" },
+    }));
+  });
+
+  it("caps RFQ selection at ten and clears the selection after success", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const vendors = Array.from({ length: 11 }, (_, index) => ({
+      ...vendor,
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      name: `Supplier ${index + 1}`,
+    }));
+    const request = {
+      id: "11111111-1111-4111-8111-111111111111",
+      title: "Packaging stock",
+      justification: "Stock is low before the next shipment.",
+      estimatedAmountMinor: null,
+      status: "approved",
+      decisionReason: null,
+      createdAt: "2026-08-01T10:00:00.000Z",
+      rfqs: [],
+    };
+    const fetchMock = purchasingFetch({
+      workspace: workspaceFixture({ vendors, requests: [request] }),
+      post: (body) => body.action === "createRfq" ? { ok: true, data: { rfqIds: ["22222222-2222-4222-8222-222222222222"] } } : { ok: true, data: {} },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PurchasingPage actorId="actor-sourcing-rfq" organizationId="org-sourcing-rfq" />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^Requests & RFQs/ }));
+    for (let index = 1; index <= 10; index += 1) fireEvent.click(screen.getByLabelText(`Supplier ${index}`));
+    expect((screen.getByLabelText("Supplier 11") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Send RFQs (10)" }));
+    await waitFor(() => expect(capabilityPosts(fetchMock)[0]).toMatchObject({
+      capabilityId: "purchasing.createRfq",
+      input: { vendorIds: vendors.slice(0, 10).map((entry) => entry.id) },
+    }));
+    await waitFor(() => expect((screen.getByLabelText("Supplier 1") as HTMLInputElement).checked).toBe(false));
+    expect(screen.getByRole("button", { name: "Send RFQs (0)" }).hasAttribute("disabled")).toBe(true);
+  });
+
   it("keeps the PO draft and stable Go intent while approval is pending, then clears on success", async () => {
     vi.stubGlobal("__GO_PURCHASING_CREATE_ORDER__", true);
     let attempt = 0;

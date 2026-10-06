@@ -290,6 +290,29 @@ const SelectWinningQuoteSchema = z.object({
   rfqId: z.string().min(1),
 }).strict();
 
+const GoCreatePurchaseRequestSchema = CreatePurchaseRequestSchema.extend({
+  title: z.string().min(3).max(200),
+  justification: z.string().min(10).max(4000),
+  estimatedAmountMinor: NonnegativeSafeIntegerSchema.optional(),
+});
+const GoDecidePurchaseRequestSchema = DecidePurchaseRequestSchema.extend({ reason: z.string().max(1000).optional() });
+const GoCreateRfqSchema = CreateRfqSchema.extend({ vendorIds: z.array(z.string().min(1)).min(1).max(10) });
+const GoRecordQuoteSchema = RecordQuoteSchema.extend({
+  amountMinor: SafeIntegerSchema.positive(),
+  leadTimeDays: NonnegativeSafeIntegerSchema.optional(),
+  notes: z.string().max(2000).optional(),
+});
+
+const GoCreatePurchaseRequestOutputSchema = z.object({ requestId: z.string().uuid() }).strict();
+const GoDecidePurchaseRequestOutputSchema = z.object({ status: z.enum(["approved", "rejected"]) }).strict();
+const GoCreateRfqOutputSchema = z.object({ rfqIds: z.array(z.string().uuid()).min(1).max(10) }).strict();
+const GoRecordQuoteOutputSchema = z.object({ status: z.literal("quoted") }).strict();
+const GoSelectWinningQuoteOutputSchema = z.object({
+  poNumber: z.number().int().safe().positive().max(2_147_483_647),
+  vendorId: z.string().uuid(),
+  quoteAmountMinor: NonnegativeSafeIntegerSchema,
+}).strict();
+
 const PriceHistorySchema = z.object({
   action: z.literal("priceHistory"),
   sku: z.string().min(1).optional(),
@@ -743,6 +766,7 @@ async function submitPurchaseLifecycle<T>(
 }
 
 type PurchaseFinanceAction = z.infer<typeof GoCreateVendorSchema> | z.infer<typeof GoCreateBillSchema> | z.infer<typeof GoPayBillSchema> | z.infer<typeof GoBillCreditNoteSchema>;
+type PurchaseSourcingAction = z.infer<typeof GoCreatePurchaseRequestSchema> | z.infer<typeof GoDecidePurchaseRequestSchema> | z.infer<typeof GoCreateRfqSchema> | z.infer<typeof GoRecordQuoteSchema> | z.infer<typeof SelectWinningQuoteSchema>;
 type PurchaseFinanceAttempt = { storageKey: string; fingerprint: string; intentId: string };
 type PurchaseFinanceRetryScope = { actorId: string; organizationId: string };
 const purchaseFinanceAttemptPrefix = "chaste.purchasing.finance.active.v1:";
@@ -836,6 +860,97 @@ async function submitPurchaseFinanceCapability(
   }
 }
 
+async function submitPurchaseSourcingCapability<T>(
+  action: PurchaseSourcingAction,
+  capabilityId: "purchasing.createPurchaseRequest" | "purchasing.decidePurchaseRequest" | "purchasing.createRfq" | "purchasing.recordQuote" | "purchasing.selectWinningQuote",
+  output: z.ZodType<T>,
+  activity: string,
+  signal: AbortSignal | undefined,
+  retryScope: { actorId: string | null; organizationId: string | null } | undefined,
+): Promise<PurchasingActionOutcome<T>> {
+  if (!retryScope?.actorId?.trim() || !retryScope.organizationId?.trim()) {
+    throw new PurchasingApiError(0, "Wait for your account and organization to finish loading before changing a purchase request.");
+  }
+  const scope = { actorId: retryScope.actorId.trim(), organizationId: retryScope.organizationId.trim() };
+  const attempt = await createPurchaseSourcingAttempt(action, scope);
+  try {
+    let { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        capabilityId,
+        input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")),
+        intentId: attempt.intentId,
+      }),
+    }, activity, signal, true);
+    if (response.status === 404) {
+      ({ response, body } = await request("/api/purchasing", {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ ...action, intentId: attempt.intentId }),
+      }, activity, signal));
+      const outcome = parsePurchasingActionOutcome(response, body, OpaqueOutputSchema, activity);
+      if (outcome.kind === "completed") clearPurchaseSourcingAttempt(attempt);
+      return outcome as PurchasingActionOutcome<T>;
+    }
+    const outcome = parsePurchasingActionOutcome(response, body, output, activity);
+    if (outcome.kind === "completed") clearPurchaseSourcingAttempt(attempt);
+    return outcome;
+  } catch (error) {
+    if (!(error instanceof PurchasingApiError)) {
+      throw new PurchasingApiError(0, "The request was interrupted. Check the purchase request before trying again.", true);
+    }
+    if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) clearPurchaseSourcingAttempt(attempt);
+    throw error;
+  }
+}
+
+type PurchaseSourcingAttempt = { storageKey: string; fingerprint: string; intentId: string };
+const purchaseSourcingAttemptPrefix = "chaste.purchasing.sourcing.active.v1:";
+
+async function createPurchaseSourcingAttempt(action: PurchaseSourcingAction, scope: PurchaseFinanceRetryScope): Promise<PurchaseSourcingAttempt> {
+  let scopeDigest: string;
+  let fingerprint: string;
+  try {
+    scopeDigest = await digestHex(JSON.stringify(scope));
+    fingerprint = await digestHex(JSON.stringify({ ...scope, action: canonicalize(action) }));
+  } catch {
+    throw new PurchasingApiError(0, "Purchase request retry protection is unavailable. Check browser security settings and try again.");
+  }
+  const actionTarget = action.action === "createPurchaseRequest" ? "new"
+    : action.action === "decidePurchaseRequest" || action.action === "createRfq" ? action.requestId
+      : action.rfqId;
+  const storageKey = `${purchaseSourcingAttemptPrefix}${action.action}:${encodeURIComponent(actionTarget)}:${scopeDigest}`;
+  let stored: { fingerprint: string; intentId: string } | null;
+  try {
+    stored = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+  } catch {
+    throw new PurchasingApiError(0, "Enable browser storage before changing a purchase request so an uncertain result can be retried safely.");
+  }
+  if (stored && stored.fingerprint !== fingerprint) {
+    throw new PurchasingApiError(0, "A previous result for this sourcing action is unresolved. Retry the exact action or check the request before changing it.");
+  }
+  if (stored) return { storageKey, fingerprint, intentId: stored.intentId };
+  const attempt = { storageKey, fingerprint, intentId: crypto.randomUUID() };
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify({ fingerprint, intentId: attempt.intentId }));
+    const persisted = parsePurchaseOrderAttempt(window.localStorage.getItem(storageKey));
+    if (!persisted || persisted.fingerprint !== fingerprint) throw new Error("saved attempt did not persist");
+    return { ...attempt, intentId: persisted.intentId };
+  } catch {
+    throw new PurchasingApiError(0, "Enable browser storage before changing a purchase request so an uncertain result can be retried safely.");
+  }
+}
+
+function clearPurchaseSourcingAttempt(attempt: PurchaseSourcingAttempt): void {
+  try {
+    const stored = parsePurchaseOrderAttempt(window.localStorage.getItem(attempt.storageKey));
+    if (stored?.fingerprint === attempt.fingerprint && stored.intentId === attempt.intentId) window.localStorage.removeItem(attempt.storageKey);
+  } catch {
+    // A saved marker cannot change the server result, so resolution continues.
+  }
+}
+
 function parsePurchasingActionOutcome<T>(response: Response, body: unknown, output: z.ZodType<T>, activity: string): PurchasingActionOutcome<T> {
   if (response.status === 202) {
     const pending = PendingEnvelopeSchema.safeParse(body);
@@ -925,36 +1040,59 @@ export async function creditPurchasingBill(
 export async function createPurchasingRequest(
   action: z.infer<typeof CreatePurchaseRequestSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  return submit(action, OpaqueOutputSchema, "raising the purchase request", signal);
+  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
+  if (!useGo) return submit(action, OpaqueOutputSchema, "raising the purchase request", signal);
+  const parsed = GoCreatePurchaseRequestSchema.safeParse(action);
+  if (!parsed.success) throw new PurchasingApiError(0, "Enter a request title of 3 to 200 characters and a justification of 10 to 4000 characters.");
+  return submitPurchaseSourcingCapability(parsed.data, "purchasing.createPurchaseRequest", GoCreatePurchaseRequestOutputSchema, "raising the purchase request", signal, retryScope);
 }
 
 export async function decidePurchasingRequest(
   action: z.infer<typeof DecidePurchaseRequestSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  return submit(action, OpaqueOutputSchema, "recording the decision", signal);
+  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
+  if (!useGo) return submit(action, OpaqueOutputSchema, "recording the decision", signal);
+  const parsed = GoDecidePurchaseRequestSchema.safeParse(action);
+  if (!parsed.success) throw new PurchasingApiError(0, "Enter a valid purchase request decision and a reason no longer than 1000 characters.");
+  return submitPurchaseSourcingCapability(parsed.data, "purchasing.decidePurchaseRequest", GoDecidePurchaseRequestOutputSchema, "recording the decision", signal, retryScope);
 }
 
 export async function createPurchasingRfq(
   action: z.infer<typeof CreateRfqSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  return submit(action, OpaqueOutputSchema, "sending the RFQs", signal);
+  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
+  if (!useGo) return submit(action, OpaqueOutputSchema, "sending the RFQs", signal);
+  const parsed = GoCreateRfqSchema.safeParse(action);
+  if (!parsed.success) throw new PurchasingApiError(0, "Select between 1 and 10 valid suppliers for the RFQ.");
+  return submitPurchaseSourcingCapability(parsed.data, "purchasing.createRfq", GoCreateRfqOutputSchema, "sending the RFQs", signal, retryScope);
 }
 
 export async function recordPurchasingQuote(
   action: z.infer<typeof RecordQuoteSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  return submit(action, OpaqueOutputSchema, "recording the quote", signal);
+  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
+  if (!useGo) return submit(action, OpaqueOutputSchema, "recording the quote", signal);
+  const parsed = GoRecordQuoteSchema.safeParse(action);
+  if (!parsed.success) throw new PurchasingApiError(0, "Enter a positive quote amount and valid optional lead time and notes.");
+  return submitPurchaseSourcingCapability(parsed.data, "purchasing.recordQuote", GoRecordQuoteOutputSchema, "recording the quote", signal, retryScope);
 }
 
 export async function selectPurchasingWinningQuote(
   action: z.infer<typeof SelectWinningQuoteSchema>,
   signal?: AbortSignal,
+  retryScope?: { actorId: string | null; organizationId: string | null },
 ): Promise<PurchasingActionOutcome> {
-  return submit(action, OpaqueOutputSchema, "awarding the quote", signal);
+  const useGo = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
+  if (!useGo) return submit(action, OpaqueOutputSchema, "awarding the quote", signal);
+  return submitPurchaseSourcingCapability(action, "purchasing.selectWinningQuote", GoSelectWinningQuoteOutputSchema, "awarding the quote", signal, retryScope);
 }
 
 export async function fetchPurchasingPriceHistory(

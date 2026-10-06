@@ -81,6 +81,10 @@ export function goPurchasingFinanceWritesFromEnv(env: Record<string, string | un
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_FINANCE_WRITES === "1";
 }
 
+export function goPurchasingSourcingWritesFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_PURCHASING_SOURCING_WRITES === "1";
+}
+
 export function goManufacturingWorkOrderWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES === "1";
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
+import { z } from "zod";
 import {
   closePurchasingOrder,
   createPurchasingBill,
@@ -68,6 +69,13 @@ const tabs: { id: Tab; label: string }[] = [
 
 const emptyPoLine: PoLineDraft = { description: "", quantity: "1", unitPrice: "0.00", sku: "" };
 const emptyBillLine: BillLineDraft = { description: "", quantity: "1", unitPrice: "0.00", poLineNumber: "", taxCodeId: "" };
+const PersistedSourcingDraftSchema = z.object({
+  requestForm: z.object({ title: z.string(), justification: z.string(), estimate: z.string() }).strict(),
+  rfqPick: z.record(z.string(), z.array(z.string())),
+  quoteDraft: z.record(z.string(), z.object({ amount: z.string(), leadTime: z.string(), notes: z.string() }).strict()),
+  rejectFor: z.string().nullable(),
+  rejectReason: z.string(),
+}).strict();
 
 /* -------------------------------------------------------------- formatting --- */
 
@@ -237,11 +245,11 @@ async function submitAction(action: PurchasingWrite, retryScope?: { actorId: str
     case "createBill": return createPurchasingBill(action, undefined, retryScope);
     case "payBill": return payPurchasingBill(action, undefined, retryScope);
     case "billCreditNote": return creditPurchasingBill(action, undefined, retryScope);
-    case "createPurchaseRequest": return createPurchasingRequest(action);
-    case "decidePurchaseRequest": return decidePurchasingRequest(action);
-    case "createRfq": return createPurchasingRfq(action);
-    case "recordQuote": return recordPurchasingQuote(action);
-    case "selectWinningQuote": return selectPurchasingWinningQuote(action);
+    case "createPurchaseRequest": return createPurchasingRequest(action, undefined, retryScope);
+    case "decidePurchaseRequest": return decidePurchasingRequest(action, undefined, retryScope);
+    case "createRfq": return createPurchasingRfq(action, undefined, retryScope);
+    case "recordQuote": return recordPurchasingQuote(action, undefined, retryScope);
+    case "selectWinningQuote": return selectPurchasingWinningQuote(action, undefined, retryScope);
     default: {
       const unreachable: never = action;
       throw new PurchasingApiError(0, `Unsupported purchasing action: ${JSON.stringify(unreachable)}`);
@@ -301,10 +309,11 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   const [poForm, setPoForm] = useState({ vendorId: "", memo: "", lines: [emptyPoLine] });
   const [billForm, setBillForm] = useState({ vendorId: "", vendorRef: "", poNumber: "", lines: [emptyBillLine] });
   const [requestForm, setRequestForm] = useState({ title: "", justification: "", estimate: "" });
+  const [requestEstimateError, setRequestEstimateError] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<Record<string, string>>({});
   const [payAmount, setPayAmount] = useState<Record<string, string>>({});
   const [rfqPick, setRfqPick] = useState<Record<string, string[]>>({});
-  const [quoteDraft, setQuoteDraft] = useState<Record<string, { amount: string; leadTime: string }>>({});
+  const [quoteDraft, setQuoteDraft] = useState<Record<string, { amount: string; leadTime: string; notes: string }>>({});
   const [rejectFor, setRejectFor] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [billError, setBillError] = useState<string | null>(null);
@@ -316,6 +325,81 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
   const [returnTarget, setReturnTarget] = useState<PurchasingOrder | null>(null);
   const [returnLines, setReturnLines] = useState<Record<number, { qty: string; reason: string }>>({});
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
+  const sourcingDraftScopeIdentity = actorId?.trim() && organizationId?.trim()
+    ? JSON.stringify({ actorId: actorId.trim(), organizationId: organizationId.trim() })
+    : null;
+  const goSourcingWritesEnabled = typeof __GO_PURCHASING_SOURCING_WRITES__ !== "undefined" && __GO_PURCHASING_SOURCING_WRITES__;
+  const [sourcingDraftStorageKey, setSourcingDraftStorageKey] = useState<string | null>(null);
+  const [hydratedSourcingDraftScope, setHydratedSourcingDraftScope] = useState<string | null>(null);
+  const [sourcingDraftStorageStatus, setSourcingDraftStorageStatus] = useState<"loading" | "ready" | "failed">("loading");
+  const sourcingDraftsReady = !goSourcingWritesEnabled || Boolean(
+    sourcingDraftScopeIdentity && sourcingDraftStorageKey && hydratedSourcingDraftScope === sourcingDraftStorageKey && sourcingDraftStorageStatus === "ready",
+  );
+
+  useEffect(() => {
+    let active = true;
+    setSourcingDraftStorageKey(null);
+    setHydratedSourcingDraftScope(null);
+    setSourcingDraftStorageStatus("loading");
+    setRequestForm({ title: "", justification: "", estimate: "" });
+    setRfqPick({});
+    setQuoteDraft({});
+    setRejectFor(null);
+    setRejectReason("");
+    if (!sourcingDraftScopeIdentity) {
+      setHydratedSourcingDraftScope(null);
+      return () => { active = false; };
+    }
+    void crypto.subtle.digest("SHA-256", new TextEncoder().encode(sourcingDraftScopeIdentity)).then((digest) => {
+      if (!active) return;
+      const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      setSourcingDraftStorageKey(`chaste.purchasing.sourcing.draft.v1:${hex}`);
+    }).catch(() => {
+      if (active) {
+        setSourcingDraftStorageKey(null);
+        setSourcingDraftStorageStatus("failed");
+      }
+    });
+    return () => { active = false; };
+  }, [sourcingDraftScopeIdentity]);
+
+  useEffect(() => {
+    if (!sourcingDraftStorageKey) return;
+    let storageAvailable = true;
+    try {
+      const raw = window.localStorage.getItem(sourcingDraftStorageKey);
+      const parsed = raw === null ? null : PersistedSourcingDraftSchema.safeParse(JSON.parse(raw));
+      if (parsed?.success) {
+        setRequestForm(parsed.data.requestForm);
+        setRfqPick(parsed.data.rfqPick);
+        setQuoteDraft(parsed.data.quoteDraft);
+        setRejectFor(parsed.data.rejectFor);
+        setRejectReason(parsed.data.rejectReason);
+      } else {
+        if (raw !== null) window.localStorage.removeItem(sourcingDraftStorageKey);
+        setRequestForm({ title: "", justification: "", estimate: "" });
+        setRfqPick({});
+        setQuoteDraft({});
+        setRejectFor(null);
+        setRejectReason("");
+      }
+    } catch {
+      storageAvailable = false;
+    }
+    setHydratedSourcingDraftScope(sourcingDraftStorageKey);
+    setSourcingDraftStorageStatus(storageAvailable ? "ready" : "failed");
+  }, [sourcingDraftStorageKey]);
+
+  useEffect(() => {
+    if (!sourcingDraftStorageKey || hydratedSourcingDraftScope !== sourcingDraftStorageKey || sourcingDraftStorageStatus !== "ready") return;
+    try {
+      const serialized = JSON.stringify({ requestForm, rfqPick, quoteDraft, rejectFor, rejectReason });
+      window.localStorage.setItem(sourcingDraftStorageKey, serialized);
+      if (window.localStorage.getItem(sourcingDraftStorageKey) !== serialized) throw new Error("sourcing draft did not persist");
+    } catch {
+      setSourcingDraftStorageStatus("failed");
+    }
+  }, [hydratedSourcingDraftScope, sourcingDraftStorageKey, sourcingDraftStorageStatus, requestForm, rfqPick, quoteDraft, rejectFor, rejectReason]);
 
   const load = useCallback(async ({ signal, quiet = false }: { signal?: AbortSignal; quiet?: boolean } = {}) => {
     if (!quiet) setState({ status: "loading" });
@@ -362,6 +446,22 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
     lifecycle?: { onPending?: () => void; onError?: (error: unknown) => void },
   ): Promise<boolean> {
     if (busy) return false;
+    const isSourcingAction = action.action === "createPurchaseRequest" || action.action === "decidePurchaseRequest" || action.action === "createRfq" || action.action === "recordQuote" || action.action === "selectWinningQuote";
+    if (goSourcingWritesEnabled && isSourcingAction) {
+      if (!sourcingDraftsReady || !sourcingDraftStorageKey) {
+        setNotice({ tone: "error", text: "Wait for your scoped purchasing draft to finish loading before submitting this action." });
+        return false;
+      }
+      try {
+        const serializedDraft = JSON.stringify({ requestForm, rfqPick, quoteDraft, rejectFor, rejectReason });
+        window.localStorage.setItem(sourcingDraftStorageKey, serializedDraft);
+        if (window.localStorage.getItem(sourcingDraftStorageKey) !== serializedDraft) throw new Error("sourcing draft did not persist");
+      } catch {
+        setSourcingDraftStorageStatus("failed");
+        setNotice({ tone: "error", text: "Browser storage could not save this sourcing draft, so the action was not sent. Enable browser storage and reload before trying again." });
+        return false;
+      }
+    }
     setBusy(true);
     setNotice(null);
     try {
@@ -523,6 +623,15 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
           </div>
         )}
 
+        {tab === "requests" && goSourcingWritesEnabled && sourcingDraftStorageStatus === "failed" && (
+          <p className="purchasing-notice is-error" role="alert">
+            Browser storage could not retain this scoped sourcing draft. Enable browser storage and reload before submitting sourcing actions.
+          </p>
+        )}
+        {tab === "requests" && goSourcingWritesEnabled && !sourcingDraftsReady && sourcingDraftStorageStatus === "loading" && (
+          <p className="purchasing-inline-note" role="status">Loading your scoped sourcing draft before enabling submissions.</p>
+        )}
+
         {tab === "overview" && (
           <Overview
             orders={orders}
@@ -539,9 +648,12 @@ export function PurchasingPage({ baseCurrency = null, actorId = null, organizati
           <RequestsTab
             requests={requests}
             vendors={vendors}
-            busy={busy}
+            currency={currency}
+            busy={busy || !sourcingDraftsReady}
             form={requestForm}
             setForm={setRequestForm}
+            estimateError={requestEstimateError}
+            setEstimateError={setRequestEstimateError}
             rfqPick={rfqPick}
             setRfqPick={setRfqPick}
             quoteDraft={quoteDraft}
@@ -919,16 +1031,19 @@ function Overview({ orders, bills, requests, vendorCount, outstanding, currency,
 
 /* ---------------------------------------------------------------- requests --- */
 
-function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPick, quoteDraft, setQuoteDraft, rejectFor, rejectReason, setRejectFor, setRejectReason, onRun }: {
+function RequestsTab({ requests, vendors, currency, busy, form, setForm, estimateError, setEstimateError, rfqPick, setRfqPick, quoteDraft, setQuoteDraft, rejectFor, rejectReason, setRejectFor, setRejectReason, onRun }: {
   requests: PurchasingRequest[];
   vendors: PurchasingVendor[];
+  currency: string;
   busy: boolean;
   form: { title: string; justification: string; estimate: string };
   setForm: (form: { title: string; justification: string; estimate: string }) => void;
+  estimateError: string | null;
+  setEstimateError: (message: string | null) => void;
   rfqPick: Record<string, string[]>;
-  setRfqPick: (pick: Record<string, string[]>) => void;
-  quoteDraft: Record<string, { amount: string; leadTime: string }>;
-  setQuoteDraft: React.Dispatch<React.SetStateAction<Record<string, { amount: string; leadTime: string }>>>;
+  setRfqPick: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
+  quoteDraft: Record<string, { amount: string; leadTime: string; notes: string }>;
+  setQuoteDraft: React.Dispatch<React.SetStateAction<Record<string, { amount: string; leadTime: string; notes: string }>>>;
   rejectFor: string | null;
   rejectReason: string;
   setRejectFor: (id: string | null) => void;
@@ -945,7 +1060,12 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
           className="purchasing-form"
           onSubmit={(event) => {
             event.preventDefault();
-            const estimateMinor = parseMinor("USD", form.estimate || "0") ?? 0;
+            const estimateMinor = parseMinor(currency, form.estimate || "0");
+            if (estimateMinor === null) {
+              setEstimateError("Enter a valid non-negative estimate in the workspace currency.");
+              return;
+            }
+            setEstimateError(null);
             void onRun("Purchase request raised", {
               action: "createPurchaseRequest",
               title: form.title.trim(),
@@ -961,21 +1081,29 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
                 id="purchasing-request-title"
                 className="purchasing-input"
                 placeholder="e.g. Packaging supplies for Q4"
+                disabled={busy}
+                maxLength={200}
                 value={form.title}
                 onChange={(event) => setForm({ ...form, title: event.currentTarget.value })}
               />
             </label>
             <label className="purchasing-field" htmlFor="purchasing-request-estimate">
-              Estimate (optional)
+              Estimate (optional, {currency})
               <input
                 id="purchasing-request-estimate"
                 className="purchasing-input purchasing-input-narrow"
                 inputMode="decimal"
                 placeholder="0.00"
                 value={form.estimate}
-                onChange={(event) => setForm({ ...form, estimate: event.currentTarget.value })}
+                disabled={busy}
+                aria-invalid={estimateError ? true : undefined}
+                onChange={(event) => {
+                  setForm({ ...form, estimate: event.currentTarget.value });
+                  setEstimateError(null);
+                }}
               />
             </label>
+            {estimateError && <p className="purchasing-inline-note" role="alert">{estimateError}</p>}
           </div>
           <label className="purchasing-field" htmlFor="purchasing-request-justification">
             Justification
@@ -984,6 +1112,8 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
               className="purchasing-textarea"
               rows={2}
               placeholder="Justify it for the reviewer: why now, from whom, what changes if it is declined…"
+              disabled={busy}
+              maxLength={4000}
               value={form.justification}
               onChange={(event) => setForm({ ...form, justification: event.currentTarget.value })}
             />
@@ -1019,7 +1149,7 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
             </div>
             <p className="purchasing-card-hint">{request.justification}</p>
             {request.estimatedAmountMinor != null && (
-              <p className="purchasing-inline-note">Estimated {formatMoney(request.estimatedAmountMinor, "USD")}</p>
+              <p className="purchasing-inline-note">Estimated {formatMoney(request.estimatedAmountMinor, currency)}</p>
             )}
             {request.decisionReason && <p className="purchasing-inline-note">Decision: {request.decisionReason}</p>}
 
@@ -1041,6 +1171,8 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
                         id={`purchasing-reject-${request.id}`}
                         className="purchasing-input"
                         value={rejectReason}
+                        disabled={busy}
+                        maxLength={1000}
                         onChange={(event) => setRejectReason(event.currentTarget.value)}
                       />
                     </label>
@@ -1103,6 +1235,7 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
                           <input
                             type="checkbox"
                             checked={picked.includes(vendor.id)}
+                            disabled={busy || (!picked.includes(vendor.id) && picked.length >= 10)}
                             onChange={(event) => setRfqPick({
                               ...rfqPick,
                               [request.id]: event.currentTarget.checked
@@ -1114,16 +1247,21 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
                         </label>
                       ))}
                     </div>
+                    <p className="purchasing-inline-note">Select up to 10 vendors ({picked.length}/10 selected).</p>
                     <div className="purchasing-actions">
                       <button
                         type="button"
                         className="purchasing-button is-primary"
-                        disabled={busy || picked.length === 0}
-                        onClick={() => void onRun(`RFQs sent to ${picked.length} vendor${picked.length === 1 ? "" : "s"}`, {
-                          action: "createRfq",
-                          requestId: request.id,
-                          vendorIds: picked,
-                        })}
+                        disabled={busy || picked.length === 0 || picked.length > 10}
+                        onClick={() => {
+                          void onRun(`RFQs sent to ${picked.length} vendor${picked.length === 1 ? "" : "s"}`, {
+                            action: "createRfq",
+                            requestId: request.id,
+                            vendorIds: picked,
+                          }).then((completed) => {
+                            if (completed) setRfqPick((current) => ({ ...current, [request.id]: [] }));
+                          });
+                        }}
                       >
                         Send RFQs ({picked.length})
                       </button>
@@ -1148,13 +1286,13 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
                   </thead>
                   <tbody>
                     {request.rfqs.map((rfq) => {
-                      const entry = draft[rfq.id] ?? { amount: "", leadTime: "" };
-                      const quoteMinor = parseMinor("USD", entry.amount || "");
+                      const entry = draft[rfq.id] ?? { amount: "", leadTime: "", notes: "" };
+                      const quoteMinor = parseMinor(currency, entry.amount || "");
                       return (
                         <tr key={rfq.id}>
                           <th scope="row">{rfq.vendorName}</th>
                           <td><span className={statusClass(rfq.status)}>{rfq.status}</span></td>
-                          <td className="is-amount">{rfq.quoteAmountMinor != null ? formatMoney(rfq.quoteAmountMinor, "USD") : "-"}</td>
+                          <td className="is-amount">{rfq.quoteAmountMinor != null ? formatMoney(rfq.quoteAmountMinor, currency) : "-"}</td>
                           <td className="is-numeric">{rfq.quoteLeadTimeDays != null ? `${rfq.quoteLeadTimeDays}d` : "-"}</td>
                           <td>
                             <div className="purchasing-cell-actions">
@@ -1166,6 +1304,7 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
                                     placeholder="Quote"
                                     aria-label={`Quote amount from ${rfq.vendorName}`}
                                     value={entry.amount}
+                                    disabled={busy}
                                     onChange={(event) => setQuoteDraft({ ...draft, [rfq.id]: { ...entry, amount: event.currentTarget.value } })}
                                   />
                                   <input
@@ -1174,7 +1313,17 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
                                     placeholder="Days"
                                     aria-label={`Lead time days from ${rfq.vendorName}`}
                                     value={entry.leadTime}
+                                    disabled={busy}
                                     onChange={(event) => setQuoteDraft({ ...draft, [rfq.id]: { ...entry, leadTime: event.currentTarget.value } })}
+                                  />
+                                  <input
+                                    className="purchasing-input purchasing-input-narrow"
+                                    placeholder="Notes (optional)"
+                                    aria-label={`Quote notes from ${rfq.vendorName}`}
+                                    maxLength={2000}
+                                    value={entry.notes}
+                                    disabled={busy}
+                                    onChange={(event) => setQuoteDraft({ ...draft, [rfq.id]: { ...entry, notes: event.currentTarget.value } })}
                                   />
                                   <button
                                     type="button"
@@ -1185,7 +1334,8 @@ function RequestsTab({ requests, vendors, busy, form, setForm, rfqPick, setRfqPi
                                       rfqId: rfq.id,
                                       amountMinor: quoteMinor ?? 0,
                                       ...(Number(entry.leadTime) > 0 ? { leadTimeDays: Number(entry.leadTime) } : {}),
-                                    }, () => setQuoteDraft({ ...draft, [rfq.id]: { amount: "", leadTime: "" } }))}
+                                      ...(entry.notes.trim() ? { notes: entry.notes.trim() } : {}),
+                                    }, () => setQuoteDraft({ ...draft, [rfq.id]: { amount: "", leadTime: "", notes: "" } }))}
                                   >
                                     Save
                                   </button>

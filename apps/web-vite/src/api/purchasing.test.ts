@@ -3,6 +3,8 @@ import {
   closePurchasingOrder,
   createPurchasingBill,
   createPurchasingOrder,
+  createPurchasingRequest,
+  createPurchasingRfq,
   createPurchasingVendor,
   creditPurchasingBill,
   fetchPurchasingEnabled,
@@ -15,6 +17,9 @@ import {
   PurchasingApiError,
   receivePurchasingGoods,
   returnPurchasingGoods,
+  decidePurchasingRequest,
+  recordPurchasingQuote,
+  selectPurchasingWinningQuote,
 } from "./purchasing";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -147,6 +152,59 @@ describe("governed purchasing writes", () => {
     actorId: "actor-1",
     organizationId: "org-1",
   };
+
+  it("routes all sourcing actions through scoped Go capabilities with strict output shapes", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const requestId = "0569aacb-58c3-4a30-8afe-3554e38eb2ce";
+    const rfqId = "1a7c1a1e-9c3a-4f1a-9b2f-3f1c2d4e5a6b";
+    const vendorId = "2b8d2b2f-0d4b-4a2b-8c3a-4a2b3c4d5e6f";
+    const results = [
+      { requestId },
+      { status: "approved" },
+      { rfqIds: [rfqId] },
+      { status: "quoted" },
+      { poNumber: 73, vendorId, quoteAmountMinor: 4200 },
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(Response.json({ ok: true, data: results.shift() })));
+    vi.stubGlobal("fetch", fetchMock);
+    const scoped = { actorId: "actor-sourcing-contract", organizationId: "org-sourcing-contract" };
+
+    await expect(createPurchasingRequest({ action: "createPurchaseRequest", title: "Need packaging", justification: "Stock is too low for confirmed orders." }, undefined, scoped)).resolves.toMatchObject({ kind: "completed", data: { requestId } });
+    await expect(decidePurchasingRequest({ action: "decidePurchaseRequest", requestId, decision: "approve" }, undefined, scoped)).resolves.toMatchObject({ kind: "completed", data: { status: "approved" } });
+    await expect(createPurchasingRfq({ action: "createRfq", requestId, vendorIds: [vendorId] }, undefined, scoped)).resolves.toMatchObject({ kind: "completed", data: { rfqIds: [rfqId] } });
+    await expect(recordPurchasingQuote({ action: "recordQuote", rfqId, amountMinor: 4200 }, undefined, scoped)).resolves.toMatchObject({ kind: "completed", data: { status: "quoted" } });
+    await expect(selectPurchasingWinningQuote({ action: "selectWinningQuote", rfqId }, undefined, scoped)).resolves.toMatchObject({ kind: "completed", data: { poNumber: 73, vendorId, quoteAmountMinor: 4200 } });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.calls.map((call) => postedBody(call).capabilityId)).toEqual([
+      "purchasing.createPurchaseRequest", "purchasing.decidePurchaseRequest", "purchasing.createRfq", "purchasing.recordQuote", "purchasing.selectWinningQuote",
+    ]);
+    expect(fetchMock.mock.calls.map((call) => postedBody(call).intentId)).toEqual(expect.arrayContaining([expect.any(String)]));
+  });
+
+  it("requires scope, preserves a sourcing intent across uncertainty and pending, and reuses it on 404 fallback", async () => {
+    vi.stubGlobal("__GO_PURCHASING_SOURCING_WRITES__", true);
+    const action = { action: "createPurchaseRequest" as const, title: "Need packaging", justification: "Stock is too low for confirmed orders." };
+    const scoped = { actorId: "actor-sourcing-retry", organizationId: "org-sourcing-retry" };
+    const noScopeFetch = vi.fn();
+    vi.stubGlobal("fetch", noScopeFetch);
+    await expect(createPurchasingRequest(action, undefined, { ...scoped, organizationId: null })).rejects.toMatchObject({ status: 0 });
+    expect(noScopeFetch).not.toHaveBeenCalled();
+
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("connection lost"))
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Approval required." }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ error: "route missing" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { requestId: "0569aacb-58c3-4a30-8afe-3554e38eb2ce" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createPurchasingRequest(action, undefined, scoped)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    const firstIntent = postedBody(fetchMock.mock.calls[0]!).intentId;
+    await expect(createPurchasingRequest(action, undefined, scoped)).resolves.toMatchObject({ kind: "pending" });
+    expect(postedBody(fetchMock.mock.calls[1]!).intentId).toBe(firstIntent);
+    await expect(createPurchasingRequest(action, undefined, scoped)).resolves.toMatchObject({ kind: "completed" });
+    expect(postedBody(fetchMock.mock.calls[2]!).intentId).toBe(firstIntent);
+    expect(postedBody(fetchMock.mock.calls[3]!).intentId).toBe(firstIntent);
+    expect(postedBody(fetchMock.mock.calls[3]!).action).toBe("createPurchaseRequest");
+  });
 
   it("requires actor and organization scope before a Go purchase order request", async () => {
     const fetchMock = vi.fn();

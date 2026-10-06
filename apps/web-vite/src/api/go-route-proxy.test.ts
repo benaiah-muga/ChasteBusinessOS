@@ -13,6 +13,7 @@ import {
   goPurchasingReceiveGoodsFromEnv,
   goPurchasingReturnCloseFromEnv,
   goPurchasingFinanceWritesFromEnv,
+  goPurchasingSourcingWritesFromEnv,
   goManufacturingWorkOrderWritesFromEnv,
   goManufacturingProductionWritesFromEnv,
   goSalesOrderWritesFromEnv,
@@ -102,6 +103,14 @@ describe("purchase finance Go selector", () => {
     expect(goPurchasingFinanceWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_FINANCE_WRITES: "1" })).toBe(true);
     expect(goPurchasingFinanceWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goPurchasingFinanceWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_FINANCE_WRITES: "1" })).toBe(false);
+  });
+});
+
+describe("purchase sourcing Go selector", () => {
+  it("requires the sourcing selector and session capability route", () => {
+    expect(goPurchasingSourcingWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_PURCHASING_SOURCING_WRITES: "1" })).toBe(true);
+    expect(goPurchasingSourcingWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goPurchasingSourcingWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_PURCHASING_SOURCING_WRITES: "1" })).toBe(false);
   });
 });
 

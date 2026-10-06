@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/benaiah-muga/ChasteBusinessOS/apps/api/internal/authbridge"
@@ -167,11 +168,17 @@ func ParseCreateRfqInput(raw json.RawMessage) (CreateRfqInput, error) {
 		return CreateRfqInput{}, errors.New("vendorIds must contain at most 10 vendors")
 	}
 	vendorIDs := make([]string, 0, len(vendorValues))
+	seenVendorIDs := make(map[string]struct{}, len(vendorValues))
 	for _, value := range vendorValues {
 		var vendorID string
 		if err := json.Unmarshal(value, &vendorID); err != nil {
 			return CreateRfqInput{}, errors.New("vendorIds must be an array of strings")
 		}
+		canonicalVendorID := strings.ToLower(vendorID)
+		if _, duplicate := seenVendorIDs[canonicalVendorID]; duplicate {
+			return CreateRfqInput{}, errors.New("vendorIds must not contain duplicates")
+		}
+		seenVendorIDs[canonicalVendorID] = struct{}{}
 		vendorIDs = append(vendorIDs, vendorID)
 	}
 	return CreateRfqInput{RequestID: requestID, VendorIDs: vendorIDs}, nil
@@ -239,7 +246,8 @@ func decidePurchaseRequest(ctx context.Context, tx pgx.Tx, claims authbridge.Cap
 		SELECT id::text, status
 		FROM purchase_requests
 		WHERE id = $1::uuid AND org_id = $2::uuid
-		LIMIT 1`, input.RequestID, claims.OrganizationID).Scan(&requestID, &status)
+		LIMIT 1
+		FOR UPDATE`, input.RequestID, claims.OrganizationID).Scan(&requestID, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DecidePurchaseRequestOutput{}, errors.New("purchase request not found")
 	}
@@ -272,7 +280,8 @@ func createRfq(ctx context.Context, tx pgx.Tx, orgID string, input CreateRfqInpu
 		SELECT id::text, status
 		FROM purchase_requests
 		WHERE id = $1::uuid AND org_id = $2::uuid
-		LIMIT 1`, input.RequestID, orgID).Scan(&requestID, &status)
+		LIMIT 1
+		FOR UPDATE`, input.RequestID, orgID).Scan(&requestID, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CreateRfqOutput{}, errors.New("purchase request not found")
 	}
@@ -282,7 +291,13 @@ func createRfq(ctx context.Context, tx pgx.Tx, orgID string, input CreateRfqInpu
 	if status != "approved" {
 		return CreateRfqOutput{}, errors.New("only approved requests can go out as RFQs")
 	}
+	seenVendorIDs := make(map[string]struct{}, len(input.VendorIDs))
 	for _, vendorID := range input.VendorIDs {
+		canonicalVendorID := strings.ToLower(vendorID)
+		if _, duplicate := seenVendorIDs[canonicalVendorID]; duplicate {
+			return CreateRfqOutput{}, errors.New("vendorIds must not contain duplicates")
+		}
+		seenVendorIDs[canonicalVendorID] = struct{}{}
 		if !isUUID(vendorID) {
 			return CreateRfqOutput{}, errors.New("unknown vendor id(s)")
 		}
@@ -294,6 +309,17 @@ func createRfq(ctx context.Context, tx pgx.Tx, orgID string, input CreateRfqInpu
 		if !exists {
 			return CreateRfqOutput{}, errors.New("unknown vendor id(s)")
 		}
+	}
+	var existingRFQ bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM rfqs
+			WHERE request_id = $1::uuid AND org_id = $2::uuid AND vendor_id = ANY($3::uuid[])
+		)`, requestID, orgID, input.VendorIDs).Scan(&existingRFQ); err != nil {
+		return CreateRfqOutput{}, err
+	}
+	if existingRFQ {
+		return CreateRfqOutput{}, errors.New("RFQ already exists for one or more selected vendors")
 	}
 	rfqIDs := make([]string, 0, len(input.VendorIDs))
 	rows, err := tx.Query(ctx, `
@@ -320,12 +346,33 @@ func createRfq(ctx context.Context, tx pgx.Tx, orgID string, input CreateRfqInpu
 }
 
 func recordQuote(ctx context.Context, tx pgx.Tx, orgID string, input RecordQuoteInput, now time.Time) (RecordQuoteOutput, error) {
-	var rfqID, status string
+	var requestID string
 	err := tx.QueryRow(ctx, `
+		SELECT request_id::text
+		FROM rfqs
+		WHERE id = $1::uuid AND org_id = $2::uuid
+		LIMIT 1`, input.RFQID, orgID).Scan(&requestID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RecordQuoteOutput{}, errors.New("RFQ not found")
+	}
+	if err != nil {
+		return RecordQuoteOutput{}, err
+	}
+	var lockedRequestID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id::text FROM purchase_requests
+		WHERE id = $1::uuid AND org_id = $2::uuid
+		LIMIT 1 FOR UPDATE`, requestID, orgID).Scan(&lockedRequestID); errors.Is(err, pgx.ErrNoRows) {
+		return RecordQuoteOutput{}, errors.New("purchase request not found")
+	} else if err != nil {
+		return RecordQuoteOutput{}, err
+	}
+	var rfqID, status string
+	err = tx.QueryRow(ctx, `
 		SELECT id::text, status
 		FROM rfqs
 		WHERE id = $1::uuid AND org_id = $2::uuid
-		LIMIT 1`, input.RFQID, orgID).Scan(&rfqID, &status)
+		LIMIT 1 FOR UPDATE`, input.RFQID, orgID).Scan(&rfqID, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return RecordQuoteOutput{}, errors.New("RFQ not found")
 	}
@@ -345,28 +392,24 @@ func recordQuote(ctx context.Context, tx pgx.Tx, orgID string, input RecordQuote
 }
 
 func selectWinningQuote(ctx context.Context, tx pgx.Tx, orgID string, input SelectWinningQuoteInput, now time.Time) (SelectWinningQuoteOutput, error) {
-	var rfqID, requestID, vendorID, status string
-	var quoteAmountMinor *int64
+	var requestID string
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, request_id::text, vendor_id::text, status, quote_amount_minor
+		SELECT request_id::text
 		FROM rfqs
 		WHERE id = $1::uuid AND org_id = $2::uuid
-		LIMIT 1`, input.RFQID, orgID).Scan(&rfqID, &requestID, &vendorID, &status, &quoteAmountMinor)
+		LIMIT 1`, input.RFQID, orgID).Scan(&requestID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SelectWinningQuoteOutput{}, errors.New("RFQ not found")
 	}
 	if err != nil {
 		return SelectWinningQuoteOutput{}, err
 	}
-	if status != "quoted" {
-		return SelectWinningQuoteOutput{}, errors.New("record this vendor's quote before awarding")
-	}
 	var requestStatus, requestTitle string
 	err = tx.QueryRow(ctx, `
 		SELECT status, title
 		FROM purchase_requests
 		WHERE id = $1::uuid AND org_id = $2::uuid
-		LIMIT 1`, requestID, orgID).Scan(&requestStatus, &requestTitle)
+		LIMIT 1 FOR UPDATE`, requestID, orgID).Scan(&requestStatus, &requestTitle)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SelectWinningQuoteOutput{}, errors.New("purchase request not found")
 	}
@@ -375,6 +418,22 @@ func selectWinningQuote(ctx context.Context, tx pgx.Tx, orgID string, input Sele
 	}
 	if requestStatus != "approved" {
 		return SelectWinningQuoteOutput{}, errors.New("request is no longer approvable into an order")
+	}
+	var rfqID, vendorID, status string
+	var quoteAmountMinor *int64
+	err = tx.QueryRow(ctx, `
+		SELECT id::text, request_id::text, vendor_id::text, status, quote_amount_minor
+		FROM rfqs
+		WHERE id = $1::uuid AND request_id = $2::uuid AND org_id = $3::uuid
+		LIMIT 1 FOR UPDATE`, input.RFQID, requestID, orgID).Scan(&rfqID, &requestID, &vendorID, &status, &quoteAmountMinor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SelectWinningQuoteOutput{}, errors.New("RFQ not found")
+	}
+	if err != nil {
+		return SelectWinningQuoteOutput{}, err
+	}
+	if status != "quoted" {
+		return SelectWinningQuoteOutput{}, errors.New("record this vendor's quote before awarding")
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE rfqs SET status = 'lost'

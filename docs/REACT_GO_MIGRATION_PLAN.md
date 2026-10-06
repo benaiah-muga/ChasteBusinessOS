@@ -1665,3 +1665,16 @@ new owners and the manifest shows zero legacy runtime paths.
      payment and credit constraints; existing bill form fields and tax
      behavior remain aligned with the Vite workspace. Browser proof remains
      open.
+169. Route Vite purchase requests, request decisions, RFQ creation, quote
+     recording, and quote awards through Go's session-authenticated
+     `purchasing.createPurchaseRequest`, `purchasing.decidePurchaseRequest`,
+     `purchasing.createRfq`, `purchasing.recordQuote`, and
+     `purchasing.selectWinningQuote` capabilities when
+     `CHASTE_GO_PURCHASING_SOURCING_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. Preserve `/api/purchasing` as the
+     same-intent fallback when the capability route is missing. Persist exact
+     action intents by actor and organization across pending and uncertain
+     outcomes, validate each Go output shape, and restore scope-hashed form
+     drafts and request targets after reload until an action completes. Go serializes decisions and
+     quote actions on the parent request and rejects duplicate vendor IDs in
+     RFQ creation. Browser proof remains open.
