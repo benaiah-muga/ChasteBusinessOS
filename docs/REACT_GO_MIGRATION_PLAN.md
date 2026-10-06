@@ -1791,11 +1791,13 @@ new owners and the manifest shows zero legacy runtime paths.
      and require the Go task ID to match before clearing a saved attempt.
      Authenticated browser proof remains open because the in-app browser is
      unavailable in this environment.
-180. Add the opt-in `CHASTE_GO_MESSAGING_EDIT_SLICE` selector for Vite message
-     edits through Go's `messaging.editMessage` capability. Restore the exact
-     actor/org scoped edit and intent after pending or uncertain results,
-     validate Go output, and use legacy only when the capability route is
-     missing. Browser proof remains open.
+180. (Implemented) Add the opt-in `CHASTE_GO_MESSAGING_EDIT_SLICE` selector
+     for Vite message edits through Go's `messaging.editMessage` capability.
+     Restore the exact actor/org scoped edit and intent after pending or
+     uncertain results, validate Go output, fail closed while scope is
+     unresolved or stale, keep unresolved edits locked across selector
+     rollback, and use legacy only when the capability route is missing.
+     Focused API/UI tests pass; authenticated browser proof remains open.
 181. Add the opt-in `CHASTE_GO_MESSAGING_DELETE_SLICE` selector for Vite
      message deletions through Go's `messaging.deleteMessage` capability.
      Restore the actor/org scoped confirmation and intent after pending or

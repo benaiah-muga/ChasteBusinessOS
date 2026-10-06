@@ -63,6 +63,10 @@ function messageDeleteScopeIdentity(actorId: string | null, organizationId: stri
   return JSON.stringify([actorId?.trim() ?? "", organizationId?.trim() ?? ""]);
 }
 
+function messageEditScopeIdentity(actorId: string | null, organizationId: string | null, conversationId: string | null): string {
+  return JSON.stringify([actorId?.trim() ?? "", organizationId?.trim() ?? "", conversationId?.trim() ?? ""]);
+}
+
 export interface PendingAttachment {
   key: string;
   file: File;
@@ -320,6 +324,7 @@ function ThreadMessage({
   replies,
   editing,
   editingBody,
+  editLocked,
   focused,
   reactionMenuOpen,
   onStartEdit,
@@ -340,6 +345,7 @@ function ThreadMessage({
   replies: number;
   editing: boolean;
   editingBody: string;
+  editLocked: boolean;
   focused: boolean;
   reactionMenuOpen: boolean;
   onStartEdit: (message: Message) => void;
@@ -389,10 +395,11 @@ function ThreadMessage({
                 onChange={(event) => onEditBody(event.target.value)}
                 rows={2}
                 aria-label="Edit message"
+                readOnly={editLocked}
               />
               <div className="messages-edit-actions">
                 <button type="button" className="messages-button messages-button-primary" onClick={onSaveEdit} disabled={!editingBody.trim()}>Save</button>
-                <button type="button" className="messages-button messages-button-quiet" onClick={onCancelEdit}>Cancel</button>
+                <button type="button" className="messages-button messages-button-quiet" onClick={onCancelEdit} disabled={editLocked}>Cancel</button>
               </div>
             </div>
           ) : (
@@ -554,6 +561,8 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const [reactionMenuId, setReactionMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingBody, setEditingBody] = useState("");
+  const [editingScope, setEditingScope] = useState<string | null>(null);
+  const [editLocked, setEditLocked] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -580,7 +589,9 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const goSendIntentRef = useRef<GoSendIntent | null>(null);
   const aroundTargetRef = useRef<string | null>(null);
   const wideRef = useRef(wide);
+  const messageEditScopeRef = useRef(messageEditScopeIdentity(actorId, organizationId, activeId));
   wideRef.current = wide;
+  messageEditScopeRef.current = messageEditScopeIdentity(actorId, organizationId, activeId);
 
   const activeConv = conversations?.find((conversation) => conversation.id === activeId) ?? null;
   const counts = conversationCounts(conversations ?? []);
@@ -595,14 +606,15 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   );
 
   useEffect(() => {
-    const goEditEnabled = typeof __GO_MESSAGING_EDIT_SLICE__ !== "undefined" && __GO_MESSAGING_EDIT_SLICE__;
-    if (!goEditEnabled || !actorId || !organizationId) return;
+    if (!actorId || !organizationId) return;
     let current = true;
     void getPendingMessageEdit({ actorId, organizationId }).then((pending) => {
       if (!current || !pending) return;
       if (pending.conversationId) setActiveId(pending.conversationId);
       setEditingId(pending.messageId);
       setEditingBody(pending.body);
+      setEditingScope(messageEditScopeIdentity(actorId, organizationId, pending.conversationId));
+      setEditLocked(true);
       setNotice({ tone: "pending", text: "An earlier message edit is unresolved. Retry the restored edit to check its result." });
     }).catch((error: unknown) => {
       if (current) setNotice({ tone: "error", text: errorText(error, "Could not restore the pending message edit.") });
@@ -1045,31 +1057,55 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
   const saveEdit = useCallback(async () => {
     if (!editingId || !editingBody.trim()) return;
     const goEditEnabled = typeof __GO_MESSAGING_EDIT_SLICE__ !== "undefined" && __GO_MESSAGING_EDIT_SLICE__;
-    const retainDraft = goEditEnabled && actorId != null && organizationId != null && activeId != null;
+    const retainDraft = goEditEnabled;
+    const requestScope = messageEditScopeIdentity(actorId, organizationId, activeId);
+    if (editLocked && !goEditEnabled) {
+      setNotice({ tone: "error", text: "This Go edit is unresolved. Restore Go message editing to retry the saved edit." });
+      return;
+    }
+    if (goEditEnabled && (!actorId?.trim() || !organizationId?.trim() || !activeId?.trim())) {
+      setNotice({ tone: "error", text: "Message editing is paused until the actor, organization, and conversation are resolved." });
+      return;
+    }
+    if (goEditEnabled && editingScope !== requestScope) {
+      setNotice({ tone: "error", text: "This edit belongs to another workspace. Reopen the message in the active workspace before editing." });
+      return;
+    }
     let keepEditing = false;
     try {
       const outcome = await editMessage(editingId, editingBody.trim(), undefined, {
-        allowGo: retainDraft,
+        allowGo: goEditEnabled,
         actorId,
         organizationId,
         conversationId: activeId,
       });
+      if (messageEditScopeRef.current !== requestScope) return;
       if (report(outcome, "Your edit is waiting for approval.")) {
-        if (activeId) await refreshThread(activeId);
+        if (activeId && messageEditScopeRef.current === requestScope) await refreshThread(activeId);
+        if (messageEditScopeRef.current !== requestScope) return;
         setNotice({ tone: "success", text: "Message updated." });
       } else {
         keepEditing = retainDraft;
+        if (retainDraft) setEditLocked(true);
       }
     } catch (error) {
+      if (messageEditScopeRef.current !== requestScope) return;
       setNotice({ tone: "error", text: errorText(error, "Could not update the message.") });
       keepEditing = retainDraft;
+      if (retainDraft) {
+        const status = error instanceof MessagingApiError ? error.status : 0;
+        const safeToCorrect = status >= 400 && status < 500 && status !== 408 && status !== 429;
+        setEditLocked(!safeToCorrect);
+      }
     } finally {
-      if (!keepEditing) {
+      if (messageEditScopeRef.current === requestScope && !keepEditing) {
         setEditingId(null);
         setEditingBody("");
+        setEditingScope(null);
+        setEditLocked(false);
       }
     }
-  }, [activeId, actorId, editingBody, editingId, organizationId, refreshThread, report]);
+  }, [activeId, actorId, editLocked, editingBody, editingId, editingScope, organizationId, refreshThread, report]);
 
   const removeMessage = useCallback(async (messageId: string) => {
     const goDeleteEnabled = typeof __GO_MESSAGING_DELETE_SLICE__ !== "undefined" && __GO_MESSAGING_DELETE_SLICE__;
@@ -1449,12 +1485,21 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
                       me={me}
                       readers={readers}
                       replies={replies.get(message.id) ?? 0}
-                      editing={editingId === message.id}
+                      editing={editingId === message.id && (
+                        typeof __GO_MESSAGING_EDIT_SLICE__ === "undefined" || !__GO_MESSAGING_EDIT_SLICE__ ||
+                        editingScope === messageEditScopeIdentity(actorId, organizationId, activeId)
+                      )}
                       editingBody={editingBody}
+                      editLocked={editLocked}
                       focused={focusedMessageId === message.id}
                       reactionMenuOpen={reactionMenuId === message.id}
-                      onStartEdit={(target) => { setEditingId(target.id); setEditingBody(target.body); }}
-                      onCancelEdit={() => { setEditingId(null); setEditingBody(""); }}
+                      onStartEdit={(target) => {
+                        setEditingId(target.id);
+                        setEditingBody(target.body);
+                        setEditingScope(messageEditScopeIdentity(actorId, organizationId, activeId));
+                        setEditLocked(false);
+                      }}
+                      onCancelEdit={() => { setEditingId(null); setEditingBody(""); setEditingScope(null); setEditLocked(false); }}
                       onSaveEdit={() => { void saveEdit(); }}
                       onEditBody={setEditingBody}
                       onReply={(target) => { setReplyTo(target); composerRef.current?.focus(); }}

@@ -448,14 +448,24 @@ function editMessageLegacy(messageId: string, body: string, signal?: AbortSignal
   }, "edit this message", OkEnvelopeSchema, "Your edit is waiting for approval.", signal);
 }
 
-export function editMessage(
+export async function editMessage(
   messageId: string,
   body: string,
   signal?: AbortSignal,
   options: { allowGo?: boolean; actorId?: string | null; organizationId?: string | null; conversationId?: string | null } = {},
 ): Promise<MessagingOutcome<{ ok: true }>> {
   const useGo = options.allowGo === true && typeof __GO_MESSAGING_EDIT_SLICE__ !== "undefined" && __GO_MESSAGING_EDIT_SLICE__;
-  if (!useGo) return editMessageLegacy(messageId, body, signal);
+  if (!useGo) {
+    const actorId = options.actorId?.trim();
+    const organizationId = options.organizationId?.trim();
+    if (actorId && organizationId) {
+      const pending = await getPendingMessageEdit({ actorId, organizationId });
+      if (pending) {
+        throw new MessagingApiError(0, "A Go message edit is unresolved. Restore Go message editing to retry the saved edit before starting another edit.");
+      }
+    }
+    return editMessageLegacy(messageId, body, signal);
+  }
   return editMessageThroughGo(messageId, body, { actorId: options.actorId ?? null, organizationId: options.organizationId ?? null }, signal, options.conversationId ?? null);
 }
 

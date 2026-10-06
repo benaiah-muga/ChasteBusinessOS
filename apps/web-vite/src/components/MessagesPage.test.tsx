@@ -366,12 +366,78 @@ describe("messages page states", () => {
     await waitFor(() => expect(paths).toContain("/api/capabilities/execute"));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Manager review required"));
     expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Corrected after reload");
+    expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).readOnly).toBe(true);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
 
     first.unmount();
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", false);
     render(<MessagesPage {...props} />);
     await waitFor(() => expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Corrected after reload"));
+    expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).readOnly).toBe(true);
+    const requestCount = paths.length;
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Restore Go message editing");
+    expect(paths).toHaveLength(requestCount);
     const goBody = JSON.parse(String(fetchMock.mock.calls.find(([path]) => String(path) === "/api/capabilities/execute")?.[1]?.body)) as Record<string, unknown>;
     expect(goBody).toMatchObject({ capabilityId: "messaging.editMessage", input: { body: "Corrected after reload" }, intentId: expect.any(String) });
+  });
+
+  it("blocks message edits until the Go actor, organization, and conversation scope is resolved", async () => {
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
+    const writes: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (init?.method === "PATCH" || (path === "/api/capabilities/execute" && init?.method === "POST")) writes.push(path);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit message" }));
+    fireEvent.change(await screen.findByLabelText("Edit message"), { target: { value: "Must wait for scope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("paused until the actor, organization, and conversation are resolved");
+    expect(writes).toEqual([]);
+    expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Must wait for scope");
+  });
+
+  it("does not let a stale Go edit response clear the next scope's editor state", async () => {
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
+    let finishRequest: (response: Response) => void = () => undefined;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const path = String(input);
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        return new Promise((resolve) => { finishRequest = resolve; });
+      }
+      if (path === "/api/modules") return Promise.resolve(Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] }));
+      if (path === "/api/conversations") return Promise.resolve(Response.json({ conversations: [conversation()], me }));
+      if (path.startsWith("/api/conversations/people")) return Promise.resolve(Response.json({ people }));
+      if (path.includes("/presence")) return Promise.resolve(Response.json({ people: [] }));
+      if (path.endsWith("/messages")) return Promise.resolve(Response.json(threadBody()));
+      return Promise.resolve(Response.json({ error: "not found" }, { status: 404 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const scopeA = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    const view = render(<MessagesPage {...scopeA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit message" }));
+    fireEvent.change(await screen.findByLabelText("Edit message"), { target: { value: "Scope A edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.anything()));
+
+    view.rerender(<MessagesPage actorId={other} organizationId="7d15d9ac-d8b6-4f49-8ca5-387adf08b8e5" />);
+    expect(screen.queryByRole("textbox", { name: "Edit message" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+    fireEvent.change(screen.getByLabelText("Edit message"), { target: { value: "Scope B draft" } });
+    await act(async () => { finishRequest(Response.json({ ok: true, data: { messageId: "m1", editedAt: "2026-10-01T09:00:00.000Z" } })); });
+
+    expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Scope B draft");
+    expect(screen.queryByText("Message updated.")).toBeNull();
   });
 
   it("restores the Go message deletion confirmation and intent after reload", async () => {

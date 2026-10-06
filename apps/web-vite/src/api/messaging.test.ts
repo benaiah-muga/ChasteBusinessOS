@@ -234,6 +234,23 @@ describe("messaging API client", () => {
     await expect(getPendingMessageEdit({ actorId: "user-1", organizationId: "org-2" })).resolves.toBeNull();
   });
 
+  it("keeps unresolved Go edits blocked if the selector is rolled back", async () => {
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ pendingApproval: true }, { status: 202 })));
+    const scope = { actorId: "rollback-user", organizationId: "rollback-org" };
+    const options = { allowGo: true, ...scope, conversationId };
+    await editMessage(messageId, "Saved exact edit", undefined, options);
+
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", false);
+    const legacyFetch = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", legacyFetch);
+    await expect(editMessage(messageId, "Different edit", undefined, { ...scope, conversationId })).rejects.toMatchObject({
+      message: expect.stringContaining("Go message edit is unresolved"),
+    });
+    expect(legacyFetch).not.toHaveBeenCalled();
+    await expect(getPendingMessageEdit(scope)).resolves.toMatchObject({ messageId, body: "Saved exact edit" });
+  });
+
   it("keeps the Go edit intent after an uncertain transport failure and clears it on success", async () => {
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
     const scope = { actorId: "user-2", organizationId: "org-2" };
@@ -250,6 +267,35 @@ describe("messaging API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(editMessage(messageId, "Retry me", undefined, options)).resolves.toEqual({ kind: "completed", data: { ok: true } });
     expect(lastBody(fetchMock)).toMatchObject({ intentId: recovered?.intentId });
+    await expect(getPendingMessageEdit(scope)).resolves.toBeNull();
+  });
+
+  it.each([
+    ["malformed envelope", { ok: true, data: { messageId } }],
+    ["wrong message ID", { ok: true, data: { messageId: "another-message", editedAt: "2026-10-01T09:00:00.000Z" } }],
+  ])("keeps the exact Go edit marker after a successful response with %s", async (_case, invalidBody) => {
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
+    const scope = { actorId: "user-invalid-success", organizationId: "org-invalid-success" };
+    const options = { allowGo: true, ...scope, conversationId };
+    let responseBody: unknown = invalidBody;
+    const bodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return Response.json(responseBody);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(editMessage(messageId, "Retry this exact edit", undefined, options)).rejects.toMatchObject({
+      message: expect.stringContaining("unexpected response to edit this message"),
+    });
+    const pending = await getPendingMessageEdit(scope);
+    expect(pending).toMatchObject({ messageId, conversationId, body: "Retry this exact edit", intentId: expect.any(String) });
+
+    responseBody = { ok: true, data: { messageId, editedAt: "2026-10-01T09:00:00.000Z" } };
+    await expect(editMessage(messageId, "Retry this exact edit", undefined, options)).resolves.toEqual({
+      kind: "completed", data: { ok: true },
+    });
+    expect(bodies[1]?.intentId).toBe(pending?.intentId);
     await expect(getPendingMessageEdit(scope)).resolves.toBeNull();
   });
 
