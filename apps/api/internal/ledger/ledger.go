@@ -11,16 +11,17 @@ import (
 )
 
 type Event struct {
-	Seq          int64           `json:"seq"`
-	Kind         string          `json:"kind"`
-	CapabilityID *string         `json:"capabilityId"`
-	ActorType    string          `json:"actorType"`
-	ActorID      *string         `json:"actorId"`
-	SessionID    *string         `json:"sessionId"`
-	Payload      json.RawMessage `json:"payload"`
-	Hash         string          `json:"hash"`
-	PrevHash     *string         `json:"prevHash"`
-	OccurredAt   string          `json:"occurredAt"`
+	Seq           int64           `json:"seq"`
+	Kind          string          `json:"kind"`
+	CapabilityID  *string         `json:"capabilityId"`
+	ActorType     string          `json:"actorType"`
+	ActorID       *string         `json:"actorId"`
+	SessionID     *string         `json:"sessionId"`
+	AuthSessionID *string         `json:"authSessionId"`
+	Payload       json.RawMessage `json:"payload"`
+	Hash          string          `json:"hash"`
+	PrevHash      *string         `json:"prevHash"`
+	OccurredAt    string          `json:"occurredAt"`
 }
 
 type Reader interface {
@@ -38,7 +39,7 @@ func NewPostgresReader(pool dbx.Beginner) *PostgresReader {
 func (r *PostgresReader) RecentForOrg(ctx context.Context, orgID string, limit int) ([]Event, error) {
 	return dbx.WithOrgTx(ctx, r.pool, orgID, func(tx pgx.Tx) ([]Event, error) {
 		rows, err := tx.Query(ctx, `
-			SELECT seq, kind, capability_id, actor_type, actor_id, session_id,
+			SELECT seq, kind, capability_id, actor_type, actor_id, session_id, auth_session_id,
 			       payload, hash, prev_hash, occurred_at
 			FROM ledger_events
 			WHERE org_id = $1
@@ -55,6 +56,7 @@ func (r *PostgresReader) RecentForOrg(ctx context.Context, orgID string, limit i
 			var capabilityID pgtype.Text
 			var actorID pgtype.UUID
 			var sessionID pgtype.UUID
+			var authSessionID pgtype.Text
 			var payload []byte
 			var prevHash pgtype.Text
 			var occurredAt time.Time
@@ -65,6 +67,7 @@ func (r *PostgresReader) RecentForOrg(ctx context.Context, orgID string, limit i
 				&event.ActorType,
 				&actorID,
 				&sessionID,
+				&authSessionID,
 				&payload,
 				&event.Hash,
 				&prevHash,
@@ -75,6 +78,7 @@ func (r *PostgresReader) RecentForOrg(ctx context.Context, orgID string, limit i
 			event.CapabilityID = nullableText(capabilityID)
 			event.ActorID = nullableUUID(actorID)
 			event.SessionID = nullableUUID(sessionID)
+			event.AuthSessionID = nullableText(authSessionID)
 			event.Payload = append(json.RawMessage(nil), payload...)
 			event.PrevHash = nullableText(prevHash)
 			event.OccurredAt = occurredAt.UTC().Format("2006-01-02T15:04:05.000Z")

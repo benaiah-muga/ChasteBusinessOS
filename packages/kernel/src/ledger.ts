@@ -10,6 +10,8 @@ export interface LedgerEntry {
   capabilityId: string | null;
   /** Attribution context: the agent session behind this event. Not hash-covered. */
   sessionId?: string | null;
+  /** Verified Better Auth session attribution. Hash-covered when present. */
+  authSessionId?: string | null;
   payload: unknown;
   prevHash: string | null;
   hash: string;
@@ -34,6 +36,7 @@ export function computeEntryHash(entry: Omit<LedgerEntry, "hash" | "prevHash">, 
   h.update(entry.actorId ?? "");
   h.update(entry.kind);
   h.update(entry.capabilityId ?? "");
+  if (entry.authSessionId) h.update(entry.authSessionId);
   h.update(JSON.stringify(entry.payload));
   h.update(String(entry.occurredAt.getTime()));
   return h.digest("hex");

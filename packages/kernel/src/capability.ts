@@ -64,6 +64,8 @@ export interface Capability<I = unknown, O = unknown> {
   module: string;
   risk: RiskClass;
   permission: string;
+  /** Capabilities outside ordinary organization execution are dispatched only by their dedicated boundary. */
+  executionScope?: "organization" | "pre-organization";
   input: z.ZodType<I>;
   output: z.ZodType<O>;
   /**

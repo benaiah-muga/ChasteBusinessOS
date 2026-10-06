@@ -17,6 +17,7 @@ func TestGoCapabilitySpecsCoverMigrationManifest(t *testing.T) {
 			Module              string  `json:"module"`
 			Permission          string  `json:"permission"`
 			Risk                string  `json:"risk"`
+			ExecutionScope      string  `json:"executionScope"`
 			MoneyThresholdMinor *int64  `json:"moneyThresholdMinor"`
 			InverseCapabilityID *string `json:"inverseCapabilityId"`
 		} `json:"capabilities"`
@@ -37,8 +38,11 @@ func TestGoCapabilitySpecsCoverMigrationManifest(t *testing.T) {
 			}
 			seen[entry.ID] = struct{}{}
 
-			if !supportedCapability(entry.ID) {
+			if !supportedCapability(entry.ID) && entry.ExecutionScope != "pre-organization" {
 				t.Errorf("Go executor does not support manifest capability %q", entry.ID)
+			}
+			if entry.ExecutionScope == "pre-organization" && supportedCapability(entry.ID) {
+				t.Errorf("pre-organization capability %q leaked into ordinary executor dispatch", entry.ID)
 			}
 			spec, exists := capabilitySpecs[entry.ID]
 			if !exists {
@@ -48,6 +52,13 @@ func TestGoCapabilitySpecsCoverMigrationManifest(t *testing.T) {
 			if spec.module != entry.Module || spec.permission != entry.Permission || spec.risk != entry.Risk {
 				t.Errorf("Go spec for %s = module %q, permission %q, risk %q; manifest wants %q, %q, %q",
 					entry.ID, spec.module, spec.permission, spec.risk, entry.Module, entry.Permission, entry.Risk)
+			}
+			executionScope := spec.executionScope
+			if executionScope == "" {
+				executionScope = "organization"
+			}
+			if executionScope != entry.ExecutionScope {
+				t.Errorf("Go execution scope for %s = %q, manifest wants %q", entry.ID, executionScope, entry.ExecutionScope)
 			}
 			var moneyThreshold int64
 			if entry.MoneyThresholdMinor != nil {

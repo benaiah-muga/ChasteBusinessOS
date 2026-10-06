@@ -57,6 +57,7 @@ const (
 	iamUpdateRolePermissionsCapabilityID = "iam.updateRolePermissions"
 	iamAssignRoleCapabilityID            = "iam.assignRole"
 	iamInviteMemberCapabilityID          = "iam.inviteMember"
+	iamBootstrapOrganizationCapabilityID = "iam.bootstrapOrganization"
 )
 const approvalTTL = 7 * 24 * time.Hour
 
@@ -64,6 +65,7 @@ type capabilitySpec struct {
 	module              string
 	permission          string
 	risk                string
+	executionScope      string
 	moneyThresholdMinor int64
 	inverseCapabilityID string
 	inverseInputSource  string
@@ -353,6 +355,7 @@ var capabilitySpecs = map[string]capabilitySpec{
 	iamUpdateRolePermissionsCapabilityID:    {module: "iam", permission: "iam.admin", risk: "identity"},
 	iamAssignRoleCapabilityID:               {module: "iam", permission: "iam.admin", risk: "identity"},
 	iamInviteMemberCapabilityID:             {module: "iam", permission: "iam.admin", risk: "write"},
+	iamBootstrapOrganizationCapabilityID:    {module: "iam", permission: "iam.bootstrapOrganization", risk: "write", executionScope: "pre-organization"},
 	settingsConfigureAiProviderCapabilityID: {module: "settings", permission: "iam.admin", risk: "secret", inverseCapabilityID: settingsRestoreAiProviderCapabilityID, inverseInputSource: "output", inverseFields: []string{"config"}},
 	settingsRestoreAiProviderCapabilityID:   {module: "settings", permission: "iam.admin", risk: "secret", inverseCapabilityID: settingsConfigureAiProviderCapabilityID, inverseInputSource: "output", inverseFields: []string{"config"}},
 	harnessApproveCompositionCapabilityID:   {module: "harness", permission: "harness.approve", risk: "identity"},

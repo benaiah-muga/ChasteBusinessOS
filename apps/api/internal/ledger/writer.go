@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"hash"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -20,14 +22,15 @@ const ledgerChainLockKey int64 = 7_214_811
 // AppendEvent is one hash-chained ledger fact. Payload should be JSON created
 // from typed structs whose field order matches the TypeScript event payload.
 type AppendEvent struct {
-	OrgID        string
-	ActorType    string
-	ActorID      *string
-	Kind         string
-	CapabilityID *string
-	SessionID    *string
-	Payload      json.RawMessage
-	OccurredAt   time.Time
+	OrgID         string
+	ActorType     string
+	ActorID       *string
+	Kind          string
+	CapabilityID  *string
+	SessionID     *string
+	AuthSessionID *string
+	Payload       json.RawMessage
+	OccurredAt    time.Time
 }
 
 // AppendTx appends an event through the caller's transaction. It neither
@@ -36,6 +39,9 @@ type AppendEvent struct {
 func AppendTx(ctx context.Context, tx pgx.Tx, event AppendEvent) (seq int64, hash string, err error) {
 	if tx == nil {
 		return 0, "", errors.New("ledger transaction is required")
+	}
+	if event.AuthSessionID != nil && (strings.TrimSpace(*event.AuthSessionID) == "" || utf8.RuneCountInString(*event.AuthSessionID) > 200) {
+		return 0, "", errors.New("ledger auth session attribution is invalid")
 	}
 
 	payload, err := stringifyPayload(event.Payload)
@@ -56,10 +62,10 @@ func AppendTx(ctx context.Context, tx pgx.Tx, event AppendEvent) (seq int64, has
 	hash = hashEvent(event, payload, prevHash, occurredAt)
 	err = tx.QueryRow(ctx, `
 		INSERT INTO ledger_events (
-			org_id, actor_type, actor_id, kind, capability_id, session_id,
+			org_id, actor_type, actor_id, kind, capability_id, session_id, auth_session_id,
 			payload, prev_hash, hash, occurred_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)
 		RETURNING seq`,
 		event.OrgID,
 		event.ActorType,
@@ -67,6 +73,7 @@ func AppendTx(ctx context.Context, tx pgx.Tx, event AppendEvent) (seq int64, has
 		event.Kind,
 		event.CapabilityID,
 		event.SessionID,
+		event.AuthSessionID,
 		string(payload),
 		prevHash,
 		hash,
@@ -86,6 +93,9 @@ func hashEvent(event AppendEvent, payload []byte, prevHash string, occurredAt ti
 	writeHashPart(digest, stringValue(event.ActorID))
 	writeHashPart(digest, event.Kind)
 	writeHashPart(digest, stringValue(event.CapabilityID))
+	if event.AuthSessionID != nil {
+		writeHashPart(digest, *event.AuthSessionID)
+	}
 	writeHashPart(digest, string(payload))
 	writeHashPart(digest, strconv.FormatInt(occurredAt.UnixMilli(), 10))
 	return hex.EncodeToString(digest.Sum(nil))

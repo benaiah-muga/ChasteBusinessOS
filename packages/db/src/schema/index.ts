@@ -178,6 +178,8 @@ export const ledgerEvents = pgTable(
     capabilityId: text("capability_id"),
     /** Attribution context: the agent session that produced this event. Not hash-covered. */
     sessionId: uuid("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    /** Immutable Better Auth attribution. Deliberately has no FK because logout deletes auth sessions. */
+    authSessionId: text("auth_session_id"),
     payload: jsonb("payload").notNull(),
     prevHash: text("prev_hash"),
     hash: text("hash").notNull(),
@@ -187,6 +189,7 @@ export const ledgerEvents = pgTable(
     index("ledger_org_kind_idx").on(t.orgId, t.kind),
     index("ledger_occurred_idx").on(t.occurredAt),
     uniqueIndex("ledger_seq_idx").on(t.seq),
+    check("ledger_events_auth_session_id_check", sql`${t.authSessionId} IS NULL OR length(${t.authSessionId}) BETWEEN 1 AND 200`),
   ],
 );
 

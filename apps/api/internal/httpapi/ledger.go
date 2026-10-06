@@ -55,16 +55,17 @@ func (h *GoLedgerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	response := apicontract.GoLedgerResponse{Events: make([]apicontract.GoLedgerEvent, 0, len(events))}
 	for _, event := range events {
 		response.Events = append(response.Events, apicontract.GoLedgerEvent{
-			Seq:          event.Seq,
-			Kind:         event.Kind,
-			CapabilityId: event.CapabilityID,
-			ActorType:    event.ActorType,
-			ActorId:      event.ActorID,
-			SessionId:    event.SessionID,
-			Payload:      event.Payload,
-			Hash:         event.Hash,
-			PrevHash:     event.PrevHash,
-			OccurredAt:   event.OccurredAt,
+			Seq:           event.Seq,
+			Kind:          event.Kind,
+			CapabilityId:  event.CapabilityID,
+			ActorType:     event.ActorType,
+			ActorId:       event.ActorID,
+			SessionId:     event.SessionID,
+			AuthSessionId: event.AuthSessionID,
+			Payload:       event.Payload,
+			Hash:          event.Hash,
+			PrevHash:      event.PrevHash,
+			OccurredAt:    event.OccurredAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, response)

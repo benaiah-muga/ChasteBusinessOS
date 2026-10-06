@@ -31,6 +31,30 @@ export interface ModuleDeps {
   settingsSchemas?: Record<string, z.ZodTypeAny>;
 }
 
+const bootstrapOrganization = (_deps: ModuleDeps) =>
+  defineCapability({
+    id: "iam.bootstrapOrganization",
+    title: "Open the first workspace",
+    intent:
+      "Create the first organization for a verified human account before it has an organization membership",
+    module: "iam",
+    risk: "write",
+    permission: "iam.bootstrapOrganization",
+    executionScope: "pre-organization",
+    input: z.object({
+      orgName: z.string().min(2).max(80),
+      businessDescription: z.string().min(20).max(8000),
+      baseCurrency: z.string().length(3),
+      path: z.enum(["fresh", "import", "connect"]),
+      deferredSteps: z.array(z.string()).max(100),
+      intentId: z.string().min(8).max(100),
+    }),
+    output: z.object({ orgId: z.string(), replayed: z.boolean().optional() }),
+    execute: async () => {
+      throw new Error("organization bootstrap requires the verified pre-organization executor");
+    },
+  });
+
 /**
  * Authority over authority. Every capability here is identity-class:
  * policy can never make it autonomous, and execution always follows a
@@ -365,6 +389,7 @@ const restoreModules = (deps: ModuleDeps) =>
   });
 
 export function registerIamCapabilities(registry: CapabilityRegistry, deps: ModuleDeps): void {
+  registry.register(bootstrapOrganization(deps));
   registry.register(createRole(deps));
   registry.register(updateRolePermissions(deps));
   registry.register(assignRole(deps));

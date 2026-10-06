@@ -9,6 +9,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -55,6 +56,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.archiveTaxCode",
       "inputSchema": {
@@ -93,6 +95,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -148,6 +151,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -226,6 +230,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.activateTaxCode",
       "inputSchema": {
@@ -264,6 +269,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -309,6 +315,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -412,6 +419,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -492,6 +500,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -617,6 +626,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -682,6 +692,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.restoreTaxReturnDraft",
       "inputSchema": {
@@ -720,6 +731,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -793,6 +805,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -933,6 +946,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -1042,6 +1056,7 @@
       "module": "accounting",
       "risk": "destructive",
       "permission": "accounting.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.reopenPeriod",
       "inputSchema": {
@@ -1086,6 +1101,7 @@
       "module": "accounting",
       "risk": "destructive",
       "permission": "accounting.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.reverseEntry",
       "inputSchema": {
@@ -1143,6 +1159,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -1249,6 +1266,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.declineQuote",
       "inputSchema": {
@@ -1342,6 +1360,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.pauseRecurringTemplate",
       "inputSchema": {
@@ -1444,6 +1463,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.archiveTaxCode",
       "inputSchema": {
@@ -1529,6 +1549,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.removeTaxProfile",
       "inputSchema": {
@@ -1598,6 +1619,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.cancelTaxReturnDraft",
       "inputSchema": {
@@ -1744,6 +1766,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.cancelTaxReturnDraft",
       "inputSchema": {
@@ -1795,6 +1818,7 @@
       "module": "accounting",
       "risk": "money",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -1853,6 +1877,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -1943,6 +1968,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "expenses.decide",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -1997,6 +2023,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2036,6 +2063,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2074,6 +2102,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.unexcludeBankTransaction",
       "inputSchema": {
@@ -2113,6 +2142,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2144,6 +2174,7 @@
       "module": "accounting",
       "risk": "money",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.reverseEntry",
       "inputSchema": {
@@ -2194,6 +2225,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2223,6 +2255,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2294,6 +2327,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2355,6 +2389,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2474,6 +2509,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "expenses.decide",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2541,6 +2577,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "expenses.decide",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2586,6 +2623,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2696,6 +2734,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2792,6 +2831,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -2850,6 +2890,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.unmatchBankTransaction",
       "inputSchema": {
@@ -2926,6 +2967,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.resumeRecurringTemplate",
       "inputSchema": {
@@ -2965,6 +3007,7 @@
       "module": "accounting",
       "risk": "money",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": 50000,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3018,6 +3061,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3143,6 +3187,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3198,6 +3243,7 @@
       "module": "accounting",
       "risk": "money",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": 50000,
       "inverseCapabilityId": "accounting.reversePayment",
       "inputSchema": {
@@ -3273,6 +3319,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3340,6 +3387,7 @@
       "module": "accounting",
       "risk": "money",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3403,6 +3451,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.createTaxProfile",
       "inputSchema": {
@@ -3456,6 +3505,7 @@
       "module": "accounting",
       "risk": "destructive",
       "permission": "accounting.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3500,6 +3550,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3538,6 +3589,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.undoBudgetScenarioVersion",
       "inputSchema": {
@@ -3600,6 +3652,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.updatePeriodCloseCheck",
       "inputSchema": {
@@ -3678,6 +3731,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.cancelTaxReturnDraft",
       "inputSchema": {
@@ -3716,6 +3770,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3755,6 +3810,7 @@
       "module": "accounting",
       "risk": "money",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.reversePeriodFxRevaluation",
       "inputSchema": {
@@ -3858,6 +3914,7 @@
       "module": "accounting",
       "risk": "money",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3894,6 +3951,7 @@
       "module": "accounting",
       "risk": "money",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -3953,6 +4011,7 @@
       "module": "accounting",
       "risk": "money",
       "permission": "accounting.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.revalueForeignReceivables",
       "inputSchema": {
@@ -4012,6 +4071,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -4081,6 +4141,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.undoBudgetScenarioVersion",
       "inputSchema": {
@@ -4237,6 +4298,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "expenses.decide",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -4290,6 +4352,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -4356,6 +4419,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "expenses.submit",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.decideExpenseClaim",
       "inputSchema": {
@@ -4436,6 +4500,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -4497,6 +4562,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.restoreBudgetScenarioVersion",
       "inputSchema": {
@@ -4559,6 +4625,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -4598,6 +4665,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -4641,6 +4709,7 @@
       "module": "accounting",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -4719,6 +4788,7 @@
       "module": "accounting",
       "risk": "write",
       "permission": "accounting.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.restorePeriodCloseCheck",
       "inputSchema": {
@@ -4797,6 +4867,7 @@
       "module": "analytics",
       "risk": "read",
       "permission": "analytics.report",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -4893,6 +4964,7 @@
       "module": "analytics",
       "risk": "read",
       "permission": "analytics.report",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -5027,6 +5099,7 @@
       "module": "analytics",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -5081,6 +5154,7 @@
       "module": "analytics",
       "risk": "read",
       "permission": "crm.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -5135,6 +5209,7 @@
       "module": "analytics",
       "risk": "read",
       "permission": "analytics.report",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -5516,6 +5591,7 @@
       "module": "analytics",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -5580,6 +5656,7 @@
       "module": "analytics",
       "risk": "read",
       "permission": "accounting.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -5644,6 +5721,7 @@
       "module": "analytics",
       "risk": "read",
       "permission": "inventory.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -5698,6 +5776,7 @@
       "module": "creator",
       "risk": "identity",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "creator.uninstallListing",
       "inputSchema": {
@@ -5742,6 +5821,7 @@
       "module": "creator",
       "risk": "read",
       "permission": "platform.browse",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -5807,6 +5887,7 @@
       "module": "creator",
       "risk": "read",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -5870,6 +5951,7 @@
       "module": "creator",
       "risk": "identity",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "creator.rollbackCandidate",
       "inputSchema": {
@@ -5931,6 +6013,7 @@
       "module": "creator",
       "risk": "write",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "creator.retractListing",
       "inputSchema": {
@@ -6056,6 +6139,7 @@
       "module": "creator",
       "risk": "write",
       "permission": "platform.creator.release",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6164,6 +6248,7 @@
       "module": "creator",
       "risk": "write",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6200,6 +6285,7 @@
       "module": "creator",
       "risk": "destructive",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6257,6 +6343,7 @@
       "module": "creator",
       "risk": "read",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6389,6 +6476,7 @@
       "module": "creator",
       "risk": "identity",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "creator.rollbackCandidate",
       "inputSchema": {
@@ -6461,6 +6549,7 @@
       "module": "creator",
       "risk": "write",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6527,6 +6616,7 @@
       "module": "creator",
       "risk": "write",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6563,6 +6653,7 @@
       "module": "creator",
       "risk": "read",
       "permission": "platform.creator",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6608,6 +6699,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6645,6 +6737,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6700,6 +6793,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.deactivateCustomer",
       "inputSchema": {
@@ -6774,6 +6868,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6834,6 +6929,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6894,6 +6990,7 @@
       "module": "crm",
       "risk": "read",
       "permission": "crm.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6959,6 +7056,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -6995,6 +7093,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.undoCustomerImport",
       "inputSchema": {
@@ -7125,6 +7224,7 @@
       "module": "crm",
       "risk": "read",
       "permission": "crm.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -7185,6 +7285,7 @@
       "module": "crm",
       "risk": "read",
       "permission": "crm.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -7288,6 +7389,7 @@
       "module": "crm",
       "risk": "read",
       "permission": "crm.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -7416,6 +7518,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.restoreCustomerMerge",
       "inputSchema": {
@@ -7625,6 +7728,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -7682,6 +7786,7 @@
       "module": "crm",
       "risk": "read",
       "permission": "crm.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -7743,6 +7848,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.restoreCustomerProfiles",
       "inputSchema": {
@@ -7939,6 +8045,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.mergeCustomers",
       "inputSchema": {
@@ -8305,6 +8412,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.reapplyCustomerProfiles",
       "inputSchema": {
@@ -8501,6 +8609,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -8618,6 +8727,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.undoCustomerImport",
       "inputSchema": {
@@ -8672,6 +8782,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.updateTaskDetails",
       "inputSchema": {
@@ -8767,6 +8878,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.restoreCustomerView",
       "inputSchema": {
@@ -8934,6 +9046,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.restoreImportedCustomers",
       "inputSchema": {
@@ -8988,6 +9101,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.restoreCustomerProfiles",
       "inputSchema": {
@@ -9182,6 +9296,7 @@
       "module": "crm",
       "risk": "write",
       "permission": "crm.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "crm.restoreTaskDetails",
       "inputSchema": {
@@ -9277,6 +9392,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -9325,6 +9441,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "documents.deleteDoc",
       "inputSchema": {
@@ -9441,6 +9558,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "documents.deleteDocument",
       "inputSchema": {
@@ -9511,6 +9629,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "documents.deleteFolder",
       "inputSchema": {
@@ -9553,6 +9672,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "documents.deleteTemplate",
       "inputSchema": {
@@ -9610,6 +9730,7 @@
       "module": "documents",
       "risk": "destructive",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -9648,6 +9769,7 @@
       "module": "documents",
       "risk": "destructive",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -9684,6 +9806,7 @@
       "module": "documents",
       "risk": "destructive",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "documents.createFolder",
       "inputSchema": {
@@ -9726,6 +9849,7 @@
       "module": "documents",
       "risk": "destructive",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -9768,6 +9892,7 @@
       "module": "documents",
       "risk": "destructive",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -9806,6 +9931,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -9985,6 +10111,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10056,6 +10183,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10122,6 +10250,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10246,6 +10375,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10308,6 +10438,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10384,6 +10515,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10429,6 +10561,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10511,6 +10644,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10576,6 +10710,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10620,6 +10755,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10668,6 +10804,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10716,6 +10853,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10812,6 +10950,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10903,6 +11042,7 @@
       "module": "documents",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -10989,6 +11129,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11085,6 +11226,7 @@
       "module": "documents",
       "risk": "write",
       "permission": "documents.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11230,6 +11372,7 @@
       "module": "harness",
       "risk": "identity",
       "permission": "harness.approve",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11284,6 +11427,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11337,6 +11481,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11373,6 +11518,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11415,6 +11561,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11459,6 +11606,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11498,6 +11646,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "hr.closeOpening",
       "inputSchema": {
@@ -11544,6 +11693,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "hr.voidPayrollRun",
       "inputSchema": {
@@ -11604,6 +11754,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11640,6 +11791,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11688,6 +11840,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11738,6 +11891,7 @@
       "module": "hr",
       "risk": "money",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": 0,
       "inverseCapabilityId": "hr.reversePayrollPosting",
       "inputSchema": {
@@ -11789,6 +11943,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11842,6 +11997,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "hr.deactivateEmployee",
       "inputSchema": {
@@ -11909,6 +12065,7 @@
       "module": "hr",
       "risk": "read",
       "permission": "hr.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -11955,6 +12112,7 @@
       "module": "hr",
       "risk": "read",
       "permission": "hr.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12027,6 +12185,7 @@
       "module": "hr",
       "risk": "read",
       "permission": "hr.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12096,6 +12255,7 @@
       "module": "hr",
       "risk": "read",
       "permission": "hr.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12164,6 +12324,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12222,6 +12383,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12276,6 +12438,7 @@
       "module": "hr",
       "risk": "read",
       "permission": "hr.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12367,6 +12530,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "hr.cancelLeave",
       "inputSchema": {
@@ -12427,6 +12591,7 @@
       "module": "hr",
       "risk": "destructive",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12473,6 +12638,7 @@
       "module": "hr",
       "risk": "read",
       "permission": "hr.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12540,6 +12706,7 @@
       "module": "hr",
       "risk": "write",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12600,6 +12767,7 @@
       "module": "hr",
       "risk": "destructive",
       "permission": "hr.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12636,6 +12804,7 @@
       "module": "iam",
       "risk": "identity",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12670,12 +12839,90 @@
       }
     },
     {
+      "id": "iam.bootstrapOrganization",
+      "title": "Open the first workspace",
+      "intent": "Create the first organization for a verified human account before it has an organization membership",
+      "module": "iam",
+      "risk": "write",
+      "permission": "iam.bootstrapOrganization",
+      "executionScope": "pre-organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": null,
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "orgName": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "businessDescription": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 8000
+          },
+          "baseCurrency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "path": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "import",
+              "connect"
+            ]
+          },
+          "deferredSteps": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "intentId": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "orgName",
+          "businessDescription",
+          "baseCurrency",
+          "path",
+          "deferredSteps",
+          "intentId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "orgId": {
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "orgId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "iam.createRole",
       "title": "Create role",
       "intent": "Create a named role in the organization that groups permissions for assignment to members",
       "module": "iam",
       "risk": "identity",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12720,6 +12967,7 @@
       "module": "iam",
       "risk": "write",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12777,6 +13025,7 @@
       "module": "iam",
       "risk": "read",
       "permission": "iam.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12875,6 +13124,7 @@
       "module": "iam",
       "risk": "identity",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12920,6 +13170,7 @@
       "module": "iam",
       "risk": "write",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -12974,6 +13225,7 @@
       "module": "iam",
       "risk": "identity",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "iam.restoreModules",
       "inputSchema": {
@@ -13026,6 +13278,7 @@
       "module": "iam",
       "risk": "write",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13077,6 +13330,7 @@
       "module": "iam",
       "risk": "identity",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13141,6 +13395,7 @@
       "module": "iam",
       "risk": "identity",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13186,6 +13441,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13246,6 +13502,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13292,6 +13549,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13330,6 +13588,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13368,6 +13627,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "inventory.reverseTransfer",
       "inputSchema": {
@@ -13439,6 +13699,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "inventory.cancelCycleCount",
       "inputSchema": {
@@ -13493,6 +13754,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13587,6 +13849,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13631,6 +13894,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "inventory.cancelTransfer",
       "inputSchema": {
@@ -13717,6 +13981,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "inventory.undoItemImport",
       "inputSchema": {
@@ -13853,6 +14118,7 @@
       "module": "inventory",
       "risk": "read",
       "permission": "inventory.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -13980,6 +14246,7 @@
       "module": "inventory",
       "risk": "read",
       "permission": "inventory.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14100,6 +14367,7 @@
       "module": "inventory",
       "risk": "read",
       "permission": "inventory.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14145,6 +14413,7 @@
       "module": "inventory",
       "risk": "read",
       "permission": "inventory.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14209,6 +14478,7 @@
       "module": "inventory",
       "risk": "read",
       "permission": "inventory.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14343,6 +14613,7 @@
       "module": "inventory",
       "risk": "read",
       "permission": "inventory.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14456,6 +14727,7 @@
       "module": "inventory",
       "risk": "read",
       "permission": "inventory.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14540,6 +14812,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14586,6 +14859,7 @@
       "module": "inventory",
       "risk": "money",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "inventory.reverseValuationSummary",
       "inputSchema": {
@@ -14648,6 +14922,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14681,6 +14956,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14743,6 +15019,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14781,6 +15058,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "inventory.releaseReservation",
       "inputSchema": {
@@ -14834,6 +15112,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -14966,6 +15245,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "inventory.undoItemImport",
       "inputSchema": {
@@ -15020,6 +15300,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -15062,6 +15343,7 @@
       "module": "inventory",
       "risk": "money",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -15104,6 +15386,7 @@
       "module": "inventory",
       "risk": "read",
       "permission": "inventory.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -15230,6 +15513,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "inventory.restoreItemImport",
       "inputSchema": {
@@ -15284,6 +15568,7 @@
       "module": "inventory",
       "risk": "write",
       "permission": "inventory.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "inventory.restoreItem",
       "inputSchema": {
@@ -15416,6 +15701,7 @@
       "module": "manufacturing",
       "risk": "read",
       "permission": "manufacturing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -15495,6 +15781,7 @@
       "module": "manufacturing",
       "risk": "read",
       "permission": "manufacturing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -15564,6 +15851,7 @@
       "module": "manufacturing",
       "risk": "write",
       "permission": "manufacturing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -15602,6 +15890,7 @@
       "module": "manufacturing",
       "risk": "read",
       "permission": "manufacturing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -15687,6 +15976,7 @@
       "module": "manufacturing",
       "risk": "write",
       "permission": "manufacturing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "manufacturing.reverseProductionRun",
       "inputSchema": {
@@ -15778,6 +16068,7 @@
       "module": "manufacturing",
       "risk": "read",
       "permission": "manufacturing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -15874,6 +16165,7 @@
       "module": "manufacturing",
       "risk": "write",
       "permission": "manufacturing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "manufacturing.cancelWorkOrder",
       "inputSchema": {
@@ -15940,6 +16232,7 @@
       "module": "manufacturing",
       "risk": "write",
       "permission": "manufacturing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16012,6 +16305,7 @@
       "module": "manufacturing",
       "risk": "destructive",
       "permission": "manufacturing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16072,6 +16366,7 @@
       "module": "manufacturing",
       "risk": "read",
       "permission": "manufacturing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16137,6 +16432,7 @@
       "module": "manufacturing",
       "risk": "write",
       "permission": "manufacturing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "manufacturing.reverseProductionRun",
       "inputSchema": {
@@ -16214,6 +16510,7 @@
       "module": "manufacturing",
       "risk": "read",
       "permission": "manufacturing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16321,6 +16618,7 @@
       "module": "manufacturing",
       "risk": "write",
       "permission": "manufacturing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "manufacturing.cancelWorkOrder",
       "inputSchema": {
@@ -16359,6 +16657,7 @@
       "module": "manufacturing",
       "risk": "destructive",
       "permission": "manufacturing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16442,6 +16741,7 @@
       "module": "manufacturing",
       "risk": "read",
       "permission": "manufacturing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16546,6 +16846,7 @@
       "module": "marketing",
       "risk": "read",
       "permission": "marketing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16599,6 +16900,7 @@
       "module": "marketing",
       "risk": "write",
       "permission": "marketing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16655,6 +16957,7 @@
       "module": "marketing",
       "risk": "write",
       "permission": "marketing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16700,6 +17003,7 @@
       "module": "marketing",
       "risk": "write",
       "permission": "marketing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16750,6 +17054,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16793,6 +17098,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.restoreReadCursor",
       "inputSchema": {
@@ -16856,6 +17162,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16901,6 +17208,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16953,6 +17261,7 @@
       "module": "messaging",
       "risk": "destructive",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -16990,6 +17299,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -17027,6 +17337,7 @@
       "module": "messaging",
       "risk": "secret",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -17066,6 +17377,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -17112,6 +17424,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -17149,6 +17462,7 @@
       "module": "messaging",
       "risk": "read",
       "permission": "messaging.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -17242,6 +17556,7 @@
       "module": "messaging",
       "risk": "read",
       "permission": "messaging.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -17306,6 +17621,7 @@
       "module": "messaging",
       "risk": "read",
       "permission": "messaging.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -17391,6 +17707,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.updateConversationPresence",
       "inputSchema": {
@@ -17477,6 +17794,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.setMessagePin",
       "inputSchema": {
@@ -17519,6 +17837,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.setMessageReaction",
       "inputSchema": {
@@ -17572,6 +17891,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.advanceReadCursor",
       "inputSchema": {
@@ -17636,6 +17956,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.deleteMessage",
       "inputSchema": {
@@ -17717,6 +18038,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.restoreMessagePin",
       "inputSchema": {
@@ -17763,6 +18085,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.restoreMessageReaction",
       "inputSchema": {
@@ -17820,6 +18143,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -17864,6 +18188,7 @@
       "module": "messaging",
       "risk": "write",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.restoreConversationPresence",
       "inputSchema": {
@@ -17928,6 +18253,7 @@
       "module": "messaging",
       "risk": "secret",
       "permission": "messaging.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "messaging.deletePendingAttachment",
       "inputSchema": {
@@ -17984,6 +18310,7 @@
       "module": "pos",
       "risk": "write",
       "permission": "pos.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18039,6 +18366,7 @@
       "module": "pos",
       "risk": "money",
       "permission": "pos.sell",
+      "executionScope": "organization",
       "moneyThresholdMinor": 100000,
       "inverseCapabilityId": "pos.returnSale",
       "inputSchema": {
@@ -18200,6 +18528,7 @@
       "module": "pos",
       "risk": "write",
       "permission": "pos.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18244,6 +18573,7 @@
       "module": "pos",
       "risk": "money",
       "permission": "pos.sell",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18338,6 +18668,7 @@
       "module": "pos",
       "risk": "read",
       "permission": "pos.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18454,6 +18785,7 @@
       "module": "projects",
       "risk": "write",
       "permission": "projects.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18493,6 +18825,7 @@
       "module": "projects",
       "risk": "write",
       "permission": "projects.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18537,6 +18870,7 @@
       "module": "projects",
       "risk": "write",
       "permission": "projects.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "projects.archiveProject",
       "inputSchema": {
@@ -18580,6 +18914,7 @@
       "module": "projects",
       "risk": "write",
       "permission": "projects.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18647,6 +18982,7 @@
       "module": "projects",
       "risk": "read",
       "permission": "projects.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18758,6 +19094,7 @@
       "module": "projects",
       "risk": "write",
       "permission": "projects.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18815,6 +19152,7 @@
       "module": "purchasing",
       "risk": "read",
       "permission": "purchasing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18869,6 +19207,7 @@
       "module": "purchasing",
       "risk": "money",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -18927,6 +19266,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "purchasing.restorePaymentRunDraft",
       "inputSchema": {
@@ -18965,6 +19305,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -19012,6 +19353,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "accounting.reverseEntry",
       "inputSchema": {
@@ -19120,6 +19462,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "purchasing.cancelPaymentRunDraft",
       "inputSchema": {
@@ -19198,6 +19541,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -19283,6 +19627,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -19332,6 +19677,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -19380,6 +19726,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -19427,6 +19774,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -19475,6 +19823,7 @@
       "module": "purchasing",
       "risk": "money",
       "permission": "purchasing.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "purchasing.reversePaymentRun",
       "inputSchema": {
@@ -19538,6 +19887,7 @@
       "module": "purchasing",
       "risk": "read",
       "permission": "purchasing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -19671,6 +20021,7 @@
       "module": "purchasing",
       "risk": "read",
       "permission": "purchasing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -19811,6 +20162,7 @@
       "module": "purchasing",
       "risk": "read",
       "permission": "purchasing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -19959,6 +20311,7 @@
       "module": "purchasing",
       "risk": "money",
       "permission": "purchasing.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": 50000,
       "inverseCapabilityId": "purchasing.reverseVendorPayment",
       "inputSchema": {
@@ -20021,6 +20374,7 @@
       "module": "purchasing",
       "risk": "read",
       "permission": "purchasing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -20096,6 +20450,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -20196,6 +20551,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -20247,6 +20603,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "purchasing.cancelPaymentRunDraft",
       "inputSchema": {
@@ -20285,6 +20642,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -20366,6 +20724,7 @@
       "module": "purchasing",
       "risk": "money",
       "permission": "purchasing.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -20419,6 +20778,7 @@
       "module": "purchasing",
       "risk": "money",
       "permission": "purchasing.post",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -20475,6 +20835,7 @@
       "module": "purchasing",
       "risk": "write",
       "permission": "purchasing.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -20519,6 +20880,7 @@
       "module": "purchasing",
       "risk": "read",
       "permission": "purchasing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -20605,6 +20967,7 @@
       "module": "purchasing",
       "risk": "read",
       "permission": "purchasing.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -20675,6 +21038,7 @@
       "module": "routines",
       "risk": "write",
       "permission": "routines.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "routines.delete",
       "inputSchema": {
@@ -20915,6 +21279,7 @@
       "module": "routines",
       "risk": "write",
       "permission": "routines.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "routines.create",
       "inputSchema": {
@@ -21052,6 +21417,7 @@
       "module": "routines",
       "risk": "read",
       "permission": "routines.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -21163,6 +21529,7 @@
       "module": "routines",
       "risk": "write",
       "permission": "routines.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -21201,6 +21568,7 @@
       "module": "routines",
       "risk": "write",
       "permission": "routines.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -21355,6 +21723,7 @@
       "module": "sales",
       "risk": "write",
       "permission": "sales.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -21400,6 +21769,7 @@
       "module": "sales",
       "risk": "write",
       "permission": "sales.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "sales.cancelOrder",
       "inputSchema": {
@@ -21452,6 +21822,7 @@
       "module": "sales",
       "risk": "write",
       "permission": "sales.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "sales.cancelOrder",
       "inputSchema": {
@@ -21535,6 +21906,7 @@
       "module": "sales",
       "risk": "write",
       "permission": "sales.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -21608,6 +21980,7 @@
       "module": "sales",
       "risk": "read",
       "permission": "sales.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -21683,6 +22056,7 @@
       "module": "settings",
       "risk": "secret",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "settings.restoreAiProvider",
       "inputSchema": {
@@ -21770,6 +22144,18 @@
                     "type": "string",
                     "format": "date-time",
                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                  },
+                  "codingAgentUserId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -21878,6 +22264,18 @@
                     "type": "string",
                     "format": "date-time",
                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                  },
+                  "codingAgentUserId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -21976,6 +22374,18 @@
                     "type": "string",
                     "format": "date-time",
                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                  },
+                  "codingAgentUserId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -22008,6 +22418,7 @@
       "module": "settings",
       "risk": "secret",
       "permission": "iam.admin",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "settings.configureAiProvider",
       "inputSchema": {
@@ -22095,6 +22506,18 @@
                     "type": "string",
                     "format": "date-time",
                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                  },
+                  "codingAgentUserId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -22203,6 +22626,18 @@
                     "type": "string",
                     "format": "date-time",
                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                  },
+                  "codingAgentUserId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -22301,6 +22736,18 @@
                     "type": "string",
                     "format": "date-time",
                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                  },
+                  "codingAgentUserId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -22333,6 +22780,7 @@
       "module": "signals",
       "risk": "read",
       "permission": "signals.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -22464,6 +22912,7 @@
       "module": "skills",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -22527,6 +22976,7 @@
       "module": "skills",
       "risk": "read",
       "permission": "documents.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -22591,6 +23041,7 @@
       "module": "support",
       "risk": "write",
       "permission": "support.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -22641,6 +23092,7 @@
       "module": "support",
       "risk": "write",
       "permission": "support.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -22660,11 +23112,16 @@
           "category": {
             "type": "string",
             "maxLength": 40
+          },
+          "isPublic": {
+            "default": false,
+            "type": "boolean"
           }
         },
         "required": [
           "title",
-          "body"
+          "body",
+          "isPublic"
         ],
         "additionalProperties": false
       },
@@ -22689,6 +23146,7 @@
       "module": "support",
       "risk": "write",
       "permission": "support.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -22748,6 +23206,7 @@
       "module": "support",
       "risk": "write",
       "permission": "support.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "support.reopenConversation",
       "inputSchema": {
@@ -22793,6 +23252,7 @@
       "module": "support",
       "risk": "read",
       "permission": "support.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -22877,6 +23337,7 @@
       "module": "support",
       "risk": "read",
       "permission": "support.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -22956,6 +23417,7 @@
       "module": "support",
       "risk": "write",
       "permission": "support.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -23013,6 +23475,7 @@
       "module": "support",
       "risk": "read",
       "permission": "support.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -23108,6 +23571,7 @@
       "module": "support",
       "risk": "write",
       "permission": "support.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -23147,6 +23611,7 @@
       "module": "support",
       "risk": "write",
       "permission": "support.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "support.reopenConversation",
       "inputSchema": {
@@ -23186,6 +23651,7 @@
       "module": "support",
       "risk": "read",
       "permission": "support.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -23259,6 +23725,7 @@
       "module": "support",
       "risk": "write",
       "permission": "support.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": "support.resolveConversation",
       "inputSchema": {
@@ -23303,6 +23770,7 @@
       "module": "support",
       "risk": "read",
       "permission": "support.read",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {
@@ -23346,6 +23814,7 @@
       "module": "support",
       "risk": "write",
       "permission": "support.write",
+      "executionScope": "organization",
       "moneyThresholdMinor": null,
       "inverseCapabilityId": null,
       "inputSchema": {

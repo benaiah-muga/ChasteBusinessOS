@@ -67,6 +67,31 @@ func TestHashEventMatchesTypeScriptVector(t *testing.T) {
 	}
 }
 
+func TestHashEventCoversVerifiedAuthSessionAttribution(t *testing.T) {
+	actorID := "22222222-2222-4222-8222-222222222222"
+	capabilityID := "iam.bootstrapOrganization"
+	authSessionID := "33333333-3333-4333-8333-333333333333"
+	base := AppendEvent{
+		OrgID: "11111111-1111-4111-8111-111111111111", ActorType: "human", ActorID: &actorID,
+		Kind: "organization.created", CapabilityID: &capabilityID,
+		Payload:    json.RawMessage(`{"orgId":"44444444-4444-4444-8444-444444444444","name":"Parity Org"}`),
+		OccurredAt: time.Date(2024, 1, 2, 3, 4, 5, 123000000, time.UTC),
+	}
+	payload, err := stringifyPayload(base.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutSession := hashEvent(base, payload, strings.Repeat("0", 64), base.OccurredAt)
+	base.AuthSessionID = &authSessionID
+	withSession := hashEvent(base, payload, strings.Repeat("0", 64), base.OccurredAt)
+	if withSession == withoutSession {
+		t.Fatal("hashEvent did not cover the verified auth session id")
+	}
+	if want := "3ed97e2eb4f49c069e33161b3f6d8b7e70e6c1a5e388e3091b3226b585439fc6"; withSession != want {
+		t.Fatalf("hashEvent() with auth session = %s, want shared TypeScript vector %s", withSession, want)
+	}
+}
+
 func TestAppendTxUsesCallerTransactionAndGlobalHead(t *testing.T) {
 	actorID := "22222222-2222-4222-8222-222222222222"
 	capabilityID := "crm.createCustomer"
@@ -89,8 +114,8 @@ func TestAppendTxUsesCallerTransactionAndGlobalHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seq != tx.nextSeq || hash != tx.insertArgs[8] {
-		t.Fatalf("AppendTx() = (%d, %s), want seq %d and inserted hash %v", seq, hash, tx.nextSeq, tx.insertArgs[8])
+	if seq != tx.nextSeq || hash != tx.insertArgs[9] {
+		t.Fatalf("AppendTx() = (%d, %s), want seq %d and inserted hash %v", seq, hash, tx.nextSeq, tx.insertArgs[9])
 	}
 	if got, want := strings.Join(tx.operations, ","), "lock,head,insert"; got != want {
 		t.Fatalf("database operation order = %q, want %q", got, want)
@@ -98,13 +123,13 @@ func TestAppendTxUsesCallerTransactionAndGlobalHead(t *testing.T) {
 	if tx.lockKey != ledgerChainLockKey {
 		t.Fatalf("advisory lock key = %d, want %d", tx.lockKey, ledgerChainLockKey)
 	}
-	if tx.insertArgs[7] != tx.head {
-		t.Fatalf("insert prev_hash = %v, want global head %q", tx.insertArgs[7], tx.head)
+	if tx.insertArgs[8] != tx.head {
+		t.Fatalf("insert prev_hash = %v, want global head %q", tx.insertArgs[8], tx.head)
 	}
-	if tx.insertArgs[6] != `{"input":{"name":"Acme <Ltd>"}}` {
-		t.Fatalf("insert payload = %q, want compact JSON.stringify-compatible JSON", tx.insertArgs[6])
+	if tx.insertArgs[7] != `{"input":{"name":"Acme <Ltd>"}}` {
+		t.Fatalf("insert payload = %q, want compact JSON.stringify-compatible JSON", tx.insertArgs[7])
 	}
-	if got, want := tx.insertArgs[9].(time.Time), occurredAt.Truncate(time.Millisecond).UTC(); !got.Equal(want) {
+	if got, want := tx.insertArgs[10].(time.Time), occurredAt.Truncate(time.Millisecond).UTC(); !got.Equal(want) {
 		t.Fatalf("insert occurred_at = %s, want truncated UTC timestamp %s", got, want)
 	}
 	if tx.insertArgs[5] != &sessionID {

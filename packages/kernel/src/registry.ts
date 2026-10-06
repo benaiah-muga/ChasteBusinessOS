@@ -33,7 +33,9 @@ export class CapabilityRegistry {
   }
 
   forActor(actor: Actor): Capability[] {
-    return this.all().filter((c) => hasPermission(actor, c.permission));
+    return this.all().filter(
+      (c) => c.executionScope !== "pre-organization" && hasPermission(actor, c.permission),
+    );
   }
 
   /**

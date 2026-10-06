@@ -30,9 +30,26 @@ or organization ID.
   and `NOBYPASSRLS`, with no role memberships and only the required table
   privileges. Pin `search_path` to `pg_catalog`, revoke execution from
   `PUBLIC`, and grant execution only to `chaste_app`.
-- Keep the function as an internal database foundation. The future Go handler
-  must append `organization.created` only for a first execution and perform
-  the legacy best-effort embedding upgrade after commit.
+- Expose creation through the fixed `iam.bootstrapOrganization` capability
+  and a separate pre-organization Go executor entrypoint. Its shared
+  `executionScope` classification prevents ordinary organization execution
+  and agent tool discovery from dispatching the capability. The entrypoint
+  checks the live verified session against the HTTP resolver identity, calls
+  the database function, verifies the returned organization has the session
+  user's membership and intent receipt, and appends `organization.created`
+  only for a first execution in the same transaction. The event records the
+  Better Auth session in a separate nullable `auth_session_id` reference,
+  distinct from the agent-only `session_id`; non-null auth-session attribution
+  is included in the hash material. This is a bounded text reference without a
+  foreign key: sign-out deletes auth-session rows, and `ON DELETE SET NULL`
+  would rewrite hash-covered historical ledger data, while `RESTRICT` would
+  prevent sign-out. The executor revalidates the live verified session in the
+  transaction immediately before appending the event. Embedding upgrade runs
+  best-effort after commit.
+- The capability has no inverse. Deleting the initial organization would
+  invalidate its immutable creation event and receipts, and would erase the
+  first owner relationship needed to govern the workspace. Future workspace
+  closure must be a separate lifecycle action that retains audit history.
 - Before routing the public endpoint to Go, make legacy bootstrap calls share
   this serialization boundary or remove that route. A simultaneous legacy
   call with a different intent does not acquire the function's advisory lock.
@@ -41,6 +58,6 @@ or organization ID.
 
 The migration principal must be able to provision and assign the restricted
 function owner. Migration fails atomically if it cannot establish that
-boundary. The public cutover remains incomplete until the handler preserves
-the audit and post-commit embedding behavior and the legacy concurrency gap is
-resolved.
+boundary. The Go handler remains opt-in until Vite routing changes and legacy
+bootstrap shares the same serialization boundary or is removed; otherwise a
+simultaneous legacy request with a different intent can race the Go path.

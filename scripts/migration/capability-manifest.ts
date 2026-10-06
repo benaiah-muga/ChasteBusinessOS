@@ -72,6 +72,7 @@ async function main(): Promise<void> {
         module: capability.module,
         risk: capability.risk,
         permission: capability.permission,
+        executionScope: capability.executionScope ?? "organization",
         moneyThresholdMinor: capability.moneyThresholdMinor ?? null,
         inverseCapabilityId: capability.inverse?.capabilityId ?? null,
         inputSchema: wireSchema(capability.input),

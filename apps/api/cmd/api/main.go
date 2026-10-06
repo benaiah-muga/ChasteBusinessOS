@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -492,6 +493,39 @@ func run(logger *slog.Logger) error {
 		}
 		logger.Info("Go public support route mounted", "path", "/api/support/public")
 	}
+	var onboardingRoute http.Handler
+	if os.Getenv("GO_ONBOARDING_ROUTE") == "1" {
+		resolver, resolverErr := getSessionResolver()
+		if resolverErr != nil {
+			return resolverErr
+		}
+		var embeddingModel string
+		var embedder capability.SupportKnowledgeEmbedder
+		if os.Getenv("NVIDIA_API_KEY") != "" {
+			configuredModel := strings.TrimSpace(os.Getenv("MODEL_EMBEDDINGS"))
+			if configuredModel == "" {
+				configuredModel, err = capability.SupportEmbeddingModelFromEnv()
+			}
+			if err != nil {
+				logger.Warn("Go onboarding embedding upgrade disabled", "error", err)
+			} else {
+				for _, prefix := range []string{"openrouter/", "groq/", "mistral/", "zai/", "openai/"} {
+					configuredModel = strings.TrimPrefix(configuredModel, prefix)
+				}
+				configuredEmbedder, embedderErr := capability.SupportEmbeddingClientFromEnv()
+				if embedderErr != nil {
+					logger.Warn("Go onboarding embedding upgrade disabled", "error", embedderErr)
+				} else {
+					embeddingModel, embedder = configuredModel, configuredEmbedder
+				}
+			}
+		}
+		onboardingRoute, err = httpapi.NewGoOnboardingHandler(pool, capabilityExecutor, resolver, os.Getenv("BETTER_AUTH_SECRET"), embeddingModel, embedder, logger, trustedProxyCIDRs)
+		if err != nil {
+			return err
+		}
+		logger.Info("Go onboarding route mounted", "path", "POST /api/onboarding")
+	}
 	var scimReadRoute, scimWriteRoute http.Handler
 	scimRateLimiter := httpapi.NewSCIMRateLimiter()
 	if os.Getenv("GO_SCIM_READ_ROUTE") == "1" {
@@ -520,7 +554,7 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr: addr,
-		Handler: httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
+		Handler: httpapi.MountGoOnboardingRoute(httpapi.MountGoPOSShiftSummaryRoute(httpapi.MountGoPOSCustomersRoute(httpapi.MountGoPOSReadRoute(httpapi.MountGoInventoryReadRoute(httpapi.MountGoRoutinesRoute(httpapi.MountGoNotificationReadRoute(httpapi.MountGoSessionReadRoutes(httpapi.MountGoSCIMTokenManagementRoute(httpapi.MountSignalsRoute(httpapi.MountGoSCIMRoutes(httpapi.MountGoSalesOrdersRoute(httpapi.MountGoBusinessRoutes(httpapi.MountMyWorkSummaryRoute(httpapi.MountMyWorkRoute(httpapi.MountSetupRoute(httpapi.MountSupportPublicRoute(httpapi.NewRouterWithAuthAndOrgRoute(
 			pool,
 			logger,
 			os.Getenv("GO_INTERNAL_AUTH_SECRET"),
@@ -533,7 +567,7 @@ func run(logger *slog.Logger) error {
 			orgRoute,
 			authRoute,
 			approvalDecider,
-		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute),
+		), supportPublicRoute), setupRoute), myWorkRoute), myWorkSummaryRoute), portalInvoiceRoute, salesInvoiceRoute, supportChannelsRoute, sessionCapabilityRoute, modulesRoute, modulesWriteRoute, projectsRoute, teamReadRoute, teamWriteRoute, brandingRoute, analyticsRoute, dashboardRoute, ledgerRoute, directMetricsRoute), salesOrdersRoute), scimReadRoute, scimWriteRoute), signalsRoute), scimTokenManagementRoute), sessionsListRoute, sessionsDetailRoute, durableRunsRoute, notificationsRoute), notificationReadRoute), routinesRoute), inventoryReadRoute), posReadRoute), posCustomersRoute), posShiftSummaryRoute), onboardingRoute),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

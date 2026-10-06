@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -42,9 +43,18 @@ func NewNVIDIAEmbeddingClient(apiKey string) (*NVIDIAEmbeddingClient, error) {
 	if apiKey == "" || len(apiKey) > 4096 || strings.ContainsAny(apiKey, "\r\n") {
 		return nil, errors.New("NVIDIA embedding API key is invalid")
 	}
+	endpoint := nvidiaEmbeddingEndpoint
+	if configured := strings.TrimSpace(os.Getenv("NIM_BASE_URL")); configured != "" {
+		base, err := url.Parse(configured)
+		if err != nil || base == nil || (base.Scheme != "https" && base.Scheme != "http") || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+			return nil, errors.New("NIM_BASE_URL is invalid")
+		}
+		base.Path = strings.TrimRight(base.Path, "/") + "/embeddings"
+		endpoint = base.String()
+	}
 	return &NVIDIAEmbeddingClient{
 		apiKey:   apiKey,
-		endpoint: nvidiaEmbeddingEndpoint,
+		endpoint: endpoint,
 		client: &http.Client{
 			Timeout: 20 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error {

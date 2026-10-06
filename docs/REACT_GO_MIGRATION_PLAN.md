@@ -1773,7 +1773,11 @@ new owners and the manifest shows zero legacy runtime paths.
      attempts by that user, and create the organization, seeded records, and
      intent receipt atomically under a dedicated `chaste_bootstrap_owner` role
      with `NOBYPASSRLS`, a pinned search path, and execution granted only to
-     `chaste_app`. This is foundation only: the public Go handler must also
-     append `organization.created`, perform the best-effort embedding upgrade,
-     and coordinate with the legacy route before cutover. Browser proof remains
-     open.
+     `chaste_app`.
+183. Add the verified pre-organization `iam.bootstrapOrganization` executor
+     entrypoint. Keep the capability out of ordinary org-scoped dispatch and
+     agent tool lists; verify the live session and its resolved identity,
+     execute bootstrap and append its first-create ledger event in one
+     transaction, then upgrade embeddings best-effort after commit. The Go
+     endpoint remains opt-in until Vite routing and legacy cross-runtime
+     serialization are resolved. Browser proof remains open.

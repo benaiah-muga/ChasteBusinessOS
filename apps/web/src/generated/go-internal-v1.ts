@@ -59,6 +59,7 @@ export interface components {
             actorType: string;
             actorId: string | null;
             sessionId: string | null;
+            authSessionId: string | null;
             payload: unknown;
             hash: string;
             prevHash: string | null;

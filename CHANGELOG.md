@@ -11,6 +11,7 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ## [Unreleased]
 
+- Added the Go pre-organization `iam.bootstrapOrganization` capability boundary for verified human workspace creation. Session identity, bootstrap receipt, and the attributed `organization.created` event commit atomically; its bounded nullable auth-session reference is hash-covered and preserved after logout without a foreign key, while embedding remains best-effort after commit. The endpoint stays opt-in pending route cutover.
 - Fixed Go purchasing quote-award validation to report a losing or already-awarded RFQ before checking whether its parent request can create an order. Kept the serialized request decision check intact.
 - Fixed Vite POS register open and close recovery so retries use the exact actor/org scoped payload and intent. Missing scope, unavailable storage, and corrupt retry markers fail closed; scope changes ignore stale responses, unresolved inputs are frozen, and 408/429 keep the retry identity.
 - Fixed Vite manual stock adjustments so pending and uncertain Go writes restore the exact actor/org scoped action and retry intent after reload. Inputs freeze while saving or unresolved, and stale responses from an old workspace are ignored.

@@ -10,11 +10,12 @@ type ErrorResponse struct {
 
 // GoLedgerEvent defines model for GoLedgerEvent.
 type GoLedgerEvent struct {
-	ActorId      *string `json:"actorId"`
-	ActorType    string  `json:"actorType"`
-	CapabilityId *string `json:"capabilityId"`
-	Hash         string  `json:"hash"`
-	Kind         string  `json:"kind"`
+	ActorId       *string `json:"actorId"`
+	ActorType     string  `json:"actorType"`
+	AuthSessionId *string `json:"authSessionId"`
+	CapabilityId  *string `json:"capabilityId"`
+	Hash          string  `json:"hash"`
+	Kind          string  `json:"kind"`
 
 	// OccurredAt UTC timestamp formatted with millisecond precision.
 	OccurredAt string  `json:"occurredAt"`

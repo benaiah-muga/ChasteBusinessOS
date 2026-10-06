@@ -122,7 +122,7 @@ components:
     GoLedgerEvent:
       type: object
       additionalProperties: false
-      required: [seq, kind, capabilityId, actorType, actorId, sessionId, payload, hash, prevHash, occurredAt]
+      required: [seq, kind, capabilityId, actorType, actorId, sessionId, authSessionId, payload, hash, prevHash, occurredAt]
       properties:
         seq:
           type: integer
@@ -136,6 +136,8 @@ components:
         actorId:
           type: [string, "null"]
         sessionId:
+          type: [string, "null"]
+        authSessionId:
           type: [string, "null"]
         payload:
           x-go-type: RawJSON

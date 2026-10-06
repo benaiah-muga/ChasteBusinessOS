@@ -116,6 +116,9 @@ export class KernelExecutor {
   ): Promise<CapabilityResult<O>> {
     const cap = this.deps.registry.get(capId) as Capability<I, O> | undefined;
     if (!cap) return { ok: false, error: `unknown capability: ${capId}` };
+    if (cap.executionScope === "pre-organization") {
+      return { ok: false, error: `capability "${capId}" requires its dedicated pre-organization executor` };
+    }
 
     // Module availability is checked before anything else about the action:
     // a disabled module must not even validate inputs, appear in tool lists,
