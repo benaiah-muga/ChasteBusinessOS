@@ -1753,3 +1753,8 @@ new owners and the manifest shows zero legacy runtime paths.
      pending or uncertain outcomes, reject stale scope responses, retain 408/429
      identity, and fail closed on unavailable storage or corrupt markers.
      Browser proof remains open.
+179. Route Vite CRM task due date and assignee updates through the Go
+     `crm.updateTaskDetails` capability under `CHASTE_GO_CRM_TASK_WRITES=1`.
+     Scan actor/org scoped retry records on load, keep affected tasks locked
+     from completion across editor switches, and require the Go task ID to
+     match before clearing a saved attempt. Browser proof remains open.

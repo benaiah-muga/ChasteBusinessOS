@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CRMPage } from "./CRMPage";
+import { submitCrmTaskMutation } from "../api/crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -820,6 +821,99 @@ describe("Vite CRM page", () => {
     expect(await screen.findByText("Manager approval required")).not.toBeNull();
     expect(completion.checked).toBe(false);
     expect(JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/crm" && init?.method === "POST")?.[1]?.body))).toMatchObject({ action: "completeTask", taskId });
+  });
+
+  it("saves and retries an exact task detail update through the Go task selector", async () => {
+    vi.stubGlobal("__GO_CRM_TASK_WRITES__", true);
+    const taskId = "99999999-9999-4999-8999-999999999999";
+    const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
+    const task = { id: taskId, title: "Review renewal", dueAt: null, doneAt: null, assigneeUserId: null, assigneeName: null };
+    let capabilityWrites = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [task] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        capabilityWrites += 1;
+        return capabilityWrites === 1
+          ? Response.json({ pendingApproval: true, reason: "Manager approval required" }, { status: 202 })
+          : Response.json({ ok: true, data: { taskId, previous: { dueAt: null, assigneeUserId: null } } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit details" }));
+    fireEvent.change(await screen.findByLabelText("Task due date"), { target: { value: "2026-10-15" } });
+    fireEvent.change(screen.getByLabelText("Task assignee"), { target: { value: ownerId } });
+    fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+    expect(await screen.findByText("Manager approval required")).not.toBeNull();
+    expect((screen.getByLabelText("Task due date") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "Review renewal" }) as HTMLInputElement).disabled).toBe(true);
+    const retryButton = screen.getByRole("button", { name: "Retry update" });
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === "/api/capabilities/execute" && init?.method === "POST")).toHaveLength(2));
+    const bodies = fetchMock.mock.calls.filter(([url, init]) => String(url) === "/api/capabilities/execute" && init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies[0]).toMatchObject({ capabilityId: "crm.updateTaskDetails", input: { taskId, dueAt: new Date("2026-10-15T12:00:00").toISOString(), assigneeUserId: ownerId }, intentId: expect.any(String) });
+    expect(bodies[1]).toEqual(bodies[0]);
+  });
+
+  it("recovers task detail retries on mount and prevents completion until resolved", async () => {
+    vi.stubGlobal("__GO_CRM_TASK_WRITES__", true);
+    const taskId = "99999999-9999-4999-8999-999999999999";
+    const otherTaskId = "88888888-8888-4888-8888-888888888888";
+    const ownerId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
+    const action = { action: "updateTaskDetails" as const, taskId, dueAt: "2026-10-15T12:00:00.000Z", assigneeUserId: ownerId };
+    const scope = { actorId: customerId, organizationId: dealId };
+    const preseedFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ pendingApproval: true, error: "Manager approval required" }, { status: 202 }));
+    vi.stubGlobal("fetch", preseedFetch);
+    await submitCrmTaskMutation(action, undefined, true, scope);
+    const savedAttempt = JSON.parse(String(preseedFetch.mock.calls[0]?.[1]?.body));
+
+    let capabilityWrites = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/deals") return Response.json({ deals: [] });
+      if (path === "/api/customers") return Response.json({ customers: [] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [
+        { id: taskId, title: "Review renewal", dueAt: null, doneAt: null, assigneeUserId: null },
+        { id: otherTaskId, title: "Check shipment", dueAt: null, doneAt: null, assigneeUserId: null },
+      ] });
+      if (path === "/api/crm/views") return Response.json({ views: [] });
+      if (path === "/api/team") return Response.json({ members: [{ userId: ownerId, name: "Avery", email: "avery@example.test" }] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        capabilityWrites += 1;
+        return Response.json({ ok: true, data: { taskId, previous: { dueAt: null, assigneeUserId: null } } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tasks/ }));
+    const completion = await screen.findByRole("checkbox", { name: "Review renewal" }) as HTMLInputElement;
+    const pendingTaskRow = screen.getByText("Review renewal").closest("li")!;
+    const otherTaskRow = screen.getByText("Check shipment").closest("li")!;
+    await waitFor(() => expect((within(pendingTaskRow).getByRole("button", { name: "Edit details" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(completion.disabled).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "Check shipment" }) as HTMLInputElement).disabled).toBe(false);
+    expect(capabilityWrites).toBe(0);
+
+    fireEvent.click(within(otherTaskRow).getByRole("button", { name: "Edit details" }));
+    expect(completion.disabled).toBe(true);
+    fireEvent.click(within(pendingTaskRow).getByRole("button", { name: "Edit details" }));
+    expect((await screen.findByLabelText("Task due date") as HTMLInputElement).value).toBe("2026-10-15");
+    expect((screen.getByLabelText("Task assignee") as HTMLSelectElement).value).toBe(ownerId);
+    fireEvent.click(screen.getByRole("button", { name: "Retry update" }));
+    await waitFor(() => expect(capabilityWrites).toBe(1));
+    const retriedBody = JSON.parse(String(fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/capabilities/execute" && init?.method === "POST")?.[1]?.body));
+    expect(retriedBody).toEqual(savedAttempt);
   });
 
   it("downloads a CSV containing the selected customer rows", async () => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTimeline, importCrmCustomers, readPendingCrmCustomerCreate, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -200,6 +200,41 @@ describe("CRM API client", () => {
 
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId, extra: true } })));
     await expect(submitCrmTaskMutation({ action: "createTask", title: "Call customer" }, undefined, true, scope)).rejects.toMatchObject({ name: "CrmApiError", message: "The CRM service returned an unexpected task result." });
+  });
+
+  it("routes task detail updates through Go, restores the exact pending payload, and falls back with the same intent on 404", async () => {
+    const taskId = "77e93149-61d7-48ed-929d-754ddfa263b1";
+    const assigneeUserId = "4a16ce8b-8f2a-4e10-8bd8-2396c61ad78a";
+    const scope = { actorId: customerId, organizationId: dealId };
+    const action = { action: "updateTaskDetails" as const, taskId, dueAt: null, assigneeUserId };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: false, pendingApproval: true, reason: "Manager approval required" }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { taskId, previous: { dueAt: "2026-10-15T12:00:00.000Z", assigneeUserId: null } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitCrmTaskMutation(action, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Manager approval required" });
+    await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toEqual(action);
+    await expect(readPendingCrmTaskDetailsForScope(scope)).resolves.toEqual([action]);
+    await submitCrmTaskMutation(action, undefined, true, scope);
+
+    const goBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    const legacyBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute", "/api/crm"]);
+    expect(goBody).toMatchObject({ capabilityId: "crm.updateTaskDetails", input: { taskId, dueAt: null, assigneeUserId }, intentId: expect.any(String) });
+    expect(retryBody.intentId).toBe(goBody.intentId);
+    expect(legacyBody).toMatchObject({ ...action, intentId: goBody.intentId });
+    await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toBeNull();
+    await expect(readPendingCrmTaskDetailsForScope(scope)).resolves.toEqual([]);
+
+    const otherTaskId = "4d906ed9-70da-4e66-a8e7-a192cfaf42db";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId: otherTaskId, previous: { dueAt: null, assigneeUserId: null } } })));
+    await expect(submitCrmTaskMutation(action, undefined, true, scope)).rejects.toMatchObject({ message: "The CRM service returned an unexpected task result." });
+    await expect(readPendingCrmTaskDetails(scope, taskId)).resolves.toEqual(action);
+
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { taskId, previous: { dueAt: null, assigneeUserId: null }, extra: true } })));
+    await expect(submitCrmTaskMutation(action, undefined, true, scope)).rejects.toMatchObject({ message: "The CRM service returned an unexpected task result." });
   });
 
   it("retains the exact create-task draft and intent while pending, after reload, and on 404 fallback", async () => {
