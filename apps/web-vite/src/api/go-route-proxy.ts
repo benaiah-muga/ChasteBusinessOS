@@ -178,6 +178,10 @@ export function goManufacturingWorkOrderWritesFromEnv(env: Record<string, string
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES === "1";
 }
 
+export function goManufacturingDefineBomSliceFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE === "1";
+}
+
 export function goManufacturingProductionWritesFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MANUFACTURING_PRODUCTION_WRITES === "1";
 }

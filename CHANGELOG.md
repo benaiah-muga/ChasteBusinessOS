@@ -23,7 +23,9 @@ The full v1 changelog is preserved at the bottom of this file.
   production fail closed on 404 without retrying through `/api/manufacturing`.
   Their actor/org-scoped exact intent stays pending for same-action Go retry;
   selector rollback is blocked until that retry is resolved. Selector-off
-  actions continue to use the legacy route.
+  actions continue to use the legacy route. BOM definition now uses Go by
+  default; set both `CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE` and
+  `GO_MANUFACTURING_DEFINE_BOM_SLICE` to `0` for explicit legacy rollback.
 
 - Vite's HR Overview report can use the authenticated Go `hr.report` capability
   behind `CHASTE_GO_HR_OVERVIEW_REPORT_READS=1` and

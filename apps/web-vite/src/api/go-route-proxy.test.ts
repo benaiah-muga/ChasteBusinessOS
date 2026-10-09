@@ -36,6 +36,7 @@ import {
   goPurchasingIntelReadsFromEnv,
   goPurchasingSourcingWritesFromEnv,
   goManufacturingWorkOrderWritesFromEnv,
+  goManufacturingDefineBomSliceFromEnv,
   goManufacturingProductionWritesFromEnv,
   goManufacturingPlanningReadsFromEnv,
   goSalesOrderReadsFromEnv,
@@ -473,6 +474,14 @@ describe("manufacturing work order Go selector", () => {
     expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES: "1" })).toBe(true);
     expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goManufacturingWorkOrderWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_WORK_ORDER_WRITES: "1" })).toBe(false);
+  });
+});
+
+describe("manufacturing BOM definition Go selector", () => {
+  it("requires the BOM selector and session capability route, with selector-off rollback", () => {
+    expect(goManufacturingDefineBomSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE: "1" })).toBe(true);
+    expect(goManufacturingDefineBomSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE: "0" })).toBe(false);
+    expect(goManufacturingDefineBomSliceFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE: "1" })).toBe(false);
   });
 });
 

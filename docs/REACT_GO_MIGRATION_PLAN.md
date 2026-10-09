@@ -2305,3 +2305,14 @@ new owners and the manifest shows zero legacy runtime paths.
      submission unchanged. Focused Vite API, proxy, and page tests cover the
      read path; the existing Go receipt integration test proves permission and
      tenant behavior.
+225. (Implemented; default-on) Route only Vite BOM definition through Go's
+     authenticated `manufacturing.defineBom` capability when
+     `CHASTE_GO_MANUFACTURING_DEFINE_BOM_SLICE=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`, with
+     `GO_MANUFACTURING_DEFINE_BOM_SLICE=1` enforced server-side for all
+     capability callers. Set both BOM selector flags to `0` for legacy
+     rollback. Preserve `manufacturing.write` authorization, tenant scope, and
+     actor/org-scoped exact retry behavior; selected Go failures do not retry
+     through legacy. Other Manufacturing routes remain unchanged. The Vite
+     selector test covers explicit rollback, and the Go session handler test
+     covers disabled and enabled capability behavior.
