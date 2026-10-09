@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite CRM saved-view create, pin, and share writes can use Go's authenticated
+  `crm.saveCustomerView` capability behind paired
+  `CHASTE_GO_CRM_VIEW_WRITES=1` and `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`
+  selectors. Exact action retries are scoped to the active actor and
+  organization and recover after reload; pending or uncertain writes block
+  duplicate edits and legacy fallback. Saved-view reads remain unchanged.
+
 - Vite product CSV imports, undo, and restore can use Go's authenticated
   `inventory.importItems`, `inventory.undoItemImport`, and
   `inventory.restoreItemImport` capabilities. Exact pending intent inputs and

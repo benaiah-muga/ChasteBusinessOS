@@ -6,6 +6,7 @@ import {
   type CrmFollowUpDraft,
   type CrmDealCreateInput,
   type CrmCustomerProfileUpdateMutation,
+  type CrmSavedViewWriteMutation,
   type CrmTask,
   type CrmTaskMutation,
   type CrmTimelineEntry,
@@ -29,6 +30,7 @@ import {
   readPendingCrmCustomerMergeUndo,
   readCrmCustomerMergeUndo,
   readPendingCrmCustomerProfileUpdate,
+  readPendingCrmSavedViewWrite,
   readPendingCrmTaskCreate,
   readPendingCrmTaskDetailsForScope,
   submitCrmAction,
@@ -39,6 +41,7 @@ import {
   submitCrmCustomerMerge,
   submitCrmCustomerMergeUndo,
   submitCrmCustomerProfileUpdate,
+  submitCrmSavedViewWrite,
   submitCrmTaskMutation,
   undoCrmImport,
 } from "../api/crm";
@@ -167,6 +170,7 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sharedBusy, setSharedBusy] = useState(false);
+  const [savedViewBusyCount, setSavedViewBusyCount] = useState(0);
   const [customerCreateBusy, setCustomerCreateBusy] = useState(false);
   const [dealCreateBusy, setDealCreateBusy] = useState(false);
   const [profileUpdateBusyCount, setProfileUpdateBusyCount] = useState(0);
@@ -222,6 +226,8 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const [importRetryLocked, setImportRetryLocked] = useState(false);
   const [importRecoveryResolvedScope, setImportRecoveryResolvedScope] = useState<string | null>(null);
   const [saveViewName, setSaveViewName] = useState("");
+  const [savedViewRecovery, setSavedViewRecovery] = useState<CrmSavedViewWriteMutation | null>(null);
+  const [savedViewResolvedScope, setSavedViewResolvedScope] = useState<string | null>(null);
   const [convertTarget, setConvertTarget] = useState<CrmDeal | null>(null);
   const [convertMode, setConvertMode] = useState<"new" | "existing">("new");
   const [convertCustomerId, setConvertCustomerId] = useState("");
@@ -237,10 +243,13 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
   const dealCreateScopeGeneration = useRef(0);
   const profileUpdateScopeRef = useRef<string | null>(null);
   const profileUpdateScopeGeneration = useRef(0);
+  const savedViewScopeRef = useRef<string | null>(null);
+  const savedViewScopeGeneration = useRef(0);
   const goCrmTaskWrites = typeof __GO_CRM_TASK_WRITES__ !== "undefined" && __GO_CRM_TASK_WRITES__;
   const goCrmCustomerCreate = typeof __GO_CRM_CUSTOMER_CREATE__ !== "undefined" && __GO_CRM_CUSTOMER_CREATE__;
   const goCrmCustomerImport = typeof __GO_CRM_CUSTOMER_IMPORT__ !== "undefined" && __GO_CRM_CUSTOMER_IMPORT__;
   const goCrmCustomerProfileUpdate = typeof __GO_CRM_CUSTOMER_PROFILE_UPDATE__ !== "undefined" && __GO_CRM_CUSTOMER_PROFILE_UPDATE__;
+  const goCrmViewWrites = typeof __GO_CRM_VIEW_WRITES__ !== "undefined" && __GO_CRM_VIEW_WRITES__;
   const goCrmDealCreate = typeof __GO_CRM_DEAL_CREATE__ !== "undefined" && __GO_CRM_DEAL_CREATE__;
   const customerCreateScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
   if (customerCreateScopeRef.current !== customerCreateScopeIdentity) {
@@ -257,15 +266,21 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     profileUpdateScopeRef.current = profileUpdateScopeIdentity;
     profileUpdateScopeGeneration.current += 1;
   }
+  const savedViewScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
+  if (savedViewScopeRef.current !== savedViewScopeIdentity) {
+    savedViewScopeRef.current = savedViewScopeIdentity;
+    savedViewScopeGeneration.current += 1;
+  }
   const mergeRecoveryScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
   const importRecoveryScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
-  const busy = sharedBusy || customerCreateBusy || dealCreateBusy || profileUpdateBusyCount > 0;
+  const busy = sharedBusy || savedViewBusyCount > 0 || customerCreateBusy || dealCreateBusy || profileUpdateBusyCount > 0;
   const customerCreateReady = Boolean(customerCreateScopeIdentity && customerCreateResolvedScope === customerCreateScopeIdentity);
   const dealCreateReady = Boolean(dealCreateScopeIdentity && dealCreateResolvedScope === dealCreateScopeIdentity);
   const taskDraftScopeIdentity = actorId?.trim() && organizationId?.trim() ? `${actorId.trim()}:${organizationId.trim()}` : null;
   const taskDraftReady = !goCrmTaskWrites || Boolean(taskDraftScopeIdentity && taskDraftResolvedScope === taskDraftScopeIdentity);
   const taskDetailsReady = !goCrmTaskWrites || Boolean(taskDraftScopeIdentity && taskDetailsRecoveryScope === taskDraftScopeIdentity);
   const profileUpdateReady = !goCrmCustomerProfileUpdate || Boolean(profileUpdateScopeIdentity && profileUpdateResolvedScope === profileUpdateScopeIdentity);
+  const savedViewReady = Boolean(savedViewScopeIdentity && savedViewResolvedScope === savedViewScopeIdentity);
   const lockedProfileCustomerId = profileUpdateLocked && profileUpdateAction?.name !== undefined ? profileUpdateAction.customerIds[0] : null;
 
   const load = useCallback(async (signal?: AbortSignal, isCurrent: () => boolean = () => true) => {
@@ -294,6 +309,26 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       controller.abort();
     };
   }, [load]);
+
+  useEffect(() => {
+    if (!savedViewScopeIdentity || !actorId?.trim() || !organizationId?.trim()) {
+      setSavedViewResolvedScope(null);
+      setSavedViewRecovery(null);
+      return;
+    }
+    if (savedViewResolvedScope === savedViewScopeIdentity) return;
+    let active = true;
+    setSavedViewResolvedScope(null);
+    setSavedViewRecovery(null);
+    void readPendingCrmSavedViewWrite({ actorId, organizationId }).then((pending) => {
+      if (!active) return;
+      setSavedViewRecovery(pending);
+      setSavedViewResolvedScope(savedViewScopeIdentity);
+    }).catch((reason: unknown) => {
+      if (active) setNotice({ tone: "error", text: friendlyError(reason) });
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId, savedViewResolvedScope, savedViewScopeIdentity]);
 
   useEffect(() => {
     if (mergeRecoveryScopeIdentity && mergeRecoveryResolvedScope === mergeRecoveryScopeIdentity) return;
@@ -588,9 +623,10 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     }
   }, [profileUpdateAction]);
 
-  async function mutate(path: "/api/deals" | "/api/customers" | "/api/crm" | "/api/crm/views", action: Record<string, unknown>, onDone?: (data: Record<string, unknown>) => void, submitAction?: () => ReturnType<typeof submitCrmAction>, isCurrent: () => boolean = () => true, busyOwner: "shared" | "customer-create" | "deal-create" = "shared"): Promise<boolean> {
+  async function mutate(path: "/api/deals" | "/api/customers" | "/api/crm" | "/api/crm/views", action: Record<string, unknown>, onDone?: (data: Record<string, unknown>) => void, submitAction?: () => ReturnType<typeof submitCrmAction>, isCurrent: () => boolean = () => true, busyOwner: "shared" | "customer-create" | "deal-create" | "saved-view" = "shared"): Promise<boolean> {
     const setOperationBusy = busyOwner === "customer-create" ? setCustomerCreateBusy : busyOwner === "deal-create" ? setDealCreateBusy : setSharedBusy;
-    setOperationBusy(true);
+    if (busyOwner === "saved-view") setSavedViewBusyCount((count) => count + 1);
+    else setOperationBusy(true);
     try {
       const outcome = await (submitAction ? submitAction() : submitCrmAction(path, action));
       if (!isCurrent()) return false;
@@ -612,7 +648,10 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       if (!isCurrent()) return false;
       setNotice({ tone: "error", text: friendlyError(reason) });
       return false;
-    } finally { if (isCurrent()) setOperationBusy(false); }
+    } finally {
+      if (busyOwner === "saved-view") setSavedViewBusyCount((count) => Math.max(0, count - 1));
+      else if (isCurrent()) setOperationBusy(false);
+    }
   }
 
   async function moveDeal(deal: CrmDeal, next: (typeof stages)[number], reason?: string) {
@@ -938,10 +977,28 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
     try { setViews(await fetchCrmViews()); } catch (reason) { setNotice({ tone: "error", text: friendlyError(reason) }); }
   }
 
-  async function saveView(name = saveViewName, view?: SavedCustomerView) {
+  async function saveView(name = saveViewName, view?: { id?: string; name: string; filters: CustomerFilter; isShared: boolean; isPinned: boolean }) {
     if (!name.trim()) return;
-    const result = await mutate("/api/crm/views", { ...(view ? { id: view.id } : {}), name: name.trim(), filters: view?.filters ?? customerFilter, isShared: view?.isShared ?? true, isPinned: view?.isPinned ?? false });
-    if (result) { setSaveViewName(""); await refreshViews(); }
+    const action: CrmSavedViewWriteMutation = { action: "saveCustomerView", ...(view?.id ? { id: view.id } : {}), name: name.trim(), filters: view?.filters ?? customerFilter, isShared: view?.isShared ?? true, isPinned: view?.isPinned ?? false };
+    if (!savedViewReady) return;
+    const generation = savedViewScopeGeneration.current;
+    const isCurrent = () => savedViewScopeGeneration.current === generation;
+    setSavedViewRecovery(action);
+    const result = await mutate("/api/crm/views", action, () => {
+      setSavedViewRecovery(null);
+      setSaveViewName((current) => current === action.name ? "" : current);
+    }, async () => {
+      try {
+        const outcome = await submitCrmSavedViewWrite({ ...(action.id ? { id: action.id } : {}), name: action.name, filters: action.filters, isShared: action.isShared, isPinned: action.isPinned }, undefined, goCrmViewWrites, { actorId, organizationId });
+        if (outcome.kind === "pending" && isCurrent()) setSavedViewRecovery(action);
+        return outcome;
+      } catch (reason) {
+        const uncertain = reason instanceof CrmApiError && (reason.requestMayHaveReachedServer || reason.status === 408 || reason.status === 429 || reason.status >= 500);
+        if (isCurrent()) setSavedViewRecovery(uncertain ? action : null);
+        throw reason;
+      }
+    }, isCurrent, "saved-view");
+    if (result) await refreshViews();
   }
 
   function previewMappedRows(sourceRows: string[][], mapping: { name: number; email: number; phone: number }): ImportPreviewRow[] {
@@ -1087,7 +1144,9 @@ export function CRMPage({ actorId = null, organizationId = null }: { actorId?: s
       {!customerCreateReady && <p role="status">CRM is waiting for account and organization details or restoring a saved customer draft.</p>}
       {goCrmCustomerCreate && customerCreateLocked && <p role="status">This customer creation is pending or uncertain. Retry the same details to resolve it.</p>}
       <div className="crm-filter-row"><label>Search<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, email, phone, or tag" /></label><label>Status<select value={customerFilter.status} onChange={(event) => setCustomerFilter({ ...customerFilter, status: event.target.value as CustomerFilter["status"] })}><option value="active">Active</option><option value="inactive">Inactive</option><option value="all">All</option></select></label><label>Owner<select value={customerFilter.owner} onChange={(event) => setCustomerFilter({ ...customerFilter, owner: event.target.value })}><option value="all">All owners</option><option value="unassigned">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label><label>Tag<input value={customerFilter.tag} onChange={(event) => setCustomerFilter({ ...customerFilter, tag: event.target.value })} /></label><label className="crm-check"><input type="checkbox" checked={customerFilter.staleOnly} onChange={(event) => setCustomerFilter({ ...customerFilter, staleOnly: event.target.checked })} /> No activity in 30 days</label><label className="crm-check"><input type="checkbox" checked={customerFilter.duplicateOnly} onChange={(event) => setCustomerFilter({ ...customerFilter, duplicateOnly: event.target.checked })} /> Possible duplicates</label></div>
-      <div className="crm-saved-views"><label>Saved views<select aria-label="Saved customer views" value="" onChange={(event) => { const view = views.find((entry) => entry.id === event.target.value); if (view) setCustomerFilter(view.filters); }}><option value="">Choose a view</option>{views.filter((view) => view.isPinned).map((view) => <option key={view.id} value={view.id}>★ {view.name}</option>)}{views.filter((view) => !view.isPinned).map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><input aria-label="Saved view name" placeholder="Name this view" value={saveViewName} onChange={(event) => setSaveViewName(event.target.value)} /><button type="button" disabled={!saveViewName.trim() || busy} onClick={() => void saveView()}>Save current view</button>{views.map((view) => <span className="crm-view-chip" key={view.id}>{view.name}<button type="button" aria-label={`Pin ${view.name}`} onClick={() => void saveView(view.name, { ...view, isPinned: !view.isPinned })}>{view.isPinned ? "★" : "☆"}</button><button type="button" aria-label={`Share ${view.name}`} onClick={() => void saveView(view.name, { ...view, isShared: !view.isShared })}>{view.isShared ? "Shared" : "Private"}</button></span>)}</div>
+      <div className="crm-saved-views"><label>Saved views<select aria-label="Saved customer views" value="" onChange={(event) => { const view = views.find((entry) => entry.id === event.target.value); if (view) setCustomerFilter(view.filters); }}><option value="">Choose a view</option>{views.filter((view) => view.isPinned).map((view) => <option key={view.id} value={view.id}>★ {view.name}</option>)}{views.filter((view) => !view.isPinned).map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label><input aria-label="Saved view name" placeholder="Name this view" maxLength={60} value={saveViewName} onChange={(event) => setSaveViewName(event.target.value)} /><button type="button" disabled={!saveViewName.trim() || busy || !savedViewReady || Boolean(savedViewRecovery)} onClick={() => void saveView()}>Save current view</button>{views.map((view) => <span className="crm-view-chip" key={view.id}>{view.name}<button type="button" aria-label={`Pin ${view.name}`} disabled={busy || !savedViewReady || Boolean(savedViewRecovery)} onClick={() => void saveView(view.name, { ...view, isPinned: !view.isPinned })}>{view.isPinned ? "★" : "☆"}</button><button type="button" aria-label={`Share ${view.name}`} disabled={busy || !savedViewReady || Boolean(savedViewRecovery)} onClick={() => void saveView(view.name, { ...view, isShared: !view.isShared })}>{view.isShared ? "Shared" : "Private"}</button></span>)}</div>
+      {!savedViewReady && <p role="status">CRM is checking for a saved-view change associated with this account and organization.</p>}
+      {savedViewRecovery && <p role="status">This saved-view change is pending or uncertain. Retry its exact details before making another saved-view change. <button type="button" disabled={busy || !goCrmViewWrites || !savedViewReady} onClick={() => void saveView(savedViewRecovery.name, { ...(savedViewRecovery.id ? { id: savedViewRecovery.id } : {}), name: savedViewRecovery.name, filters: savedViewRecovery.filters, isShared: savedViewRecovery.isShared, isPinned: savedViewRecovery.isPinned })}>Retry saved-view change</button></p>}
       <form className="crm-bulk-customer-form" aria-label="Bulk customer updates" onSubmit={(event) => { event.preventDefault(); void applyBulkCustomerUpdate(); }}>
         <span>{selectedCustomerIds.length} selected</span>
         <label>Assign owner<select aria-label="Bulk owner" disabled={busy || !profileUpdateReady || profileUpdateLocked} value={bulkOwner} onChange={(event) => setBulkOwner(event.target.value)}><option value="unchanged">Keep current owner</option><option value="unassigned">Unassigned</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.name ?? member.email}</option>)}</select></label>

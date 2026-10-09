@@ -236,6 +236,7 @@ const CRM_CUSTOMER_IMPORT_UNDO_INTENT_PREFIX = "chaste.crm.customer-import-undo-
 const CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX = "chaste.crm.customer-import-undo-state.v1:";
 const CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX = "chaste.crm.customer-profile-update-intent.v1:";
 const CRM_DEAL_CREATE_INTENT_PREFIX = "chaste.crm.deal-create-intent.v1:";
+const CRM_SAVED_VIEW_WRITE_INTENT_PREFIX = "chaste.crm.saved-view-write-intent.v1:";
 const CrmTaskAttemptSchema = z.object({
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   intentId: z.string().uuid(),
@@ -264,6 +265,14 @@ export type CrmCustomerProfileUpdateMutation = {
   phone?: string | null;
   preferredContactMethod?: "email" | "phone" | "whatsapp" | "other";
   doNotContact?: boolean;
+};
+export type CrmSavedViewWriteMutation = {
+  action: "saveCustomerView";
+  id?: string;
+  name: string;
+  filters: CustomerFilter;
+  isShared: boolean;
+  isPinned: boolean;
 };
 export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
 type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string };
@@ -299,7 +308,7 @@ export type CrmCustomerMergeResult = {
 };
 type CrmCustomerMergeMutation = { action: "mergeCustomers"; survivorCustomerId: string; duplicateCustomerId: string };
 type CrmCustomerMergeUndoMutation = { action: "restoreCustomerMerge" } & CrmCustomerMergeResult;
-type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmCustomerImportMutation | CrmCustomerImportUndoMutation | CrmCustomerMergeMutation | CrmCustomerMergeUndoMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation;
+type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmCustomerImportMutation | CrmCustomerImportUndoMutation | CrmCustomerMergeMutation | CrmCustomerMergeUndoMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation | CrmSavedViewWriteMutation;
 const CrmCustomerMergeInputSchema = z.object({ survivorCustomerId: uuid, duplicateCustomerId: uuid }).strict().refine((input) => input.survivorCustomerId !== input.duplicateCustomerId);
 const CrmCustomerMergeSnapshotSchema = z.object({
   customerId: uuid,
@@ -923,6 +932,90 @@ export async function submitCrmCustomerProfileUpdate(
     return { kind: "completed", data: parsed.data };
   } catch (error) {
     if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+      await clearCrmTaskAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+const CrmSavedViewWriteMutationSchema = z.object({
+  action: z.literal("saveCustomerView"),
+  id: uuid.optional(),
+  name: z.string().trim().min(1).max(60),
+  filters: z.object({
+    status: z.enum(["active", "inactive", "all"]),
+    owner: z.string().max(64),
+    staleOnly: z.boolean(),
+    duplicateOnly: z.boolean(),
+    tag: z.string().max(40),
+  }).strict(),
+  isShared: z.boolean(),
+  isPinned: z.boolean(),
+}).strict();
+const CrmSavedViewPriorStateSchema = z.object({
+  id: uuid,
+  name: z.string(),
+  filters: CrmSavedViewWriteMutationSchema.shape.filters,
+  isShared: z.boolean(),
+  isPinned: z.boolean(),
+  createdByUserId: uuid,
+}).strict();
+const CrmSavedViewWriteOutputSchema = z.object({
+  viewId: uuid,
+  previous: CrmSavedViewPriorStateSchema.nullable(),
+}).strict();
+
+export async function readPendingCrmSavedViewWrite(scope: CrmTaskRetryScope): Promise<CrmSavedViewWriteMutation | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_SAVED_VIEW_WRITE_INTENT_PREFIX}${scopeHash}:save`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to restore an unresolved saved-view change."); }
+  if (raw === null) return null;
+  const attempt = parseCrmTaskAttempt(raw);
+  const action = CrmSavedViewWriteMutationSchema.safeParse(attempt.action);
+  if (!action.success || await crmTaskFingerprint(action.data) !== attempt.fingerprint) {
+    throw new CrmApiError(0, "An unresolved saved-view change could not be verified. Contact an administrator before retrying.");
+  }
+  return action.data;
+}
+
+export async function submitCrmSavedViewWrite(
+  input: Omit<CrmSavedViewWriteMutation, "action">,
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<z.infer<typeof CrmSavedViewWriteOutputSchema>>> {
+  const action = { action: "saveCustomerView" as const, ...input };
+  if (!CrmSavedViewWriteMutationSchema.safeParse(action).success) {
+    throw new CrmApiError(0, "Review the saved-view name and filters before saving.");
+  }
+  const scope = await crmTaskScope(retryScope);
+  let storageKey: string | null;
+  try { storageKey = window.localStorage.getItem(`${CRM_SAVED_VIEW_WRITE_INTENT_PREFIX}${scope.scopeHash}:save`) === null ? null : `${CRM_SAVED_VIEW_WRITE_INTENT_PREFIX}${scope.scopeHash}:save`; }
+  catch { throw new CrmApiError(0, "Enable browser storage to check for an unresolved saved-view change."); }
+  const useGo = useGoOverride ?? (typeof __GO_CRM_VIEW_WRITES__ !== "undefined" && __GO_CRM_VIEW_WRITES__);
+  if (!useGo) {
+    if (storageKey) throw new CrmApiError(0, "A Go saved-view change is unresolved. Re-enable Go saved-view writes and retry its exact details before using legacy writes.", true);
+    return submitCrmAction("/api/crm/views", action, signal);
+  }
+  const attempt = await crmTaskAttempt(action, scope, "save", CRM_SAVED_VIEW_WRITE_INTENT_PREFIX);
+  try {
+    const { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.saveCustomerView", input: Object.fromEntries(Object.entries(action).filter(([key]) => key !== "action")), intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) throw new CrmApiError(404, "The Go CRM saved-view route is unavailable. Check the Go session capability route configuration.", true);
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const parsed = CrmSavedViewWriteOutputSchema.safeParse(outcome.data);
+    if (!parsed.success || (action.id && parsed.data.viewId !== action.id)) {
+      throw new CrmApiError(response.status, "The CRM service returned an unexpected saved-view result.", true);
+    }
+    await clearCrmTaskAttempt(attempt.storageKey);
+    return { kind: "completed", data: parsed.data };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 404 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
       await clearCrmTaskAttempt(attempt.storageKey);
     }
     throw error;

@@ -43,6 +43,7 @@ describe("Vite CRM page", () => {
     render(<CRMPage actorId={customerId} organizationId={dealId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add customer" })).toHaveProperty("disabled", false));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Northwind Ltd" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "office@northwind.test" } });
     fireEvent.click(screen.getByRole("button", { name: "Add customer" }));
@@ -389,6 +390,90 @@ describe("Vite CRM page", () => {
     expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe("inactive");
     expect(await screen.findByRole("row", { name: /Dormant Company/ })).not.toBeNull();
     expect(screen.queryByRole("row", { name: /Northwind/ })).toBeNull();
+  });
+
+  it("recovers an uncertain saved-view write after remount and retries the same Go intent", async () => {
+    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", true);
+    let viewAttempts = 0;
+    const writeBodies: Array<{ capabilityId: string; input: unknown; intentId: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path) && init?.method !== "POST") return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute") {
+        viewAttempts += 1;
+        writeBodies.push(JSON.parse(String(init?.body)) as typeof writeBodies[number]);
+        if (viewAttempts === 1) throw new TypeError("connection reset");
+        return Response.json({ ok: true, data: { viewId: "8ea6ef66-d321-4be4-a4ee-32fa0b13e5f9", previous: null } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    await screen.findByRole("combobox", { name: "Saved customer views" });
+    fireEvent.change(screen.getByLabelText("Saved view name"), { target: { value: "Active accounts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save current view" }));
+    expect(await screen.findByText("Could not reach the CRM service. Check your connection and try again.")).not.toBeNull();
+    expect(await screen.findByRole("button", { name: "Retry saved-view change" })).not.toBeNull();
+
+    view.unmount();
+    render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry saved-view change" }));
+    await waitFor(() => expect(viewAttempts).toBe(2));
+    await waitFor(() => expect(screen.getByLabelText("Saved view name")).toHaveProperty("value", ""));
+    expect(writeBodies[1]).toEqual(writeBodies[0]);
+    expect(fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/crm/views" && init?.method === "POST")).toHaveLength(0);
+  });
+
+  it("releases only the stale saved-view busy state after the active organization changes", async () => {
+    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", true);
+    let finishFirst!: (response: Response) => void;
+    const firstResponse = new Promise<Response>((resolve) => { finishFirst = resolve; });
+    let writes = 0;
+    const nextOrganizationId = "3cebf482-832f-4bf2-b322-03ca9c123456";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path)) return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path) && init?.method !== "POST") return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute") {
+        writes += 1;
+        if (writes === 1) return firstResponse;
+        return Response.json({ ok: true, data: { viewId: "8ea6ef66-d321-4be4-a4ee-32fa0b13e5f9", previous: null } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = render(<CRMPage actorId={customerId} organizationId={dealId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    await screen.findByRole("combobox", { name: "Saved customer views" });
+    fireEvent.change(screen.getByLabelText("Saved view name"), { target: { value: "Old organization view" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save current view" }));
+    await waitFor(() => expect(writes).toBe(1));
+
+    view.rerender(<CRMPage actorId={customerId} organizationId={nextOrganizationId} />);
+    const viewName = screen.getByLabelText("Saved view name") as HTMLInputElement;
+    fireEvent.change(viewName, { target: { value: "New organization view" } });
+    expect(screen.getByRole("button", { name: "Save current view" })).toHaveProperty("disabled", true);
+
+    await act(async () => {
+      finishFirst(Response.json({ ok: true, data: { viewId: "8ea6ef66-d321-4be4-a4ee-32fa0b13e5f9", previous: null } }));
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save current view" })).toHaveProperty("disabled", false));
+    expect(viewName.value).toBe("New organization view");
+    expect(screen.queryByText("CRM changes saved.")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save current view" }));
+    await waitFor(() => expect(writes).toBe(2));
+    const requests = fetchMock.mock.calls.filter(([path]) => String(path) === "/api/capabilities/execute");
+    const oldIntent = JSON.parse(String(requests[0]?.[1]?.body)).intentId;
+    const newIntent = JSON.parse(String(requests[1]?.[1]?.body)).intentId;
+    expect(newIntent).not.toBe(oldIntent);
   });
 
   it("requires a lost reason and restores a stage move that is waiting for approval", async () => {

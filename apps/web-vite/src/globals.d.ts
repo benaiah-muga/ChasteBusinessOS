@@ -14,6 +14,7 @@ declare const __GO_CRM_CUSTOMER_DEACTIVATE__: boolean;
 declare const __GO_CRM_CUSTOMER_MERGE__: boolean;
 declare const __GO_CRM_CUSTOMER_IMPORT__: boolean;
 declare const __GO_CRM_CUSTOMER_PROFILE_UPDATE__: boolean;
+declare const __GO_CRM_VIEW_WRITES__: boolean;
 declare const __GO_HR_EXPENSES__: boolean;
 declare const __GO_HR_LEAVE__: boolean;
 declare const __GO_HR_TIME__: boolean;

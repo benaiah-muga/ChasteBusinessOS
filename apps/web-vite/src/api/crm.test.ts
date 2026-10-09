@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmSavedViewWrite, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmSavedViewWrite, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
+const crmRetryScope = { actorId: customerId, organizationId: dealId };
+const savedViewFilters = { status: "active" as const, owner: "all", staleOnly: false, duplicateOnly: false, tag: "" };
 
 afterEach(() => { vi.unstubAllGlobals(); window.localStorage.clear(); });
 
@@ -828,5 +830,56 @@ describe("CRM API client", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(submitCrmCustomerProfileUpdate({ action: "updateProfile", customerIds: [customerId], notes: "Updated" }, undefined, true)).rejects.toMatchObject({ status: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("writes saved views through the Go capability and validates its typed snapshot", async () => {
+    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", true);
+    const viewId = dealId;
+    const prior = { id: viewId, name: "Prior", filters: savedViewFilters, isShared: false, isPinned: true, createdByUserId: customerId };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true, data: { viewId, previous: prior } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { id: viewId, name: "Active customers", filters: savedViewFilters, isShared: true, isPinned: false };
+
+    await expect(submitCrmSavedViewWrite(input, undefined, true, crmRetryScope)).resolves.toEqual({ kind: "completed", data: { viewId, previous: prior } });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/capabilities/execute");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      capabilityId: "crm.saveCustomerView",
+      input,
+      intentId: expect.any(String),
+    });
+    await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toBeNull();
+  });
+
+  it("retries an uncertain saved-view write with its exact intent and blocks legacy fallback", async () => {
+    vi.stubGlobal("__GO_CRM_VIEW_WRITES__", true);
+    let attemptCount = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      attemptCount += 1;
+      if (attemptCount === 1) throw new TypeError("connection reset");
+      if (attemptCount === 2) return Response.json({ pendingApproval: true, error: "Owner approval required" }, { status: 202 });
+      return Response.json({ ok: true, data: { viewId: dealId, previous: null } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { name: "Active customers", filters: savedViewFilters, isShared: true, isPinned: false };
+
+    await expect(submitCrmSavedViewWrite(input, undefined, true, crmRetryScope)).rejects.toMatchObject({ requestMayHaveReachedServer: true });
+    await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toMatchObject({ action: "saveCustomerView", ...input });
+    await expect(submitCrmSavedViewWrite(input, undefined, false, crmRetryScope)).rejects.toThrow(/Re-enable Go saved-view writes/);
+    await expect(submitCrmSavedViewWrite(input, undefined, true, crmRetryScope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitCrmSavedViewWrite(input, undefined, true, crmRetryScope)).resolves.toMatchObject({ kind: "completed" });
+
+    const goCalls = fetchMock.mock.calls;
+    expect(goCalls).toHaveLength(3);
+    expect(goCalls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+    expect(new Set(goCalls.map(([, init]) => JSON.parse(String(init?.body)).intentId)).size).toBe(1);
+    await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toBeNull();
+  });
+
+  it("does not fall back from a missing selected Go saved-view route", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("not found", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submitCrmSavedViewWrite({ name: "Active", filters: savedViewFilters, isShared: true, isPinned: false }, undefined, true, crmRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(["/api/capabilities/execute"]);
+    await expect(readPendingCrmSavedViewWrite(crmRetryScope)).resolves.toMatchObject({ name: "Active" });
   });
 });
