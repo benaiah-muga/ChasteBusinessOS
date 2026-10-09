@@ -42,6 +42,25 @@ describe("fetchInventoryHistory", () => {
     });
   });
 
+  it("rejects an unexpected history envelope or extra movement fields", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ movements: [movement], extra: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ movements: [{ ...movement, extra: true }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchInventoryHistory("SKU-1")).rejects.toMatchObject({
+      name: "InventoryHistoryApiError",
+      status: 200,
+      message: expect.stringContaining("unexpected format"),
+    });
+    await expect(fetchInventoryHistory("SKU-1")).rejects.toMatchObject({
+      name: "InventoryHistoryApiError",
+      status: 200,
+      message: expect.stringContaining("unexpected format"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("surfaces API errors, session expiry, and network failures", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: "Item not found." }), { status: 404 })));
     await expect(fetchInventoryHistory("MISSING")).rejects.toMatchObject({ status: 404, message: "Item not found." });

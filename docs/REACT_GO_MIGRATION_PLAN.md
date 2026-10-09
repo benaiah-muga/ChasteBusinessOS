@@ -2199,3 +2199,11 @@ new owners and the manifest shows zero legacy runtime paths.
      `analytics.report` permissions, and HTML download behavior. Exact method
      and route tests cover enabled and disabled paths; browser proof remains
      open.
+215. (Implemented) Route Vite `GET /api/inventory?sku=...` through the direct
+     session-authenticated Go inventory reader, which executes
+     `inventory.itemHistory`, behind the existing paired
+     `CHASTE_GO_INVENTORY_READ_ROUTE=1` and `GO_INVENTORY_READ_ROUTE=1`
+     selectors. Preserve the `{ movements }` contract, strict movement
+     validation, existing error behavior, and currency display. The API flag
+     gates the handler server-side, and selected Go errors never retry through
+     legacy. Focused Vite API/proxy tests pass; browser proof remains open.

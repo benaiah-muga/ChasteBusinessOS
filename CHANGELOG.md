@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite inventory item history can use the authenticated Go session reader via
+  the existing paired `CHASTE_GO_INVENTORY_READ_ROUTE=1` and
+  `GO_INVENTORY_READ_ROUTE=1` selectors. It preserves the `{ movements }`
+  contract and strict movement validation; selected Go errors do not retry via
+  the legacy handler.
+
 - Vite analytics report generation can route only `POST /api/analytics` to the
   existing authenticated Go Analytics handler behind paired default-off
   `GO_ANALYTICS_REPORT_ROUTE=1` and

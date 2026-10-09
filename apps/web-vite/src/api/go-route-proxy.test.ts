@@ -726,6 +726,48 @@ describe("Vite Go route proxy selection", () => {
     expect(isGoRouteRequest(goRouteProxyFlagsFromEnv({}), "GET", "/api/inventory")).toBe(false);
   });
 
+  it("keeps a selected inventory history 404 on Go without retrying legacy", async () => {
+    let goCalls = 0;
+    let legacyCalls = 0;
+    const go = createHttpServer((request, response) => {
+      goCalls += 1;
+      expect(request.url).toBe("/api/inventory?sku=MUG-404");
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "Item not found." }));
+    });
+    const goOrigin = await listen(go);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => go.close((error) => error ? reject(error) : resolve())) });
+
+    const legacy = createHttpServer((_request, response) => {
+      legacyCalls += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ movements: [] }));
+    });
+    const legacyOrigin = await listen(legacy);
+    runningServers.push({ close: () => new Promise<void>((resolve, reject) => legacy.close((error) => error ? reject(error) : resolve())) });
+
+    const vite = await createViteServer({
+      configFile: false,
+      appType: "custom",
+      plugins: [createGoRouteProxyPlugin(goRouteProxyFlagsFromEnv({ CHASTE_GO_INVENTORY_READ_ROUTE: "1" }), goOrigin)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: { "/api": { target: legacyOrigin, changeOrigin: false } },
+      },
+    });
+    await vite.listen();
+    runningServers.push({ close: () => vite.close() });
+    const address = vite.httpServer?.address() as AddressInfo;
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/inventory?sku=MUG-404`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Item not found." });
+    expect(goCalls).toBe(1);
+    expect(legacyCalls).toBe(0);
+  });
+
   it("routes supported CRM reads to Go by default and allows a legacy rollback", () => {
     const defaults = goRouteProxyFlagsFromEnv({});
     expect(defaults.crmReads).toBe(true);
@@ -971,6 +1013,7 @@ describe("Vite Go route proxy selection", () => {
       CHASTE_GO_NOTIFICATIONS_WRITE_ROUTE: "1",
       CHASTE_GO_POS_READ_ROUTE: "1",
       CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1",
+      CHASTE_GO_INVENTORY_READ_ROUTE: "1",
     });
     const vite: ViteDevServer = await createViteServer({
       configFile: false,
@@ -1119,6 +1162,16 @@ describe("Vite Go route proxy selection", () => {
       method: "POST",
       url: "/api/analytics",
       body: JSON.stringify({ title: "Quarterly report", sections: [] }),
+    });
+
+    const inventoryHistory = await fetch(`${origin}/api/inventory?sku=MUG-1`, {
+      headers: { cookie: "auth-session=browser" },
+    });
+    expect(await inventoryHistory.json()).toMatchObject({
+      target: "go",
+      method: "GET",
+      url: "/api/inventory?sku=MUG-1",
+      cookie: "auth-session=browser",
     });
 
     const myWork = await fetch(`${origin}/api/my-work?status=open`);
