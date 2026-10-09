@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrOverviewReportUseGo, readPendingHrEmployeeHireAction, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrEmployeeHireAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
 import type { HrApiError } from "./hr";
 
 const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
@@ -18,6 +18,12 @@ afterEach(() => {
 });
 
 describe("Vite People API", () => {
+  it("uses only the dedicated overview selector for the Overview Go report", () => {
+    expect(goHrOverviewReportUseGo()).toBe(false);
+    vi.stubGlobal("__GO_HR_OVERVIEW_REPORT_READS__", true);
+    expect(goHrOverviewReportUseGo()).toBe(true);
+  });
+
   it("keeps an exact actor/org employee hire intent through approval and recovery", async () => {
     vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);
     const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };

@@ -70,6 +70,56 @@ afterEach(() => {
 });
 
 describe("Vite People page", () => {
+  it("loads the default Overview report through Go when its selector is enabled", async () => {
+    vi.stubGlobal("__GO_HR_OVERVIEW_REPORT_READS__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/capabilities/execute") {
+        expect(init?.method).toBe("POST");
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        expect(body).toMatchObject({ capabilityId: "hr.report", input: {}, intentId: expect.any(String) });
+        return Response.json({ ok: true, data: report });
+      }
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
+      return Response.json({ error: "Unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HrPage />);
+
+    expect(await screen.findByRole("heading", { name: "Recently added" })).not.toBeNull();
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities/execute")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
+  });
+
+  it("fails closed on a selected Go Overview report error", async () => {
+    vi.stubGlobal("__GO_HR_OVERVIEW_REPORT_READS__", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/capabilities/execute") return Response.json({ error: "capability unavailable" }, { status: 404 });
+      return Response.json({ error: "Unexpected route" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HrPage />);
+
+    expect(await screen.findByText("capability unavailable")).not.toBeNull();
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities/execute")).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(false);
+  });
+
+  it("keeps the Overview report on legacy when its Go selector is off", async () => {
+    vi.stubGlobal("__GO_HR_OVERVIEW_REPORT_READS__", false);
+    const fetchMock = hrFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<HrPage />);
+
+    expect(await screen.findByRole("heading", { name: "Recently added" })).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/hr")).toBe(true);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/capabilities/execute")).toBe(false);
+  });
+
   it("retries an employee hire with the same intent after reload and clears the form", async () => {
     window.history.replaceState(null, "", "/hr?tab=people");
     vi.stubGlobal("__GO_HR_EMPLOYEE_WRITES__", true);

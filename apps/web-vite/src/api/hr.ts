@@ -211,6 +211,10 @@ export function goHrHiringUseGo(): boolean {
   return typeof __GO_HR_HIRING__ !== "undefined" && __GO_HR_HIRING__;
 }
 
+export function goHrOverviewReportUseGo(): boolean {
+  return typeof __GO_HR_OVERVIEW_REPORT_READS__ !== "undefined" && __GO_HR_OVERVIEW_REPORT_READS__;
+}
+
 export function goHrEmployeeWritesUseGo(): boolean {
   return typeof __GO_HR_EMPLOYEE_WRITES__ !== "undefined" && __GO_HR_EMPLOYEE_WRITES__;
 }

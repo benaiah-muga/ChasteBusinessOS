@@ -40,6 +40,7 @@ import {
   goSalesOrderWritesFromEnv,
   goHrExpensesFromEnv,
   goHrHiringFromEnv,
+  goHrOverviewReportFromEnv,
   goHrEmployeeWritesFromEnv,
   goHrLeaveFromEnv,
   goHrPayrollFromEnv,
@@ -230,6 +231,15 @@ describe("HR Hiring Go selector", () => {
     expect(goHrHiringFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goHrHiringFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_HIRING: "0" })).toBe(false);
     expect(goHrHiringFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_HIRING: "1" })).toBe(false);
+  });
+});
+
+describe("HR Overview report Go selector", () => {
+  it("requires both the dedicated overview selector and session capability route", () => {
+    expect(goHrOverviewReportFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_OVERVIEW_REPORT_READS: "1" })).toBe(true);
+    expect(goHrOverviewReportFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goHrOverviewReportFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_HR_OVERVIEW_REPORT_READS: "0" })).toBe(false);
+    expect(goHrOverviewReportFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_HR_OVERVIEW_REPORT_READS: "1" })).toBe(false);
   });
 });
 

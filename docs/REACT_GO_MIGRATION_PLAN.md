@@ -2264,3 +2264,9 @@ new owners and the manifest shows zero legacy runtime paths.
      output validation; failed Go detail never retries through legacy. Keep
      workspace, presence, autosave, collaboration, content writes, archive
      reads, and the Documents library unchanged. Browser proof remains open.
+221. Route only the Vite HR Overview report through the existing Go `hr.report`
+     capability behind paired `CHASTE_GO_HR_OVERVIEW_REPORT_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other HR tabs on
+     their current route selections; set the new selector to `0` for legacy
+     rollback. A selected Go error must fail closed without retrying the legacy
+     `/api/hr` route.

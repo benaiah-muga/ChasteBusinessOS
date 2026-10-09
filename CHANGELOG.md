@@ -13,6 +13,12 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite's HR Overview report can use the authenticated Go `hr.report` capability
+  behind `CHASTE_GO_HR_OVERVIEW_REPORT_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1`. The selector is scoped to Overview;
+  set it to `0` to return Overview to legacy `/api/hr`. Selected-Go errors fail
+  closed without retrying `/api/hr`.
+
 - Vite Sales order create, deliver, and cancel writes fail closed when the
   selected Go capability route returns 404. They keep the exact actor- and
   organization-scoped retry intent, pinned to the route that created it, and

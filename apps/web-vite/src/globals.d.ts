@@ -21,6 +21,7 @@ declare const __GO_HR_TIME__: boolean;
 declare const __GO_HR_PAYROLL__: boolean;
 declare const __GO_PROJECTS_WRITES__: boolean;
 declare const __GO_HR_HIRING__: boolean;
+declare const __GO_HR_OVERVIEW_REPORT_READS__: boolean;
 declare const __GO_HR_EMPLOYEE_WRITES__: boolean;
 declare const __GO_ACCOUNTING_RECORD_PAYMENT__: boolean;
 declare const __GO_ACCOUNTING_CREATE_INVOICE__: boolean;
