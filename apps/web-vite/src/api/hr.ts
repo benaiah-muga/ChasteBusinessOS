@@ -117,6 +117,7 @@ export type HrAction =
 
 export type HrActionResult = { kind: "success" | "pending"; data: Record<string, unknown> };
 export type HrPayrollAction = Extract<HrAction, { action: "createPayrollRun" }>;
+export type HrHiringAction = Extract<HrAction, { action: "createOpening" | "addApplicant" | "moveApplicant" }>;
 export type HrLeaveAction =
   | { action: "requestLeave"; employeeId: string; kind: string; startDate: string; endDate: string }
   | { action: "decideLeave"; requestId: string; approve: boolean }
@@ -137,6 +138,7 @@ const retryIntentIds = new Map<string, string>();
 const GO_HR_LEAVE_ATTEMPT_PREFIX = "chaste:hr:leave:go:attempt:v1:";
 const GO_HR_TIME_ATTEMPT_PREFIX = "chaste:hr:time:go:attempt:v1:";
 const GO_HR_PAYROLL_ATTEMPT_PREFIX = "chaste:hr:payroll:go:attempt:v1:";
+const GO_HR_HIRING_ATTEMPT_PREFIX = "chaste:hr:hiring:go:attempt:v1:";
 const GoLeaveRequestSchema = z.object({ action: z.literal("requestLeave"), employeeId: z.string().uuid(), kind: z.enum(["annual", "sick", "parental", "unpaid", "other"]), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict();
 const GoLeaveDecisionSchema = z.object({ action: z.literal("decideLeave"), requestId: z.string().uuid(), approve: z.boolean() }).strict();
 const GoLeaveCancelSchema = z.object({ action: z.literal("cancelLeave"), requestId: z.string().uuid() }).strict();
@@ -158,6 +160,16 @@ const GoTimeOutputSchemas = {
 const GoHrPayrollActionSchema = z.object({ action: z.literal("createPayrollRun"), year: z.number().int().min(2020).max(2100), month: z.number().int().min(1).max(12) }).strict();
 const GoHrPayrollAttemptSchema = z.object({ intentId: z.string().uuid(), fingerprint: z.string().length(64), action: GoHrPayrollActionSchema }).strict();
 const GoHrPayrollOutputSchema = z.object({ runId: z.string().uuid(), headcount: z.number().int().safe().positive(), totalGrossMinor: z.number().int().safe().nonnegative(), totalTaxMinor: z.number().int().safe().nonnegative(), totalNetMinor: z.number().int().safe().nonnegative() }).strict();
+const GoHrCreateOpeningActionSchema = z.object({ action: z.literal("createOpening"), title: z.string().min(1).max(120), department: z.string().min(1).max(100).optional(), note: z.string().min(1).max(500).optional() }).strict();
+const GoHrAddApplicantActionSchema = z.object({ action: z.literal("addApplicant"), openingId: z.string().uuid(), name: z.string().min(1).max(120), email: z.string().email().optional(), note: z.string().min(1).max(500).optional() }).strict();
+const GoHrMoveApplicantActionSchema = z.object({ action: z.literal("moveApplicant"), applicantId: z.string().uuid(), stage: z.enum(["applied", "screening", "interview", "offer", "rejected"]) }).strict();
+const GoHrHiringActionSchema = z.discriminatedUnion("action", [GoHrCreateOpeningActionSchema, GoHrAddApplicantActionSchema, GoHrMoveApplicantActionSchema]);
+const GoHrHiringAttemptSchema = z.object({ intentId: z.string().uuid(), fingerprint: z.string().length(64), action: GoHrHiringActionSchema }).strict();
+const GoHrHiringOutputSchemas = {
+  createOpening: z.object({ openingId: z.string().uuid() }).strict(),
+  addApplicant: z.object({ applicantId: z.string().uuid() }).strict(),
+  moveApplicant: z.object({ moved: z.literal(true), stage: z.enum(["applied", "screening", "interview", "offer", "rejected"]) }).strict(),
+} as const;
 const GoPendingEntriesSchema = z.object({
   entries: z.array(z.object({
     id: z.string().uuid(),
@@ -180,6 +192,10 @@ export function goHrTimeUseGo(): boolean {
 
 export function goHrPayrollUseGo(): boolean {
   return typeof __GO_HR_PAYROLL__ !== "undefined" && __GO_HR_PAYROLL__;
+}
+
+export function goHrHiringUseGo(): boolean {
+  return typeof __GO_HR_HIRING__ !== "undefined" && __GO_HR_HIRING__;
 }
 
 export async function fetchHrEnabled(signal?: AbortSignal): Promise<boolean> {
@@ -322,6 +338,140 @@ export async function submitHrPayrollAction(
     }
     throw error;
   }
+}
+
+export async function readPendingHrHiringAction(scope: HrRetryScope): Promise<HrHiringAction | null> {
+  const scoped = await hrHiringScope(scope);
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(`${GO_HR_HIRING_ATTEMPT_PREFIX}${scoped.scopeHash}`); }
+  catch { throw new HrApiError(0, "Enable browser storage to check for an unresolved Hiring action."); }
+  if (raw === null) return null;
+  return parseGoHrHiringAttempt(raw).action;
+}
+
+export async function submitHrHiringAction(
+  action: HrHiringAction,
+  scope: HrRetryScope,
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+): Promise<HrActionResult> {
+  const useGo = useGoOverride ?? goHrHiringUseGo();
+  if (!useGo) {
+    if (await readPendingHrHiringAction(scope)) {
+      throw new HrApiError(0, "A Go Hiring action is unresolved. Restore the Go Hiring route and retry its exact details before using the legacy route.", true);
+    }
+    return submitHrAction(action);
+  }
+
+  const parsedAction = GoHrHiringActionSchema.safeParse(action);
+  if (!parsedAction.success) throw new HrApiError(400, "The Hiring action does not match the Go service contract.");
+  const scoped = await hrHiringScope(scope);
+  const attempt = await goHrHiringAttempt(parsedAction.data, scoped.scopeHash);
+  const capability = goHrHiringCapabilityInput(parsedAction.data);
+  try {
+    const response = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ ...capability, intentId: attempt.intentId }),
+    }, signal);
+    const body = await readJson(response);
+    if (response.status === 202) {
+      const pending = z.object({ pendingApproval: z.literal(true), reason: z.string().optional(), error: z.string().optional() }).safeParse(body);
+      if (!pending.success) throw new HrApiError(response.status, "The Hiring service returned an unexpected approval response.", true);
+      return { kind: "pending", data: { reason: pending.data.reason ?? pending.data.error ?? "This Hiring action is waiting for approval." } };
+    }
+    if (!response.ok) {
+      const mayHaveReachedServer = response.status === 404 || response.status >= 500 || response.status === 408 || response.status === 429;
+      const apiFailure = parseError(response.status, body, "The Go Hiring service could not complete this action.");
+      const failure = new HrApiError(response.status, apiFailure.message, mayHaveReachedServer);
+      if (!mayHaveReachedServer) await clearGoHrHiringAttempt(attempt.storageKey);
+      throw failure;
+    }
+    const parsed = z.object({ ok: z.literal(true), data: GoHrHiringOutputSchemas[parsedAction.data.action] }).strict().safeParse(body);
+    if (response.status !== 200 || !parsed.success) throw new HrApiError(response.status, "The Go Hiring service returned an unexpected action response.", true);
+    await clearGoHrHiringAttempt(attempt.storageKey);
+    return { kind: "success", data: parsed.data.data };
+  } catch (error) {
+    if (error instanceof HrApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+      await clearGoHrHiringAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+function goHrHiringCapabilityInput(action: HrHiringAction): { capabilityId: string; input: Record<string, unknown> } {
+  switch (action.action) {
+    case "createOpening": {
+      const { action: _action, ...input } = action;
+      return { capabilityId: "hr.createOpening", input };
+    }
+    case "addApplicant": {
+      const { action: _action, ...input } = action;
+      return { capabilityId: "hr.addApplicant", input };
+    }
+    case "moveApplicant": {
+      const { action: _action, ...input } = action;
+      return { capabilityId: "hr.moveApplicant", input };
+    }
+  }
+}
+
+async function hrHiringScope(scope: HrRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {
+  const actorId = scope.actorId?.trim() ?? "";
+  const organizationId = scope.organizationId?.trim() ?? "";
+  if (!z.string().uuid().safeParse(actorId).success || !z.string().uuid().safeParse(organizationId).success) {
+    throw new HrApiError(0, "Hiring actions need your account and organization details before they can be submitted.");
+  }
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({ actorId, organizationId })));
+    return { actorId, organizationId, scopeHash: Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("") };
+  } catch {
+    throw new HrApiError(0, "Could not prepare a durable Hiring retry.");
+  }
+}
+
+async function goHrHiringAttempt(action: HrHiringAction, scopeHash: string): Promise<{ storageKey: string; intentId: string }> {
+  const storageKey = `${GO_HR_HIRING_ATTEMPT_PREFIX}${scopeHash}`;
+  const fingerprint = await goHrHiringFingerprint(action);
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new HrApiError(0, "Enable browser storage before changing Hiring so uncertain actions can be retried safely."); }
+  if (raw !== null) {
+    const stored = parseGoHrHiringAttempt(raw);
+    if (stored.fingerprint !== fingerprint) throw new HrApiError(0, "A previous Hiring action is unresolved. Retry its exact details before starting another action.", true);
+    return { storageKey, intentId: stored.intentId };
+  }
+  const attempt = { fingerprint, intentId: crypto.randomUUID(), action };
+  const serialized = JSON.stringify(attempt);
+  try {
+    window.localStorage.setItem(storageKey, serialized);
+    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("Hiring retry did not persist");
+  } catch {
+    throw new HrApiError(0, "Enable browser storage before changing Hiring so uncertain actions can be retried safely.");
+  }
+  return { storageKey, intentId: attempt.intentId };
+}
+
+async function goHrHiringFingerprint(action: HrHiringAction): Promise<string> {
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJSON(action)));
+    return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+  } catch {
+    throw new HrApiError(0, "Could not prepare a durable Hiring retry.");
+  }
+}
+
+function parseGoHrHiringAttempt(raw: string): z.infer<typeof GoHrHiringAttemptSchema> {
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new HrApiError(0, "An unresolved Hiring action marker is malformed. Contact an administrator before retrying.", true); }
+  const parsed = GoHrHiringAttemptSchema.safeParse(decoded);
+  if (!parsed.success) throw new HrApiError(0, "An unresolved Hiring action marker is malformed. Contact an administrator before retrying.", true);
+  return parsed.data;
+}
+
+async function clearGoHrHiringAttempt(storageKey: string): Promise<void> {
+  try { window.localStorage.removeItem(storageKey); }
+  catch { throw new HrApiError(0, "The Hiring action completed, but its retry marker could not be cleared. Reload before another action.", true); }
 }
 
 async function hrPayrollScope(scope: HrRetryScope): Promise<{ actorId: string; organizationId: string; scopeHash: string }> {

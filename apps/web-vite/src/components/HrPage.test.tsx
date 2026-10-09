@@ -70,6 +70,95 @@ afterEach(() => {
 });
 
 describe("Vite People page", () => {
+  it("uses Go for the Hiring report and all exposed pipeline changes, with exact retry after reload", async () => {
+    window.history.replaceState(null, "", "/hr?tab=hiring");
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    const actorId = "22222222-2222-4222-8222-222222222222";
+    const organizationId = "33333333-3333-4333-8333-333333333333";
+    const openingId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const applicantId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const intents: string[] = [];
+    const writeCalls: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
+    let openingCreated = false;
+    let applicantAdded = false;
+    let createCount = 0;
+    let addApplicantCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "hr" }], enabledModules: ["hr"] });
+      if (path === "/api/time?pending=1") return Response.json({ entries: [] });
+      if (path.startsWith("/api/time?")) return Response.json({ rows: [] });
+      if (path === "/api/capabilities/execute") {
+        const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown>; intentId: string };
+        if (body.capabilityId === "hr.report") return Response.json({ ok: true, data: {
+          ...report,
+          openings: openingCreated ? [{ id: openingId, title: "Field Technician", department: null, note: null, status: "open", createdAt: "2026-10-01T10:00:00.000Z" }] : [],
+          applicants: applicantAdded ? [{ id: applicantId, openingId, name: "Mira Patel", stage: "applied", note: null }] : [],
+        } });
+        intents.push(body.intentId);
+        writeCalls.push({ capabilityId: body.capabilityId, input: body.input });
+        if (body.capabilityId === "hr.createOpening") {
+          createCount += 1;
+          if (createCount === 1) return Response.json({ pendingApproval: true, reason: "Hiring approval required." }, { status: 202 });
+          openingCreated = true;
+          return Response.json({ ok: true, data: { openingId } });
+        }
+        if (body.capabilityId === "hr.addApplicant") {
+          addApplicantCount += 1;
+          if (addApplicantCount === 1) return Response.json({ pendingApproval: true, reason: "Candidate approval required." }, { status: 202 });
+          applicantAdded = true;
+          return Response.json({ ok: true, data: { applicantId } });
+        }
+        return Response.json({ ok: true, data: { moved: true, stage: "interview" } });
+      }
+      throw new Error(`Unexpected Hiring route: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
+    expect(await screen.findByRole("heading", { name: "Open roles" })).not.toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("For example, Operations associate"), { target: { value: "Field Technician" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create opening" }));
+    expect(await screen.findByRole("button", { name: "Retry exact Hiring action" })).not.toBeNull();
+    expect((screen.getByPlaceholderText("For example, Operations associate") as HTMLInputElement).disabled).toBe(true);
+    first.unmount();
+
+    const openingRecovery = render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact Hiring action" }));
+    expect(await screen.findByText("Opening creation completed.")).not.toBeNull();
+    expect((screen.getByPlaceholderText("For example, Operations associate") as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "Create opening" }) as HTMLButtonElement).disabled).toBe(true);
+    await screen.findByRole("button", { name: "Add applicant" });
+    fireEvent.change(screen.getByLabelText("Candidate name"), { target: { value: "Mira Patel" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "mira@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add applicant" }));
+    expect(await screen.findByRole("button", { name: "Retry exact Hiring action" })).not.toBeNull();
+    expect((screen.getByLabelText("Candidate name") as HTMLInputElement).disabled).toBe(true);
+    openingRecovery.unmount();
+    render(<HrPage baseCurrency="UGX" actorId={actorId} organizationId={organizationId} />);
+    expect(await screen.findByRole("button", { name: "Retry exact Hiring action" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry exact Hiring action" }));
+    expect(await screen.findByText("Applicant creation completed.")).not.toBeNull();
+    expect((screen.getByLabelText("Candidate name") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("");
+    expect((screen.getByRole("button", { name: "Add applicant" }) as HTMLButtonElement).disabled).toBe(true);
+    await screen.findByText("Mira Patel");
+    fireEvent.change(screen.getByLabelText("Stage"), { target: { value: "interview" } });
+    expect(await screen.findByText("Applicant stage update completed.")).not.toBeNull();
+
+    expect(intents[1]).toBe(intents[0]);
+    expect(intents[3]).toBe(intents[2]);
+    expect(writeCalls).toEqual([
+      { capabilityId: "hr.createOpening", input: { title: "Field Technician" } },
+      { capabilityId: "hr.createOpening", input: { title: "Field Technician" } },
+      { capabilityId: "hr.addApplicant", input: { openingId, name: "Mira Patel", email: "mira@example.com" } },
+      { capabilityId: "hr.addApplicant", input: { openingId, name: "Mira Patel", email: "mira@example.com" } },
+      { capabilityId: "hr.moveApplicant", input: { applicantId, stage: "interview" } },
+    ]);
+    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/hr" && init?.method === "POST")).toBe(false);
+    expect(fetchMock.mock.calls.some(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
   it("loads Payroll from Go and retries a pending draft with the same intent after reload", async () => {
     window.history.replaceState(null, "", "/hr?tab=payroll");
     vi.stubGlobal("__GO_HR_PAYROLL__", true);

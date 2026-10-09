@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { currencyMinorUnits } from "@chaste/erp-core";
 import { fetchExpenses, ExpensesApiError, readPendingExpenseAction, submitExpenseAction, type ExpenseAction, type ExpenseClaim, type ExpensePolicy } from "../api/expenses";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrLeaveUseGo, goHrPayrollUseGo, goHrTimeUseGo, HrApiError, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, goHrHiringUseGo, goHrLeaveUseGo, goHrPayrollUseGo, goHrTimeUseGo, HrApiError, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction, type HrApplicant, type HrEmployee, type HrHiringAction, type HrLeaveAction, type HrOpening, type HrPayrollAction, type HrPendingEntry, type HrReport, type HrTimeAction, type HrTimeReport } from "../api/hr";
 import { legacyUrl } from "../legacy";
 import "./hr-page.css";
 
@@ -46,7 +46,7 @@ function formatMinutes(minutes: number): string {
 }
 
 function goHrReportForTab(tab: TabId): boolean {
-  return (tab === "leave" && goHrLeaveUseGo()) || (tab === "payroll" && goHrPayrollUseGo());
+  return (tab === "leave" && goHrLeaveUseGo()) || (tab === "payroll" && goHrPayrollUseGo()) || (tab === "hiring" && goHrHiringUseGo());
 }
 
 export function HrPage({ baseCurrency = null, actorId = null, organizationId = null }: { baseCurrency?: string | null; actorId?: string | null; organizationId?: string | null }) {
@@ -61,6 +61,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [leaveRecoveryAction, setLeaveRecoveryAction] = useState<HrLeaveAction | null>(null);
+  const [hiringRecoveryAction, setHiringRecoveryAction] = useState<HrHiringAction | null>(null);
   const [payrollRecoveryAction, setPayrollRecoveryAction] = useState<HrPayrollAction | null>(null);
   const [timeRecoveryAction, setTimeRecoveryAction] = useState<HrTimeAction | null>(null);
   const [range, setRange] = useState(monthRange);
@@ -138,6 +139,22 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
       if (action) setNotice({ tone: "pending", text: "A payroll draft is unresolved. Retry the exact period to recover its result before creating another draft." });
     }).catch((error) => {
       if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved payroll draft." });
+    });
+    return () => { active = false; };
+  }, [tab, actorId, organizationId]);
+
+  useEffect(() => {
+    if (tab !== "hiring") {
+      setHiringRecoveryAction(null);
+      return;
+    }
+    let active = true;
+    void readPendingHrHiringAction({ actorId, organizationId }).then((action) => {
+      if (!active) return;
+      setHiringRecoveryAction(action);
+      if (action) setNotice({ tone: "pending", text: "A Hiring action is unresolved. Retry its exact details before making another change." });
+    }).catch((error) => {
+      if (active) setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved Hiring action." });
     });
     return () => { active = false; };
   }, [tab, actorId, organizationId]);
@@ -260,11 +277,47 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
     }
   }
 
+  async function runHiringAction(action: HrHiringAction, label: string, exactRecovery = false): Promise<void> {
+    if (busy || (hiringRecoveryAction && !exactRecovery)) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await submitHrHiringAction(action, { actorId, organizationId });
+      if (result.kind === "pending") {
+        setHiringRecoveryAction(action);
+        setNotice({ tone: "pending", text: `${label} is waiting for approval or result recovery. Retry the exact action when ready.` });
+      } else {
+        setHiringRecoveryAction(null);
+        const completedLabel = exactRecovery
+          ? action.action === "createOpening" ? "Opening creation" : action.action === "addApplicant" ? "Applicant creation" : "Applicant stage update"
+          : label;
+        setNotice({ tone: "success", text: `${completedLabel} completed.` });
+        if (action.action === "createOpening") setOpeningTitle("");
+        if (action.action === "addApplicant") setApplicantForm((current) => ({ ...current, name: "", email: "" }));
+        await refreshAll();
+      }
+    } catch (error) {
+      try { setHiringRecoveryAction(await readPendingHrHiringAction({ actorId, organizationId })); }
+      catch { setHiringRecoveryAction(action); }
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : `${label} failed.` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function payrollRecoveryControls() {
     if (tab !== "payroll") return null;
     return <>
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
       {payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrPayrollUseGo()} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll draft</button>{!goHrPayrollUseGo() && <small>Re-enable the Go Payroll selector to retry this draft.</small>}</div>}
+    </>;
+  }
+
+  function hiringRecoveryControls() {
+    if (tab !== "hiring") return null;
+    return <>
+      {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
+      {hiringRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrHiringUseGo()} onClick={() => void runHiringAction(hiringRecoveryAction, "Hiring action", true)}>Retry exact Hiring action</button>{!goHrHiringUseGo() && <small>Re-enable the Go Hiring selector to retry this action.</small>}</div>}
     </>;
   }
 
@@ -296,7 +349,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
   }
 
   if (state.status === "loading") {
-    return <main className="hr-page"><p className="hr-loading" role="status">Loading People workspace…</p>{payrollRecoveryControls()}</main>;
+    return <main className="hr-page"><p className="hr-loading" role="status">Loading People workspace…</p>{payrollRecoveryControls()}{hiringRecoveryControls()}</main>;
   }
   if (state.status === "failed") {
     return (
@@ -306,6 +359,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
           <div className="hr-actions">{state.statusCode === 401 && <a href="/login">Sign in again</a>}<button type="button" onClick={() => void load()}>Try again</button></div>
         </section>
         {payrollRecoveryControls()}
+        {hiringRecoveryControls()}
       </main>
     );
   }
@@ -359,6 +413,7 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
 
       {notice && <p className={`hr-notice hr-notice-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
       {tab === "leave" && leaveRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void runLeaveAction(leaveRecoveryAction, "Leave action")}>Retry exact leave action</button></div>}
+      {tab === "hiring" && hiringRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrHiringUseGo()} onClick={() => void runHiringAction(hiringRecoveryAction, "Hiring action", true)}>Retry exact Hiring action</button>{!goHrHiringUseGo() && <small>Re-enable the Go Hiring selector to retry this action.</small>}</div>}
       {tab === "payroll" && payrollRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy || !goHrPayrollUseGo()} onClick={() => void runPayrollAction(payrollRecoveryAction, true)}>Retry exact payroll draft</button>{!goHrPayrollUseGo() && <small>Re-enable the Go Payroll selector to retry this draft.</small>}</div>}
       {timeRecoveryAction && <div className="hr-actions"><button type="button" disabled={busy} onClick={() => void submitTimeAction(timeRecoveryAction, "Time action", undefined, true)}>Retry exact time action</button></div>}
       <section id="hr-tab-panel" className="hr-content" role="tabpanel" aria-labelledby={`hr-tab-${tab}`}>
@@ -369,13 +424,13 @@ export function HrPage({ baseCurrency = null, actorId = null, organizationId = n
           if (!hire.name.trim() || !Number.isSafeInteger(salaryMinor) || salaryMinor <= 0) return;
           void runAction("Employee hire", { action: "hireEmployee", name: hire.name.trim(), email: hire.email.trim() || undefined, title: hire.title.trim() || undefined, monthlySalaryMinor: salaryMinor }, () => setHire({ name: "", email: "", title: "", salary: "" }));
         }} />}
-        {tab === "hiring" && <Hiring openings={openings} applicants={data.applicants} busy={busy} openingTitle={openingTitle} setOpeningTitle={setOpeningTitle} applicantForm={applicantForm} setApplicantForm={setApplicantForm} onCreateOpening={() => {
+        {tab === "hiring" && <Hiring openings={openings} applicants={data.applicants} busy={busy || Boolean(hiringRecoveryAction)} openingTitle={openingTitle} setOpeningTitle={setOpeningTitle} applicantForm={applicantForm} setApplicantForm={setApplicantForm} onCreateOpening={() => {
           if (!openingTitle.trim()) return;
-          void runAction("Opening creation", { action: "createOpening", title: openingTitle.trim() }, () => setOpeningTitle(""));
+          void runHiringAction({ action: "createOpening", title: openingTitle.trim() }, "Opening creation");
         }} onAddApplicant={() => {
           if (!selectedOpening || !applicantForm.name.trim()) return;
-          void runAction("Applicant creation", { action: "addApplicant", openingId: selectedOpening.id, name: applicantForm.name.trim(), email: applicantForm.email.trim() || undefined }, () => setApplicantForm({ ...applicantForm, name: "", email: "" }));
-        }} onMove={(applicant, stage) => void runAction("Applicant stage update", { action: "moveApplicant", applicantId: applicant.id, stage })} />}
+          void runHiringAction({ action: "addApplicant", openingId: selectedOpening.id, name: applicantForm.name.trim(), email: applicantForm.email.trim() || undefined }, "Applicant creation");
+        }} onMove={(applicant, stage) => void runHiringAction({ action: "moveApplicant", applicantId: applicant.id, stage: stage as "applied" | "screening" | "interview" | "offer" | "rejected" }, "Applicant stage update")} />}
         {tab === "leave" && <Leave employees={activeEmployees} rows={data.leave} form={leaveRequest} setForm={setLeaveRequest} busy={busy || Boolean(leaveRecoveryAction)} onRequest={() => {
           if (!leaveRequest.employeeId || !leaveRequest.startDate || !leaveRequest.endDate || leaveRequest.endDate < leaveRequest.startDate) return;
           void runLeaveAction({ action: "requestLeave", ...leaveRequest }, "Leave request", () => setLeaveRequest({ ...leaveRequest, startDate: "", endDate: "" }));
@@ -600,11 +655,11 @@ function Hiring({ openings, applicants, busy, openingTitle, setOpeningTitle, app
   const pipeline = applicants.filter((applicant) => applicant.openingId === openingId);
   return <>
     <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Recruitment</p><h2>Open roles</h2></div><span className="hr-count">{selectableOpenings.length} open</span></div>
-      <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); onCreateOpening(); }}><label className="hr-grow">Role title<input required maxLength={120} value={openingTitle} onChange={(event) => setOpeningTitle(event.currentTarget.value)} placeholder="For example, Operations associate" /></label><button className="hr-primary-button" disabled={busy || !openingTitle.trim()}>Create opening</button></form>
+      <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); onCreateOpening(); }}><label className="hr-grow">Role title<input required disabled={busy} maxLength={120} value={openingTitle} onChange={(event) => setOpeningTitle(event.currentTarget.value)} placeholder="For example, Operations associate" /></label><button className="hr-primary-button" disabled={busy || !openingTitle.trim()}>Create opening</button></form>
       {openings.length === 0 ? <p className="hr-muted">No roles yet. Create an opening to start a pipeline.</p> : <ul className="hr-opening-list">{openings.map((opening) => <li key={opening.id}><span><strong>{opening.title}</strong><small>{opening.department || "General"}</small></span><span className={`hr-pill ${opening.status === "open" ? "is-active" : "is-muted"}`}>{opening.status}</span></li>)}</ul>}
     </section>
-    <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Candidate pipeline</p><h2>Applicants</h2></div>{selectableOpenings.length > 0 && <label className="hr-select-label">Opening<select value={openingId} onChange={(event) => setApplicantForm({ ...applicantForm, openingId: event.currentTarget.value })}>{selectableOpenings.map((opening) => <option value={opening.id} key={opening.id}>{opening.title}</option>)}</select></label>}</div>
-      {selectableOpenings.length > 0 && <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); onAddApplicant(); }}><label className="hr-grow">Candidate name<input required maxLength={120} value={applicantForm.name} onChange={(event) => setApplicantForm({ ...applicantForm, name: event.currentTarget.value })} /></label><label>Email<input type="email" maxLength={254} value={applicantForm.email} onChange={(event) => setApplicantForm({ ...applicantForm, email: event.currentTarget.value })} /></label><button className="hr-primary-button" disabled={busy || !applicantForm.name.trim()}>Add applicant</button></form>}
+    <section className="hr-card"><div className="hr-section-heading"><div><p className="hr-eyebrow">Candidate pipeline</p><h2>Applicants</h2></div>{selectableOpenings.length > 0 && <label className="hr-select-label">Opening<select disabled={busy} value={openingId} onChange={(event) => setApplicantForm({ ...applicantForm, openingId: event.currentTarget.value })}>{selectableOpenings.map((opening) => <option value={opening.id} key={opening.id}>{opening.title}</option>)}</select></label>}</div>
+      {selectableOpenings.length > 0 && <form className="hr-inline-form" onSubmit={(event) => { event.preventDefault(); onAddApplicant(); }}><label className="hr-grow">Candidate name<input required disabled={busy} maxLength={120} value={applicantForm.name} onChange={(event) => setApplicantForm({ ...applicantForm, name: event.currentTarget.value })} /></label><label>Email<input type="email" disabled={busy} maxLength={254} value={applicantForm.email} onChange={(event) => setApplicantForm({ ...applicantForm, email: event.currentTarget.value })} /></label><button className="hr-primary-button" disabled={busy || !applicantForm.name.trim()}>Add applicant</button></form>}
       {pipeline.length === 0 ? <p className="hr-muted">No applicants are listed for this opening yet.</p> : <div className="hr-applicant-list">{pipeline.map((applicant) => <article className="hr-applicant" key={applicant.id}><span><strong>{applicant.name}</strong><small>{applicant.note || "No notes"}</small></span><label>Stage<select disabled={busy} value={applicant.stage} onChange={(event) => onMove(applicant, event.currentTarget.value)}><option value={applicant.stage}>{applicant.stage}</option>{["applied", "screening", "interview", "offer", "rejected"].filter((stage) => stage !== applicant.stage).map((stage) => <option value={stage} key={stage}>{stage}</option>)}</select></label></article>)}</div>}
     </section>
   </>;

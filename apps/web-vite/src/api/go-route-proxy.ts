@@ -147,6 +147,10 @@ export function goHrPayrollFromEnv(env: Record<string, string | undefined>): boo
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_HR_PAYROLL === "1";
 }
 
+export function goHrHiringFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_HR_HIRING === "1";
+}
+
 export function goAccountingRecordPaymentFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_ACCOUNTING_RECORD_PAYMENT === "1";
 }

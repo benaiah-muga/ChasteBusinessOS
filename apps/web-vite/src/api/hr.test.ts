@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
+import { fetchGoHrReport, fetchHrEnabled, fetchHrPendingEntries, fetchHrReport, fetchHrTime, readPendingHrHiringAction, readPendingHrLeaveAction, readPendingHrPayrollAction, readPendingHrTimeAction, submitHrAction, submitHrHiringAction, submitHrLeaveAction, submitHrPayrollAction, submitHrTimeAction } from "./hr";
 import type { HrApiError } from "./hr";
 
 const switchboard = { catalog: [{ id: "hr" }], enabledModules: ["hr"] };
@@ -139,6 +139,58 @@ describe("Vite People API", () => {
     expect(intentIds[1]).toBe(intentIds[0]);
     expect(intentIds[2]).toBe(intentIds[0]);
     expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("keeps an exact Hiring action after pending approval and Go 404, with no selector-off fallback", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    const action = { action: "createOpening" as const, title: "Field Technician" };
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const intentIds: string[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId?: string; input?: Record<string, unknown>; intentId: string };
+      intentIds.push(body.intentId);
+      expect(body).toMatchObject({ capabilityId: "hr.createOpening", input: { title: action.title }, intentId: expect.any(String) });
+      if (intentIds.length === 1) return Response.json({ pendingApproval: true, reason: "Hiring approval required." }, { status: 202 });
+      if (intentIds.length === 2) return Response.json({ error: "capability not found" }, { status: 404 });
+      return Response.json({ ok: true, data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitHrHiringAction(action, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingHrHiringAction(scope)).resolves.toEqual(action);
+    vi.stubGlobal("__GO_HR_HIRING__", false);
+    await expect(submitHrHiringAction(action, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    await expect(submitHrHiringAction(action, scope)).resolves.toMatchObject({ kind: "success", data: { openingId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } });
+
+    expect(intentIds).toHaveLength(3);
+    expect(intentIds[1]).toBe(intentIds[0]);
+    expect(intentIds[2]).toBe(intentIds[0]);
+    expect(fetchMock.mock.calls.every(([path]) => path === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("maps Hiring applicant add and stage changes to their Go contracts", async () => {
+    vi.stubGlobal("__GO_HR_HIRING__", true);
+    const scope = { actorId: "22222222-2222-4222-8222-222222222222", organizationId: "33333333-3333-4333-8333-333333333333" };
+    const seen: Array<{ capabilityId: string; input: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { capabilityId: string; input: Record<string, unknown> };
+      seen.push({ capabilityId: body.capabilityId, input: body.input });
+      return body.capabilityId === "hr.addApplicant"
+        ? Response.json({ ok: true, data: { applicantId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" } })
+        : Response.json({ ok: true, data: { moved: true, stage: "interview" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const openingId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const applicantId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+    await expect(submitHrHiringAction({ action: "addApplicant", openingId, name: "Mira Patel", email: "mira@example.com" }, scope)).resolves.toMatchObject({ kind: "success", data: { applicantId } });
+    await expect(submitHrHiringAction({ action: "moveApplicant", applicantId, stage: "interview" }, scope)).resolves.toMatchObject({ kind: "success", data: { moved: true, stage: "interview" } });
+    expect(seen).toEqual([
+      { capabilityId: "hr.addApplicant", input: { openingId, name: "Mira Patel", email: "mira@example.com" } },
+      { capabilityId: "hr.moveApplicant", input: { applicantId, stage: "interview" } },
+    ]);
   });
 
   it("keeps actor and organization scoped exact leave attempts through approval and Go 404", async () => {

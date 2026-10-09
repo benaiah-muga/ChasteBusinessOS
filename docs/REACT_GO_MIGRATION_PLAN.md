@@ -2034,3 +2034,13 @@ new owners and the manifest shows zero legacy runtime paths.
      legacy fallback while unresolved, and fail closed on Go 404. Add focused
      Vite API, page, and proxy tests; existing Go parser and governed executor
      tests remain the capability contract proof.
+200. Route only the Vite Hiring tab's report, opening creation, applicant
+     creation, and applicant stage changes through Go's `hr.report`,
+     `hr.createOpening`, `hr.addApplicant`, and `hr.moveApplicant` capabilities
+     behind paired `CHASTE_GO_HR_HIRING=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other HR tab
+     transports unchanged and do not add applicant conversion controls. Scope
+     durable exact write attempts by actor and organization, recover pending
+     and uncertain actions after reload, block legacy fallback while
+     unresolved, and fail closed on Go 404. Add focused Go contract and Vite
+     API, page, and proxy tests.
