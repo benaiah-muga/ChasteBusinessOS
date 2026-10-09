@@ -225,6 +225,45 @@ func TestGoWave3BankingGovernedExecutorPath(t *testing.T) {
 	}
 }
 
+func TestGoWave3BankReconciliationMatchUnmatchExecutor(t *testing.T) {
+	fx := newExecutorFixture(t)
+	cleanupBankingFixture(t, fx)
+	grantWavePermission(t, fx, "accounting.write")
+	account := seedBankAccount(t, fx, fx.orgID, "Reconciliation", "USD", 0)
+	paymentID := seedBankingInvoiceAndPayment(t, fx, fx.orgID, "USD", 5000)
+	transactionID := seedBankTransaction(t, fx, fx.orgID, account, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), 5000, "Executor match", "unmatched")
+
+	matchInput := json.RawMessage(`{"transactionId":"` + transactionID + `","paymentId":"` + paymentID + `"}`)
+	matchClaims := waveModuleClaims(fx, matchBankTransactionCapabilityID, "accounting.write", matchInput, "human", "", "wave3-bank-match-executor")
+	matched, err := fx.executor.Execute(fx.ctx, matchClaims, matchBankTransactionCapabilityID, matchInput)
+	if err != nil || !matched.OK {
+		t.Fatalf("matchBankTransaction result=%+v err=%v", matched, err)
+	}
+	var matchOutput MatchBankTransactionOutput
+	if err := json.Unmarshal(matched.Data, &matchOutput); err != nil || matchOutput.Status != "matched" || matchOutput.AllocatedMinor != 5000 || matchOutput.LineUnexplainedMinor != 0 {
+		t.Fatalf("matchBankTransaction output=%+v err=%v", matchOutput, err)
+	}
+	matchReplay, err := fx.executor.Execute(fx.ctx, matchClaims, matchBankTransactionCapabilityID, matchInput)
+	if err != nil || !matchReplay.OK || !matchReplay.Replayed {
+		t.Fatalf("matchBankTransaction replay=%+v err=%v, want governed receipt replay", matchReplay, err)
+	}
+
+	unmatchInput := json.RawMessage(`{"transactionId":"` + transactionID + `"}`)
+	unmatchClaims := waveModuleClaims(fx, unmatchBankTransactionCapabilityID, "accounting.write", unmatchInput, "human", "", "wave3-bank-unmatch-executor")
+	unmatched, err := fx.executor.Execute(fx.ctx, unmatchClaims, unmatchBankTransactionCapabilityID, unmatchInput)
+	if err != nil || !unmatched.OK {
+		t.Fatalf("unmatchBankTransaction result=%+v err=%v", unmatched, err)
+	}
+	var unmatchOutput UnmatchBankTransactionOutput
+	if err := json.Unmarshal(unmatched.Data, &unmatchOutput); err != nil || unmatchOutput.Status != "unmatched" || unmatchOutput.ReleasedMinor != 5000 {
+		t.Fatalf("unmatchBankTransaction output=%+v err=%v", unmatchOutput, err)
+	}
+	unmatchReplay, err := fx.executor.Execute(fx.ctx, unmatchClaims, unmatchBankTransactionCapabilityID, unmatchInput)
+	if err != nil || !unmatchReplay.OK || !unmatchReplay.Replayed {
+		t.Fatalf("unmatchBankTransaction replay=%+v err=%v, want governed receipt replay", unmatchReplay, err)
+	}
+}
+
 func TestGoWave3PurchasingRequestsGovernedExecutorPath(t *testing.T) {
 	fx := newExecutorFixture(t)
 	t.Cleanup(func() {

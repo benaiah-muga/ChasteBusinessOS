@@ -17,10 +17,12 @@ import {
   goAccountingCreateInvoiceUseGo,
   goAccountingCreditNoteUseGo,
   goAccountingReverseEntryUseGo,
+  goAccountingBankReconciliationWritesUseGo,
   readPendingAccountingRecordPayment,
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
   readPendingAccountingReverseEntry,
+  readPendingAccountingBankReconciliationWrite,
   submitAccountingAction,
   type AccountingAging,
   type AccountingBill,
@@ -37,6 +39,7 @@ import {
   type AccountingCreateInvoiceAction,
   type AccountingCreditNoteAction,
   type AccountingReverseEntryAction,
+  type AccountingBankReconciliationWriteAction,
   type AccountingReminder,
   type AccountingReports,
   type AccountingStatement,
@@ -354,6 +357,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
   const [pendingCreateInvoice, setPendingCreateInvoice] = useState<AccountingCreateInvoiceAction | null>(null);
   const [pendingCreditNote, setPendingCreditNote] = useState<AccountingCreditNoteAction | null>(null);
   const [pendingReverseEntry, setPendingReverseEntry] = useState<AccountingReverseEntryAction | null>(null);
+  const [pendingBankReconciliationWrite, setPendingBankReconciliationWrite] = useState<AccountingBankReconciliationWriteAction | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const paymentRetryScope: AccountingPaymentRetryScope = { actorId, organizationId };
 
@@ -408,6 +412,23 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
     }).catch((error) => {
       if (active && goAccountingRecordPaymentUseGo()) {
         setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved invoice payment." });
+      }
+    });
+    return () => { active = false; };
+  }, [actorId, organizationId]);
+
+  useEffect(() => {
+    if (!actorId || !organizationId) return;
+    let active = true;
+    void readPendingAccountingBankReconciliationWrite(paymentRetryScope).then((action) => {
+      if (!active) return;
+      setPendingBankReconciliationWrite(action);
+      if (action) setNotice({ tone: "pending", text: goAccountingBankReconciliationWritesUseGo()
+        ? "A bank reconciliation action is unresolved. Retry the exact action to recover its result."
+        : "A Go bank reconciliation action is unresolved. Restore the Go route and retry that exact action before using the legacy route." });
+    }).catch((error) => {
+      if (active && goAccountingBankReconciliationWritesUseGo()) {
+        setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not check for an unresolved bank reconciliation action." });
       }
     });
     return () => { active = false; };
@@ -497,6 +518,8 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
       const goCreditNote = isCreditNote && goAccountingCreditNoteUseGo();
       const isReverseEntry = path === "/api/accounting" && payload.action === "reverse";
       const goReverseEntry = isReverseEntry && goAccountingReverseEntryUseGo();
+      const isBankReconciliationWrite = path === "/api/banking" && (payload.action === "matchBankTransaction" || payload.action === "unmatchBankTransaction");
+      const goBankReconciliationWrite = isBankReconciliationWrite && goAccountingBankReconciliationWritesUseGo();
       setBusy(true);
       try {
         const outcome = await submitAccountingAction(path, payload, undefined, paymentRetryScope);
@@ -521,6 +544,11 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : null);
           if (outcome.kind === "completed") setReverseTarget(null);
         }
+        if (goBankReconciliationWrite) {
+          setPendingBankReconciliationWrite(outcome.kind === "pending"
+            ? await readPendingAccountingBankReconciliationWrite(paymentRetryScope)
+            : null);
+        }
         // A 202 is a queued approval, never a completed write: say so plainly.
         setNotice(
           outcome.kind === "pending"
@@ -528,7 +556,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
             : { tone: "success", text: `${label} done.` },
         );
         void load();
-        return !((goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry) && outcome.kind === "pending");
+        return !((goRecordPayment || goCreateInvoice || goCreditNote || goReverseEntry || goBankReconciliationWrite) && outcome.kind === "pending");
       } catch (error) {
         if (goRecordPayment) {
           try { setPendingRecordPayment(await readPendingAccountingRecordPayment(paymentRetryScope)); }
@@ -545,6 +573,10 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
         if (goReverseEntry) {
           try { setPendingReverseEntry(await readPendingAccountingReverseEntry(paymentRetryScope)); }
           catch { setPendingReverseEntry(payload as unknown as AccountingReverseEntryAction); }
+        }
+        if (goBankReconciliationWrite) {
+          try { setPendingBankReconciliationWrite(await readPendingAccountingBankReconciliationWrite(paymentRetryScope)); }
+          catch { setPendingBankReconciliationWrite(payload as unknown as AccountingBankReconciliationWriteAction); }
         }
         setNotice({
           tone: "error",
@@ -653,6 +685,14 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
                 disabled={busy || !goAccountingReverseEntryUseGo()}
                 onClick={() => void runAction("/api/accounting", { ...pendingReverseEntry }, "Reversal")}
               >{goAccountingReverseEntryUseGo() ? "Retry exact reversal" : "Enable Go reversal route to retry"}</button>}
+              {pendingBankReconciliationWrite && <button
+                type="button"
+                className="accounting-button accounting-button-small"
+                disabled={busy || !goAccountingBankReconciliationWritesUseGo()}
+                onClick={() => void runAction("/api/banking", { ...pendingBankReconciliationWrite }, pendingBankReconciliationWrite.action === "matchBankTransaction" ? "Match" : "Unmatch")}
+              >{goAccountingBankReconciliationWritesUseGo()
+                ? `Retry exact ${pendingBankReconciliationWrite.action === "matchBankTransaction" ? "match" : "unmatch"}`
+                : "Enable Go bank reconciliation route to retry"}</button>}
               {pendingRecordPayment && <button
                 type="button"
                 className="accounting-button accounting-button-small"
@@ -787,6 +827,7 @@ export function AccountingPage({ actorId = null, organizationId = null }: { acto
               baseCurrency={state.data.baseCurrency}
               banking={state.banking}
               busy={busy}
+              pendingReconciliationWrite={pendingBankReconciliationWrite !== null}
               onAction={runAction}
             />
           )}
@@ -2655,11 +2696,13 @@ function BankSection({
   baseCurrency,
   banking,
   busy,
+  pendingReconciliationWrite,
   onAction,
 }: {
   baseCurrency: string;
   banking: AccountingBanking | null;
   busy: boolean;
+  pendingReconciliationWrite: boolean;
   onAction: (
     path: "/api/accounting" | "/api/banking",
     payload: Record<string, unknown>,
@@ -2871,6 +2914,7 @@ function BankSection({
                   {formatMoneyOrMinor(transaction.currencyCode, transaction.amountMinor)}
                 </span>
                 <select
+                  disabled={pendingReconciliationWrite}
                   aria-label={`Match ${transaction.description} against payment`}
                   value={matchPicks[transaction.id] ?? ""}
                   onChange={(event) =>
@@ -2890,7 +2934,7 @@ function BankSection({
                 <button
                   type="button"
                   className="accounting-button accounting-button-small"
-                  disabled={busy || !matchPicks[transaction.id]}
+                  disabled={busy || pendingReconciliationWrite || !matchPicks[transaction.id]}
                   onClick={() =>
                     void onAction(
                       "/api/banking",
@@ -2943,7 +2987,7 @@ function BankSection({
                 <button
                   type="button"
                   className="accounting-button accounting-button-ghost accounting-button-small"
-                  disabled={busy}
+                  disabled={busy || pendingReconciliationWrite}
                   onClick={() =>
                     void onAction(
                       "/api/banking",

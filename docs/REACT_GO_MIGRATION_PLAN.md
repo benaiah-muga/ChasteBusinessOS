@@ -1979,3 +1979,15 @@ new owners and the manifest shows zero legacy runtime paths.
      AccountingPage tests; existing Go reverse-entry parser, domain, and
      governed-executor tests remain the contract proof. Authenticated browser
      proof remains open.
+195. Route only Vite bank reconciliation match/unmatch writes through Go's
+     session-authenticated `accounting.matchBankTransaction` and
+     `accounting.unmatchBankTransaction` capabilities behind paired
+     `CHASTE_GO_BANK_RECONCILIATION_WRITES=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Set the banking write
+     selector to `0` for explicit legacy rollback. Scope durable exact intents
+     by actor and organization, recover pending approvals and uncertain writes
+     after reload, block legacy fallback while unresolved, and fail closed on
+     Go 404. Keep other Banking operations and reads on their current routes.
+     Go remains authoritative for allocation and matched-state rules. Add
+     focused API, proxy, and AccountingPage tests plus governed Go executor
+     coverage. Authenticated browser proof remains open.

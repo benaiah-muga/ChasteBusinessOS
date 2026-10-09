@@ -30,6 +30,7 @@ import {
   goAccountingCreateInvoiceFromEnv,
   goAccountingCreditNoteFromEnv,
   goAccountingReverseEntryFromEnv,
+  goBankReconciliationWritesFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
   goRouteProxyFlagsFromEnv,
@@ -194,6 +195,15 @@ describe("accounting reverse entry Go selector", () => {
     expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_REVERSE_ENTRY: "0" })).toBe(false);
     expect(goAccountingReverseEntryFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_REVERSE_ENTRY: "1" })).toBe(false);
+  });
+});
+
+describe("bank reconciliation Go selector", () => {
+  it("requires both bank reconciliation writes and the session capability route", () => {
+    expect(goBankReconciliationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_BANK_RECONCILIATION_WRITES: "1" })).toBe(true);
+    expect(goBankReconciliationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goBankReconciliationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_BANK_RECONCILIATION_WRITES: "0" })).toBe(false);
+    expect(goBankReconciliationWritesFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_BANK_RECONCILIATION_WRITES: "1" })).toBe(false);
   });
 });
 

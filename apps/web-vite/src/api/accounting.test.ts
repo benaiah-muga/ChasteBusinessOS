@@ -15,6 +15,7 @@ import {
   readPendingAccountingCreateInvoice,
   readPendingAccountingCreditNote,
   readPendingAccountingReverseEntry,
+  readPendingAccountingBankReconciliationWrite,
   submitAccountingAction,
 } from "./accounting";
 
@@ -323,7 +324,7 @@ describe("accounting API: governed writes", () => {
 
   it("reports a completed write only when a 200 envelope comes back", async () => {
     stubFetch(() => Response.json({ ok: true, data: {} }));
-    await expect(submitAccountingAction("/api/banking", { action: "matchBankTransaction" })).resolves.toEqual({
+    await expect(submitAccountingAction("/api/banking", { action: "excludeBankTransaction", transactionId: "transaction-1" })).resolves.toEqual({
       kind: "completed",
     });
   });
@@ -612,6 +613,88 @@ describe("accounting API: Go journal reversals", () => {
     await expect(submitAccountingAction("/api/accounting", action, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 422, message: expect.stringContaining("domain workflow") });
     expect(mock).toHaveBeenCalledTimes(1);
     expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+  });
+});
+
+describe("accounting API: Go bank reconciliation writes", () => {
+  const matchAction = {
+    action: "matchBankTransaction",
+    transactionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    paymentId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  };
+  const unmatchAction = {
+    action: "unmatchBankTransaction",
+    transactionId: matchAction.transactionId,
+  };
+
+  it("routes match and unmatch through their Go capabilities and validates outputs", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    const mock = stubFetch((_url, init) => {
+      const capabilityId = JSON.parse(String(init?.body)).capabilityId;
+      return capabilityId === "accounting.matchBankTransaction"
+        ? Response.json({ ok: true, data: { status: "matched", allocatedMinor: 5000, lineUnexplainedMinor: 0 } })
+        : Response.json({ ok: true, data: { status: "unmatched", releasedMinor: 5000 } });
+    });
+    await expect(submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    await expect(submitAccountingAction("/api/banking", unmatchAction, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    const matchBody = JSON.parse(String(mock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    const unmatchBody = JSON.parse(String(mock.mock.calls[1]?.[1]?.body)) as Record<string, unknown>;
+    expect(matchBody).toMatchObject({ capabilityId: "accounting.matchBankTransaction", input: { transactionId: matchAction.transactionId, paymentId: matchAction.paymentId }, intentId: expect.any(String) });
+    expect(unmatchBody).toMatchObject({ capabilityId: "accounting.unmatchBankTransaction", input: { transactionId: unmatchAction.transactionId }, intentId: expect.any(String) });
+    expect(matchBody).not.toHaveProperty("actorId");
+    expect(matchBody).not.toHaveProperty("organizationId");
+    expect((matchBody.input as Record<string, unknown>).action).toBeUndefined();
+    await expect(readPendingAccountingBankReconciliationWrite(paymentRetryScope)).resolves.toBeNull();
+  });
+
+  it("validates Go parser constraints before sending", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: { status: "matched", allocatedMinor: 100, lineUnexplainedMinor: 0 } }));
+    const valid = { ...matchAction, entryId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" };
+    for (const invalid of [
+      { action: "matchBankTransaction", transactionId: "bad", paymentId: matchAction.paymentId },
+      { action: "matchBankTransaction", transactionId: matchAction.transactionId },
+      { ...valid },
+      { ...matchAction, amountMinor: 0 },
+      { ...matchAction, feeMinor: -1 },
+      { ...matchAction, amountMinor: 1, feeMinor: 1 },
+      { ...matchAction, amountMinor: 1, fxGainLossMinor: 1 },
+      { ...matchAction, note: "n".repeat(501) },
+    ]) {
+      await expect(submitAccountingAction("/api/banking", invalid, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 400 });
+    }
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it("retains one exact match intent through 202/404 and blocks both rollback operations", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    const mock = stubFetch(() => mock.mock.calls.length === 1
+      ? Response.json({ pendingApproval: true, reason: "Match approval required" }, { status: 202 })
+      : Response.json({ error: "capability not found" }, { status: 404 }));
+    await expect(submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope)).resolves.toMatchObject({ kind: "pending" });
+    await expect(submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(readPendingAccountingBankReconciliationWrite(paymentRetryScope)).resolves.toEqual(matchAction);
+    const calls = mock.mock.calls;
+    expect(JSON.parse(String(calls[0]?.[1]?.body)).intentId).toBe(JSON.parse(String(calls[1]?.[1]?.body)).intentId);
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", false);
+    await expect(submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    await expect(submitAccountingAction("/api/banking", unmatchAction, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(mock).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses Go's authoritative allocation and matched-state rejection", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    const mock = stubFetch(() => Response.json({ error: "transaction is excluded; unexclude it before matching" }, { status: 422 }));
+    await expect(submitAccountingAction("/api/banking", matchAction, undefined, paymentRetryScope)).rejects.toMatchObject({ status: 422, message: "transaction is excluded; unexclude it before matching" });
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledWith("/api/capabilities/execute", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("leaves other Banking writes on their existing endpoint", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    const mock = stubFetch(() => Response.json({ ok: true, data: {} }));
+    await expect(submitAccountingAction("/api/banking", { action: "excludeBankTransaction", transactionId: matchAction.transactionId }, undefined, paymentRetryScope)).resolves.toEqual({ kind: "completed" });
+    expect(mock).toHaveBeenCalledWith("/api/banking", expect.objectContaining({ method: "POST" }));
   });
 });
 

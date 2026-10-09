@@ -46,6 +46,15 @@ The full v1 changelog is preserved at the bottom of this file.
   never fall back to the legacy writer. Go checks reversal eligibility and
   directs invoice, payment, and year-end entries to their domain workflows.
   Other Accounting actions retain their existing routes.
+- Vite bank reconciliation match and unmatch writes can use Go's
+  session-authenticated `accounting.matchBankTransaction` and
+  `accounting.unmatchBankTransaction` capabilities behind the paired
+  `CHASTE_GO_BANK_RECONCILIATION_WRITES=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Exact actor/org scoped
+  attempts and approval recovery survive reload; Go 404 and uncertain outcomes
+  never fall back to the legacy writer. Go remains authoritative for matching
+  eligibility and allocation rules. Other banking actions and reads retain
+  their existing routes.
 - Go leave requests now verify that the employee belongs to the caller's
   organization before inserting a request. Missing and cross-organization
   employee IDs are rejected without creating leave records.

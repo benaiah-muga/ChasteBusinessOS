@@ -129,6 +129,8 @@ interface StubOptions {
   goCreateInvoiceResponse?: () => Response;
   goCreditNoteResponse?: () => Response;
   goReverseEntryResponse?: () => Response;
+  goBankMatchResponse?: () => Response;
+  goBankUnmatchResponse?: () => Response;
 }
 
 function stubAccounting(options: StubOptions = {}) {
@@ -155,6 +157,12 @@ function stubAccounting(options: StubOptions = {}) {
       }
       if (capabilityId === "accounting.reverseEntry") {
         return options.goReverseEntryResponse?.() ?? Response.json({ ok: true, data: { reversalEntryId: "88888888-8888-4888-8888-888888888888" } });
+      }
+      if (capabilityId === "accounting.matchBankTransaction") {
+        return options.goBankMatchResponse?.() ?? Response.json({ ok: true, data: { status: "matched", allocatedMinor: 2500, lineUnexplainedMinor: 0 } });
+      }
+      if (capabilityId === "accounting.unmatchBankTransaction") {
+        return options.goBankUnmatchResponse?.() ?? Response.json({ ok: true, data: { status: "unmatched", releasedMinor: 2500 } });
       }
       if (capabilityId === "accounting.createInvoice") {
         return options.goCreateInvoiceResponse?.() ?? Response.json({ ok: true, data: {
@@ -883,12 +891,17 @@ describe("AccountingPage tabs", () => {
     });
   });
 
-  it("matches a bank line to a payment through the banking route", async () => {
+  it("keeps a pending Go match exact across reload and locks the match form", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    let responseCount = 0;
     const { calls } = stubAccounting({
+      goBankMatchResponse: () => ++responseCount === 1
+        ? Response.json({ pendingApproval: true, reason: "Match approval required" }, { status: 202 })
+        : Response.json({ ok: true, data: { status: "matched", allocatedMinor: 2500, lineUnexplainedMinor: 0 } }),
       banking: {
-        accounts: [{ id: "acct-1", name: "Operating", currencyCode: "USD", last4: null, balanceMinor: 0 }],
-        unmatched: [{ id: "txn-1", bankAccountId: "acct-1", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 2_500, description: "Incoming transfer" }],
-        payments: [{ id: "payment-1", invoiceNumber: 1042, currencyCode: "USD", customerName: "Kampala Coffee", amountMinor: 2_500, receivedAt: "2026-06-01T00:00:00.000Z" }],
+        accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: null, balanceMinor: 0 }],
+        unmatched: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 2_500, description: "Incoming transfer" }],
+        payments: [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", invoiceNumber: 1042, currencyCode: "USD", customerName: "Kampala Coffee", amountMinor: 2_500, receivedAt: "2026-06-01T00:00:00.000Z" }],
         summary: { accounts: [], unmatchedCount: 1 },
       },
     });
@@ -896,18 +909,62 @@ describe("AccountingPage tabs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
     fireEvent.change(await screen.findByLabelText("Match Incoming transfer against payment"), {
-      target: { value: "payment-1" },
+      target: { value: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Match" }));
 
     await waitFor(() => {
-      const write = calls.find((call) => call.url === "/api/banking" && call.body?.includes("matchBankTransaction"));
-      expect(JSON.parse(write!.body!)).toEqual({
-        action: "matchBankTransaction",
-        transactionId: "txn-1",
-        paymentId: "payment-1",
-      });
+      expect(screen.getByRole("button", { name: "Retry exact match" })).toBeTruthy();
     });
+    expect(screen.getByLabelText("Match Incoming transfer against payment")).toHaveProperty("disabled", true);
+    expect(calls.some((call) => call.url === "/api/banking" && call.method === "POST")).toBe(false);
+    const initial = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute")!.body!) as Record<string, unknown>;
+
+    cleanup();
+    await renderReady();
+    fireEvent.click(await screen.findByRole("button", { name: /Bank/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact match" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry exact match" })).toBeNull());
+    const writes = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body!) as Record<string, unknown>);
+    expect(writes).toHaveLength(2);
+    expect(writes[0]).toEqual(initial);
+    expect(writes[1]).toEqual(initial);
+    expect(writes[0]).toMatchObject({ capabilityId: "accounting.matchBankTransaction", input: { transactionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", paymentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } });
+  });
+
+  it("recovers an unresolved Go unmatch with the same intent after reload", async () => {
+    vi.stubGlobal("__GO_BANK_RECONCILIATION_WRITES__", true);
+    let responseCount = 0;
+    const { calls } = stubAccounting({
+      goBankUnmatchResponse: () => ++responseCount === 1
+        ? Response.json({ pendingApproval: true, reason: "Unmatch approval required" }, { status: 202 })
+        : Response.json({ ok: true, data: { status: "unmatched", releasedMinor: 2500 } }),
+      banking: {
+        accounts: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Operating", currencyCode: "USD", last4: null, balanceMinor: 0 }],
+        unmatched: [],
+        matched: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", bankAccountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", currencyCode: "USD", postedAt: "2026-06-01T00:00:00.000Z", amountMinor: 2_500, description: "Incoming transfer" }],
+        payments: [],
+        summary: { accounts: [], unmatchedCount: 0 },
+      },
+    });
+    await renderReady();
+    fireEvent.click(screen.getByRole("button", { name: /Bank/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Unmatch" }));
+    await screen.findByRole("button", { name: "Retry exact unmatch" });
+    const initial = JSON.parse(calls.find((call) => call.url === "/api/capabilities/execute")!.body!) as Record<string, unknown>;
+
+    cleanup();
+    await renderReady();
+    fireEvent.click(await screen.findByRole("button", { name: /Bank/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry exact unmatch" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry exact unmatch" })).toBeNull());
+    const writes = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body!) as Record<string, unknown>);
+    expect(writes).toHaveLength(2);
+    expect(writes[0]).toEqual(initial);
+    expect(writes[1]).toEqual(initial);
+    expect(writes[0]).toMatchObject({ capabilityId: "accounting.unmatchBankTransaction", input: { transactionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" } });
   });
 
   it("lists return filings and active output tax codes on the tax tab", async () => {
