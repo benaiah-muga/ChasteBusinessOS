@@ -25,6 +25,7 @@ declare const __GO_ACCOUNTING_CREATE_INVOICE__: boolean;
 declare const __GO_ACCOUNTING_CREDIT_NOTE__: boolean;
 declare const __GO_ACCOUNTING_REVERSE_ENTRY__: boolean;
 declare const __GO_ACCOUNTING_PERIOD_CLOSE_READS__: boolean;
+declare const __GO_ACCOUNTING_REPORTS__: boolean;
 declare const __GO_BANK_RECONCILIATION_WRITES__: boolean;
 declare const __GO_PURCHASING_CREATE_ORDER__: boolean;
 declare const __GO_PURCHASING_RECEIVE_GOODS__: boolean;

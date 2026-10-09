@@ -132,6 +132,7 @@ interface StubOptions {
   goBankMatchResponse?: () => Response;
   goBankUnmatchResponse?: () => Response;
   goPurchasingPayBillResponse?: () => Response;
+  goReportResponse?: (capabilityId: string) => Response;
 }
 
 function stubAccounting(options: StubOptions = {}) {
@@ -149,6 +150,28 @@ function stubAccounting(options: StubOptions = {}) {
     }
     if (url === "/api/capabilities/execute") {
       const capabilityId = body ? (JSON.parse(body) as { capabilityId?: string }).capabilityId : undefined;
+      if (capabilityId && [
+        "accounting.incomeStatement",
+        "accounting.balanceSheet",
+        "accounting.cashFlow",
+        "accounting.unrealizedFxExposure",
+        "accounting.reportCurrencyMetadata",
+      ].includes(capabilityId)) {
+        if (options.goReportResponse) return options.goReportResponse(capabilityId);
+        const reportData: Record<string, unknown> = {
+          "accounting.incomeStatement": reports.pnl,
+          "accounting.balanceSheet": reports.balanceSheet,
+          "accounting.cashFlow": {
+            openingMinor: 0, closingMinor: 0, netMinor: 0, cashBalanceMinor: 0, ties: true,
+            operating: { inflowMinor: 0, outflowMinor: 0, netMinor: 0, entries: 0 },
+            investing: { inflowMinor: 0, outflowMinor: 0, netMinor: 0, entries: 0 },
+            financing: { inflowMinor: 0, outflowMinor: 0, netMinor: 0, entries: 0 },
+          },
+          "accounting.unrealizedFxExposure": { exposures: [] },
+          "accounting.reportCurrencyMetadata": { baseCurrency: "USD", unsupportedCurrencies: [] },
+        };
+        return Response.json({ ok: true, data: reportData[capabilityId] });
+      }
       if (capabilityId === "purchasing.payBill") {
         return options.goPurchasingPayBillResponse?.() ?? Response.json({ ok: true, data: {
           paymentId: "33333333-3333-4333-8333-333333333333",
@@ -906,6 +929,38 @@ describe("AccountingPage tabs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^90 days and over/ }));
     expect(await screen.findByText("No invoices match this aging range.")).toBeTruthy();
+  });
+
+  it("loads the Reports aggregate directly from Go when selected", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    const { calls } = stubAccounting();
+    await renderReady();
+
+    fireEvent.click(screen.getByRole("button", { name: /Reports/ }));
+    expect(await screen.findByRole("table", { name: "Balance sheet" })).toBeTruthy();
+    expect(screen.getByText("Profit and loss · to date")).toBeTruthy();
+    const reportCalls = calls.filter((call) => call.url === "/api/capabilities/execute").map((call) => JSON.parse(call.body ?? "{}") as { capabilityId?: string });
+    expect(reportCalls.map((call) => call.capabilityId).sort()).toEqual([
+      "accounting.balanceSheet",
+      "accounting.cashFlow",
+      "accounting.incomeStatement",
+      "accounting.reportCurrencyMetadata",
+      "accounting.unrealizedFxExposure",
+    ]);
+    expect(calls.some((call) => call.url === "/api/reports")).toBe(false);
+  });
+
+  it("fails the report load on a pending required Go capability", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    stubAccounting({
+      goReportResponse: (capabilityId) => capabilityId === "accounting.incomeStatement"
+        ? Response.json({ pendingApproval: true }, { status: 202 })
+        : Response.json({ ok: true, data: reports.pnl }),
+    });
+    render(<AccountingPage />);
+
+    expect(await screen.findByRole("heading", { name: "Could not load your books" })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Accounting sections" })).toBeNull();
   });
 
   it("shows reports and keeps foreign bills out of the base-currency payable total", async () => {

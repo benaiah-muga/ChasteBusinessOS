@@ -161,6 +161,16 @@ const FxExposureSchema = z.object({
   }).strict()),
 }).strict();
 
+const ReportCurrencyMetadataSchema = z.object({
+  baseCurrency: currency,
+  unsupportedCurrencies: z.array(currency),
+}).strict().refine((metadata) => {
+  const sorted = [...metadata.unsupportedCurrencies].sort();
+  return metadata.unsupportedCurrencies.every((code) => code !== metadata.baseCurrency) &&
+    new Set(metadata.unsupportedCurrencies).size === metadata.unsupportedCurrencies.length &&
+    metadata.unsupportedCurrencies.every((code, index) => code === sorted[index]);
+});
+
 const AccountingReportsSchema = z.object({
   baseCurrency: currency,
   unsupportedCurrencies: z.array(currency).optional(),
@@ -297,6 +307,7 @@ const StatementSchema = z.object({
 
 const ErrorResponseSchema = z.object({ error: z.string().optional(), message: z.string().optional() });
 const EnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() }).strict();
+const CapabilityErrorSchema = z.object({ ok: z.literal(false), error: z.string() }).strict();
 const PendingSchema = z.object({
   ok: z.literal(false).optional(),
   pendingApproval: z.literal(true),
@@ -466,6 +477,10 @@ export function goAccountingReverseEntryUseGo(): boolean {
   return typeof __GO_ACCOUNTING_REVERSE_ENTRY__ !== "undefined" && __GO_ACCOUNTING_REVERSE_ENTRY__;
 }
 
+export function goAccountingReportsUseGo(): boolean {
+  return typeof __GO_ACCOUNTING_REPORTS__ !== "undefined" && __GO_ACCOUNTING_REPORTS__;
+}
+
 export function goAccountingBankReconciliationWritesUseGo(): boolean {
   return typeof __GO_BANK_RECONCILIATION_WRITES__ !== "undefined" && __GO_BANK_RECONCILIATION_WRITES__;
 }
@@ -582,7 +597,55 @@ export async function fetchAccountingOverview(signal?: AbortSignal): Promise<Acc
 }
 
 export async function fetchAccountingReports(signal?: AbortSignal): Promise<AccountingReports> {
+  if (goAccountingReportsUseGo()) {
+    const [pnl, balanceSheet, cashFlow, fxExposure, metadata] = await Promise.all([
+      readGoAccountingReport("accounting.incomeStatement", PnlSchema, "income statement", signal),
+      readGoAccountingReport("accounting.balanceSheet", BalanceSheetSchema, "balance sheet", signal),
+      readGoAccountingReport("accounting.cashFlow", CashFlowSchema, "cash flow statement", signal, true),
+      readGoAccountingReport("accounting.unrealizedFxExposure", FxExposureSchema, "foreign exchange exposure", signal, true),
+      readGoAccountingReport("accounting.reportCurrencyMetadata", ReportCurrencyMetadataSchema, "report currency metadata", signal),
+    ]);
+    if (!pnl || !balanceSheet || !metadata) throw new AccountingApiError(503, "A required Accounting report was unavailable.");
+    const aggregate = AccountingReportsSchema.safeParse({
+      baseCurrency: metadata.baseCurrency,
+      unsupportedCurrencies: metadata.unsupportedCurrencies,
+      pnl,
+      balanceSheet,
+      cashFlow,
+      fxExposure,
+    });
+    if (!aggregate.success) throw new AccountingApiError(200, "The Accounting service returned data in an unexpected format.");
+    return aggregate.data;
+  }
   return get("/api/reports", AccountingReportsSchema, "load the financial reports", signal);
+}
+
+async function readGoAccountingReport<T>(
+  capabilityId: "accounting.incomeStatement" | "accounting.balanceSheet" | "accounting.cashFlow" | "accounting.unrealizedFxExposure" | "accounting.reportCurrencyMetadata",
+  schema: z.ZodType<T>,
+  subject: string,
+  signal?: AbortSignal,
+  optional = false,
+): Promise<T | null> {
+  const { response, body } = await getJson("/api/capabilities/execute", {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({ capabilityId, input: {}, intentId: crypto.randomUUID() }),
+  }, signal);
+  if (response.status === 422) {
+    const error = CapabilityErrorSchema.safeParse(body);
+    if (!error.success) throw new AccountingApiError(503, "The Accounting reports service returned an unexpected response.");
+    if (optional) return null;
+    throw new AccountingApiError(500, error.data.error.slice(0, 240));
+  }
+  if (response.status !== 200) {
+    throw new AccountingApiError(response.status, errorMessage(response.status, body, `load ${subject}`));
+  }
+  const envelope = EnvelopeSchema.safeParse(body);
+  if (!envelope.success) throw new AccountingApiError(response.status, "The Accounting reports service returned an unexpected response.");
+  const parsed = schema.safeParse(envelope.data.data);
+  if (!parsed.success) throw new AccountingApiError(response.status, "The Accounting reports service returned an unexpected result.");
+  return parsed.data;
 }
 
 /** Cash basis and bank feeds are auxiliary: a failure must never blank the books. */

@@ -38,6 +38,7 @@ import {
   goAccountingCreditNoteFromEnv,
   goAccountingReverseEntryFromEnv,
   goAccountingPeriodCloseReadsFromEnv,
+  goAccountingReportsFromEnv,
   goBankReconciliationWritesFromEnv,
   goPosCustomersSliceFromEnv,
   goPosOpenSessionSliceFromEnv,
@@ -247,6 +248,15 @@ describe("accounting period close read Go selector", () => {
     expect(goAccountingPeriodCloseReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goAccountingPeriodCloseReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS: "0" })).toBe(false);
     expect(goAccountingPeriodCloseReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_PERIOD_CLOSE_READS: "1" })).toBe(false);
+  });
+});
+
+describe("accounting reports Go selector", () => {
+  it("requires the reports selector and session capability route", () => {
+    expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_REPORTS: "1" })).toBe(true);
+    expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
+    expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_ACCOUNTING_REPORTS: "0" })).toBe(false);
+    expect(goAccountingReportsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_ACCOUNTING_REPORTS: "1" })).toBe(false);
   });
 });
 

@@ -2080,3 +2080,13 @@ new owners and the manifest shows zero legacy runtime paths.
      output contracts and render pending, malformed, or unavailable results as
      errors rather than empty analytics. Keep other Purchasing flows unchanged;
      add focused Vite API, page, proxy selector, and Go executor contract tests.
+205. Route only the Vite Accounting Reports aggregate read through Go's
+     `accounting.incomeStatement`, `accounting.balanceSheet`,
+     `accounting.cashFlow`, `accounting.unrealizedFxExposure`, and
+     `accounting.reportCurrencyMetadata` capabilities behind paired
+     `CHASTE_GO_ACCOUNTING_REPORTS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Preserve required versus
+     optional report semantics, validate all result schemas and currency
+     metadata, and use no-store reads. Fail closed without `/api/reports`
+     fallback. Keep Accounting writes and other report reads unchanged; add
+     focused Vite API, page, proxy selector, and Go executor contract tests.

@@ -7,6 +7,7 @@ import {
   fetchAccountingEnabled,
   fetchAccountingOverview,
   fetchAccountingReports,
+  goAccountingReportsUseGo,
   fetchAccountingTaxCodes,
   fetchCashForecast,
   fetchCustomerStatement,
@@ -202,6 +203,114 @@ describe("accounting API: books and reports", () => {
   it("reads reports and passes through optional sections", async () => {
     stubFetch(() => Response.json(reports));
     await expect(fetchAccountingReports()).resolves.toMatchObject({ baseCurrency: "USD" });
+  });
+
+  it("loads the aggregate from the five session Go report capabilities with no-store caching", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    const dataByCapability: Record<string, unknown> = {
+      "accounting.incomeStatement": reports.pnl,
+      "accounting.balanceSheet": reports.balanceSheet,
+      "accounting.cashFlow": null,
+      "accounting.unrealizedFxExposure": { exposures: [] },
+      "accounting.reportCurrencyMetadata": { baseCurrency: "USD", unsupportedCurrencies: ["EUR"] },
+    };
+    const mock = stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
+      if (body.capabilityId === "accounting.cashFlow" || body.capabilityId === "accounting.unrealizedFxExposure") {
+        return Response.json({ ok: false, error: "No optional report data." }, { status: 422 });
+      }
+      return Response.json({ ok: true, data: dataByCapability[body.capabilityId ?? ""] });
+    });
+
+    expect(goAccountingReportsUseGo()).toBe(true);
+    await expect(fetchAccountingReports()).resolves.toEqual({
+      baseCurrency: "USD",
+      unsupportedCurrencies: ["EUR"],
+      pnl: reports.pnl,
+      balanceSheet: reports.balanceSheet,
+      cashFlow: null,
+      fxExposure: null,
+    });
+    expect(mock).toHaveBeenCalledTimes(5);
+    const calls = mock.mock.calls.map(([url, init]) => ({
+      url,
+      init,
+      body: JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string; input?: unknown; intentId?: string },
+    }));
+    expect(calls.map((call) => call.body.capabilityId).sort()).toEqual([
+      "accounting.balanceSheet",
+      "accounting.cashFlow",
+      "accounting.incomeStatement",
+      "accounting.reportCurrencyMetadata",
+      "accounting.unrealizedFxExposure",
+    ]);
+    for (const call of calls) {
+      expect(call.url).toBe("/api/capabilities/execute");
+      expect(call.init).toMatchObject({ method: "POST", cache: "no-store", credentials: "same-origin" });
+      expect(call.body.input).toEqual({});
+      expect(call.body.intentId).toEqual(expect.any(String));
+    }
+  });
+
+  it.each([
+    { label: "pending", response: () => Response.json({ pendingApproval: true }, { status: 202 }), status: 202 },
+    { label: "unavailable", response: () => Response.json({ error: "not found" }, { status: 404 }), status: 404 },
+    { label: "malformed", response: () => Response.json({ ok: true, data: { revenueMinor: "12" } }), status: 200 },
+    { label: "required domain error", response: () => Response.json({ ok: false, error: "P&L failed" }, { status: 422 }), status: 500 },
+  ])("fails closed on $label Go report responses", async ({ response, status }) => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    const mock = stubFetch((url, init) => {
+      if (url !== "/api/capabilities/execute") return Response.json(reports);
+      const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
+      return body.capabilityId === "accounting.incomeStatement" ? response() : Response.json({ ok: true, data: reports.pnl });
+    });
+    await expect(fetchAccountingReports()).rejects.toMatchObject({ name: "AccountingApiError", status });
+    expect(mock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
+  });
+
+  it("rejects malformed Go currency metadata", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    const validCashFlow = {
+      openingMinor: 0, closingMinor: 0, netMinor: 0, cashBalanceMinor: 0, ties: true,
+      operating: { inflowMinor: 0, outflowMinor: 0, netMinor: 0, entries: 0 },
+      investing: { inflowMinor: 0, outflowMinor: 0, netMinor: 0, entries: 0 },
+      financing: { inflowMinor: 0, outflowMinor: 0, netMinor: 0, entries: 0 },
+    };
+    const mock = stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
+      if (body.capabilityId === "accounting.reportCurrencyMetadata") {
+        return Response.json({ ok: true, data: { baseCurrency: "USD", unsupportedCurrencies: ["EUR", "EUR"] } });
+      }
+      const data = body.capabilityId === "accounting.incomeStatement" ? reports.pnl
+        : body.capabilityId === "accounting.balanceSheet" ? reports.balanceSheet
+          : body.capabilityId === "accounting.cashFlow" ? validCashFlow
+            : { exposures: [] };
+      return Response.json({ ok: true, data });
+    });
+    await expect(fetchAccountingReports()).rejects.toMatchObject({ name: "AccountingApiError" });
+    expect(mock).toHaveBeenCalledTimes(5);
+  });
+
+  it("does not turn unavailable optional Go reports into null", async () => {
+    vi.stubGlobal("__GO_ACCOUNTING_REPORTS__", true);
+    const validCashFlow = {
+      openingMinor: 0, closingMinor: 0, netMinor: 0, cashBalanceMinor: 0, ties: true,
+      operating: { inflowMinor: 0, outflowMinor: 0, netMinor: 0, entries: 0 },
+      investing: { inflowMinor: 0, outflowMinor: 0, netMinor: 0, entries: 0 },
+      financing: { inflowMinor: 0, outflowMinor: 0, netMinor: 0, entries: 0 },
+    };
+    const mock = stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { capabilityId?: string };
+      if (body.capabilityId === "accounting.cashFlow") return Response.json({ error: "cash flow unavailable" }, { status: 503 });
+      const data = body.capabilityId === "accounting.incomeStatement" ? reports.pnl
+        : body.capabilityId === "accounting.balanceSheet" ? reports.balanceSheet
+          : body.capabilityId === "accounting.reportCurrencyMetadata" ? { baseCurrency: "USD", unsupportedCurrencies: [] }
+            : body.capabilityId === "accounting.unrealizedFxExposure" ? { exposures: [] }
+              : validCashFlow;
+      return Response.json({ ok: true, data });
+    });
+    await expect(fetchAccountingReports()).rejects.toMatchObject({ name: "AccountingApiError", status: 503 });
+    expect(mock).toHaveBeenCalledTimes(5);
   });
 });
 
