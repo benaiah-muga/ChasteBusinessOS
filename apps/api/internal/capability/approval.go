@@ -233,8 +233,14 @@ func (d *ApprovalDecider) Decide(ctx context.Context, claims authbridge.Capabili
 				parsedDigest, err := parsed.CanonicalHash()
 				verifiedPayload = err == nil && parsedDigest == digest
 			}
-		case undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID:
-			parsed, parseErr := ParseCustomerIDsInput(transition.row.Payload)
+		case undoCustomerImportCapabilityID:
+			parsed, parseErr := ParseCustomerUndoImportInput(transition.row.Payload)
+			if parseErr == nil {
+				parsedDigest, err := parsed.CanonicalHash()
+				verifiedPayload = err == nil && parsedDigest == digest
+			}
+		case restoreImportedCustomersCapabilityID:
+			parsed, parseErr := ParseCustomerRestoreImportInput(transition.row.Payload)
 			if parseErr == nil {
 				parsedDigest, err := parsed.CanonicalHash()
 				verifiedPayload = err == nil && parsedDigest == digest

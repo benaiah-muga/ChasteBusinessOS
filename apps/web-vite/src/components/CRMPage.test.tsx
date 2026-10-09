@@ -379,7 +379,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     const views = await screen.findByRole("combobox", { name: "Saved customer views" });
@@ -402,7 +402,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Pipeline/ }));
     const stageSelect = screen.getByRole("combobox", { name: "Move Annual renewal" });
@@ -1259,7 +1259,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Customers/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
     const dialog = await screen.findByRole("dialog", { name: "Northwind" });
@@ -1287,7 +1287,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Profile" }));
@@ -1301,6 +1301,7 @@ describe("Vite CRM page", () => {
   });
 
   it("downloads the template, maps CSV columns, paginates imports, and submits all selected rows", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_IMPORT__", false);
     const createObjectURL = vi.fn(() => "blob:crm-template");
     const revokeObjectURL = vi.fn();
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
@@ -1318,7 +1319,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
     fireEvent.click(await screen.findByRole("button", { name: /Customers/ }));
     fireEvent.click(screen.getByRole("button", { name: "Import CSV" }));
     fireEvent.click(screen.getByRole("button", { name: "Download template" }));
@@ -1489,6 +1490,7 @@ describe("Vite CRM page", () => {
   });
 
   it("imports customers and sends the exact created IDs when Undo this import is used", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_IMPORT__", false);
     const createdIds = [
       "8ea6ef66-d321-4be4-a4ee-32fa0b13e5f9",
       "3736fc41-fbf2-4892-b290-ae17fbdbcc36",
@@ -1512,7 +1514,7 @@ describe("Vite CRM page", () => {
       return new Response(null, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<CRMPage />);
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
     fireEvent.click(screen.getByRole("button", { name: "Import CSV" }));
@@ -1533,6 +1535,65 @@ describe("Vite CRM page", () => {
     expect(await screen.findByText("Undid this import. 2 imported customers were deactivated.")).not.toBeNull();
     expect(importPosts).toHaveLength(2);
     expect(JSON.parse(importPosts[1]!.body)).toEqual({ entity: "customers", action: "undo", importIds: createdIds });
+  });
+
+  it("freezes and restores a pending Go import, then keeps its created IDs available for undo after reload", async () => {
+    vi.stubGlobal("__GO_CRM_CUSTOMER_IMPORT__", true);
+    const importedCustomerIds = [dealId];
+    const capabilityPosts: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (isDealsRead(path)) return Response.json({ deals: [] });
+      if (isCustomersRead(path) && init?.method !== "POST") return Response.json({ customers: [customer()] });
+      if (path === "/api/crm?tasks=1") return Response.json({ tasks: [] });
+      if (isCustomerViewsRead(path)) return Response.json({ views: [] });
+      if (path === "/api/capabilities/execute" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        capabilityPosts.push(body);
+        if (body.capabilityId === "crm.importCustomers" && capabilityPosts.filter((post) => post.capabilityId === "crm.importCustomers").length === 1) {
+          return Response.json({ pendingApproval: true, error: "Import needs approval" }, { status: 202 });
+        }
+        if (body.capabilityId === "crm.importCustomers") return Response.json({ ok: true, data: { createdIds: importedCustomerIds, imported: 1, skippedDuplicateRows: [] } });
+        const undoInput = body.input as { importIntentId: string };
+        return Response.json({ ok: true, data: { customerIds: importedCustomerIds, deactivated: 1, importIntentId: undoInput.importIntentId, undoIntentId: body.intentId } });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = render(<CRMPage actorId={dealId} organizationId={customerId} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Import CSV" }));
+    const file = new File(["Name,Email\nNorthwind,contact@northwind.test"], "customers.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("Choose CSV"), { target: { files: [file] } });
+    fireEvent.change(await screen.findByLabelText("Map name"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Map email"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Possible match: Northwind/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Import 1 customers" }));
+    expect(await screen.findByText("Import needs approval")).not.toBeNull();
+    expect((screen.getByLabelText("Map name") as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Choose another CSV") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Row 2 name") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /Row 2/ }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /Possible match: Northwind/ }) as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Retry import 1 customers" })).not.toBeNull();
+
+    unmount();
+    render(<CRMPage actorId={dealId} organizationId={customerId} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Customers/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry import 1 customers" }));
+    expect(await screen.findByText("1 customers imported, 0 duplicates skipped.")).not.toBeNull();
+    const importPosts = capabilityPosts.filter((post) => post.capabilityId === "crm.importCustomers");
+    expect(importPosts).toHaveLength(2);
+    expect(importPosts[0]).toEqual(importPosts[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Undo last import" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Undo this import" }));
+    expect(await screen.findByText("Import undone.")).not.toBeNull();
+    const undoPost = capabilityPosts.find((post) => post.capabilityId === "crm.undoCustomerImport");
+    const importIntentId = capabilityPosts.find((post) => post.capabilityId === "crm.importCustomers")?.intentId;
+    expect(undoPost).toMatchObject({ capabilityId: "crm.undoCustomerImport", input: { customerIds: importedCustomerIds, importIntentId } });
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/import")).toBe(false);
   });
 
   it("requires confirmation to deactivate a customer and keeps the record in inactive history", async () => {

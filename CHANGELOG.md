@@ -13,6 +13,15 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite CRM customer CSV import and undo now use Go's session-authenticated
+  `crm.importCustomers` and `crm.undoCustomerImport` capabilities by default in
+  local setups. Exact rows, created-ID undo state, actor/org scoped intents, and
+  pending or uncertain retries survive reload; a Go 404 never falls back to
+  `/api/import`, and selector rollback blocks unresolved attempts. Go binds undo
+  to the successful import receipt and actor, and binds restore to the successful
+  undo receipt while rejecting changed records. Undo remains on Go for imports
+  created by Go. Set `CHASTE_GO_CRM_CUSTOMER_IMPORT=0` to use `/api/import` for
+  new legacy imports.
 - Vite CRM customer merge and undo now use Go's session-authenticated
   `crm.mergeCustomers` and `crm.restoreCustomerMerge` capabilities by default
   in local setups. Merge and undo inputs retain exact actor and organization

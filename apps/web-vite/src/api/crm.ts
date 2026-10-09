@@ -231,6 +231,9 @@ const CRM_CUSTOMER_DEACTIVATE_INTENT_PREFIX = "chaste.crm.customer-deactivate-in
 const CRM_CUSTOMER_MERGE_INTENT_PREFIX = "chaste.crm.customer-merge-intent.v1:";
 const CRM_CUSTOMER_MERGE_UNDO_INTENT_PREFIX = "chaste.crm.customer-merge-undo-intent.v1:";
 const CRM_CUSTOMER_MERGE_UNDO_STATE_PREFIX = "chaste.crm.customer-merge-undo-state.v1:";
+const CRM_CUSTOMER_IMPORT_INTENT_PREFIX = "chaste.crm.customer-import-intent.v1:";
+const CRM_CUSTOMER_IMPORT_UNDO_INTENT_PREFIX = "chaste.crm.customer-import-undo-intent.v1:";
+const CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX = "chaste.crm.customer-import-undo-state.v1:";
 const CRM_CUSTOMER_PROFILE_UPDATE_INTENT_PREFIX = "chaste.crm.customer-profile-update-intent.v1:";
 const CRM_DEAL_CREATE_INTENT_PREFIX = "chaste.crm.deal-create-intent.v1:";
 const CrmTaskAttemptSchema = z.object({
@@ -266,6 +269,10 @@ export type CrmCustomerCreateInput = Omit<CrmCustomerCreateMutation, "action">;
 type CrmDealCreateMutation = { action: "createDeal"; title: string; valueMinor: number; customerId?: string };
 export type CrmDealCreateInput = Omit<CrmDealCreateMutation, "action">;
 type CrmCustomerDeactivateMutation = { action: "deactivateCustomer"; customerId: string };
+type CrmCustomerImportRow = { rowNumber: number; name: string; email?: string; phone?: string; allowDuplicate: boolean };
+type CrmCustomerImportMutation = { action: "importCustomers"; rows: CrmCustomerImportRow[] };
+type CrmCustomerImportUndoMutation = { action: "undoCustomerImport"; customerIds: string[]; importIntentId: string };
+export type CrmCustomerImportUndoState = { imported: number; skippedDuplicates: number; createdIds: string[]; importIntentId: string };
 type CrmCustomerMergeSnapshot = {
   customerId: string;
   email: string | null;
@@ -292,7 +299,7 @@ export type CrmCustomerMergeResult = {
 };
 type CrmCustomerMergeMutation = { action: "mergeCustomers"; survivorCustomerId: string; duplicateCustomerId: string };
 type CrmCustomerMergeUndoMutation = { action: "restoreCustomerMerge" } & CrmCustomerMergeResult;
-type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmCustomerMergeMutation | CrmCustomerMergeUndoMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation;
+type CrmRetryMutation = CrmTaskMutation | CrmCustomerCreateMutation | CrmCustomerDeactivateMutation | CrmCustomerImportMutation | CrmCustomerImportUndoMutation | CrmCustomerMergeMutation | CrmCustomerMergeUndoMutation | CrmDealCreateMutation | CrmCustomerProfileUpdateMutation;
 const CrmCustomerMergeInputSchema = z.object({ survivorCustomerId: uuid, duplicateCustomerId: uuid }).strict().refine((input) => input.survivorCustomerId !== input.duplicateCustomerId);
 const CrmCustomerMergeSnapshotSchema = z.object({
   customerId: uuid,
@@ -317,6 +324,28 @@ const CrmCustomerMergeResultSchema = z.object({
   previous: z.array(CrmCustomerMergeSnapshotSchema).min(2).max(502),
   merged: z.array(CrmCustomerMergeSnapshotSchema).min(2).max(502).optional(),
   mergeIntentId: uuid.optional(),
+}).strict();
+const CrmCustomerImportRowSchema = z.object({
+  rowNumber: z.number().int().positive(),
+  name: z.string().min(1).max(120),
+  email: z.string().email().optional(),
+  phone: z.string().max(40).optional(),
+  allowDuplicate: z.boolean(),
+}).strict();
+const CrmCustomerImportMutationSchema = z.object({
+  action: z.literal("importCustomers"),
+  rows: z.array(CrmCustomerImportRowSchema).min(1).max(5000).refine((rows) => new Set(rows.map((row) => row.rowNumber)).size === rows.length),
+}).strict();
+const CrmCustomerImportUndoMutationSchema = z.object({
+  action: z.literal("undoCustomerImport"),
+  customerIds: z.array(uuid).min(1).max(5000),
+  importIntentId: uuid,
+}).strict();
+const CrmCustomerImportUndoStateSchema = z.object({
+  imported: z.number().int().nonnegative(),
+  skippedDuplicates: z.number().int().nonnegative(),
+  createdIds: z.array(uuid),
+  importIntentId: uuid,
 }).strict();
 
 const CrmTaskMutationSchema = z.discriminatedUnion("action", [
@@ -1027,30 +1056,197 @@ const ImportResponseSchema = z.object({
 });
 export type CrmImportResult = z.infer<typeof ImportResponseSchema>;
 
-export async function importCrmCustomers(rows: Array<{ rowNumber: number; name: string; email?: string; phone?: string; allowDuplicate: boolean }>, signal?: AbortSignal): Promise<CrmActionOutcome<CrmImportResult>> {
-  const { response, body } = await request("/api/import", { method: "POST", body: JSON.stringify({ entity: "customers", rows }) }, signal);
-  if (response.status === 202) {
-    const parsed = ImportPendingSchema.safeParse(body);
-    if (!parsed.success) throw new CrmApiError(202, "The import service returned an unexpected approval response.");
-    return { kind: "pending", reason: parsed.data.error };
+export async function readPendingCrmCustomerImport(scope: CrmTaskRetryScope): Promise<CrmCustomerImportRow[] | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_CUSTOMER_IMPORT_INTENT_PREFIX}${scopeHash}:import`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to check an unresolved customer import."); }
+  if (raw === null) return null;
+  const stored = parseCrmTaskAttempt(raw);
+  const action = CrmCustomerImportMutationSchema.safeParse(stored.action);
+  if (!action.success || await crmTaskFingerprint(action.data) !== stored.fingerprint) {
+    throw new CrmApiError(0, "An unresolved customer import could not be verified. Contact an administrator before retrying.");
   }
-  if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
-  const parsed = ImportResponseSchema.safeParse(body);
-  if (!parsed.success) throw new CrmApiError(response.status, "The import service returned an unexpected result.");
-  return { kind: "completed", data: parsed.data };
+  return action.data.rows;
 }
 
-export async function undoCrmImport(importIds: string[], signal?: AbortSignal): Promise<CrmActionOutcome<{ undone: number; remaining: number }>> {
-  const { response, body } = await request("/api/import", { method: "POST", body: JSON.stringify({ entity: "customers", action: "undo", importIds }) }, signal);
-  if (response.status === 202) {
-    const parsed = ImportPendingSchema.safeParse(body);
-    if (!parsed.success) throw new CrmApiError(202, "The import service returned an unexpected undo approval response.");
-    return { kind: "pending", reason: parsed.data.error };
+export async function readPendingCrmCustomerImportUndo(scope: CrmTaskRetryScope): Promise<CrmCustomerImportUndoMutation | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_CUSTOMER_IMPORT_UNDO_INTENT_PREFIX}${scopeHash}:undo`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to check an unresolved customer import undo."); }
+  if (raw === null) return null;
+  const stored = parseCrmTaskAttempt(raw);
+  const action = CrmCustomerImportUndoMutationSchema.safeParse(stored.action);
+  if (!action.success || await crmTaskFingerprint(action.data) !== stored.fingerprint) {
+    throw new CrmApiError(0, "An unresolved customer import undo could not be verified. Contact an administrator before retrying.");
   }
-  if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
-  const parsed = z.object({ undone: z.number().int().nonnegative(), remaining: z.number().int().nonnegative() }).safeParse(body);
-  if (!parsed.success) throw new CrmApiError(response.status, "The import service returned an unexpected undo result.");
-  return { kind: "completed", data: parsed.data };
+  return action.data;
+}
+
+export async function readCrmCustomerImportUndo(scope: CrmTaskRetryScope): Promise<CrmCustomerImportUndoState | null> {
+  const { scopeHash } = await crmTaskScope(scope);
+  const storageKey = `${CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX}${scopeHash}:undo`;
+  let raw: string | null;
+  try { raw = window.localStorage.getItem(storageKey); }
+  catch { throw new CrmApiError(0, "Enable browser storage to restore the saved customer import undo."); }
+  if (raw === null) return null;
+  let decoded: unknown;
+  try { decoded = JSON.parse(raw); }
+  catch { throw new CrmApiError(0, "The saved customer import undo is malformed. Contact an administrator before retrying."); }
+  const parsed = CrmCustomerImportUndoStateSchema.safeParse(decoded);
+  if (!parsed.success) throw new CrmApiError(0, "The saved customer import undo could not be verified. Contact an administrator before retrying.");
+  return parsed.data;
+}
+
+async function persistCrmCustomerImportUndo(scope: { scopeHash: string }, result: CrmImportResult, importIntentId: string): Promise<void> {
+  const storageKey = `${CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX}${scope.scopeHash}:undo`;
+  const state: CrmCustomerImportUndoState = {
+    imported: result.inserted,
+    skippedDuplicates: result.skippedDuplicates,
+    createdIds: result.createdIds,
+    importIntentId,
+  };
+  const serialized = JSON.stringify(state);
+  try {
+    window.localStorage.setItem(storageKey, serialized);
+    if (window.localStorage.getItem(storageKey) !== serialized) throw new Error("customer import undo state did not persist");
+  } catch {
+    throw new CrmApiError(0, "The import completed, but its undo IDs could not be saved. Retry the exact import before starting another CRM change.", true);
+  }
+}
+
+async function clearCrmCustomerImportUndo(scope: { scopeHash: string }): Promise<void> {
+  try { window.localStorage.removeItem(`${CRM_CUSTOMER_IMPORT_UNDO_STATE_PREFIX}${scope.scopeHash}:undo`); }
+  catch { throw new CrmApiError(0, "The import undo completed, but its saved IDs could not be cleared. Reload CRM before retrying.", true); }
+}
+
+export async function importCrmCustomers(
+  rows: CrmCustomerImportRow[],
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+): Promise<CrmActionOutcome<CrmImportResult>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_IMPORT__ !== "undefined" && __GO_CRM_CUSTOMER_IMPORT__);
+  const parsedRows = z.array(CrmCustomerImportRowSchema).min(1).max(5000).refine((items) => new Set(items.map((row) => row.rowNumber)).size === items.length).safeParse(rows);
+  if (!parsedRows.success) throw new CrmApiError(0, "Review the customer import rows and correct invalid values before submitting.");
+  const scope = await crmTaskScope(retryScope);
+  if (!useGo) {
+    if (await readPendingCrmCustomerImport(scope) || await readPendingCrmCustomerImportUndo(scope)) {
+      throw new CrmApiError(0, "A Go customer import is unresolved. Restore the Go customer route and retry its exact action before using the legacy import route.", true);
+    }
+    const { response, body } = await request("/api/import", { method: "POST", body: JSON.stringify({ entity: "customers", rows: parsedRows.data }) }, signal);
+    if (response.status === 202) {
+      const parsed = ImportPendingSchema.safeParse(body);
+      if (!parsed.success) throw new CrmApiError(202, "The import service returned an unexpected approval response.");
+      return { kind: "pending", reason: parsed.data.error };
+    }
+    if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
+    const parsed = ImportResponseSchema.safeParse(body);
+    if (!parsed.success) throw new CrmApiError(response.status, "The import service returned an unexpected result.");
+    return { kind: "completed", data: parsed.data };
+  }
+  if (await readPendingCrmCustomerImportUndo(scope)) {
+    throw new CrmApiError(0, "A Go customer import undo is unresolved. Retry that exact undo before starting another import.", true);
+  }
+  const action: CrmCustomerImportMutation = { action: "importCustomers", rows: parsedRows.data };
+  const attempt = await crmTaskAttempt(action, scope, "import", CRM_CUSTOMER_IMPORT_INTENT_PREFIX);
+  try {
+    const { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.importCustomers", input: { rows: parsedRows.data }, intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const submittedRowNumbers = new Set(parsedRows.data.map((row) => row.rowNumber));
+    const parsed = z.object({ createdIds: z.array(uuid).max(5000), imported: z.number().int().nonnegative(), skippedDuplicateRows: z.array(z.number().int().positive()).max(5000) }).strict().safeParse(outcome.data);
+    const skippedRowNumbers = parsed.success ? parsed.data.skippedDuplicateRows : [];
+    const skippedRowsAreValid = parsed.success
+      && new Set(skippedRowNumbers).size === skippedRowNumbers.length
+      && skippedRowNumbers.every((rowNumber) => submittedRowNumbers.has(rowNumber));
+    if (!parsed.success || !skippedRowsAreValid || parsed.data.imported !== parsed.data.createdIds.length || new Set(parsed.data.createdIds).size !== parsed.data.createdIds.length || parsed.data.imported + skippedRowNumbers.length !== parsedRows.data.length) {
+      throw new CrmApiError(response.status, "The CRM service returned an unexpected import result.", true);
+    }
+    const result: CrmImportResult = {
+      inserted: parsed.data.imported,
+      skippedDuplicates: parsed.data.skippedDuplicateRows.length,
+      createdIds: parsed.data.createdIds,
+    };
+    await persistCrmCustomerImportUndo(scope, result, attempt.intentId);
+    await clearCrmTaskAttempt(attempt.storageKey);
+    return { kind: "completed", data: result };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+      await clearCrmTaskAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
+}
+
+export async function undoCrmImport(
+  importIds: string[],
+  signal?: AbortSignal,
+  useGoOverride?: boolean,
+  retryScope?: CrmTaskRetryScope,
+  importIntentId?: string,
+): Promise<CrmActionOutcome<{ undone: number; remaining: number }>> {
+  const useGo = useGoOverride ?? (typeof __GO_CRM_CUSTOMER_IMPORT__ !== "undefined" && __GO_CRM_CUSTOMER_IMPORT__);
+  const parsedIds = z.array(uuid).min(1).max(5000).safeParse(importIds);
+  if (!parsedIds.success) throw new CrmApiError(0, "The customer import undo IDs are invalid.");
+  const scope = await crmTaskScope(retryScope);
+  if (!useGo) {
+    if (importIntentId) throw new CrmApiError(0, "This import was performed by Go. Restore the Go CRM import route to undo it safely.", true);
+    if (await readPendingCrmCustomerImport(scope) || await readPendingCrmCustomerImportUndo(scope)) {
+      throw new CrmApiError(0, "A Go customer import is unresolved. Restore the Go customer route and retry its exact action before using the legacy import route.", true);
+    }
+    const { response, body } = await request("/api/import", { method: "POST", body: JSON.stringify({ entity: "customers", action: "undo", importIds: parsedIds.data }) }, signal);
+    if (response.status === 202) {
+      const parsed = ImportPendingSchema.safeParse(body);
+      if (!parsed.success) throw new CrmApiError(202, "The import service returned an unexpected undo approval response.");
+      return { kind: "pending", reason: parsed.data.error };
+    }
+    if (!response.ok) throw new CrmApiError(response.status, messageFor(response.status, body));
+    const parsed = z.object({ undone: z.number().int().nonnegative(), remaining: z.number().int().nonnegative() }).safeParse(body);
+    if (!parsed.success) throw new CrmApiError(response.status, "The import service returned an unexpected undo result.");
+    await clearCrmCustomerImportUndo(scope);
+    return { kind: "completed", data: parsed.data };
+  }
+  if (await readPendingCrmCustomerImport(scope)) {
+    throw new CrmApiError(0, "A Go customer import is unresolved. Retry that exact import before undoing it.", true);
+  }
+  if (!importIntentId || !uuid.safeParse(importIntentId).success) {
+    throw new CrmApiError(0, "The successful Go import receipt reference is missing. Retry or refresh the import before undoing it.", true);
+  }
+  const action: CrmCustomerImportUndoMutation = { action: "undoCustomerImport", customerIds: parsedIds.data, importIntentId };
+  const attempt = await crmTaskAttempt(action, scope, "undo", CRM_CUSTOMER_IMPORT_UNDO_INTENT_PREFIX);
+  try {
+    const { response, body } = await request("/api/capabilities/execute", {
+      method: "POST",
+      body: JSON.stringify({ capabilityId: "crm.undoCustomerImport", input: { customerIds: parsedIds.data, importIntentId }, intentId: attempt.intentId }),
+    }, signal);
+    if (response.status === 404) throw new CrmApiError(response.status, messageFor(response.status, body), true);
+    const outcome = parseCrmActionOutcome<Record<string, unknown>>(response, body);
+    if (outcome.kind === "pending") return outcome;
+    const parsed = z.object({ customerIds: z.array(uuid).max(5000), deactivated: z.number().int().nonnegative(), importIntentId: uuid, undoIntentId: uuid }).strict().safeParse(outcome.data);
+    const requestedIds = new Set(parsedIds.data);
+    const returnedIdsMatchRequest = parsed.success
+      && parsed.data.customerIds.length === requestedIds.size
+      && parsed.data.customerIds.every((id) => requestedIds.has(id));
+    if (!parsed.success || parsed.data.importIntentId !== importIntentId || parsed.data.undoIntentId !== attempt.intentId || parsed.data.deactivated !== parsedIds.data.length || !returnedIdsMatchRequest || new Set(parsed.data.customerIds).size !== parsed.data.customerIds.length) {
+      throw new CrmApiError(response.status, "The CRM service returned an unexpected import undo result.", true);
+    }
+    await clearCrmCustomerImportUndo(scope);
+    await clearCrmTaskAttempt(attempt.storageKey);
+    return { kind: "completed", data: { undone: parsed.data.deactivated, remaining: parsedIds.data.length - parsed.data.deactivated } };
+  } catch (error) {
+    if (error instanceof CrmApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 && !error.requestMayHaveReachedServer) {
+      await clearCrmTaskAttempt(attempt.storageKey);
+    }
+    throw error;
+  }
 }
 
 export async function fetchCrmTeamMembers(signal?: AbortSignal): Promise<Array<{ userId: string; name: string | null; email: string }>> {

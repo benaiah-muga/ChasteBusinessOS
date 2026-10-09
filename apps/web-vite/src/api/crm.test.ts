@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
+import { CrmApiError, fetchCrmCustomers, fetchCrmDeals, fetchCrmFollowUpDraft, fetchCrmTasks, fetchCrmTimeline, fetchCrmViews, importCrmCustomers, readCrmCustomerImportUndo, readCrmCustomerMergeUndo, readPendingCrmCustomerCreate, readPendingCrmCustomerImport, readPendingCrmCustomerImportUndo, readPendingCrmCustomerMerge, readPendingCrmCustomerMergeUndo, readPendingCrmCustomerProfileUpdate, readPendingCrmDealCreate, readPendingCrmTaskCreate, readPendingCrmTaskDetails, readPendingCrmTaskDetailsForScope, submitCrmAction, submitCrmCustomerCreate, submitCrmCustomerDeactivate, submitCrmCustomerMerge, submitCrmCustomerMergeUndo, submitCrmCustomerProfileUpdate, submitCrmDealCreate, submitCrmDealStageMove, submitCrmTaskMutation, undoCrmImport } from "./crm";
 
 const dealId = "0d57752c-41c1-4aae-9c78-b51d9ec07d62";
 const customerId = "2beae091-6921-4e49-97b1-5049196e0ac5";
@@ -590,38 +590,162 @@ describe("CRM API client", () => {
   });
 
   it("imports and undoes customer batches using the existing import contract", async () => {
+    const scope = { actorId: dealId, organizationId: customerId };
+    const rows = [2, 3, 4].map((rowNumber) => ({ rowNumber, name: `Customer ${rowNumber}`, allowDuplicate: false }));
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(Response.json({ inserted: 1, skippedDuplicates: 2, createdIds: [customerId], errors: [] }))
       .mockResolvedValueOnce(Response.json({ undone: 1, remaining: 0 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(importCrmCustomers([{ rowNumber: 2, name: "Northwind", allowDuplicate: false }])).resolves.toEqual({ kind: "completed", data: { inserted: 1, skippedDuplicates: 2, createdIds: [customerId], errors: [] } });
-    await expect(undoCrmImport([customerId])).resolves.toEqual({ kind: "completed", data: { undone: 1, remaining: 0 } });
+    await expect(importCrmCustomers(rows, undefined, false, scope)).resolves.toEqual({ kind: "completed", data: { inserted: 1, skippedDuplicates: 2, createdIds: [customerId], errors: [] } });
+    await expect(undoCrmImport([customerId], undefined, false, scope)).resolves.toEqual({ kind: "completed", data: { undone: 1, remaining: 0 } });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["/api/import", "/api/import"]);
   });
 
   it("validates approval responses for customer import and undo", async () => {
+    const scope = { actorId: dealId, organizationId: customerId };
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Import needs approval" }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ pendingApproval: true }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ error: "Undo needs approval" }, { status: 202 }))
       .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Undo needs approval" }, { status: 202 })));
 
-    await expect(importCrmCustomers([{ rowNumber: 2, name: "Northwind", allowDuplicate: false }])).resolves.toEqual({
+    await expect(importCrmCustomers([{ rowNumber: 2, name: "Northwind", allowDuplicate: false }], undefined, false, scope)).resolves.toEqual({
       kind: "pending",
       reason: "Import needs approval",
     });
-    await expect(importCrmCustomers([{ rowNumber: 2, name: "Northwind", allowDuplicate: false }])).rejects.toMatchObject({
+    await expect(importCrmCustomers([{ rowNumber: 2, name: "Northwind", allowDuplicate: false }], undefined, false, scope)).rejects.toMatchObject({
       name: "CrmApiError",
       message: "The import service returned an unexpected approval response.",
     });
-    await expect(undoCrmImport([customerId])).rejects.toMatchObject({
+    await expect(undoCrmImport([customerId], undefined, false, scope)).rejects.toMatchObject({
       name: "CrmApiError",
       message: "The import service returned an unexpected undo approval response.",
     });
-    await expect(undoCrmImport([customerId])).resolves.toEqual({
+    await expect(undoCrmImport([customerId], undefined, false, scope)).resolves.toEqual({
       kind: "pending",
       reason: "Undo needs approval",
     });
+  });
+
+  it("rejects import results with duplicate or unsubmitted skipped row numbers", async () => {
+    const scope = { actorId: dealId, organizationId: customerId };
+    const rows = [
+      { rowNumber: 2, name: "First", allowDuplicate: false },
+      { rowNumber: 3, name: "Second", allowDuplicate: false },
+      { rowNumber: 4, name: "Third", allowDuplicate: false },
+    ];
+    const duplicateSkipped = vi.fn(async () => Response.json({ ok: true, data: { createdIds: [customerId], imported: 1, skippedDuplicateRows: [3, 3] } }));
+    vi.stubGlobal("fetch", duplicateSkipped);
+    await expect(importCrmCustomers(rows, undefined, true, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+
+    const unsubmittedSkipped = vi.fn(async () => Response.json({ ok: true, data: { createdIds: [customerId, dealId], imported: 2, skippedDuplicateRows: [99] } }));
+    vi.stubGlobal("fetch", unsubmittedSkipped);
+    await expect(importCrmCustomers(rows, undefined, true, scope)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+  });
+
+  it("keeps saved Go import undo state when the response omits or replaces requested customer IDs", async () => {
+    const scope = { actorId: dealId, organizationId: customerId };
+    const rows = [
+      { rowNumber: 2, name: "Northwind", allowDuplicate: false },
+      { rowNumber: 3, name: "Contoso", allowDuplicate: false },
+    ];
+    const requestedIds = [dealId, customerId];
+    const replacementId = "4aef4162-c9d5-41a8-80a4-0ae002f9d02b";
+
+    for (const returnedIds of [[dealId], [dealId, replacementId]]) {
+      window.localStorage.clear();
+      vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, data: { createdIds: requestedIds, imported: 2, skippedDuplicateRows: [] } })));
+      await expect(importCrmCustomers(rows, undefined, true, scope)).resolves.toMatchObject({ kind: "completed" });
+      const savedUndo = await readCrmCustomerImportUndo(scope);
+      expect(savedUndo?.createdIds).toEqual(requestedIds);
+      if (!savedUndo) throw new Error("expected saved import undo state");
+
+      const undoResponse = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { intentId: string };
+        return Promise.resolve(Response.json({ ok: true, data: {
+          customerIds: returnedIds,
+          deactivated: requestedIds.length,
+          importIntentId: savedUndo.importIntentId,
+          undoIntentId: body.intentId,
+        } }));
+      });
+      vi.stubGlobal("fetch", undoResponse);
+
+      await expect(undoCrmImport(requestedIds, undefined, true, scope, savedUndo.importIntentId)).rejects.toMatchObject({ status: 200, requestMayHaveReachedServer: true });
+      await expect(readCrmCustomerImportUndo(scope)).resolves.toEqual(savedUndo);
+    }
+  });
+
+  it("retries Go customer imports and undo with scoped intents, blocks rollback, and persists the created IDs", async () => {
+    const scope = { actorId: dealId, organizationId: customerId };
+    const rows = [
+      { rowNumber: 2, name: "Northwind", email: "hello@northwind.test", allowDuplicate: false },
+      { rowNumber: 3, name: "Contoso", phone: "+256 700 111 222", allowDuplicate: true },
+    ];
+    const importPost = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Import needs approval" }, { status: 202 }))
+      .mockRejectedValueOnce(new TypeError("connection reset"));
+    vi.stubGlobal("fetch", importPost);
+    await expect(importCrmCustomers(rows, undefined, true, scope)).resolves.toEqual({ kind: "pending", reason: "Import needs approval" });
+    const importIntentId = JSON.parse(String(importPost.mock.calls[0]?.[1]?.body)).intentId;
+    await expect(readPendingCrmCustomerImport(scope)).resolves.toEqual(rows);
+    await expect(importCrmCustomers(rows, undefined, true, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+
+    const noImportFallback = vi.fn();
+    vi.stubGlobal("fetch", noImportFallback);
+    await expect(importCrmCustomers(rows, undefined, false, scope)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(noImportFallback).not.toHaveBeenCalled();
+
+    const importRetry = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { createdIds: [dealId], imported: 1, skippedDuplicateRows: [3] } }));
+    vi.stubGlobal("fetch", importRetry);
+    await expect(importCrmCustomers(rows, undefined, true, scope)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(importCrmCustomers(rows, undefined, true, scope)).resolves.toEqual({
+      kind: "completed",
+      data: { inserted: 1, skippedDuplicates: 1, createdIds: [dealId] },
+    });
+    const importBodies = importRetry.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(importBodies).toHaveLength(2);
+    expect(importBodies.map((body) => body.intentId)).toEqual([importIntentId, importIntentId]);
+    expect(importBodies[0]).toMatchObject({ capabilityId: "crm.importCustomers", input: { rows } });
+    await expect(readPendingCrmCustomerImport(scope)).resolves.toBeNull();
+    await expect(readCrmCustomerImportUndo(scope)).resolves.toEqual({ imported: 1, skippedDuplicates: 1, createdIds: [dealId], importIntentId });
+
+    const noCompletedImportUndoFallback = vi.fn();
+    vi.stubGlobal("fetch", noCompletedImportUndoFallback);
+    await expect(undoCrmImport([dealId], undefined, false, scope, importIntentId)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(noCompletedImportUndoFallback).not.toHaveBeenCalled();
+
+    const undo = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pendingApproval: true, error: "Undo needs approval" }, { status: 202 }))
+      .mockRejectedValueOnce(new TypeError("connection reset"));
+    vi.stubGlobal("fetch", undo);
+    await expect(undoCrmImport([dealId], undefined, true, scope, importIntentId)).resolves.toEqual({ kind: "pending", reason: "Undo needs approval" });
+    const undoIntentId = JSON.parse(String(undo.mock.calls[0]?.[1]?.body)).intentId;
+    await expect(readPendingCrmCustomerImportUndo(scope)).resolves.toEqual({ action: "undoCustomerImport", customerIds: [dealId], importIntentId });
+    await expect(undoCrmImport([dealId], undefined, true, scope, importIntentId)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+
+    const noUndoFallback = vi.fn();
+    vi.stubGlobal("fetch", noUndoFallback);
+    await expect(undoCrmImport([dealId], undefined, false, scope, importIntentId)).rejects.toMatchObject({ status: 0, requestMayHaveReachedServer: true });
+    expect(noUndoFallback).not.toHaveBeenCalled();
+
+    const undoRetry = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "not found" }, { status: 404 }))
+      .mockImplementationOnce((_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { intentId: string };
+        return Promise.resolve(Response.json({ ok: true, data: { customerIds: [dealId], deactivated: 1, importIntentId, undoIntentId: body.intentId } }));
+      });
+    vi.stubGlobal("fetch", undoRetry);
+    await expect(undoCrmImport([dealId], undefined, true, scope, importIntentId)).rejects.toMatchObject({ status: 404, requestMayHaveReachedServer: true });
+    await expect(undoCrmImport([dealId], undefined, true, scope, importIntentId)).resolves.toEqual({ kind: "completed", data: { undone: 1, remaining: 0 } });
+    const undoBodies = undoRetry.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(undoBodies).toHaveLength(2);
+    expect(undoBodies.map((body) => body.intentId)).toEqual([undoIntentId, undoIntentId]);
+    expect(undoBodies[0]).toMatchObject({ capabilityId: "crm.undoCustomerImport", input: { customerIds: [dealId], importIntentId } });
+    await expect(readPendingCrmCustomerImportUndo(scope)).resolves.toBeNull();
+    await expect(readCrmCustomerImportUndo(scope)).resolves.toBeNull();
   });
 
   it("requests the existing AI follow-up draft action and validates its grounded sources", async () => {

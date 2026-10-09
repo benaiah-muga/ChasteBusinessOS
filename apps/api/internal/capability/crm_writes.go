@@ -101,13 +101,21 @@ type CustomerImportOutput struct {
 	SkippedDuplicateRows []int    `json:"skippedDuplicateRows"`
 }
 
-type CustomerIDsInput struct {
-	CustomerIDs []string `json:"customerIds"`
+type CustomerUndoImportInput struct {
+	CustomerIDs    []string `json:"customerIds"`
+	ImportIntentID string   `json:"importIntentId"`
+}
+
+type CustomerRestoreImportInput struct {
+	CustomerIDs  []string `json:"customerIds"`
+	UndoIntentID string   `json:"undoIntentId"`
 }
 
 type CustomerUndoImportOutput struct {
-	CustomerIDs []string `json:"customerIds"`
-	Deactivated int      `json:"deactivated"`
+	CustomerIDs    []string `json:"customerIds"`
+	Deactivated    int      `json:"deactivated"`
+	ImportIntentID string   `json:"importIntentId"`
+	UndoIntentID   string   `json:"undoIntentId"`
 }
 
 type CustomerRestoreImportOutput struct {
@@ -241,11 +249,16 @@ func ParseCustomerImportInput(raw json.RawMessage) (CustomerImportInput, error) 
 		return CustomerImportInput{}, errors.New("rows must contain between 1 and 5000 entries")
 	}
 	input := CustomerImportInput{Rows: make([]CustomerImportRow, 0, len(entries))}
+	seenRowNumbers := make(map[int]struct{}, len(entries))
 	for _, entry := range entries {
 		row, err := parseCustomerImportRow(entry)
 		if err != nil {
 			return CustomerImportInput{}, err
 		}
+		if _, exists := seenRowNumbers[row.RowNumber]; exists {
+			return CustomerImportInput{}, errors.New("rowNumber values must be unique")
+		}
+		seenRowNumbers[row.RowNumber] = struct{}{}
 		input.Rows = append(input.Rows, row)
 	}
 	return input, nil
@@ -317,25 +330,58 @@ func parseCustomerImportRow(raw json.RawMessage) (CustomerImportRow, error) {
 	return row, nil
 }
 
-func ParseCustomerIDsInput(raw json.RawMessage) (CustomerIDsInput, error) {
-	fields, err := jsonObject(raw)
-	if err != nil {
-		return CustomerIDsInput{}, err
-	}
+func parseCustomerIDList(fields map[string]json.RawMessage) ([]string, error) {
 	idsRaw, ok := fields["customerIds"]
 	if !ok || bytesIsNull(idsRaw) {
-		return CustomerIDsInput{}, errors.New("customerIds must contain between 1 and 5000 UUIDs")
+		return nil, errors.New("customerIds must contain between 1 and 5000 UUIDs")
 	}
 	var ids []string
 	if err := json.Unmarshal(idsRaw, &ids); err != nil || len(ids) < 1 || len(ids) > 5000 {
-		return CustomerIDsInput{}, errors.New("customerIds must contain between 1 and 5000 UUIDs")
+		return nil, errors.New("customerIds must contain between 1 and 5000 UUIDs")
 	}
+	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		if !isZodUUID(id) {
-			return CustomerIDsInput{}, errors.New("customerIds must contain UUIDs")
+			return nil, errors.New("customerIds must contain UUIDs")
 		}
+		if _, exists := seen[id]; exists {
+			return nil, errors.New("customerIds must not contain duplicates")
+		}
+		seen[id] = struct{}{}
 	}
-	return CustomerIDsInput{CustomerIDs: ids}, nil
+	return ids, nil
+}
+
+func ParseCustomerUndoImportInput(raw json.RawMessage) (CustomerUndoImportInput, error) {
+	fields, err := jsonObject(raw)
+	if err != nil {
+		return CustomerUndoImportInput{}, err
+	}
+	ids, err := parseCustomerIDList(fields)
+	if err != nil {
+		return CustomerUndoImportInput{}, err
+	}
+	importIntentID, err := requiredString(fields, "importIntentId")
+	if err != nil || !isZodUUID(importIntentID) {
+		return CustomerUndoImportInput{}, errors.New("importIntentId must be a UUID")
+	}
+	return CustomerUndoImportInput{CustomerIDs: ids, ImportIntentID: importIntentID}, nil
+}
+
+func ParseCustomerRestoreImportInput(raw json.RawMessage) (CustomerRestoreImportInput, error) {
+	fields, err := jsonObject(raw)
+	if err != nil {
+		return CustomerRestoreImportInput{}, err
+	}
+	ids, err := parseCustomerIDList(fields)
+	if err != nil {
+		return CustomerRestoreImportInput{}, err
+	}
+	undoIntentID, err := requiredString(fields, "undoIntentId")
+	if err != nil || !isZodUUID(undoIntentID) {
+		return CustomerRestoreImportInput{}, errors.New("undoIntentId must be a UUID")
+	}
+	return CustomerRestoreImportInput{CustomerIDs: ids, UndoIntentID: undoIntentID}, nil
 }
 
 func (input CustomerMergeInput) CanonicalHash() (string, error) {
@@ -350,7 +396,11 @@ func (input CustomerImportInput) CanonicalHash() (string, error) {
 	return canonicalHash(input)
 }
 
-func (input CustomerIDsInput) CanonicalHash() (string, error) {
+func (input CustomerUndoImportInput) CanonicalHash() (string, error) {
+	return canonicalHash(input)
+}
+
+func (input CustomerRestoreImportInput) CanonicalHash() (string, error) {
 	return canonicalHash(input)
 }
 
@@ -745,6 +795,9 @@ type customerImportInsert struct {
 }
 
 func importCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CustomerImportInput) (CustomerImportOutput, error) {
+	if !isZodUUID(claims.IntentID) {
+		return CustomerImportOutput{}, errors.New("customer import requires a durable UUID intent")
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT name, email, phone FROM customers
 		WHERE org_id = $1::uuid AND deactivated_at IS NULL`, claims.OrganizationID)
@@ -799,6 +852,13 @@ func importCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.Capabilit
 	for _, row := range created {
 		createdIDs = append(createdIDs, row.ID)
 	}
+	marker := customerImportTransitionReceipt{
+		CustomerIDs: createdIDs, SourceIntentID: claims.IntentID, ActorType: claims.ActorType,
+		ActorID: claims.ActorID, AgentSessionID: claims.AgentSessionID,
+	}
+	if err := insertCustomerImportTransitionMarker(ctx, tx, claims.OrganizationID, "import", importCustomersCapabilityID, claims.IntentID, marker); err != nil {
+		return CustomerImportOutput{}, err
+	}
 	return CustomerImportOutput{CreatedIDs: createdIDs, Imported: len(createdIDs), SkippedDuplicateRows: skipped}, nil
 }
 
@@ -824,56 +884,232 @@ func insertCustomerImportBatch(ctx context.Context, tx pgx.Tx, batch []customerI
 	return err
 }
 
-func toggleImportedCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CustomerIDsInput, now time.Time, restore bool) (any, error) {
-	ids := dedupeCustomerIDs(input.CustomerIDs)
-	updatedBy := humanActorID(claims)
-	var rows pgx.Rows
-	var err error
-	if restore {
-		rows, err = tx.Query(ctx, `
-			UPDATE customers SET deactivated_at = NULL, updated_by_user_id = $1::uuid, updated_at = $2
-			WHERE org_id = $3::uuid AND id = ANY($4::uuid[]) AND deactivated_at IS NOT NULL
-			RETURNING id::text`, updatedBy, now, claims.OrganizationID, ids)
-	} else {
-		rows, err = tx.Query(ctx, `
-			UPDATE customers SET deactivated_at = $1, updated_by_user_id = $2::uuid, updated_at = $1
-			WHERE org_id = $3::uuid AND id = ANY($4::uuid[]) AND deactivated_at IS NULL
-			RETURNING id::text`, now, updatedBy, claims.OrganizationID, ids)
+type customerImportTransitionReceipt struct {
+	CustomerIDs    []string  `json:"customerIds"`
+	SourceIntentID string    `json:"sourceIntentId"`
+	ChangedAt      time.Time `json:"changedAt"`
+	ActorType      string    `json:"actorType"`
+	ActorID        *string   `json:"actorId"`
+	AgentSessionID string    `json:"agentSessionId"`
+}
+
+func customerImportTransitionKey(orgID, transition, sourceIntentID string) string {
+	return orgID + ":crm-customer-import:" + transition + ":" + sourceIntentID
+}
+
+func lockCustomerImportTransition(ctx context.Context, tx pgx.Tx, orgID, transition, sourceIntentID string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, orgID, "crm-customer-import:"+transition+":"+sourceIntentID)
+	return err
+}
+
+func customerImportTransitionMarker(ctx context.Context, tx pgx.Tx, orgID, transition, sourceIntentID string) (customerImportTransitionReceipt, bool, error) {
+	receipt, found, err := loadReceipt(ctx, tx, orgID, customerImportTransitionKey(orgID, transition, sourceIntentID))
+	if err != nil || !found {
+		return customerImportTransitionReceipt{}, found, err
 	}
+	if !receipt.OK || receipt.Outcome != "known" {
+		return customerImportTransitionReceipt{}, false, errors.New("customer import transition receipt is invalid")
+	}
+	expectedCapability := map[string]string{
+		"import":  importCustomersCapabilityID,
+		"undo":    undoCustomerImportCapabilityID,
+		"restore": restoreImportedCustomersCapabilityID,
+	}[transition]
+	if expectedCapability == "" || receipt.CapabilityID != expectedCapability {
+		return customerImportTransitionReceipt{}, false, errors.New("customer import transition receipt is invalid")
+	}
+	var marker customerImportTransitionReceipt
+	if err := json.Unmarshal(receipt.Data, &marker); err != nil || marker.SourceIntentID != sourceIntentID || marker.ActorType == "" || transition != "import" && len(marker.CustomerIDs) == 0 {
+		return customerImportTransitionReceipt{}, false, errors.New("customer import transition receipt is invalid")
+	}
+	return marker, true, nil
+}
+
+func sameCustomerImportActor(marker customerImportTransitionReceipt, claims authbridge.CapabilityClaims) bool {
+	if marker.ActorType != claims.ActorType || marker.AgentSessionID != claims.AgentSessionID {
+		return false
+	}
+	if marker.ActorID == nil || claims.ActorID == nil {
+		return marker.ActorID == nil && claims.ActorID == nil
+	}
+	return *marker.ActorID == *claims.ActorID
+}
+
+func insertCustomerImportTransitionMarker(ctx context.Context, tx pgx.Tx, orgID, transition, capabilityID, sourceIntentID string, marker customerImportTransitionReceipt) error {
+	data, err := json.Marshal(marker)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	changedIDs := make([]string, 0)
+	inputHash, err := canonicalHash(marker)
+	if err != nil {
+		return err
+	}
+	return insertReceipt(ctx, tx, orgID, customerImportTransitionKey(orgID, transition, sourceIntentID), capabilityID, inputHash, Result{OK: true, Data: data})
+}
+
+func requireReceiptIDsMatch(suppliedIDs, receiptIDs []string) error {
+	if len(suppliedIDs) != len(receiptIDs) {
+		return errors.New("customer IDs do not match the server receipt")
+	}
+	seen := make(map[string]struct{}, len(suppliedIDs))
+	for _, id := range suppliedIDs {
+		if _, exists := seen[id]; exists {
+			return errors.New("customer IDs do not match the server receipt")
+		}
+		seen[id] = struct{}{}
+	}
+	for _, id := range receiptIDs {
+		if _, exists := seen[id]; !exists {
+			return errors.New("customer IDs do not match the server receipt")
+		}
+	}
+	return nil
+}
+
+func successfulCustomerImportReceipt(ctx context.Context, tx pgx.Tx, orgID, importIntentID string) (CustomerImportOutput, error) {
+	receipt, found, err := loadReceipt(ctx, tx, orgID, orgID+":"+importIntentID)
+	if err != nil {
+		return CustomerImportOutput{}, err
+	}
+	if !found || receipt.CapabilityID != importCustomersCapabilityID || !receipt.OK || receipt.Outcome != "known" {
+		return CustomerImportOutput{}, errors.New("a successful customer import receipt is required")
+	}
+	var output CustomerImportOutput
+	if err := json.Unmarshal(receipt.Data, &output); err != nil || output.Imported != len(output.CreatedIDs) || output.Imported < 1 || len(output.CreatedIDs) > 5000 {
+		return CustomerImportOutput{}, errors.New("the customer import receipt is invalid")
+	}
+	if err := requireReceiptIDsMatch(output.CreatedIDs, output.CreatedIDs); err != nil {
+		return CustomerImportOutput{}, errors.New("the customer import receipt is invalid")
+	}
+	return output, nil
+}
+
+func undoImportedCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CustomerUndoImportInput, now time.Time) (CustomerUndoImportOutput, error) {
+	if err := lockCustomerImportTransition(ctx, tx, claims.OrganizationID, "undo", input.ImportIntentID); err != nil {
+		return CustomerUndoImportOutput{}, err
+	}
+	imported, err := successfulCustomerImportReceipt(ctx, tx, claims.OrganizationID, input.ImportIntentID)
+	if err != nil {
+		return CustomerUndoImportOutput{}, err
+	}
+	importMarker, found, err := customerImportTransitionMarker(ctx, tx, claims.OrganizationID, "import", input.ImportIntentID)
+	if err != nil {
+		return CustomerUndoImportOutput{}, err
+	}
+	if !found || !sameCustomerImportActor(importMarker, claims) || requireReceiptIDsMatch(importMarker.CustomerIDs, imported.CreatedIDs) != nil {
+		return CustomerUndoImportOutput{}, errors.New("the customer import receipt does not belong to this actor")
+	}
+	if err := requireReceiptIDsMatch(input.CustomerIDs, imported.CreatedIDs); err != nil {
+		return CustomerUndoImportOutput{}, err
+	}
+	if _, found, err := customerImportTransitionMarker(ctx, tx, claims.OrganizationID, "undo", input.ImportIntentID); err != nil {
+		return CustomerUndoImportOutput{}, err
+	} else if found {
+		return CustomerUndoImportOutput{}, errors.New("this customer import was already undone")
+	}
+	changedAt := now.UTC().Truncate(time.Microsecond)
+	updatedBy := humanActorID(claims)
+	rows, err := tx.Query(ctx, `
+		UPDATE customers SET deactivated_at = $1, updated_by_user_id = $2::uuid, updated_at = $1
+		WHERE org_id = $3::uuid AND id = ANY($4::uuid[]) AND deactivated_at IS NULL
+		RETURNING id::text`, changedAt, updatedBy, claims.OrganizationID, imported.CreatedIDs)
+	if err != nil {
+		return CustomerUndoImportOutput{}, err
+	}
+	changedIDs := make([]string, 0, len(imported.CreatedIDs))
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return nil, err
+			return CustomerUndoImportOutput{}, err
 		}
 		changedIDs = append(changedIDs, id)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return nil, err
+		return CustomerUndoImportOutput{}, err
 	}
 	rows.Close()
-	if restore {
-		return CustomerRestoreImportOutput{CustomerIDs: changedIDs, Restored: len(changedIDs)}, nil
+	if err := requireReceiptIDsMatch(changedIDs, imported.CreatedIDs); err != nil {
+		return CustomerUndoImportOutput{}, errors.New("imported customers changed before undo could complete")
 	}
-	return CustomerUndoImportOutput{CustomerIDs: changedIDs, Deactivated: len(changedIDs)}, nil
+	marker := customerImportTransitionReceipt{
+		CustomerIDs: imported.CreatedIDs, SourceIntentID: input.ImportIntentID, ChangedAt: changedAt,
+		ActorType: claims.ActorType, ActorID: claims.ActorID, AgentSessionID: claims.AgentSessionID,
+	}
+	if err := insertCustomerImportTransitionMarker(ctx, tx, claims.OrganizationID, "undo", undoCustomerImportCapabilityID, input.ImportIntentID, marker); err != nil {
+		return CustomerUndoImportOutput{}, err
+	}
+	return CustomerUndoImportOutput{CustomerIDs: imported.CreatedIDs, Deactivated: len(imported.CreatedIDs), ImportIntentID: input.ImportIntentID, UndoIntentID: claims.IntentID}, nil
 }
 
-func dedupeCustomerIDs(input []string) []string {
-	ids := make([]string, 0, len(input))
-	seen := make(map[string]struct{}, len(input))
-	for _, id := range input {
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
+func restoreImportedCustomers(ctx context.Context, tx pgx.Tx, claims authbridge.CapabilityClaims, input CustomerRestoreImportInput, now time.Time) (CustomerRestoreImportOutput, error) {
+	if err := lockCustomerImportTransition(ctx, tx, claims.OrganizationID, "restore", input.UndoIntentID); err != nil {
+		return CustomerRestoreImportOutput{}, err
 	}
-	return ids
+	undoReceipt, found, err := loadReceipt(ctx, tx, claims.OrganizationID, claims.OrganizationID+":"+input.UndoIntentID)
+	if err != nil {
+		return CustomerRestoreImportOutput{}, err
+	}
+	if !found || undoReceipt.CapabilityID != undoCustomerImportCapabilityID || !undoReceipt.OK || undoReceipt.Outcome != "known" {
+		return CustomerRestoreImportOutput{}, errors.New("a successful customer import undo receipt is required")
+	}
+	var undoOutput CustomerUndoImportOutput
+	if err := json.Unmarshal(undoReceipt.Data, &undoOutput); err != nil || undoOutput.Deactivated != len(undoOutput.CustomerIDs) || undoOutput.ImportIntentID == "" || undoOutput.UndoIntentID != input.UndoIntentID {
+		return CustomerRestoreImportOutput{}, errors.New("the customer import undo receipt is invalid")
+	}
+	if err := requireReceiptIDsMatch(input.CustomerIDs, undoOutput.CustomerIDs); err != nil {
+		return CustomerRestoreImportOutput{}, err
+	}
+	undoMarker, found, err := customerImportTransitionMarker(ctx, tx, claims.OrganizationID, "undo", undoOutput.ImportIntentID)
+	if err != nil {
+		return CustomerRestoreImportOutput{}, err
+	}
+	if !found || undoMarker.SourceIntentID != undoOutput.ImportIntentID || undoMarker.ChangedAt.IsZero() || requireReceiptIDsMatch(undoMarker.CustomerIDs, undoOutput.CustomerIDs) != nil {
+		return CustomerRestoreImportOutput{}, errors.New("the customer import undo receipt is invalid")
+	}
+	if !sameCustomerImportActor(undoMarker, claims) {
+		return CustomerRestoreImportOutput{}, errors.New("the customer import undo receipt does not belong to this actor")
+	}
+	if _, found, err := customerImportTransitionMarker(ctx, tx, claims.OrganizationID, "restore", input.UndoIntentID); err != nil {
+		return CustomerRestoreImportOutput{}, err
+	} else if found {
+		return CustomerRestoreImportOutput{}, errors.New("this customer import undo was already restored")
+	}
+	updatedBy := humanActorID(claims)
+	rows, err := tx.Query(ctx, `
+		UPDATE customers SET deactivated_at = NULL, updated_by_user_id = $1::uuid, updated_at = $2
+		WHERE org_id = $3::uuid AND id = ANY($4::uuid[])
+		  AND deactivated_at = $5 AND updated_at = $5
+		RETURNING id::text`, updatedBy, now, claims.OrganizationID, undoOutput.CustomerIDs, undoMarker.ChangedAt)
+	if err != nil {
+		return CustomerRestoreImportOutput{}, err
+	}
+	changedIDs := make([]string, 0, len(undoOutput.CustomerIDs))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return CustomerRestoreImportOutput{}, err
+		}
+		changedIDs = append(changedIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return CustomerRestoreImportOutput{}, err
+	}
+	rows.Close()
+	if err := requireReceiptIDsMatch(changedIDs, undoOutput.CustomerIDs); err != nil {
+		return CustomerRestoreImportOutput{}, errors.New("imported customers changed after undo and cannot be restored safely")
+	}
+	marker := customerImportTransitionReceipt{
+		CustomerIDs: undoOutput.CustomerIDs, SourceIntentID: input.UndoIntentID, ChangedAt: now.UTC().Truncate(time.Microsecond),
+		ActorType: claims.ActorType, ActorID: claims.ActorID, AgentSessionID: claims.AgentSessionID,
+	}
+	if err := insertCustomerImportTransitionMarker(ctx, tx, claims.OrganizationID, "restore", restoreImportedCustomersCapabilityID, input.UndoIntentID, marker); err != nil {
+		return CustomerRestoreImportOutput{}, err
+	}
+	return CustomerRestoreImportOutput{CustomerIDs: undoOutput.CustomerIDs, Restored: len(undoOutput.CustomerIDs)}, nil
 }
 
 func humanActorID(claims authbridge.CapabilityClaims) *string {
@@ -924,17 +1160,17 @@ func executeCustomerMergeCapability(ctx context.Context, tx pgx.Tx, claims authb
 		}
 		return importCustomers(ctx, tx, claims, parsed)
 	case undoCustomerImportCapabilityID:
-		parsed, ok := input.(CustomerIDsInput)
+		parsed, ok := input.(CustomerUndoImportInput)
 		if !ok {
 			return nil, errors.New("invalid undo customer import input")
 		}
-		return toggleImportedCustomers(ctx, tx, claims, parsed, now, false)
+		return undoImportedCustomers(ctx, tx, claims, parsed, now)
 	case restoreImportedCustomersCapabilityID:
-		parsed, ok := input.(CustomerIDsInput)
+		parsed, ok := input.(CustomerRestoreImportInput)
 		if !ok {
 			return nil, errors.New("invalid restore imported customer input")
 		}
-		return toggleImportedCustomers(ctx, tx, claims, parsed, now, true)
+		return restoreImportedCustomers(ctx, tx, claims, parsed, now)
 	default:
 		return nil, errors.New("unsupported CRM capability input")
 	}

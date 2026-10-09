@@ -908,13 +908,22 @@ func (e *Executor) executeWithFinalizer(
 			}
 			input = parsed
 		case importCustomersCapabilityID:
+			if !isZodUUID(claims.IntentID) {
+				return Result{OK: false, Error: "invalid input: customer import requires a durable UUID intent"}, nil
+			}
 			parsed, err := ParseCustomerImportInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
 			input = parsed
-		case undoCustomerImportCapabilityID, restoreImportedCustomersCapabilityID:
-			parsed, err := ParseCustomerIDsInput(rawInput)
+		case undoCustomerImportCapabilityID:
+			parsed, err := ParseCustomerUndoImportInput(rawInput)
+			if err != nil {
+				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
+			}
+			input = parsed
+		case restoreImportedCustomersCapabilityID:
+			parsed, err := ParseCustomerRestoreImportInput(rawInput)
 			if err != nil {
 				return Result{OK: false, Error: "invalid input: " + err.Error()}, nil
 			}
@@ -2018,7 +2027,7 @@ func (e *Executor) executeWithFinalizer(
 				return Result{}, err
 			}
 			data, err = marshalJS(output)
-		case CustomerMergeInput, CustomerMergeSnapshotInput, CustomerImportInput, CustomerIDsInput:
+		case CustomerMergeInput, CustomerMergeSnapshotInput, CustomerImportInput, CustomerUndoImportInput, CustomerRestoreImportInput:
 			output, err := executeCustomerMergeCapability(ctx, tx, claims, capabilityID, parsed, now)
 			if err != nil {
 				return Result{}, err
@@ -3336,7 +3345,9 @@ func canonicalInputHash(input any) (string, error) {
 		return parsed.CanonicalHash()
 	case CustomerImportInput:
 		return parsed.CanonicalHash()
-	case CustomerIDsInput:
+	case CustomerUndoImportInput:
+		return parsed.CanonicalHash()
+	case CustomerRestoreImportInput:
 		return parsed.CanonicalHash()
 	case CustomerProfileUpdateInput:
 		return parsed.CanonicalHash()

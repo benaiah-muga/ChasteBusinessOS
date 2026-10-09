@@ -1894,3 +1894,17 @@ new owners and the manifest shows zero legacy runtime paths.
      caller-supplied snapshots, and rejects undo when any restored field changed
      after the merge. All other CRM mutations keep their existing routes.
      Browser proof remains open.
+188. Route Vite CRM customer CSV import and undo through Go's existing
+     `crm.importCustomers` and `crm.undoCustomerImport` capabilities under the
+     paired `CHASTE_GO_CRM_CUSTOMER_IMPORT=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` flags. Set the import selector to
+     `0` to use `/api/import`. Persist exact scoped import and undo attempts
+     through approval and uncertain results, fail closed on Go 404, and block
+     legacy rollback while either Go operation is unresolved. Persist the
+     created customer IDs and import receipt reference so Undo remains
+     available after reload and stays on Go. Go binds undo to the successful
+     organization- and actor-scoped import receipt, consumes it atomically, and
+     binds restore to the successful undo receipt while detecting later record
+     edits. Require durable UUID import intents. Keep CSV mapping and review
+     behavior unchanged. Add focused API, proxy, UI, and DB-backed Go tests;
+     authenticated browser proof remains open.
