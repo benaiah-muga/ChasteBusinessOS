@@ -81,6 +81,10 @@ const CostPreviewSchema = z.object({
   totalCostMinor: z.number().int().safe(),
   resultingAvgFinishedUnitCostMinor: z.number().int().safe(),
 }).strict();
+const GoCostPreviewSchema = CostPreviewSchema.extend({
+  plannedThousandths: z.number().int().safe(),
+  expectedGoodThousandths: z.number().int().safe(),
+}).strict();
 
 const FeasibilitySchema = z.object({
   producible: z.boolean(),
@@ -171,6 +175,9 @@ const PendingSchema = z.object({
   approvalId: z.string().uuid().optional(),
 }).strict();
 const ErrorSchema = z.object({ error: z.string() }).passthrough();
+const ProductionCostInputSchema = z.object({ assemblySku: z.string().trim().min(1), quantityThousandths: z.number().int().positive().safe() }).strict();
+const ProductionFeasibilityInputSchema = z.object({ assemblySku: z.string().trim().min(1), desiredUnitsThousandths: z.number().int().positive().safe() }).strict();
+const BomReportInputSchema = z.object({ assemblySku: z.string().trim().min(1), quantityThousandths: z.number().int().positive().safe() }).strict();
 const WorkOrderOutputSchemas = {
   createWorkOrder: z.object({ workOrderId: z.string().uuid(), number: z.number().int().positive().safe(), expectedGoodThousandths: z.number().int().nonnegative().safe() }).passthrough(),
   releaseWorkOrder: z.object({ released: z.boolean() }).passthrough(),
@@ -459,27 +466,46 @@ export async function submitManufacturingAction(
   return { kind: "completed" };
 }
 
-async function postRead<T>(payload: Record<string, unknown>, schema: z.ZodType<T>, fallback: string, signal?: AbortSignal): Promise<T> {
-  const { response, body } = await request("/api/manufacturing", {
+async function postRead<TInput extends object, T>(
+  action: "costPreview" | "checkProductionFeasibility" | "bomReport",
+  payload: unknown,
+  inputSchema: z.ZodType<TInput>,
+  schema: z.ZodType<T>,
+  fallback: string,
+  signal?: AbortSignal,
+  goSchema?: z.ZodType<T>,
+): Promise<T> {
+  const input = inputSchema.safeParse(payload);
+  if (!input.success) throw new ManufacturingApiError(0, "Check the production details and try again.");
+  const useGo = typeof __GO_MANUFACTURING_PLANNING_READS__ !== "undefined" && __GO_MANUFACTURING_PLANNING_READS__;
+  const path = useGo ? "/api/capabilities/execute" : "/api/manufacturing";
+  const requestBody = useGo
+    ? { capabilityId: `manufacturing.${action}`, input: input.data, intentId: crypto.randomUUID() }
+    : { action, ...input.data, intentId: crypto.randomUUID() };
+  const { response, body } = await request(path, {
     method: "POST",
-    body: JSON.stringify({ ...payload, intentId: crypto.randomUUID() }),
+    body: JSON.stringify(requestBody),
   }, signal);
+  if (response.status === 202) {
+    throw new ManufacturingApiError(202, "The manufacturing planning read unexpectedly requires approval. No result was returned.");
+  }
   if (!response.ok) throw new ManufacturingApiError(response.status, messageFor(response.status, body, fallback));
   const envelope = EnvelopeSchema.safeParse(body);
   if (!envelope.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned an unexpected response.");
-  const parsed = schema.safeParse(envelope.data.data);
+  const outputSchema = useGo && action === "costPreview" && goSchema ? goSchema : schema;
+  const parsed = outputSchema.safeParse(envelope.data.data);
   if (!parsed.success) throw new ManufacturingApiError(response.status, "The manufacturing service returned data in an unexpected format.");
   return parsed.data;
 }
 
 export function fetchProductionCostPreview(assemblySku: string, quantityThousandths: number, signal?: AbortSignal): Promise<ManufacturingCostPreview> {
-  return postRead({ action: "costPreview", assemblySku, quantityThousandths }, CostPreviewSchema, "Could not preview production cost.", signal);
+  return postRead("costPreview", { assemblySku, quantityThousandths }, ProductionCostInputSchema, CostPreviewSchema, "Could not preview production cost.", signal, GoCostPreviewSchema);
 }
 
 export function fetchProductionFeasibility(assemblySku: string, desiredUnitsThousandths: number, signal?: AbortSignal): Promise<ManufacturingFeasibility> {
-  return postRead({ action: "checkProductionFeasibility", assemblySku, desiredUnitsThousandths }, FeasibilitySchema, "Could not check production feasibility.", signal);
+  return postRead("checkProductionFeasibility", { assemblySku, desiredUnitsThousandths }, ProductionFeasibilityInputSchema, FeasibilitySchema, "Could not check production feasibility.", signal);
 }
 
 export function fetchManufacturingBomReport(assemblySku: string, quantityThousandths: number, signal?: AbortSignal): Promise<ManufacturingBomReport> {
-  return postRead({ action: "bomReport", assemblySku, quantityThousandths }, BomReportSchema, "Could not build the BOM report.", signal);
+  return postRead("bomReport", { assemblySku, quantityThousandths }, BomReportInputSchema, BomReportSchema, "Could not build the BOM report.", signal);
 }

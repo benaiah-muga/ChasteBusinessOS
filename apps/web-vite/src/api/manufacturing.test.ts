@@ -107,6 +107,82 @@ describe("manufacturing API", () => {
     await expect(fetchManufacturingEnabled()).resolves.toBe(true);
   });
 
+  it("routes planning reads through their Go capabilities when selected", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, data: {
+        producible: true,
+        plannedThousandths: 2000,
+        expectedGoodThousandths: 2000,
+        lines: [],
+        totalCostMinor: 0,
+        resultingAvgFinishedUnitCostMinor: 0,
+      } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: {
+        producible: true,
+        maxProducibleThousandths: 3000,
+        estimatedLeadTimeDays: null,
+        lines: [],
+      } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, data: {
+        producible: true,
+        totalShortfallThousandths: 0,
+        lines: [],
+      } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchProductionCostPreview("DESK-1", 2000)).resolves.toMatchObject({ plannedThousandths: 2000 });
+    await expect(fetchProductionFeasibility("DESK-1", 2000)).resolves.toMatchObject({ producible: true });
+    await expect(fetchManufacturingBomReport("DESK-1", 2000)).resolves.toMatchObject({ totalShortfallThousandths: 0 });
+
+    const requests = fetchMock.mock.calls.map(([url, init]) => ({
+      url,
+      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+    }));
+    expect(requests.map(({ url }) => url)).toEqual(Array(3).fill("/api/capabilities/execute"));
+    expect(requests.map(({ body }) => body.capabilityId)).toEqual([
+      "manufacturing.costPreview",
+      "manufacturing.checkProductionFeasibility",
+      "manufacturing.bomReport",
+    ]);
+    expect(requests[0]?.body.input).toEqual({ assemblySku: "DESK-1", quantityThousandths: 2000 });
+    expect(requests.every(({ body }) => typeof body.intentId === "string")).toBe(true);
+  });
+
+  it("validates planning read inputs before sending a request", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchProductionCostPreview("  ", 1000)).rejects.toThrow("Check the production details");
+    await expect(fetchProductionFeasibility("DESK-1", 0)).rejects.toThrow("Check the production details");
+    await expect(fetchManufacturingBomReport("DESK-1", Number.NaN)).rejects.toThrow("Check the production details");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ expectedGoodThousandths: 1000, producible: true, lines: [], totalCostMinor: 0, resultingAvgFinishedUnitCostMinor: 0 }],
+    [{ plannedThousandths: 1000, producible: true, lines: [], totalCostMinor: 0, resultingAvgFinishedUnitCostMinor: 0 }],
+  ])("requires planned and expected-good quantities in a Go cost preview response", async (data) => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, data }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchProductionCostPreview("DESK-1", 1000)).rejects.toThrow("unexpected format");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
+
+  it.each([
+    [202, { ok: false, pendingApproval: true, reason: "unexpected" }, "unexpectedly requires approval"],
+    [200, { ok: true, data: { producible: "yes", lines: [] } }, "unexpected format"],
+    [404, { error: "capability unavailable" }, "capability unavailable"],
+  ])("fails closed on selected Go planning read response %i without legacy fallback", async (status, body, expected) => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    const fetchMock = stubSequenced([Response.json(body, { status })]);
+    await expect(fetchProductionCostPreview("DESK-1", 1000)).rejects.toThrow(expected);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities/execute", expect.any(Object));
+  });
+
   it("fails closed on empty or corrupt saved Go work order attempts", async () => {
     const scope = { actorId: "actor-1", organizationId: "org-1" };
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(scope)));

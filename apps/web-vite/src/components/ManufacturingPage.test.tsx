@@ -213,6 +213,58 @@ describe("Vite manufacturing page", () => {
     expect(postedActions(fetchMock).find((body) => body.action === "produceFromBom")).toMatchObject({ assemblySku: "DESK-1", quantityThousandths: 2000, lotCode: "DESK-MAY" });
   });
 
+  it("keeps production planning reads working when routed through Go", async () => {
+    vi.stubGlobal("__GO_MANUFACTURING_PLANNING_READS__", true);
+    const fetchMock = manufacturingFetch({
+      onPost: (body) => {
+        if (body.action === "costPreview") return Response.json({ ok: true, data: {
+          producible: true,
+          plannedThousandths: 1000,
+          expectedGoodThousandths: 1000,
+          lines: [{ sku: "LEG-1", name: "Oak leg", requiredThousandths: 4000, unitCostMinor: 3000, costMinor: 12_000 }],
+          totalCostMinor: 12_000,
+          resultingAvgFinishedUnitCostMinor: 12_000,
+        } });
+        if (body.action === "checkProductionFeasibility") return Response.json({ ok: true, data: {
+          producible: false,
+          maxProducibleThousandths: 0,
+          estimatedLeadTimeDays: null,
+          lines: [{ itemId: "leg-1", requiredThousandths: 4000, onHandThousandths: 1000, shortfallThousandths: 3000 }],
+        } });
+        if (body.action === "bomReport") return Response.json({ ok: true, data: {
+          producible: false,
+          totalShortfallThousandths: 3000,
+          lines: [{ sku: "LEG-1", name: "Oak leg", requiredThousandths: 4000, onHandThousandths: 1000, shortfallThousandths: 3000 }],
+        } });
+        return Response.json({ ok: true, data: {} });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ManufacturingPage />);
+
+    await screen.findByRole("heading", { name: "Manufacturing" });
+    fireEvent.click(screen.getByRole("button", { name: /^BOMs/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Check feasibility" }));
+    expect(await screen.findByText(/max producible: 0.000 units/)).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "BOM report" }));
+    expect(await screen.findByText(/scrap-adjusted requirements/)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Produce" }));
+    fireEvent.change(screen.getByLabelText("Produce assembly SKU"), { target: { value: "DESK-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview cost" }));
+    expect(await screen.findByText("producible")).not.toBeNull();
+
+    const capabilityRequests = fetchMock.mock.calls
+      .filter(([url]) => url === "/api/capabilities/execute")
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+    expect(capabilityRequests.map((body) => body.capabilityId)).toEqual([
+      "manufacturing.checkProductionFeasibility",
+      "manufacturing.bomReport",
+      "manufacturing.costPreview",
+    ]);
+    expect(capabilityRequests.every((body) => typeof body.intentId === "string")).toBe(true);
+  });
+
   it("drives work orders from draft through release, completion, and cancellation", async () => {
     const fetchMock = manufacturingFetch();
     vi.stubGlobal("fetch", fetchMock);

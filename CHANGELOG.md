@@ -13,6 +13,13 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite Manufacturing can route production cost previews, feasibility checks,
+  and BOM reports through Go's `manufacturing.costPreview`,
+  `manufacturing.checkProductionFeasibility`, and `manufacturing.bomReport`
+  capabilities with paired `CHASTE_GO_MANUFACTURING_PLANNING_READS=1` and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Responses are validated,
+  pending or malformed results show errors, and selected Go reads never fall
+  back to `/api/manufacturing`.
 - Vite Accounting Reports can load the aggregate directly from Go's income
   statement, balance sheet, cash flow, FX exposure, and report currency
   metadata capabilities behind paired `CHASTE_GO_ACCOUNTING_REPORTS=1` and

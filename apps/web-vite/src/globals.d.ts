@@ -41,6 +41,7 @@ declare const __GO_MARKETING_CAMPAIGN_WRITES__: boolean;
 declare const __GO_MANUFACTURING_DEFINE_BOM_SLICE__: boolean;
 declare const __GO_MANUFACTURING_WORK_ORDER_WRITES__: boolean;
 declare const __GO_MANUFACTURING_PRODUCTION_WRITES__: boolean;
+declare const __GO_MANUFACTURING_PLANNING_READS__: boolean;
 declare const __GO_SALES_ORDER_WRITES__: boolean;
 declare const __GO_MESSAGING_SEND_SLICE__: boolean;
 declare const __GO_MESSAGING_EDIT_SLICE__: boolean;

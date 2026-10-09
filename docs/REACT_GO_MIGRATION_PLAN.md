@@ -2090,3 +2090,12 @@ new owners and the manifest shows zero legacy runtime paths.
      metadata, and use no-store reads. Fail closed without `/api/reports`
      fallback. Keep Accounting writes and other report reads unchanged; add
      focused Vite API, page, proxy selector, and Go executor contract tests.
+206. Route only Vite Manufacturing production cost previews, feasibility
+     checks, and BOM reports through `manufacturing.costPreview`,
+     `manufacturing.checkProductionFeasibility`, and `manufacturing.bomReport`
+     behind paired `CHASTE_GO_MANUFACTURING_PLANNING_READS=1` and
+     `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. Keep other Manufacturing
+     routes unchanged, validate request and response schemas, and surface
+     pending, malformed, and unavailable results without falling back to
+     `/api/manufacturing`. Add focused Vite API, page, proxy selector, and Go
+     parser/executor contract tests.

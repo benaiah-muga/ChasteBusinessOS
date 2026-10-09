@@ -39,6 +39,16 @@ func TestManufacturingBomParsersMirrorZodContracts(t *testing.T) {
 	if err != nil || preview.YieldPctThousandths != manufacturingPctScale {
 		t.Fatalf("costPreview parse=%+v err=%v, want full yield default", preview, err)
 	}
+	report, err := ParseManufacturingBomReportInput(json.RawMessage(`{"assemblySku":"DESK","quantityThousandths":2000}`))
+	if err != nil || report.AssemblySKU != "DESK" || report.QuantityThousandths != 2000 {
+		t.Fatalf("bomReport parse=%+v err=%v", report, err)
+	}
+	if _, err := parseManufacturingBomInput(manufacturingBomReportCapabilityID, json.RawMessage(`{"assemblySku":"DESK","quantityThousandths":0}`)); err == nil {
+		t.Fatal("bomReport parser accepted a nonpositive quantity")
+	}
+	if _, err := parseManufacturingBomInput(manufacturingCostPreviewCapabilityID, json.RawMessage(`{"assemblySku":"DESK","quantityThousandths":-1}`)); err == nil {
+		t.Fatal("costPreview parser accepted a negative quantity")
+	}
 	runs, err := ParseManufacturingProductionRunsInput(json.RawMessage(`{}`))
 	if err != nil || runs.Limit != 25 {
 		t.Fatalf("productionRuns parse=%+v err=%v, want default 25", runs, err)
@@ -154,6 +164,21 @@ func TestManufacturingBomLifecycleAndTree(t *testing.T) {
 		return struct{}{}, nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+
+	grantWavePermission(t, fx, "manufacturing.read")
+	for _, check := range []struct {
+		capabilityID string
+		input        string
+	}{
+		{manufacturingBomReportCapabilityID, `{"assemblySku":"DESK","quantityThousandths":2000}`},
+		{manufacturingCostPreviewCapabilityID, `{"assemblySku":"DESK","quantityThousandths":2000}`},
+	} {
+		raw := json.RawMessage(check.input)
+		result, err := fx.executor.Execute(fx.ctx, waveModuleClaims(fx, check.capabilityID, "manufacturing.read", raw, "human", "", "bom-read-"+check.capabilityID), check.capabilityID, raw)
+		if err != nil || !result.OK || len(result.Data) == 0 {
+			t.Fatalf("%s result=%+v err=%v", check.capabilityID, result, err)
+		}
 	}
 }
 
