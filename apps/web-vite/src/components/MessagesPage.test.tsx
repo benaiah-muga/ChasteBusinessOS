@@ -19,6 +19,7 @@ import {
 import {
   MAX_ATTACHMENT_BYTES,
   deleteMessage,
+  getPendingMessageEdit,
   type Conversation,
   type Message,
   type MessageReader,
@@ -426,6 +427,42 @@ describe("messages page states", () => {
     expect(goBody).toMatchObject({ capabilityId: "messaging.editMessage", input: { body: "Corrected after reload" }, intentId: expect.any(String) });
   });
 
+  it("keeps a Go edit 404 locked across selector rollback without calling legacy PATCH", async () => {
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(input);
+      paths.push(path);
+      if (path === "/api/capabilities/execute") return Response.json({ error: "route unavailable" }, { status: 404 });
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { actorId: me, organizationId: "6a7c5482-c5a6-4fcb-8b69-a06d4820238a" };
+    const first = render(<MessagesPage {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit message" }));
+    fireEvent.change(await screen.findByLabelText("Edit message"), { target: { value: "Retry after route recovery" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByLabelText("Edit message")).toHaveProperty("readOnly", true));
+    expect(await getPendingMessageEdit({ actorId: me, organizationId: props.organizationId }))
+      .toMatchObject({ messageId: "m1", body: "Retry after route recovery", intentId: expect.any(String) });
+    expect(paths).not.toContain("/api/messages/m1");
+    expect(paths.some((path) => path.startsWith("/api/messages/m1?"))).toBe(false);
+
+    first.unmount();
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", false);
+    render(<MessagesPage {...props} />);
+    await waitFor(() => expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).readOnly).toBe(true));
+    const requestCount = paths.length;
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Restore Go message editing");
+    expect(paths).toHaveLength(requestCount);
+  });
+
   it("blocks message edits until the Go actor, organization, and conversation scope is resolved", async () => {
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
     const writes: string[] = [];
@@ -446,9 +483,33 @@ describe("messages page states", () => {
     fireEvent.change(await screen.findByLabelText("Edit message"), { target: { value: "Must wait for scope" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain("paused until the actor, organization, and conversation are resolved");
+    expect((await screen.findByRole("alert")).textContent).toContain("paused until the actor and organization are resolved");
     expect(writes).toEqual([]);
     expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Must wait for scope");
+  });
+
+  it("blocks selector-off edits until actor and organization scope can check recovery", async () => {
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", false);
+    const writes: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (init?.method === "PATCH") writes.push(path);
+      if (path === "/api/modules") return Response.json({ catalog: [{ id: "messaging" }], enabledModules: ["messaging"] });
+      if (path === "/api/conversations") return Response.json({ conversations: [conversation()], me });
+      if (path.startsWith("/api/conversations/people")) return Response.json({ people });
+      if (path.includes("/presence")) return Response.json({ people: [] });
+      if (path.endsWith("/messages")) return Response.json(threadBody());
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MessagesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit message" }));
+    fireEvent.change(await screen.findByLabelText("Edit message"), { target: { value: "Must not send without scope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("actor and organization are resolved");
+    expect(writes).toEqual([]);
   });
 
   it("does not let a stale Go edit response clear the next scope's editor state", async () => {
@@ -478,7 +539,10 @@ describe("messages page states", () => {
     expect(screen.queryByRole("textbox", { name: "Edit message" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
     fireEvent.change(screen.getByLabelText("Edit message"), { target: { value: "Scope B draft" } });
-    await act(async () => { finishRequest(Response.json({ ok: true, data: { messageId: "m1", editedAt: "2026-10-01T09:00:00.000Z" } })); });
+    await act(async () => { finishRequest(Response.json({
+      ok: true,
+      data: { messageId: "m1", body: "Morning all", expectedBody: "Scope A edit", expectedEditedAt: "2026-10-01T09:00:00.000Z", editedAt: "2026-10-01T09:00:00.000Z" },
+    })); });
 
     expect((screen.getByLabelText("Edit message") as HTMLTextAreaElement).value).toBe("Scope B draft");
     expect(screen.queryByText("Message updated.")).toBeNull();

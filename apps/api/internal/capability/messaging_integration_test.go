@@ -125,6 +125,135 @@ func (fx *messagingFixture) count(query string, args ...any) int64 {
 	return count
 }
 
+func executeMessagingCapability(fx *messagingFixture, capabilityID, input, intent string) (Result, error) {
+	raw := json.RawMessage(input)
+	claims := fx.humanClaims(raw, intent)
+	claims.CapabilityID = capabilityID
+	claims.Permissions = []string{"messaging.write"}
+	return fx.executor.Execute(fx.ctx, claims, capabilityID, raw)
+}
+
+func TestMessagingEditRestoreRequiresReceiptAndReplaysGuardedInverse(t *testing.T) {
+	fx := newMessagingFixture(t)
+	if _, err := fx.owner.Exec(fx.ctx, `INSERT INTO role_permissions (role_id, permission_key, org_id) VALUES ($1::uuid, 'messaging.write', $2::uuid)`, fx.roleID, fx.orgID); err != nil {
+		t.Fatal(err)
+	}
+	channel := fx.createChannel(t, fx.userID, "guarded edits")
+	messageID := fx.send(t, fx.userID, channel, "original wording")
+
+	edit, err := executeMessagingCapability(fx, messagingEditMessageCapabilityID,
+		`{"messageId":"`+messageID+`","body":"corrected wording"}`, "message-edit-inverse-edit")
+	if err != nil || !edit.OK {
+		t.Fatalf("edit result=%+v err=%v", edit, err)
+	}
+	var editSnapshot MessagingEditMessageOutput
+	if err := json.Unmarshal(edit.Data, &editSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if editSnapshot.Body != "original wording" || editSnapshot.ExpectedBody != "corrected wording" || editSnapshot.ExpectedEditedAt == "" || editSnapshot.EditedAt == "" {
+		t.Fatalf("edit inverse snapshot=%+v", editSnapshot)
+	}
+	fabricated := `{"messageId":"` + messageID + `","body":"invented original","expectedBody":"corrected wording","expectedEditedAt":"` + editSnapshot.ExpectedEditedAt + `"}`
+	if result, err := executeMessagingCapability(fx, messagingRestoreMessageEditCapabilityID, fabricated, "message-edit-fabricated-restore"); err == nil || !strings.Contains(err.Error(), "matching successful edit receipt") {
+		t.Fatalf("restore fabricated snapshot result=%+v err=%v, want receipt proof rejection", result, err)
+	}
+
+	if _, err := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.orgID, func(tx pgx.Tx) (MessagingRestoreMessageEditOutput, error) {
+		return messagingRestoreMessageEdit(fx.ctx, tx, fx.orgID, "human", messagingUserPointer(fx.colleagueID), MessagingRestoreMessageEditInput{
+			MessageID: messageID, Body: editSnapshot.Body, ExpectedBody: editSnapshot.ExpectedBody, ExpectedEditedAt: editSnapshot.ExpectedEditedAt,
+		})
+	}); err == nil || err.Error() != "you can only restore your own messages" {
+		t.Fatalf("restore by different author err=%v, want author refusal", err)
+	}
+
+	var wrongTenant MessagingRestoreMessageEditOutput
+	_, tenantErr := dbx.WithOrgTx(fx.ctx, fx.runtime, fx.otherOrgID, func(tx pgx.Tx) (MessagingRestoreMessageEditOutput, error) {
+		return messagingRestoreMessageEdit(fx.ctx, tx, fx.otherOrgID, "human", messagingUserPointer(fx.userID), MessagingRestoreMessageEditInput{
+			MessageID: messageID, Body: editSnapshot.Body, ExpectedBody: editSnapshot.ExpectedBody, ExpectedEditedAt: editSnapshot.ExpectedEditedAt,
+		})
+	})
+	if tenantErr == nil || tenantErr.Error() != "message not found" {
+		t.Fatalf("restore in foreign tenant=%+v err=%v, want tenant-isolated not found", wrongTenant, tenantErr)
+	}
+
+	restoreInput, err := json.Marshal(MessagingRestoreMessageEditInput{
+		MessageID: editSnapshot.MessageID, Body: editSnapshot.Body, ExpectedBody: editSnapshot.ExpectedBody, ExpectedEditedAt: editSnapshot.ExpectedEditedAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := executeMessagingCapability(fx, messagingRestoreMessageEditCapabilityID, string(restoreInput), "message-edit-inverse-restore")
+	if err != nil || !restored.OK {
+		t.Fatalf("restore from edit receipt result=%+v err=%v", restored, err)
+	}
+	var restoreSnapshot MessagingRestoreMessageEditOutput
+	if err := json.Unmarshal(restored.Data, &restoreSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if restoreSnapshot.MessageID != messageID || restoreSnapshot.Body != "corrected wording" || restoreSnapshot.ExpectedBody != "original wording" {
+		t.Fatalf("restore inverse snapshot=%+v", restoreSnapshot)
+	}
+	restoreReplay, err := executeMessagingCapability(fx, messagingRestoreMessageEditCapabilityID, string(restoreInput), "message-edit-inverse-restore")
+	var replaySnapshot MessagingRestoreMessageEditOutput
+	if err := json.Unmarshal(restoreReplay.Data, &replaySnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err != nil || !restoreReplay.OK || !restoreReplay.Replayed || !reflect.DeepEqual(replaySnapshot, restoreSnapshot) {
+		t.Fatalf("restore receipt replay=%+v err=%v", restoreReplay, err)
+	}
+
+	editInput, err := json.Marshal(MessagingEditMessageInput{
+		MessageID: restoreSnapshot.MessageID, Body: restoreSnapshot.Body, ExpectedBody: &restoreSnapshot.ExpectedBody,
+		ExpectedEditedAt: &restoreSnapshot.ExpectedEditedAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	redone, err := executeMessagingCapability(fx, messagingEditMessageCapabilityID, string(editInput), "message-edit-inverse-redo")
+	if err != nil || !redone.OK {
+		t.Fatalf("redo from restore receipt result=%+v err=%v", redone, err)
+	}
+	var currentBody string
+	if err := fx.owner.QueryRow(fx.ctx, `SELECT body FROM messages WHERE id=$1::uuid AND org_id=$2::uuid`, messageID, fx.orgID).Scan(&currentBody); err != nil {
+		t.Fatal(err)
+	}
+	if currentBody != "corrected wording" {
+		t.Fatalf("body after reciprocal inverse=%q, want corrected wording", currentBody)
+	}
+
+	var redoSnapshot MessagingEditMessageOutput
+	if err := json.Unmarshal(redone.Data, &redoSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	changeToC, err := json.Marshal(MessagingEditMessageInput{
+		MessageID: messageID, Body: "later wording", ExpectedBody: &redoSnapshot.ExpectedBody, ExpectedEditedAt: &redoSnapshot.ExpectedEditedAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := executeMessagingCapability(fx, messagingEditMessageCapabilityID, string(changeToC), "message-edit-aba-to-c")
+	if err != nil || !changed.OK {
+		t.Fatalf("edit to C result=%+v err=%v", changed, err)
+	}
+	var changedSnapshot MessagingEditMessageOutput
+	if err := json.Unmarshal(changed.Data, &changedSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	backToB, err := json.Marshal(MessagingEditMessageInput{
+		MessageID: messageID, Body: redoSnapshot.ExpectedBody, ExpectedBody: &changedSnapshot.ExpectedBody,
+		ExpectedEditedAt: &changedSnapshot.ExpectedEditedAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := executeMessagingCapability(fx, messagingEditMessageCapabilityID, string(backToB), "message-edit-aba-back-to-b"); err != nil || !result.OK {
+		t.Fatalf("edit back to B result=%+v err=%v", result, err)
+	}
+	if result, err := executeMessagingCapability(fx, messagingRestoreMessageEditCapabilityID, string(restoreInput), "message-edit-stale-restore"); err == nil || !strings.Contains(err.Error(), "message changed since the inverse") {
+		t.Fatalf("restore after A-B-C-B result=%+v err=%v, want stale revision refusal", result, err)
+	}
+}
+
 func TestMessagingConversationLifecycleGovernsMembershipAndTenant(t *testing.T) {
 	fx := newMessagingFixture(t)
 	channel := fx.createChannel(t, fx.userID, "lifecycle")
@@ -1015,7 +1144,31 @@ func TestMessagingCanonicalInputHashesAreStable(t *testing.T) {
 	if !strings.HasPrefix(cursorHash, "sha256:") && cursorHash == "" {
 		t.Fatalf("canonical hash for the read cursor input=%q", cursorHash)
 	}
+	unguardedEdit, err := parseMessagingInput(messagingEditMessageCapabilityID, json.RawMessage(`{"messageId":"m","body":"corrected"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardedEdit, err := parseMessagingInput(messagingEditMessageCapabilityID,
+		json.RawMessage(`{"messageId":"m","body":"corrected","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unguardedHash, err := canonicalHash(unguardedEdit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardedHash, err := canonicalHash(guardedEdit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unguardedHash == guardedHash {
+		t.Fatal("canonical edit hash ignored the expectedEditedAt inverse guard")
+	}
 	if !reflect.DeepEqual(messagingCapabilitySpecs[messagingSendMessageCapabilityID].InverseFields, []string{"messageId"}) {
 		t.Fatal("sendMessage inverse fields changed")
+	}
+	if !reflect.DeepEqual(messagingCapabilitySpecs[messagingEditMessageCapabilityID].InverseFields,
+		[]string{"messageId", "body", "expectedBody", "expectedEditedAt"}) {
+		t.Fatal("editMessage inverse fields changed")
 	}
 }

@@ -26,6 +26,7 @@ const (
 	messagingLeaveConversationCapabilityID       = "messaging.leaveConversation"
 	messagingAddMemberCapabilityID               = "messaging.addMember"
 	messagingEditMessageCapabilityID             = "messaging.editMessage"
+	messagingRestoreMessageEditCapabilityID      = "messaging.restoreMessageEdit"
 	messagingDeleteMessageCapabilityID           = "messaging.deleteMessage"
 	messagingAdvanceReadCursorCapabilityID       = "messaging.advanceReadCursor"
 	messagingRestoreReadCursorCapabilityID       = "messaging.restoreReadCursor"
@@ -101,7 +102,8 @@ var messagingCapabilitySpecs = map[string]MessagingCapabilitySpec{
 	messagingDeleteConversationCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "destructive"},
 	messagingLeaveConversationCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write"},
 	messagingAddMemberCapabilityID:               {Module: "messaging", Permission: "messaging.write", Risk: "write"},
-	messagingEditMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write"},
+	messagingEditMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageEditCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
+	messagingRestoreMessageEditCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingEditMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
 	messagingDeleteMessageCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write"},
 	messagingAdvanceReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
 	messagingRestoreReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingAdvanceReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
@@ -237,13 +239,33 @@ type MessagingAddMemberOutput struct {
 }
 
 type MessagingEditMessageInput struct {
-	MessageID string `json:"messageId"`
-	Body      string `json:"body"`
+	MessageID        string  `json:"messageId"`
+	Body             string  `json:"body"`
+	ExpectedBody     *string `json:"expectedBody,omitempty"`
+	ExpectedEditedAt *string `json:"expectedEditedAt,omitempty"`
 }
 
 type MessagingEditMessageOutput struct {
-	MessageID string `json:"messageId"`
-	EditedAt  string `json:"editedAt"`
+	MessageID        string `json:"messageId"`
+	Body             string `json:"body"`
+	ExpectedBody     string `json:"expectedBody"`
+	ExpectedEditedAt string `json:"expectedEditedAt"`
+	EditedAt         string `json:"editedAt"`
+}
+
+type MessagingRestoreMessageEditInput struct {
+	MessageID        string `json:"messageId"`
+	Body             string `json:"body"`
+	ExpectedBody     string `json:"expectedBody"`
+	ExpectedEditedAt string `json:"expectedEditedAt"`
+}
+
+type MessagingRestoreMessageEditOutput struct {
+	MessageID        string `json:"messageId"`
+	Body             string `json:"body"`
+	ExpectedBody     string `json:"expectedBody"`
+	ExpectedEditedAt string `json:"expectedEditedAt"`
+	EditedAt         string `json:"editedAt"`
 }
 
 type MessagingDeleteMessageInput struct {
@@ -358,6 +380,8 @@ func parseMessagingInput(capabilityID string, raw json.RawMessage) (any, error) 
 		return parseMessagingAddMemberInput(raw)
 	case messagingEditMessageCapabilityID:
 		return parseMessagingEditMessageInput(raw)
+	case messagingRestoreMessageEditCapabilityID:
+		return parseMessagingRestoreMessageEditInput(raw)
 	case messagingDeleteMessageCapabilityID:
 		return parseMessagingDeleteMessageInput(raw)
 	case messagingAdvanceReadCursorCapabilityID:
@@ -547,6 +571,31 @@ func messagingOptionalDateTimeString(fields map[string]json.RawMessage, key stri
 	return &formatted, nil
 }
 
+func messagingMaybeDateTimeString(fields map[string]json.RawMessage, key string) (*string, error) {
+	value, err := optionalString(fields, key)
+	if err != nil || value == nil {
+		return value, err
+	}
+	parsed, err := messagingParseDateTime(*value)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be an ISO datetime", key)
+	}
+	formatted := messagingFormatTime(parsed)
+	return &formatted, nil
+}
+
+func messagingRequiredDateTimeString(fields map[string]json.RawMessage, key string) (string, error) {
+	value, err := messagingRequiredString(fields, key)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := messagingParseDateTime(value)
+	if err != nil {
+		return "", fmt.Errorf("%s must be an ISO datetime", key)
+	}
+	return messagingFormatTime(parsed), nil
+}
+
 func messagingFormatTime(value time.Time) string {
 	return value.UTC().Truncate(time.Millisecond).Format("2006-01-02T15:04:05.000Z")
 }
@@ -561,6 +610,17 @@ func messagingFormatOptionalTime(value *time.Time) *string {
 
 func messagingNow() time.Time {
 	return time.Now().UTC().Truncate(time.Millisecond)
+}
+
+func messagingNextEditTime(previous *time.Time) time.Time {
+	next := messagingNow()
+	if previous != nil {
+		previousMillisecond := previous.UTC().Truncate(time.Millisecond)
+		if !next.After(previousMillisecond) {
+			next = previousMillisecond.Add(time.Millisecond)
+		}
+	}
+	return next
 }
 
 func messagingSupportedReaction(emoji string) bool {
@@ -772,7 +832,45 @@ func parseMessagingEditMessageInput(raw json.RawMessage) (MessagingEditMessageIn
 	if input.Body, err = requiredCRMDealString(fields, "body", 1, messagingBodyMax); err != nil {
 		return MessagingEditMessageInput{}, err
 	}
+	if input.ExpectedBody, err = messagingOptionalBoundedString(fields, "expectedBody", 0, messagingBodyMax); err != nil {
+		return MessagingEditMessageInput{}, err
+	}
+	if input.ExpectedEditedAt, err = messagingMaybeDateTimeString(fields, "expectedEditedAt"); err != nil {
+		return MessagingEditMessageInput{}, err
+	}
 	return input, nil
+}
+
+func parseMessagingRestoreMessageEditInput(raw json.RawMessage) (MessagingRestoreMessageEditInput, error) {
+	fields, err := decodeJSONObject(raw)
+	if err != nil {
+		return MessagingRestoreMessageEditInput{}, err
+	}
+	var input MessagingRestoreMessageEditInput
+	if input.MessageID, err = messagingRequiredString(fields, "messageId"); err != nil {
+		return MessagingRestoreMessageEditInput{}, err
+	}
+	if input.Body, err = requiredCRMDealString(fields, "body", 0, messagingBodyMax); err != nil {
+		return MessagingRestoreMessageEditInput{}, err
+	}
+	if input.ExpectedBody, err = requiredCRMDealString(fields, "expectedBody", 0, messagingBodyMax); err != nil {
+		return MessagingRestoreMessageEditInput{}, err
+	}
+	if input.ExpectedEditedAt, err = messagingRequiredDateTimeString(fields, "expectedEditedAt"); err != nil {
+		return MessagingRestoreMessageEditInput{}, err
+	}
+	return input, nil
+}
+
+func messagingOptionalBoundedString(fields map[string]json.RawMessage, key string, minLength, maxLength int) (*string, error) {
+	value, err := optionalString(fields, key)
+	if err != nil || value == nil {
+		return value, err
+	}
+	if len(*value) < minLength || len(*value) > maxLength {
+		return nil, fmt.Errorf("%s must contain between %d and %d characters", key, minLength, maxLength)
+	}
+	return value, nil
 }
 
 func parseMessagingDeleteMessageInput(raw json.RawMessage) (MessagingDeleteMessageInput, error) {
@@ -1423,19 +1521,20 @@ func messagingAddMember(
 	return MessagingAddMemberOutput{Added: true}, nil
 }
 
-func messagingLoadOwnMessage(ctx context.Context, tx pgx.Tx, orgID, messageID string) (string, string, *string, error) {
-	var senderType, id string
+func messagingLoadOwnMessage(ctx context.Context, tx pgx.Tx, orgID, messageID string) (string, string, *string, string, *time.Time, error) {
+	var senderType, id, body string
 	var senderUserID *string
+	var editedAt *time.Time
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, sender_type, sender_user_id::text FROM messages
-		WHERE id = $2::uuid AND org_id = $1::uuid LIMIT 1`, orgID, messageID).Scan(&id, &senderType, &senderUserID)
+		SELECT id::text, sender_type, sender_user_id::text, body, edited_at FROM messages
+		WHERE id = $2::uuid AND org_id = $1::uuid LIMIT 1 FOR UPDATE`, orgID, messageID).Scan(&id, &senderType, &senderUserID, &body, &editedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", nil, errors.New("message not found")
+		return "", "", nil, "", nil, errors.New("message not found")
 	}
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, "", nil, err
 	}
-	return id, senderType, senderUserID, nil
+	return id, senderType, senderUserID, body, editedAt, nil
 }
 
 func messagingEditMessage(
@@ -1444,20 +1543,72 @@ func messagingEditMessage(
 	if actorType != "human" || userID == nil {
 		return MessagingEditMessageOutput{}, errors.New("only your own human messages can be edited")
 	}
-	messageID, senderType, senderUserID, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
+	messageID, senderType, senderUserID, previousBody, previousEditedAt, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
 	if err != nil {
 		return MessagingEditMessageOutput{}, err
 	}
 	if senderType != "human" || senderUserID == nil || *senderUserID != *userID {
 		return MessagingEditMessageOutput{}, errors.New("you can only edit your own messages")
 	}
-	editedAt := messagingNow()
+	if input.ExpectedBody != nil && previousBody != *input.ExpectedBody {
+		return MessagingEditMessageOutput{}, errors.New("message changed since the inverse was recorded")
+	}
+	if input.ExpectedEditedAt != nil && (previousEditedAt == nil || messagingFormatTime(*previousEditedAt) != *input.ExpectedEditedAt) {
+		return MessagingEditMessageOutput{}, errors.New("message changed since the inverse was recorded")
+	}
+	editedAt := messagingNextEditTime(previousEditedAt)
 	if _, err := tx.Exec(ctx, `
 		UPDATE messages SET body = $3, edited_at = $4 WHERE id = $2::uuid AND org_id = $1::uuid`,
 		orgID, messageID, input.Body, editedAt); err != nil {
 		return MessagingEditMessageOutput{}, err
 	}
-	return MessagingEditMessageOutput{MessageID: messageID, EditedAt: messagingFormatTime(editedAt)}, nil
+	formattedEditedAt := messagingFormatTime(editedAt)
+	return MessagingEditMessageOutput{
+		MessageID: messageID, Body: previousBody, ExpectedBody: input.Body,
+		ExpectedEditedAt: formattedEditedAt, EditedAt: formattedEditedAt,
+	}, nil
+}
+
+func messagingRestoreMessageEdit(
+	ctx context.Context, tx pgx.Tx, orgID, actorType string, userID *string, input MessagingRestoreMessageEditInput,
+) (MessagingRestoreMessageEditOutput, error) {
+	if actorType != "human" || userID == nil {
+		return MessagingRestoreMessageEditOutput{}, errors.New("only your own human messages can be restored")
+	}
+	messageID, senderType, senderUserID, currentBody, currentEditedAt, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
+	if err != nil {
+		return MessagingRestoreMessageEditOutput{}, err
+	}
+	if senderType != "human" || senderUserID == nil || *senderUserID != *userID {
+		return MessagingRestoreMessageEditOutput{}, errors.New("you can only restore your own messages")
+	}
+	if currentBody != input.ExpectedBody || currentEditedAt == nil || messagingFormatTime(*currentEditedAt) != input.ExpectedEditedAt {
+		return MessagingRestoreMessageEditOutput{}, errors.New("message changed since the inverse was recorded")
+	}
+	var hasMatchingReceipt bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM action_receipts
+			WHERE org_id = $1::uuid AND capability_id = $2 AND ok = true AND outcome = 'known'
+			  AND data->>'messageId' = $3 AND data->>'body' = $4 AND data->>'expectedBody' = $5
+			  AND data->>'expectedEditedAt' = $6
+		)`, orgID, messagingEditMessageCapabilityID, input.MessageID, input.Body, input.ExpectedBody, input.ExpectedEditedAt).Scan(&hasMatchingReceipt); err != nil {
+		return MessagingRestoreMessageEditOutput{}, err
+	}
+	if !hasMatchingReceipt {
+		return MessagingRestoreMessageEditOutput{}, errors.New("message restore requires a matching successful edit receipt")
+	}
+	editedAt := messagingNextEditTime(currentEditedAt)
+	if _, err := tx.Exec(ctx, `
+		UPDATE messages SET body = $3, edited_at = $4 WHERE id = $2::uuid AND org_id = $1::uuid`,
+		orgID, messageID, input.Body, editedAt); err != nil {
+		return MessagingRestoreMessageEditOutput{}, err
+	}
+	formattedEditedAt := messagingFormatTime(editedAt)
+	return MessagingRestoreMessageEditOutput{
+		MessageID: messageID, Body: input.ExpectedBody, ExpectedBody: input.Body,
+		ExpectedEditedAt: formattedEditedAt, EditedAt: formattedEditedAt,
+	}, nil
 }
 
 func messagingDeleteMessage(
@@ -1466,7 +1617,7 @@ func messagingDeleteMessage(
 	if actorType != "human" || userID == nil {
 		return MessagingDeleteMessageOutput{}, errors.New("only your own human messages can be deleted")
 	}
-	messageID, senderType, senderUserID, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
+	messageID, senderType, senderUserID, _, _, err := messagingLoadOwnMessage(ctx, tx, orgID, input.MessageID)
 	if err != nil {
 		return MessagingDeleteMessageOutput{}, err
 	}

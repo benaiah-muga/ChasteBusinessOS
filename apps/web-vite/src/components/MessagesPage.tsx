@@ -1074,6 +1074,10 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
     const goEditEnabled = typeof __GO_MESSAGING_EDIT_SLICE__ !== "undefined" && __GO_MESSAGING_EDIT_SLICE__;
     const retainDraft = goEditEnabled;
     const requestScope = messageEditScopeIdentity(actorId, organizationId, activeId);
+    if (!actorId?.trim() || !organizationId?.trim()) {
+      setNotice({ tone: "error", text: "Message editing is paused until the actor and organization are resolved." });
+      return;
+    }
     if (editLocked && !goEditEnabled) {
       setNotice({ tone: "error", text: "This Go edit is unresolved. Restore Go message editing to retry the saved edit." });
       return;
@@ -1109,7 +1113,7 @@ export function MessagesPage({ actorId = null, organizationId = null }: { actorI
       keepEditing = retainDraft;
       if (retainDraft) {
         const status = error instanceof MessagingApiError ? error.status : 0;
-        const safeToCorrect = status >= 400 && status < 500 && status !== 408 && status !== 429;
+        const safeToCorrect = status >= 400 && status < 500 && status !== 404 && status !== 408 && status !== 429;
         setEditLocked(!safeToCorrect);
       }
     } finally {

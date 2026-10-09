@@ -11,7 +11,7 @@ import (
 
 func TestMessagingCapabilitySpecsMatchTheMigrationManifest(t *testing.T) {
 	want := map[string]MessagingCapabilitySpec{
-		messagingSendMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingDeleteMessageCapabilityID},
+		messagingSendMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingDeleteMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
 		messagingListConversationsCapabilityID:       {Module: "messaging", Permission: "messaging.read", Risk: "read"},
 		messagingReadMessagesCapabilityID:            {Module: "messaging", Permission: "messaging.read", Risk: "read"},
 		messagingListPeopleCapabilityID:              {Module: "messaging", Permission: "messaging.read", Risk: "read"},
@@ -21,17 +21,18 @@ func TestMessagingCapabilitySpecsMatchTheMigrationManifest(t *testing.T) {
 		messagingDeleteConversationCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "destructive"},
 		messagingLeaveConversationCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write"},
 		messagingAddMemberCapabilityID:               {Module: "messaging", Permission: "messaging.write", Risk: "write"},
-		messagingEditMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write"},
+		messagingEditMessageCapabilityID:             {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageEditCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
+		messagingRestoreMessageEditCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingEditMessageCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId", "body", "expectedBody", "expectedEditedAt"}},
 		messagingDeleteMessageCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write"},
-		messagingAdvanceReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreReadCursorCapabilityID},
-		messagingRestoreReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingAdvanceReadCursorCapabilityID},
-		messagingSetMessageReactionCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageReactionCapabilityID},
-		messagingRestoreMessageReactionCapabilityID:  {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingSetMessageReactionCapabilityID},
-		messagingSetMessagePinCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessagePinCapabilityID},
-		messagingRestoreMessagePinCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingSetMessagePinCapabilityID},
-		messagingUpdatePresenceCapabilityID:          {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestorePresenceCapabilityID},
-		messagingRestorePresenceCapabilityID:         {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingUpdatePresenceCapabilityID},
-		messagingUploadAttachmentCapabilityID:        {Module: "messaging", Permission: "messaging.write", Risk: "secret", InverseCapabilityID: messagingDeletePendingAttachmentCapabilityID},
+		messagingAdvanceReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
+		messagingRestoreReadCursorCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingAdvanceReadCursorCapabilityID, InverseInputSource: "output", InverseFields: []string{"conversationId", "previousReadAt"}},
+		messagingSetMessageReactionCapabilityID:      {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessageReactionCapabilityID, InverseInputSource: "input", InverseFields: []string{"messageId", "emoji"}},
+		messagingRestoreMessageReactionCapabilityID:  {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingSetMessageReactionCapabilityID, InverseInputSource: "output", InverseFields: []string{"previousActive"}},
+		messagingSetMessagePinCapabilityID:           {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestoreMessagePinCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
+		messagingRestoreMessagePinCapabilityID:       {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingSetMessagePinCapabilityID, InverseInputSource: "output", InverseFields: []string{"messageId"}},
+		messagingUpdatePresenceCapabilityID:          {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingRestorePresenceCapabilityID, InverseInputSource: "input", InverseFields: []string{"conversationId"}},
+		messagingRestorePresenceCapabilityID:         {Module: "messaging", Permission: "messaging.write", Risk: "write", InverseCapabilityID: messagingUpdatePresenceCapabilityID, InverseInputSource: "output", InverseFields: []string{"previousLastSeenAt", "previousTypingUntil"}},
+		messagingUploadAttachmentCapabilityID:        {Module: "messaging", Permission: "messaging.write", Risk: "secret", InverseCapabilityID: messagingDeletePendingAttachmentCapabilityID, InverseInputSource: "output", InverseFields: []string{"attachmentId"}},
 		messagingDeletePendingAttachmentCapabilityID: {Module: "messaging", Permission: "messaging.write", Risk: "secret"},
 	}
 	if len(messagingCapabilitySpecs) != len(want) {
@@ -44,7 +45,8 @@ func TestMessagingCapabilitySpecsMatchTheMigrationManifest(t *testing.T) {
 			continue
 		}
 		if spec.Module != expected.Module || spec.Permission != expected.Permission ||
-			spec.Risk != expected.Risk || spec.MoneyThresholdMinor != 0 || spec.InverseCapabilityID != expected.InverseCapabilityID {
+			spec.Risk != expected.Risk || spec.MoneyThresholdMinor != 0 || spec.InverseCapabilityID != expected.InverseCapabilityID ||
+			spec.InverseInputSource != expected.InverseInputSource || !reflect.DeepEqual(spec.InverseFields, expected.InverseFields) {
 			t.Errorf("messaging spec %s = %+v, want module=%s permission=%s risk=%s inverse=%q",
 				id, spec, expected.Module, expected.Permission, expected.Risk, expected.InverseCapabilityID)
 		}
@@ -100,6 +102,8 @@ func TestMessagingParsersAcceptEveryValidManifestPayload(t *testing.T) {
 		{messagingAddMemberCapabilityID, `{"conversationId":"conv-1","userId":"` + conversationID + `"}`,
 			`{"conversationId":"conv-1","userId":"` + conversationID + `"}`},
 		{messagingEditMessageCapabilityID, `{"messageId":"msg-1","body":"corrected"}`, `{"messageId":"msg-1","body":"corrected"}`},
+		{messagingEditMessageCapabilityID, `{"messageId":"msg-1","body":"corrected","expectedBody":"current","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`, `{"messageId":"msg-1","body":"corrected","expectedBody":"current","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`},
+		{messagingRestoreMessageEditCapabilityID, `{"messageId":"msg-1","body":"original","expectedBody":"corrected","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`, `{"messageId":"msg-1","body":"original","expectedBody":"corrected","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`},
 		{messagingDeleteMessageCapabilityID, `{"messageId":"msg-1"}`, `{"messageId":"msg-1"}`},
 		{messagingAdvanceReadCursorCapabilityID, `{"conversationId":"` + conversationID + `"}`,
 			`{"conversationId":"` + conversationID + `"}`},
@@ -210,6 +214,14 @@ func TestMessagingParsersRejectInvalidManifestPayloads(t *testing.T) {
 		{"edit without body", messagingEditMessageCapabilityID, `{"messageId":"m"}`},
 		{"edit with empty body", messagingEditMessageCapabilityID, `{"messageId":"m","body":""}`},
 		{"edit with oversized body", messagingEditMessageCapabilityID, `{"messageId":"m","body":"` + strings.Repeat("b", 8001) + `"}`},
+		{"edit with null expected body", messagingEditMessageCapabilityID, `{"messageId":"m","body":"corrected","expectedBody":null}`},
+		{"edit with oversized expected body", messagingEditMessageCapabilityID, `{"messageId":"m","body":"corrected","expectedBody":"` + strings.Repeat("b", 8001) + `"}`},
+		{"edit with bad expected editedAt", messagingEditMessageCapabilityID, `{"messageId":"m","body":"corrected","expectedEditedAt":"yesterday"}`},
+		{"restore edit without body", messagingRestoreMessageEditCapabilityID, `{"messageId":"m","expectedBody":"corrected","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`},
+		{"restore edit without expected body", messagingRestoreMessageEditCapabilityID, `{"messageId":"m","body":"original","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`},
+		{"restore edit without expected editedAt", messagingRestoreMessageEditCapabilityID, `{"messageId":"m","body":"original","expectedBody":"corrected"}`},
+		{"restore edit with invalid expected editedAt", messagingRestoreMessageEditCapabilityID, `{"messageId":"m","body":"original","expectedBody":"corrected","expectedEditedAt":"yesterday"}`},
+		{"restore edit with oversized body", messagingRestoreMessageEditCapabilityID, `{"messageId":"m","body":"` + strings.Repeat("b", 8001) + `","expectedBody":"corrected","expectedEditedAt":"2026-09-20T00:00:00.000Z"}`},
 		{"delete message without id", messagingDeleteMessageCapabilityID, `{}`},
 		{"advance cursor with non-uuid conversation", messagingAdvanceReadCursorCapabilityID, `{"conversationId":"conv-1"}`},
 		{"advance cursor with offset datetime", messagingAdvanceReadCursorCapabilityID, `{"conversationId":"` + conversationID + `","readAt":"2026-09-20T00:00:00+02:00"}`},
@@ -333,7 +345,8 @@ func TestMessagingOutputShapesMatchTheManifest(t *testing.T) {
 		{messagingDeleteConversationCapabilityID, MessagingDeleteConversationOutput{Deleted: true}, []string{"deleted"}},
 		{messagingLeaveConversationCapabilityID, MessagingLeaveConversationOutput{Left: true}, []string{"left"}},
 		{messagingAddMemberCapabilityID, MessagingAddMemberOutput{Added: true}, []string{"added"}},
-		{messagingEditMessageCapabilityID, MessagingEditMessageOutput{MessageID: "m", EditedAt: "2026-09-20T00:00:00.000Z"}, []string{"messageId", "editedAt"}},
+		{messagingEditMessageCapabilityID, MessagingEditMessageOutput{MessageID: "m", Body: "before", ExpectedBody: "after", ExpectedEditedAt: "2026-09-20T00:00:00.000Z", EditedAt: "2026-09-20T00:00:00.000Z"}, []string{"messageId", "body", "expectedBody", "expectedEditedAt", "editedAt"}},
+		{messagingRestoreMessageEditCapabilityID, MessagingRestoreMessageEditOutput{MessageID: "m", Body: "after", ExpectedBody: "before", ExpectedEditedAt: "2026-09-20T00:00:00.000Z", EditedAt: "2026-09-20T00:00:00.000Z"}, []string{"messageId", "body", "expectedBody", "expectedEditedAt", "editedAt"}},
 		{messagingDeleteMessageCapabilityID, MessagingDeleteMessageOutput{Deleted: true}, []string{"deleted"}},
 		{messagingAdvanceReadCursorCapabilityID, MessagingReadCursorOutput{ConversationID: "c"}, []string{"conversationId", "previousReadAt"}},
 		{messagingRestoreReadCursorCapabilityID, MessagingReadCursorOutput{ConversationID: "c"}, []string{"conversationId", "previousReadAt"}},

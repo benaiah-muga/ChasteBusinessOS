@@ -169,7 +169,13 @@ const pendingMessageEditPrefix = "chaste:message-edit-attempt:";
 const pendingMessageDeletePrefix = "chaste:message-delete-attempt:";
 const GoEditMessageEnvelopeSchema = z.object({
   ok: z.literal(true),
-  data: z.object({ messageId: z.string().min(1), editedAt: IsoTimestampSchema }).strict(),
+  data: z.object({
+    messageId: z.string().min(1),
+    body: z.string(),
+    expectedBody: z.string(),
+    expectedEditedAt: IsoTimestampSchema,
+    editedAt: IsoTimestampSchema,
+  }).strict(),
 }).strict();
 const GoDeleteMessageEnvelopeSchema = z.object({
   ok: z.literal(true),
@@ -496,11 +502,12 @@ export async function editMessage(
   if (!useGo) {
     const actorId = options.actorId?.trim();
     const organizationId = options.organizationId?.trim();
-    if (actorId && organizationId) {
-      const pending = await getPendingMessageEdit({ actorId, organizationId });
-      if (pending) {
-        throw new MessagingApiError(0, "A Go message edit is unresolved. Restore Go message editing to retry the saved edit before starting another edit.");
-      }
+    if (!actorId || !organizationId) {
+      throw new MessagingApiError(0, "Message editing needs a signed-in actor and active organization so unresolved Go edits can be checked.");
+    }
+    const pending = await getPendingMessageEdit({ actorId, organizationId });
+    if (pending) {
+      throw new MessagingApiError(0, "A Go message edit is unresolved. Restore Go message editing to retry the saved edit before starting another edit.");
     }
     return editMessageLegacy(messageId, body, signal);
   }
@@ -578,37 +585,22 @@ export async function editMessageThroughGo(
   if (!pending) writePendingMessageEdit(key, action);
 
   const input = { messageId: action.messageId, body: action.body };
-  const legacy = () => governed(`/api/messages/${encodeURIComponent(action.messageId)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ body: action.body, intentId: action.intentId }),
-  }, "edit this message", OkEnvelopeSchema, "Your edit is waiting for approval.", signal);
   const result = await send("/api/capabilities/execute", {
     method: "POST",
     body: JSON.stringify({ capabilityId: "messaging.editMessage", input, intentId: action.intentId }),
   }, "edit this message", signal);
-  if (result.response.status === 404) {
-    try {
-      const outcome = await legacy();
-      if (outcome.kind === "completed") clearPendingMessageEdit(key, action.intentId);
-      return outcome;
-    } catch (error) {
-      const status = error instanceof MessagingApiError ? error.status : 0;
-      if (status >= 400 && status < 500 && status !== 408 && status !== 429) clearPendingMessageEdit(key, action.intentId);
-      throw error;
-    }
-  }
   if (result.response.status === 202) {
     const parsed = PendingApprovalSchema.safeParse(result.body);
     if (!parsed.success) throw new MessagingApiError(202, "The messaging service returned an unexpected approval response to edit this message.");
     return { kind: "pending", reason: parsed.data.hint ?? parsed.data.reason ?? parsed.data.error ?? "Your edit is waiting for approval." };
   }
   if (!result.response.ok) {
-    const terminal = result.response.status >= 400 && result.response.status < 500 && result.response.status !== 408 && result.response.status !== 429;
+    const terminal = result.response.status >= 400 && result.response.status < 500 && result.response.status !== 404 && result.response.status !== 408 && result.response.status !== 429;
     if (terminal) clearPendingMessageEdit(key, action.intentId);
     throw new MessagingApiError(result.response.status, readError(result.response.status, result.body, "edit this message"));
   }
   const parsed = GoEditMessageEnvelopeSchema.safeParse(result.body);
-  if (!parsed.success || parsed.data.data.messageId !== action.messageId) {
+  if (!parsed.success || parsed.data.data.messageId !== action.messageId || parsed.data.data.expectedBody !== action.body) {
     throw new MessagingApiError(result.response.status, "The messaging service returned an unexpected response to edit this message.");
   }
   clearPendingMessageEdit(key, action.intentId);

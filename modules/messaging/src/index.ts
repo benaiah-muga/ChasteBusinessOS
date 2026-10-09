@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, ilike, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
+  actionReceipts,
   conversationMembers,
   conversationPresence,
   conversations,
@@ -400,6 +401,7 @@ export function registerMessagingCapabilities(registry: CapabilityRegistry, deps
   registry.register(leaveConversation(deps));
   registry.register(addMember(deps));
   registry.register(editMessage(deps));
+  registry.register(restoreMessageEdit(deps));
   registry.register(deleteMessage(deps));
   registry.register(advanceReadCursor(deps));
   registry.register(restoreReadCursor(deps));
@@ -633,25 +635,131 @@ const editMessage = (deps: ModuleDeps) =>
     input: z.object({
       messageId: z.string(),
       body: z.string().min(1).max(8000),
+      expectedBody: z.string().max(8000).optional(),
+      expectedEditedAt: z.string().datetime().optional(),
     }),
-    output: z.object({ messageId: z.string(), editedAt: z.string() }),
+    output: z.object({
+      messageId: z.string(),
+      body: z.string().max(8000),
+      expectedBody: z.string().max(8000),
+      expectedEditedAt: z.string().datetime(),
+      editedAt: z.string(),
+    }),
+    inverse: {
+      capabilityId: "messaging.restoreMessageEdit",
+      buildInput: (_input, output) => ({
+        messageId: output.messageId,
+        body: output.body,
+        expectedBody: output.expectedBody,
+        expectedEditedAt: output.expectedEditedAt,
+      }),
+    },
     execute: async (ctx, input) => {
       if (ctx.actor.type !== "human" || !ctx.actor.id) throw new Error("only your own human messages can be edited");
-      const [row] = await deps.db
-        .select({ id: messages.id, senderType: messages.senderType, senderUserId: messages.senderUserId })
-        .from(messages)
-        .where(and(eq(messages.id, input.messageId), eq(messages.orgId, ctx.actor.orgId)))
-        .limit(1);
-      if (!row) throw new Error("message not found");
-      if (row.senderType !== "human" || row.senderUserId !== ctx.actor.id) {
-        throw new Error("you can only edit your own messages");
-      }
-      const editedAt = new Date();
-      await deps.db
-        .update(messages)
-        .set({ body: input.body, editedAt })
-        .where(eq(messages.id, row.id));
-      return { messageId: row.id, editedAt: editedAt.toISOString() };
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [row] = await tx
+          .select({ id: messages.id, senderType: messages.senderType, senderUserId: messages.senderUserId, body: messages.body, editedAt: messages.editedAt })
+          .from(messages)
+          .where(and(eq(messages.id, input.messageId), eq(messages.orgId, ctx.actor.orgId)))
+          .limit(1)
+          .for("update");
+        if (!row) throw new Error("message not found");
+        if (row.senderType !== "human" || row.senderUserId !== ctx.actor.id) {
+          throw new Error("you can only edit your own messages");
+        }
+        if (input.expectedBody !== undefined && row.body !== input.expectedBody) {
+          throw new Error("message changed since the inverse was recorded");
+        }
+        if (input.expectedEditedAt !== undefined && row.editedAt?.toISOString() !== input.expectedEditedAt) {
+          throw new Error("message changed since the inverse was recorded");
+        }
+        const editedAt = new Date(Math.max(Date.now(), (row.editedAt?.getTime() ?? 0) + 1));
+        await tx.update(messages).set({ body: input.body, editedAt }).where(eq(messages.id, row.id));
+        return {
+          messageId: row.id,
+          body: row.body,
+          expectedBody: input.body,
+          expectedEditedAt: editedAt.toISOString(),
+          editedAt: editedAt.toISOString(),
+        };
+      });
+    },
+  });
+
+const restoreMessageEdit = (deps: ModuleDeps) =>
+  defineCapability({
+    id: "messaging.restoreMessageEdit",
+    title: "Restore message edit",
+    intent:
+      "Restore the prior wording of your own internal message after a matching successful edit, only while the edited wording is still current",
+    module: "messaging",
+    risk: "write",
+    permission: "messaging.write",
+    input: z.object({
+      messageId: z.string(),
+      body: z.string().max(8000),
+      expectedBody: z.string().max(8000),
+      expectedEditedAt: z.string().datetime(),
+    }),
+    output: z.object({
+      messageId: z.string(),
+      body: z.string().max(8000),
+      expectedBody: z.string().max(8000),
+      expectedEditedAt: z.string().datetime(),
+      editedAt: z.string(),
+    }),
+    inverse: {
+      capabilityId: "messaging.editMessage",
+      buildInput: (_input, output) => ({
+        messageId: output.messageId,
+        body: output.body,
+        expectedBody: output.expectedBody,
+        expectedEditedAt: output.expectedEditedAt,
+      }),
+    },
+    execute: async (ctx, input) => {
+      if (ctx.actor.type !== "human" || !ctx.actor.id) throw new Error("only your own human messages can be restored");
+      return withOrgContext(deps.db, ctx.actor.orgId, async (tx) => {
+        const [row] = await tx
+          .select({ id: messages.id, senderType: messages.senderType, senderUserId: messages.senderUserId, body: messages.body, editedAt: messages.editedAt })
+          .from(messages)
+          .where(and(eq(messages.id, input.messageId), eq(messages.orgId, ctx.actor.orgId)))
+          .limit(1)
+          .for("update");
+        if (!row) throw new Error("message not found");
+        if (row.senderType !== "human" || row.senderUserId !== ctx.actor.id) {
+          throw new Error("you can only restore your own messages");
+        }
+        if (row.body !== input.expectedBody || row.editedAt?.toISOString() !== input.expectedEditedAt) {
+          throw new Error("message changed since the inverse was recorded");
+        }
+        const [receipt] = await tx
+          .select({ id: actionReceipts.id })
+          .from(actionReceipts)
+          .where(
+            and(
+              eq(actionReceipts.orgId, ctx.actor.orgId),
+              eq(actionReceipts.capabilityId, "messaging.editMessage"),
+              eq(actionReceipts.ok, true),
+              eq(actionReceipts.outcome, "known"),
+              sql`${actionReceipts.data}->>'messageId' = ${input.messageId}`,
+              sql`${actionReceipts.data}->>'body' = ${input.body}`,
+              sql`${actionReceipts.data}->>'expectedBody' = ${input.expectedBody}`,
+              sql`${actionReceipts.data}->>'expectedEditedAt' = ${input.expectedEditedAt}`,
+            ),
+          )
+          .limit(1);
+        if (!receipt) throw new Error("message restore requires a matching successful edit receipt");
+        const editedAt = new Date(Math.max(Date.now(), (row.editedAt?.getTime() ?? 0) + 1));
+        await tx.update(messages).set({ body: input.body, editedAt }).where(eq(messages.id, row.id));
+        return {
+          messageId: row.id,
+          body: input.expectedBody,
+          expectedBody: input.body,
+          expectedEditedAt: editedAt.toISOString(),
+          editedAt: editedAt.toISOString(),
+        };
+      });
     },
   });
 

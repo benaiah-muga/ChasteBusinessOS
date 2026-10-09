@@ -262,7 +262,7 @@ describe("messaging API client", () => {
 
     const fetchMock = vi.fn(async () => Response.json({
       ok: true,
-      data: { messageId, editedAt: "2026-10-01T09:00:00.000Z" },
+      data: { messageId, body: "Morning all", expectedBody: "Retry me", expectedEditedAt: "2026-10-01T09:00:00.000Z", editedAt: "2026-10-01T09:00:00.000Z" },
     }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(editMessage(messageId, "Retry me", undefined, options)).resolves.toEqual({ kind: "completed", data: { ok: true } });
@@ -272,7 +272,8 @@ describe("messaging API client", () => {
 
   it.each([
     ["malformed envelope", { ok: true, data: { messageId } }],
-    ["wrong message ID", { ok: true, data: { messageId: "another-message", editedAt: "2026-10-01T09:00:00.000Z" } }],
+    ["wrong message ID", { ok: true, data: { messageId: "another-message", body: "Morning all", expectedBody: "Retry this exact edit", expectedEditedAt: "2026-10-01T09:00:00.000Z", editedAt: "2026-10-01T09:00:00.000Z" } }],
+    ["wrong expected body", { ok: true, data: { messageId, body: "Morning all", expectedBody: "A different edit", expectedEditedAt: "2026-10-01T09:00:00.000Z", editedAt: "2026-10-01T09:00:00.000Z" } }],
   ])("keeps the exact Go edit marker after a successful response with %s", async (_case, invalidBody) => {
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
     const scope = { actorId: "user-invalid-success", organizationId: "org-invalid-success" };
@@ -291,7 +292,7 @@ describe("messaging API client", () => {
     const pending = await getPendingMessageEdit(scope);
     expect(pending).toMatchObject({ messageId, conversationId, body: "Retry this exact edit", intentId: expect.any(String) });
 
-    responseBody = { ok: true, data: { messageId, editedAt: "2026-10-01T09:00:00.000Z" } };
+    responseBody = { ok: true, data: { messageId, body: "Morning all", expectedBody: "Retry this exact edit", expectedEditedAt: "2026-10-01T09:00:00.000Z", editedAt: "2026-10-01T09:00:00.000Z" } };
     await expect(editMessage(messageId, "Retry this exact edit", undefined, options)).resolves.toEqual({
       kind: "completed", data: { ok: true },
     });
@@ -299,19 +300,37 @@ describe("messaging API client", () => {
     await expect(getPendingMessageEdit(scope)).resolves.toBeNull();
   });
 
-  it("uses the same Go edit intent when the capability route is absent", async () => {
+  it("fails closed on a Go edit 404 and keeps the exact attempt for a Go-only retry", async () => {
     vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", true);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-      if (String(input) === "/api/capabilities/execute") return Response.json({ error: "not found" }, { status: 404 });
-      return Response.json({ ok: true });
+    const scope = { actorId: "user-3", organizationId: "org-3" };
+    const bodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (bodies.length === 1) return Response.json({ error: "not found" }, { status: 404 });
+      return Response.json({ ok: true, data: { messageId, body: "Morning all", expectedBody: "Retry exact edit", expectedEditedAt: "2026-10-01T09:00:00.000Z", editedAt: "2026-10-01T09:00:00.000Z" } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    await expect(editMessage(messageId, "Legacy fallback", undefined, {
-      allowGo: true, actorId: "user-3", organizationId: "org-3", conversationId,
-    })).resolves.toEqual({ kind: "completed", data: { ok: true } });
+    const options = { allowGo: true, ...scope, conversationId };
+    await expect(editMessage(messageId, "Retry exact edit", undefined, options)).rejects.toMatchObject({ status: 404 });
+    const pending = await getPendingMessageEdit(scope);
+    expect(pending).toMatchObject({ messageId, body: "Retry exact edit", intentId: expect.any(String) });
+    await expect(editMessage(messageId, "Retry exact edit", undefined, options)).resolves.toEqual({ kind: "completed", data: { ok: true } });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`/api/messages/${messageId}`);
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({ body: "Legacy fallback", intentId: expect.any(String) });
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/capabilities/execute")).toBe(true);
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+    await expect(getPendingMessageEdit(scope)).resolves.toBeNull();
+  });
+
+  it("refuses selector-off edits until actor and organization scope can check Go recovery", async () => {
+    vi.stubGlobal("__GO_MESSAGING_EDIT_SLICE__", false);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(editMessage(messageId, "No scope"))
+      .rejects.toMatchObject({ message: expect.stringContaining("actor and active organization") });
+    await expect(editMessage(messageId, "Missing organization", undefined, { actorId: "actor-only" }))
+      .rejects.toMatchObject({ message: expect.stringContaining("actor and active organization") });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("retries a Go message deletion with the exact actor/org scoped intent", async () => {
@@ -446,7 +465,7 @@ describe("messaging API client", () => {
     await setMessageReaction(messageId, "👍", true);
     await setMessagePin(messageId, true);
     await deletePendingAttachment(conversationId, messageId);
-    await editMessage(messageId, "Corrected");
+    await editMessage(messageId, "Corrected", undefined, { actorId: "legacy-actor", organizationId: "legacy-org" });
 
     for (const call of fetchMock.mock.calls) {
       const body = JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>;

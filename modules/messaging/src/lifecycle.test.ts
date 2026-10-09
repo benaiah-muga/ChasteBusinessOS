@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import {
+  actionReceipts,
   conversationMembers,
   conversationPresence,
   conversations,
@@ -202,14 +203,91 @@ describe("messaging message lifecycle", () => {
     });
     expect(foreign).toMatchObject({ ok: false });
 
-    const edited = await run("messaging.editMessage", ctx(creatorId, ["messaging.write"]), {
+    const edited = (await run("messaging.editMessage", ctx(creatorId, ["messaging.write"]), {
       messageId,
       body: "corrected wording",
-    });
+    })) as { ok: true; data: { messageId: string; body: string; expectedBody: string; expectedEditedAt: string; editedAt: string } };
     expect(edited).toMatchObject({ ok: true });
+    expect(edited.data).toMatchObject({
+      messageId,
+      body: "original wording",
+      expectedBody: "corrected wording",
+      expectedEditedAt: expect.any(String),
+    });
     const [row] = await db.db.select().from(messages).where(eq(messages.id, messageId));
     expect(row?.body).toBe("corrected wording");
     expect(row?.editedAt).toBeTruthy();
+
+    await db.db.insert(actionReceipts).values({
+      orgId,
+      intentKey: `${orgId}:messaging-edit-receipt`,
+      capabilityId: "messaging.editMessage",
+      inputHash: "sha256:messaging-edit-receipt",
+      ok: true,
+      outcome: "known",
+      data: edited.data,
+    });
+
+    const wrongAuthor = await run("messaging.restoreMessageEdit", ctx(memberId, ["messaging.write"]), {
+      messageId,
+      body: edited.data.body,
+      expectedBody: edited.data.expectedBody,
+      expectedEditedAt: edited.data.expectedEditedAt,
+    });
+    expect(wrongAuthor).toMatchObject({ ok: false, error: expect.stringContaining("you can only restore your own messages") });
+
+    const fabricated = await run("messaging.restoreMessageEdit", ctx(creatorId, ["messaging.write"]), {
+      messageId,
+      body: "invented wording",
+      expectedBody: "corrected wording",
+      expectedEditedAt: edited.data.expectedEditedAt,
+    });
+    expect(fabricated).toMatchObject({ ok: false, error: expect.stringContaining("matching successful edit receipt") });
+
+    const restored = (await run("messaging.restoreMessageEdit", ctx(creatorId, ["messaging.write"]), {
+      messageId,
+      body: edited.data.body,
+      expectedBody: edited.data.expectedBody,
+      expectedEditedAt: edited.data.expectedEditedAt,
+    })) as { ok: true; data: { messageId: string; body: string; expectedBody: string; expectedEditedAt: string } };
+    expect(restored).toMatchObject({
+      ok: true,
+      data: { messageId, body: "corrected wording", expectedBody: "original wording" },
+    });
+    const [restoredRow] = await db.db.select().from(messages).where(eq(messages.id, messageId));
+    expect(restoredRow?.body).toBe("original wording");
+
+    const redone = (await run("messaging.editMessage", ctx(creatorId, ["messaging.write"]), {
+      messageId,
+      body: restored.data.body,
+      expectedBody: restored.data.expectedBody,
+      expectedEditedAt: restored.data.expectedEditedAt,
+    })) as { ok: true; data: { messageId: string; body: string; expectedBody: string; expectedEditedAt: string } };
+    expect(redone).toMatchObject({ ok: true });
+
+    const editToC = (await run("messaging.editMessage", ctx(creatorId, ["messaging.write"]), {
+      messageId,
+      body: "later wording",
+      expectedBody: redone.data.expectedBody,
+      expectedEditedAt: redone.data.expectedEditedAt,
+    })) as { ok: true; data: { body: string; expectedBody: string; expectedEditedAt: string } };
+    expect(editToC).toMatchObject({ ok: true });
+
+    const editBackToB = await run("messaging.editMessage", ctx(creatorId, ["messaging.write"]), {
+      messageId,
+      body: redone.data.expectedBody,
+      expectedBody: editToC.data.expectedBody,
+      expectedEditedAt: editToC.data.expectedEditedAt,
+    });
+    expect(editBackToB).toMatchObject({ ok: true });
+
+    const stale = await run("messaging.restoreMessageEdit", ctx(creatorId, ["messaging.write"]), {
+      messageId,
+      body: edited.data.body,
+      expectedBody: edited.data.expectedBody,
+      expectedEditedAt: edited.data.expectedEditedAt,
+    });
+    expect(stale).toMatchObject({ ok: false, error: expect.stringContaining("message changed since the inverse") });
 
     const deleted = await run("messaging.deleteMessage", ctx(creatorId, ["messaging.write"]), { messageId });
     expect(deleted).toMatchObject({ ok: true, data: { deleted: true } });

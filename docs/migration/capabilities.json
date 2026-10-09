@@ -17379,7 +17379,7 @@
       "permission": "messaging.write",
       "executionScope": "organization",
       "moneyThresholdMinor": null,
-      "inverseCapabilityId": null,
+      "inverseCapabilityId": "messaging.restoreMessageEdit",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -17391,6 +17391,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 8000
+          },
+          "expectedBody": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "expectedEditedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
           }
         },
         "required": [
@@ -17406,12 +17415,28 @@
           "messageId": {
             "type": "string"
           },
+          "body": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "expectedBody": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "expectedEditedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
           "editedAt": {
             "type": "string"
           }
         },
         "required": [
           "messageId",
+          "body",
+          "expectedBody",
+          "expectedEditedAt",
           "editedAt"
         ],
         "additionalProperties": false
@@ -17783,6 +17808,79 @@
         "required": [
           "previousLastSeenAt",
           "previousTypingUntil"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "messaging.restoreMessageEdit",
+      "title": "Restore message edit",
+      "intent": "Restore the prior wording of your own internal message after a matching successful edit, only while the edited wording is still current",
+      "module": "messaging",
+      "risk": "write",
+      "permission": "messaging.write",
+      "executionScope": "organization",
+      "moneyThresholdMinor": null,
+      "inverseCapabilityId": "messaging.editMessage",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "expectedBody": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "expectedEditedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          }
+        },
+        "required": [
+          "messageId",
+          "body",
+          "expectedBody",
+          "expectedEditedAt"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "expectedBody": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "expectedEditedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "editedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "messageId",
+          "body",
+          "expectedBody",
+          "expectedEditedAt",
+          "editedAt"
         ],
         "additionalProperties": false
       }
