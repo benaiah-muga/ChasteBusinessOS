@@ -13,6 +13,15 @@ The full v1 changelog is preserved at the bottom of this file.
 
 ### Changed
 
+- Vite's authored-document editor can use Go for its primary detail and version
+  history behind paired `CHASTE_GO_DOCUMENTS_EDITOR_READS=1`,
+  `CHASTE_GO_DOCUMENTS_VERSION_READS=1`, and
+  `CHASTE_GO_SESSION_CAPABILITY_ROUTE=1` selectors. The API gates
+  `documents.getDoc` and `documents.listDocVersions` with their default-off
+  `GO_DOCUMENTS_EDITOR_READS=1` and `GO_DOCUMENTS_VERSION_READS=1` flags. The
+  selected Go path does not fetch legacy detail for version rows or fall back
+  after a Go failure. Workspace and write routes remain unchanged.
+
 - Vite mention and add-member people lookup can use the authenticated Go
   `messaging.listPeople` capability behind paired
   `CHASTE_GO_MESSAGING_PEOPLE_READS=1` and

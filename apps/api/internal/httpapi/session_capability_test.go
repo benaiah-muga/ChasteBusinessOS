@@ -503,6 +503,30 @@ func TestSessionCapabilityHandlerCanGateAuthoredDocumentVersionReads(t *testing.
 	}
 }
 
+func TestSessionCapabilityHandlerCanGateAuthoredDocumentEditorRead(t *testing.T) {
+	body := `{"capabilityId":"documents.getDoc","input":{"documentId":"6f1b2c3d-0000-4000-8000-000000000001"},"intentId":"documents-editor-read"}`
+	t.Run("default off", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"document":{}}`)}}
+		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, DocumentsEditorDisabledCapabilities(false))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+		if response.Code != http.StatusServiceUnavailable || executor.calls != 0 {
+			t.Fatalf("status=%d executor=%d body=%s", response.Code, executor.calls, response.Body.String())
+		}
+	})
+	t.Run("opted in", func(t *testing.T) {
+		resolver := &fakeDirectSessionResolver{resolved: directTestIdentity()}
+		executor := &fakeDirectCapabilityExecutor{result: capability.Result{OK: true, Data: json.RawMessage(`{"document":{}}`)}}
+		handler := NewSessionCapabilityHandlerWithDisabledCapabilities(resolver, executor, nil, DocumentsEditorDisabledCapabilities(true))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, directCapabilityRequest(http.MethodPost, body))
+		if response.Code != http.StatusOK || executor.calls != 1 || executor.capID != "documents.getDoc" {
+			t.Fatalf("status=%d capability=%q executor=%d body=%s", response.Code, executor.capID, executor.calls, response.Body.String())
+		}
+	})
+}
+
 func TestSessionCapabilityHandlerCanGateMessagingPeopleRead(t *testing.T) {
 	body := `{"capabilityId":"messaging.listPeople","input":{"limit":100},"intentId":"messaging-people-read"}`
 	t.Run("default off", func(t *testing.T) {

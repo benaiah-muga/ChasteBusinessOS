@@ -152,6 +152,12 @@ export function goDocumentsVersionReadsFromEnv(env: Record<string, string | unde
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_DOCUMENTS_VERSION_READS === "1";
 }
 
+export function goDocumentsEditorReadsFromEnv(env: Record<string, string | undefined>): boolean {
+  return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" &&
+    env.CHASTE_GO_DOCUMENTS_EDITOR_READS === "1" &&
+    env.CHASTE_GO_DOCUMENTS_VERSION_READS === "1";
+}
+
 export function goMessagingPeopleReadsFromEnv(env: Record<string, string | undefined>): boolean {
   return env.CHASTE_GO_SESSION_CAPABILITY_ROUTE === "1" && env.CHASTE_GO_MESSAGING_PEOPLE_READS === "1";
 }

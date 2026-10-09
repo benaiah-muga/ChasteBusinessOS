@@ -42,6 +42,23 @@ const versionRows = [
   { version: 2, note: null, createdBy: "workmate", createdAt: "2026-09-28T09:30:00.000Z" },
 ];
 
+const goAuthoredDocument = {
+  id: "6f1b2c3d-0000-4000-8000-000000000001",
+  title: "Go service quote",
+  status: "published",
+  content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Go body" }] }] },
+  html: "<p>Go body</p>",
+  templateId: null,
+  folder: "Sales",
+  documentType: "quote",
+  linkedRecordType: null,
+  linkedRecordId: null,
+  linkedRecordLabel: null,
+  pageSettings: { size: "A4", orientation: "portrait", margin: "normal" },
+  versions: 2,
+  updatedAt: "2026-09-28T10:00:00.000Z",
+};
+
 interface RecordedCall {
   url: string;
   init: RequestInit;
@@ -88,6 +105,37 @@ describe("authored document reads", () => {
       headers: { accept: "application/json" },
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it("loads editor detail and version rows from Go when the paired editor selectors are active", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_EDITOR_READS__", true);
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+    const { calls } = recorder((call) => {
+      const body = bodyOf(call);
+      if (body.capabilityId === "documents.getDoc") return Response.json({ ok: true, data: { document: goAuthoredDocument } });
+      if (body.capabilityId === "documents.listDocVersions") return Response.json({ ok: true, data: { versions: versionRows } });
+      return Response.json({ error: "unexpected" }, { status: 404 });
+    });
+
+    await expect(fetchEditorDocument(goAuthoredDocument.id)).resolves.toEqual({ document: goAuthoredDocument, versions: versionRows });
+    expect(calls.map((call) => call.url)).toEqual(["/api/capabilities/execute", "/api/capabilities/execute"]);
+    expect(bodyOf(calls[0]!)).toMatchObject({ capabilityId: "documents.getDoc", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
+    expect(bodyOf(calls[1]!)).toMatchObject({ capabilityId: "documents.listDocVersions", input: { documentId: goAuthoredDocument.id }, intentId: expect.any(String) });
+  });
+
+  it("does not fall back to legacy detail after selected Go getDoc failure or malformed output", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_EDITOR_READS__", true);
+    vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
+    const documentId = goAuthoredDocument.id;
+    for (const response of [
+      () => Response.json({ error: "not found" }, { status: 404 }),
+      () => Response.json({ ok: true, data: { document: { ...goAuthoredDocument, unknown: true } } }),
+    ]) {
+      const { calls } = recorder(() => response());
+      await expect(fetchEditorDocument(documentId)).rejects.toBeInstanceOf(DocumentsEditorApiError);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("/api/capabilities/execute");
+    }
   });
 
   it("keeps permission and shape failures understandable", async () => {

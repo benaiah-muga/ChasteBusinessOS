@@ -27,6 +27,7 @@ import {
   goPurchasingAPAgingReadsFromEnv,
   goDocumentsIngestedReadsFromEnv,
   goDocumentsVersionReadsFromEnv,
+  goDocumentsEditorReadsFromEnv,
   goMessagingPeopleReadsFromEnv,
   goPurchasingSupplierStatementReadsFromEnv,
   goPurchasingWorkflowReadsFromEnv,
@@ -376,6 +377,20 @@ describe("authored document versions Go selector", () => {
     expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1" })).toBe(false);
     expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1", CHASTE_GO_DOCUMENTS_VERSION_READS: "0" })).toBe(false);
     expect(goDocumentsVersionReadsFromEnv({ CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0", CHASTE_GO_DOCUMENTS_VERSION_READS: "1" })).toBe(false);
+  });
+});
+
+describe("authored document editor Go selector", () => {
+  it("requires editor, version-history, and session capability selectors", () => {
+    const enabled = {
+      CHASTE_GO_SESSION_CAPABILITY_ROUTE: "1",
+      CHASTE_GO_DOCUMENTS_EDITOR_READS: "1",
+      CHASTE_GO_DOCUMENTS_VERSION_READS: "1",
+    };
+    expect(goDocumentsEditorReadsFromEnv(enabled)).toBe(true);
+    expect(goDocumentsEditorReadsFromEnv({ ...enabled, CHASTE_GO_DOCUMENTS_EDITOR_READS: "0" })).toBe(false);
+    expect(goDocumentsEditorReadsFromEnv({ ...enabled, CHASTE_GO_DOCUMENTS_VERSION_READS: "0" })).toBe(false);
+    expect(goDocumentsEditorReadsFromEnv({ ...enabled, CHASTE_GO_SESSION_CAPABILITY_ROUTE: "0" })).toBe(false);
   });
 });
 

@@ -9,9 +9,7 @@ import {
   documentsEditorIdFromPath,
   downloadDocx,
   fetchArchivedVersion,
-  fetchDocumentVersionHistoryFromGo,
   fetchEditorDocument,
-  documentsVersionReadsGoSelected,
   postEditorWorkspace,
   publishDocumentVersion,
   refineDocumentHtml,
@@ -615,11 +613,9 @@ export function DocumentsEditorPage({ documentId }: { documentId?: string }) {
     setBoot({ status: "loading" });
     void (async () => {
       try {
-        const goVersionReads = documentsVersionReadsGoSelected();
-        const [payload, workspace, goVersions] = await Promise.all([
+        const [payload, workspace] = await Promise.all([
           fetchEditorDocument(resolvedId, controller.signal),
           postEditorWorkspace(resolvedId, {}, controller.signal),
-          goVersionReads ? fetchDocumentVersionHistoryFromGo(resolvedId, controller.signal) : Promise.resolve(null),
         ]);
         if (!alive || controller.signal.aborted) return;
         if (!payload.document) {
@@ -632,18 +628,17 @@ export function DocumentsEditorPage({ documentId }: { documentId?: string }) {
         if (draft) revRef.current = draft.rev;
         contentRef.current = initial;
         const html = documentJsonToHtml(initial) || sanitizeDocumentHtml(payload.document.html);
-        const versionHistory = goVersions ?? payload.versions;
         contentHtmlRef.current = html;
         const paper = refineDocumentHtml(html);
         setPreviewHtml(paper);
         setPrintHtml(paper);
         setSeed((current) => ({ key: current.key + 1, html }));
         setTitle(payload.document.title);
-        setVersions(versionHistory);
+        setVersions(payload.versions);
         setPageSettings(draft?.pageSettings ?? payload.document.pageSettings);
         setLockHolder(workspace.lock && !workspace.lock.mine ? workspace.lock.heldBy : null);
         setOthers(workspace.others);
-        setBoot({ status: "ready", document: payload.document, versions: versionHistory });
+        setBoot({ status: "ready", document: payload.document, versions: payload.versions });
       } catch (error) {
         if (!alive || controller.signal.aborted) return;
         setBoot({ status: "failed", message: readableError(error) });
@@ -783,9 +778,7 @@ export function DocumentsEditorPage({ documentId }: { documentId?: string }) {
       } else {
         setNotice({ tone: "success", text: `Version ${outcome.data.version} published.` });
         const fresh = await fetchEditorDocument(resolvedId);
-        setVersions(documentsVersionReadsGoSelected()
-          ? await fetchDocumentVersionHistoryFromGo(resolvedId)
-          : fresh.versions);
+        setVersions(fresh.versions);
         revRef.current = undefined;
       }
       setPublishOpen(false);
@@ -809,9 +802,7 @@ export function DocumentsEditorPage({ documentId }: { documentId?: string }) {
       setNotice({ tone: "success", text: `Restored from version ${version} as version ${outcome.data.version}.` });
       const fresh = await fetchEditorDocument(resolvedId);
       if (fresh.document) {
-        setVersions(documentsVersionReadsGoSelected()
-          ? await fetchDocumentVersionHistoryFromGo(resolvedId)
-          : fresh.versions);
+        setVersions(fresh.versions);
         contentRef.current = fresh.document.content;
         const html = documentJsonToHtml(fresh.document.content);
         contentHtmlRef.current = html;

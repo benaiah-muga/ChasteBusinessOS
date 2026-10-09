@@ -4,8 +4,8 @@ import { z } from "zod";
  * Client for the authored-document editor surface: the one document read,
  * the draft workspace (autosave, presence, soft lock), governed writes
  * (publish, restore, rename, save as template) and the read-shaped AI
- * assist calls. Editor content and writes retain their existing routes;
- * authored-version reads can use the signed Go capability route.
+ * assist calls. Editor detail and authored-version reads can use the signed
+ * Go capability route; workspace, collaboration and writes keep their routes.
  *
  * Document content crosses this boundary in two forms: the ProseMirror JSON
  * tree the editor works in, and the HTML that tree renders to. Every HTML
@@ -55,6 +55,23 @@ const DocumentPayloadSchema = z.object({
   versions: z.array(VersionRowSchema),
 }).strict();
 export type DocumentPayload = z.infer<typeof DocumentPayloadSchema>;
+const GoAuthoredDocumentSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  status: z.string().min(1),
+  content: z.record(z.string(), z.unknown()),
+  html: z.string(),
+  templateId: z.string().nullable(),
+  folder: z.string().nullable(),
+  documentType: z.string().nullable(),
+  linkedRecordType: z.string().nullable(),
+  linkedRecordId: z.string().nullable(),
+  linkedRecordLabel: z.string().nullable(),
+  pageSettings: PageSettingsSchema,
+  versions: z.number().int().nonnegative(),
+  updatedAt: z.string().datetime(),
+}).strict();
+const GoAuthoredDocumentOutputSchema = z.object({ document: GoAuthoredDocumentSchema }).strict();
 
 const ArchivedVersionSchema = z.object({
   version: z.number().int().positive(),
@@ -239,6 +256,10 @@ export function documentsVersionReadsGoSelected(): boolean {
   return typeof __GO_DOCUMENTS_VERSION_READS__ !== "undefined" && __GO_DOCUMENTS_VERSION_READS__;
 }
 
+export function documentsEditorReadsGoSelected(): boolean {
+  return typeof __GO_DOCUMENTS_EDITOR_READS__ !== "undefined" && __GO_DOCUMENTS_EDITOR_READS__;
+}
+
 function validateDocumentVersionInput(id: string, version?: number): void {
   if (!documentUUID.safeParse(id).success || (version !== undefined && (!Number.isSafeInteger(version) || version < 1))) {
     throw new DocumentsEditorApiError(400, "The document version request is invalid. Reopen the document and try again.");
@@ -266,7 +287,23 @@ export async function fetchDocumentVersionHistoryFromGo(id: string, signal?: Abo
 }
 
 export async function fetchEditorDocument(id: string, signal?: AbortSignal): Promise<DocumentPayload> {
-  return get(documentPath(id), DocumentPayloadSchema, signal);
+  if (!documentsEditorReadsGoSelected()) {
+    const legacyPayload = await get(documentPath(id), DocumentPayloadSchema, signal);
+    if (!documentsVersionReadsGoSelected()) return legacyPayload;
+    const versions = await fetchDocumentVersionHistoryFromGo(id, signal);
+    return { ...legacyPayload, versions };
+  }
+  if (!documentUUID.safeParse(id).success) {
+    throw new DocumentsEditorApiError(400, "The document request is invalid. Reopen the document and try again.");
+  }
+  const output = await postDocumentVersionCapability("documents.getDoc", { documentId: id }, GoAuthoredDocumentOutputSchema, signal);
+  if (output.document.id.toLowerCase() !== id.toLowerCase()) {
+    throw new DocumentsEditorApiError(200, "The document service returned data in an unexpected format.");
+  }
+  const versions = await fetchDocumentVersionHistoryFromGo(id, signal);
+  const payload = DocumentPayloadSchema.safeParse({ document: output.document, versions });
+  if (!payload.success) throw new DocumentsEditorApiError(200, "The document service returned data in an unexpected format.");
+  return payload.data;
 }
 
 export async function fetchArchivedVersion(id: string, version: number, signal?: AbortSignal): Promise<ArchivedVersion> {

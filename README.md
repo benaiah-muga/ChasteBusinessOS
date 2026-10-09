@@ -334,6 +334,13 @@ and archived compare previews with `CHASTE_GO_DOCUMENTS_VERSION_READS=1` and
 `GO_DOCUMENTS_VERSION_READS=1`; Go enforces that gate for both capabilities and
 all callers. Document content, collaboration, and editor writes retain their
 existing routes.
+For the editor's primary detail read, set `CHASTE_GO_DOCUMENTS_EDITOR_READS=1`
+as well as the version-read selector above. Go then supplies both `getDoc` and
+`listDocVersions`, gated by `GO_DOCUMENTS_EDITOR_READS=1` and
+`GO_DOCUMENTS_VERSION_READS=1` on the API. This avoids a legacy detail request
+for version rows while Go supplies the primary body. A selected Go detail error
+fails closed; workspace, presence, autosave, collaboration, and writes keep
+their existing routes.
 `GO_DOCUMENTS_VERSION_READS=1` opts authored document version history and
 single-version reads on `GET /api/docs/:id` into the signed Go
 `documents.listDocVersions` and `documents.getDocVersion` capabilities. It

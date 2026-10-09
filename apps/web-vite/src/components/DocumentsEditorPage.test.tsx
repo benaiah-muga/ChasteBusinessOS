@@ -298,7 +298,8 @@ describe("authored document editor", () => {
     expect(calls.filter((call) => call.body?.action === "restore")[0]?.body).toMatchObject({ sourceVersion: 2 });
   }, TIMEOUT);
 
-  it("keeps document content on its existing route while Go supplies version history and archived previews", async () => {
+  it("loads editor detail and version history from Go while workspace and compare stay on their owned routes", async () => {
+    vi.stubGlobal("__GO_DOCUMENTS_EDITOR_READS__", true);
     vi.stubGlobal("__GO_DOCUMENTS_VERSION_READS__", true);
     const documentId = "6f1b2c3d-0000-4000-8000-000000000001";
     window.history.replaceState(null, "", `/documents/editor/${documentId}`);
@@ -310,13 +311,19 @@ describe("authored document editor", () => {
         body: init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null,
       };
       calls.push(call);
-      if (call.url === "/api/docs/" + documentId && method === "GET") {
-        return Response.json({ document: { ...authoredDocument, id: documentId }, versions: [] });
-      }
       if (call.url === `/api/docs/${documentId}/workspace`) {
         return Response.json({ lock: { heldBy: "Ada", mine: true }, others: [] });
       }
       if (call.url === "/api/capabilities/execute") {
+        if (call.body?.capabilityId === "documents.getDoc") {
+          return Response.json({ ok: true, data: { document: {
+            ...authoredDocument,
+            id: documentId,
+            linkedRecordType: null,
+            linkedRecordId: null,
+            linkedRecordLabel: null,
+          } } });
+        }
         if (call.body?.capabilityId === "documents.listDocVersions") {
           return Response.json({ ok: true, data: { versions: [
             { version: 1, note: "Go first", createdBy: "ada", createdAt: "2026-09-20T08:00:00.000Z" },
@@ -347,10 +354,11 @@ describe("authored document editor", () => {
     const compare = await screen.findByRole("dialog", { name: /Compare v1 vs v2/ }, BOOT);
     expect(within(compare).getByText("Go archived body 1")).not.toBeNull();
     expect(within(compare).getByText("Go archived body 2")).not.toBeNull();
-    expect(calls.some((call) => call.url === `/api/docs/${documentId}` && call.method === "GET")).toBe(true);
+    expect(calls.some((call) => call.url === `/api/docs/${documentId}` && call.method === "GET")).toBe(false);
+    expect(calls.some((call) => call.url === `/api/docs/${documentId}/workspace` && call.method === "POST")).toBe(true);
     expect(calls.some((call) => call.url.includes("?version=") && call.method === "GET")).toBe(false);
     expect(calls.map((call) => call.body?.capabilityId).filter(Boolean)).toEqual([
-      "documents.listDocVersions", "documents.getDocVersion", "documents.getDocVersion",
+      "documents.getDoc", "documents.listDocVersions", "documents.getDocVersion", "documents.getDocVersion",
     ]);
   }, TIMEOUT);
 

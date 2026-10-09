@@ -2245,3 +2245,12 @@ new owners and the manifest shows zero legacy runtime paths.
      80-character query bound, and the Vite person/agent alias shape. Keep
      conversation, thread, presence, and message-search reads unchanged; show
      selected-Go errors without legacy fallback. Browser proof remains open.
+220. (Implemented) Route Vite authored-document editor detail through
+     `documents.getDoc` when `CHASTE_GO_DOCUMENTS_EDITOR_READS=1` and
+     `CHASTE_GO_DOCUMENTS_VERSION_READS=1` are paired with the session route.
+     The API independently gates `documents.getDoc` and
+     `documents.listDocVersions` behind their default-off Go flags. Selected Go
+     mode reads both document detail and version rows from Go with strict
+     output validation; failed Go detail never retries through legacy. Keep
+     workspace, presence, autosave, collaboration, content writes, archive
+     reads, and the Documents library unchanged. Browser proof remains open.
